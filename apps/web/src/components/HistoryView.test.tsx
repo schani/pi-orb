@@ -42,4 +42,61 @@ describe("HistoryView", () => {
     expect(html).toContain("Use <strong>Markdown</strong> and <code>code</code>.");
     expect(html).toContain("A <strong>streaming</strong> response");
   });
+
+  it("collapses persisted tool inputs and outputs and omits live tool messages by default", () => {
+    const records: HistoryRecord[] = [
+      {
+        id: "assistant-tool-call",
+        parentId: null,
+        timestamp: "time-call",
+        overflow: { native: {} },
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "tool_call",
+            callId: "call-1",
+            name: "bash",
+            arguments: { command: "echo tool-input" },
+          },
+        ],
+      },
+      {
+        id: "tool-result",
+        parentId: "assistant-tool-call",
+        timestamp: "time-result",
+        overflow: { native: {} },
+        type: "message",
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            callId: "call-1",
+            content: [{ type: "text", text: "tool-output" }],
+          },
+        ],
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={records}
+        liveBlocks={[]}
+        tools={[
+          {
+            callId: "live-call",
+            name: "read",
+            state: "running",
+            message: "live-tool-secret",
+          },
+        ]}
+        busy
+      />,
+    );
+
+    expect(html).toContain("<summary>→ bash</summary>");
+    expect(html).toContain("<summary>tool output</summary>");
+    expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
+    expect(html).not.toContain("live-tool-secret");
+  });
 });

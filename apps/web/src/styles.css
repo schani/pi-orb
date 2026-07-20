@@ -379,11 +379,28 @@ textarea:focus {
   font-size: 0.85rem;
 }
 
-.tool-call {
+.tool-details {
+  margin: 0.25rem 0;
+}
+
+.tool-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-muted);
   font-family: var(--mono);
   font-size: 0.82rem;
-  color: var(--text-muted);
+}
+
+.tool-input {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  background: #14161a;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
   margin: 0.25rem 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 

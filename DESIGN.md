@@ -1064,7 +1064,7 @@ Every returned persisted entry maps one-to-one to exactly one record and advance
 
 Visibility is presentation policy, not persistence filtering:
 
-- show user, assistant, and tool messages normally;
+- show user and assistant messages normally; show tool names and states while keeping tool inputs and outputs collapsed by default;
 - show compaction as a collapsed boundary;
 - show `pi.custom_message` only when native `display` is true;
 - hide model/thinking changes, branch summaries, bash-execution events, labels, session-info entries, ordinary custom entries, and unknown events by default;
@@ -1083,8 +1083,7 @@ The first UI needs to display at least:
 
 - user text as plain text and assistant text as Markdown, for both committed history and live streaming;
 - reasoning/thinking when available and permitted;
-- tool calls and arguments;
-- tool results and errors;
+- tool-call and tool-result status, with inputs and outputs available only through collapsed disclosures by default;
 - compaction summaries;
 - runtime state such as starting, working, idle, stopped, or failed.
 

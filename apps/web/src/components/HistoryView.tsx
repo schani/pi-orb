@@ -46,9 +46,26 @@ function blockText(blocks: readonly ContentBlock[]): string {
 
 function renderToolCall(block: ContentBlock & { type: "tool_call" }): ReactNode {
   return (
-    <div className="tool-call" key={`call-${block.callId}`}>
-      → {block.name}({truncate(JSON.stringify(block.arguments), TOOL_ARGS_LIMIT)})
-    </div>
+    <details className="tool-details tool-call" key={`call-${block.callId}`}>
+      <summary>→ {block.name}</summary>
+      <pre className="tool-input">
+        {truncate(JSON.stringify(block.arguments, null, 2), TOOL_ARGS_LIMIT)}
+      </pre>
+    </details>
+  );
+}
+
+function renderToolResult(
+  block: ContentBlock & { type: "tool_result" },
+  key: string | number,
+): ReactNode {
+  return (
+    <details className="tool-details" key={key}>
+      <summary>{block.isError === true ? "tool error" : "tool output"}</summary>
+      <pre className={block.isError === true ? "tool-output tool-error" : "tool-output"}>
+        {blockText(block.content)}
+      </pre>
+    </details>
   );
 }
 
@@ -86,14 +103,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
         );
         break;
       case "tool_result":
-        nodes.push(
-          <pre
-            className={block.isError === true ? "tool-output tool-error" : "tool-output"}
-            key={index}
-          >
-            {blockText(block.content)}
-          </pre>,
-        );
+        nodes.push(renderToolResult(block, index));
         break;
       case "other":
         nodes.push(
@@ -111,14 +121,7 @@ function renderToolMessage(record: MessageRecord): ReactNode {
   const results = record.content.filter((block) => block.type === "tool_result");
   return (
     <div className="record record-tool" key={record.id}>
-      {results.map((block, index) => (
-        <pre
-          className={block.isError === true ? "tool-output tool-error" : "tool-output"}
-          key={index}
-        >
-          {blockText(block.content)}
-        </pre>
-      ))}
+      {results.map((block, index) => renderToolResult(block, index))}
     </div>
   );
 }
@@ -199,11 +202,7 @@ export function HistoryView({ records, liveBlocks, tools, busy }: HistoryViewPro
           {tools.length > 0 && (
             <div className="tool-chips">
               {tools.map((tool) => (
-                <span
-                  className={toolChipClass(tool.state)}
-                  key={tool.callId}
-                  title={tool.message ?? undefined}
-                >
+                <span className={toolChipClass(tool.state)} key={tool.callId}>
                   {tool.name} · {tool.state}
                 </span>
               ))}
