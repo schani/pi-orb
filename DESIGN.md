@@ -1081,7 +1081,7 @@ The UI must support two modes without visibly changing data sources:
 
 The first UI needs to display at least:
 
-- user and assistant text;
+- user text as plain text and assistant text as Markdown, for both committed history and live streaming;
 - reasoning/thinking when available and permitted;
 - tool calls and arguments;
 - tool results and errors;
