@@ -1,5 +1,5 @@
+import { err, ok, type Result, ResultAsync } from "neverthrow";
 import pg from "pg";
-import { err, ok, ResultAsync, type Result } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
 
 /**

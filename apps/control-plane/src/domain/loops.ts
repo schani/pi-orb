@@ -1,7 +1,7 @@
-import type { SimulationTask } from "determined";
 import type { OrbState } from "@pi-orb/protocol";
+import type { SimulationTask } from "determined";
 import { sleepResult } from "./dst.ts";
-import { reconcileOrbOnce, type ReconcileOutcome } from "./lifecycle.ts";
+import { type ReconcileOutcome, reconcileOrbOnce } from "./lifecycle.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 

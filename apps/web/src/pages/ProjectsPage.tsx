@@ -1,17 +1,19 @@
-import { generateUuid } from "../lib/uuid.ts";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { validateRepositoryUrl, type OrbView, type ProjectView } from "@pi-orb/protocol";
+import { type OrbView, type ProjectView, validateRepositoryUrl } from "@pi-orb/protocol";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import {
+  type ApiError,
   createOrb,
   createProject,
   describeApiError,
   listOrbs,
   listProjects,
-  type ApiError,
 } from "../lib/api.ts";
+import { generateUuid } from "../lib/uuid.ts";
 
 type OrbListState =
-  { type: "loading" } | { type: "loaded"; items: OrbView[] } | { type: "failed"; error: ApiError };
+  | { type: "loading" }
+  | { type: "loaded"; items: OrbView[] }
+  | { type: "failed"; error: ApiError };
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);

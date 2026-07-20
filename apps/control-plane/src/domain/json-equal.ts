@@ -17,7 +17,7 @@ export function jsonEqual(a: unknown, b: unknown): boolean {
     if (aKeys.length !== bKeys.length) return false;
     return aKeys.every(
       (k) =>
-        Object.prototype.hasOwnProperty.call(b, k) &&
+        Object.hasOwn(b, k) &&
         jsonEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
     );
   }

@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 import { HistoryRecordSchema } from "./history.ts";
 import { JsonValueSchema } from "./json.ts";
 

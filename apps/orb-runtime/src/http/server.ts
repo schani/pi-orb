@@ -1,20 +1,20 @@
 import { randomUUID } from "node:crypto";
-import Fastify, { type FastifyInstance } from "fastify";
 import websocketPlugin from "@fastify/websocket";
-import { Check } from "typebox/value";
 import {
   CAPABILITY_ABORT,
   CAPABILITY_INPUT_IMAGE,
   ClientFrameSchema,
-  HISTORY_PULL_DEFAULT_LIMIT,
-  RUNTIME_SUBPROTOCOL,
   type ClientRequest,
+  HISTORY_PULL_DEFAULT_LIMIT,
   type RequestResultFrame,
+  RUNTIME_SUBPROTOCOL,
   type RuntimeHttpError,
   type ServerFrame,
 } from "@pi-orb/protocol";
+import Fastify, { type FastifyInstance } from "fastify";
+import { Check } from "typebox/value";
 import { computePullHistory } from "../domain/history.ts";
-import { OutboundWriter, type FrameSink } from "../domain/outbound.ts";
+import { type FrameSink, OutboundWriter } from "../domain/outbound.ts";
 import { decideRequest, RequestRegistry, type RequestResult } from "../domain/requests.ts";
 import { computeSyncFrames } from "../domain/sync.ts";
 import type { PiOrbAgent } from "../pi/agent.ts";

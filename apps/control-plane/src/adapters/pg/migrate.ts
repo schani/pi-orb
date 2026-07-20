@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";

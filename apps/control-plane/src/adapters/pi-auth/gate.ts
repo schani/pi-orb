@@ -136,10 +136,13 @@ export class PiAuthGate implements AuthGate {
         },
       };
     };
-    return ResultAsync.fromPromise(run(), (error): AuthGateError => ({
-      type: "auth_gate_error",
-      message: error instanceof Error ? error.message : String(error),
-      retryable: true,
-    }));
+    return ResultAsync.fromPromise(
+      run(),
+      (error): AuthGateError => ({
+        type: "auth_gate_error",
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      }),
+    );
   }
 }

@@ -1,5 +1,3 @@
-import type { SimulationTask } from "determined";
-import type { ResultAsync } from "neverthrow";
 import type {
   HarnessSessionMetadata,
   HistoryRecord,
@@ -7,6 +5,8 @@ import type {
   PullHistoryResponse,
   RuntimeHealth,
 } from "@pi-orb/protocol";
+import type { SimulationTask } from "determined";
+import type { ResultAsync } from "neverthrow";
 import type {
   AuthGateError,
   CommitPullError,

@@ -1,6 +1,6 @@
-import type { SimulationTask } from "determined";
 import type { PullHistoryResponse } from "@pi-orb/protocol";
-import { withDeadline, sleepResult } from "./dst.ts";
+import type { SimulationTask } from "determined";
+import { sleepResult, withDeadline } from "./dst.ts";
 import { formatOrbFailure, type ReplicationIntegrityError } from "./errors.ts";
 import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
 

@@ -1,6 +1,6 @@
+import { jsonEqual } from "../domain/json-equal.ts";
 import type { InMemoryControlPlaneStore } from "./store.ts";
 import type { FakeWorld } from "./world.ts";
-import { jsonEqual } from "../domain/json-equal.ts";
 
 /**
  * Core replication invariants (DESIGN.md §14): the replica is a duplicate-free

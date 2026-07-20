@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { HistoryRecord, ServerFrame } from "@pi-orb/protocol";
+import { describe, expect, it } from "vitest";
 import { computeSyncFrames } from "./sync.ts";
 import type { HarnessSnapshot, LiveOperationView } from "./types.ts";
 

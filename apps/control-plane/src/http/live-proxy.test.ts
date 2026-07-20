@@ -1,11 +1,11 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import Fastify from "fastify";
+import { RUNTIME_SUBPROTOCOL } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
+import Fastify from "fastify";
 import { ResultAsync } from "neverthrow";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
-import { RUNTIME_SUBPROTOCOL } from "@pi-orb/protocol";
 import type { OrbHostProvider } from "../domain/ports.ts";
 import { makeHarness, makeOrbRow } from "../testkit/fixtures.ts";
 import { registerLiveProxy } from "./live-proxy.ts";

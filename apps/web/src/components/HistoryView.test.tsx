@@ -1,6 +1,6 @@
+import type { HistoryRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { HistoryRecord } from "@pi-orb/protocol";
 import { HistoryView } from "./HistoryView.tsx";
 
 function message(id: string, role: "user" | "assistant", text: string): HistoryRecord {

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { Check } from "typebox/value";
 import { HistoryRecordSchema } from "@pi-orb/protocol";
+import { Check } from "typebox/value";
+import { describe, expect, it } from "vitest";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 
 const base = { id: "e2", parentId: "e1", timestamp: "2026-07-20T10:00:00.000Z" };

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import type { ClientAction } from "@pi-orb/protocol";
-import { decideRequest, RequestRegistry, type AgentGateView } from "./requests.ts";
+import { describe, expect, it } from "vitest";
+import { type AgentGateView, decideRequest, RequestRegistry } from "./requests.ts";
 
 const messageAction = (expectedHeadId: string | null): ClientAction => ({
   type: "message",

@@ -1,18 +1,18 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import Fastify from "fastify";
 import { NoSimulationTask, noSimulation } from "determined";
-import { DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
-import { ControlState } from "./domain/control-state.ts";
-import { pollLoop, reconcileLoop } from "./domain/loops.ts";
-import type { ControlPlaneDeps } from "./domain/ports.ts";
+import Fastify from "fastify";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { PgClient } from "./adapters/pg/client.ts";
 import { runMigrations } from "./adapters/pg/migrate.ts";
 import { PgControlPlaneStore } from "./adapters/pg/store.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
+import { DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
+import { ControlState } from "./domain/control-state.ts";
+import { pollLoop, reconcileLoop } from "./domain/loops.ts";
+import type { ControlPlaneDeps } from "./domain/ports.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
 

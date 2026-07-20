@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { HistoryRecord } from "@pi-orb/protocol";
+import { describe, expect, it } from "vitest";
 import { computePullHistory } from "./history.ts";
 import type { HarnessSnapshot } from "./types.ts";
 

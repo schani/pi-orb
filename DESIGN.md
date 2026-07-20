@@ -1487,10 +1487,9 @@ Runtime dependencies:
 
 Development/build dependencies:
 
-- `typescript`;
+- the latest stable `typescript` release, pinned exactly so compiler upgrades are explicit;
 - `vite` and `@vitejs/plugin-react`;
-- `eslint` and `typescript-eslint`, primarily to enforce the no-throw and unsafe-boundary rules;
-- `prettier`;
+- `@biomejs/biome`, pinned exactly, for repository-wide linting, formatting, and import organization; a scoped GritQL plugin preserves the no-throw rule for first-party production code while allowing test assertions and deterministic-testkit invariants to throw;
 - `vitest` for unit, adapter, component, and deterministic simulation tests;
 - `@playwright/test` only when the browser E2E test is implemented.
 

@@ -1,12 +1,13 @@
+import type { HarnessSessionMetadata, HistoryRecord, OrbState } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
-import type { HarnessSessionMetadata, HistoryRecord, OrbState } from "@pi-orb/protocol";
 import type {
   CommitPullError,
   ReplicationIntegrityError,
   StateConflict,
   StoreError,
 } from "../domain/errors.ts";
+import { jsonEqual } from "../domain/json-equal.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
   CasTransitionParams,
@@ -15,7 +16,6 @@ import type {
   ControlPlaneStore,
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
-import { jsonEqual } from "../domain/json-equal.ts";
 
 interface OrbReplica {
   records: Map<string, HistoryRecord>;

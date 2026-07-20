@@ -1,12 +1,13 @@
-import type { SimulationTask } from "determined";
-import { err, ok, ResultAsync, type Result } from "neverthrow";
 import type { HarnessSessionMetadata, HistoryRecord, OrbState } from "@pi-orb/protocol";
+import type { SimulationTask } from "determined";
+import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type {
   CommitPullError,
   ReplicationIntegrityError,
   StateConflict,
   StoreError,
 } from "../../domain/errors.ts";
+import { jsonEqual } from "../../domain/json-equal.ts";
 import type { OrbRow, ProjectRow } from "../../domain/orb.ts";
 import type {
   CasTransitionParams,
@@ -14,8 +15,7 @@ import type {
   CommitPullBatchParams,
   ControlPlaneStore,
 } from "../../domain/ports.ts";
-import { jsonEqual } from "../../domain/json-equal.ts";
-import { PgClient, type PgRow } from "./client.ts";
+import type { PgClient, PgRow } from "./client.ts";
 
 function toMs(value: unknown): number {
   if (value instanceof Date) return value.getTime();

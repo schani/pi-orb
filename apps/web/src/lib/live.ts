@@ -1,13 +1,13 @@
-import { generateUuid } from "./uuid.ts";
-import { Check } from "typebox/value";
 import {
-  RUNTIME_SUBPROTOCOL,
-  ServerFrameSchema,
   type ClientAction,
   type ClientHello,
   type ClientRequest,
+  RUNTIME_SUBPROTOCOL,
   type ServerFrame,
+  ServerFrameSchema,
 } from "@pi-orb/protocol";
+import { Check } from "typebox/value";
+import { generateUuid } from "./uuid.ts";
 
 /** Stable UUID for this browser tab (DESIGN §6.2). */
 export const CLIENT_INSTANCE_ID: string = generateUuid();

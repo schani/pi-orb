@@ -1,12 +1,12 @@
-import type { SimulationTask } from "determined";
 import type { OrbState } from "@pi-orb/protocol";
+import type { SimulationTask } from "determined";
 import { DEFAULT_LIFECYCLE_CONSTANTS, type LifecycleConstants } from "../domain/constants.ts";
 import { ControlState } from "../domain/control-state.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
-import { FakeOrbHostProvider, FakeRuntimeClient, FakeWorld, type FakeOrbConfig } from "./world.ts";
+import { type FakeOrbConfig, FakeOrbHostProvider, FakeRuntimeClient, FakeWorld } from "./world.ts";
 
 /** Faster constants so DST scenarios cover many cycles in little virtual time. */
 export const TEST_CONSTANTS: LifecycleConstants = {

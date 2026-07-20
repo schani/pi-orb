@@ -383,8 +383,15 @@ describe("orb lifecycle (DST)", () => {
     await runDst({ name: "drain-integrity", iterations: 20 }, async (sim) => {
       const harness = makeHarness();
       const stop = new AbortController();
+      let sessionCorrupted = false;
       const result = await sim.runTasks([
-        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        {
+          name: "reconciler",
+          f: async (task) => {
+            await waitUntil(task, "session corrupted", () => sessionCorrupted);
+            await reconcileLoop(task, harness.deps, stop.signal);
+          },
+        },
         { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
         {
           name: "driver",
@@ -403,6 +410,7 @@ describe("orb lifecycle (DST)", () => {
             // Corrupt after the stop request: the poller skips stopping orbs,
             // so the drain itself hits the mismatch.
             harness.world.corruptSession(ORB);
+            sessionCorrupted = true;
             await waitUntil(
               task,
               "orb failed during drain",

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { HistoryRecord } from "@pi-orb/protocol";
+import { describe, expect, it } from "vitest";
 import { LiveHistoryPublisher } from "./live-history.ts";
 
 const entry = (id: string, parentId: string | null, role: "user" | "assistant", text: string) => ({

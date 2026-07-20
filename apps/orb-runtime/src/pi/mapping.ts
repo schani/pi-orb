@@ -1,4 +1,3 @@
-import { err, ok, type Result } from "neverthrow";
 import type {
   ContentBlock,
   HarnessSessionMetadata,
@@ -7,6 +6,7 @@ import type {
   JsonValue,
   MessageRecord,
 } from "@pi-orb/protocol";
+import { err, ok, type Result } from "neverthrow";
 
 /**
  * Lossless Pi-entry → normalized-record mapping (DESIGN.md §9.2). Every

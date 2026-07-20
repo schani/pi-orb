@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
 
 const closed = { additionalProperties: false } as const;

@@ -1,9 +1,9 @@
-import { err, ok, type Result } from "neverthrow";
 import {
   HISTORY_PULL_MAX_LIMIT,
   HISTORY_PULL_MIN_LIMIT,
   type PullHistoryResponse,
 } from "@pi-orb/protocol";
+import { err, ok, type Result } from "neverthrow";
 import type { HarnessSnapshot } from "./types.ts";
 
 export interface PullHistoryQuery {

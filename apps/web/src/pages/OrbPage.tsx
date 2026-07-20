@@ -1,4 +1,3 @@
-import { useEffect, useReducer, useRef, useState } from "react";
 import {
   CAPABILITY_ABORT,
   type HistoryRecord,
@@ -7,17 +6,18 @@ import {
   type RuntimeEvent,
   type ServerFrame,
 } from "@pi-orb/protocol";
+import { useEffect, useReducer, useRef, useState } from "react";
+import { Composer } from "../components/Composer.tsx";
+import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
 import {
+  type ApiError,
   describeApiError,
   getOrb,
   getOrbHistory,
   startOrb,
   stopOrb,
-  type ApiError,
 } from "../lib/api.ts";
-import { openLiveConnection, type LiveConnection, type LiveConnectionStatus } from "../lib/live.ts";
-import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
-import { Composer } from "../components/Composer.tsx";
+import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 
 const POLL_INTERVAL_MS = 2000;
 

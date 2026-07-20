@@ -1,24 +1,23 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type AgentSession,
+  type AgentSessionEvent,
   createAgentSession,
   ModelRuntime,
   SessionManager,
-  type AgentSession,
-  type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import { readdirSync, statSync } from "node:fs";
-import { err, ok, Result, ResultAsync } from "neverthrow";
 import {
-  validateRepositoryUrl,
   type RuntimeEvent,
   type RuntimeHealth,
   type ServerFrame,
+  validateRepositoryUrl,
 } from "@pi-orb/protocol";
-import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
+import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { AgentGateView } from "../domain/requests.ts";
+import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 

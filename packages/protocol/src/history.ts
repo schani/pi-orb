@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 import { JsonObjectSchema, JsonValueSchema } from "./json.ts";
 
 const closed = { additionalProperties: false } as const;

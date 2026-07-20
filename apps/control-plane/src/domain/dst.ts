@@ -1,5 +1,5 @@
 import { isCancellation, type SimulationTask } from "determined";
-import { err, ok, ResultAsync, type Result } from "neverthrow";
+import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { OperationContext } from "./ports.ts";
 
 export interface Cancelled {

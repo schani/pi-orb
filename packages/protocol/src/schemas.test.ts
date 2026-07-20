@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import { Check } from "typebox/value";
+import { describe, expect, it } from "vitest";
 import {
   ClientFrameSchema,
   ControlPlaneHttpErrorSchema,
@@ -391,7 +391,9 @@ describe("control-plane API schemas", () => {
     const visit = (node: unknown, path: string): void => {
       if (node === null || typeof node !== "object") return;
       if (Array.isArray(node)) {
-        node.forEach((item, i) => visit(item, `${path}[${i}]`));
+        node.forEach((item, i) => {
+          visit(item, `${path}[${i}]`);
+        });
         return;
       }
       const obj = node as Record<string, unknown>;

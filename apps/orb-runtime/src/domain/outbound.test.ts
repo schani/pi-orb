@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
 import type { ServerFrame } from "@pi-orb/protocol";
-import { OutboundWriter, type FrameSink } from "./outbound.ts";
+import { describe, expect, it } from "vitest";
+import { type FrameSink, OutboundWriter } from "./outbound.ts";
 
 class FakeSink implements FrameSink {
   sent: ServerFrame[] = [];

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { ProjectsPage } from "./pages/ProjectsPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
+import { ProjectsPage } from "./pages/ProjectsPage.tsx";
 
 type Route = { page: "projects" } | { page: "orb"; orbId: string };
 

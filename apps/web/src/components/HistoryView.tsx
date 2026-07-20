@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type {
   CompactionRecord,
   ContentBlock,
@@ -6,6 +5,7 @@ import type {
   HistoryRecord,
   MessageRecord,
 } from "@pi-orb/protocol";
+import type { ReactNode } from "react";
 import { AssistantMarkdown } from "./AssistantMarkdown.tsx";
 
 /** Streaming output block accumulated from `output_patch` events. */

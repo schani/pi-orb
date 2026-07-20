@@ -1,0 +1,6 @@
+engine biome(1.0)
+language js(typescript, jsx)
+
+JsThrowStatement() as $throw where {
+  register_diagnostic(span=$throw, message="Return a neverthrow Result instead of throwing. Boundary overrides must be narrow and documented.")
+}
