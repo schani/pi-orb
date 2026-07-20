@@ -1,0 +1,25 @@
+{
+  "name": "pi-orb",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/protocol",
+    "apps/control-plane",
+    "apps/orb-runtime",
+    "apps/web"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  }
+}
