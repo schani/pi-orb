@@ -1337,6 +1337,8 @@ State-machine timing uses two distinct patterns:
 
 Code never `await`s an `AbortSignal` directly. APIs such as `fetch`, `execFile`, and simulated adapter sleeps observe it. A low-level cancellable-sleep implementation may await the signal's abort event internally. Avoid a bare `Promise.race` whose losing operation continues unobserved.
 
+Baseline GitHub CI runs for every pull request and every push to `main`, using Node 24 and the committed npm lockfile. A single required checks job installs with `npm ci`, then runs the repository-wide typecheck, lint, and test scripts. Entropy-iteration budgets and deterministic failure-trace retention remain open.
+
 ## 15. Security requirements and questions
 
 The first local vertical slice intentionally has no authentication or authorization. Anyone who can reach the control plane can list, create, inspect, control, and stop every project and orb. The control plane-to-runtime hop is also unauthenticated. This deployment is suitable only on a trusted development machine/network and must not be exposed publicly.
