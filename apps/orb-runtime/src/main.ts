@@ -1,3 +1,4 @@
+import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
 
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
     repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
     workDir: env("PI_ORB_WORK_DIR", "/workspace"),
     authDir: env("PI_ORB_AUTH_DIR", "/var/lib/pi-orb/auth"),
+    mockOpenAi: readMockOpenAiEnv(process.env),
   });
 
   // The health server starts before slow initialization (DESIGN.md §5.1).

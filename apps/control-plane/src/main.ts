@@ -1,6 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  MOCK_OPENAI_INFERENCE_URL_ENV,
+  MOCK_OPENAI_OAUTH_URL_ENV,
+  readMockOpenAiEnv,
+} from "@pi-orb/mock-openai";
 import { NoSimulationTask, noSimulation } from "determined";
 import Fastify from "fastify";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
@@ -40,15 +45,30 @@ async function main(): Promise<void> {
   }
   if (migrated.value.length > 0) bootTask.log("applied migrations:", migrated.value.join(", "));
 
+  // E2E mode: when the fake-OpenAI URLs are set, the auth gate and every orb
+  // container route Codex OAuth/inference to the mock (PI-CODEX-E2E.md).
+  const mockOpenAi = readMockOpenAiEnv(process.env);
+  if (mockOpenAi !== null) {
+    bootTask.log("E2E mode: Codex OAuth/inference routed to", mockOpenAi.oauthBaseUrl);
+  }
   const deps: ControlPlaneDeps = {
     store: new PgControlPlaneStore(db),
     hostProvider: new DockerOrbHostProvider({
       image: runtimeImage,
       network: dockerNetwork,
       authDir,
+      ...(mockOpenAi !== null
+        ? {
+            extraEnv: {
+              [MOCK_OPENAI_OAUTH_URL_ENV]: mockOpenAi.oauthBaseUrl,
+              [MOCK_OPENAI_INFERENCE_URL_ENV]: mockOpenAi.inferenceBaseUrl,
+              PI_OFFLINE: "1",
+            },
+          }
+        : {}),
     }),
     runtimeClient: new FetchRuntimeClient(),
-    authGate: new PiAuthGate(authDir),
+    authGate: new PiAuthGate(authDir, mockOpenAi),
     control: new ControlState(),
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
   };

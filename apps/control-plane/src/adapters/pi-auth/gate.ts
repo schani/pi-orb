@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { type MockOpenAiConfig, mockOpenAiProviderConfig } from "@pi-orb/mock-openai";
 import type { SimulationTask } from "determined";
 import { ResultAsync } from "neverthrow";
 import type { AuthGateError } from "../../domain/errors.ts";
@@ -23,19 +24,32 @@ interface ActiveFlow {
  */
 export class PiAuthGate implements AuthGate {
   private readonly authDir: string;
+  private readonly mockOpenAi: MockOpenAiConfig | null;
   private runtime: ModelRuntime | null = null;
   private flow: ActiveFlow | null = null;
 
-  constructor(authDir: string) {
+  constructor(authDir: string, mockOpenAi: MockOpenAiConfig | null = null) {
     this.authDir = authDir;
+    this.mockOpenAi = mockOpenAi;
   }
 
   private async getRuntime(): Promise<ModelRuntime> {
     if (this.runtime === null) {
-      this.runtime = await ModelRuntime.create({
+      const runtime = await ModelRuntime.create({
         authPath: join(this.authDir, "auth.json"),
         modelsPath: null,
+        // The control plane resolves auth only; it never needs the live model
+        // catalog. Without this, `ModelRuntime.login` ends with a network
+        // availability sweep across every provider, which can stall the
+        // device flow for minutes.
+        allowModelNetwork: false,
       });
+      if (this.mockOpenAi !== null) {
+        // E2E mode: OAuth and inference go to the fake OpenAI service
+        // through the supported provider override (PI-CODEX-E2E.md).
+        runtime.registerProvider(PROVIDER, mockOpenAiProviderConfig(this.mockOpenAi));
+      }
+      this.runtime = runtime;
     }
     return this.runtime;
   }

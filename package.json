@@ -4,15 +4,17 @@
   "type": "module",
   "workspaces": [
     "packages/protocol",
+    "packages/mock-openai",
     "apps/control-plane",
     "apps/orb-runtime",
     "apps/web"
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e",
     "lint": "biome check .",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "test:e2e": "vitest run --config e2e/vitest.config.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",

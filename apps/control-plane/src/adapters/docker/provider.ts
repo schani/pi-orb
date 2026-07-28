@@ -18,6 +18,8 @@ export interface DockerOrbHostProviderOptions {
   readonly network: string;
   /** Host directory holding Pi's auth.json; mounted into every orb (DESIGN.md §15.1). */
   readonly authDir: string;
+  /** Extra environment passed to every orb container (e.g. E2E mock-OpenAI URLs). */
+  readonly extraEnv?: Readonly<Record<string, string>>;
 }
 
 const ORB_LABEL = "pi-orb.orb-id";
@@ -210,6 +212,10 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           `PI_ORB_ID=${request.orbId}`,
           "--env",
           `PI_ORB_REPOSITORY_URL=${request.bootstrap.repositoryUrl}`,
+          ...Object.entries(this.options.extraEnv ?? {}).flatMap(([key, value]) => [
+            "--env",
+            `${key}=${value}`,
+          ]),
           this.options.image,
         ],
         context,

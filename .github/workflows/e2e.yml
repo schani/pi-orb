@@ -1,0 +1,34 @@
+# Full-slice end-to-end test against the fake OpenAI service
+# (fake-openai.flingit.run). Manually triggered while we evaluate its
+# runtime and reliability; may become automatic later.
+name: E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build orb runtime image
+        run: docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
+
+      - name: Run end-to-end test
+        run: npm run test:e2e

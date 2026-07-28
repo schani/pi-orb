@@ -44,7 +44,14 @@
   "plugins": [
     {
       "path": "./lint/no-throw.grit",
-      "includes": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx", "!**/testkit/**/*.ts"]
+      "includes": [
+        "**/*.ts",
+        "**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!**/testkit/**/*.ts",
+        "!e2e/**/*.ts"
+      ]
     }
   ]
 }
