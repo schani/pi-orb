@@ -1,9 +1,13 @@
 # Full-slice end-to-end test against the fake OpenAI service
-# (fake-openai.flingit.run). Manually triggered while we evaluate its
-# runtime and reliability; may become automatic later.
+# (fake-openai.flingit.run). The dependency on the deployed fake is an
+# accepted trade-off; total runtime is about 1.5 minutes.
 name: E2E
 
 on:
+  pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
