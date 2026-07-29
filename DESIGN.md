@@ -63,9 +63,12 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The future cloud backend is raw Google Compute Engine, not Cloud Workstations.
 - All cloud orbs will live in one GCP project rather than one GCP project per source project.
 - The development GCP project has display name `playground-dev` and project ID `playground-dev-6ae7`.
-- The current prescribed cloud location is `us-central1`.
+- The current prescribed cloud location is the single hardcoded zone `us-central1-a`. No multi-zone or multi-region logic initially.
 - The current prescribed GCE shape is Spot `n2d-highmem-4`: 4 vCPUs and 32 GiB RAM.
-- The host OS will be a fixed Debian image. Debian 12 is the current intended baseline.
+- Spot capacity exhaustion (`ZONE_RESOURCE_POOL_EXHAUSTED` on instance create or start) maps to a typed provisioning error that fails the orb and is shown to the user. There is no zone or on-demand fallback initially.
+- Spot preemption is handled purely as the existing crashed-host path: the provider observes the instance `TERMINATED`, and recovery starts the same instance again in place with its disks intact. Rejected for now: a best-effort history drain on the ~30-second preemption notice — it would convert most preemptions into near-clean stops, but the first cloud slice stays simple; the unreplicated tail is recovered on the next start as §3.5 already allows.
+- Cloud orb VMs boot Container-Optimized OS and run the standard orb runtime container image, declared via instance metadata and pulled from Artifact Registry. There is no baked VM image and no VM image pipeline. The orb environment is defined by the runtime container image on every provider (Debian 12 base, Node.js 24); which host runs that container is a provider implementation detail invisible to the control plane.
+- Orb VMs use no Cloud NAT: each has an internal IP (used by the control plane) plus an ephemeral public IP for outbound traffic only, behind a deny-all-inbound firewall. Revisit NAT if orb count grows.
 - Node.js 24 is prescribed.
 - A simple TypeScript project should require no orb configuration file.
 - Per-project machine sizing and arbitrary OS/package configuration are not part of the first slice.
@@ -92,7 +95,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - A stop that completes without a reachable runtime — a crashed or already-stopped host — may leave final records unreplicated until the next start. In that case the stopped-orb history view is complete only up to the last committed pull. This is a deliberate, narrow weakening of the complete-replication goal in exchange for never stranding an orb in `stopping`.
 - Shutdown does not wait for Pi to settle. A user or parent agent may stop an orb during active work and accepts the risk of terminating an incomplete turn.
 - If a pre-stop pull or database commit fails retryably, the stop must not proceed; the control plane retries while leaving the host running. A non-retryable replication-integrity failure (unknown cursor, session-header mismatch, mapping failure) instead abandons the drain, stops the host, and marks the orb `failed` with a typed error; the authoritative filesystem retains everything not yet replicated.
-- Cloud SQL for PostgreSQL is preferred over AlloyDB for the first cloud deployment because cheaper small configurations are sufficient for expected load.
+- Cloud SQL for PostgreSQL is preferred over AlloyDB for the first cloud deployment because cheaper small configurations are sufficient for expected load. Private IP only, with automated backups and point-in-time recovery from day one — the replica is the durable product history.
 - Local development should use a local PostgreSQL-compatible database, likely a Docker container.
 - Database access must be behind an interface so tests can use an in-memory/fake implementation where appropriate and local/cloud deployments can select different adapters.
 
@@ -103,8 +106,10 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The polling process must use always-allocated CPU/instance-based billing; a minimum instance with request-only CPU allocation is insufficient for reliable background work.
 - Polling state and cursors remain in PostgreSQL because Cloud Run may restart even a minimum instance at any time.
 - Multiple control-plane instances may poll the same orb concurrently. Correctness uses an optimistic cursor compare-and-swap in the commit transaction rather than a distributed polling lock or leader.
+- Confirming Cloud Run WebSocket configuration (open question 2) is the first task of the cloud slice, because a bad answer there is the only thing that could force the control plane onto a VM instead; the application is a container either way, so that fallback changes no application code.
+- The cloud control plane sits behind Identity-Aware Proxy restricted to the owner's Google account until an application identity/authorization model exists (open question 24). The unauthenticated control plane must never be directly reachable from the public internet.
 - Infrastructure must be managed as code.
-- The IaC tool is not decided.
+- The IaC tool is OpenTofu. It manages only the static plane: VPC, firewall rules, Cloud Run, Cloud SQL, Artifact Registry, IAM. Per-orb VMs are dynamic resources created by `GceOrbHostProvider` through the GCE API at runtime and are never IaC resources.
 - The control plane, orb runtime, shared protocol, and web UI will be written in TypeScript on Node.js 24.
 
 ### 3.7 Deterministic simulation testing
@@ -269,12 +274,21 @@ new DockerOrbHostProvider({
 
 new GceOrbHostProvider({
   projectId: "playground-dev-6ae7",
-  region: "us-central1",
+  zone: "us-central1-a",
   machineType: "n2d-highmem-4",
-  debianImage: "<exact-image>",
-  runtimeImage: "pi-orb-runtime:<digest>",
+  runtimeImage: "us-central1-docker.pkg.dev/…/pi-orb-runtime:<digest>",
 });
 ```
+
+The contract shared by every provider is: a persistent filesystem plus a host running the orb runtime container image with provider-delivered environment variables. Where that container runs — the local Docker daemon or a Container-Optimized OS VM — never appears in the control plane or lifecycle engine.
+
+Decided shape of the future `GceOrbHostProvider` (not yet implemented):
+
+- Each orb owns a separate persistent data disk, mirroring the Docker provider's volume/container split. The COS boot disk is disposable and is replaced on runtime-image upgrades without touching orb state.
+- The runtime container is declared through COS instance metadata and pulled from Artifact Registry; COS restarts it on crash, providing the host-level supervision Docker's restart policy provides locally.
+- `provision` creates the instance only when it does not exist. Recovery from a stop or a Spot preemption is `instances.start` on the same instance (restart-in-place); there is no recreate-and-reattach path in the common case.
+- Spot preemption appears as instance state `TERMINATED`. Instance status alone does not distinguish preemption from other terminations, and the provider does not consult Cloud Logging to find out; it logs the cause as "likely preemption". Host-down detection, restart initiation, and restart outcome are all logged as structured lifecycle events.
+- Networking: the control plane reaches the runtime on the instance's internal IP via Direct VPC egress from Cloud Run; the ephemeral public IP is outbound-only behind a deny-all-inbound firewall (§3.3).
 
 The Docker provider reports the runtime address using the container's bridge-network IP when one is available, falling back to the container name. On Linux, bridge IPs are routable from the host, so the first-slice control plane can run uncontainerized during development while orb runtimes stay reachable only on the private Docker network; a containerized control plane on the same network resolves the container-name form.
 
@@ -1081,10 +1095,10 @@ This forecloses local paths, `file://` URLs, credential leakage into the databas
 
 The environment is prescribed initially:
 
-- Debian 12;
+- Debian 12 (the runtime container image's base);
 - Node.js 24;
-- fixed orb runtime/container image;
-- Spot `n2d-highmem-4` on GCE later;
+- fixed orb runtime/container image on every provider;
+- Spot `n2d-highmem-4` Container-Optimized OS VMs on GCE later, running that same container image;
 - no required orb configuration for a simple TypeScript project.
 
 Still open:
@@ -1390,7 +1404,16 @@ A containerized control plane would use the equivalent named Docker volume mount
 
 Do not write OAuth credentials to PostgreSQL, images, project volumes, Pi session history, logs, or HTTP responses. No browser-facing response type imports or contains Pi's stored credential type; `OrbView.actionRequired` can represent only the public device-login challenge. Add a response-schema test that fails if `access` or `refresh` can be serialized.
 
-This shared file is intentionally the simplest local implementation, not a security boundary. Orb code may be able to read the mounted subscription credential, and anyone able to request orb creation/start may trigger the global login flow. The first slice therefore trusts all users and repository code. Before GCE/public deployment, replace the file implementation behind Pi's `CredentialStore` interface with a control-plane credential broker or managed-secret-backed store so refresh tokens are never mounted into orbs.
+This shared file is intentionally the simplest local implementation, not a security boundary. Orb code may be able to read the mounted subscription credential, and anyone able to request orb creation/start may trigger the global login flow. The first slice therefore trusts all users and repository code.
+
+Decided for the cloud slice: replace the mounted file with a **control-plane credential broker**, as one unified mechanism on both Docker and GCE from day one. The mounted-`auth.json` path is removed, not kept as a second path, so local and cloud auth never diverge and the existing E2E against the fake OpenAI service exercises the broker. A Secret-Manager-backed store was rejected because it changes only where the refresh token is stored, not that it lands inside an orb running untrusted repository code. Decided shape (detailed design pending; see open question 21):
+
+- The broker lives in the control plane next to `PiAuthGate`, which continues to own `ModelRuntime` and `auth.json`. Refresh tokens never leave the control plane.
+- A runtime-facing control-plane endpoint returns a current short-lived access token. It is authenticated by a per-orb bearer token minted at provision time and scoped to that orb only.
+- The orb runtime registers a provider config (the same `registerProvider` mechanism the E2E mock uses) whose `getApiKey`/`refreshToken` delegate to that endpoint; from Pi's perspective nothing is unusual.
+- Providers deliver exactly two environment variables — the control-plane base URL and the orb token — via `--env` on Docker and via instance metadata forwarded into the container on GCE. This env contract is the entire provider-specific surface.
+- Accepted limitation until the identity model exists (open question 24): repository code inside an orb can read the orb token and thus obtain short-lived access tokens. What it can no longer obtain is the refresh token.
+- To be settled in the detailed design: token lifetime and renewal semantics, coalescing concurrent refresh requests from multiple orbs into one upstream refresh (Pi's credential-store lock points the way), and the runtime's 401-retry path.
 
 ### 15.2 Requirements before public deployment
 
@@ -1561,7 +1584,7 @@ Test framework assertions and React/framework error boundaries may use exception
 ### Project and environment
 
 11. Define clone failure handling, default-branch behavior, and recorded repository metadata.
-12. Choose the exact pinned Debian image and Node 24 release/update policy.
+12. Choose the runtime container base-image pin and Node 24 release/update policy. (The VM host-OS half of this question dissolved: cloud hosts boot Container-Optimized OS and only run the runtime container, §3.3.)
 13. Decide whether to adopt `.agents/setup` and a restart hook inspired by Amp.
 14. Decide how setup caching/prebuilt snapshots work after the unoptimized first slice.
 15. Decide which tools and services are installed in the prescribed base image.
@@ -1571,9 +1594,9 @@ Test framework assertions and React/framework error boundaries may use exception
 ### Control plane, database, and deployment
 
 18. Define the abstract history repository/database interface.
-19. Choose the IaC tool for Cloud Run, Cloud SQL, networking, IAM, Artifact Registry, and GCE.
+19. Resolved: OpenTofu manages the static infrastructure plane; per-orb VMs stay dynamic provider resources outside IaC (§3.6).
 20. Decide how to partition polling later if redundant all-orb polling becomes inefficient at scale; no leader or partitioning is needed initially.
-21. Define Cloud Run-to-orb networking and runtime authentication.
+21. Write the detailed credential-broker and per-orb-token design: token lifetime/renewal semantics, control-plane refresh coalescing, and the runtime 401-retry path. (Direction decided in §15.1; networking decided: Direct VPC egress to internal instance IPs, §5.)
 22. Define observability, audit logging, metrics, and cost attribution.
 23. Define orphan-host reconciliation and cleanup.
 
