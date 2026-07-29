@@ -1361,7 +1361,7 @@ Baseline GitHub CI runs for every pull request and every push to `main`, using N
 
 The first local vertical slice intentionally has no authentication or authorization. Anyone who can reach the control plane can list, create, inspect, control, and stop every project and orb. The control plane-to-runtime hop is also unauthenticated. This deployment is suitable only on a trusted development machine/network and must not be exposed publicly.
 
-### 15.1 First-slice OpenAI Codex OAuth credentials
+### 15.1 OpenAI Codex OAuth credentials
 
 The initial provider is hardcoded to Pi's built-in `openai-codex`, using a ChatGPT Plus/Pro subscription rather than an OpenAI API key. There are no model/provider/thinking-level environment variables or model-selection controls in the first slice. The runtime uses Pi's built-in default Codex model and default thinking level; explicit model selection can be added only when the product needs it.
 
@@ -1409,11 +1409,53 @@ This shared file is intentionally the simplest local implementation, not a secur
 Decided for the cloud slice: replace the mounted file with a **control-plane credential broker**, as one unified mechanism on both Docker and GCE from day one. The mounted-`auth.json` path is removed, not kept as a second path, so local and cloud auth never diverge and the existing E2E against the fake OpenAI service exercises the broker. A Secret-Manager-backed store was rejected because it changes only where the refresh token is stored, not that it lands inside an orb running untrusted repository code. Decided shape (detailed design pending; see open question 21):
 
 - The broker lives in the control plane next to `PiAuthGate`, which continues to own `ModelRuntime` and `auth.json`. Refresh tokens never leave the control plane.
-- A runtime-facing control-plane endpoint returns a current short-lived access token. It is authenticated by a per-orb bearer token minted at provision time and scoped to that orb only.
+- A runtime-facing control-plane endpoint returns a current short-lived access token. It is authenticated by a per-host-incarnation bearer token scoped to that orb only and valid only while the orb is meant to be running.
 - The orb runtime registers a provider config (the same `registerProvider` mechanism the E2E mock uses) whose `getApiKey`/`refreshToken` delegate to that endpoint; from Pi's perspective nothing is unusual.
 - Providers deliver exactly two environment variables — the control-plane base URL and the orb token — via `--env` on Docker and via instance metadata forwarded into the container on GCE. This env contract is the entire provider-specific surface.
 - Accepted limitation until the identity model exists (open question 24): repository code inside an orb can read the orb token and thus obtain short-lived access tokens. What it can no longer obtain is the refresh token.
-- To be settled in the detailed design: token lifetime and renewal semantics, coalescing concurrent refresh requests from multiple orbs into one upstream refresh (Pi's credential-store lock points the way), and the runtime's 401-retry path.
+- Token lifetime/renewal semantics, refresh coalescing, and the 401-retry path are settled in the detailed design below.
+
+#### Credential broker detailed design
+
+Status: designed and revised after an external (Codex) review; not yet implemented. This replaces the mounted `auth.json` on every provider when the cloud slice starts.
+
+**Division of responsibility.** The control plane is the credential owner: it runs the device login (unchanged `PiAuthGate`), performs every upstream refresh, and holds the only durable copy of the refresh token. The orb runtime is a consumer of short-lived access tokens and holds them in memory only; no refresh token ever exists in the runtime process. The existing no-credential-serialization guard remains scoped to browser-facing responses — the runtime endpoint below intentionally serializes an access token.
+
+**Runtime-facing endpoint.** One route, versioned separately from the browser API because its compatibility story is deployment-internal:
+
+```text
+POST /runtime/v1/model-token
+Authorization: Bearer <orb token>
+
+request  { "reason": "startup" | "expiring" | "rejected", "staleGeneration"?: number }
+200      { "accessToken": string, "accountId": string, "expiresAt": number, "generation": number }
+         // expiresAt in ms since epoch; Cache-Control: no-store
+401      unknown, invalid, or lifecycle-revoked orb token
+409      { "error": "auth_required" }   // no usable credential; device login must run
+429/5xx  retryable; the runtime backs off with jitter and honors Retry-After
+```
+
+`generation` is an opaque broker-issued counter identifying the current stored credential; the runtime echoes it as `staleGeneration` when reporting a rejected or expiring token. The broker refreshes upstream only when `staleGeneration` matches the current generation — otherwise someone already rotated and it serves the newer token. A client-controlled timestamp was rejected as the fingerprint: it is not unique and lets a malicious orb force continuous rotation. As a backstop against forced-rotation abuse, upstream refreshes are additionally rate-limited globally (initially at most one per 30 seconds unless the current token is expired). Independent of callers, the broker refreshes when remaining lifetime falls below a threshold (initially 5 minutes).
+
+**Orb token.** 256-bit random value minted per *host incarnation*: freshly generated whenever a provider is about to create a container or VM, with its SHA-256 hash committed to PostgreSQL (keyed by orb) *before* the host is created — a failed creation just mints again on retry, and an ambiguous one leaves at most one valid hash. The plaintext exists only in the host's delivery channel (`--env` on Docker, instance metadata on GCE), which resolves the earlier contradiction of storing only a hash while also "re-supplying" the value: the control plane never needs the plaintext again because recreating a host mints a new token. GCE restart-in-place keeps the same incarnation and token; replacing a container or VM rotates it. A hash of an internal bearer token is not an OAuth credential and does not violate the no-credentials-in-PostgreSQL rule. Lookup is by indexed hash with constant-time comparison. The token authorizes only `/runtime/v1/*` for its orb, and only while the orb's lifecycle state says the host should be up (`starting`/`running`/`stopping`); tokens of stopped or failed orbs are refused. Accepted for the single-account phase: repository code can read the token and, while its orb runs, obtain access tokens reachable only from inside the deployment's network; what it can never obtain is the refresh token.
+
+**Pi adapter (runtime side).** Pi's provider-OAuth contract is: `getApiKey(credentials)` is synchronous, `refreshToken(credentials)` is async and returns a full OAuth credential, and *Pi* decides when to refresh based on the stored credential's expiry. The adapter therefore works as follows: during boot the runtime calls the broker once and seeds its in-memory credential store with `{access, expires, refresh: "<broker>"}` — a synthetic refresh marker, since the real refresh token never leaves the control plane; `getApiKey` synchronously returns the stored access token; `refreshToken` calls the broker and returns the new credential with the same marker; `login` always fails — login happens only in the control plane. Whether an upstream 401 surfaces in a way that triggers Pi's refresh path, and how partially streamed operations behave, must be pinned by a contract test against the exact Pi SDK version — not assumed, and not validated only through the E2E mock. Retries around 401 are refresh-then-retry-once and never replay a partially consumed stream. Mock mode composes cleanly and gets simpler: the fake-inference base URL override stays an env concern, the OAuth side becomes broker-backed in both modes, the runtime's device-flow mock code is deleted, and the fake sees refresh traffic from the control plane only.
+
+**Durable storage and fenced mutations.** Cloud Run filesystems are ephemeral, so the refresh token cannot live in a file there. Local development keeps the `auth.json` file store; the cloud control plane stores the credential in Secret Manager, with a PostgreSQL *credential-pointer row* as the source of truth: `{generation, secretVersion}`. Readers load the pointer and read that exact numeric secret version — never `latest`, whose read-after-write consistency is not guaranteed. Every mutation (login write, refresh write, invalidation) is fenced: it names the generation it read, and commits via compare-and-swap on the pointer row — the same optimistic-CAS philosophy the replication cursor already uses. An advisory lock was rejected as the correctness mechanism because a dropped connection releases it while its holder may still be mid-flight; instead, coalescing uses a short lease value CAS'd into the pointer row (bounded, expiring), so no database lock is ever held across an external call and a crashed leaseholder just times out. `invalid_grant` clears only the generation that was submitted upstream — a stale failure can never clobber a newer credential. Superseded secret versions are destroyed best-effort after the pointer moves.
+
+**Acknowledged loss window.** Upstream refresh rotates the refresh token, and no protocol makes "upstream accepted the rotation" and "we durably stored the result" atomic. If the process dies, or the response is lost, between upstream acceptance and the Secret Manager write plus pointer CAS, the only usable refresh token may be gone. This is accepted: the outcome is a forced re-login, surfaced as `auth_required`, not silent corruption. The write path retries hard within its lease and fails loudly. Deterministic tests must cover the three shapes: response lost after upstream acceptance; death after response, before persist; login completed but death before persist.
+
+**Failure semantics.** Transient upstream or storage failures (network, 429, 5xx, Secret Manager outage) while the current access token is still valid do *not* fail token requests — the broker serves the valid token and retries refresh in the background of subsequent requests; only an expired-or-rejected token combined with a failing refresh surfaces an error. `invalid_grant` is terminal: the credential pointer is cleared (fenced) and subsequent calls return `auth_required`. Mid-run recovery needs no new machinery in the first iteration: a revoked credential fails the active agent operation with a typed auth error, the orb stays up, and recovery is stop/start — which re-runs `ensureAuth` and the device flow. A standalone re-login action that does not bounce the orb is a recorded follow-up (open question 32).
+
+**Cloud exposure.** Two Cloud Run services from the same image, gated by a role env var that controls which routes are *registered* (a hard allowlist, not hidden-by-convention): the browser-facing service (behind IAP, min one instance, instance-based billing, runs the poller and the login flow) and a runtime-facing service registering only `/runtime/v1/*`, with `ingress=internal`, unauthenticated at the Cloud Run IAM layer by explicit decision — caller authentication is the orb token; requiring Google identity tokens from the VM would push GCP-specific auth into the runtime, which stays provider-agnostic (URL + bearer token on every provider). Both properties (internal ingress, route allowlist) are enforced in OpenTofu. The previously sketched fallback — one service behind an external load balancer with `ingress=internal-and-cloud-load-balancing` — was rejected: VPC-internal callers (i.e., orbs) could reach the `run.app` origin directly and bypass IAP entirely, so it would be safe only with app-level verification of signed IAP assertions on every browser route.
+
+**GCE identity hardening.** Orb VMs never run as the default Compute service account: they get a dedicated service account with only Artifact Registry read and log writing, because untrusted repository code can query the metadata server and mint that account's tokens. (The same metadata server exposes the orb token to code on the VM — already accepted above.)
+
+**Local Docker parity.** On the shared local Docker network, orb containers can reach the whole control plane, not just `/runtime/v1/*`, and traffic is plaintext. Accepted for single-user development on a trusted machine; noted as a gap to close (separate broker listener or network) if that assumption ever changes.
+
+**Abuse bounds.** Per-orb token-endpoint rate limiting, the global upstream-refresh rate limit above, and a Cloud Run max-instances cap bound what a hostile orb can do: at worst it consumes the shared account's inference quota — inherent to the single-account phase — but it cannot force unbounded rotation or scale-out.
+
+**Deterministic simulation and contract tests.** Broker logic is control-plane domain code behind ports (`SimulationTask` clock, upstream refresher, secret store with pointer CAS, lease). Failpoints beyond the happy paths: refresh storm coalescing to one upstream call; rotation race between two instances; leaseholder crash mid-refresh; the three loss-window shapes above; stale `invalid_grant` racing a successful refresh; login racing refresh; database connection loss mid-mutation; upstream 429-then-success. The runtime-side adapter (seed, refresh, 401 singleflight) gets the same port treatment. What simulation cannot validate — Pi's actual callback/401 behavior, Cloud Run ingress and IAM, IAP, metadata-server exposure — is covered by the pinned-SDK contract test and the cloud-slice validation exercise.
 
 ### 15.2 Requirements before public deployment
 
@@ -1596,7 +1638,7 @@ Test framework assertions and React/framework error boundaries may use exception
 18. Define the abstract history repository/database interface.
 19. Resolved: OpenTofu manages the static infrastructure plane; per-orb VMs stay dynamic provider resources outside IaC (§3.6).
 20. Decide how to partition polling later if redundant all-orb polling becomes inefficient at scale; no leader or partitioning is needed initially.
-21. Write the detailed credential-broker and per-orb-token design: token lifetime/renewal semantics, control-plane refresh coalescing, and the runtime 401-retry path. (Direction decided in §15.1; networking decided: Direct VPC egress to internal instance IPs, §5.)
+21. Resolved: credential-broker and per-orb-token design written (§15.1); networking decided: Direct VPC egress to internal instance IPs (§5). Remaining: implement it, and validate direct IAP-on-Cloud-Run during the WebSocket validation exercise.
 22. Define observability, audit logging, metrics, and cost attribution.
 23. Define orphan-host reconciliation and cleanup.
 
@@ -1613,3 +1655,7 @@ Test framework assertions and React/framework error boundaries may use exception
 
 30. Define CI iteration budgets and storage/replay conventions for failing entropy traces.
 31. Decide which virtual-time API requirements in [`DETERMINED-REQ.md`](DETERMINED-REQ.md) belong in `determined` itself versus a pi-orb wrapper.
+
+### Credential broker follow-ups
+
+32. Add a standalone re-login action so a mid-run credential revocation can be repaired without stopping and starting the orb (§15.1: today recovery is stop/start).
