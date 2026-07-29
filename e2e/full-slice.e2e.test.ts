@@ -9,8 +9,8 @@ import {
   deleteFakeSession,
   docker,
   type FakeSession,
-  fakeControl,
   FatalProbeError,
+  fakeControl,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
