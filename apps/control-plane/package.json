@@ -8,6 +8,7 @@
     "dev": "node src/main.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.10",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.0.0",
     "@google-cloud/secret-manager": "^6.3.0",

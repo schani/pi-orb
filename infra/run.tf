@@ -63,7 +63,10 @@ resource "google_cloud_run_v2_service" "runtime" {
       }
     }
   }
-  depends_on = [google_secret_manager_secret_iam_member.cp_reads_database_url]
+  depends_on = [
+    google_secret_manager_secret_iam_member.cp_reads_database_url,
+    google_secret_manager_secret_version.database_url,
+  ]
 }
 
 resource "google_cloud_run_v2_service" "browser" {
@@ -119,5 +122,8 @@ resource "google_cloud_run_v2_service" "browser" {
       }
     }
   }
-  depends_on = [google_secret_manager_secret_iam_member.cp_reads_database_url]
+  depends_on = [
+    google_secret_manager_secret_iam_member.cp_reads_database_url,
+    google_secret_manager_secret_version.database_url,
+  ]
 }
