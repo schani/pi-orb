@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import type { SimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError } from "../../domain/errors.ts";
@@ -8,6 +9,7 @@ import type {
   OrbHostProvider,
   OrbHostRef,
   OrbHostState,
+  ProvisionedOrbHost,
   ProvisionOrbHostRequest,
 } from "../../domain/ports.ts";
 
@@ -23,6 +25,24 @@ export interface DockerOrbHostProviderOptions {
 }
 
 const ORB_LABEL = "pi-orb.orb-id";
+const RUNTIME_TOKEN_ENV = "PI_ORB_RUNTIME_TOKEN";
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/** Read the runtime token back from a container's `Config.Env` list. */
+function tokenFromInspect(info: Record<string, unknown>): string | null {
+  const config = info["Config"] as Record<string, unknown> | undefined;
+  const env = config?.["Env"];
+  if (!Array.isArray(env)) return null;
+  for (const entry of env) {
+    if (typeof entry === "string" && entry.startsWith(`${RUNTIME_TOKEN_ENV}=`)) {
+      return entry.slice(RUNTIME_TOKEN_ENV.length + 1);
+    }
+  }
+  return null;
+}
 
 interface DockerExecOk {
   stdout: string;
@@ -171,19 +191,28 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     task: SimulationTask,
     request: ProvisionOrbHostRequest,
     context: OperationContext,
-  ): ResultAsync<OrbHostRef, OrbHostProviderError> {
+  ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError> {
     const name = containerName(request.orbId);
-    const run = async (): Promise<Result<OrbHostRef, OrbHostProviderError>> => {
+    const ref: OrbHostRef = { provider: "docker", resourceId: name };
+    const run = async (): Promise<Result<ProvisionedOrbHost, OrbHostProviderError>> => {
       const existing = await this.inspect("provision", name, context);
       if (existing.isErr()) return err(existing.error);
       if (existing.value !== null) {
-        // Idempotent: reuse the container; start it if it is not running.
-        const observation = this.toObservation(existing.value);
-        if (observation !== null && observation.state !== "running") {
-          const started = await this.exec("provision", ["start", name], context);
-          if (started.isErr()) return err(started.error);
+        const existingToken = tokenFromInspect(existing.value);
+        if (existingToken !== null) {
+          // Idempotent: reuse the container (starting it if needed) and read
+          // its token back — an existing incarnation is never re-minted.
+          const observation = this.toObservation(existing.value);
+          if (observation !== null && observation.state !== "running") {
+            const started = await this.exec("provision", ["start", name], context);
+            if (started.isErr()) return err(started.error);
+          }
+          return ok({ ref, runtimeTokenHash: sha256Hex(existingToken) });
         }
-        return ok({ provider: "docker", resourceId: name });
+        // A container without a token predates the broker: replace it. The
+        // data volume persists; only the compute incarnation rotates.
+        const removed = await this.exec("provision", ["rm", "--force", name], context);
+        if (removed.isErr()) return err(removed.error);
       }
       const volume = await this.exec(
         "provision",
@@ -191,6 +220,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         context,
       );
       if (volume.isErr()) return err(volume.error);
+      const runtimeToken = randomBytes(32).toString("hex");
       const created = await this.exec(
         "provision",
         [
@@ -212,6 +242,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           `PI_ORB_ID=${request.orbId}`,
           "--env",
           `PI_ORB_REPOSITORY_URL=${request.bootstrap.repositoryUrl}`,
+          "--env",
+          `${RUNTIME_TOKEN_ENV}=${runtimeToken}`,
           ...Object.entries(this.options.extraEnv ?? {}).flatMap(([key, value]) => [
             "--env",
             `${key}=${value}`,
@@ -221,14 +253,23 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         context,
       );
       if (created.isErr()) {
-        // A concurrent provision may have won the name race; that is success.
+        // A concurrent provision may have won the name race; read the winner's
+        // token back instead of reporting ours.
         if (/is already in use/i.test(created.error.message)) {
-          return ok({ provider: "docker", resourceId: name });
+          const winner = await this.inspect("provision", name, context);
+          if (winner.isErr()) return err(winner.error);
+          const winnerToken = winner.value === null ? null : tokenFromInspect(winner.value);
+          if (winnerToken === null) {
+            return err(
+              providerError("provision", "conflict", "racing container has no token", true),
+            );
+          }
+          return ok({ ref, runtimeTokenHash: sha256Hex(winnerToken) });
         }
         return err(created.error);
       }
       task.log(`provisioned docker host ${name}`);
-      return ok({ provider: "docker", resourceId: name });
+      return ok({ ref, runtimeTokenHash: sha256Hex(runtimeToken) });
     };
     return new ResultAsync(run());
   }

@@ -84,6 +84,7 @@ export function makeOrbRow(
     harnessSessionId: null,
     harnessSessionHeader: null,
     lastError: null,
+    runtimeTokenHash: null,
     replicationCursor: null,
     replicatedHeadId: null,
     stateChangedAt: 0,
@@ -106,11 +107,12 @@ export function seedRunningOrb(
   const projectId = `project-of-${orbId}`;
   harness.store.seedProject(makeProjectRow(projectId));
   harness.world.configureOrb(orbId, { initDurationMs: 0, ...config });
-  const ref = harness.world.provisionHost(task, orbId);
+  const provisioned = harness.world.provisionHost(task, orbId);
   harness.world.ensureSessionExists(orbId);
   harness.store.seedOrb(
     makeOrbRow(orbId, projectId, "running", {
-      hostRef: ref.resourceId,
+      hostRef: provisioned.ref.resourceId,
+      runtimeTokenHash: provisioned.runtimeTokenHash,
       checkoutCommit: "commit-0",
       stateChangedAt: task.wallNow(),
     }),

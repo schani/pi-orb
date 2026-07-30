@@ -35,6 +35,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     harnessSessionId: row["harness_session_id"] === null ? null : String(row["harness_session_id"]),
     harnessSessionHeader: (row["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
     lastError: row["last_error"] === null ? null : String(row["last_error"]),
+    runtimeTokenHash: row["runtime_token_hash"] === null ? null : String(row["runtime_token_hash"]),
     replicationCursor:
       row["replication_cursor"] === null ? null : String(row["replication_cursor"]),
     replicatedHeadId: row["replicated_head_id"] === null ? null : String(row["replicated_head_id"]),
@@ -113,8 +114,9 @@ export class PgControlPlaneStore implements ControlPlaneStore {
       .query(
         `INSERT INTO orbs (id, project_id, state, state_version, host_kind, host_ref,
            checkout_commit, harness_session_id, harness_session_header, last_error,
-           replication_cursor, replicated_head_id, state_changed_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+           runtime_token_hash, replication_cursor, replicated_head_id, state_changed_at,
+           created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
         [
           orb.id,
           orb.projectId,
@@ -126,6 +128,7 @@ export class PgControlPlaneStore implements ControlPlaneStore {
           orb.harnessSessionId,
           orb.harnessSessionHeader,
           orb.lastError,
+          orb.runtimeTokenHash,
           orb.replicationCursor,
           orb.replicatedHeadId,
           new Date(orb.stateChangedAt),
@@ -207,6 +210,11 @@ export class PgControlPlaneStore implements ControlPlaneStore {
     if (params.checkoutCommit !== undefined) {
       sets.push(`checkout_commit = $${index}`);
       values.push(params.checkoutCommit);
+      index += 1;
+    }
+    if (params.runtimeTokenHash !== undefined) {
+      sets.push(`runtime_token_hash = $${index}`);
+      values.push(params.runtimeTokenHash);
       index += 1;
     }
     return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values);

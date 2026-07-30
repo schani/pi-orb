@@ -618,8 +618,10 @@ describe("orb lifecycle (DST)", () => {
           f: async (task) => {
             harness.store.seedProject(makeProjectRow(PROJECT));
             harness.world.configureOrb(ORB, { initDurationMs: 0 });
-            const ref = harness.world.provisionHost(task, ORB); // stray host
-            harness.store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped", { hostRef: ref.resourceId }));
+            const provisioned = harness.world.provisionHost(task, ORB); // stray host
+            harness.store.seedOrb(
+              makeOrbRow(ORB, PROJECT, "stopped", { hostRef: provisioned.ref.resourceId }),
+            );
             await waitUntil(
               task,
               "stray host stopped",

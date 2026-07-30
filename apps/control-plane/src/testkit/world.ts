@@ -14,6 +14,7 @@ import type {
   OrbHostRef,
   OrbHostState,
   OrbRuntimeClient,
+  ProvisionedOrbHost,
   ProvisionOrbHostRequest,
   PullHistoryClientRequest,
 } from "../domain/ports.ts";
@@ -47,6 +48,13 @@ interface FakeHost {
   orbId: string;
   state: OrbHostState;
   runtime: FakeRuntimeInstance | null;
+  /** Per-incarnation runtime token "carried in the host's env". */
+  runtimeToken: string;
+}
+
+/** The deterministic stand-in for SHA-256 used by the fake provider. */
+export function fakeTokenHash(token: string): string {
+  return `sha256(${token})`;
 }
 
 interface OrbWorldState {
@@ -203,20 +211,31 @@ export class FakeWorld {
     }
   }
 
-  provisionHost(task: SimulationTask, orbId: string): OrbHostRef {
+  provisionHost(task: SimulationTask, orbId: string): ProvisionedOrbHost {
     const state = this.orbState(orbId);
     if (state.host !== null) {
-      // Idempotent: return the existing host, starting it if stopped.
+      // Idempotent: return the existing host (starting it if stopped) and
+      // read its token back — never re-mint for an existing incarnation.
       if (state.host.state === "stopped" || state.host.state === "failed") {
         this.startHost(task, state.host.ref);
       }
-      return state.host.ref;
+      return { ref: state.host.ref, runtimeTokenHash: fakeTokenHash(state.host.runtimeToken) };
     }
     this.refCounter += 1;
     const ref: OrbHostRef = { provider: "fake", resourceId: `host-${orbId}-${this.refCounter}` };
-    state.host = { ref, orbId, state: "running", runtime: null };
+    const runtimeToken = `token-${orbId}-${this.refCounter}`;
+    state.host = { ref, orbId, state: "running", runtime: null, runtimeToken };
     this.bootRuntime(task, orbId);
-    return ref;
+    return { ref, runtimeTokenHash: fakeTokenHash(runtimeToken) };
+  }
+
+  /** The host vanishes entirely (manual removal, definitive absence). */
+  removeHost(orbId: string): void {
+    this.orbState(orbId).host = null;
+  }
+
+  hostTokenOf(orbId: string): string | null {
+    return this.orbState(orbId).host?.runtimeToken ?? null;
   }
 
   startHost(task: SimulationTask, ref: OrbHostRef): void {
@@ -400,7 +419,7 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     task: SimulationTask,
     request: ProvisionOrbHostRequest,
     context: OperationContext,
-  ): ResultAsync<OrbHostRef, OrbHostProviderError> {
+  ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError> {
     return this.op(task, "provision", FAILPOINTS.providerProvision, context, () =>
       this.world.provisionHost(task, request.orbId),
     );

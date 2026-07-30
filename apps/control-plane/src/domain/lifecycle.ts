@@ -218,7 +218,8 @@ async function reconcileCreateStart(
       orbId: orb.id,
       expectedStateVersion: orb.stateVersion,
       now: task.wallNow(),
-      hostRef: provisioned.value.resourceId,
+      hostRef: provisioned.value.ref.resourceId,
+      runtimeTokenHash: provisioned.value.runtimeTokenHash,
     });
     if (updated.isErr()) {
       return updated.error.type === "state_conflict"
@@ -226,7 +227,7 @@ async function reconcileCreateStart(
         : retryable(updated.error.message);
     }
     orb = updated.value;
-    hostResourceId = provisioned.value.resourceId;
+    hostResourceId = provisioned.value.ref.resourceId;
   }
 
   // 4. Drive the host toward a ready runtime.
@@ -261,12 +262,19 @@ async function reconcileCreateStart(
         ? retryable(provisioned.error.message)
         : failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
     }
-    if (provisioned.value.resourceId !== hostResourceId) {
+    if (
+      provisioned.value.ref.resourceId !== hostResourceId ||
+      provisioned.value.runtimeTokenHash !== orb.runtimeTokenHash
+    ) {
+      // A replaced host may keep its resource name (Docker container names
+      // are stable) while carrying a fresh token, so the hash is compared
+      // independently of the ref.
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
         expectedStateVersion: orb.stateVersion,
         now: task.wallNow(),
-        hostRef: provisioned.value.resourceId,
+        hostRef: provisioned.value.ref.resourceId,
+        runtimeTokenHash: provisioned.value.runtimeTokenHash,
       });
       if (updated.isErr()) {
         return updated.error.type === "state_conflict"
@@ -615,6 +623,7 @@ export function createOrb(
       harnessSessionId: null,
       harnessSessionHeader: null,
       lastError: null,
+      runtimeTokenHash: null,
       replicationCursor: null,
       replicatedHeadId: null,
       stateChangedAt: now,

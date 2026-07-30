@@ -16,6 +16,11 @@ export interface OrbRow {
   readonly harnessSessionId: string | null;
   readonly harnessSessionHeader: HarnessSessionMetadata | null;
   readonly lastError: string | null;
+  /**
+   * SHA-256 of the per-host-incarnation runtime token (DESIGN.md §15.1);
+   * follows what the provisioned host actually carries. Never the plaintext.
+   */
+  readonly runtimeTokenHash: string | null;
   readonly replicationCursor: string | null;
   readonly replicatedHeadId: string | null;
   readonly stateChangedAt: number;

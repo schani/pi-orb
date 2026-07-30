@@ -194,6 +194,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.lastError !== undefined ? { lastError: params.lastError } : {}),
         ...(params.hostRef !== undefined ? { hostRef: params.hostRef } : {}),
         ...(params.checkoutCommit !== undefined ? { checkoutCommit: params.checkoutCommit } : {}),
+        ...(params.runtimeTokenHash !== undefined
+          ? { runtimeTokenHash: params.runtimeTokenHash }
+          : {}),
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };

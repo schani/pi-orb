@@ -11,6 +11,7 @@ import type {
   AuthGateError,
   CommitPullError,
   OrbHostProviderError,
+  PointerConflict,
   RuntimeClientError,
   StateConflict,
   StoreError,
@@ -43,6 +44,7 @@ export interface CasUpdateFieldsParams {
   readonly hostRef?: string | null;
   readonly checkoutCommit?: string | null;
   readonly lastError?: string | null;
+  readonly runtimeTokenHash?: string | null;
 }
 
 export interface CommitPullBatchParams {
@@ -152,6 +154,18 @@ export interface ProvisionOrbHostRequest {
   readonly bootstrap: { repositoryUrl: string };
 }
 
+/**
+ * Provision outcome. `runtimeTokenHash` is the SHA-256 of the runtime token
+ * the host *actually carries* — minted fresh when the provider created the
+ * host, read back from the host's delivery channel (container env, instance
+ * metadata) when an existing host was found. The control plane commits this
+ * observed hash; it never needs the plaintext (DESIGN.md §15.1).
+ */
+export interface ProvisionedOrbHost {
+  readonly ref: OrbHostRef;
+  readonly runtimeTokenHash: string;
+}
+
 export interface OrbHostProvider {
   readonly kind: string;
   /** Idempotent by orbId. */
@@ -159,7 +173,7 @@ export interface OrbHostProvider {
     task: SimulationTask,
     request: ProvisionOrbHostRequest,
     context: OperationContext,
-  ): ResultAsync<OrbHostRef, OrbHostProviderError>;
+  ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError>;
   /** Idempotent. */
   start(
     task: SimulationTask,
