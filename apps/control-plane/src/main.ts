@@ -68,7 +68,10 @@ async function main(): Promise<void> {
     hostProvider: new DockerOrbHostProvider({
       image: runtimeImage,
       network: dockerNetwork,
-      authDir,
+      controlPlanePort: port,
+      ...(process.env["PI_ORB_BROKER_URL"] !== undefined && process.env["PI_ORB_BROKER_URL"] !== ""
+        ? { controlPlaneUrl: process.env["PI_ORB_BROKER_URL"] }
+        : {}),
       ...(mockOpenAi !== null
         ? {
             extraEnv: {

@@ -10,14 +10,18 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { type MockOpenAiConfig, mockOpenAiProviderConfig } from "@pi-orb/mock-openai";
+import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
   type RuntimeEvent,
   type RuntimeHealth,
   type ServerFrame,
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
+import { NoSimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
+import { type BrokerEnv, HttpBrokerEndpoint } from "../broker/endpoint.ts";
+import { brokerProviderConfig } from "../broker/provider.ts";
+import { BrokerTokenClient } from "../domain/broker-client.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
@@ -28,9 +32,9 @@ export interface PiOrbAgentOptions {
   readonly repositoryUrl: string;
   /** Persistent orb filesystem root (the Docker volume). */
   readonly workDir: string;
-  /** Directory containing the shared auth.json (DESIGN.md §15.1). */
-  readonly authDir: string;
-  /** E2E mode: route OAuth/inference to the fake OpenAI service. */
+  /** Control-plane broker access (DESIGN.md §15.1); the only credential path. */
+  readonly broker: BrokerEnv | null;
+  /** E2E mode: route inference to the fake OpenAI service. */
   readonly mockOpenAi?: MockOpenAiConfig | null;
 }
 
@@ -218,13 +222,26 @@ export class PiOrbAgent {
     }
     this.sessionManager = managerResult.value;
 
-    // 3. Codex credential must resolve (DESIGN.md §5.1).
+    // 3. Codex credential resolves through the control-plane broker
+    // (DESIGN.md §15.1) — the only credential path on every provider.
     this.health = this.initializing("checking_auth");
     const mockOpenAi = this.options.mockOpenAi ?? null;
+    const broker = this.options.broker;
+    if (broker === null) {
+      return err(
+        this.failed("auth_unavailable", "broker environment variables are missing", false),
+      );
+    }
+    const brokerTask = new NoSimulationTask(`broker-${this.options.orbId}`, false);
+    const brokerClient = new BrokerTokenClient(new HttpBrokerEndpoint(broker));
     const runtimeResult = await ResultAsync.fromPromise(
       ModelRuntime.create({
-        authPath: join(this.options.authDir, "auth.json"),
-        ...(mockOpenAi !== null ? { allowModelNetwork: false } : {}),
+        // Private per-orb auth file: holds only the short-lived access token
+        // and the synthetic broker marker, never a refresh token.
+        authPath: join(this.options.workDir, "pi-auth.json"),
+        // Codex resolves offline from the built-in catalog; the availability
+        // sweep in ModelRuntime.login can stall boots for minutes.
+        allowModelNetwork: false,
       }),
       (error) => (error instanceof Error ? error.message : String(error)),
     );
@@ -232,39 +249,52 @@ export class PiOrbAgent {
       return err(this.failed("auth_unavailable", runtimeResult.error, true));
     }
     const modelRuntime = runtimeResult.value;
-    if (mockOpenAi !== null) {
-      // E2E mode (PI-CODEX-E2E.md): OAuth and inference reach the fake
-      // OpenAI service; Pi keeps its built-in Codex catalog and parser.
-      modelRuntime.registerProvider("openai-codex", mockOpenAiProviderConfig(mockOpenAi));
-    }
+    modelRuntime.registerProvider(
+      "openai-codex",
+      brokerProviderConfig(brokerTask, brokerClient, {
+        // E2E mode routes inference to the fake service; Pi keeps its
+        // built-in Codex catalog and parser (PI-CODEX-E2E.md).
+        ...(mockOpenAi !== null ? { inferenceBaseUrl: mockOpenAi.inferenceBaseUrl } : {}),
+      }),
+    );
     const auth = await ResultAsync.fromPromise(modelRuntime.getAuth("openai-codex"), (error) =>
       error instanceof Error ? error.message : String(error),
     );
-    if (auth.isErr() || auth.value === undefined) {
-      return err(
-        this.failed(
-          "credential_unavailable",
-          auth.isErr() ? auth.error : "openai-codex credential did not resolve",
-          true,
-        ),
-      );
+    if (auth.isErr()) {
+      return err(this.failed("credential_unavailable", auth.error, true));
     }
-
-    // 4. Create the embedded session.
-    let mockSetup: { model: NonNullable<ReturnType<ModelRuntime["getModel"]>> } | null = null;
-    if (mockOpenAi !== null) {
-      const refreshed = await ResultAsync.fromPromise(
-        modelRuntime.refresh({ allowNetwork: false }),
+    if (auth.value === undefined) {
+      // First boot of this incarnation: pull the initial token. Pi drives
+      // our broker-backed oauth `login`; no prompts are involved.
+      const login = await ResultAsync.fromPromise(
+        modelRuntime.login("openai-codex", "oauth", {
+          prompt: (prompt) => {
+            if (prompt.type === "select") {
+              const first = prompt.options[0];
+              if (first !== undefined) return Promise.resolve(first.id);
+            }
+            return Promise.reject(new Error(`unsupported auth prompt: ${prompt.type}`));
+          },
+          notify: () => {},
+        }),
         (error) => (error instanceof Error ? error.message : String(error)),
       );
-      if (refreshed.isErr()) {
-        return err(this.failed("session_init_failed", refreshed.error, true));
+      if (login.isErr()) {
+        return err(this.failed("credential_unavailable", login.error, true));
       }
-      const model = modelRuntime.getModels("openai-codex")[0];
-      if (model === undefined) {
-        return err(this.failed("session_init_failed", "no openai-codex model available", true));
-      }
-      mockSetup = { model };
+    }
+
+    // 4. Create the embedded session, pinned to the Codex model.
+    const refreshed = await ResultAsync.fromPromise(
+      modelRuntime.refresh({ allowNetwork: false }),
+      (error) => (error instanceof Error ? error.message : String(error)),
+    );
+    if (refreshed.isErr()) {
+      return err(this.failed("session_init_failed", refreshed.error, true));
+    }
+    const model = modelRuntime.getModels("openai-codex")[0];
+    if (model === undefined) {
+      return err(this.failed("session_init_failed", "no openai-codex model available", true));
     }
     const sessionResult = await ResultAsync.fromPromise(
       createAgentSession({
@@ -272,9 +302,9 @@ export class PiOrbAgent {
         agentDir: join(this.options.workDir, "pi-agent"),
         modelRuntime,
         sessionManager: this.sessionManager,
-        ...(mockSetup !== null
+        model,
+        ...(mockOpenAi !== null
           ? {
-              model: mockSetup.model,
               // SSE keeps the first E2E deterministic; the fake refuses the
               // WebSocket transport (PI-CODEX-E2E.md).
               settingsManager: SettingsManager.inMemory({ transport: "sse" }),

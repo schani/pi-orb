@@ -49,7 +49,10 @@ describe("runtime broker routes", () => {
     await app.close();
   });
 
-  function seedOrb(state: "running" | "stopped", tokenHash: string | null = sha256(TOKEN)): void {
+  function seedOrb(
+    state: "creating" | "running" | "stopped",
+    tokenHash: string | null = sha256(TOKEN),
+  ): void {
     store.seedOrb(makeOrbRow(ORB, PROJECT, state, { runtimeTokenHash: tokenHash }));
   }
 
@@ -106,6 +109,13 @@ describe("runtime broker routes", () => {
     seedCredential();
     const response = await request({ reason: "startup" });
     expect(response.statusCode).toBe(401);
+  });
+
+  it("grants a token during the first boot, while the orb is still creating", async () => {
+    seedOrb("creating");
+    seedCredential();
+    const response = await request({ reason: "startup" });
+    expect(response.statusCode).toBe(200);
   });
 
   it("rejects an invalid body", async () => {

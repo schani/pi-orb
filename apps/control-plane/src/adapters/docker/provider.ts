@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, Result, ResultAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError } from "../../domain/errors.ts";
 import type {
   OperationContext,
@@ -18,14 +19,19 @@ export interface DockerOrbHostProviderOptions {
   readonly image: string;
   /** Docker network shared by orb containers (and the control plane when containerized). */
   readonly network: string;
-  /** Host directory holding Pi's auth.json; mounted into every orb (DESIGN.md §15.1). */
-  readonly authDir: string;
+  /**
+   * Control-plane base URL as reachable *from orb containers* (the broker
+   * endpoint, DESIGN.md §15.1). When omitted, the provider resolves the
+   * Docker network's gateway address and uses `http://<gateway>:<port>`.
+   */
+  readonly controlPlaneUrl?: string;
+  /** Port for the gateway-derived control-plane URL. */
+  readonly controlPlanePort: number;
   /** Extra environment passed to every orb container (e.g. E2E mock-OpenAI URLs). */
   readonly extraEnv?: Readonly<Record<string, string>>;
 }
 
 const ORB_LABEL = "pi-orb.orb-id";
-const RUNTIME_TOKEN_ENV = "PI_ORB_RUNTIME_TOKEN";
 
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -100,9 +106,38 @@ function mapContainerState(state: string): OrbHostState {
 export class DockerOrbHostProvider implements OrbHostProvider {
   readonly kind = "docker";
   private readonly options: DockerOrbHostProviderOptions;
+  private controlPlaneUrl: string | null = null;
 
   constructor(options: DockerOrbHostProviderOptions) {
     this.options = options;
+    this.controlPlaneUrl = options.controlPlaneUrl ?? null;
+  }
+
+  /** The broker URL orb containers use; gateway-derived unless configured. */
+  private resolveControlPlaneUrl(
+    context: OperationContext,
+  ): ResultAsync<string, OrbHostProviderError> {
+    if (this.controlPlaneUrl !== null) return okAsync(this.controlPlaneUrl);
+    return this.exec(
+      "provision",
+      [
+        "network",
+        "inspect",
+        this.options.network,
+        "--format",
+        "{{(index .IPAM.Config 0).Gateway}}",
+      ],
+      context,
+    ).andThen((result) => {
+      const gateway = result.stdout.trim();
+      if (gateway === "") {
+        return errAsync(
+          providerError("provision", "operation_failed", "docker network has no gateway", true),
+        );
+      }
+      this.controlPlaneUrl = `http://${gateway}:${this.options.controlPlanePort}`;
+      return okAsync(this.controlPlaneUrl);
+    });
   }
 
   private exec(
@@ -214,6 +249,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         const removed = await this.exec("provision", ["rm", "--force", name], context);
         if (removed.isErr()) return err(removed.error);
       }
+      const controlPlaneUrl = await this.resolveControlPlaneUrl(context);
+      if (controlPlaneUrl.isErr()) return err(controlPlaneUrl.error);
       const volume = await this.exec(
         "provision",
         ["volume", "create", "--label", `${ORB_LABEL}=${request.orbId}`, volumeName(request.orbId)],
@@ -236,14 +273,14 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           "unless-stopped",
           "--volume",
           `${volumeName(request.orbId)}:/workspace`,
-          "--volume",
-          `${this.options.authDir}:/var/lib/pi-orb/auth`,
           "--env",
           `PI_ORB_ID=${request.orbId}`,
           "--env",
           `PI_ORB_REPOSITORY_URL=${request.bootstrap.repositoryUrl}`,
           "--env",
           `${RUNTIME_TOKEN_ENV}=${runtimeToken}`,
+          "--env",
+          `${CONTROL_PLANE_URL_ENV}=${controlPlaneUrl.value}`,
           ...Object.entries(this.options.extraEnv ?? {}).flatMap(([key, value]) => [
             "--env",
             `${key}=${value}`,

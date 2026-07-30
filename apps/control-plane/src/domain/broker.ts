@@ -15,8 +15,17 @@ import type { BrokerDeps, CredentialPointerRow, StoredCredential } from "./ports
 /** The single credential slot of the first slice. */
 export const CODEX_PROVIDER = "openai-codex";
 
-/** Orb states whose runtime token is honored: the host is meant to be up. */
-export const RUNTIME_TOKEN_STATES: readonly string[] = ["starting", "running", "stopping"];
+/**
+ * Orb states whose runtime token is honored: every state in which the host
+ * is meant to be up. `creating` is included because the first boot fetches
+ * its token while the orb has not yet reached `running`.
+ */
+export const RUNTIME_TOKEN_STATES: readonly string[] = [
+  "creating",
+  "starting",
+  "running",
+  "stopping",
+];
 
 export interface ModelTokenRequest {
   readonly reason: "startup" | "expiring" | "rejected";

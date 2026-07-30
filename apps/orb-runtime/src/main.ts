@@ -1,4 +1,5 @@
 import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
+import { readBrokerEnv } from "./broker/endpoint.ts";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
 
@@ -15,7 +16,7 @@ async function main(): Promise<void> {
     orbId: env("PI_ORB_ID"),
     repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
     workDir: env("PI_ORB_WORK_DIR", "/workspace"),
-    authDir: env("PI_ORB_AUTH_DIR", "/var/lib/pi-orb/auth"),
+    broker: readBrokerEnv(process.env),
     mockOpenAi: readMockOpenAiEnv(process.env),
   });
 
