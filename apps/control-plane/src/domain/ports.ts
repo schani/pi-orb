@@ -69,6 +69,11 @@ export interface ControlPlaneStore {
   insertProject(task: SimulationTask, project: ProjectRow): ResultAsync<ProjectRow, StoreError>;
 
   getOrb(task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError>;
+  /** Bearer-token lookup for the runtime broker routes (indexed hash). */
+  getOrbByRuntimeTokenHash(
+    task: SimulationTask,
+    tokenHash: string,
+  ): ResultAsync<OrbRow | null, StoreError>;
   listOrbsByProject(task: SimulationTask, projectId: string): ResultAsync<OrbRow[], StoreError>;
   listOrbsInStates(
     task: SimulationTask,

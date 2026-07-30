@@ -1,7 +1,7 @@
 import type { SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
-import type { ModelTokenError, StoreError } from "./errors.ts";
 import { sleepResult, withDeadline } from "./dst.ts";
+import type { ModelTokenError, StoreError } from "./errors.ts";
 import type { BrokerDeps, CredentialPointerRow, StoredCredential } from "./ports.ts";
 
 /**
@@ -11,6 +11,12 @@ import type { BrokerDeps, CredentialPointerRow, StoredCredential } from "./ports
  * pointer's `rowVersion` CAS; a stale actor can never clobber a newer
  * credential. The refresh token itself never appears in a return value.
  */
+
+/** The single credential slot of the first slice. */
+export const CODEX_PROVIDER = "openai-codex";
+
+/** Orb states whose runtime token is honored: the host is meant to be up. */
+export const RUNTIME_TOKEN_STATES: readonly string[] = ["starting", "running", "stopping"];
 
 export interface ModelTokenRequest {
   readonly reason: "startup" | "expiring" | "rejected";

@@ -1,3 +1,4 @@
+export * from "./broker.ts";
 export * from "./control-plane-api.ts";
 export * from "./frames.ts";
 export * from "./history.ts";

@@ -94,6 +94,15 @@ export class PgControlPlaneStore implements ControlPlaneStore {
       .map((result) => (result.rows[0] !== undefined ? mapOrbRow(result.rows[0]) : null));
   }
 
+  getOrbByRuntimeTokenHash(
+    _task: SimulationTask,
+    tokenHash: string,
+  ): ResultAsync<OrbRow | null, StoreError> {
+    return this.db
+      .query("SELECT * FROM orbs WHERE runtime_token_hash = $1", [tokenHash])
+      .map((result) => (result.rows[0] !== undefined ? mapOrbRow(result.rows[0]) : null));
+  }
+
   listOrbsByProject(_task: SimulationTask, projectId: string): ResultAsync<OrbRow[], StoreError> {
     return this.db
       .query("SELECT * FROM orbs WHERE project_id = $1 ORDER BY created_at", [projectId])

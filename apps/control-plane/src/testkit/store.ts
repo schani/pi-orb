@@ -122,6 +122,18 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return this.access(task, FAILPOINTS.storeRead, "get orb", () => this.orbs.get(orbId) ?? null);
   }
 
+  getOrbByRuntimeTokenHash(
+    task: SimulationTask,
+    tokenHash: string,
+  ): ResultAsync<OrbRow | null, StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "get orb by token hash", () => {
+      for (const orb of this.orbs.values()) {
+        if (orb.runtimeTokenHash === tokenHash) return orb;
+      }
+      return null;
+    });
+  }
+
   listOrbsByProject(task: SimulationTask, projectId: string): ResultAsync<OrbRow[], StoreError> {
     return this.access(task, FAILPOINTS.storeRead, "list orbs by project", () =>
       [...this.orbs.values()].filter((orb) => orb.projectId === projectId),

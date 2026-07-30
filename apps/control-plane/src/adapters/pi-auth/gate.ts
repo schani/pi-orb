@@ -2,11 +2,34 @@ import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { type MockOpenAiConfig, mockOpenAiProviderConfig } from "@pi-orb/mock-openai";
 import type { SimulationTask } from "determined";
-import { ResultAsync } from "neverthrow";
+import { Result, ResultAsync } from "neverthrow";
+import { commitLoginCredential } from "../../domain/broker.ts";
 import type { AuthGateError } from "../../domain/errors.ts";
-import type { AuthGate, AuthResolution, DeviceChallenge } from "../../domain/ports.ts";
+import type {
+  AuthGate,
+  AuthResolution,
+  BrokerDeps,
+  DeviceChallenge,
+  StoredCredential,
+} from "../../domain/ports.ts";
 
 const PROVIDER = "openai-codex";
+
+/** Extract the ChatGPT account id from the access token's JWT claims. */
+const accountIdFromAccessToken = Result.fromThrowable(
+  (access: string): string => {
+    const payload = access.split(".")[1] ?? "";
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+    const auth = claims["https://api.openai.com/auth"] as Record<string, unknown> | undefined;
+    const accountId = auth?.["chatgpt_account_id"];
+    if (typeof accountId !== "string") return "unknown";
+    return accountId;
+  },
+  () => "unknown" as const,
+);
 
 interface ActiveFlow {
   challenge: DeviceChallenge | null;
@@ -25,12 +48,52 @@ interface ActiveFlow {
 export class PiAuthGate implements AuthGate {
   private readonly authDir: string;
   private readonly mockOpenAi: MockOpenAiConfig | null;
+  private readonly broker: BrokerDeps | null;
   private runtime: ModelRuntime | null = null;
   private flow: ActiveFlow | null = null;
 
-  constructor(authDir: string, mockOpenAi: MockOpenAiConfig | null = null) {
+  constructor(
+    authDir: string,
+    mockOpenAi: MockOpenAiConfig | null = null,
+    broker: BrokerDeps | null = null,
+  ) {
     this.authDir = authDir;
     this.mockOpenAi = mockOpenAi;
+    this.broker = broker;
+  }
+
+  /**
+   * Make sure the broker's pointer/secret pair holds the credential Pi's
+   * auth.json holds (DESIGN.md §15.1): after a fresh login, and on first boot
+   * over a pre-broker auth.json. Idempotent via the pointer check; login
+   * races resolve through the fenced commit inside the broker.
+   */
+  private async seedBroker(
+    task: SimulationTask,
+    runtime: ModelRuntime,
+    force: boolean,
+  ): Promise<{ ok: boolean; message: string }> {
+    if (this.broker === null) return { ok: true, message: "" };
+    if (!force) {
+      const pointer = await this.broker.pointers.readPointer(task, PROVIDER);
+      if (pointer.isErr()) return { ok: false, message: pointer.error.message };
+      if (pointer.value?.secretVersion != null) return { ok: true, message: "" };
+    }
+    const auth = await runtime.getAuth(PROVIDER);
+    if (auth === undefined || !("refresh" in auth) || !("access" in auth)) {
+      return { ok: false, message: "no OAuth credential to seed the broker with" };
+    }
+    const access = String(auth.access);
+    const expires = (auth as Record<string, unknown>)["expires"];
+    const credential: StoredCredential = {
+      access,
+      refresh: String(auth.refresh),
+      accountId: accountIdFromAccessToken(access).unwrapOr("unknown"),
+      expiresAt: typeof expires === "number" ? expires : task.wallNow() + 3_600_000,
+    };
+    const committed = await commitLoginCredential(task, this.broker, PROVIDER, credential);
+    if (committed.isErr()) return { ok: false, message: committed.error.message };
+    return { ok: true, message: "" };
   }
 
   private async getRuntime(): Promise<ModelRuntime> {
@@ -112,6 +175,12 @@ export class PiAuthGate implements AuthGate {
       const flow = this.flow;
       if (flow !== null) {
         if (flow.state === "succeeded") {
+          // A fresh login always overwrites the broker credential: the
+          // pointer may still hold a stale (revoked) one.
+          const seeded = await this.seedBroker(task, runtime, true);
+          if (!seeded.ok) {
+            return { status: "failed", message: seeded.message, retryable: true };
+          }
           this.flow = null;
           return { status: "ok" };
         }
@@ -132,7 +201,12 @@ export class PiAuthGate implements AuthGate {
         };
       }
       const auth = await runtime.getAuth(PROVIDER);
-      if (auth !== undefined) return { status: "ok" };
+      if (auth !== undefined) {
+        // Bridge a pre-broker auth.json into the broker on first sight.
+        const seeded = await this.seedBroker(task, runtime, false);
+        if (!seeded.ok) return { status: "failed", message: seeded.message, retryable: true };
+        return { status: "ok" };
+      }
       const started = this.startFlow(runtime, task.wallNow());
       this.flow = started;
       const challenge = await this.awaitChallenge(started, 10_000);

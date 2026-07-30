@@ -9,17 +9,21 @@ import {
 import { NoSimulationTask, noSimulation } from "determined";
 import Fastify from "fastify";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
+import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
 import { PgClient } from "./adapters/pg/client.ts";
+import { PgCredentialPointerStore } from "./adapters/pg/credential-pointers.ts";
 import { runMigrations } from "./adapters/pg/migrate.ts";
 import { PgControlPlaneStore } from "./adapters/pg/store.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
-import { DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
+import { FileSecretStore } from "./adapters/secrets/file-store.ts";
+import { DEFAULT_BROKER_CONSTANTS, DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { pollLoop, reconcileLoop } from "./domain/loops.ts";
-import type { ControlPlaneDeps } from "./domain/ports.ts";
+import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
+import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 
 const env = (name: string, fallback: string): string => {
   const value = process.env[name];
@@ -51,6 +55,14 @@ async function main(): Promise<void> {
   if (mockOpenAi !== null) {
     bootTask.log("E2E mode: Codex OAuth/inference routed to", mockOpenAi.oauthBaseUrl);
   }
+  const broker: BrokerDeps = {
+    pointers: new PgCredentialPointerStore(db),
+    secrets: new FileSecretStore(join(authDir, "broker-secrets")),
+    upstream: new OAuthUpstreamRefresher(
+      mockOpenAi !== null ? { oauthBaseUrl: mockOpenAi.oauthBaseUrl } : {},
+    ),
+    constants: DEFAULT_BROKER_CONSTANTS,
+  };
   const deps: ControlPlaneDeps = {
     store: new PgControlPlaneStore(db),
     hostProvider: new DockerOrbHostProvider({
@@ -68,15 +80,24 @@ async function main(): Promise<void> {
         : {}),
     }),
     runtimeClient: new FetchRuntimeClient(),
-    authGate: new PiAuthGate(authDir, mockOpenAi),
+    authGate: new PiAuthGate(authDir, mockOpenAi, broker),
     control: new ControlState(),
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
   };
 
+  // Which route families this process registers (DESIGN.md §15.1): the cloud
+  // deployment splits "browser" and "runtime" into separate services; local
+  // development serves both from one process.
+  const role = env("PI_ORB_ROLE", "all");
   const app = Fastify({ logger: false });
   const httpTask = new NoSimulationTask("http", false);
-  await registerLiveProxy(app, httpTask, deps);
-  registerRoutes(app, httpTask, deps);
+  if (role === "all" || role === "browser") {
+    await registerLiveProxy(app, httpTask, deps);
+    registerRoutes(app, httpTask, deps);
+  }
+  if (role === "all" || role === "runtime") {
+    registerRuntimeRoutes(app, httpTask, { store: deps.store, broker });
+  }
 
   const stop = new AbortController();
   const shutdown = (): void => {
