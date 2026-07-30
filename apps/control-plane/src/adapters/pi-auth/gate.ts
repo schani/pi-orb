@@ -204,6 +204,17 @@ export class PiAuthGate implements AuthGate {
           },
         };
       }
+      // The broker pointer is the durable authority (DESIGN.md §15.1):
+      // auth.json is an ephemeral login artifact on Cloud Run, so a stored
+      // credential must satisfy auth without a fresh device flow. An
+      // invalid_grant clears the pointer, which re-opens the flow below.
+      if (this.broker !== null) {
+        const pointer = await this.broker.pointers.readPointer(task, PROVIDER);
+        if (pointer.isErr()) {
+          return { status: "failed", message: pointer.error.message, retryable: true };
+        }
+        if (pointer.value?.secretVersion != null) return { status: "ok" };
+      }
       const auth = await runtime.getAuth(PROVIDER);
       if (auth !== undefined) {
         // Bridge a pre-broker auth.json into the broker on first sight.
