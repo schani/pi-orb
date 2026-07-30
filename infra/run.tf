@@ -127,3 +127,64 @@ resource "google_cloud_run_v2_service" "browser" {
     google_secret_manager_secret_version.database_url,
   ]
 }
+
+# Ops surface for tooling/debugging: the browser API without loops or web
+# assets, callable only by the debug service account via Cloud Run IAM.
+resource "google_cloud_run_v2_service" "ops" {
+  name                = "pi-orb-ops"
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
+
+  template {
+    service_account = google_service_account.control_plane.email
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 1
+    }
+    vpc_access {
+      egress = "PRIVATE_RANGES_ONLY"
+      network_interfaces {
+        network    = google_compute_network.pi_orb.id
+        subnetwork = google_compute_subnetwork.run_egress.id
+      }
+    }
+    containers {
+      image = var.control_plane_image
+      env {
+        name  = "PI_ORB_ROLE"
+        value = "ops"
+      }
+      env {
+        name = "DATABASE_URL"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.database_url.secret_id
+            version = "latest"
+          }
+        }
+      }
+      dynamic "env" {
+        for_each = { for k, v in local.shared_env : k => v if k != "PI_ORB_ROLE_UNUSED" }
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+      resources {
+        limits = { cpu = "1", memory = "512Mi" }
+      }
+    }
+  }
+  depends_on = [
+    google_secret_manager_secret_iam_member.cp_reads_database_url,
+    google_secret_manager_secret_version.database_url,
+  ]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "ops_debug_invoker" {
+  name     = google_cloud_run_v2_service.ops.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:pi-orb-debug@${var.project}.iam.gserviceaccount.com"
+}

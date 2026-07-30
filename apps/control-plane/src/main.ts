@@ -46,6 +46,9 @@ async function main(): Promise<void> {
   const bootTask = new NoSimulationTask("boot", true);
   const role = env("PI_ORB_ROLE", "all");
   const browserRole = role === "all" || role === "browser";
+  // "ops": the browser API surface for tooling, with no background loops,
+  // no migrations, and no web assets — invoker-IAM keeps it private.
+  const opsRole = role === "ops";
   // Only the single-instance browser role migrates; the runtime role's
   // queries fail retryably until the schema exists.
   if (browserRole) {
@@ -132,12 +135,12 @@ async function main(): Promise<void> {
   // development serves both from one process.
   const app = Fastify({ logger: false });
   const httpTask = new NoSimulationTask("http", false);
-  if (browserRole) {
+  if (browserRole || opsRole) {
     await registerLiveProxy(app, httpTask, deps);
     registerRoutes(app, httpTask, deps);
     // Cloud deployment serves the built web UI from the same process; local
     // development keeps the vite dev server + proxy instead.
-    const webDist = env("PI_ORB_WEB_DIST", "");
+    const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";
     if (webDist !== "") {
       const fastifyStatic = (await import("@fastify/static")).default;
       await app.register(fastifyStatic, { root: webDist, wildcard: false });
