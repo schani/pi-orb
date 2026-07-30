@@ -110,6 +110,9 @@ mkdir -p "$MNT"
 mountpoint -q "$MNT" || mount -o discard,defaults "$DISK" "$MNT"
 TOKEN=$(curl -sf -H 'Metadata-Flavor: Google' \\
   'http://metadata.google.internal/computeMetadata/v1/instance/attributes/${TOKEN_METADATA_KEY}')
+# COS mounts / read-only; docker config must live on the stateful partition.
+export DOCKER_CONFIG=/var/lib/pi-orb-docker
+mkdir -p "$DOCKER_CONFIG"
 docker-credential-gcr configure-docker --registries=$(echo '${options.runtimeImage}' | cut -d/ -f1)
 docker rm -f pi-orb-runtime >/dev/null 2>&1 || true
 docker run --detach --name pi-orb-runtime --restart unless-stopped \\
