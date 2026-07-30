@@ -173,5 +173,14 @@ the OpenTofu static plane should adopt exactly this shape.
   sign-in, `wss://…/ws` delivered hello and tick frames in the browser.
 - IAP access policy tightened to `domain:heyglide.com` only (the sole
   `iap.httpsResourceAccessor` binding).
-- Billing: cost tracking the always-on instance is still being eyeballed
-  on the billing page over the next day.
+- Billing: confirmed via the Cloud Monitoring metric
+  `run.googleapis.com/container/billable_instance_time` — a flat 1.00
+  instance-second/second every hour for 12+ hours regardless of open
+  WebSockets (brief 1.16 during a revision replacement). Open sockets
+  add nothing under instance-based billing; cost is the always-on
+  instance's flat rate (~$50/month at list price for 1 vCPU / 512 MiB).
+
+**Teardown (2026-07-30).** Service, VM, and the validation firewall rule
+are deleted. Kept for the OpenTofu static plane to adopt: VPC `pi-orb`,
+subnet `pi-orb-us-central1`, service account `pi-orb-orb-vm`, and the
+`pi-orb` Artifact Registry repository.
