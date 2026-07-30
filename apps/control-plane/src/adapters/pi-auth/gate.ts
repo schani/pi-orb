@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { type MockOpenAiConfig, mockOpenAiProviderConfig } from "@pi-orb/mock-openai";
 import type { SimulationTask } from "determined";
 import { Result, ResultAsync } from "neverthrow";
@@ -70,7 +70,6 @@ export class PiAuthGate implements AuthGate {
    */
   private async seedBroker(
     task: SimulationTask,
-    runtime: ModelRuntime,
     force: boolean,
   ): Promise<{ ok: boolean; message: string }> {
     if (this.broker === null) return { ok: true, message: "" };
@@ -79,17 +78,22 @@ export class PiAuthGate implements AuthGate {
       if (pointer.isErr()) return { ok: false, message: pointer.error.message };
       if (pointer.value?.secretVersion != null) return { ok: true, message: "" };
     }
-    const auth = await runtime.getAuth(PROVIDER);
-    if (auth === undefined || !("refresh" in auth) || !("access" in auth)) {
+    // The raw credential (with the refresh token) comes from auth.json via
+    // Pi's storage reader; `getAuth` only returns resolved request auth.
+    const stored = Result.fromThrowable(
+      () => readStoredCredential(PROVIDER, join(this.authDir, "auth.json")),
+      (error) => (error instanceof Error ? error.message : String(error)),
+    )();
+    if (stored.isErr()) return { ok: false, message: stored.error };
+    const raw = stored.value;
+    if (raw === undefined || raw.type !== "oauth") {
       return { ok: false, message: "no OAuth credential to seed the broker with" };
     }
-    const access = String(auth.access);
-    const expires = (auth as Record<string, unknown>)["expires"];
     const credential: StoredCredential = {
-      access,
-      refresh: String(auth.refresh),
-      accountId: accountIdFromAccessToken(access).unwrapOr("unknown"),
-      expiresAt: typeof expires === "number" ? expires : task.wallNow() + 3_600_000,
+      access: raw.access,
+      refresh: raw.refresh,
+      accountId: accountIdFromAccessToken(raw.access).unwrapOr("unknown"),
+      expiresAt: typeof raw.expires === "number" ? raw.expires : task.wallNow() + 3_600_000,
     };
     const committed = await commitLoginCredential(task, this.broker, PROVIDER, credential);
     if (committed.isErr()) return { ok: false, message: committed.error.message };
@@ -177,7 +181,7 @@ export class PiAuthGate implements AuthGate {
         if (flow.state === "succeeded") {
           // A fresh login always overwrites the broker credential: the
           // pointer may still hold a stale (revoked) one.
-          const seeded = await this.seedBroker(task, runtime, true);
+          const seeded = await this.seedBroker(task, true);
           if (!seeded.ok) {
             return { status: "failed", message: seeded.message, retryable: true };
           }
@@ -203,7 +207,7 @@ export class PiAuthGate implements AuthGate {
       const auth = await runtime.getAuth(PROVIDER);
       if (auth !== undefined) {
         // Bridge a pre-broker auth.json into the broker on first sight.
-        const seeded = await this.seedBroker(task, runtime, false);
+        const seeded = await this.seedBroker(task, false);
         if (!seeded.ok) return { status: "failed", message: seeded.message, retryable: true };
         return { status: "ok" };
       }

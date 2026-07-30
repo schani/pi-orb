@@ -375,15 +375,16 @@ describe("credential broker (DST)", () => {
     await runDst({ name: "broker-stale-clear", iterations: 30 }, async (sim) => {
       const harness = makeBrokerHarness();
       let loginCredential: StoredCredential | null = null;
+      let loginCommitted = false;
       const result = await sim.runTasks([
         {
           name: "slow-refresher",
           f: async (task) => {
             seedCredential(task, harness, { expiresInMs: -1_000 });
             harness.upstream.revokeAll();
-            // The invalid_grant lands only after the delay, well after the
-            // login below has committed a new credential.
-            harness.upstream.pushScript({ kind: "delay", ms: 10_000 });
+            // Causal gate: the invalid_grant lands only after the login has
+            // durably committed — no timer schedule can reorder that.
+            harness.upstream.pushScript({ kind: "until", ready: () => loginCommitted });
             const outcome = await getModelToken(task, harness.deps, PROVIDER, {
               reason: "startup",
             });
@@ -395,12 +396,13 @@ describe("credential broker (DST)", () => {
         {
           name: "login",
           f: async (task) => {
-            await task.sleep(3_000, "login mid-refresh");
+            await task.sleep(1_000, "login while refresh is gated");
             const fresh = makeCredential(task, { expiresInMs: 3_600_000 });
             harness.upstream.adoptLogin(fresh);
             loginCredential = fresh;
             const commit = await commitLoginCredential(task, harness.deps, PROVIDER, fresh);
             expect(commit.isOk(), JSON.stringify(commit)).toBe(true);
+            loginCommitted = true;
           },
         },
       ]);

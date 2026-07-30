@@ -183,6 +183,12 @@ export type UpstreamScript =
   | { readonly kind: "apply_then_transient" }
   /** Take this long before following the next scripted step. */
   | { readonly kind: "delay"; readonly ms: number }
+  /**
+   * Causal gate: proceed to the next step only once `ready()` holds. Unlike
+   * a delay, this survives adversarial timer scheduling — the ordering it
+   * enforces is by causality, not by time.
+   */
+  | { readonly kind: "until"; readonly ready: () => boolean }
   /** Never respond; settle as transient only when the deadline aborts. */
   | { readonly kind: "hang" };
 
@@ -243,6 +249,12 @@ export class FakeUpstream implements UpstreamRefresher {
         const step = this.script.shift() ?? { kind: "ok" };
         if (step.kind === "delay") {
           await task.sleep(step.ms, "scripted upstream delay");
+          continue;
+        }
+        if (step.kind === "until") {
+          while (!step.ready()) {
+            await task.sleep(50, "scripted upstream gate");
+          }
           continue;
         }
         if (step.kind === "hang") {
