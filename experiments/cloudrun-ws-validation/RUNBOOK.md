@@ -161,7 +161,17 @@ the OpenTofu static plane should adopt exactly this shape.
 - Consequence: the two-service plan stands and the load-balancer+IAP
   fallback is unnecessary.
 
-**4. Billing.** min-instances 1 with `--no-cpu-throttling` set; observe
-that cost tracks the always-on instance and not open sockets over the
-next day. Connection-longevity of the egress leg is observed alongside
-(`/vm-probe` records every drop; instance replacements are expected).
+**4. Overnight observations (2026-07-30).**
+- Egress longevity: the Cloud Run → VM WebSocket stayed connected for
+  **11.4 hours (40,883 s, 2,725 ticks, zero drops)** until a deploy
+  replaced the instance. Outbound connections are not subject to the
+  request timeout; the control-plane→runtime leg only drops on instance
+  replacement, exactly as designed.
+- The min-instance also survived the whole night without replacement
+  (single instance uptime > 11 h).
+- IAP WebSocket pass-through confirmed interactively: after Google
+  sign-in, `wss://…/ws` delivered hello and tick frames in the browser.
+- IAP access policy tightened to `domain:heyglide.com` only (the sole
+  `iap.httpsResourceAccessor` binding).
+- Billing: cost tracking the always-on instance is still being eyeballed
+  on the billing page over the next day.
