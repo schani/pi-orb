@@ -1,4 +1,4 @@
-# `determined` bug: awaiting another task's promise deadlocks the simulation
+# `determined` bug (FIXED in 0.4.1): awaiting another task's promise deadlocks the simulation
 
 ## Summary
 

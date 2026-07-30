@@ -63,16 +63,11 @@ export type BrokerClientError =
   | { readonly type: "unavailable"; readonly message: string }
   | { readonly type: "fatal"; readonly message: string };
 
-interface Flight {
-  settled: boolean;
-  outcome: Result<BrokerTokenGrant, BrokerClientError> | null;
-}
-
 export class BrokerTokenClient {
   private readonly endpoint: BrokerEndpoint;
   private readonly constants: BrokerClientConstants;
   private lastGrant: BrokerTokenGrant | null = null;
-  private flight: Flight | null = null;
+  private inFlight: Promise<Result<BrokerTokenGrant, BrokerClientError>> | null = null;
 
   constructor(
     endpoint: BrokerEndpoint,
@@ -88,31 +83,21 @@ export class BrokerTokenClient {
   }
 
   /**
-   * Fetch a token. Concurrent calls coalesce onto one in-flight request.
-   * Waiters poll on their own timers instead of awaiting the owner's
-   * promise: a task awaiting a promise settled by another task's timer
-   * deadlocks the deterministic simulation (DESIGN.md §14).
+   * Fetch a token. Concurrent calls share one in-flight request — sharing a
+   * promise across simulation tasks requires `determined` >= 0.4.1
+   * (DETERMINED-BUG.md).
    */
-  async fetch(
+  fetch(
     task: SimulationTask,
     reason: TokenReason,
   ): Promise<Result<BrokerTokenGrant, BrokerClientError>> {
-    for (;;) {
-      const running = this.flight;
-      if (running === null) {
-        const flight: Flight = { settled: false, outcome: null };
-        this.flight = flight;
-        const outcome = await this.run(task, reason);
-        flight.outcome = outcome;
-        flight.settled = true;
-        this.flight = null;
-        return outcome;
-      }
-      while (!running.settled) {
-        await task.sleep(25, "await in-flight token fetch");
-      }
-      if (running.outcome !== null) return running.outcome;
-    }
+    const running = this.inFlight;
+    if (running !== null) return running;
+    const started = this.run(task, reason).finally(() => {
+      this.inFlight = null;
+    });
+    this.inFlight = started;
+    return started;
   }
 
   private async run(
