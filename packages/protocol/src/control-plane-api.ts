@@ -42,14 +42,26 @@ export const ProjectViewSchema = Type.Object(
 );
 export type ProjectView = Static<typeof ProjectViewSchema>;
 
-export const OrbStateDetailSchema = Type.Object(
-  {
-    type: Type.Literal("draining_history"),
-    retrying: Type.Boolean(),
-    message: Type.Optional(Type.String()),
-  },
-  closed,
-);
+export const OrbStateDetailSchema = Type.Union([
+  Type.Object(
+    {
+      type: Type.Literal("draining_history"),
+      retrying: Type.Boolean(),
+      message: Type.Optional(Type.String()),
+    },
+    closed,
+  ),
+  Type.Object(
+    {
+      type: Type.Literal("waiting_for_runtime"),
+      hostState: Type.Union([Type.String(), Type.Null()]),
+      secondsSinceHostRunning: Type.Union([Type.Number(), Type.Null()]),
+      probeAttempts: Type.Number(),
+      lastProbeError: Type.Optional(Type.String()),
+    },
+    closed,
+  ),
+]);
 export type OrbStateDetail = Static<typeof OrbStateDetailSchema>;
 
 export const OrbActionRequiredSchema = Type.Object(

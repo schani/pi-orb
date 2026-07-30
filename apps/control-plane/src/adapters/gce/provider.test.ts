@@ -256,6 +256,36 @@ describe("GceOrbHostProvider", () => {
     }
   });
 
+  it("reads startup diagnostics from guest attributes", async () => {
+    const transport = new FakeTransport([
+      () =>
+        ok200({
+          queryValue: { items: [{ key: "startup", value: "failed: line 12: docker run" }] },
+        }),
+      () => notFound,
+    ]);
+    const provider = makeProvider(transport);
+    const ref = { provider: "gce", resourceId: "pi-orb-orb-1" };
+    const found = await provider.diagnose(task, ref, context);
+    expect(found.isOk() && found.value).toBe("startup-script: failed: line 12: docker run");
+    const absent = await provider.diagnose(task, ref, context);
+    expect(absent.isOk() && absent.value).toBeNull();
+  });
+
+  it("the startup script reports progress and failures", () => {
+    const script = buildStartupScript({
+      runtimeImage: "img",
+      orbId: "o",
+      repositoryUrl: "https://x",
+      controlPlaneUrl: "https://cp",
+      extraEnv: {},
+    });
+    expect(script).toContain("trap 'report \"failed: line $LINENO");
+    expect(script).toContain("report disk-mounted");
+    expect(script).toContain("report container-started");
+    expect(script).toContain("guest-attributes/pi-orb/startup");
+  });
+
   it("reads metadata attributes defensively", () => {
     expect(metadataValue({}, "k")).toBeNull();
     expect(metadataValue({ metadata: { items: [{ key: "k", value: "v" }] } }, "k")).toBe("v");

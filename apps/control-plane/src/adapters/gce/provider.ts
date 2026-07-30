@@ -103,6 +103,12 @@ export function buildStartupScript(options: {
     .join("");
   return `#!/bin/bash
 set -euo pipefail
+report() {
+  curl -sf -X PUT -H 'Metadata-Flavor: Google' --data "$1" \\
+    'http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes/pi-orb/startup' || true
+}
+trap 'report "failed: line $LINENO: $BASH_COMMAND"' ERR
+report starting
 DISK=/dev/disk/by-id/google-${DATA_DEVICE}
 MNT=/mnt/disks/orb-data
 if ! blkid "$DISK" >/dev/null 2>&1; then
@@ -110,6 +116,7 @@ if ! blkid "$DISK" >/dev/null 2>&1; then
 fi
 mkdir -p "$MNT"
 mountpoint -q "$MNT" || mount -o discard,defaults "$DISK" "$MNT"
+report disk-mounted
 TOKEN=$(curl -sf -H 'Metadata-Flavor: Google' \\
   'http://metadata.google.internal/computeMetadata/v1/instance/attributes/${TOKEN_METADATA_KEY}')
 # COS mounts / read-only; docker config must live on the stateful partition.
@@ -125,6 +132,7 @@ docker run --detach --name pi-orb-runtime --restart unless-stopped \\
   -e ${RUNTIME_TOKEN_ENV}="$TOKEN" \\
   -e ${CONTROL_PLANE_URL_ENV}='${options.controlPlaneUrl}' \\
 ${extra}  '${options.runtimeImage}'
+report container-started
 `;
 }
 
@@ -508,6 +516,36 @@ export class GceOrbHostProvider implements OrbHostProvider {
         );
       }
       return ok(this.toObservation(response.body));
+    });
+  }
+
+  diagnose(
+    _task: SimulationTask,
+    ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<string | null, OrbHostProviderError> {
+    return this.request(
+      "observe",
+      "GET",
+      this.zonePath(`instances/${ref.resourceId}/getGuestAttributes?queryPath=pi-orb%2Fstartup`),
+      context,
+    ).andThen((response) => {
+      // 404: instance gone or no attribute written yet — nothing known.
+      if (response.status === 404) return ok<string | null, OrbHostProviderError>(null);
+      if (response.status !== 200) {
+        return err(
+          providerError("observe", "unavailable", `guest attributes HTTP ${response.status}`, true),
+        );
+      }
+      const items = (response.body["queryValue"] as Record<string, unknown> | undefined)?.["items"];
+      if (!Array.isArray(items)) return ok<string | null, OrbHostProviderError>(null);
+      for (const item of items) {
+        const entry = item as Record<string, unknown>;
+        if (entry["key"] === "startup" && typeof entry["value"] === "string") {
+          return ok<string | null, OrbHostProviderError>(`startup-script: ${entry["value"]}`);
+        }
+      }
+      return ok<string | null, OrbHostProviderError>(null);
     });
   }
 

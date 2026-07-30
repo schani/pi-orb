@@ -26,6 +26,10 @@ export function orbView(orb: OrbRow, control: ControlState): OrbView {
     control.isAuthBlocked(orb.id) &&
     challenge.verificationUri !== "";
   const drain = orb.state === "stopping" ? control.getDrainStatus(orb.id) : null;
+  const bootProbe =
+    (orb.state === "creating" || orb.state === "starting") && !showChallenge
+      ? control.getBootProbe(orb.id)
+      : null;
   return {
     id: orb.id,
     projectId: orb.projectId,
@@ -41,7 +45,20 @@ export function orbView(orb: OrbRow, control: ControlState): OrbView {
             ...(drain.message !== undefined ? { message: drain.message } : {}),
           },
         }
-      : {}),
+      : bootProbe !== null
+        ? {
+            stateDetail: {
+              type: "waiting_for_runtime" as const,
+              hostState: bootProbe.hostState,
+              secondsSinceHostRunning:
+                bootProbe.hostRunningSinceWall === null
+                  ? null
+                  : Math.max(0, Math.round((Date.now() - bootProbe.hostRunningSinceWall) / 1000)),
+              probeAttempts: bootProbe.attempts,
+              ...(bootProbe.lastError !== undefined ? { lastProbeError: bootProbe.lastError } : {}),
+            },
+          }
+        : {}),
     stateChangedAt: iso(orb.stateChangedAt),
     ...(showChallenge
       ? {

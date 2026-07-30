@@ -388,11 +388,22 @@ export function OrbPage({ orbId }: { orbId: string }) {
             )}
           </dl>
         )}
-        {orb?.stateDetail !== undefined && (
+        {orb?.stateDetail?.type === "draining_history" && (
           <div className="banner banner-info">
             Stopping: draining history…
             {orb.stateDetail.retrying && " (retrying)"}
             {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+          </div>
+        )}
+        {orb?.stateDetail?.type === "waiting_for_runtime" && (
+          <div className="banner banner-info">
+            Waiting for the runtime…
+            {orb.stateDetail.hostState !== null && ` host ${orb.stateDetail.hostState}`}
+            {orb.stateDetail.secondsSinceHostRunning !== null &&
+              ` for ${orb.stateDetail.secondsSinceHostRunning}s`}
+            {` — ${orb.stateDetail.probeAttempts} probes`}
+            {orb.stateDetail.lastProbeError !== undefined &&
+              ` — last error: ${orb.stateDetail.lastProbeError}`}
           </div>
         )}
         {orb?.actionRequired !== undefined && (
