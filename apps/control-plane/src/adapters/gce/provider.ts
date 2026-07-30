@@ -117,6 +117,9 @@ fi
 mkdir -p "$MNT"
 mountpoint -q "$MNT" || mount -o discard,defaults "$DISK" "$MNT"
 report disk-mounted
+# COS's host firewall admits only SSH by default; open the runtime port.
+iptables -w -A INPUT -p tcp --dport 8080 -j ACCEPT
+report port-opened
 TOKEN=$(curl -sf -H 'Metadata-Flavor: Google' \\
   'http://metadata.google.internal/computeMetadata/v1/instance/attributes/${TOKEN_METADATA_KEY}')
 # COS mounts / read-only; docker config must live on the stateful partition.

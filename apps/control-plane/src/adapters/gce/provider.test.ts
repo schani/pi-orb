@@ -282,6 +282,7 @@ describe("GceOrbHostProvider", () => {
     });
     expect(script).toContain("trap 'report \"failed: line $LINENO");
     expect(script).toContain("report disk-mounted");
+    expect(script).toContain("iptables -w -A INPUT -p tcp --dport 8080 -j ACCEPT");
     expect(script).toContain("report container-started");
     expect(script).toContain("guest-attributes/pi-orb/startup");
   });
