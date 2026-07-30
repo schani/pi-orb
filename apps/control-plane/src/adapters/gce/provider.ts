@@ -96,9 +96,11 @@ export function buildStartupScript(options: {
   readonly controlPlaneUrl: string;
   readonly extraEnv: Readonly<Record<string, string>>;
 }): string {
+  // Each entry carries its own trailing continuation so an empty map never
+  // leaves a blank line inside the docker run command.
   const extra = Object.entries(options.extraEnv)
-    .map(([key, value]) => `  -e ${key}='${value}' \\`)
-    .join("\n");
+    .map(([key, value]) => `  -e ${key}='${value}' \\\n`)
+    .join("");
   return `#!/bin/bash
 set -euo pipefail
 DISK=/dev/disk/by-id/google-${DATA_DEVICE}
@@ -122,8 +124,7 @@ docker run --detach --name pi-orb-runtime --restart unless-stopped \\
   -e PI_ORB_REPOSITORY_URL='${options.repositoryUrl}' \\
   -e ${RUNTIME_TOKEN_ENV}="$TOKEN" \\
   -e ${CONTROL_PLANE_URL_ENV}='${options.controlPlaneUrl}' \\
-${extra}
-  '${options.runtimeImage}'
+${extra}  '${options.runtimeImage}'
 `;
 }
 

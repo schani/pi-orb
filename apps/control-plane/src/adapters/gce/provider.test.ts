@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import type { GceApiTransport, GceResponse } from "./api.ts";
-import { GceOrbHostProvider, mapInstanceStatus, metadataValue } from "./provider.ts";
+import { buildStartupScript, GceOrbHostProvider, mapInstanceStatus, metadataValue } from "./provider.ts";
 
 const task = new NoSimulationTask("gce test", false);
 const context = { signal: new AbortController().signal };
@@ -233,6 +233,22 @@ describe("GceOrbHostProvider", () => {
     expect(mapInstanceStatus("TERMINATED")).toBe("stopped");
     expect(mapInstanceStatus("SUSPENDED")).toBe("stopped");
     expect(mapInstanceStatus("WEIRD")).toBe("failed");
+  });
+
+  it("emits a well-formed docker run with and without extra env", () => {
+    const base = {
+      runtimeImage: "img",
+      orbId: "o",
+      repositoryUrl: "https://x",
+      controlPlaneUrl: "https://cp",
+    };
+    for (const extraEnv of [{}, { A: "1", B: "2" }]) {
+      const script = buildStartupScript({ ...base, extraEnv });
+      // No blank line may interrupt a backslash continuation.
+      expect(script).not.toMatch(/\\\n\s*\n/);
+      // The image is the final argument of the same docker run command.
+      expect(script).toMatch(/\\\n  'img'\n/);
+    }
   });
 
   it("reads metadata attributes defensively", () => {
