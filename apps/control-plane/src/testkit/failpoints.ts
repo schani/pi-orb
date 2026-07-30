@@ -15,6 +15,13 @@ export const FAILPOINTS = {
   providerObserve: "provider.observe",
   runtimeHealth: "runtime.health",
   runtimePull: "runtime.pull",
+  brokerPointerRead: "broker.pointer.read",
+  /** Fails before the CAS applies: nothing committed. */
+  brokerPointerWriteBefore: "broker.pointer.write.before",
+  /** Fails after the CAS applied: write landed, caller sees an error. */
+  brokerPointerWriteAfter: "broker.pointer.write.after",
+  brokerSecretRead: "broker.secret.read",
+  brokerSecretWrite: "broker.secret.write",
 } as const;
 
 export type FailpointName = (typeof FAILPOINTS)[keyof typeof FAILPOINTS];

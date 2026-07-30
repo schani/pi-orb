@@ -77,3 +77,34 @@ export interface StateConflict {
   readonly type: "state_conflict";
   readonly currentState?: OrbState;
 }
+
+// ---------------------------------------------------------------------------
+// Credential broker (DESIGN.md §15.1)
+
+/** CAS on the credential pointer's `row_version` affected zero rows. */
+export interface PointerConflict {
+  readonly type: "pointer_conflict";
+}
+
+/** Upstream OAuth refresh outcome that is not a new credential. */
+export type UpstreamRefreshError =
+  /** The refresh token was rejected: terminal, forces re-login. */
+  | { readonly type: "invalid_grant"; readonly message: string }
+  | {
+      readonly type: "upstream_transient";
+      readonly message: string;
+      readonly retryAfterMs?: number;
+    };
+
+/**
+ * What a runtime's token request can fail with. Store and upstream failures
+ * are folded into `token_retryable` — for the runtime every non-terminal
+ * failure means the same thing: back off and ask again.
+ */
+export type ModelTokenError =
+  | { readonly type: "auth_required" }
+  | {
+      readonly type: "token_retryable";
+      readonly message: string;
+      readonly retryAfterMs?: number;
+    };

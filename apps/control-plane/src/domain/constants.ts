@@ -26,6 +26,31 @@ export interface LifecycleConstants {
   readonly hostBackstopIntervalMs: number;
 }
 
+/** Credential-broker timing constants (DESIGN.md §15.1). */
+export interface BrokerConstants {
+  /** Refresh proactively when remaining credential lifetime falls below this. */
+  readonly refreshThresholdMs: number;
+  /** Global floor between upstream refreshes unless the token is expired. */
+  readonly minRefreshIntervalMs: number;
+  /** Refresh-coalescing lease duration; must exceed the upstream deadline. */
+  readonly leaseMs: number;
+  /** Deadline for one upstream refresh call. */
+  readonly upstreamTimeoutMs: number;
+  /** Poll interval while waiting on another instance's lease. */
+  readonly waiterPollMs: number;
+  /** Overall deadline for one token request. */
+  readonly requestDeadlineMs: number;
+}
+
+export const DEFAULT_BROKER_CONSTANTS: BrokerConstants = {
+  refreshThresholdMs: 5 * 60_000,
+  minRefreshIntervalMs: 30_000,
+  leaseMs: 30_000,
+  upstreamTimeoutMs: 20_000,
+  waiterPollMs: 500,
+  requestDeadlineMs: 45_000,
+};
+
 export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {
   readinessPollMs: 5_000,
   unreachableGraceMs: 30_000,

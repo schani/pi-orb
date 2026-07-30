@@ -231,6 +231,96 @@ export interface AuthGate {
 }
 
 // ---------------------------------------------------------------------------
+// Credential broker (DESIGN.md §15.1)
+
+/**
+ * The durable credential pointer. Lives in PostgreSQL; holds no secret
+ * material. `rowVersion` is the CAS fence and bumps on every write;
+ * `generation` identifies the credential and bumps only when the credential
+ * itself changes (login, refresh, clear).
+ */
+export interface CredentialPointerRow {
+  readonly provider: string;
+  readonly rowVersion: number;
+  readonly generation: number;
+  /** Secret-store version holding the credential; null = no usable credential. */
+  readonly secretVersion: string | null;
+  /** Refresh-coalescing lease, wall-clock ms; 0 = no lease. */
+  readonly refreshLeaseUntil: number;
+  /** Wall-clock ms of the last refresh attempt that reached the upstream. */
+  readonly lastRefreshAt: number;
+}
+
+export type CredentialPointerWrite = Omit<CredentialPointerRow, "provider" | "rowVersion">;
+
+export interface CredentialPointerStore {
+  readPointer(
+    task: SimulationTask,
+    provider: string,
+  ): ResultAsync<CredentialPointerRow | null, StoreError>;
+  /**
+   * Compare-and-swap write. `expectedRowVersion: null` means the row must not
+   * exist yet (insert). Every fenced mutation goes through here.
+   */
+  casWritePointer(
+    task: SimulationTask,
+    provider: string,
+    expectedRowVersion: number | null,
+    next: CredentialPointerWrite,
+  ): ResultAsync<CredentialPointerRow, StoreError | PointerConflict>;
+}
+
+/**
+ * The stored Codex credential. Exists only in the secret store (file locally,
+ * Secret Manager in the cloud) and in broker memory during a mutation — never
+ * in PostgreSQL, never in an orb.
+ */
+export interface StoredCredential {
+  readonly access: string;
+  readonly refresh: string;
+  readonly accountId: string;
+  /** Wall-clock ms. */
+  readonly expiresAt: number;
+}
+
+export interface CredentialSecretStore {
+  /** Creates a new immutable version and returns its identifier. */
+  writeSecret(
+    task: SimulationTask,
+    provider: string,
+    credential: StoredCredential,
+  ): ResultAsync<{ version: string }, StoreError>;
+  /** Reads one exact version; null when it does not exist or was destroyed. */
+  readSecret(
+    task: SimulationTask,
+    provider: string,
+    version: string,
+  ): ResultAsync<StoredCredential | null, StoreError>;
+  /** Best-effort cleanup of a superseded version. */
+  destroySecret(
+    task: SimulationTask,
+    provider: string,
+    version: string,
+  ): ResultAsync<void, StoreError>;
+}
+
+/** Performs the actual upstream OAuth refresh (rotates the refresh token). */
+export interface UpstreamRefresher {
+  refresh(
+    task: SimulationTask,
+    credential: StoredCredential,
+    context: OperationContext,
+  ): ResultAsync<StoredCredential, import("./errors.ts").UpstreamRefreshError>;
+}
+
+export interface BrokerDeps {
+  readonly pointers: CredentialPointerStore;
+  readonly secrets: CredentialSecretStore;
+  readonly upstream: UpstreamRefresher;
+  readonly constants: import("./constants.ts").BrokerConstants;
+}
+
+// ---------------------------------------------------------------------------
 
 export interface ControlPlaneDeps {
   readonly store: ControlPlaneStore;
