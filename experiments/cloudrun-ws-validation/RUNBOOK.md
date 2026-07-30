@@ -122,6 +122,46 @@ gcloud compute instances delete ws-validation-vm --project $PROJECT --zone $ZONE
 gcloud compute firewall-rules delete allow-ws-validation --project $PROJECT --quiet
 ```
 
-## Results
+## Results (2026-07-29/30)
 
-(filled in as the exercise runs)
+**Deviations from the runbook.** Cloud Build is unusable in this project
+(the default compute service account is disabled), so the image was built
+locally and pushed to Artifact Registry (`pi-orb` repo, Dockerfile added).
+The project also has no default VPC: a custom `pi-orb` network with subnet
+`pi-orb-us-central1` (10.10.0.0/20, Private Google Access on) was created —
+the OpenTofu static plane should adopt exactly this shape.
+
+**1. Browser leg.**
+- Default request timeout: forced close at **301.2 s**, code 1006;
+  reconnect succeeded after 1.1 s against the same instance. The 300 s
+  default silently breaks live sessions — raising `--timeout 3600` is
+  mandatory.
+- With `--timeout 3600`: one connection survived the full hour, forced
+  close at **3601.1 s**, code 1006, reconnect in 1.1 s. Exactly the
+  resync-handled behavior DESIGN.md assumes.
+
+**2. VPC egress to a COS VM.**
+- `--network pi-orb --subnet pi-orb-us-central1 --vpc-egress
+  private-ranges-only` deployed cleanly; the outbound WebSocket to
+  `ws://10.10.0.3:8080/ws` (internal IP, VM has **no external IP**)
+  connected immediately and streamed ticks.
+- Bonus validations for the GCE provider path: COS pulled the container
+  from Artifact Registry via Private Google Access, running as the
+  dedicated minimal service account `pi-orb-orb-vm` (Artifact Registry
+  reader + log writer only). The first attempt with the default compute
+  SA failed — that SA is disabled project-wide, so the provider must
+  always pass the dedicated SA.
+
+**3. IAP.**
+- Direct IAP-on-Cloud-Run is available: `gcloud run services update
+  --iap` worked (after enabling `iap.googleapis.com`). Unauthenticated
+  requests get `302 Invalid IAP credentials`. `mark@heyglide.com` holds
+  `roles/iap.httpsResourceAccessor` on the service. Browser WebSocket
+  pass-through remains to be eyeballed interactively.
+- Consequence: the two-service plan stands and the load-balancer+IAP
+  fallback is unnecessary.
+
+**4. Billing.** min-instances 1 with `--no-cpu-throttling` set; observe
+that cost tracks the always-on instance and not open sockets over the
+next day. Connection-longevity of the egress leg is observed alongside
+(`/vm-probe` records every drop; instance replacements are expected).

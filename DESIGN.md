@@ -106,7 +106,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The polling process must use always-allocated CPU/instance-based billing; a minimum instance with request-only CPU allocation is insufficient for reliable background work.
 - Polling state and cursors remain in PostgreSQL because Cloud Run may restart even a minimum instance at any time.
 - Multiple control-plane instances may poll the same orb concurrently. Correctness uses an optimistic cursor compare-and-swap in the commit transaction rather than a distributed polling lock or leader.
-- Confirming Cloud Run WebSocket configuration (open question 2) is the first task of the cloud slice, because a bad answer there is the only thing that could force the control plane onto a VM instead; the application is a container either way, so that fallback changes no application code.
+- Cloud Run WebSocket configuration is validated (open question 2): the platform behaves exactly as the architecture assumes once the request timeout is raised to 3600 s, and no VM fallback is needed.
 - The cloud control plane sits behind Identity-Aware Proxy restricted to the owner's Google account until an application identity/authorization model exists (open question 24). The unauthenticated control plane must never be directly reachable from the public internet.
 - Infrastructure must be managed as code.
 - The IaC tool is OpenTofu. It manages only the static plane: VPC, firewall rules, Cloud Run, Cloud SQL, Artifact Registry, IAM. Per-orb VMs are dynamic resources created by `GceOrbHostProvider` through the GCE API at runtime and are never IaC resources.
@@ -291,6 +291,7 @@ Decided shape of the future `GceOrbHostProvider` (not yet implemented):
 - `provision` creates the instance only when it does not exist. Recovery from a stop or a Spot preemption is `instances.start` on the same instance (restart-in-place); there is no recreate-and-reattach path in the common case.
 - Spot preemption appears as instance state `TERMINATED`. Instance status alone does not distinguish preemption from other terminations, and the provider does not consult Cloud Logging to find out; it logs the cause as "likely preemption". Host-down detection, restart initiation, and restart outcome are all logged as structured lifecycle events.
 - Networking: the control plane reaches the runtime on the instance's internal IP via Direct VPC egress from Cloud Run; the ephemeral public IP is outbound-only behind a deny-all-inbound firewall (§3.3).
+- Validated on real infrastructure (2026-07-30, see the validation runbook): a COS VM with no external IP pulls the container from Artifact Registry over Private Google Access and serves WebSockets to Cloud Run via Direct VPC egress. Orb VMs run as the dedicated minimal service account `pi-orb-orb-vm` (Artifact Registry reader + log writer); the project's default compute service account is disabled, so the provider must always pass the dedicated one. The dev project has no default VPC — the validation created network `pi-orb` / subnet `pi-orb-us-central1` (10.10.0.0/20, Private Google Access), which the OpenTofu static plane should adopt.
 
 The Docker provider reports the runtime address using the container's bridge-network IP when one is available, falling back to the container name. On Linux, bridge IPs are routable from the host, so the first-slice control plane can run uncontainerized during development while orb runtimes stay reachable only on the private Docker network; a containerized control plane on the same network resolves the container-name form.
 
@@ -1603,7 +1604,7 @@ Test framework assertions and React/framework error boundaries may use exception
 ### Immediate architecture
 
 1. Finalize the remaining HTTP/WebSocket payload details, capability negotiation, and versioning rules.
-2. At the start of the cloud slice, confirm Cloud Run WebSocket configuration: raise the request timeout to its 60-minute maximum, verify VPC egress for the control-plane-to-runtime leg, and measure long-lived-connection cost. Forced periodic reconnects are expected and handled by the ordinary resynchronization path; this is configuration validation, not an architectural risk.
+2. Resolved by the validation exercise (`experiments/cloudrun-ws-validation/RUNBOOK.md`, 2026-07-30): the request timeout must be raised from the 300-second default (measured forced close at 301 s) to the 60-minute maximum (measured forced close at 3601 s, code 1006, clean ~1 s reconnect — the ordinary resynchronization path handles it); Direct VPC egress carries a WebSocket from Cloud Run to an internal-IP COS VM with no external addresses involved; direct IAP-on-Cloud-Run is available and gates unauthenticated traffic, so the load-balancer fallback is unnecessary. Still observing passively: long-lived-connection cost under instance-based billing, and interactive confirmation that a browser WebSocket passes IAP.
 
 ### Replication and history
 
