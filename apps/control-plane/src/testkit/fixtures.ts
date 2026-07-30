@@ -14,6 +14,7 @@ export const TEST_CONSTANTS: LifecycleConstants = {
   readinessPollMs: 1_000,
   unreachableGraceMs: 10_000,
   createStartDeadlineMs: 120_000,
+  unreachableBootDeadlineMs: 20_000,
   historyPullIntervalMs: 2_000,
   reconcileTickMs: 500,
   retryBackoffBaseMs: 200,

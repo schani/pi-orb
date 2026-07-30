@@ -27,6 +27,8 @@ export interface FakeOrbConfig {
   initDurationMs?: number;
   initOutcome?: InitOutcome;
   checkoutCommit?: string;
+  /** The host runs but its container never starts: HTTP stays dark. */
+  containerNeverStarts?: boolean;
 }
 
 /** The persistent filesystem: survives host stop/start and runtime restarts. */
@@ -74,6 +76,7 @@ const DEFAULT_CONFIG: Required<FakeOrbConfig> = {
   initDurationMs: 2_000,
   initOutcome: "ready",
   checkoutCommit: "commit-0",
+  containerNeverStarts: false,
 };
 
 /**
@@ -238,6 +241,17 @@ export class FakeWorld {
     return this.orbState(orbId).host?.runtimeToken ?? null;
   }
 
+  private readonly diagnoses = new Map<string, string>();
+
+  /** Host-side evidence returned by the fake provider's diagnose(). */
+  setDiagnosis(orbId: string, message: string): void {
+    this.diagnoses.set(orbId, message);
+  }
+
+  diagnosisOf(orbId: string): string | null {
+    return this.diagnoses.get(orbId) ?? null;
+  }
+
   startHost(task: SimulationTask, ref: OrbHostRef): void {
     const state = this.findByRef(ref);
     if (state === null || state.host === null) return;
@@ -256,6 +270,7 @@ export class FakeWorld {
   private bootRuntime(task: SimulationTask, orbId: string): void {
     const state = this.orbState(orbId);
     if (state.host === null) return;
+    if (state.config.containerNeverStarts) return;
     state.runtimeInstanceCounter += 1;
     state.host.runtime = {
       instanceId: `${orbId}-runtime-${state.runtimeInstanceCounter}`,
@@ -458,6 +473,18 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<OrbHostObservation[], OrbHostProviderError> {
     return this.op(task, "list", FAILPOINTS.providerObserve, context, () => this.world.listHosts());
+  }
+
+  diagnose(
+    task: SimulationTask,
+    ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<string | null, OrbHostProviderError> {
+    return this.op(task, "observe", FAILPOINTS.providerObserve, context, () => {
+      const state = this.world.findByRef(ref);
+      if (state === null || state.host === null) return null;
+      return this.world.diagnosisOf(state.host.orbId);
+    });
   }
 }
 

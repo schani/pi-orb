@@ -64,6 +64,7 @@ export type OrbFailureCode =
   | "deadline_exceeded"
   | "replication_integrity"
   | "runtime_failed"
+  | "runtime_never_answered"
   | "provider_failed"
   | "auth_failed"
   | "drain_runtime_unrecoverable";

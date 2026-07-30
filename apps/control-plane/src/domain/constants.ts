@@ -9,6 +9,12 @@ export interface LifecycleConstants {
   readonly unreachableGraceMs: number;
   /** Deadline for `creating`/`starting`, measured from `state_changed_at`. */
   readonly createStartDeadlineMs: number;
+  /**
+   * Sub-deadline: the runtime health server starts before slow init, so a
+   * host observed running whose runtime has never answered for this long is
+   * a boot failure, not a slow clone (DESIGN.md §5.2).
+   */
+  readonly unreachableBootDeadlineMs: number;
   /** Approximate history-pull interval per active orb. */
   readonly historyPullIntervalMs: number;
   /** Reconciler wake-up tick. */
@@ -55,6 +61,7 @@ export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {
   readinessPollMs: 5_000,
   unreachableGraceMs: 30_000,
   createStartDeadlineMs: 15 * 60_000,
+  unreachableBootDeadlineMs: 3 * 60_000,
   historyPullIntervalMs: 10_000,
   reconcileTickMs: 1_000,
   retryBackoffBaseMs: 500,

@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import type { GceApiTransport, GceResponse } from "./api.ts";
-import { buildStartupScript, GceOrbHostProvider, mapInstanceStatus, metadataValue } from "./provider.ts";
+import {
+  buildStartupScript,
+  GceOrbHostProvider,
+  mapInstanceStatus,
+  metadataValue,
+} from "./provider.ts";
 
 const task = new NoSimulationTask("gce test", false);
 const context = { signal: new AbortController().signal };
@@ -247,7 +252,7 @@ describe("GceOrbHostProvider", () => {
       // No blank line may interrupt a backslash continuation.
       expect(script).not.toMatch(/\\\n\s*\n/);
       // The image is the final argument of the same docker run command.
-      expect(script).toMatch(/\\\n  'img'\n/);
+      expect(script).toMatch(/\\\n {2}'img'\n/);
     }
   });
 

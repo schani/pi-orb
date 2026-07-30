@@ -201,6 +201,15 @@ export interface OrbHostProvider {
     task: SimulationTask,
     context: OperationContext,
   ): ResultAsync<OrbHostObservation[], OrbHostProviderError>;
+  /**
+   * Optional cheap host-side evidence for an unreachable runtime (e.g. GCE
+   * guest-attribute startup markers). Null when nothing is known.
+   */
+  diagnose?(
+    task: SimulationTask,
+    ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<string | null, OrbHostProviderError>;
 }
 
 // ---------------------------------------------------------------------------

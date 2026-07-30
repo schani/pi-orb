@@ -28,6 +28,37 @@ const retryable = (message: string): ReconcileOutcome => ({ type: "retryable", m
 const waiting = (reason: "auth" | "readiness" | "host_transition" | "drain_blocked") =>
   ({ type: "waiting", reason }) as const;
 
+async function diagnoseHost(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  resourceId: string,
+): Promise<{ settled: boolean; evidence: string | null }> {
+  const diagnose = deps.hostProvider.diagnose?.bind(deps.hostProvider);
+  if (diagnose === undefined) return { settled: true, evidence: null };
+  const result = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "diagnose host",
+    (context) => diagnose(task, hostRefOf(deps, resourceId), context),
+  );
+  // A transient diagnose failure defers the caller's decision one poll so
+  // host evidence is never silently dropped.
+  if (result.isErr()) return { settled: false, evidence: null };
+  return { settled: true, evidence: result.value };
+}
+
+/** Fold the boot probe's live picture into a terminal error message. */
+function deadlineEvidence(deps: ControlPlaneDeps, orbId: string, base: string): string {
+  const probe = deps.control.getBootProbe(orbId);
+  if (probe === null) return base;
+  const parts = [base];
+  if (probe.hostState !== null) parts.push(`host ${probe.hostState}`);
+  parts.push(`${probe.attempts} probes`);
+  parts.push(probe.everAnswered ? "runtime answered at least once" : "runtime never answered");
+  if (probe.lastError !== undefined) parts.push(`last probe error: ${probe.lastError}`);
+  return parts.join("; ");
+}
+
 function hostRefOf(deps: ControlPlaneDeps, resourceId: string): OrbHostRef {
   return { provider: deps.hostProvider.kind, resourceId };
 }
@@ -185,7 +216,11 @@ async function reconcileCreateStart(
       deps,
       orb,
       "deadline_exceeded",
-      `orb did not become ready within ${deps.constants.createStartDeadlineMs}ms`,
+      deadlineEvidence(
+        deps,
+        orb.id,
+        `orb did not become ready within ${deps.constants.createStartDeadlineMs}ms`,
+      ),
     );
   }
 
@@ -288,6 +323,12 @@ async function reconcileCreateStart(
   switch (observation.state) {
     case "starting":
     case "stopping":
+      deps.control.recordBootProbe(orb.id, {
+        hostState: observation.state,
+        hostRunningSinceWall: null,
+        hostRunningSinceMono: null,
+        answered: false,
+      });
       return waiting("host_transition");
     case "stopped":
     case "failed": {
@@ -301,16 +342,59 @@ async function reconcileCreateStart(
     }
     case "running": {
       const address = observation.runtimeAddress;
-      if (address === undefined) return waiting("readiness");
+      const probeBase = {
+        hostState: "running",
+        hostRunningSinceWall: task.wallNow(),
+        hostRunningSinceMono: task.monotonicNow(),
+      };
+      if (address === undefined) {
+        deps.control.recordBootProbe(orb.id, {
+          ...probeBase,
+          answered: false,
+          lastError: "host reports no runtime address",
+        });
+        return waiting("readiness");
+      }
       const health = await withDeadline(
         task,
         deps.constants.runtimeRequestTimeoutMs,
         "readiness health check",
         (context) => deps.runtimeClient.health(task, address.baseUrl, context),
       );
-      // The runtime may not serve HTTP yet; the create/start deadline bounds
-      // how long we keep waiting.
-      if (health.isErr()) return waiting("readiness");
+      if (health.isErr()) {
+        deps.control.recordBootProbe(orb.id, {
+          ...probeBase,
+          answered: false,
+          lastError: health.error.message,
+        });
+        // Sub-deadline (DESIGN.md §5.2): the health server starts before slow
+        // init, so a running host that has never answered is a boot failure,
+        // not a slow clone — fail fast with host-side evidence.
+        const probe = deps.control.getBootProbe(orb.id);
+        const nowMono = task.monotonicNow();
+        if (
+          probe !== null &&
+          !probe.everAnswered &&
+          probe.hostRunningSinceMono !== null &&
+          nowMono - probe.hostRunningSinceMono > deps.constants.unreachableBootDeadlineMs
+        ) {
+          const diagnosis = await diagnoseHost(task, deps, hostResourceId);
+          if (!diagnosis.settled) return waiting("readiness");
+          const seconds = Math.round((nowMono - probe.hostRunningSinceMono) / 1000);
+          const evidence = diagnosis.evidence;
+          return failOrbStoppingHost(
+            task,
+            deps,
+            orb,
+            "runtime_never_answered",
+            `host ran for ${seconds}s but the runtime never answered ` +
+              `(${probe.attempts} probes; last error: ${health.error.message})` +
+              (evidence !== null && evidence !== "" ? `; host diagnostics: ${evidence}` : ""),
+          );
+        }
+        return waiting("readiness");
+      }
+      deps.control.recordBootProbe(orb.id, { ...probeBase, answered: true });
       const status = health.value;
       if (status.status === "initializing") return waiting("readiness");
       if (status.status === "failed") {
@@ -345,6 +429,7 @@ async function reconcileCreateStart(
           ? { type: "conflict" }
           : retryable(updated.error.message);
       }
+      deps.control.clearBootProbe(orb.id);
       const transitioned = await transitionTo(task, deps, updated.value, "running", {
         lastError: null,
       });

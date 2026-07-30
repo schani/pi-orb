@@ -12,6 +12,17 @@ export interface DrainStatus {
   message?: string;
 }
 
+/** Live picture of a boot in progress (creating/starting). */
+export interface BootProbe {
+  hostState: string | null;
+  hostRunningSinceWall: number | null;
+  hostRunningSinceMono: number | null;
+  attempts: number;
+  /** Whether the runtime has answered health at all this boot. */
+  everAnswered: boolean;
+  lastError?: string;
+}
+
 /**
  * Per-process in-memory reconciliation state (DESIGN.md §11.3, §15.1). It is
  * deliberately reconstructible: a control-plane restart loses it and the
@@ -98,6 +109,52 @@ export class ControlState {
     return this.challenge;
   }
 
+  // -- boot probing (creating/starting visibility, DESIGN.md §5.2) --
+
+  private readonly bootProbes = new Map<string, BootProbe>();
+
+  /** Record one readiness-probe outcome while the orb boots. */
+  recordBootProbe(
+    orbId: string,
+    outcome: {
+      hostState: string | null;
+      /** Wall ms when the host was first observed running (null resets). */
+      hostRunningSinceWall: number | null;
+      /** Monotonic ms companion for deadline math. */
+      hostRunningSinceMono: number | null;
+      answered: boolean;
+      lastError?: string;
+    },
+  ): void {
+    const existing = this.bootProbes.get(orbId);
+    const keepSince =
+      existing?.hostRunningSinceMono != null && outcome.hostRunningSinceMono != null;
+    this.bootProbes.set(orbId, {
+      hostState: outcome.hostState,
+      hostRunningSinceWall: keepSince
+        ? existing.hostRunningSinceWall
+        : outcome.hostRunningSinceWall,
+      hostRunningSinceMono: keepSince
+        ? existing.hostRunningSinceMono
+        : outcome.hostRunningSinceMono,
+      attempts: (existing?.attempts ?? 0) + 1,
+      everAnswered: (existing?.everAnswered ?? false) || outcome.answered,
+      ...(outcome.lastError !== undefined
+        ? { lastError: outcome.lastError }
+        : existing?.lastError !== undefined
+          ? { lastError: existing.lastError }
+          : {}),
+    });
+  }
+
+  getBootProbe(orbId: string): BootProbe | null {
+    return this.bootProbes.get(orbId) ?? null;
+  }
+
+  clearBootProbe(orbId: string): void {
+    this.bootProbes.delete(orbId);
+  }
+
   // -- host restart tracking --
 
   private readonly restartPending = new Set<string>();
@@ -141,6 +198,7 @@ export class ControlState {
 
   /** Drop all per-orb state after a terminal transition. */
   clearOrb(orbId: string): void {
+    this.bootProbes.delete(orbId);
     this.liveness.delete(orbId);
     this.nextAttemptAt.delete(orbId);
     this.retryAttempts.delete(orbId);
