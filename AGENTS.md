@@ -24,4 +24,3 @@ When third-party or platform code can throw or reject, catch it at the immediate
 
 Deterministic simulation testing with the `determined` package is a first-class design constraint. Keep concurrency-critical logic, clocks, persistence, runtime transport, and host lifecycle behavior behind simulation-friendly boundaries. New state machines and retry/reconciliation logic must include deterministic scheduling checkpoints, failpoints where appropriate, invariant-focused tests, and reproducible failure traces.
 
-`DETERMINED-REQ.md` records pi-orb's deterministic virtual-time requirements for `determined`. Keep it synchronized when clock, timer, timeout, replay, or simulation-safety requirements change.

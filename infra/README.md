@@ -24,7 +24,7 @@ Impersonates `pi-orb-debug@...` against the ops service — no IAP involved.
   `deploy.sh` immediately after.
 - During a revision rollover the draining instance's reconciler can create
   orb VMs with the previous startup script (DESIGN.md §3.3 caveat, open
-  question 33). Wait ~2 minutes after deploying before restarting orbs.
+  question 32). Wait ~2 minutes after deploying before restarting orbs.
 - Workspace session policy expires gcloud user credentials roughly daily:
   `gcloud auth login` interactively when everything returns empty/errors.
 - Orb VM boot diagnostics: `gcloud compute instances get-guest-attributes
