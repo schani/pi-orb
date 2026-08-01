@@ -513,10 +513,27 @@ textarea:focus {
   padding-bottom: 0;
 }
 
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
 .composer-input {
+  flex: 1;
   width: 100%;
   resize: vertical;
   min-height: 4rem;
+}
+
+.composer-send {
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .composer-actions {

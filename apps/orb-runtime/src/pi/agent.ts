@@ -27,6 +27,7 @@ import type { AgentGateView } from "../domain/requests.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
+import { pickCodexModel } from "./model-select.ts";
 
 export interface PiOrbAgentOptions {
   readonly orbId: string;
@@ -293,7 +294,7 @@ export class PiOrbAgent {
     if (refreshed.isErr()) {
       return err(this.failed("session_init_failed", refreshed.error, true));
     }
-    const model = modelRuntime.getModels("openai-codex")[0];
+    const model = pickCodexModel(modelRuntime.getModels("openai-codex"));
     if (model === undefined) {
       return err(this.failed("session_init_failed", "no openai-codex model available", true));
     }

@@ -1,4 +1,5 @@
-import type { ClipboardEvent } from "react";
+import type { ClipboardEvent, KeyboardEvent } from "react";
+import { isSendShortcut } from "./send-shortcut.ts";
 
 export interface ComposerImage {
   id: string;
@@ -76,25 +77,40 @@ export function Composer({
           ))}
         </div>
       )}
-      <textarea
-        className="composer-input"
-        value={text}
-        onChange={(event) => onTextChange(event.target.value)}
-        onPaste={handlePaste}
-        placeholder="Message the agent… (paste images directly)"
-        rows={3}
-        disabled={!canSend}
-      />
-      <div className="composer-actions">
-        <button type="button" onClick={onSend} disabled={!sendEnabled}>
-          {pending ? "sending…" : "send"}
+      <div className="composer-row">
+        <textarea
+          className="composer-input"
+          value={text}
+          onChange={(event) => onTextChange(event.target.value)}
+          onPaste={handlePaste}
+          onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+            if (isSendShortcut(event) && sendEnabled) {
+              event.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder="Message the agent… (paste images directly, ⌘⏎ to send)"
+          rows={3}
+          disabled={!canSend}
+        />
+        <button
+          type="button"
+          className="composer-send"
+          aria-label="send"
+          title="send (⌘⏎)"
+          onClick={onSend}
+          disabled={!sendEnabled}
+        >
+          {pending ? "…" : "↑"}
         </button>
-        {canAbort && (
+      </div>
+      {canAbort && (
+        <div className="composer-actions">
           <button type="button" className="danger" onClick={onAbort}>
             abort
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
