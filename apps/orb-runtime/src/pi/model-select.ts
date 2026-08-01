@@ -1,13 +1,19 @@
 /**
  * Pinned-model selection for the hardcoded `openai-codex` provider
- * (DESIGN.md §15.1). The runtime advertises the `input.image` capability, so
- * the model must declare image input: pi-ai's request serializers include
- * image content only when `model.input` contains "image" and silently drop
- * it otherwise. Prefer the first image-capable model in Pi's catalog order;
- * fall back to the catalog head only when no model accepts images.
+ * (DESIGN.md §15.1). The decided orb model is gpt-5.6-sol. If a future Pi
+ * catalog drops that id, fall back to the first image-capable model — the
+ * runtime advertises `input.image`, and pi-ai's request serializers include
+ * image content only when `model.input` contains "image" — and only then to
+ * the catalog head.
  */
-export function pickCodexModel<Model extends { input: string[] }>(
+export const PINNED_CODEX_MODEL_ID = "gpt-5.6-sol";
+
+export function pickCodexModel<Model extends { id: string; input: string[] }>(
   models: readonly Model[],
 ): Model | undefined {
-  return models.find((model) => model.input.includes("image")) ?? models[0];
+  return (
+    models.find((model) => model.id === PINNED_CODEX_MODEL_ID) ??
+    models.find((model) => model.input.includes("image")) ??
+    models[0]
+  );
 }

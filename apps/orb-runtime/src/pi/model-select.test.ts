@@ -17,15 +17,15 @@ interface CatalogModel {
 
 const spark: CatalogModel = { id: "gpt-5.3-codex-spark", input: ["text"] };
 const multimodal: CatalogModel = { id: "gpt-5.4", input: ["text", "image"] };
-const laterMultimodal: CatalogModel = { id: "gpt-5.5", input: ["text", "image"] };
+const sol: CatalogModel = { id: "gpt-5.6-sol", input: ["text", "image"] };
 
 describe("pickCodexModel", () => {
-  it("prefers the first image-capable model over an earlier text-only one", () => {
-    expect(pickCodexModel([spark, multimodal, laterMultimodal])).toBe(multimodal);
+  it("pins gpt-5.6-sol when the catalog has it (decided model)", () => {
+    expect(pickCodexModel([spark, multimodal, sol])).toBe(sol);
   });
 
-  it("keeps catalog order among image-capable models", () => {
-    expect(pickCodexModel([multimodal, laterMultimodal])).toBe(multimodal);
+  it("falls back to the first image-capable model when the pinned id is absent", () => {
+    expect(pickCodexModel([spark, multimodal])).toBe(multimodal);
   });
 
   it("falls back to the first model when none accepts images", () => {
