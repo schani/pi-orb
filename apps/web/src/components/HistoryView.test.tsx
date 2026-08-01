@@ -43,6 +43,37 @@ describe("HistoryView", () => {
     expect(html).toContain("A <strong>streaming</strong> response");
   });
 
+  it("renders image blocks inline from base64 data or url, with a placeholder fallback", () => {
+    const record = (
+      id: string,
+      content: Extract<HistoryRecord, { type: "message" }>["content"],
+    ): HistoryRecord =>
+      ({
+        id,
+        parentId: null,
+        timestamp: `time-${id}`,
+        overflow: { native: {} },
+        type: "message",
+        role: "user",
+        content,
+      }) as HistoryRecord;
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[
+          record("with-data", [{ type: "image", mediaType: "image/png", data: "aGVsbG8=" }]),
+          record("with-url", [{ type: "image", url: "https://example.com/pic.png" }]),
+          record("bare", [{ type: "image" }]),
+        ]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+      />,
+    );
+    expect(html).toContain('src="data:image/png;base64,aGVsbG8="');
+    expect(html).toContain('src="https://example.com/pic.png"');
+    expect(html).toContain("[image]");
+  });
+
   it("collapses persisted tool inputs and outputs and omits live tool messages by default", () => {
     const records: HistoryRecord[] = [
       {

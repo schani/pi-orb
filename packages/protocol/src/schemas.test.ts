@@ -213,6 +213,39 @@ describe("frame schemas", () => {
     ).toBe(false);
   });
 
+  it("accepts image input blocks and rejects malformed ones (capability input.image)", () => {
+    const request = (content: unknown) => ({
+      v: 1,
+      type: "client.request",
+      requestId: "req-4",
+      action: { type: "message", expectedHeadId: null, content },
+    });
+    expect(
+      Check(
+        ClientFrameSchema,
+        request([
+          { type: "image", mediaType: "image/png", data: "aGVsbG8=" },
+          { type: "text", text: "what is this?" },
+        ]),
+      ),
+    ).toBe(true);
+    // Image-only messages are valid.
+    expect(
+      Check(ClientFrameSchema, request([{ type: "image", mediaType: "image/png", data: "x" }])),
+    ).toBe(true);
+    // Closed schemas: missing fields and data-URL-style extras are rejected.
+    expect(Check(ClientFrameSchema, request([{ type: "image", data: "x" }]))).toBe(false);
+    expect(Check(ClientFrameSchema, request([{ type: "image", mediaType: "image/png" }]))).toBe(
+      false,
+    );
+    expect(
+      Check(
+        ClientFrameSchema,
+        request([{ type: "image", mediaType: "image/png", data: "x", url: "data:..." }]),
+      ),
+    ).toBe(false);
+  });
+
   it("accepts server frames", () => {
     expect(
       Check(ServerWelcomeSchema, {
