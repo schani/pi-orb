@@ -482,12 +482,35 @@ textarea:focus {
   padding-left: 0.25rem;
 }
 
+.msg-image {
+  display: block;
+  max-width: min(100%, 24rem);
+  max-height: 20rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  margin: 0.25rem 0;
+}
+
 /* Composer */
 
+/* The composer stays pinned to the viewport bottom while the chat scrolls
+   in the normal document flow. */
 .composer {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  position: sticky;
+  bottom: 0;
+  /* Swallow the page flex gap so records don't peek through above it. */
+  margin-top: -1rem;
+  padding: 0.75rem 0 1rem;
+  background: var(--bg);
+  border-top: 1px solid var(--panel-border);
+}
+
+/* The sticky composer provides its own bottom spacing on the orb page. */
+.app:has(.orb-page) {
+  padding-bottom: 0;
 }
 
 .composer-input {
@@ -499,4 +522,33 @@ textarea:focus {
 .composer-actions {
   display: flex;
   gap: 0.6rem;
+}
+
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.composer-attachment {
+  position: relative;
+  display: inline-flex;
+}
+
+.composer-attachment img {
+  max-height: 4.5rem;
+  max-width: 8rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+
+.composer-attachment-remove {
+  position: absolute;
+  top: -0.5rem;
+  right: -0.5rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  line-height: 1;
+  border-radius: 99px;
 }

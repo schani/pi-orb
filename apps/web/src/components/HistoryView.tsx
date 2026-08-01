@@ -95,13 +95,22 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
       case "tool_call":
         nodes.push(renderToolCall(block));
         break;
-      case "image":
+      case "image": {
+        const src =
+          block.data !== undefined
+            ? `data:${block.mediaType ?? "image/png"};base64,${block.data}`
+            : block.url;
         nodes.push(
-          <div className="muted" key={index}>
-            [image]
-          </div>,
+          src !== undefined ? (
+            <img className="msg-image" key={index} src={src} alt="attachment" />
+          ) : (
+            <div className="muted" key={index}>
+              [image]
+            </div>
+          ),
         );
         break;
+      }
       case "tool_result":
         nodes.push(renderToolResult(block, index));
         break;

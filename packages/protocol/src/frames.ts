@@ -23,12 +23,28 @@ export const ClientHelloSchema = Type.Object(
 );
 export type ClientHello = Static<typeof ClientHelloSchema>;
 
+/** Input blocks a browser may send in a message (capability `input.image`). */
+export const MessageInputBlockSchema = Type.Union([
+  Type.Object({ type: Type.Literal("text"), text: Type.String() }, closed),
+  Type.Object(
+    {
+      type: Type.Literal("image"),
+      /** e.g. "image/png". */
+      mediaType: Type.String(),
+      /** Base64 payload without a data-URL prefix. */
+      data: Type.String(),
+    },
+    closed,
+  ),
+]);
+export type MessageInputBlock = Static<typeof MessageInputBlockSchema>;
+
 export const ClientActionSchema = Type.Union([
   Type.Object(
     {
       type: Type.Literal("message"),
       expectedHeadId: Type.Union([Type.String(), Type.Null()]),
-      content: Type.Array(Type.Object({ type: Type.Literal("text"), text: Type.String() }, closed)),
+      content: Type.Array(MessageInputBlockSchema),
     },
     closed,
   ),

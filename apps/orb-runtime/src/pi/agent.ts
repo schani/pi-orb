@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
+  type MessageInputBlock,
   type RuntimeEvent,
   type RuntimeHealth,
   type ServerFrame,
@@ -516,7 +517,10 @@ export class PiOrbAgent {
    * Submit a user message under the operation ID already promised to the
    * requester; resolves once Pi has accepted/persisted it.
    */
-  submitMessage(text: string, operationId: string): ResultAsync<void, { message: string }> {
+  submitMessage(
+    content: readonly MessageInputBlock[],
+    operationId: string,
+  ): ResultAsync<void, { message: string }> {
     const session = this.session;
     if (session === null) {
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
@@ -524,9 +528,17 @@ export class PiOrbAgent {
       );
     }
     this.pendingOperationId = operationId;
-    return ResultAsync.fromPromise(Promise.resolve(session.sendUserMessage(text)), (error) => ({
-      message: error instanceof Error ? error.message : String(error),
-    })).map(() => undefined);
+    const piContent = content.map((block) =>
+      block.type === "text"
+        ? { type: "text" as const, text: block.text }
+        : { type: "image" as const, data: block.data, mimeType: block.mediaType },
+    );
+    return ResultAsync.fromPromise(
+      Promise.resolve(session.sendUserMessage(piContent)),
+      (error) => ({
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    ).map(() => undefined);
   }
 
   abortOperation(): ResultAsync<void, { message: string }> {

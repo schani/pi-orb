@@ -62,19 +62,36 @@ const ok200 = (body: Record<string, unknown>): GceResponse => ({ status: 200, bo
 const notFound: GceResponse = { status: 404, body: {} };
 const done: GceResponse = { status: 200, body: { status: "DONE" } };
 
-const existingInstance = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
-  name: "pi-orb-orb-1",
-  status: "RUNNING",
-  labels: { "pi-orb-orb-id": "orb-1" },
-  metadata: { items: [{ key: "pi-orb-runtime-token", value: "tok" }] },
-  networkInterfaces: [{ networkIP: "10.10.0.9" }],
-  ...overrides,
-});
-
 const provisionRequest = {
   orbId: "orb-1",
   bootstrap: { repositoryUrl: "https://github.com/o/r" },
 };
+
+/** The script hash a `makeProvider` provider expects for orb-1 (fresh stamp). */
+const currentScriptHash = sha256(
+  buildStartupScript({
+    runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
+    orbId: provisionRequest.orbId,
+    repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
+    controlPlaneUrl: "https://runtime.example",
+    extraEnv: {},
+  }),
+);
+
+const freshMetadataItems = [
+  { key: "pi-orb-runtime-token", value: "tok" },
+  { key: "pi-orb-script-sha256", value: currentScriptHash },
+  { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
+];
+
+const existingInstance = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  name: "pi-orb-orb-1",
+  status: "RUNNING",
+  labels: { "pi-orb-orb-id": "orb-1" },
+  metadata: { fingerprint: "fp-1", items: freshMetadataItems },
+  networkInterfaces: [{ networkIP: "10.10.0.9" }],
+  ...overrides,
+});
 
 describe("GceOrbHostProvider", () => {
   it("creates a Spot COS instance and reports the minted token hash", async () => {
@@ -110,6 +127,11 @@ describe("GceOrbHostProvider", () => {
     expect(script).toContain("PI_ORB_CONTROL_PLANE_URL='https://runtime.example'");
     // The token reaches the container from metadata, never inline.
     expect(script).not.toContain(token);
+    // Script-version stamp and the re-derivation input (open question 32).
+    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(sha256(script));
+    expect(items.find((item) => item.key === "pi-orb-repository-url")?.value).toBe(
+      "https://github.com/o/r",
+    );
   });
 
   it("reuses an existing instance and reads its token back", async () => {
@@ -131,6 +153,99 @@ describe("GceOrbHostProvider", () => {
     const result = await provider.provision(task, provisionRequest, context);
     expect(result.isOk()).toBe(true);
     expect(transport.requests[1]?.path).toContain("/instances/pi-orb-orb-1/start");
+  });
+
+  it("repairs a stale startup script on a reused running instance", async () => {
+    const staleItems = [
+      { key: "pi-orb-runtime-token", value: "tok" },
+      { key: "pi-orb-script-sha256", value: "stale-hash" },
+      { key: "pi-orb-repository-url", value: "https://github.com/o/r" },
+    ];
+    const transport = new FakeTransport([
+      () => ok200(existingInstance({ metadata: { fingerprint: "fp-1", items: staleItems } })),
+      () => ok200({ name: "op-stop" }), // stop for repair
+      () => done,
+      () =>
+        ok200(
+          existingInstance({
+            status: "TERMINATED",
+            metadata: { fingerprint: "fp-2", items: staleItems },
+          }),
+        ), // re-get for a fresh fingerprint
+      () => ok200({ name: "op-meta" }), // setMetadata
+      () => done,
+      () => ok200({ name: "op-start" }), // start
+      () => done,
+    ]);
+    const provider = makeProvider(transport);
+    const result = await provider.provision(task, provisionRequest, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    // The token is preserved by the repair, so the committed hash stays valid.
+    if (result.isOk()) expect(result.value.runtimeTokenHash).toBe(sha256("tok"));
+    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
+    expect(setMetadata).toBeDefined();
+    const body = setMetadata?.body ?? {};
+    expect(body["fingerprint"]).toBe("fp-2");
+    const items = body["items"] as { key: string; value: string }[];
+    expect(items.find((item) => item.key === "pi-orb-runtime-token")?.value).toBe("tok");
+    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(
+      currentScriptHash,
+    );
+    expect(items.find((item) => item.key === "startup-script")?.value).toContain("docker run");
+  });
+
+  it("start() repairs a pre-stamp TERMINATED instance, recovering the repo URL", async () => {
+    const legacyScript = "#!/bin/bash\n  -e PI_ORB_REPOSITORY_URL='https://github.com/o/r' \\\n";
+    const transport = new FakeTransport([
+      () =>
+        ok200(
+          existingInstance({
+            status: "TERMINATED",
+            metadata: {
+              fingerprint: "fp-1",
+              items: [
+                { key: "pi-orb-runtime-token", value: "tok" },
+                { key: "startup-script", value: legacyScript },
+              ],
+            },
+          }),
+        ),
+      () => ok200({ name: "op-meta" }), // setMetadata (no stop needed)
+      () => done,
+      () => ok200({ name: "op-start" }),
+      () => done,
+    ]);
+    const provider = makeProvider(transport);
+    const result = await provider.start(
+      task,
+      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      context,
+    );
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
+    const items = (setMetadata?.body?.["items"] ?? []) as { key: string; value: string }[];
+    expect(items.find((item) => item.key === "pi-orb-repository-url")?.value).toBe(
+      "https://github.com/o/r",
+    );
+    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(
+      currentScriptHash,
+    );
+  });
+
+  it("start() with a current stamp starts without touching metadata", async () => {
+    const transport = new FakeTransport([
+      () => ok200(existingInstance({ status: "TERMINATED" })),
+      () => ok200({ name: "op-start" }),
+      () => done,
+    ]);
+    const provider = makeProvider(transport);
+    const result = await provider.start(
+      task,
+      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      context,
+    );
+    expect(result.isOk()).toBe(true);
+    expect(transport.requests.some((request) => request.path.endsWith("/setMetadata"))).toBe(false);
   });
 
   it("maps capacity exhaustion to a non-retryable failure", async () => {

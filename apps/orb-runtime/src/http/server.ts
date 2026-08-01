@@ -19,8 +19,10 @@ import { decideRequest, RequestRegistry, type RequestResult } from "../domain/re
 import { computeSyncFrames } from "../domain/sync.ts";
 import type { PiOrbAgent } from "../pi/agent.ts";
 
-const MAX_INCOMING_FRAME_BYTES = 1024 * 1024;
-const MAX_PROMPT_BYTES = 256 * 1024;
+// Sized for pasted screenshots: base64 inflates ~4/3, so 6 MiB of prompt
+// admits roughly a 4.5 MiB image plus text (capability `input.image`).
+const MAX_INCOMING_FRAME_BYTES = 8 * 1024 * 1024;
+const MAX_PROMPT_BYTES = 6 * 1024 * 1024;
 const OUTBOUND_BUDGET_BYTES = 8 * 1024 * 1024;
 const HIGH_WATER_MARK_BYTES = 512 * 1024;
 
@@ -188,15 +190,12 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
         }
         // start_message: acceptance is not completion (§6.3). The operation
         // id becomes visible through operation_started once Pi starts.
-        const text =
-          frame.action.type === "message"
-            ? frame.action.content.map((block) => block.text).join("\n")
-            : "";
+        const content = frame.action.type === "message" ? frame.action.content : [];
         const operationId = randomUUID();
         const result: RequestResult = { type: "accepted", operationId, duplicate: false };
         registry.record(frame.requestId, frame.action, result);
         sendResult(frame.requestId, result);
-        void agent.submitMessage(text, operationId);
+        void agent.submitMessage(content, operationId);
       };
 
       socket.on("message", (data: Buffer, isBinary: boolean) => {

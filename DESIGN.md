@@ -67,7 +67,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The current prescribed GCE shape is Spot `n2d-highmem-4`: 4 vCPUs and 32 GiB RAM.
 - Spot capacity exhaustion (`ZONE_RESOURCE_POOL_EXHAUSTED` on instance create or start) maps to a typed provisioning error that fails the orb and is shown to the user. There is no zone or on-demand fallback initially.
 - Boot-failure detection (implemented; born from cloud smoke-testing): while an orb is `creating`/`starting`, the reconciler records a per-probe boot picture (host state, attempts, whether the runtime ever answered, last error) exposed to the UI as a `waiting_for_runtime` state detail. Because the runtime's health server starts before slow initialization, a running host whose runtime has never answered past `unreachableBootDeadlineMs` (3 minutes) fails fast as `runtime_never_answered` instead of burning the 15-minute deadline; the terminal error carries the probes plus provider diagnostics (`OrbHostProvider.diagnose`, reading the GCE guest-attribute startup markers). A transiently failing diagnose defers the failure one poll so evidence is never dropped. Deadline failures carry the same evidence. Covered by DST scenarios including the adversarial-scheduling case where a best-effort host stop is cancelled and repaired by the backstop sweep.
-- Known rollout caveat: during a control-plane revision rollover, the draining instance's reconciler can briefly provision hosts with the previous startup script (observed once). Bounded by the drain window and self-healing via boot-failure detection; a provider-side script-version stamp is the candidate fix (open question 32).
+- Rollout caveat resolved (open question 32, implemented 2026-08-01): the GCE provider stamps `pi-orb-script-sha256` (and `pi-orb-repository-url`, the input needed to re-derive the script) into instance metadata at creation. Both `provision`-reuse and `start` compare the stamp against the script the current provider would generate; on mismatch — including pre-stamp instances, whose repository URL is recovered from the old script text — the host is repaired: stopped if running, `setMetadata` with the new script while preserving the runtime token (so the committed token hash stays valid), then started. This also delivers runtime-image upgrades to existing orbs on their next start, which restart-in-place previously never did. Residual: a draining stale revision can still "repair" a fresh host backward within its bounded drain window; the surviving revision repairs it forward on its next pass, and provision/start only run while the orb is `creating`/`starting`, so a ready runtime is never bounced.
 - Spot preemption is handled purely as the existing crashed-host path: the provider observes the instance `TERMINATED`, and recovery starts the same instance again in place with its disks intact. Rejected for now: a best-effort history drain on the ~30-second preemption notice — it would convert most preemptions into near-clean stops, but the first cloud slice stays simple; the unreplicated tail is recovered on the next start as §3.5 already allows.
 - Cloud orb VMs boot Container-Optimized OS and run the standard orb runtime container image pulled from Artifact Registry. The container is launched by a startup script rather than the konlet metadata declaration — konlet has no ordering guarantee against the data-disk mount the container depends on. Hard-won COS specifics encoded in that script: the root filesystem is read-only (docker credentials live on the stateful partition) and the COS host firewall admits only SSH by default (the script opens the runtime port). Startup progress and failures are reported through guest attributes. There is no baked VM image and no VM image pipeline. The orb environment is defined by the runtime container image on every provider (Debian 12 base, Node.js 24); which host runs that container is a provider implementation detail invisible to the control plane.
 - Orb VMs use no Cloud NAT: each has an internal IP (used by the control plane) plus an ephemeral public IP for outbound traffic only, behind a deny-all-inbound firewall. Revisit NAT if orb count grows.
@@ -84,6 +84,22 @@ The first version is not intended to be a generic VM configurator or a generic r
 - Initial lifecycle constants are a 5-second readiness health poll during create/start, a 30-second unreachable-runtime grace period, and a 15-minute create/start deadline; all use injectable clocks and may be tuned later. While an orb is `running`, the ~10-second history pull doubles as the liveness signal, so no separate health poll runs.
 - Pi's `agent_settled` lifecycle state is a useful agent-idle signal because it means no retry, compaction retry, or queued continuation remains.
 - How arbitrary detached/background processes affect idleness remains unresolved. We prefer not to introduce a special background-process tool if Pi or the operating system can provide a reliable signal.
+
+**Current proposal — idle auto-stop and orphan-host sweep (2026-08-01, not yet implemented; discussed but not decided):**
+
+Idle auto-stop reuses existing machinery rather than adding a new lifecycle path:
+
+- The ~10-second history pull already returns `activity: idle | busy`. Add a `last_busy_at` column on the orb row (restart-stable, like `state_changed_at`; the wall clock is already injected). A pull observing `busy` — or any accepted mutating request, or an open live browser connection — refreshes it.
+- When a `running` orb's reconciler observes `wallNow() - last_busy_at > idleStopAfterMs` (proposed initial value: 15 minutes, matching Amp's pause window), it CAS-enters `stopping` with a distinguishable stop reason so the UI can say "stopped (idle)" rather than presenting an unexplained stop. From there the ordinary controlled-stop drain barrier applies unchanged.
+- An open browser connection counts as activity (proposed answer to open question 10): watching an agent work — or think about what to type next — should not power off the machine under the user.
+- Accepted limitation (open questions 8/9 stay open): detached background processes the agent started are invisible to `agent_settled` and would not prevent an idle stop. Amp ships the same trade-off with its 15-minute pause. If this bites, the answer is an OS-level signal (process/cgroup inspection in the runtime's health report), not a special background-job tool.
+- Required DST scenarios before this ships: idle deadline racing a just-accepted message (the request gate makes the winner explicit); idle stop racing a browser reconnect; `last_busy_at` refresh racing the CAS into `stopping`; and clock-skew-free behavior across control-plane restarts.
+
+Idle auto-stop cannot, by construction, handle a host the database has no row for — no row means no reconciler, no history pull, and no idle signal. That is the separate **orphan-host sweep** (open question 23), and the two should ship together:
+
+- A periodic control-plane loop (proposed: every few minutes, one instance is enough since the operation is idempotent) calls `listManagedHosts` — already on the provider port for exactly this purpose; the GCE implementation lists by the `pi-orb-orb-id` label, Docker by its managed-container naming.
+- Each observation is joined against the orbs table. A running host whose orb row says `stopped`/`failed` is already covered by §5.2 reconciliation when `host_ref` matches; the sweep additionally catches rows whose `host_ref` was lost. A running host with *no* orb row at all — a provision whose commit was lost, or a database reset — is stopped (never deleted: the filesystem is authoritative and deletion does not exist in the first slice) and logged loudly as an integrity signal.
+- The sweep only ever moves hosts toward "stopped"; it never starts or deletes anything, so a misfire costs a restart, not data.
 
 ### 3.5 Persistence
 
@@ -479,11 +495,20 @@ Keep the top-level union small. The browser sends only a hello or a request. Ste
 ```ts
 type ClientFrame = ClientHello | ClientRequest;
 
+type MessageInputBlock =
+  | { type: "text"; text: string }
+  | {
+      /** Capability `input.image`; base64 payload without a data-URL prefix. */
+      type: "image";
+      mediaType: string;
+      data: string;
+    };
+
 type ClientAction =
   | {
       type: "message";
       expectedHeadId: string | null;
-      content: Array<{ type: "text"; text: string }>;
+      content: MessageInputBlock[];
     }
   | {
       type: "abort";
@@ -594,6 +619,8 @@ There is deliberately no durable request inbox. An earlier proposal appended a `
 Under outbound pressure, transient output and tool-state events may be coalesced to their newest equivalent state. Welcome, synchronization boundaries, request results, complete history records, operation transitions, and errors are never intentionally dropped. If critical queued data exceeds the configured budget, the runtime closes the connection and the browser reconstructs state through a new handshake.
 
 Harness capabilities differ. `server.welcome.capabilities` initially advertises values such as `abort` and `input.image`; later slices can add `steer` and `follow_up` behind new capability values without a wire-version change. Unsupported actions are rejected explicitly.
+
+`input.image` is implemented end to end (2026-08-01): the browser composer accepts pasted images and sends them as `image` input blocks, the runtime forwards them to Pi's `sendUserMessage` as native image content (`mediaType` → Pi's `mimeType`), and they replicate losslessly through the ordinary history path like any other Pi-persisted content. To accommodate base64 payloads, the runtime's limits are 8 MiB per incoming frame and 6 MiB per prompt (`server.welcome.limits` remains authoritative for clients; the browser enforces the limit at paste time).
 
 ### 6.5 Multiple connections
 
@@ -1437,7 +1464,7 @@ request  { "reason": "startup" | "expiring" | "rejected", "staleGeneration"?: nu
 
 **Orb token.** 256-bit random value minted per *host incarnation*, using a **read-back model** (implemented): the provider mints the token only when it actually creates a container or VM and injects it into the host's delivery channel (`--env` on Docker, instance metadata on GCE); when `provision` finds an existing host it reads the token back from that channel instead of re-minting. `provision` returns the SHA-256 of the token the host *actually carries*, and the control plane commits that observed hash (state-version CAS) alongside the host ref. An earlier commit-hash-before-create scheme was rejected: with concurrent reconcilers it allowed a stale provisioner to leave a host whose env no longer matched the committed hash, because nobody could re-derive the plaintext. Under read-back the hash always follows reality — concurrent provisions observe the same host and report the same hash, and a replaced host (which may keep its Docker container name) is caught by comparing the hash, not just the ref. The plaintext never appears outside the provider adapter and the host itself. GCE restart-in-place keeps the same incarnation and token; replacing a container or VM rotates it. There is a benign window where a host runs before its hash is committed; the runtime treats broker 401s at boot as retryable-for-a-bounded-time, and the create/start readiness deadline is the backstop. A hash of an internal bearer token is not an OAuth credential and does not violate the no-credentials-in-PostgreSQL rule. Lookup is by indexed hash with constant-time comparison. The token authorizes only `/runtime/v1/*` for its orb, and only while the orb's lifecycle state says the host should be up (`creating`/`starting`/`running`/`stopping` — `creating` is included because the first boot fetches its token before the orb ever reaches `running`); tokens of stopped or failed orbs are refused. Accepted for the single-account phase: repository code can read the token and, while its orb runs, obtain access tokens reachable only from inside the deployment's network; what it can never obtain is the refresh token.
 
-**Pi adapter (runtime side).** Pi's provider-OAuth contract is: `getApiKey(credentials)` is synchronous, `refreshToken(credentials)` is async and returns a full OAuth credential, and *Pi* decides when to refresh based on the stored credential's expiry. The adapter therefore works as follows: during boot the runtime calls the broker once and seeds its in-memory credential store with `{access, expires, refresh: "<broker>"}` — a synthetic refresh marker, since the real refresh token never leaves the control plane; `getApiKey` synchronously returns the stored access token; `refreshToken` calls the broker and returns the new credential with the same marker; `login` always fails — login happens only in the control plane. Whether an upstream 401 surfaces in a way that triggers Pi's refresh path, and how partially streamed operations behave, must be pinned by a contract test against the exact Pi SDK version — not assumed, and not validated only through the E2E mock. Retries around 401 are refresh-then-retry-once and never replay a partially consumed stream. Mock mode composes cleanly and gets simpler: the fake-inference base URL override stays an env concern, the OAuth side becomes broker-backed in both modes, the runtime's device-flow mock code is deleted, and the fake sees refresh traffic from the control plane only.
+**Pi adapter (runtime side).** Pi's provider-OAuth contract is: `getApiKey(credentials)` is synchronous, `refreshToken(credentials)` is async and returns a full OAuth credential, and *Pi* decides when to refresh based on the stored credential's expiry. The adapter therefore works as follows: during boot the runtime calls the broker once and seeds its in-memory credential store with `{access, expires, refresh: "<broker>"}` — a synthetic refresh marker, since the real refresh token never leaves the control plane; `getApiKey` synchronously returns the stored access token; `refreshToken` calls the broker and returns the new credential with the same marker; `login` always fails — login happens only in the control plane. The pinned-SDK contract test (`apps/orb-runtime/src/broker/provider.contract.test.ts`, run against the exact installed Pi version) pins this contract: login drives the broker and persists only the synthetic marker; an unexpired credential resolves without a refresh; an expired credential triggers exactly one coalesced broker refresh that is persisted before use; a failed refresh rejects resolution, leaves the stored credential intact, and is retried on the next resolution. **Pinned finding (2026-08-01):** this SDK version has *no* 401-triggered refresh path — auth is resolved per request and refreshed only when `Date.now() >= expires`, so an upstream 401 from a revoked-but-unexpired token fails the operation without any refresh attempt, and no partially consumed stream is ever replayed (nothing retries it). An earlier sketch of runtime-side refresh-then-retry-once on 401 is therefore not implemented and not needed while broker `expiresAt` values are accurate; the broker's proactive rotation (5-minute-remaining threshold) is the mitigation, and mid-run revocation recovery remains stop/start (open question 31). The runtime's `"rejected"` token-request reason is reserved for a future SDK that surfaces 401s to the provider hook. Mock mode composes cleanly and gets simpler: the fake-inference base URL override stays an env concern, the OAuth side becomes broker-backed in both modes, the runtime's device-flow mock code is deleted, and the fake sees refresh traffic from the control plane only.
 
 **Durable storage and fenced mutations.** Cloud Run filesystems are ephemeral, so the refresh token cannot live in a file there. Local development keeps the `auth.json` file store; the cloud control plane stores the credential in Secret Manager, with a PostgreSQL *credential-pointer row* as the source of truth: `{generation, secretVersion}`. Readers load the pointer and read that exact numeric secret version — never `latest`, whose read-after-write consistency is not guaranteed. Every mutation (login write, refresh write, invalidation) is fenced: it names the generation it read, and commits via compare-and-swap on the pointer row — the same optimistic-CAS philosophy the replication cursor already uses. An advisory lock was rejected as the correctness mechanism because a dropped connection releases it while its holder may still be mid-flight; instead, coalescing uses a short lease value CAS'd into the pointer row (bounded, expiring), so no database lock is ever held across an external call and a crashed leaseholder just times out. `invalid_grant` clears only the generation that was submitted upstream — a stale failure can never clobber a newer credential. Superseded secret versions are destroyed best-effort after the pointer moves.
 
@@ -1619,7 +1646,7 @@ Test framework assertions and React/framework error boundaries may use exception
 
 8. Determine what Pi exposes about running/detached background processes before future automatic idle stopping.
 9. Determine whether ordinary OS process/cgroup inspection is reliable enough to avoid a custom background-job tool.
-10. Decide whether a browser connection prevents future automatic idle shutdown.
+10. Decide whether a browser connection prevents future automatic idle shutdown. (§3.4 idle-auto-stop proposal answers yes; undecided.)
 
 ### Project and environment
 
@@ -1638,7 +1665,7 @@ Test framework assertions and React/framework error boundaries may use exception
 20. Decide how to partition polling later if redundant all-orb polling becomes inefficient at scale; no leader or partitioning is needed initially.
 21. Resolved: credential-broker and per-orb-token design written (§15.1); networking decided: Direct VPC egress to internal instance IPs (§5). Remaining: implement it, and validate direct IAP-on-Cloud-Run during the WebSocket validation exercise.
 22. Define observability, audit logging, metrics, and cost attribution.
-23. Define orphan-host reconciliation and cleanup.
+23. Define orphan-host reconciliation and cleanup. (A sweep proposal is written in §3.4 alongside idle auto-stop; undecided.)
 
 ### Product and security
 
@@ -1655,4 +1682,4 @@ Test framework assertions and React/framework error boundaries may use exception
 ### Cloud slice follow-ups
 
 31. Add a standalone re-login action so a mid-run credential revocation can be repaired without stopping and starting the orb (§15.1: today recovery is stop/start).
-32. Prevent a draining control-plane revision's reconciler from provisioning hosts with a stale startup script (§3.3 rollout caveat): e.g. stamp the script version into instance metadata and treat a mismatch as a replaceable host.
+32. Resolved (2026-08-01): the script-version stamp is implemented in `GceOrbHostProvider` — see the §3.3 rollout-caveat entry for the mechanism, the upgrade-delivery side effect, and the accepted drain-window residual.

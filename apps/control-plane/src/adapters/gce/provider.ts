@@ -33,6 +33,8 @@ export interface GceOrbHostProviderOptions {
 
 const ORB_LABEL = "pi-orb-orb-id";
 const TOKEN_METADATA_KEY = "pi-orb-runtime-token";
+const SCRIPT_HASH_METADATA_KEY = "pi-orb-script-sha256";
+const REPO_URL_METADATA_KEY = "pi-orb-repository-url";
 const DATA_DEVICE = "pi-orb-data";
 
 const instanceName = (orbId: string): string => `pi-orb-${orbId}`;
@@ -231,6 +233,145 @@ export class GceOrbHostProvider implements OrbHostProvider {
     }
   }
 
+  private expectedScript(orbId: string, repositoryUrl: string): string {
+    return buildStartupScript({
+      runtimeImage: this.options.runtimeImage,
+      orbId,
+      repositoryUrl,
+      controlPlaneUrl: this.options.controlPlaneUrl,
+      extraEnv: this.options.extraEnv ?? {},
+    });
+  }
+
+  /**
+   * Bring a reused instance's startup script up to date (§3.3 rollout
+   * caveat, open question 32). The stamped script hash is compared with the
+   * script this provider would generate; a mismatch means the instance was
+   * created by a different control-plane revision — or predates stamping —
+   * and would boot the wrong runtime image. Repair stops the instance if
+   * needed, rewrites the script metadata while preserving the runtime token
+   * (so the committed token hash stays valid), and starts it. Provision and
+   * start only run while the orb is `creating`/`starting`, so the bounce
+   * never interrupts a ready runtime. A draining stale revision can still
+   * "repair" a fresh host backward during its bounded drain window; the
+   * surviving revision repairs it forward on its next pass.
+   */
+  private async ensureCurrentScript(
+    task: SimulationTask,
+    operation: OrbHostProviderError["operation"],
+    instance: Record<string, unknown>,
+    orbId: string,
+    repositoryUrl: string,
+    context: OperationContext,
+  ): Promise<Result<"current" | "repaired", OrbHostProviderError>> {
+    const name = String(instance["name"] ?? "");
+    const script = this.expectedScript(orbId, repositoryUrl);
+    const expectedHash = sha256Hex(script);
+    if (metadataValue(instance, SCRIPT_HASH_METADATA_KEY) === expectedHash) return ok("current");
+
+    let current = instance;
+    const status = String(current["status"] ?? "");
+    if (status !== "TERMINATED" && status !== "SUSPENDED") {
+      const stopped = await this.request(
+        operation,
+        "POST",
+        this.zonePath(`instances/${name}/stop`),
+        context,
+      );
+      if (stopped.isErr()) return err(stopped.error);
+      if (stopped.value.status !== 200) {
+        return err(
+          providerError(
+            operation,
+            "operation_failed",
+            `stop for script repair HTTP ${stopped.value.status}`,
+            true,
+          ),
+        );
+      }
+      const waited = await this.waitOperation(
+        task,
+        operation,
+        String(stopped.value.body["name"] ?? ""),
+        context,
+      );
+      if (waited.isErr()) return err(waited.error);
+      // The metadata fingerprint may have moved; re-read before mutating.
+      const reread = await this.request(
+        operation,
+        "GET",
+        this.zonePath(`instances/${name}`),
+        context,
+      );
+      if (reread.isErr()) return err(reread.error);
+      if (reread.value.status !== 200) {
+        return err(
+          providerError(
+            operation,
+            "unavailable",
+            `instance re-get HTTP ${reread.value.status}`,
+            true,
+          ),
+        );
+      }
+      current = reread.value.body;
+    }
+
+    const metadata = (current["metadata"] ?? {}) as Record<string, unknown>;
+    const fingerprint = metadata["fingerprint"];
+    if (typeof fingerprint !== "string") {
+      return err(
+        providerError(operation, "unavailable", "instance metadata has no fingerprint", true),
+      );
+    }
+    const items = Array.isArray(metadata["items"])
+      ? (metadata["items"] as { key?: unknown; value?: unknown }[])
+      : [];
+    const preserved = items.filter(
+      (item) =>
+        item.key !== "startup-script" &&
+        item.key !== SCRIPT_HASH_METADATA_KEY &&
+        item.key !== REPO_URL_METADATA_KEY,
+    );
+    const updated = await this.request(
+      operation,
+      "POST",
+      this.zonePath(`instances/${name}/setMetadata`),
+      context,
+      {
+        fingerprint,
+        items: [
+          ...preserved,
+          { key: "startup-script", value: script },
+          { key: SCRIPT_HASH_METADATA_KEY, value: expectedHash },
+          { key: REPO_URL_METADATA_KEY, value: repositoryUrl },
+        ],
+      },
+    );
+    if (updated.isErr()) return err(updated.error);
+    if (updated.value.status !== 200) {
+      return err(
+        providerError(
+          operation,
+          "operation_failed",
+          `setMetadata HTTP ${updated.value.status}`,
+          true,
+        ),
+      );
+    }
+    const metadataWaited = await this.waitOperation(
+      task,
+      operation,
+      String(updated.value.body["name"] ?? ""),
+      context,
+    );
+    if (metadataWaited.isErr()) return err(metadataWaited.error);
+    const started = await this.startByName(task, name, context);
+    if (started.isErr()) return err(started.error);
+    task.log(`gce host ${name} startup script repaired to ${expectedHash.slice(0, 12)}`);
+    return ok("repaired");
+  }
+
   private toObservation(instance: Record<string, unknown>): OrbHostObservation | null {
     const labels = (instance["labels"] ?? {}) as Record<string, unknown>;
     const orbId = labels[ORB_LABEL];
@@ -296,7 +437,19 @@ export class GceOrbHostProvider implements OrbHostProvider {
             ),
           );
         }
-        if (instance["status"] === "TERMINATED" || instance["status"] === "SUSPENDED") {
+        const freshness = await this.ensureCurrentScript(
+          task,
+          "provision",
+          instance,
+          request.orbId,
+          request.bootstrap.repositoryUrl,
+          context,
+        );
+        if (freshness.isErr()) return err(freshness.error);
+        if (
+          freshness.value === "current" &&
+          (instance["status"] === "TERMINATED" || instance["status"] === "SUSPENDED")
+        ) {
           const started = await this.startByName(task, name, context);
           if (started.isErr()) return err(started.error);
         }
@@ -404,6 +557,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
             items: [
               { key: TOKEN_METADATA_KEY, value: runtimeToken },
               { key: "startup-script", value: startupScript },
+              // Script-version stamp plus the input needed to re-derive the
+              // script on later starts (ensureCurrentScript).
+              { key: SCRIPT_HASH_METADATA_KEY, value: sha256Hex(startupScript) },
+              { key: REPO_URL_METADATA_KEY, value: request.bootstrap.repositoryUrl },
             ],
           },
         },
@@ -473,7 +630,67 @@ export class GceOrbHostProvider implements OrbHostProvider {
     ref: OrbHostRef,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
-    return new ResultAsync(this.startByName(task, ref.resourceId, context));
+    const run = async (): Promise<Result<void, OrbHostProviderError>> => {
+      // Restart-in-place is where a stale startup script would otherwise
+      // survive forever: check the stamp before booting (open question 32).
+      const got = await this.request(
+        "start",
+        "GET",
+        this.zonePath(`instances/${ref.resourceId}`),
+        context,
+      );
+      if (got.isErr()) return err(got.error);
+      if (got.value.status !== 200) {
+        // Absence here is transient from the reconciler's viewpoint: the
+        // next observe sees null and reprovisions.
+        return err(
+          providerError("start", "operation_failed", `instance get HTTP ${got.value.status}`, true),
+        );
+      }
+      const instance = got.value.body;
+      const labels = (instance["labels"] ?? {}) as Record<string, unknown>;
+      const orbId = labels[ORB_LABEL];
+      if (typeof orbId !== "string") {
+        return err(
+          providerError(
+            "start",
+            "conflict",
+            `instance ${ref.resourceId} is not a pi-orb host`,
+            false,
+          ),
+        );
+      }
+      const repositoryUrl =
+        metadataValue(instance, REPO_URL_METADATA_KEY) ??
+        // Pre-stamp instances carry the URL only inside the script text.
+        /-e PI_ORB_REPOSITORY_URL='([^']*)'/.exec(
+          metadataValue(instance, "startup-script") ?? "",
+        )?.[1] ??
+        null;
+      if (repositoryUrl === null) {
+        return err(
+          providerError(
+            "start",
+            "operation_failed",
+            `instance ${ref.resourceId} carries no repository URL`,
+            false,
+          ),
+        );
+      }
+      const freshness = await this.ensureCurrentScript(
+        task,
+        "start",
+        instance,
+        orbId,
+        repositoryUrl,
+        context,
+      );
+      if (freshness.isErr()) return err(freshness.error);
+      // A repair already started the instance.
+      if (freshness.value === "repaired") return ok(undefined);
+      return this.startByName(task, ref.resourceId, context);
+    };
+    return new ResultAsync(run());
   }
 
   stop(

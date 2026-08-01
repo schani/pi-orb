@@ -1,13 +1,15 @@
 import {
   CAPABILITY_ABORT,
+  CAPABILITY_INPUT_IMAGE,
   type HistoryRecord,
+  type MessageInputBlock,
   type OrbHistoryView,
   type OrbView,
   type RuntimeEvent,
   type ServerFrame,
 } from "@pi-orb/protocol";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { Composer } from "../components/Composer.tsx";
+import { Composer, type ComposerImage } from "../components/Composer.tsx";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
 import {
   type ApiError,
@@ -25,7 +27,11 @@ interface WelcomeInfo {
   runtimeInstanceId: string;
   sessionId: string;
   capabilities: string[];
+  maxPromptBytes: number;
 }
+
+/** Defensive prompt cap until the welcome frame supplies the real limit. */
+const FALLBACK_MAX_PROMPT_BYTES = 6 * 1024 * 1024;
 
 interface OrbPageState {
   /** Insertion-ordered records keyed by id for cross-boundary dedupe. */
@@ -43,6 +49,7 @@ interface OrbPageState {
   liveBlocks: Map<string, LiveBlock>;
   tools: Map<string, ToolChip>;
   composerText: string;
+  composerImages: ComposerImage[];
   pendingRequest: { requestId: string; kind: "message" | "abort" } | null;
   requestError: { code: string; message: string } | null;
   serverError: { code: string; message: string } | null;
@@ -55,6 +62,9 @@ type OrbPageAction =
   | { type: "frame"; frame: ServerFrame }
   | { type: "connection_status"; status: LiveConnectionStatus }
   | { type: "composer_changed"; text: string }
+  | { type: "image_added"; image: ComposerImage }
+  | { type: "image_removed"; id: string }
+  | { type: "notice"; message: string }
   | { type: "request_sent"; requestId: string; kind: "message" | "abort" }
   | { type: "request_lost"; requestId: string }
   | { type: "send_unavailable" };
@@ -73,6 +83,7 @@ function initialState(): OrbPageState {
     liveBlocks: new Map(),
     tools: new Map(),
     composerText: "",
+    composerImages: [],
     pendingRequest: null,
     requestError: null,
     serverError: null,
@@ -144,6 +155,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
           runtimeInstanceId: frame.runtimeInstanceId,
           sessionId: frame.sessionId,
           capabilities: frame.capabilities,
+          maxPromptBytes: frame.limits.maxPromptBytes,
         },
         serverError: null,
       };
@@ -185,6 +197,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
           pendingRequest: null,
           requestError: null,
           composerText: clearComposer ? "" : state.composerText,
+          composerImages: clearComposer ? [] : state.composerImages,
         };
       }
       return {
@@ -226,6 +239,15 @@ function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
       return { ...state, connection: action.status };
     case "composer_changed":
       return { ...state, composerText: action.text };
+    case "image_added":
+      return { ...state, composerImages: [...state.composerImages, action.image], notice: null };
+    case "image_removed":
+      return {
+        ...state,
+        composerImages: state.composerImages.filter((image) => image.id !== action.id),
+      };
+    case "notice":
+      return { ...state, notice: action.message };
     case "request_sent":
       return {
         ...state,
@@ -293,6 +315,14 @@ export function OrbPage({ orbId }: { orbId: string }) {
     };
   }, [orbId]);
 
+  // Land on the latest messages once history is in; the sticky composer
+  // stays visible either way.
+  useEffect(() => {
+    if (state.historyLoaded) {
+      window.scrollTo({ top: document.documentElement.scrollHeight });
+    }
+  }, [state.historyLoaded]);
+
   // Live connection while running; hello carries the latest applied cursor.
   const afterRecordIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -317,14 +347,47 @@ export function OrbPage({ orbId }: { orbId: string }) {
     };
   }, [orbId, shouldConnect]);
 
+  const maxPromptBytes = state.welcome?.maxPromptBytes ?? FALLBACK_MAX_PROMPT_BYTES;
+
+  const addImage = (mediaType: string, data: string) => {
+    const pendingBytes =
+      state.composerImages.reduce((sum, image) => sum + image.data.length, 0) + data.length;
+    if (pendingBytes > maxPromptBytes) {
+      dispatch({
+        type: "notice",
+        message: `Image too large — attachments are limited to ${Math.floor(maxPromptBytes / (1024 * 1024))} MiB per message.`,
+      });
+      return;
+    }
+    dispatch({ type: "image_added", image: { id: crypto.randomUUID(), mediaType, data } });
+  };
+
   const sendMessage = () => {
     const connection = liveRef.current;
     const text = state.composerText.trim();
-    if (connection === null || text === "") return;
+    const images = state.composerImages;
+    if (connection === null || (text === "" && images.length === 0)) return;
+    if (
+      images.length > 0 &&
+      !(state.welcome?.capabilities.includes(CAPABILITY_INPUT_IMAGE) ?? false)
+    ) {
+      dispatch({ type: "notice", message: "This runtime does not accept image input." });
+      return;
+    }
+    const content: MessageInputBlock[] = [
+      ...images.map(
+        (image): MessageInputBlock => ({
+          type: "image",
+          mediaType: image.mediaType,
+          data: image.data,
+        }),
+      ),
+      ...(text !== "" ? [{ type: "text", text } satisfies MessageInputBlock] : []),
+    ];
     const requestId = connection.sendRequest({
       type: "message",
       expectedHeadId: state.headId,
-      content: [{ type: "text", text }],
+      content,
     });
     if (requestId === null) dispatch({ type: "send_unavailable" });
     else dispatch({ type: "request_sent", requestId, kind: "message" });
@@ -463,6 +526,9 @@ export function OrbPage({ orbId }: { orbId: string }) {
       <Composer
         text={state.composerText}
         onTextChange={(text) => dispatch({ type: "composer_changed", text })}
+        images={state.composerImages}
+        onImageAdd={addImage}
+        onImageRemove={(id) => dispatch({ type: "image_removed", id })}
         canSend={canSend}
         onSend={sendMessage}
         canAbort={canAbort}
