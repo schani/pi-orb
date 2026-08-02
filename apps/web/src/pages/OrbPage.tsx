@@ -20,6 +20,7 @@ import {
   stopOrb,
 } from "../lib/api.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
+import { isPinnedToBottom } from "../lib/scroll-pin.ts";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -315,13 +316,29 @@ export function OrbPage({ orbId }: { orbId: string }) {
     };
   }, [orbId]);
 
-  // Land on the latest messages once history is in; the sticky composer
-  // stays visible either way.
+  // Follow the tail: while the reader is at (or near) the bottom, new chat
+  // content keeps the view pinned there; once they scroll up, their position
+  // stays locked until they return to the bottom themselves.
+  const pinnedRef = useRef(true);
   useEffect(() => {
-    if (state.historyLoaded) {
+    const onScroll = () => {
+      pinnedRef.current = isPinnedToBottom({
+        scrollY: window.scrollY,
+        viewportHeight: window.innerHeight,
+        contentHeight: document.documentElement.scrollHeight,
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  // No dependency array: any render may have grown the page (records, live
+  // stream, tool chips). Scrolling to the bottom while already there is a
+  // no-op, so running after every render is cheap and always correct.
+  useEffect(() => {
+    if (state.historyLoaded && pinnedRef.current) {
       window.scrollTo({ top: document.documentElement.scrollHeight });
     }
-  }, [state.historyLoaded]);
+  });
 
   // Live connection while running; hello carries the latest applied cursor.
   const afterRecordIdRef = useRef<string | null>(null);
