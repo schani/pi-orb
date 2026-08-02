@@ -31,11 +31,13 @@ export function App() {
           pi-orb
         </a>
       </header>
-      {route.page === "projects" ? (
-        <ProjectsPage />
-      ) : (
-        <OrbPage key={route.orbId} orbId={route.orbId} />
-      )}
+      <div className="app-main">
+        {route.page === "projects" ? (
+          <ProjectsPage />
+        ) : (
+          <OrbPage key={route.orbId} orbId={route.orbId} />
+        )}
+      </div>
     </div>
   );
 }

@@ -93,6 +93,11 @@ export function Composer({
           rows={3}
           disabled={!canSend}
         />
+        {canAbort && (
+          <button type="button" className="danger" onClick={onAbort}>
+            abort
+          </button>
+        )}
         <button
           type="button"
           className="composer-send"
@@ -104,13 +109,6 @@ export function Composer({
           {pending ? "…" : "↑"}
         </button>
       </div>
-      {canAbort && (
-        <div className="composer-actions">
-          <button type="button" className="danger" onClick={onAbort}>
-            abort
-          </button>
-        </div>
-      )}
     </div>
   );
 }

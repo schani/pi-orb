@@ -15,6 +15,78 @@ function message(id: string, role: "user" | "assistant", text: string): HistoryR
   };
 }
 
+describe("HistoryView turn structure", () => {
+  it("gives each user record its own gutter turn and groups adjacent agent-side records", () => {
+    const records: HistoryRecord[] = [
+      message("u1", "user", "first question"),
+      message("a1", "assistant", "working on it"),
+      {
+        id: "t1",
+        parentId: "a1",
+        timestamp: "time-t1",
+        overflow: { native: {} },
+        type: "message",
+        role: "tool",
+        content: [
+          { type: "tool_result", callId: "call-1", content: [{ type: "text", text: "output" }] },
+        ],
+      },
+      message("u2", "user", "second question"),
+      message("a2", "assistant", "answer two"),
+    ];
+    const html = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+
+    expect(html.match(/turn-user/g)).toHaveLength(2);
+    // a1 and t1 share one agent turn; a2 (after u2) starts a new one.
+    expect(html.match(/turn-agent/g)).toHaveLength(2);
+    expect(html.match(/turn-mark">Y</g)).toHaveLength(2);
+    expect(html.match(/turn-mark">O</g)).toHaveLength(2);
+    expect(html).toContain(">You<");
+    expect(html).toContain(">Orb<");
+  });
+
+  it("renders compaction as a full-width divider outside the gutter turns", () => {
+    const records: HistoryRecord[] = [
+      message("u1", "user", "hello"),
+      {
+        id: "c1",
+        parentId: "u1",
+        timestamp: "time-c1",
+        overflow: { native: {} },
+        type: "compaction",
+        summary: [{ type: "text", text: "the summary" }],
+      },
+      message("a1", "assistant", "after compaction"),
+    ];
+    const html = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+
+    expect(html).toContain("context compacted");
+    expect(html.match(/record-compaction/g)).toHaveLength(1);
+    // The divider must close the preceding agent grouping context, not live inside a turn.
+    expect(html.match(/turn-agent/g)).toHaveLength(1);
+  });
+
+  it("renders live streaming output and tool chips as an agent turn", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[message("u1", "user", "go")]}
+        liveBlocks={[{ blockId: "b1", blockType: "text", text: "streaming now", revision: 1 }]}
+        tools={[{ callId: "call-1", name: "bash", state: "running", message: null }]}
+        busy
+      />,
+    );
+
+    expect(html.match(/turn-agent/g)).toHaveLength(1);
+    expect(html.match(/turn-mark">O</g)).toHaveLength(1);
+    expect(html).toContain("streaming now");
+    expect(html).toContain("tool-chip-running");
+  });
+});
+
 describe("HistoryView", () => {
   it("renders committed and streaming assistant text as Markdown but keeps user text literal", () => {
     const html = renderToStaticMarkup(

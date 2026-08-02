@@ -1102,6 +1102,16 @@ The first UI needs to display at least:
 
 Remaining UI questions include rendering unknown content blocks, large/truncated tool output, and image storage. Transient token deltas are ephemeral presentation events and are reconstructed after reconnect through ordinary live events; they are not stored in PostgreSQL.
 
+### 10.1 Visual design (decided)
+
+The UI uses the "Reading Room" variant of the Manuscript × Gutter design, chosen from a design exploration (five initial directions, then a Manuscript × Gutter hybrid, then five typography variations). Decisions:
+
+- **Paper/ink palette, light mode only.** Warm paper ground (`#f8f3e9`), ink text (`#221c12`), terracotta accent (`#a03e1c`). No dark mode — explicit product decision.
+- **Reading typography.** Agent prose is set in a Charter/Iowan Old Style serif stack at 17.5px/1.7; user messages are larger italic serif "margin notes" on terracotta blocks; headings and buttons use small-caps serif; structural meta (labels, chips, tool output, orb ids) is quiet monospace. All fonts are system stacks — no webfonts.
+- **Turn gutter.** Every chat turn carries a gutter column: a marked square (`Y` filled terracotta for the user, `O` outlined ink for the agent) with a fading vertical rail. Adjacent agent-side records (assistant, tool results, displayed events) group into a single agent turn; compaction renders as a full-width dashed divider crossing the gutter.
+- **Fluid width.** No max-width constraint — the manuscript fills the window at any size.
+- **Composer.** Sticky at the viewport bottom, full-bleed; serif input, round ink send button (`↑`, ⌘⏎ shortcut), small-caps terracotta abort in the same row; chat scrolls in the normal document flow with bottom-pinned auto-follow (§ scroll pinning in `apps/web/src/lib/scroll-pin.ts`).
+
 ## 11. Projects, source checkout, and first end-to-end slice
 
 ### 11.1 Project model
