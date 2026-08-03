@@ -4,16 +4,19 @@
 # is still settling; revisit when it is stable.
 
 locals {
-  shared_env = {
-    PI_ORB_ROLE_UNUSED          = "per-service"
-    PI_ORB_SECRET_STORE         = "gsm"
-    PI_ORB_GCP_PROJECT          = var.project
-    PI_ORB_HOST_PROVIDER        = "gce"
-    PI_ORB_GCE_ZONE             = var.zone
-    PI_ORB_GCE_SERVICE_ACCOUNT  = google_service_account.orb_vm.email
-    PI_ORB_GCE_SUBNETWORK       = "regions/${var.region}/subnetworks/${google_compute_subnetwork.orbs.name}"
-    PI_ORB_RUNTIME_IMAGE        = var.runtime_image
-  }
+  shared_env = merge(
+    {
+      PI_ORB_ROLE_UNUSED          = "per-service"
+      PI_ORB_SECRET_STORE         = "gsm"
+      PI_ORB_GCP_PROJECT          = var.project
+      PI_ORB_HOST_PROVIDER        = "gce"
+      PI_ORB_GCE_ZONE             = var.zone
+      PI_ORB_GCE_SERVICE_ACCOUNT  = google_service_account.orb_vm.email
+      PI_ORB_GCE_SUBNETWORK       = "regions/${var.region}/subnetworks/${google_compute_subnetwork.orbs.name}"
+      PI_ORB_RUNTIME_IMAGE        = var.runtime_image
+    },
+    var.github_client_id != "" ? { PI_ORB_GITHUB_CLIENT_ID = var.github_client_id } : {},
+  )
 }
 
 resource "google_cloud_run_v2_service" "runtime" {
@@ -56,6 +59,19 @@ resource "google_cloud_run_v2_service" "runtime" {
         content {
           name  = env.key
           value = env.value
+        }
+      }
+      # The broker's GitHub user-token refresh needs the app client secret.
+      dynamic "env" {
+        for_each = var.github_client_id != "" ? [1] : []
+        content {
+          name = "PI_ORB_GITHUB_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.github_client_secret.secret_id
+              version = "latest"
+            }
+          }
         }
       }
       resources {
@@ -113,6 +129,19 @@ resource "google_cloud_run_v2_service" "browser" {
         content {
           name  = env.key
           value = env.value
+        }
+      }
+      # The GitHub device-login gate (reconciler) needs the app client secret.
+      dynamic "env" {
+        for_each = var.github_client_id != "" ? [1] : []
+        content {
+          name = "PI_ORB_GITHUB_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.github_client_secret.secret_id
+              version = "latest"
+            }
+          }
         }
       }
       resources {

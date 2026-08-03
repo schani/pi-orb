@@ -500,7 +500,12 @@ export function OrbPage({ orbId }: { orbId: string }) {
         )}
         {orb?.actionRequired !== undefined && (
           <div className="banner banner-action">
-            <strong>Device login required.</strong> Visit{" "}
+            <strong>
+              {orb.actionRequired.type === "github_device_login"
+                ? "GitHub device login required."
+                : "OpenAI device login required."}
+            </strong>{" "}
+            Visit{" "}
             <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
               {orb.actionRequired.verificationUri}
             </a>{" "}

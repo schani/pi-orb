@@ -251,7 +251,11 @@ export interface OrbRuntimeClient {
 // ---------------------------------------------------------------------------
 // Auth gate (DESIGN.md §15.1)
 
+/** Which upstream a device challenge belongs to (drives the UI label). */
+export type ChallengeProvider = "openai-codex" | "github";
+
 export interface DeviceChallenge {
+  readonly provider: ChallengeProvider;
   readonly verificationUri: string;
   readonly userCode: string;
   /** Wall-clock ms. */
@@ -358,7 +362,8 @@ export interface UpstreamRefresher {
 export interface BrokerDeps {
   readonly pointers: CredentialPointerStore;
   readonly secrets: CredentialSecretStore;
-  readonly upstream: UpstreamRefresher;
+  /** One refresher per provider; a provider with no entry cannot refresh. */
+  readonly upstreams: Readonly<Record<string, UpstreamRefresher>>;
   readonly constants: import("./constants.ts").BrokerConstants;
 }
 

@@ -28,3 +28,5 @@ When third-party or platform code can throw or reject, catch it at the immediate
 
 Deterministic simulation testing with the `determined` package is a first-class design constraint. Keep concurrency-critical logic, clocks, persistence, runtime transport, and host lifecycle behavior behind simulation-friendly boundaries. New state machines and retry/reconciliation logic must include deterministic scheduling checkpoints, failpoints where appropriate, invariant-focused tests, and reproducible failure traces.
 
+DST tests must never be flaky. A DST failure that does not reproduce on every run is not noise — it is a schedule the scenario cannot survive, and it must be root-caused before any fix: replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`), understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never "fix" DST flakiness by rerunning, loosening assertions blindly, or deleting the trace.
+

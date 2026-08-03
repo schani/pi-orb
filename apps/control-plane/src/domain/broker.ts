@@ -145,6 +145,14 @@ export async function getToken(
       );
     }
 
+    const upstream = deps.upstreams[provider];
+    if (upstream === undefined) {
+      // No refresher wired for this provider (configuration gap). A
+      // still-valid token is served; an expired one cannot recover here.
+      if (!expired && !rejected) return ok(grantOf(credential, pointer.generation));
+      return err(retryable(`no upstream refresher for provider ${provider}`));
+    }
+
     const leaseResult = await deps.pointers.casWritePointer(task, provider, pointer.rowVersion, {
       generation: pointer.generation,
       secretVersion: pointer.secretVersion,
@@ -163,7 +171,7 @@ export async function getToken(
       task,
       constants.upstreamTimeoutMs,
       "upstream refresh",
-      (context) => deps.upstream.refresh(task, credential, context),
+      (context) => upstream.refresh(task, credential, context),
     );
 
     if (refreshResult.isOk()) {

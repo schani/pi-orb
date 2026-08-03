@@ -500,7 +500,11 @@ describe("orb lifecycle (DST)", () => {
 
   it("an unreachable runtime in a live host is restarted after the grace period", async () => {
     await runDst({ name: "unreachable-restart", iterations: 20 }, async (sim) => {
-      const harness = makeHarness();
+      // Idle auto-stop is out of scope here: the scenario generates no busy
+      // activity, and adversarial schedules can stretch kill + grace + restart
+      // past the test idle window, legitimately stopping the orb (trace-
+      // diagnosed 2026-08-03). The restart mechanism is what's under test.
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
       const stop = new AbortController();
       const result = await sim.runTasks([
         { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
@@ -545,7 +549,10 @@ describe("orb lifecycle (DST)", () => {
 
   it("an unexpectedly stopped host while running is restored", async () => {
     await runDst({ name: "host-vanishes", iterations: 20 }, async (sim) => {
-      const harness = makeHarness();
+      // Same idle-stop opt-out as unreachable-restart: no activity here, and
+      // an idle stop mid-recovery would turn the wait-for-running into a
+      // timeout. Host restoration is what's under test.
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
       const stop = new AbortController();
       const result = await sim.runTasks([
         { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },

@@ -1399,6 +1399,8 @@ Code never `await`s an `AbortSignal` directly. APIs such as `fetch`, `execFile`,
 
 Baseline GitHub CI runs for every pull request and every push to `main`, using Node 24 and the committed npm lockfile. A single required checks job installs with `npm ci`, then runs the repository-wide typecheck, lint, and test scripts. Entropy-iteration budgets and deterministic failure-trace retention remain open.
 
+DST tests must never be flaky; a non-reproducing failure is a schedule the scenario cannot survive and must be root-caused from its recorded trace (`DST_REPLAY`) before any fix (also recorded in `AGENTS.md`). Standing interplay found 2026-08-03: since idle auto-stop (§3.4) landed, any scenario that holds an orb in `running` across long virtual stretches without busy activity or a visible tab races the test idle window — such scenarios must either simulate activity or opt out via a `makeHarness` `idleStopAfterMs` override, as the restart-recovery lifecycle tests now do.
+
 ## 15. Security requirements and questions
 
 The first local vertical slice intentionally has no authentication or authorization. Anyone who can reach the control plane can list, create, inspect, control, and stop every project and orb. The control plane-to-runtime hop is also unauthenticated. This deployment is suitable only on a trusted development machine/network and must not be exposed publicly.
@@ -1519,7 +1521,7 @@ Still open for that later security phase:
 - whether project code is trusted, semi-trusted, or hostile;
 - portal/forwarded-port authorization.
 
-### 15.3 GitHub credentials for `gh` and git push (proposed 2026-08-03; direction decided 2026-08-03: user OAuth device flow)
+### 15.3 GitHub credentials for `gh` and git push (decided 2026-08-03: user OAuth device flow; control-plane side implemented 2026-08-03; runtime consumption pending)
 
 Goal: `gh` is installed in the runtime image and works inside orbs without manual login, so agent shell commands can open PRs, read issues, and check CI, and `git push` over HTTPS works for authorized repositories.
 
@@ -1528,6 +1530,14 @@ The credential broker (§15.1) is the vehicle: the GitHub token route reuses the
 **Decided: user OAuth device flow** (GitHub App user-to-server tokens with expiration enabled), because PRs and comments must be authored *as the user*, not a bot. Identical in shape to the existing `openai-codex` pointer: a device-code login ceremony (analogous to `PiAuthGate`) captures a refresh token into Secret Manager; the broker vends ~8-hour access tokens and refreshes them behind the existing lease/generation mechanics (GitHub rotates the refresh token on every use — the fenced-CAS machinery and the acknowledged loss window of §15.1 apply unchanged).
 
 This still requires registering a **GitHub App** — but the app is only the OAuth client registration, not the acting identity. Two reasons a classic OAuth App does not work: its user tokens never expire and have no refresh token, so the broker would be vending a durable credential (the exact failure of the PAT option below); and its scopes are coarse (`repo` is everything). Only GitHub App user-to-server flows offer expiring tokens plus rotation and fine-grained permissions. Registration is a settings-page form (no review or marketplace listing): enable device flow, keep "expire user authorization tokens" on, install the app on the account/repositories it may reach. Resulting tokens are constrained to the intersection of the user's access and the app's installation — a useful blast-radius bound. One wrinkle: the device-flow *initial* grant needs only the client id, but *refreshing* requires the app's client secret, so the client secret is a second control-plane-only durable secret (Secret Manager beside the refresh token; it never leaves the control plane).
+
+**Control-plane implementation (2026-08-03).** The GitHub provider reuses the broker core wholesale — `credential_pointers` row `github`, GSM parent secret `pi-orb-credential-github`, the same fenced-CAS refresh mechanics — with these additions:
+
+- `BrokerDeps.upstream` became per-provider `upstreams` (a provider with no refresher serves still-valid tokens and reports retryable otherwise). `GithubUpstreamRefresher` does the rotating `refresh_token` grant against `github.com/login/oauth/access_token` with the client secret; `bad_refresh_token` maps to `invalid_grant`, clearing the pointer and re-opening the ceremony. GitHub answers OAuth errors as HTTP 200 with an `error` body field; both adapters inspect the body.
+- `GithubAuthGate` (domain, behind a `GithubOAuthClient` port) runs the device ceremony with **no background driver**: each reconciler `ensureAuth` call advances the flow by at most one poll, respecting the device-flow interval and `slow_down` backoff — the whole ceremony is deterministically simulable. An authorized-but-uncommitted credential is held in memory and the commit retried on later calls, so a store hiccup never forces a second ceremony. The `/user` login lookup fills `accountId` (falling back to `"unknown"` rather than losing a credential).
+- `CompositeAuthGate` chains Codex → GitHub: the first blocking resolution wins, so the user sees one device challenge at a time; orb create/start now gates on both ceremonies (each is once-ever). `DeviceChallenge` carries a `provider`, surfaced as `actionRequired.type` `github_device_login` and a per-provider UI banner label.
+- Configuration: `PI_ORB_GITHUB_CLIENT_ID` + `PI_ORB_GITHUB_CLIENT_SECRET`; when unset the gate and refresher are simply not wired — `tokens/github` answers `auth_required` and nothing else changes (local dev and E2E unaffected). In the cloud, the client id is the `github_client_id` tofu variable and the client secret lives in Secret Manager (`pi-orb-github-client-secret`, version added manually via `gcloud secrets versions add` after registering the app); both the browser service (gate) and runtime service (refresher) receive them.
+- DST coverage (`github-auth.dst.test.ts`): ceremony-to-served-token happy path; poll pacing (never faster than the interval, wider after `slow_down`); expired device code → fresh flow; denied → later retry; commit-failure recovery without a second ceremony; transient device-code/poll failpoints; cross-provider isolation (Codex pointer untouched); composite ordering (GitHub ceremony never starts while Codex blocks). What simulation cannot validate — GitHub's real OAuth responses — is the thin HTTP adapter, exercised on the live slice.
 
 Rejected alternatives:
 
@@ -1550,7 +1560,7 @@ Runtime consumption:
 - Exposure class: repository code can obtain a short-lived, scoped GitHub token — the same accepted exposure class as model access tokens (§15.1); the durable secret (app key or refresh token) never leaves the control plane.
 - The §11.1 public-HTTPS-only clone rule stays until this lands; private-repo clone becomes a natural follow-on (the credential helper is the same seam), but is a separate decision.
 
-Still open: user sign-off on the concrete route shape above; which repositories/permissions the app is granted; whether private clone rides along or waits; whether the `gh` shim or the `spawnHook` env injection is the consumption mechanism.
+Still open: which repositories/permissions the app is granted (a settings-page decision at registration time); whether private clone rides along or waits; whether the `gh` shim or the `spawnHook` env injection is the consumption mechanism.
 
 ## 16. Deferred suborbs
 

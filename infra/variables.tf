@@ -19,6 +19,12 @@ variable "iap_domain" {
   default     = "heyglide.com"
 }
 
+variable "github_client_id" {
+  description = "GitHub App client id for the gh/user-token flow (DESIGN.md §15.3); empty disables the integration."
+  type        = string
+  default     = ""
+}
+
 variable "control_plane_image" {
   description = "Digest-pinned control-plane image (from build-push.sh)."
   type        = string

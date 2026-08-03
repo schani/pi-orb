@@ -22,6 +22,8 @@ export const FAILPOINTS = {
   brokerPointerWriteAfter: "broker.pointer.write.after",
   brokerSecretRead: "broker.secret.read",
   brokerSecretWrite: "broker.secret.write",
+  githubDeviceCode: "github.device.code",
+  githubDevicePoll: "github.device.poll",
 } as const;
 
 export type FailpointName = (typeof FAILPOINTS)[keyof typeof FAILPOINTS];

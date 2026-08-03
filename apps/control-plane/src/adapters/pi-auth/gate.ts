@@ -140,6 +140,7 @@ export class PiAuthGate implements AuthGate {
         notify: (event) => {
           if (event.type === "device_code") {
             const challenge: DeviceChallenge = {
+              provider: "openai-codex",
               verificationUri: event.verificationUri,
               userCode: event.userCode,
               expiresAt: wallNow + (event.expiresInSeconds ?? 900) * 1000,
@@ -198,6 +199,7 @@ export class PiAuthGate implements AuthGate {
         return {
           status: "pending",
           challenge: {
+            provider: "openai-codex",
             verificationUri: "",
             userCode: "",
             expiresAt: task.wallNow(),
@@ -233,6 +235,7 @@ export class PiAuthGate implements AuthGate {
       return {
         status: "pending",
         challenge: {
+          provider: "openai-codex",
           verificationUri: "",
           userCode: "",
           expiresAt: task.wallNow(),

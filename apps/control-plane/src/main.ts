@@ -11,6 +11,11 @@ import Fastify from "fastify";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
+import {
+  type GithubOAuthConfig,
+  GithubOAuthHttpClient,
+  GithubUpstreamRefresher,
+} from "./adapters/github-oauth/client.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
 import { PgClient } from "./adapters/pg/client.ts";
 import { PgCredentialPointerStore } from "./adapters/pg/credential-pointers.ts";
@@ -20,8 +25,11 @@ import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
+import { CompositeAuthGate } from "./domain/auth-gates.ts";
+import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
+import { GithubAuthGate } from "./domain/github-auth.ts";
 import { orphanSweepLoop, pollLoop, reconcileLoop } from "./domain/loops.ts";
 import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
@@ -77,12 +85,40 @@ async function main(): Promise<void> {
           secretPrefix: env("PI_ORB_CREDENTIAL_SECRET_PREFIX", "pi-orb-credential"),
         })
       : new FileSecretStore(join(authDir, "broker-secrets"));
+  // GitHub App credentials for the gh/user-token flow (DESIGN.md §15.3).
+  // Unset means "no GitHub integration": no gate, no refresher — tokens/github
+  // answers auth_required and everything else is unchanged.
+  const githubClientId = env("PI_ORB_GITHUB_CLIENT_ID", "");
+  const githubClientSecret = env("PI_ORB_GITHUB_CLIENT_SECRET", "");
+  const githubOauth: GithubOAuthConfig | null =
+    githubClientId !== "" && githubClientSecret !== ""
+      ? {
+          clientId: githubClientId,
+          clientSecret: githubClientSecret,
+          ...(process.env["PI_ORB_GITHUB_OAUTH_URL"] !== undefined &&
+          process.env["PI_ORB_GITHUB_OAUTH_URL"] !== ""
+            ? { oauthBaseUrl: process.env["PI_ORB_GITHUB_OAUTH_URL"] }
+            : {}),
+          ...(process.env["PI_ORB_GITHUB_API_URL"] !== undefined &&
+          process.env["PI_ORB_GITHUB_API_URL"] !== ""
+            ? { apiBaseUrl: process.env["PI_ORB_GITHUB_API_URL"] }
+            : {}),
+        }
+      : null;
+  if (githubOauth === null) {
+    bootTask.log("GitHub integration disabled (PI_ORB_GITHUB_CLIENT_ID/SECRET unset)");
+  }
   const broker: BrokerDeps = {
     pointers: new PgCredentialPointerStore(db),
     secrets,
-    upstream: new OAuthUpstreamRefresher(
-      mockOpenAi !== null ? { oauthBaseUrl: mockOpenAi.oauthBaseUrl } : {},
-    ),
+    upstreams: {
+      [CODEX_PROVIDER]: new OAuthUpstreamRefresher(
+        mockOpenAi !== null ? { oauthBaseUrl: mockOpenAi.oauthBaseUrl } : {},
+      ),
+      ...(githubOauth !== null
+        ? { [GITHUB_PROVIDER]: new GithubUpstreamRefresher(githubOauth) }
+        : {}),
+    },
     constants: DEFAULT_BROKER_CONSTANTS,
   };
   const mockExtraEnv =
@@ -125,7 +161,13 @@ async function main(): Promise<void> {
     store: new PgControlPlaneStore(db),
     hostProvider,
     runtimeClient: new FetchRuntimeClient(),
-    authGate: new PiAuthGate(authDir, mockOpenAi, broker),
+    authGate:
+      githubOauth !== null
+        ? new CompositeAuthGate([
+            new PiAuthGate(authDir, mockOpenAi, broker),
+            new GithubAuthGate(broker, new GithubOAuthHttpClient(githubOauth)),
+          ])
+        : new PiAuthGate(authDir, mockOpenAi, broker),
     control: new ControlState(),
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
   };

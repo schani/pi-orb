@@ -31,7 +31,12 @@ function makeBrokerHarness(): BrokerHarness {
     pointers,
     secrets,
     upstream,
-    deps: { pointers, secrets, upstream, constants: DEFAULT_BROKER_CONSTANTS },
+    deps: {
+      pointers,
+      secrets,
+      upstreams: { [PROVIDER]: upstream },
+      constants: DEFAULT_BROKER_CONSTANTS,
+    },
   };
 }
 

@@ -75,6 +75,7 @@ export class FakeAuthGate implements AuthGate {
       this.flowStartCount += 1;
       this.flow = {
         challenge: {
+          provider: "openai-codex" as const,
           verificationUri: "https://auth.example/device",
           userCode: `CODE-${this.flowStartCount}`,
           expiresAt: task.wallNow() + mode.challengeTtlMs,

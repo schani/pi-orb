@@ -37,7 +37,10 @@ describe("runtime broker routes", () => {
     broker = {
       pointers,
       secrets,
-      upstream: new FakeUpstream("unseeded"),
+      upstreams: {
+        "openai-codex": new FakeUpstream("unseeded"),
+        github: new FakeUpstream("gh-unseeded"),
+      },
       constants: { ...DEFAULT_BROKER_CONSTANTS, requestDeadlineMs: 100, waiterPollMs: 5 },
     };
     store.seedProject(makeProjectRow(PROJECT));
@@ -170,6 +173,25 @@ describe("runtime broker routes", () => {
     const response = await request({ reason: "startup" }, TOKEN, "github");
     expect(response.statusCode).toBe(409);
     expect(response.json()).toEqual({ error: "auth_required" });
+  });
+
+  it("grants a github token once a github credential exists", async () => {
+    seedOrb("running");
+    const credential = makeCredential(task, { accountId: "octocat" });
+    const version = secrets.seedSecret("github", credential);
+    pointers.seedRow({
+      provider: "github",
+      rowVersion: 1,
+      generation: 1,
+      secretVersion: version,
+      refreshLeaseUntil: 0,
+      lastRefreshAt: 0,
+    });
+    const response = await request({ reason: "startup" }, TOKEN, "github");
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.accessToken).toBe(credential.access);
+    expect(body.accountId).toBe("octocat");
   });
 
   it("requires a valid bearer on the github token too", async () => {

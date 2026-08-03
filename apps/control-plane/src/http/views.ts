@@ -64,7 +64,10 @@ export function orbView(orb: OrbRow, control: ControlState): OrbView {
     ...(showChallenge
       ? {
           actionRequired: {
-            type: "openai_codex_device_login" as const,
+            type:
+              challenge.provider === "github"
+                ? ("github_device_login" as const)
+                : ("openai_codex_device_login" as const),
             verificationUri: challenge.verificationUri,
             userCode: challenge.userCode,
             expiresAt: iso(challenge.expiresAt),
