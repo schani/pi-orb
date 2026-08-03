@@ -20,9 +20,9 @@ variable "iap_domain" {
 }
 
 variable "github_client_id" {
-  description = "GitHub App client id for the gh/user-token flow (DESIGN.md §15.3); empty disables the integration."
+  description = "GitHub App client id for the gh/user-token flow (DESIGN.md §15.3); empty disables the integration. Public by nature — it travels in every device-flow request; the client secret lives only in Secret Manager."
   type        = string
-  default     = ""
+  default     = "Iv23liA7Aecbetq28EHv"
 }
 
 variable "control_plane_image" {

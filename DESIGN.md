@@ -1561,6 +1561,8 @@ Runtime consumption (implemented 2026-08-03; the shim approach was chosen over t
 - Exposure class: repository code can obtain a short-lived, scoped GitHub token — the same accepted exposure class as model access tokens (§15.1); the durable secrets (client secret, refresh token) never leave the control plane.
 - Private-repo clone remains a separate decision; the credential helper is the seam it would reuse.
 
+The app is registered as installable on **the owning account only** (decided 2026-08-03): the broker's single `github` slot means every orb acts as the one user who completed the ceremony, so a public app would grant nothing today. The setting only controls who may install the app — a private app can be made public later from its settings when the multi-user milestone (open questions 24/25 — per-(user, provider) credential pointers, per-user ceremonies) makes other installations meaningful.
+
 Still open: which repositories/permissions the app is granted (a settings-page decision at registration time); whether private clone rides along or waits.
 
 ## 16. Deferred suborbs
