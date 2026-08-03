@@ -16,6 +16,9 @@ import type { OperationContext, StoredCredential, UpstreamRefresher } from "../.
  * paths inspect the body, not just the status. The client secret is used
  * only for refresh (the device grant needs the client id alone) and never
  * leaves this process; refresh tokens cross the network only here.
+ *
+ * Failures travel as rejections carrying typed errors; the ResultAsync
+ * mappers at each public method are the exception boundary of this adapter.
  */
 
 const REAL_OAUTH_BASE_URL = "https://github.com";
@@ -49,6 +52,9 @@ class OAuthFailure extends Error {
   }
 }
 
+const failOauth = (message: string): Promise<never> =>
+  Promise.reject(new OAuthFailure(transientOauth(message)));
+
 async function postForm(
   url: string,
   form: URLSearchParams,
@@ -65,7 +71,7 @@ async function postForm(
   });
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok && typeof body["error"] !== "string") {
-    throw new OAuthFailure(transientOauth(`GitHub OAuth HTTP ${response.status}`));
+    return failOauth(`GitHub OAuth HTTP ${response.status}`);
   }
   return body;
 }
@@ -74,15 +80,20 @@ function credentialFromTokenBody(
   task: SimulationTask,
   body: Record<string, unknown>,
   accountId: string,
-): StoredCredential {
+): Promise<StoredCredential> {
   const access = body["access_token"];
   if (typeof access !== "string") {
-    throw new OAuthFailure(transientOauth("GitHub token response missing access_token"));
+    return failOauth("GitHub token response missing access_token");
   }
   const refresh = typeof body["refresh_token"] === "string" ? body["refresh_token"] : "";
   const expiresIn =
     typeof body["expires_in"] === "number" ? body["expires_in"] : FALLBACK_ACCESS_TTL_S;
-  return { access, refresh, accountId, expiresAt: task.wallNow() + expiresIn * 1000 };
+  return Promise.resolve({
+    access,
+    refresh,
+    accountId,
+    expiresAt: task.wallNow() + expiresIn * 1000,
+  });
 }
 
 export class GithubOAuthHttpClient implements GithubOAuthClient {
@@ -98,19 +109,19 @@ export class GithubOAuthHttpClient implements GithubOAuthClient {
 
   /** Best-effort login lookup; an unnamed account never loses a credential. */
   private async fetchLogin(access: string): Promise<string> {
-    try {
-      const response = await fetch(`${this.config.apiBaseUrl ?? REAL_API_BASE_URL}/user`, {
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${access}`,
-        },
-      });
-      if (!response.ok) return "unknown";
-      const body = (await response.json()) as Record<string, unknown>;
-      return typeof body["login"] === "string" ? body["login"] : "unknown";
-    } catch {
-      return "unknown";
-    }
+    const login = await fetch(`${this.config.apiBaseUrl ?? REAL_API_BASE_URL}/user`, {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${access}`,
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) return "unknown";
+        const body = (await response.json()) as Record<string, unknown>;
+        return typeof body["login"] === "string" ? body["login"] : "unknown";
+      })
+      .catch(() => "unknown");
+    return login;
   }
 
   requestDeviceCode(
@@ -129,7 +140,7 @@ export class GithubOAuthHttpClient implements GithubOAuthClient {
         typeof userCode !== "string" ||
         typeof verificationUri !== "string"
       ) {
-        throw new OAuthFailure(transientOauth("GitHub device-code response malformed"));
+        return failOauth("GitHub device-code response malformed");
       }
       const intervalS = typeof body["interval"] === "number" ? body["interval"] : 5;
       const expiresInS = typeof body["expires_in"] === "number" ? body["expires_in"] : 900;
@@ -166,9 +177,9 @@ export class GithubOAuthHttpClient implements GithubOAuthClient {
         if (errorCode === "slow_down") return { kind: "slow_down" };
         if (errorCode === "expired_token") return { kind: "expired" };
         if (errorCode === "access_denied") return { kind: "denied" };
-        throw new OAuthFailure(transientOauth(`GitHub device poll failed: ${errorCode}`));
+        return failOauth(`GitHub device poll failed: ${errorCode}`);
       }
-      const provisional = credentialFromTokenBody(task, body, "unknown");
+      const provisional = await credentialFromTokenBody(task, body, "unknown");
       const login = await this.fetchLogin(provisional.access);
       return { kind: "authorized", credential: { ...provisional, accountId: login } };
     };
@@ -193,6 +204,9 @@ class RefreshFailure extends Error {
   }
 }
 
+const failRefresh = (typed: UpstreamRefreshError): Promise<never> =>
+  Promise.reject(new RefreshFailure(typed));
+
 /**
  * The broker's upstream refresh for GitHub user tokens: the rotating
  * `refresh_token` grant, which for GitHub Apps requires the client secret.
@@ -213,7 +227,7 @@ export class GithubUpstreamRefresher implements UpstreamRefresher {
   ): ResultAsync<StoredCredential, UpstreamRefreshError> {
     const run = async (): Promise<StoredCredential> => {
       if (credential.refresh === "") {
-        throw new RefreshFailure({
+        return failRefresh({
           type: "invalid_grant",
           message: "no GitHub refresh token stored (token expiration disabled?)",
         });
@@ -227,20 +241,16 @@ export class GithubUpstreamRefresher implements UpstreamRefresher {
           refresh_token: credential.refresh,
         }),
         context.signal,
-      ).catch((error: unknown) => {
-        if (error instanceof OAuthFailure)
-          throw new RefreshFailure(transientRefresh(error.message));
-        throw error;
-      });
+      );
       const errorCode = body["error"];
       if (typeof errorCode === "string") {
         if (errorCode === "bad_refresh_token") {
-          throw new RefreshFailure({
+          return failRefresh({
             type: "invalid_grant",
             message: String(body["error_description"] ?? errorCode),
           });
         }
-        throw new RefreshFailure(transientRefresh(`GitHub refresh failed: ${errorCode}`));
+        return failRefresh(transientRefresh(`GitHub refresh failed: ${errorCode}`));
       }
       return credentialFromTokenBody(task, body, credential.accountId);
     };
