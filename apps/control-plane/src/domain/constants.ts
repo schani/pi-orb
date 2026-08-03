@@ -30,6 +30,10 @@ export interface LifecycleConstants {
   readonly pullLimit: number;
   /** How often stopped/failed orbs are checked for stray running hosts. */
   readonly hostBackstopIntervalMs: number;
+  /** Idle duration after which a running orb is automatically stopped (§3.4). */
+  readonly idleStopAfterMs: number;
+  /** Interval between orphan-host sweeps (§3.4). */
+  readonly orphanSweepIntervalMs: number;
 }
 
 /** Credential-broker timing constants (DESIGN.md §15.1). */
@@ -70,4 +74,6 @@ export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {
   providerOperationTimeoutMs: 60_000,
   pullLimit: 100,
   hostBackstopIntervalMs: 30_000,
+  idleStopAfterMs: 15 * 60_000,
+  orphanSweepIntervalMs: 5 * 60_000,
 };

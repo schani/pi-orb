@@ -202,6 +202,19 @@ describe("frame schemas", () => {
     ).toBe(true);
   });
 
+  it("accepts presence frames and rejects malformed ones (idle auto-stop)", () => {
+    expect(Check(ClientFrameSchema, { v: 1, type: "client.presence", visible: true })).toBe(true);
+    expect(Check(ClientFrameSchema, { v: 1, type: "client.presence", visible: false })).toBe(true);
+    // Closed schema: the visibility flag is required and must be boolean.
+    expect(Check(ClientFrameSchema, { v: 1, type: "client.presence" })).toBe(false);
+    expect(Check(ClientFrameSchema, { v: 1, type: "client.presence", visible: "visible" })).toBe(
+      false,
+    );
+    expect(
+      Check(ClientFrameSchema, { v: 1, type: "client.presence", visible: true, orbId: "o" }),
+    ).toBe(false);
+  });
+
   it("rejects unknown client actions", () => {
     expect(
       Check(ClientFrameSchema, {

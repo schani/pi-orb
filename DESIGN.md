@@ -80,24 +80,24 @@ The first version is not intended to be a generic VM configurator or a generic r
 - We will implement stop/start and full restart recovery.
 - We will not implement suspend/resume initially.
 - The runtime should report health and busy/idle activity to the control plane.
-- The control plane distinguishes an idle but healthy runtime from an unhealthy runtime. Failed health checks can lead to restart. The first vertical slice stops only on explicit requests; automatic idle stopping is deferred.
+- The control plane distinguishes an idle but healthy runtime from an unhealthy runtime. Failed health checks can lead to restart. The first vertical slice stopped only on explicit requests; idle auto-stop is now a decided design (below).
 - Initial lifecycle constants are a 5-second readiness health poll during create/start, a 30-second unreachable-runtime grace period, and a 15-minute create/start deadline; all use injectable clocks and may be tuned later. While an orb is `running`, the ~10-second history pull doubles as the liveness signal, so no separate health poll runs.
 - Pi's `agent_settled` lifecycle state is a useful agent-idle signal because it means no retry, compaction retry, or queued continuation remains.
 - Pi SDK 0.83.0 does not expose a Claude Code-style shell registry or a reliable “agent-started processes remain” query. `AgentSession.isBashRunning` covers only currently awaited user `!`/`executeBash()` commands; model-invoked bash is observable only while its generic tool lifecycle is active. Pi internally tracks each built-in local shell PID while that invocation is awaited so it can kill the process group on abort/shutdown, but exposes neither the PID set nor a status getter and stops tracking when the shell invocation returns. Arbitrary detached descendants and processes spawned by extension/custom tools are therefore invisible to Pi after their launching tool returns. Whether OS process/cgroup inspection can provide a reliable idle signal remains unresolved.
 
-**Current proposal — idle auto-stop and orphan-host sweep (2026-08-01, not yet implemented; discussed but not decided):**
+**Decided — idle auto-stop and orphan-host sweep (proposed 2026-08-01, decided and implemented 2026-08-03 with the visible-tab refinement):**
 
 Idle auto-stop reuses existing machinery rather than adding a new lifecycle path:
 
-- The ~10-second history pull already returns `activity: idle | busy`. Add a `last_busy_at` column on the orb row (restart-stable, like `state_changed_at`; the wall clock is already injected). A pull observing `busy` — or any accepted mutating request, or an open live browser connection — refreshes it.
-- When a `running` orb's reconciler observes `wallNow() - last_busy_at > idleStopAfterMs` (proposed initial value: 15 minutes, matching Amp's pause window), it CAS-enters `stopping` with a distinguishable stop reason so the UI can say "stopped (idle)" rather than presenting an unexplained stop. From there the ordinary controlled-stop drain barrier applies unchanged.
-- An open browser connection counts as activity (proposed answer to open question 10): watching an agent work — or think about what to type next — should not power off the machine under the user.
+- The ~10-second history pull already returns `activity: idle | busy`. Add a `last_busy_at` column on the orb row (restart-stable, like `state_changed_at`; the wall clock is already injected). A pull observing `busy` — or any accepted mutating request, or an open live browser connection whose tab currently reports itself visible — refreshes it.
+- When a `running` orb's reconciler observes `wallNow() - last_busy_at > idleStopAfterMs` (initial value: 15 minutes, matching Amp's pause window), it CAS-enters `stopping` with a persisted `stop_reason = 'idle'` so the UI can say "stopped (idle)" rather than presenting an unexplained stop; explicit stop/start commands clear the reason. From there the ordinary controlled-stop drain barrier applies unchanged. The effective idle anchor is `max(last_busy_at, state_changed_at, lastVisibleAt)`, so a freshly started orb always gets a full idle window. Two guards close timing holes: the reconciler also refuses to stop while the *most recent pull* observed `busy` (wall time can leap past the deadline — a clock jump or paused process — faster than pulls can refresh the persisted timestamp; found by DST), and `last_busy_at` writes go through a dedicated monotone `touchLastBusy` store operation with no `state_version` bump, so activity refreshes never conflict with lifecycle CAS or replication cursor writes.
+- A browser connection counts as activity only while its tab is actually visible (decided answer to open question 10). Watching an agent work — or thinking about what to type next — should not power off the machine under the user, but a long-forgotten background tab must not keep a VM alive for days. The web client reports `document.visibilityState` over the live WebSocket: a presence frame on connect and on every `visibilitychange`. The control plane tracks the latest report per connection and treats the orb as browser-active only while at least one open connection has affirmatively reported `visible` — a connection that has not reported visibility counts as hidden, so the failure mode of a lost presence frame is an earlier stop, never a leak. A killed tab or slept laptop closes the socket, which removes the connection either way.
 - Accepted limitation (open question 8 is resolved by the Pi SDK finding above; open question 9 stays open): detached background processes the agent started are invisible to `agent_settled` and would not prevent an idle stop. Amp ships the same trade-off with its 15-minute pause. If this bites, the answer is an OS-level signal (process/cgroup inspection in the runtime's health report), not a special background-job tool.
-- Required DST scenarios before this ships: idle deadline racing a just-accepted message (the request gate makes the winner explicit); idle stop racing a browser reconnect; `last_busy_at` refresh racing the CAS into `stopping`; and clock-skew-free behavior across control-plane restarts.
+- DST coverage (implemented in `lifecycle.dst.test.ts` "idle auto-stop" and `orphan-sweep.dst.test.ts`): the idle deadline racing a just-accepted message burst (replica completeness holds whichever side wins); a busy runtime never idle-stopping even across simulated time jumps; a visible tab blocking the stop and a hide restarting the full countdown; and idle stop resuming correctly from persisted state alone after a control-plane restart with downtime.
 
 Idle auto-stop cannot, by construction, handle a host the database has no row for — no row means no reconciler, no history pull, and no idle signal. That is the separate **orphan-host sweep** (open question 23), and the two should ship together:
 
-- A periodic control-plane loop (proposed: every few minutes, one instance is enough since the operation is idempotent) calls `listManagedHosts` — already on the provider port for exactly this purpose; the GCE implementation lists by the `pi-orb-orb-id` label, Docker by its managed-container naming.
+- A periodic control-plane loop (`orphanSweepLoop`, every 5 minutes, running as a third background task beside the poller and reconciler; one instance is enough since the operation is idempotent) calls `listManagedHosts` — already on the provider port for exactly this purpose; the GCE implementation lists by the `pi-orb-orb-id` label, Docker by its managed-container naming.
 - Each observation is joined against the orbs table. A running host whose orb row says `stopped`/`failed` is already covered by §5.2 reconciliation when `host_ref` matches; the sweep additionally catches rows whose `host_ref` was lost. A running host with *no* orb row at all — a provision whose commit was lost, or a database reset — is stopped (never deleted: the filesystem is authoritative and deletion does not exist in the first slice) and logged loudly as an integrity signal.
 - The sweep only ever moves hosts toward "stopped"; it never starts or deletes anything, so a misfire costs a restart, not data.
 
@@ -408,7 +408,7 @@ Use initial constants of a 5-second readiness health interval during create/star
 
 Add `state_changed_at` to the orb row for transition deadlines; ordinary replication writes must not alter it. `updated_at` remains a general row-update timestamp.
 
-No automatic idle stop is required for the first vertical slice. Manual stop exercises the full persistence barrier; idle/background-process policy can be added later without changing these transitions.
+Idle auto-stop (§3.4) enters `stopping` through the same transitions; it required no new lifecycle states — only the persisted `last_busy_at`/`stop_reason` columns and the reconciler's idle check.
 
 ## 6. Harness-agnostic orb runtime protocol
 
@@ -860,7 +860,7 @@ Opening an active orb should behave as follows:
 
 The browser may see live content and committed-record notifications before the next persistence poll. The control plane does not inspect those WebSocket frames for persistence and does not optimistically insert submitted user messages—or any other proxied content—into the replica. User messages and all other records enter the replica only when the regular HTTP pull path returns the harness-persisted record.
 
-“Content-agnostic” does not mean blind TCP forwarding: the control plane still owns host startup, routing, connection limits, and protocol-version negotiation. Authentication and authorization will also belong at this boundary when added after the first slice. The control plane does not parse runtime application frames after handoff.
+“Content-agnostic” does not mean blind TCP forwarding: the control plane still owns host startup, routing, connection limits, and protocol-version negotiation. Authentication and authorization will also belong at this boundary when added after the first slice. The control plane does not interpret runtime application frames after handoff, with exactly two idle-auto-stop carve-outs on the browser→runtime direction (§3.4): `client.presence` frames are consumed by the proxy (the runtime has no use for tab visibility, though it ignores one defensively), and a `client.request` sniff refreshes the advisory `last_busy_at` before the frame is forwarded unchanged. Runtime→browser frames are never parsed.
 
 ### 8.4 Controlled shutdown pull barrier
 
@@ -1659,7 +1659,7 @@ Test framework assertions and React/framework error boundaries may use exception
 
 8. Resolved: Pi SDK 0.83.0 has no shell registry or reliable query for surviving agent-started processes; only active awaited execution/tool lifecycle is observable (§3.4).
 9. Determine whether ordinary OS process/cgroup inspection is reliable enough to avoid a custom background-job tool.
-10. Decide whether a browser connection prevents future automatic idle shutdown. (§3.4 idle-auto-stop proposal answers yes; undecided.)
+10. Resolved: a browser connection prevents automatic idle shutdown only while its tab reports `visible`; hidden or non-reporting connections do not count (§3.4).
 
 ### Project and environment
 
@@ -1678,7 +1678,7 @@ Test framework assertions and React/framework error boundaries may use exception
 20. Decide how to partition polling later if redundant all-orb polling becomes inefficient at scale; no leader or partitioning is needed initially.
 21. Resolved: credential-broker and per-orb-token design written (§15.1); networking decided: Direct VPC egress to internal instance IPs (§5). Remaining: implement it, and validate direct IAP-on-Cloud-Run during the WebSocket validation exercise.
 22. Define observability, audit logging, metrics, and cost attribution.
-23. Define orphan-host reconciliation and cleanup. (A sweep proposal is written in §3.4 alongside idle auto-stop; undecided.)
+23. Resolved: the orphan-host sweep in §3.4 is the decided design — a periodic idempotent loop over `listManagedHosts` that only ever stops pi-orb-labeled hosts, never starts or deletes.
 
 ### Product and security
 

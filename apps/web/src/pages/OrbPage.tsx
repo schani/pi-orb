@@ -350,15 +350,21 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const shouldConnect = orb?.state === "running" && state.historyLoaded;
   useEffect(() => {
     if (!shouldConnect) return;
+    const isVisible = () => document.visibilityState === "visible";
     const connection = openLiveConnection({
       orbId,
       getAfterRecordId: () => afterRecordIdRef.current,
       onFrame: (frame) => dispatch({ type: "frame", frame }),
       onStatus: (status) => dispatch({ type: "connection_status", status }),
       onRequestLost: (requestId) => dispatch({ type: "request_lost", requestId }),
+      getVisible: isVisible,
     });
+    // Only a visible tab counts as activity for idle auto-stop (DESIGN §3.4).
+    const onVisibilityChange = () => connection.sendPresence(isVisible());
+    document.addEventListener("visibilitychange", onVisibilityChange);
     liveRef.current = connection;
     return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       liveRef.current = null;
       connection.dispose();
     };
@@ -448,7 +454,13 @@ export function OrbPage({ orbId }: { orbId: string }) {
       <section className="panel orb-status">
         <div className="orb-status-row">
           <h1 className="orb-title">orb {orbId}</h1>
-          {orb !== null && <span className={`state-badge state-${orb.state}`}>{orb.state}</span>}
+          {orb !== null && (
+            <span className={`state-badge state-${orb.state}`}>
+              {orb.stopReason === "idle" && (orb.state === "stopping" || orb.state === "stopped")
+                ? `${orb.state} (idle)`
+                : orb.state}
+            </span>
+          )}
         </div>
         {orb !== null && (
           <dl className="orb-meta">

@@ -1,6 +1,6 @@
 import type { OrbState } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { sleepResult } from "./dst.ts";
+import { sleepResult, withDeadline } from "./dst.ts";
 import { type ReconcileOutcome, reconcileOrbOnce } from "./lifecycle.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
@@ -109,6 +109,71 @@ export async function reconcileLoop(
       task,
       deps.constants.reconcileTickMs,
       "reconcile loop tick",
+      stop,
+    );
+    if (slept.isErr()) return;
+  }
+}
+
+/**
+ * One orphan-host sweep (DESIGN.md §3.4): stop any managed host whose orb row
+ * is missing entirely, or terminal with a lost `host_ref`. The provider lists
+ * only pi-orb-labeled hosts, so nothing else in the project is ever touched;
+ * the sweep only moves hosts toward "stopped" and never starts or deletes.
+ */
+export async function orphanSweepOnce(task: SimulationTask, deps: ControlPlaneDeps): Promise<void> {
+  const listed = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "list managed hosts",
+    (context) => deps.hostProvider.listManagedHosts(task, context),
+  );
+  if (listed.isErr()) return; // Retry at the next sweep interval.
+  for (const observation of listed.value) {
+    if (observation.state === "stopped" || observation.state === "stopping") continue;
+    const orbResult = await deps.store.getOrb(task, observation.orbId);
+    if (orbResult.isErr()) continue; // Store outage: the next sweep retries.
+    const orb = orbResult.value;
+    const host = `${observation.ref.provider}/${observation.ref.resourceId}`;
+    if (orb === null) {
+      task.log(
+        `orphan-host sweep: host ${host} is labeled for orb ${observation.orbId}, which has ` +
+          "no orb row (lost provision commit or database reset); stopping it",
+      );
+    } else if (
+      (orb.state === "stopped" || orb.state === "failed") &&
+      orb.hostRef !== observation.ref.resourceId
+    ) {
+      task.log(
+        `orphan-host sweep: host ${host} belongs to ${orb.state} orb ${orb.id} but is not its ` +
+          "recorded host_ref; stopping it",
+      );
+    } else {
+      // Live orbs and matching-ref terminal orbs are the reconciler's job
+      // (§5.2 backstop); the sweep never competes with it.
+      continue;
+    }
+    // Best effort; a failure here is retried on the next sweep.
+    await withDeadline(
+      task,
+      deps.constants.providerOperationTimeoutMs,
+      "stop orphan host",
+      (context) => deps.hostProvider.stop(task, observation.ref, context),
+    );
+  }
+}
+
+export async function orphanSweepLoop(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  stop: AbortSignal,
+): Promise<void> {
+  while (!stop.aborted) {
+    await orphanSweepOnce(task, deps);
+    const slept = await sleepResult(
+      task,
+      deps.constants.orphanSweepIntervalMs,
+      "orphan sweep tick",
       stop,
     );
     if (slept.isErr()) return;

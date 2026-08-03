@@ -22,7 +22,7 @@ import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
-import { pollLoop, reconcileLoop } from "./domain/loops.ts";
+import { orphanSweepLoop, pollLoop, reconcileLoop } from "./domain/loops.ts";
 import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
@@ -185,6 +185,7 @@ async function main(): Promise<void> {
     await noSimulation.runTasks([
       { name: "poller", f: (task) => pollLoop(task, deps, stop.signal) },
       { name: "reconciler", f: (task) => reconcileLoop(task, deps, stop.signal) },
+      { name: "sweeper", f: (task) => orphanSweepLoop(task, deps, stop.signal) },
     ]);
   }
 }

@@ -1,4 +1,4 @@
-import type { HarnessSessionMetadata, HistoryRecord, OrbState } from "@pi-orb/protocol";
+import type { HarnessSessionMetadata, HistoryRecord, OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type {
@@ -39,6 +39,8 @@ function mapOrbRow(row: PgRow): OrbRow {
     replicationCursor:
       row["replication_cursor"] === null ? null : String(row["replication_cursor"]),
     replicatedHeadId: row["replicated_head_id"] === null ? null : String(row["replicated_head_id"]),
+    lastBusyAt: row["last_busy_at"] == null ? null : toMs(row["last_busy_at"]),
+    stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
     stateChangedAt: toMs(row["state_changed_at"]),
     createdAt: toMs(row["created_at"]),
     updatedAt: toMs(row["updated_at"]),
@@ -123,9 +125,9 @@ export class PgControlPlaneStore implements ControlPlaneStore {
       .query(
         `INSERT INTO orbs (id, project_id, state, state_version, host_kind, host_ref,
            checkout_commit, harness_session_id, harness_session_header, last_error,
-           runtime_token_hash, replication_cursor, replicated_head_id, state_changed_at,
-           created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+           runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
+           stop_reason, state_changed_at, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
         [
           orb.id,
           orb.projectId,
@@ -140,6 +142,8 @@ export class PgControlPlaneStore implements ControlPlaneStore {
           orb.runtimeTokenHash,
           orb.replicationCursor,
           orb.replicatedHeadId,
+          orb.lastBusyAt === null ? null : new Date(orb.lastBusyAt),
+          orb.stopReason,
           new Date(orb.stateChangedAt),
           new Date(orb.createdAt),
           new Date(orb.updatedAt),
@@ -196,6 +200,11 @@ export class PgControlPlaneStore implements ControlPlaneStore {
       values.push(params.checkoutCommit);
       index += 1;
     }
+    if (params.stopReason !== undefined) {
+      sets.push(`stop_reason = $${index}`);
+      values.push(params.stopReason);
+      index += 1;
+    }
     return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values);
   }
 
@@ -227,6 +236,22 @@ export class PgControlPlaneStore implements ControlPlaneStore {
       index += 1;
     }
     return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values);
+  }
+
+  touchLastBusy(
+    _task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<void, StoreError> {
+    // Monotone and CAS-free (§3.4): GREATEST keeps concurrent touches safe and
+    // no state_version bump means lifecycle CAS never conflicts with this.
+    return this.db
+      .query(
+        `UPDATE orbs SET last_busy_at = GREATEST(COALESCE(last_busy_at, to_timestamp(0)), $2),
+           updated_at = GREATEST(updated_at, $2)
+         WHERE id = $1`,
+        [params.orbId, new Date(params.now)],
+      )
+      .map(() => undefined);
   }
 
   casReenterState(

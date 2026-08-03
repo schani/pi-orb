@@ -62,6 +62,55 @@ export class ControlState {
     return this.liveness.get(orbId) ?? null;
   }
 
+  // -- browser presence (idle auto-stop, DESIGN.md §3.4) --
+
+  /** orbId → connectionId → tab visible. */
+  private readonly browserVisibility = new Map<string, Map<string, boolean>>();
+  /** Wall ms when the orb last had a visible tab; lost on process restart. */
+  private readonly lastVisibleAt = new Map<string, number>();
+
+  /** A connection counts as hidden until it affirmatively reports visible. */
+  registerBrowserConnection(orbId: string, connectionId: string): void {
+    let connections = this.browserVisibility.get(orbId);
+    if (connections === undefined) {
+      connections = new Map();
+      this.browserVisibility.set(orbId, connections);
+    }
+    connections.set(connectionId, false);
+  }
+
+  setBrowserVisibility(orbId: string, connectionId: string, visible: boolean, at: number): void {
+    const connections = this.browserVisibility.get(orbId);
+    if (connections === undefined || !connections.has(connectionId)) return;
+    const wasVisible = connections.get(connectionId) === true;
+    connections.set(connectionId, visible);
+    // Both edges stamp the time: becoming visible marks activity now, and
+    // hiding marks the end of a visible stretch so the idle countdown starts
+    // from the hide, not from whenever the tab first appeared.
+    if (visible || wasVisible) this.lastVisibleAt.set(orbId, at);
+  }
+
+  unregisterBrowserConnection(orbId: string, connectionId: string, at: number): void {
+    const connections = this.browserVisibility.get(orbId);
+    if (connections === undefined) return;
+    if (connections.get(connectionId) === true) this.lastVisibleAt.set(orbId, at);
+    connections.delete(connectionId);
+    if (connections.size === 0) this.browserVisibility.delete(orbId);
+  }
+
+  hasVisibleBrowser(orbId: string): boolean {
+    const connections = this.browserVisibility.get(orbId);
+    if (connections === undefined) return false;
+    for (const visible of connections.values()) {
+      if (visible) return true;
+    }
+    return false;
+  }
+
+  getLastVisibleAt(orbId: string): number | null {
+    return this.lastVisibleAt.get(orbId) ?? null;
+  }
+
   // -- per-orb scheduling --
 
   setNextAttemptAt(orbId: string, at: number): void {
@@ -206,5 +255,7 @@ export class ControlState {
     this.drainStatus.delete(orbId);
     this.stoppingOrbs.delete(orbId);
     this.restartPending.delete(orbId);
+    this.browserVisibility.delete(orbId);
+    this.lastVisibleAt.delete(orbId);
   }
 }

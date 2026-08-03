@@ -1,4 +1,4 @@
-import type { OrbState } from "@pi-orb/protocol";
+import type { OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { withDeadline } from "./dst.ts";
@@ -136,7 +136,7 @@ async function transitionTo(
   deps: ControlPlaneDeps,
   orb: OrbRow,
   toState: OrbState,
-  extra?: { lastError?: string | null },
+  extra?: { lastError?: string | null; stopReason?: StopReason | null },
 ): Promise<ReconcileOutcome> {
   const cas = await deps.store.casTransition(task, {
     orbId: orb.id,
@@ -144,6 +144,7 @@ async function transitionTo(
     toState,
     now: task.wallNow(),
     ...(extra?.lastError !== undefined ? { lastError: extra.lastError } : {}),
+    ...(extra?.stopReason !== undefined ? { stopReason: extra.stopReason } : {}),
   });
   if (cas.isErr()) {
     return cas.error.type === "state_conflict"
@@ -492,6 +493,32 @@ async function reconcileRunning(
     deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
     return { type: "progressed" };
   }
+
+  // Idle auto-stop (DESIGN.md §3.4). Only a tab that affirmatively reports
+  // itself visible counts as activity; hidden and non-reporting connections
+  // do not, so a lost presence frame fails toward an earlier stop, never a
+  // leaked host. The last pull's `busy` observation also blocks the stop:
+  // wall time may leap past the deadline (clock jump, paused process) faster
+  // than pulls can refresh the persisted timestamp.
+  const now = task.wallNow();
+  const lastActivityAt = Math.max(
+    orb.lastBusyAt ?? 0,
+    orb.stateChangedAt,
+    deps.control.getLastVisibleAt(orb.id) ?? 0,
+  );
+  if (liveness.activity === "busy" || deps.control.hasVisibleBrowser(orb.id)) {
+    if (now - lastActivityAt > deps.constants.idleStopAfterMs / 2) {
+      // Keep the persisted timestamp fresh enough that a control-plane
+      // restart under a watched orb cannot trigger an immediate idle stop.
+      await deps.store.touchLastBusy(task, { orbId: orb.id, now });
+    }
+    return { type: "noop" };
+  }
+  if (now - lastActivityAt > deps.constants.idleStopAfterMs) {
+    const transitioned = await transitionTo(task, deps, orb, "stopping", { stopReason: "idle" });
+    if (transitioned.type === "transitioned") deps.control.markStopping(orb.id);
+    return transitioned;
+  }
   return { type: "noop" };
 }
 
@@ -711,6 +738,8 @@ export function createOrb(
       runtimeTokenHash: null,
       replicationCursor: null,
       replicatedHeadId: null,
+      lastBusyAt: null,
+      stopReason: null,
       stateChangedAt: now,
       createdAt: now,
       updatedAt: now,
@@ -752,6 +781,7 @@ export function requestOrbStart(
             toState: "starting",
             now: task.wallNow(),
             lastError: null,
+            stopReason: null,
           });
           if (cas.isOk()) return ok(cas.value);
           if (cas.error.type === "state_conflict") continue;
@@ -782,6 +812,8 @@ export function requestOrbStop(
         expectedStateVersion: orb.stateVersion,
         toState: "stopping",
         now: task.wallNow(),
+        // An explicit stop presents no reason, including over a stale one.
+        stopReason: null,
       });
       if (cas.isOk()) {
         deps.control.markStopping(orbId);

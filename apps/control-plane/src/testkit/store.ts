@@ -176,6 +176,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.lastError !== undefined ? { lastError: params.lastError } : {}),
         ...(params.hostRef !== undefined ? { hostRef: params.hostRef } : {}),
         ...(params.checkoutCommit !== undefined ? { checkoutCommit: params.checkoutCommit } : {}),
+        ...(params.stopReason !== undefined ? { stopReason: params.stopReason } : {}),
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };
@@ -220,6 +221,23 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           })
         : okAsync(outcome.row),
     );
+  }
+
+  touchLastBusy(
+    task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<void, StoreError> {
+    // Same monotone, CAS-free semantics as the pg adapter (§3.4).
+    return this.access(task, FAILPOINTS.storeWrite, "touch last busy", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined) return;
+      if (orb.lastBusyAt !== null && orb.lastBusyAt >= params.now) return;
+      this.orbs.set(orb.id, {
+        ...orb,
+        lastBusyAt: params.now,
+        updatedAt: Math.max(orb.updatedAt, params.now),
+      });
+    });
   }
 
   casReenterState(

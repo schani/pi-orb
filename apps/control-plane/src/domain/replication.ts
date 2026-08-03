@@ -185,6 +185,11 @@ export async function pollOrbUntilCaughtUp(
       response.activity,
       response.runtimeInstanceId,
     );
+    if (response.activity === "busy") {
+      // Advisory idle-auto-stop timestamp (§3.4); a failure is ignored — the
+      // next busy pull refreshes it again.
+      await deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
+    }
 
     if (response.records.length === 0) {
       const verified = await deps.store.initOrVerifySession(task, orbId, response.session);

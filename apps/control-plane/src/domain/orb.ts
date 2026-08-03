@@ -1,4 +1,4 @@
-import type { HarnessSessionMetadata, OrbState } from "@pi-orb/protocol";
+import type { HarnessSessionMetadata, OrbState, StopReason } from "@pi-orb/protocol";
 
 /**
  * Domain view of an orb row (DESIGN.md §8.6). Timestamps are wall-clock
@@ -23,6 +23,13 @@ export interface OrbRow {
   readonly runtimeTokenHash: string | null;
   readonly replicationCursor: string | null;
   readonly replicatedHeadId: string | null;
+  /**
+   * Restart-stable activity timestamp for idle auto-stop (DESIGN.md §3.4).
+   * Advisory and monotone: written outside the state_version CAS.
+   */
+  readonly lastBusyAt: number | null;
+  /** Why the orb last entered `stopping`; null for explicit stops. */
+  readonly stopReason: StopReason | null;
   readonly stateChangedAt: number;
   readonly createdAt: number;
   readonly updatedAt: number;

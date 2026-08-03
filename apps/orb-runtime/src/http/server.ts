@@ -234,6 +234,11 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
           }
           return;
         }
+        if (parsed.type === "client.presence") {
+          // Consumed by the control-plane proxy (DESIGN.md §3.4); ignore one
+          // that slips through rather than treating it as a request.
+          return;
+        }
         if (parsed.type === "client.hello") {
           if (helloSeen) return;
           helloSeen = true;

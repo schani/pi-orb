@@ -4,6 +4,7 @@ import type {
   OrbState,
   PullHistoryResponse,
   RuntimeHealth,
+  StopReason,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { ResultAsync } from "neverthrow";
@@ -35,6 +36,8 @@ export interface CasTransitionParams {
   readonly lastError?: string | null;
   readonly hostRef?: string | null;
   readonly checkoutCommit?: string | null;
+  /** Set entering `stopping` (idle) and cleared on explicit stops/starts (§3.4). */
+  readonly stopReason?: StopReason | null;
 }
 
 export interface CasUpdateFieldsParams {
@@ -92,6 +95,17 @@ export interface ControlPlaneStore {
     task: SimulationTask,
     params: CasUpdateFieldsParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict>;
+
+  /**
+   * Monotone advisory update of `last_busy_at` (idle auto-stop, §3.4). Not a
+   * correctness field: no state_version bump, so it can never conflict with
+   * lifecycle CAS or replication cursor writes. `now` older than the stored
+   * value is a no-op.
+   */
+  touchLastBusy(
+    task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<void, StoreError>;
 
   /**
    * Same-state re-entry with a fresh `state_changed_at` (OAuth completion,

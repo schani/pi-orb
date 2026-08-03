@@ -1,7 +1,8 @@
 import websocketPlugin from "@fastify/websocket";
-import { RUNTIME_SUBPROTOCOL } from "@pi-orb/protocol";
+import { ClientPresenceSchema, RUNTIME_SUBPROTOCOL } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance } from "fastify";
+import { Check } from "typebox/value";
 import { WebSocket } from "ws";
 import { withDeadline } from "../domain/dst.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
@@ -9,12 +10,18 @@ import type { ControlPlaneDeps } from "../domain/ports.ts";
 const TRY_AGAIN_LATER = 1013;
 const UNSUPPORTED_DATA = 1003;
 
+let connectionCounter = 0;
+
 /**
- * Content-agnostic live proxy (DESIGN.md §6.1/§8.3): after routing, text
- * frames and close signals are forwarded without parsing; the runtime's
- * `client.hello` is the first application frame. A connection race or an
- * unavailable runtime closes with 1013 and the browser returns to the HTTP
- * lifecycle API.
+ * Live proxy (DESIGN.md §6.1/§8.3): after routing, text frames and close
+ * signals are forwarded without interpretation; the runtime's `client.hello`
+ * is the first application frame. A connection race or an unavailable runtime
+ * closes with 1013 and the browser returns to the HTTP lifecycle API.
+ *
+ * Idle auto-stop (§3.4) carves out the only two content sniffs: presence
+ * frames are consumed here (the runtime has no use for tab visibility), and
+ * client requests refresh the advisory `last_busy_at` timestamp before being
+ * forwarded unchanged.
  */
 export async function registerLiveProxy(
   app: FastifyInstance,
@@ -33,6 +40,9 @@ export async function registerLiveProxy(
     { websocket: true },
     async (browserSocket, request) => {
       const orbId = request.params.orbId;
+      connectionCounter += 1;
+      const connectionId = `browser-${connectionCounter}`;
+      deps.control.registerBrowserConnection(orbId, connectionId);
       let upstream: WebSocket | null = null;
       let upstreamOpen = false;
       let browserClosed = false;
@@ -59,6 +69,24 @@ export async function registerLiveProxy(
           return;
         }
         const text = data.toString();
+        let parsed: unknown = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          // Not JSON: forwarded as-is; the runtime answers invalid_frame.
+        }
+        if (Check(ClientPresenceSchema, parsed)) {
+          deps.control.setBrowserVisibility(orbId, connectionId, parsed.visible, task.wallNow());
+          return;
+        }
+        if (
+          typeof parsed === "object" &&
+          parsed !== null &&
+          (parsed as { type?: unknown }).type === "client.request"
+        ) {
+          // Fire-and-forget: the timestamp is advisory (§3.4).
+          void deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
+        }
         if (upstreamOpen && upstream !== null) {
           upstream.send(text);
         } else {
@@ -67,6 +95,7 @@ export async function registerLiveProxy(
       });
       browserSocket.on("close", () => {
         browserClosed = true;
+        deps.control.unregisterBrowserConnection(orbId, connectionId, task.wallNow());
         try {
           upstream?.close();
         } catch {
@@ -74,6 +103,7 @@ export async function registerLiveProxy(
         }
       });
       browserSocket.on("error", () => {
+        deps.control.unregisterBrowserConnection(orbId, connectionId, task.wallNow());
         try {
           upstream?.close();
         } catch {

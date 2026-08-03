@@ -13,6 +13,10 @@ export const OrbStateSchema = Type.Union([
 ]);
 export type OrbState = Static<typeof OrbStateSchema>;
 
+/** Why an orb last entered `stopping`; absent for explicit stops (§3.4). */
+export const StopReasonSchema = Type.Literal("idle");
+export type StopReason = Static<typeof StopReasonSchema>;
+
 export const CreateProjectRequestSchema = Type.Object(
   {
     id: Type.String(),
@@ -85,6 +89,8 @@ export const OrbViewSchema = Type.Object(
     lastError: Type.Optional(Type.String()),
     /** Synthesized from in-memory reconciler state; never stored. */
     stateDetail: Type.Optional(OrbStateDetailSchema),
+    /** Present when the last stop was automatic ("stopped (idle)", §3.4). */
+    stopReason: Type.Optional(StopReasonSchema),
     stateChangedAt: Type.String(),
     /** Synthesized from the in-memory device flow; never stored. */
     actionRequired: Type.Optional(OrbActionRequiredSchema),

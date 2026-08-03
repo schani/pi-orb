@@ -69,7 +69,27 @@ export const ClientRequestSchema = Type.Object(
 );
 export type ClientRequest = Static<typeof ClientRequestSchema>;
 
-export const ClientFrameSchema = Type.Union([ClientHelloSchema, ClientRequestSchema]);
+/**
+ * Tab-visibility report for idle auto-stop (DESIGN.md §3.4). Sent on connect
+ * and on every `visibilitychange`; consumed by the control-plane live proxy
+ * and never forwarded to the runtime, which ignores one defensively.
+ */
+export const ClientPresenceSchema = Type.Object(
+  {
+    v: Type.Literal(1),
+    type: Type.Literal("client.presence"),
+    /** `document.visibilityState === "visible"` in the sending tab. */
+    visible: Type.Boolean(),
+  },
+  closed,
+);
+export type ClientPresence = Static<typeof ClientPresenceSchema>;
+
+export const ClientFrameSchema = Type.Union([
+  ClientHelloSchema,
+  ClientRequestSchema,
+  ClientPresenceSchema,
+]);
 export type ClientFrame = Static<typeof ClientFrameSchema>;
 
 export const ServerWelcomeSchema = Type.Object(

@@ -59,6 +59,7 @@ export function orbView(orb: OrbRow, control: ControlState): OrbView {
             },
           }
         : {}),
+    ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),
     stateChangedAt: iso(orb.stateChangedAt),
     ...(showChallenge
       ? {

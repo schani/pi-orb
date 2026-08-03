@@ -7,9 +7,10 @@ import {
   makeProjectRow,
   restartControlPlane,
   seedRunningOrb,
+  TEST_CONSTANTS,
 } from "../testkit/fixtures.ts";
 import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
-import { runDst, waitUntil } from "../testkit/sim.ts";
+import { makeRecordingSimulation, runDst, waitUntil } from "../testkit/sim.ts";
 import { requestOrbStop } from "./lifecycle.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 
@@ -634,6 +635,261 @@ describe("orb lifecycle (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
+    });
+  });
+});
+
+describe("idle auto-stop (DST)", () => {
+  it("stops an idle orb after the idle deadline with reason idle", async () => {
+    await runDst({ name: "idle-stop-happy-path", iterations: 20 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      let seededAt = 0;
+      let firstStopSeenAt: number | null = null;
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            seededAt = task.wallNow();
+            await waitUntil(
+              task,
+              "idle orb stopped",
+              () => {
+                const state = harness.store.orbSnapshot(ORB)?.state;
+                if (state !== "running" && firstStopSeenAt === null) {
+                  firstStopSeenAt = task.wallNow();
+                }
+                return state === "stopped";
+              },
+              { timeoutMs: 600_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const orb = harness.store.orbSnapshot(ORB);
+      expect(orb?.state).toBe("stopped");
+      expect(orb?.stopReason).toBe("idle");
+      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+      // The stop must not fire before the idle deadline has elapsed.
+      expect(firstStopSeenAt).not.toBeNull();
+      expect((firstStopSeenAt ?? 0) - seededAt).toBeGreaterThanOrEqual(
+        TEST_CONSTANTS.idleStopAfterMs,
+      );
+    });
+  });
+
+  it("a busy runtime never idle-stops", async () => {
+    await runDst({ name: "idle-stop-busy-blocks", iterations: 15 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            // Keep the runtime busy in pull-sized steps: a single long sleep
+            // lets the scheduler leap virtual time past the unreachable grace
+            // (host restart, which correctly resets a real runtime to idle),
+            // and a restarted runtime going idle is *supposed* to stop.
+            const rounds = Math.ceil(
+              (3 * TEST_CONSTANTS.idleStopAfterMs) / TEST_CONSTANTS.historyPullIntervalMs,
+            );
+            for (let i = 0; i < rounds; i++) {
+              harness.world.setActivity(ORB, "busy");
+              await task.sleep(TEST_CONSTANTS.historyPullIntervalMs, "stay busy");
+            }
+            expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.world.hostStateOf(ORB)).toBe("running");
+      // The busy pulls persisted the activity timestamp along the way.
+      expect(harness.store.orbSnapshot(ORB)?.lastBusyAt).not.toBeNull();
+    });
+  });
+
+  it("a visible tab blocks the idle stop; hiding it restarts the countdown", async () => {
+    await runDst({ name: "idle-stop-visible-tab", iterations: 15 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      let hiddenAt = 0;
+      let firstStopSeenAt: number | null = null;
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            // What the live proxy does when a tab connects and reports visible.
+            harness.deps.control.registerBrowserConnection(ORB, "tab-1");
+            harness.deps.control.setBrowserVisibility(ORB, "tab-1", true, task.wallNow());
+            // Watch in pull-sized steps (a single long sleep lets the
+            // scheduler leap past the unreachable grace and restart the
+            // host): while the tab is visible the orb must never stop.
+            const rounds = Math.ceil(
+              (2 * TEST_CONSTANTS.idleStopAfterMs) / TEST_CONSTANTS.historyPullIntervalMs,
+            );
+            for (let i = 0; i < rounds; i++) {
+              await task.sleep(TEST_CONSTANTS.historyPullIntervalMs, "watching the idle orb");
+              const state = harness.store.orbSnapshot(ORB)?.state;
+              expect(state === "stopping" || state === "stopped").toBe(false);
+            }
+            hiddenAt = task.wallNow();
+            harness.deps.control.setBrowserVisibility(ORB, "tab-1", false, hiddenAt);
+            await waitUntil(
+              task,
+              "orb stopped after tab hidden",
+              () => {
+                const state = harness.store.orbSnapshot(ORB)?.state;
+                if (state !== "running" && firstStopSeenAt === null) {
+                  firstStopSeenAt = task.wallNow();
+                }
+                return state === "stopped";
+              },
+              { timeoutMs: 600_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.orbSnapshot(ORB)?.stopReason).toBe("idle");
+      // Hiding the tab starts a fresh full countdown from the hide.
+      expect(firstStopSeenAt).not.toBeNull();
+      expect((firstStopSeenAt ?? 0) - hiddenAt).toBeGreaterThanOrEqual(
+        TEST_CONSTANTS.idleStopAfterMs,
+      );
+    });
+  });
+
+  it("a message racing the idle deadline never loses records", async () => {
+    await runDst(
+      {
+        name: "idle-stop-message-race",
+        iterations: 25,
+        failpointProbabilities: {
+          [FAILPOINTS.storeWrite]: 0.05,
+          [FAILPOINTS.providerObserve]: 0.1,
+        },
+      },
+      async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              // Land a burst of work right at the idle deadline so the busy
+              // refresh races the CAS into stopping.
+              await task.sleep(
+                TEST_CONSTANTS.idleStopAfterMs - 1_000,
+                "wait until just before the idle deadline",
+              );
+              for (let i = 0; i < 4; i++) harness.world.appendMessage(ORB);
+              harness.world.setActivity(ORB, "busy");
+              await task.sleep(3 * TEST_CONSTANTS.historyPullIntervalMs, "let the burst replicate");
+              harness.world.setActivity(ORB, "idle");
+              // Whichever side won the race, the orb ends stopped with every
+              // record drained.
+              await waitUntil(
+                task,
+                "orb stopped after the race",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+                { timeoutMs: 600_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        assertReplicaComplete(harness.world, harness.store, ORB);
+        expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+      },
+    );
+  });
+
+  it("survives a control-plane restart on persisted state alone", async () => {
+    await runDst({ name: "idle-stop-across-restart", iterations: 10 }, async (sim) => {
+      const before = makeHarness();
+      const stopBefore = new AbortController();
+      let crashWall = 0;
+      const phase1 = await sim.runTasks([
+        { name: "reconciler-1", f: (task) => reconcileLoop(task, before.deps, stopBefore.signal) },
+        { name: "poller-1", f: (task) => pollLoop(task, before.deps, stopBefore.signal) },
+        {
+          name: "driver-1",
+          f: async (task) => {
+            seedRunningOrb(task, before, ORB);
+            before.world.setActivity(ORB, "busy");
+            await waitUntil(
+              task,
+              "busy activity persisted",
+              () => before.store.orbSnapshot(ORB)?.lastBusyAt !== null,
+              { timeoutMs: 60_000 },
+            );
+            before.world.setActivity(ORB, "idle");
+            crashWall = task.wallNow();
+            stopBefore.abort();
+          },
+        },
+      ]);
+      expect(phase1.isOk(), phase1.isErr() ? phase1.error.message : "").toBe(true);
+      const persistedLastBusy = before.store.orbSnapshot(ORB)?.lastBusyAt ?? null;
+      expect(persistedLastBusy).not.toBeNull();
+      expect(before.store.orbSnapshot(ORB)?.state).toBe("running");
+
+      // Restart: fresh in-memory state, 10s of downtime, same durable rows.
+      const after = restartControlPlane(before);
+      const stopAfter = new AbortController();
+      const sim2 = makeRecordingSimulation({
+        name: "idle-stop-across-restart-phase2",
+        wallClockEpoch: crashWall + 10_000,
+      });
+      let firstStopSeenAt: number | null = null;
+      const phase2 = await sim2.runTasks([
+        { name: "reconciler-2", f: (task) => reconcileLoop(task, after.deps, stopAfter.signal) },
+        { name: "poller-2", f: (task) => pollLoop(task, after.deps, stopAfter.signal) },
+        {
+          name: "driver-2",
+          f: async (task) => {
+            await waitUntil(
+              task,
+              "orb idle-stopped after restart",
+              () => {
+                const state = after.store.orbSnapshot(ORB)?.state;
+                if (state !== "running" && firstStopSeenAt === null) {
+                  firstStopSeenAt = task.wallNow();
+                }
+                return state === "stopped";
+              },
+              { timeoutMs: 600_000 },
+            );
+            stopAfter.abort();
+          },
+        },
+      ]);
+      expect(phase2.isOk(), phase2.isErr() ? phase2.error.message : "").toBe(true);
+      expect(after.store.orbSnapshot(ORB)?.stopReason).toBe("idle");
+      // The persisted timestamp — not the restart — anchors the deadline: the
+      // stop never fires before last_busy_at + idleStopAfterMs even though
+      // all in-memory state was lost.
+      expect(firstStopSeenAt).not.toBeNull();
+      expect(firstStopSeenAt ?? 0).toBeGreaterThanOrEqual(
+        (persistedLastBusy ?? 0) + TEST_CONSTANTS.idleStopAfterMs,
+      );
     });
   });
 });

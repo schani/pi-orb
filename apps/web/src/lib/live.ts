@@ -1,6 +1,7 @@
 import {
   type ClientAction,
   type ClientHello,
+  type ClientPresence,
   type ClientRequest,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
@@ -25,15 +26,26 @@ export interface LiveConnectionOptions {
    * changed across a reconnect, so auto-resending is unsafe (DESIGN §6.4).
    */
   onRequestLost: (requestId: string, action: ClientAction) => void;
+  /**
+   * Current tab visibility, reported to the control plane on every
+   * (re)connect for idle auto-stop (DESIGN §3.4).
+   */
+  getVisible: () => boolean;
 }
 
 export interface LiveConnection {
   /** Returns the request id, or null when the socket is not open. */
   sendRequest: (action: ClientAction) => string | null;
+  /** Report a tab-visibility change; a no-op while the socket is not open. */
+  sendPresence: (visible: boolean) => void;
   dispose: () => void;
 }
 
 const RETRY_DELAY_MS = 2000;
+
+function presenceFrame(visible: boolean): ClientPresence {
+  return { v: 1, type: "client.presence", visible };
+}
 
 interface PendingRequest {
   frame: ClientRequest;
@@ -107,6 +119,7 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
         afterRecordId: options.getAfterRecordId(),
       };
       ws.send(JSON.stringify(hello));
+      ws.send(JSON.stringify(presenceFrame(options.getVisible())));
       options.onStatus("open");
     };
 
@@ -150,6 +163,11 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
       pending.set(requestId, { frame, runtimeInstanceId });
       ws.send(JSON.stringify(frame));
       return requestId;
+    },
+    sendPresence: (visible: boolean): void => {
+      const ws = socket;
+      if (ws === null || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify(presenceFrame(visible)));
     },
     dispose: (): void => {
       if (disposed) return;

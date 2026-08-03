@@ -94,4 +94,97 @@ describe("live proxy", () => {
     const [data] = await reply;
     expect(data.toString()).toBe("echo:client.hello");
   });
+
+  it("consumes presence frames, tracks visibility, and touches last_busy_at on requests", async () => {
+    const runtimeReceived: string[] = [];
+    const runtime = new WebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      handleProtocols: (protocols) =>
+        protocols.has(RUNTIME_SUBPROTOCOL) ? RUNTIME_SUBPROTOCOL : false,
+    });
+    openServers.push({ close: () => closeWebSocketServer(runtime) });
+    await once(runtime, "listening");
+    const runtimeAddress = runtime.address() as AddressInfo;
+    runtime.on("connection", (socket) => {
+      socket.on("message", (data) => runtimeReceived.push(data.toString()));
+    });
+
+    const harness = makeHarness();
+    const orbId = "orb-presence";
+    harness.store.seedOrb(makeOrbRow(orbId, "project-a", "running", { hostRef: "host-b" }));
+    const delegate = harness.deps.hostProvider;
+    const hostProvider: OrbHostProvider = {
+      kind: delegate.kind,
+      provision: (task, request, context) => delegate.provision(task, request, context),
+      start: (task, ref, context) => delegate.start(task, ref, context),
+      stop: (task, ref, context) => delegate.stop(task, ref, context),
+      listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
+      observe: (_task, ref) =>
+        ResultAsync.fromSafePromise(Promise.resolve()).map(() => ({
+          ref,
+          orbId,
+          state: "running" as const,
+          runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
+        })),
+    };
+
+    const app = Fastify({ logger: false });
+    openServers.push({ close: () => app.close() });
+    await registerLiveProxy(app, new NoSimulationTask("live proxy test", false), {
+      ...harness.deps,
+      hostProvider,
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const proxyAddress = app.server.address() as AddressInfo;
+
+    const browser = new WebSocket(
+      `ws://127.0.0.1:${proxyAddress.port}/api/v1/orbs/${orbId}/live`,
+      RUNTIME_SUBPROTOCOL,
+    );
+    openServers.push({
+      close: async () => {
+        browser.terminate();
+      },
+    });
+    await once(browser, "open");
+
+    const hello = JSON.stringify({
+      v: 1,
+      type: "client.hello",
+      clientInstanceId: "tab-1",
+      afterRecordId: null,
+    });
+    const request = JSON.stringify({
+      v: 1,
+      type: "client.request",
+      requestId: "req-1",
+      action: { type: "abort", operationId: "op-1" },
+    });
+    browser.send(hello);
+    browser.send(JSON.stringify({ v: 1, type: "client.presence", visible: true }));
+    browser.send(request);
+
+    await until(() => runtimeReceived.length >= 2);
+    // The presence frame was consumed by the proxy, everything else forwarded.
+    expect(runtimeReceived).toEqual([hello, request]);
+    expect(harness.deps.control.hasVisibleBrowser(orbId)).toBe(true);
+    // The client request refreshed the advisory activity timestamp.
+    await until(() => harness.store.orbSnapshot(orbId)?.lastBusyAt != null);
+
+    browser.send(JSON.stringify({ v: 1, type: "client.presence", visible: false }));
+    await until(() => !harness.deps.control.hasVisibleBrowser(orbId));
+
+    browser.close();
+    await once(browser, "close");
+    await until(() => !harness.deps.control.hasVisibleBrowser(orbId));
+  });
 });
+
+async function until(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const start = Date.now();
+  while (!condition()) {
+    if (Date.now() - start > timeoutMs) throw new Error("condition not met in time");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

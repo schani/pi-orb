@@ -23,6 +23,8 @@ export const TEST_CONSTANTS: LifecycleConstants = {
   providerOperationTimeoutMs: 5_000,
   pullLimit: 5,
   hostBackstopIntervalMs: 2_000,
+  idleStopAfterMs: 30_000,
+  orphanSweepIntervalMs: 2_000,
 };
 
 export interface TestHarness {
@@ -88,6 +90,8 @@ export function makeOrbRow(
     runtimeTokenHash: null,
     replicationCursor: null,
     replicatedHeadId: null,
+    lastBusyAt: null,
+    stopReason: null,
     stateChangedAt: 0,
     createdAt: 0,
     updatedAt: 0,
