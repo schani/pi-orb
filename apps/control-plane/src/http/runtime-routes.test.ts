@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { MODEL_TOKEN_PATH } from "@pi-orb/protocol";
+import { runtimeTokenPath, type TokenName } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -69,10 +69,17 @@ describe("runtime broker routes", () => {
     });
   }
 
-  function request(body: unknown, token: string | null = TOKEN) {
+  function request(
+    body: unknown,
+    token: string | null = TOKEN,
+    name: TokenName | string = "model",
+  ) {
     return app.inject({
       method: "POST",
-      url: MODEL_TOKEN_PATH,
+      url:
+        name === "model" || name === "github"
+          ? runtimeTokenPath(name)
+          : `/runtime/v1/tokens/${name}`,
       ...(token === null ? {} : { headers: { authorization: `Bearer ${token}` } }),
       payload: body as Record<string, unknown>,
     });
@@ -147,6 +154,40 @@ describe("runtime broker routes", () => {
     const response = await request({ reason: "startup" });
     expect(response.statusCode).toBe(503);
     expect(response.json().error).toBe("retryable");
+  });
+
+  it("404s an unknown token name with a typed error", async () => {
+    seedOrb("running");
+    seedCredential();
+    const response = await request({ reason: "startup" }, TOKEN, "sideways");
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: "unknown_token" });
+  });
+
+  it("serves tokens/github as auth_required while no GitHub credential exists", async () => {
+    seedOrb("running");
+    seedCredential(); // model credential only
+    const response = await request({ reason: "startup" }, TOKEN, "github");
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: "auth_required" });
+  });
+
+  it("requires a valid bearer on the github token too", async () => {
+    seedOrb("running");
+    const response = await request({ reason: "startup" }, "wrong-token", "github");
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("no longer serves the retired model-token path", async () => {
+    seedOrb("running");
+    seedCredential();
+    const response = await app.inject({
+      method: "POST",
+      url: "/runtime/v1/model-token",
+      headers: { authorization: `Bearer ${TOKEN}` },
+      payload: { reason: "startup" },
+    });
+    expect(response.statusCode).toBe(404);
   });
 
   it("never serializes a refresh token", async () => {

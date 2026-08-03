@@ -235,7 +235,7 @@ export class PiOrbAgent {
       );
     }
     const brokerTask = new NoSimulationTask(`broker-${this.options.orbId}`, false);
-    const brokerClient = new BrokerTokenClient(new HttpBrokerEndpoint(broker));
+    const brokerClient = new BrokerTokenClient(new HttpBrokerEndpoint(broker, "model"));
     const runtimeResult = await ResultAsync.fromPromise(
       ModelRuntime.create({
         // Private per-orb auth file: holds only the short-lived access token

@@ -1,5 +1,9 @@
 # Agent Instructions
 
+## Project stage: proof of concept
+
+pi-orb is still a POC (noted 2026-08-03). Do not build backwards-compatibility machinery unless explicitly asked: no deprecated route aliases, no dual-read/dual-write phases, no multi-deploy migration choreography. Breaking changes to internal contracts (runtime routes, protocol schemas, env contracts) ship directly; running orbs that break on an old contract are simply stopped and restarted. SQL schema migrations (`adapters/pg/migrations/*.sql`) remain the normal way to change the database — this note is about compatibility staging, not about avoiding migration files.
+
 ## Living design document
 
 `DESIGN.md` is the source of truth for pi-orb's evolving design.

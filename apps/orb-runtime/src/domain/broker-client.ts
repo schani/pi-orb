@@ -3,7 +3,7 @@ import { err, ok, type Result } from "neverthrow";
 
 /**
  * Runtime-side broker token client (DESIGN.md §15.1): fetches short-lived
- * access tokens from the control plane's `/runtime/v1/model-token`, with
+ * access tokens from the control plane's `/runtime/v1/tokens/{name}`, with
  * singleflight, bounded retry windows, and typed terminal outcomes. Pure
  * domain logic — the HTTP transport sits behind `BrokerEndpoint`.
  */
@@ -17,7 +17,8 @@ export interface TokenRequestBody {
 
 export interface BrokerTokenGrant {
   readonly accessToken: string;
-  readonly accountId: string;
+  /** Model grants carry the account id; GitHub grants carry the user login. */
+  readonly accountId?: string;
   /** Wall-clock ms. */
   readonly expiresAt: number;
   readonly generation: number;

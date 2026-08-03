@@ -1,7 +1,8 @@
+import type { TokenName } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
 import { sleepResult, withDeadline } from "./dst.ts";
-import type { ModelTokenError, StoreError } from "./errors.ts";
+import type { StoreError, TokenError } from "./errors.ts";
 import type { BrokerDeps, CredentialPointerRow, StoredCredential } from "./ports.ts";
 
 /**
@@ -12,8 +13,20 @@ import type { BrokerDeps, CredentialPointerRow, StoredCredential } from "./ports
  * credential. The refresh token itself never appears in a return value.
  */
 
-/** The single credential slot of the first slice. */
+/** The model-credential slot of the first slice. */
 export const CODEX_PROVIDER = "openai-codex";
+
+/** The GitHub user-credential slot (DESIGN.md §15.3). */
+export const GITHUB_PROVIDER = "github";
+
+/**
+ * Logical token name → backing provider. The runtime asks for a capability;
+ * which upstream backs it never appears in the wire contract.
+ */
+export const TOKEN_PROVIDERS: Readonly<Record<TokenName, string>> = {
+  model: CODEX_PROVIDER,
+  github: GITHUB_PROVIDER,
+};
 
 /**
  * Orb states whose runtime token is honored: every state in which the host
@@ -27,13 +40,13 @@ export const RUNTIME_TOKEN_STATES: readonly string[] = [
   "stopping",
 ];
 
-export interface ModelTokenRequest {
+export interface TokenRequest {
   readonly reason: "startup" | "expiring" | "rejected";
   /** The generation the caller saw fail or near expiry; enables coalescing. */
   readonly staleGeneration?: number;
 }
 
-export interface ModelTokenGrant {
+export interface TokenGrant {
   readonly accessToken: string;
   readonly accountId: string;
   /** Wall-clock ms. */
@@ -41,15 +54,15 @@ export interface ModelTokenGrant {
   readonly generation: number;
 }
 
-const retryable = (message: string, retryAfterMs?: number): ModelTokenError => ({
+const retryable = (message: string, retryAfterMs?: number): TokenError => ({
   type: "token_retryable",
   message,
   ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
 });
 
-const AUTH_REQUIRED: ModelTokenError = { type: "auth_required" };
+const AUTH_REQUIRED: TokenError = { type: "auth_required" };
 
-function grantOf(credential: StoredCredential, generation: number): ModelTokenGrant {
+function grantOf(credential: StoredCredential, generation: number): TokenGrant {
   return {
     accessToken: credential.access,
     accountId: credential.accountId,
@@ -73,12 +86,12 @@ async function releaseLease(
   });
 }
 
-export async function getModelToken(
+export async function getToken(
   task: SimulationTask,
   deps: BrokerDeps,
   provider: string,
-  request: ModelTokenRequest,
-): Promise<Result<ModelTokenGrant, ModelTokenError>> {
+  request: TokenRequest,
+): Promise<Result<TokenGrant, TokenError>> {
   const constants = deps.constants;
   const deadline = task.monotonicNow() + constants.requestDeadlineMs;
   const pause = async (ms: number): Promise<void> => {

@@ -1457,17 +1457,19 @@ Status: **implemented** (designed, revised after an external Codex review, then 
 
 **Division of responsibility.** The control plane is the credential owner: it runs the device login (unchanged `PiAuthGate`), performs every upstream refresh, and holds the only durable copy of the refresh token. The orb runtime is a consumer of short-lived access tokens and holds them in memory only; no refresh token ever exists in the runtime process. The existing no-credential-serialization guard remains scoped to browser-facing responses — the runtime endpoint below intentionally serializes an access token.
 
-**Runtime-facing endpoint.** One route, versioned separately from the browser API because its compatibility story is deployment-internal:
+**Runtime-facing endpoint.** One parameterized route, versioned separately from the browser API because its compatibility story is deployment-internal. (Generalized 2026-08-03 from the original `POST /runtime/v1/model-token` — renamed outright, no compatibility alias, per the POC stance in `CLAUDE.md`; `{name}` is a logical token name mapped internally to a provider, §15.3.)
 
 ```text
-POST /runtime/v1/model-token
+POST /runtime/v1/tokens/{name}        name ∈ "model" | "github"
 Authorization: Bearer <orb token>
 
 request  { "reason": "startup" | "expiring" | "rejected", "staleGeneration"?: number }
-200      { "accessToken": string, "accountId": string, "expiresAt": number, "generation": number }
+200      { "accessToken": string, "accountId"?: string, "expiresAt": number, "generation": number }
          // expiresAt in ms since epoch; Cache-Control: no-store
+         // accountId: account id on model grants, user login on github grants
 401      unknown, invalid, or lifecycle-revoked orb token
-409      { "error": "auth_required" }   // no usable credential; device login must run
+404      { "error": "unknown_token" }  // name outside the schema
+409      { "error": "auth_required" }  // no usable credential; device login must run
 429/5xx  retryable; the runtime backs off with jitter and honors Retry-After
 ```
 
@@ -1516,6 +1518,39 @@ Still open for that later security phase:
 - secret/environment-variable scope and auditability;
 - whether project code is trusted, semi-trusted, or hostile;
 - portal/forwarded-port authorization.
+
+### 15.3 GitHub credentials for `gh` and git push (proposed 2026-08-03; direction decided 2026-08-03: user OAuth device flow)
+
+Goal: `gh` is installed in the runtime image and works inside orbs without manual login, so agent shell commands can open PRs, read issues, and check CI, and `git push` over HTTPS works for authorized repositories.
+
+The credential broker (§15.1) is the vehicle: the GitHub token route reuses the orb-token authentication from `runtime-routes.ts` verbatim, and `credential_pointers` is already keyed by provider, so a `github` row slots in beside `openai-codex` with no schema change. Injecting a raw long-lived key as an orb environment variable is the anti-pattern the broker replaced — it would bake the secret into the GCE startup script and instance metadata, expose a durable credential to repository code, force a script-hash bounce of every orb on rotation, and violate the §15.2 requirements ("do not bake secrets into images", "prefer short-lived workload identity over forwarding developer credentials").
+
+**Decided: user OAuth device flow** (GitHub App user-to-server tokens with expiration enabled), because PRs and comments must be authored *as the user*, not a bot. Identical in shape to the existing `openai-codex` pointer: a device-code login ceremony (analogous to `PiAuthGate`) captures a refresh token into Secret Manager; the broker vends ~8-hour access tokens and refreshes them behind the existing lease/generation mechanics (GitHub rotates the refresh token on every use — the fenced-CAS machinery and the acknowledged loss window of §15.1 apply unchanged).
+
+This still requires registering a **GitHub App** — but the app is only the OAuth client registration, not the acting identity. Two reasons a classic OAuth App does not work: its user tokens never expire and have no refresh token, so the broker would be vending a durable credential (the exact failure of the PAT option below); and its scopes are coarse (`repo` is everything). Only GitHub App user-to-server flows offer expiring tokens plus rotation and fine-grained permissions. Registration is a settings-page form (no review or marketplace listing): enable device flow, keep "expire user authorization tokens" on, install the app on the account/repositories it may reach. Resulting tokens are constrained to the intersection of the user's access and the app's installation — a useful blast-radius bound. One wrinkle: the device-flow *initial* grant needs only the client id, but *refreshing* requires the app's client secret, so the client secret is a second control-plane-only durable secret (Secret Manager beside the refresh token; it never leaves the control plane).
+
+Rejected alternatives:
+
+- **App installation tokens** (`pi-orb[bot]` identity): simpler (stateless minting from the app private key, no refresh rotation), but rejected because actions would be authored by the bot, not the user.
+- **Fine-grained PAT vended by the broker:** the token handed to the orb is itself the durable credential — repository code could exfiltrate something long-lived, which crosses the line the broker exists to hold.
+- **Injection as a static orb env var** (any credential shape): see above.
+
+**Unified runtime token route (decided and implemented 2026-08-03).** Per-credential endpoints are rejected; the runtime token surface is one parameterized route, and the former `/runtime/v1/model-token` migrated into it. The wire spec lives in §15.1; the design points:
+
+- `{name}` is a *logical token name*, not the upstream provider id: the control plane maps `model → openai-codex` and `github → github` internally (`TOKEN_PROVIDERS` in `domain/broker.ts`). The runtime asks for a capability; which provider backs it is the control plane's business, so a future model-provider change never touches the runtime contract.
+- One shared request/grant/error schema in `packages/protocol/src/broker.ts` (`TokenRequestSchema` / `TokenGrantSchema` / `TokenErrorSchema`, plus `TokenNameSchema` and a `runtimeTokenPath(name)` helper replacing `MODEL_TOKEN_PATH`). `accountId` is optional; the GitHub grant carries the user's login there. The `reason`/`staleGeneration` anti-forced-rotation semantics apply per name, since generations already live on the per-provider pointer row.
+- One route handler validates `{name}` against the schema (unknown name → 404 `unknown_token`) and dispatches to the provider-keyed broker core (`getToken`); auth, status mapping, and `Cache-Control: no-store` are shared. `tokens/github` answers `auth_required` until the GitHub provider lands.
+- Migration: none — POC stance (decided 2026-08-03, recorded in `CLAUDE.md`): `/runtime/v1/model-token` is renamed outright with no deprecated alias; a running orb still on the old path fails its next token refresh and is simply stopped and restarted.
+
+Runtime consumption:
+
+- Install `gh` in the runtime Dockerfile (pinned, from GitHub's apt repository).
+- Do not run `gh auth login` or persist `hosts.yml` — `$HOME` is in the ephemeral container layer, and a static file freezes a token that should stay short-lived.
+- Vend tokens at point of use, mirroring `BrokerTokenClient` (singleflight, bounded retries): a git credential helper (`credential.helper = !pi-orb-credential`) that fetches a fresh token from the in-process runtime covers `git push` natively; for `gh`, either inject `GH_TOKEN` per command via the SDK bash-tool `spawnHook` seam, or put a `gh` wrapper shim earlier on `PATH` that fetches a token and execs the real binary with `GH_TOKEN` set.
+- Exposure class: repository code can obtain a short-lived, scoped GitHub token — the same accepted exposure class as model access tokens (§15.1); the durable secret (app key or refresh token) never leaves the control plane.
+- The §11.1 public-HTTPS-only clone rule stays until this lands; private-repo clone becomes a natural follow-on (the credential helper is the same seam), but is a separate decision.
+
+Still open: user sign-off on the concrete route shape above; which repositories/permissions the app is granted; whether private clone rides along or waits; whether the `gh` shim or the `spawnHook` env injection is the consumption mechanism.
 
 ## 16. Deferred suborbs
 
@@ -1667,7 +1702,7 @@ Test framework assertions and React/framework error boundaries may use exception
 12. Choose the runtime container base-image pin and Node 24 release/update policy. (The VM host-OS half of this question dissolved: cloud hosts boot Container-Optimized OS and only run the runtime container, §3.3.)
 13. Decide whether to adopt `.agents/setup` and a restart hook inspired by Amp.
 14. Decide how setup caching/prebuilt snapshots work after the unoptimized first slice.
-15. Decide which tools and services are installed in the prescribed base image.
+15. Decide which tools and services are installed in the prescribed base image. (`gh` is proposed, with brokered auth — §15.3.)
 16. Decide if/when an Orbfile is introduced and what it is allowed to configure.
 17. Decide how services, ports, logs, browser automation, and preview URLs work.
 
@@ -1683,7 +1718,7 @@ Test framework assertions and React/framework error boundaries may use exception
 ### Product and security
 
 24. Define the future user/project/orb identity and authorization model before public deployment.
-25. Define future per-user/project model credentials and private-Git credentials/workload identity.
+25. Define future per-user/project model credentials and private-Git credentials/workload identity. (A proposal for brokered GitHub credentials exists in §15.3.)
 26. Define project trust and the security boundary for repository-controlled code.
 27. Define orb deletion/export behavior and retention of replicated history.
 28. Define whether stopped hosts have an expiration/garbage-collection policy.

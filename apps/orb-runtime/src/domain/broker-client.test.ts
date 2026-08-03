@@ -61,6 +61,29 @@ function expectOk(
 }
 
 describe("broker token client (DST)", () => {
+  it("passes through a grant without accountId (github tokens carry none here)", async () => {
+    await runDst({ name: "client-no-account-id", iterations: 5 }, async (sim) => {
+      const endpoint = new ScriptedEndpoint([
+        {
+          kind: "grant",
+          grant: { accessToken: "access-gh", expiresAt: 9_999_999_999_999, generation: 1 },
+        },
+      ]);
+      const client = new BrokerTokenClient(endpoint, TEST_CONSTANTS);
+      const result = await sim.runTasks([
+        {
+          name: "runtime",
+          f: async (task) => {
+            const got = expectOk(await client.fetch(task, "startup"), "startup fetch");
+            expect(got.accessToken).toBe("access-gh");
+            expect(got.accountId).toBeUndefined();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("fetches a token and omits staleGeneration on startup", async () => {
     await runDst({ name: "client-startup", iterations: 15 }, async (sim) => {
       const endpoint = new ScriptedEndpoint([grant(1)]);

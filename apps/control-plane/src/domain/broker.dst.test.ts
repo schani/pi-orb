@@ -9,9 +9,9 @@ import {
 } from "../testkit/broker.ts";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { runDst } from "../testkit/sim.ts";
-import { commitLoginCredential, getModelToken, type ModelTokenGrant } from "./broker.ts";
+import { commitLoginCredential, getToken, type TokenGrant } from "./broker.ts";
 import { DEFAULT_BROKER_CONSTANTS } from "./constants.ts";
-import type { ModelTokenError } from "./errors.ts";
+import type { TokenError } from "./errors.ts";
 import type { BrokerDeps, StoredCredential } from "./ports.ts";
 
 const PROVIDER = "openai-codex";
@@ -55,10 +55,7 @@ function seedCredential(
   return credential;
 }
 
-function expectOk(
-  result: Result<ModelTokenGrant, ModelTokenError>,
-  label: string,
-): ModelTokenGrant {
+function expectOk(result: Result<TokenGrant, TokenError>, label: string): TokenGrant {
   expect(result.isOk(), `${label}: ${JSON.stringify(result.isErr() ? result.error : null)}`).toBe(
     true,
   );
@@ -66,7 +63,7 @@ function expectOk(
   return result.value;
 }
 
-function errType(result: Result<ModelTokenGrant, ModelTokenError>): string | null {
+function errType(result: Result<TokenGrant, TokenError>): string | null {
   return result.isErr() ? result.error.type : null;
 }
 
@@ -80,7 +77,7 @@ describe("credential broker (DST)", () => {
           f: async (task) => {
             const credential = seedCredential(task, harness, { expiresInMs: 3_600_000 });
             const grant = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, { reason: "startup" }),
+              await getToken(task, harness.deps, PROVIDER, { reason: "startup" }),
               "startup grant",
             );
             expect(grant.accessToken).toBe(credential.access);
@@ -100,7 +97,7 @@ describe("credential broker (DST)", () => {
         {
           name: "runtime",
           f: async (task) => {
-            const outcome = await getModelToken(task, harness.deps, PROVIDER, {
+            const outcome = await getToken(task, harness.deps, PROVIDER, {
               reason: "startup",
             });
             expect(errType(outcome)).toBe("auth_required");
@@ -115,7 +112,7 @@ describe("credential broker (DST)", () => {
   it("acceptance: a refresh storm coalesces into one upstream refresh", async () => {
     await runDst({ name: "broker-storm", iterations: 40 }, async (sim) => {
       const harness = makeBrokerHarness();
-      const grants: ModelTokenGrant[] = [];
+      const grants: TokenGrant[] = [];
       const result = await sim.runTasks([
         {
           name: "seeder",
@@ -129,7 +126,7 @@ describe("credential broker (DST)", () => {
           f: async (task: SimulationTask) => {
             await task.sleep(1 + task.random("stagger") * 500, "stagger");
             const grant = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, {
+              await getToken(task, harness.deps, PROVIDER, {
                 reason: "expiring",
                 staleGeneration: 1,
               }),
@@ -157,7 +154,7 @@ describe("credential broker (DST)", () => {
           f: async (task) => {
             seedCredential(task, harness, { expiresInMs: 3_600_000 });
             const grant = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, {
+              await getToken(task, harness.deps, PROVIDER, {
                 reason: "rejected",
                 staleGeneration: 1,
               }),
@@ -181,7 +178,7 @@ describe("credential broker (DST)", () => {
           f: async (task) => {
             seedCredential(task, harness, { expiresInMs: 3_600_000 });
             const first = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, {
+              await getToken(task, harness.deps, PROVIDER, {
                 reason: "rejected",
                 staleGeneration: 1,
               }),
@@ -191,7 +188,7 @@ describe("credential broker (DST)", () => {
             // A second caller still holding generation 1 reports it rejected;
             // the broker already rotated and must serve generation 2 as-is.
             const second = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, {
+              await getToken(task, harness.deps, PROVIDER, {
                 reason: "rejected",
                 staleGeneration: 1,
               }),
@@ -217,7 +214,7 @@ describe("credential broker (DST)", () => {
             const credential = seedCredential(task, harness, { expiresInMs: 3 * 60_000 });
             harness.upstream.pushScript({ kind: "transient" }, { kind: "transient" });
             const grant = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, {
+              await getToken(task, harness.deps, PROVIDER, {
                 reason: "expiring",
                 staleGeneration: 1,
               }),
@@ -242,7 +239,7 @@ describe("credential broker (DST)", () => {
             seedCredential(task, harness, { expiresInMs: -1_000 });
             harness.upstream.pushScript({ kind: "transient" }, { kind: "transient" });
             const grant = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, { reason: "startup" }),
+              await getToken(task, harness.deps, PROVIDER, { reason: "startup" }),
               "grant after retries",
             );
             expect(grant.generation).toBe(2);
@@ -263,12 +260,12 @@ describe("credential broker (DST)", () => {
           f: async (task) => {
             seedCredential(task, harness, { expiresInMs: -1_000 });
             harness.upstream.revokeAll();
-            const first = await getModelToken(task, harness.deps, PROVIDER, {
+            const first = await getToken(task, harness.deps, PROVIDER, {
               reason: "startup",
             });
             expect(errType(first)).toBe("auth_required");
             // The pointer is cleared: later requests never touch the upstream.
-            const second = await getModelToken(task, harness.deps, PROVIDER, {
+            const second = await getToken(task, harness.deps, PROVIDER, {
               reason: "startup",
             });
             expect(errType(second)).toBe("auth_required");
@@ -293,7 +290,7 @@ describe("credential broker (DST)", () => {
             // The upstream rotates, but the response never arrives.
             harness.upstream.pushScript({ kind: "apply_then_transient" });
             const early = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, {
+              await getToken(task, harness.deps, PROVIDER, {
                 reason: "expiring",
                 staleGeneration: 1,
               }),
@@ -302,7 +299,7 @@ describe("credential broker (DST)", () => {
             expect(early.generation).toBe(1);
             // Once expired, the stored refresh token is dead: forced re-login.
             await task.sleep(4 * 60_000, "wait for expiry");
-            const after = await getModelToken(task, harness.deps, PROVIDER, {
+            const after = await getToken(task, harness.deps, PROVIDER, {
               reason: "startup",
             });
             expect(errType(after)).toBe("auth_required");
@@ -324,7 +321,7 @@ describe("credential broker (DST)", () => {
           f: async (task) => {
             seedCredential(task, harness, { expiresInMs: -1_000 });
             harness.secrets.failWrites = true;
-            const first = await getModelToken(task, harness.deps, PROVIDER, {
+            const first = await getToken(task, harness.deps, PROVIDER, {
               reason: "startup",
             });
             expect(errType(first)).toBe("token_retryable");
@@ -332,7 +329,7 @@ describe("credential broker (DST)", () => {
             // The upstream rotated during the failed attempt; the stored
             // refresh token is dead. Wait out the refresh rate limit.
             await task.sleep(31_000, "past refresh rate limit");
-            const second = await getModelToken(task, harness.deps, PROVIDER, {
+            const second = await getToken(task, harness.deps, PROVIDER, {
               reason: "startup",
             });
             expect(errType(second)).toBe("auth_required");
@@ -359,7 +356,7 @@ describe("credential broker (DST)", () => {
             expect(commit.isErr()).toBe(true);
             harness.secrets.failWrites = false;
             const grant = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, { reason: "startup" }),
+              await getToken(task, harness.deps, PROVIDER, { reason: "startup" }),
               "old credential grant",
             );
             expect(grant.accessToken).toBe(old.access);
@@ -385,7 +382,7 @@ describe("credential broker (DST)", () => {
             // Causal gate: the invalid_grant lands only after the login has
             // durably committed — no timer schedule can reorder that.
             harness.upstream.pushScript({ kind: "until", ready: () => loginCommitted });
-            const outcome = await getModelToken(task, harness.deps, PROVIDER, {
+            const outcome = await getToken(task, harness.deps, PROVIDER, {
               reason: "startup",
             });
             // The fenced clear must fail and the newer credential be served.
@@ -430,7 +427,7 @@ describe("credential broker (DST)", () => {
               refreshLeaseUntil: task.wallNow() + harness.deps.constants.leaseMs,
             });
             const grant = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, { reason: "startup" }),
+              await getToken(task, harness.deps, PROVIDER, { reason: "startup" }),
               "grant after lease expiry",
             );
             expect(grant.generation).toBe(2);
@@ -458,7 +455,7 @@ describe("credential broker (DST)", () => {
               refreshLeaseUntil: task.wallNow() + harness.deps.constants.leaseMs,
             });
             const grant = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, { reason: "startup" }),
+              await getToken(task, harness.deps, PROVIDER, { reason: "startup" }),
               "grant under foreign lease",
             );
             expect(grant.accessToken).toBe(credential.access);
@@ -479,7 +476,7 @@ describe("credential broker (DST)", () => {
           f: async (task) => {
             seedCredential(task, harness, { expiresInMs: 3_600_000 });
             const first = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, {
+              await getToken(task, harness.deps, PROVIDER, {
                 reason: "rejected",
                 staleGeneration: 1,
               }),
@@ -488,7 +485,7 @@ describe("credential broker (DST)", () => {
             expect(first.generation).toBe(2);
             // Immediately claiming the new token is also bad gets throttled.
             for (let i = 0; i < 5; i++) {
-              const outcome = await getModelToken(task, harness.deps, PROVIDER, {
+              const outcome = await getToken(task, harness.deps, PROVIDER, {
                 reason: "rejected",
                 staleGeneration: 2,
               });
@@ -497,7 +494,7 @@ describe("credential broker (DST)", () => {
             expect(harness.upstream.calls).toBe(1);
             await task.sleep(31_000, "past rate limit");
             const later = expectOk(
-              await getModelToken(task, harness.deps, PROVIDER, {
+              await getToken(task, harness.deps, PROVIDER, {
                 reason: "rejected",
                 staleGeneration: 2,
               }),
@@ -539,7 +536,7 @@ describe("credential broker (DST)", () => {
             name: `runtime-${i}`,
             f: async (task: SimulationTask) => {
               await task.sleep(1 + task.random("stagger") * 2_000, "stagger");
-              const outcome = await getModelToken(task, harness.deps, PROVIDER, {
+              const outcome = await getToken(task, harness.deps, PROVIDER, {
                 reason: i % 2 === 0 ? "expiring" : "startup",
                 staleGeneration: 1,
               });

@@ -102,7 +102,7 @@ export type UpstreamRefreshError =
  * are folded into `token_retryable` — for the runtime every non-terminal
  * failure means the same thing: back off and ask again.
  */
-export type ModelTokenError =
+export type TokenError =
   | { readonly type: "auth_required" }
   | {
       readonly type: "token_retryable";

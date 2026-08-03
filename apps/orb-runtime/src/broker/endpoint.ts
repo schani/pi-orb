@@ -1,8 +1,9 @@
 import {
   CONTROL_PLANE_URL_ENV,
-  MODEL_TOKEN_PATH,
-  ModelTokenResponseSchema,
   RUNTIME_TOKEN_ENV,
+  runtimeTokenPath,
+  TokenGrantSchema,
+  type TokenName,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { Check } from "typebox/value";
@@ -38,13 +39,15 @@ export function readBrokerEnv(env: Record<string, string | undefined>): BrokerEn
  */
 export class HttpBrokerEndpoint implements BrokerEndpoint {
   private readonly env: BrokerEnv;
+  private readonly name: TokenName;
 
-  constructor(env: BrokerEnv) {
+  constructor(env: BrokerEnv, name: TokenName) {
     this.env = env;
+    this.name = name;
   }
 
   requestToken(_task: SimulationTask, body: TokenRequestBody): Promise<BrokerEndpointResult> {
-    return fetch(`${this.env.controlPlaneUrl}${MODEL_TOKEN_PATH}`, {
+    return fetch(`${this.env.controlPlaneUrl}${runtimeTokenPath(this.name)}`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${this.env.runtimeToken}`,
@@ -55,14 +58,14 @@ export class HttpBrokerEndpoint implements BrokerEndpoint {
       async (response): Promise<BrokerEndpointResult> => {
         const payload: unknown = await response.json().catch(() => null);
         if (response.status === 200) {
-          if (!Check(ModelTokenResponseSchema, payload)) {
+          if (!Check(TokenGrantSchema, payload)) {
             return { kind: "fatal", message: "malformed token response" };
           }
           return {
             kind: "grant",
             grant: {
               accessToken: payload.accessToken,
-              accountId: payload.accountId,
+              ...(payload.accountId !== undefined ? { accountId: payload.accountId } : {}),
               expiresAt: payload.expiresAt,
               generation: payload.generation,
             },
