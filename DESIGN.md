@@ -1521,7 +1521,7 @@ Still open for that later security phase:
 - whether project code is trusted, semi-trusted, or hostile;
 - portal/forwarded-port authorization.
 
-### 15.3 GitHub credentials for `gh` and git push (decided 2026-08-03: user OAuth device flow; control-plane side implemented 2026-08-03; runtime consumption pending)
+### 15.3 GitHub credentials for `gh` and git push (decided and implemented end to end 2026-08-03: user OAuth device flow)
 
 Goal: `gh` is installed in the runtime image and works inside orbs without manual login, so agent shell commands can open PRs, read issues, and check CI, and `git push` over HTTPS works for authorized repositories.
 
@@ -1552,15 +1552,16 @@ Rejected alternatives:
 - One route handler validates `{name}` against the schema (unknown name → 404 `unknown_token`) and dispatches to the provider-keyed broker core (`getToken`); auth, status mapping, and `Cache-Control: no-store` are shared. `tokens/github` answers `auth_required` until the GitHub provider lands.
 - Migration: none — POC stance (decided 2026-08-03, recorded in `CLAUDE.md`): `/runtime/v1/model-token` is renamed outright with no deprecated alias; a running orb still on the old path fails its next token refresh and is simply stopped and restarted.
 
-Runtime consumption:
+Runtime consumption (implemented 2026-08-03; the shim approach was chosen over the SDK bash-tool `spawnHook` because it needs no SDK coupling and covers every subprocess — `spawnHook` remains available if per-command env injection is ever needed):
 
-- Install `gh` in the runtime Dockerfile (pinned, from GitHub's apt repository).
-- Do not run `gh auth login` or persist `hosts.yml` — `$HOME` is in the ephemeral container layer, and a static file freezes a token that should stay short-lived.
-- Vend tokens at point of use, mirroring `BrokerTokenClient` (singleflight, bounded retries): a git credential helper (`credential.helper = !pi-orb-credential`) that fetches a fresh token from the in-process runtime covers `git push` natively; for `gh`, either inject `GH_TOKEN` per command via the SDK bash-tool `spawnHook` seam, or put a `gh` wrapper shim earlier on `PATH` that fetches a token and execs the real binary with `GH_TOKEN` set.
-- Exposure class: repository code can obtain a short-lived, scoped GitHub token — the same accepted exposure class as model access tokens (§15.1); the durable secret (app key or refresh token) never leaves the control plane.
-- The §11.1 public-HTTPS-only clone rule stays until this lands; private-repo clone becomes a natural follow-on (the credential helper is the same seam), but is a separate decision.
+- `gh` is installed in the runtime Dockerfile from GitHub's official apt repository. No `gh auth login`, no `hosts.yml` — `$HOME` is in the ephemeral container layer, and a static file would freeze a token that should stay short-lived; nothing is persisted.
+- Tokens are vended at point of use by a one-shot CLI (`apps/orb-runtime/src/gh/cli.ts`, reusing `HttpBrokerEndpoint`/`BrokerTokenClient` against `tokens/github` with tight ~10s retry windows). Two consumers in the image:
+  - `/usr/local/bin/gh`, a shim ahead of the real binary on `PATH`, fetches a fresh token and execs `/usr/bin/gh` with `GH_TOKEN` set (a caller-provided `GH_TOKEN` wins; on fetch failure gh runs unauthenticated with the reason on stderr);
+  - a git credential helper wired via the image's *system* gitconfig for `https://github.com` only (`username=x-access-token`, `password=<token>`), which makes `git push` work natively and stays silent for every other host — the §11.1 clone rules are untouched.
+- Exposure class: repository code can obtain a short-lived, scoped GitHub token — the same accepted exposure class as model access tokens (§15.1); the durable secrets (client secret, refresh token) never leave the control plane.
+- Private-repo clone remains a separate decision; the credential helper is the seam it would reuse.
 
-Still open: which repositories/permissions the app is granted (a settings-page decision at registration time); whether private clone rides along or waits; whether the `gh` shim or the `spawnHook` env injection is the consumption mechanism.
+Still open: which repositories/permissions the app is granted (a settings-page decision at registration time); whether private clone rides along or waits.
 
 ## 16. Deferred suborbs
 
@@ -1712,7 +1713,7 @@ Test framework assertions and React/framework error boundaries may use exception
 12. Choose the runtime container base-image pin and Node 24 release/update policy. (The VM host-OS half of this question dissolved: cloud hosts boot Container-Optimized OS and only run the runtime container, §3.3.)
 13. Decide whether to adopt `.agents/setup` and a restart hook inspired by Amp.
 14. Decide how setup caching/prebuilt snapshots work after the unoptimized first slice.
-15. Decide which tools and services are installed in the prescribed base image. (`gh` is proposed, with brokered auth — §15.3.)
+15. Decide which tools and services are installed in the prescribed base image. (Resolved for `gh`: installed in the runtime image with brokered auth, §15.3; the broader tool list remains open.)
 16. Decide if/when an Orbfile is introduced and what it is allowed to configure.
 17. Decide how services, ports, logs, browser automation, and preview URLs work.
 
