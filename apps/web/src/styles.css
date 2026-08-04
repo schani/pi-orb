@@ -211,6 +211,16 @@ textarea:focus {
   letter-spacing: 0.15em;
   margin: 0 0.5rem;
   color: var(--ink);
+  /* Any click selects the whole code, never bleeding into adjacent words. */
+  -webkit-user-select: all;
+  user-select: all;
+}
+
+.copy-code {
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-right: 0.5rem;
+  vertical-align: 2px;
 }
 
 /* ---------- projects page ---------- */

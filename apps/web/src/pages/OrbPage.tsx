@@ -274,6 +274,30 @@ function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
   }
 }
 
+/** Copies the device-login code; flips its label briefly as feedback. */
+function CopyCodeButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      className="copy-code"
+      onClick={() => {
+        navigator.clipboard.writeText(code).then(
+          () => setCopied(true),
+          () => {},
+        );
+      }}
+    >
+      {copied ? "copied" : "copy"}
+    </button>
+  );
+}
+
 export function OrbPage({ orbId }: { orbId: string }) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [orb, setOrb] = useState<OrbView | null>(null);
@@ -509,8 +533,8 @@ export function OrbPage({ orbId }: { orbId: string }) {
             <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
               {orb.actionRequired.verificationUri}
             </a>{" "}
-            and enter code
-            <span className="user-code">{orb.actionRequired.userCode}</span>
+            and enter code <span className="user-code">{orb.actionRequired.userCode}</span>
+            <CopyCodeButton code={orb.actionRequired.userCode} />
             <span className="muted"> (expires {orb.actionRequired.expiresAt})</span>
           </div>
         )}
