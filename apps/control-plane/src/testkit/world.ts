@@ -64,6 +64,7 @@ interface OrbWorldState {
   filesystem: FakeFilesystem;
   host: FakeHost | null;
   runtimeInstanceCounter: number;
+  sessionCounter: number;
   /** While > monotonic now, pulls return 503 history_unavailable. */
   pullOutageUntil: number;
   /** While > monotonic now, the runtime does not answer HTTP at all. */
@@ -94,6 +95,7 @@ export class FakeWorld {
       filesystem: { sessionId: null, header: null, entries: [], headId: null },
       host: null,
       runtimeInstanceCounter: 0,
+      sessionCounter: 0,
       pullOutageUntil: 0,
       runtimeUnreachableUntil: 0,
       reportOrbId: null,
@@ -207,9 +209,11 @@ export class FakeWorld {
 
   /** Create the persistent session if none exists (as a ready runtime would). */
   ensureSessionExists(orbId: string): void {
-    const fs = this.orbState(orbId).filesystem;
+    const state = this.orbState(orbId);
+    const fs = state.filesystem;
     if (fs.sessionId === null) {
-      fs.sessionId = `${orbId}-session-1`;
+      state.sessionCounter += 1;
+      fs.sessionId = `${orbId}-session-${state.sessionCounter}`;
       fs.header = { id: fs.sessionId, overflow: { native: { id: fs.sessionId } } };
     }
   }
@@ -271,6 +275,15 @@ export class FakeWorld {
     const state = this.orbState(orbId);
     if (state.host === null) return;
     if (state.config.containerNeverStarts) return;
+    const fs = state.filesystem;
+    if (fs.sessionId !== null && fs.entries.length === 0) {
+      // Post-flush-gate runtime contract (DESIGN.md §8.5): a session that
+      // never flushed a record evaporates with the process — the next boot
+      // starts a fresh session identity.
+      fs.sessionId = null;
+      fs.header = null;
+      fs.headId = null;
+    }
     state.runtimeInstanceCounter += 1;
     state.host.runtime = {
       instanceId: `${orbId}-runtime-${state.runtimeInstanceCounter}`,

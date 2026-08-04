@@ -301,11 +301,19 @@ export class PgControlPlaneStore implements ControlPlaneStore {
           storedSessionId !== params.session.id ||
           !jsonEqual(orbRow["harness_session_header"], params.session)
         ) {
-          return err<OrbRow, ReplicationIntegrityError>({
-            type: "replication_integrity",
-            reason: "session_mismatch",
-            message: `stored session ${storedSessionId}, pulled session ${params.session.id}`,
-          });
+          if (currentCursor === null) {
+            // An empty replica pins nothing (DESIGN.md §8.5): with no
+            // committed cursor a changed session identity is legitimate
+            // rotation — a runtime that never flushed starts a fresh session
+            // on reboot. Re-initialize instead of failing the orb.
+            initializeSession = true;
+          } else {
+            return err<OrbRow, ReplicationIntegrityError>({
+              type: "replication_integrity",
+              reason: "session_mismatch",
+              message: `stored session ${storedSessionId}, pulled session ${params.session.id}`,
+            });
+          }
         }
         for (const record of params.records) {
           const inserted = await query(
@@ -377,7 +385,7 @@ export class PgControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<void, StoreError | ReplicationIntegrityError> {
     return this.db.transaction<void, StoreError | ReplicationIntegrityError>(async (query) => {
       const orbResult = await query(
-        "SELECT harness_session_id, harness_session_header FROM orbs WHERE id = $1 FOR UPDATE",
+        "SELECT harness_session_id, harness_session_header, replication_cursor FROM orbs WHERE id = $1 FOR UPDATE",
         [orbId],
       );
       if (orbResult.isErr()) return err(orbResult.error);
@@ -385,7 +393,15 @@ export class PgControlPlaneStore implements ControlPlaneStore {
       if (row === undefined) return ok(undefined);
       const storedSessionId =
         row["harness_session_id"] === null ? null : String(row["harness_session_id"]);
-      if (storedSessionId === null) {
+      const storedCursor =
+        row["replication_cursor"] === null ? null : String(row["replication_cursor"]);
+      if (
+        storedSessionId === null ||
+        // An empty replica pins nothing (DESIGN.md §8.5): with no committed
+        // cursor, a changed session identity is legitimate rotation.
+        (storedCursor === null &&
+          (storedSessionId !== session.id || !jsonEqual(row["harness_session_header"], session)))
+      ) {
         const updated = await query(
           "UPDATE orbs SET harness_session_id = $2, harness_session_header = $3 WHERE id = $1",
           [orbId, session.id, session],

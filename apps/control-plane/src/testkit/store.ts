@@ -277,6 +277,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       return { id: session.id, header: session };
     }
     if (orb.harnessSessionId !== session.id || !jsonEqual(orb.harnessSessionHeader, session)) {
+      if (orb.replicationCursor === null) {
+        // An empty replica pins nothing (DESIGN.md §8.5): with no committed
+        // cursor, a changed session identity is legitimate rotation — a
+        // runtime that never flushed starts a fresh session on reboot.
+        return { id: session.id, header: session };
+      }
       return {
         type: "replication_integrity",
         reason: "session_mismatch",
