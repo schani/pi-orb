@@ -28,6 +28,7 @@ import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { pickCodexModel } from "./model-select.ts";
+import { sessionFlushed } from "./session-flush.ts";
 
 export interface PiOrbAgentOptions {
   readonly orbId: string;
@@ -462,6 +463,19 @@ export class PiOrbAgent {
     const header = mapPiSessionHeader(manager.getHeader());
     if (header.isErr()) {
       return err({ type: "snapshot_error", message: header.error.message });
+    }
+    if (!sessionFlushed(manager)) {
+      // The SDK has not written the session file yet (no assistant message,
+      // §8.5): every entry is memory-only and would vanish in a restart, so
+      // none may be served — a replicated cursor must always be resolvable.
+      return ok({
+        orbId: this.options.orbId,
+        runtimeInstanceId: this.runtimeInstanceId,
+        activity: this.activity,
+        session: header.value,
+        records: [],
+        headId: null,
+      });
     }
     const records = [];
     for (const entry of manager.getEntries()) {

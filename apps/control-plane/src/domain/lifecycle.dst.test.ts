@@ -11,7 +11,7 @@ import {
 } from "../testkit/fixtures.ts";
 import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
 import { makeRecordingSimulation, runDst, waitUntil } from "../testkit/sim.ts";
-import { requestOrbStop } from "./lifecycle.ts";
+import { requestOrbStart, requestOrbStop } from "./lifecycle.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 
 const ORB = "orb-a";
@@ -576,6 +576,56 @@ describe("orb lifecycle (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       assertAtMostOneHost(harness.world, ORB);
+    });
+  });
+
+  it("an orb with no replicated history survives stop and restart", async () => {
+    await runDst({ name: "empty-history-restart", iterations: 20 }, async (sim) => {
+      // The 2026-08-03 incident shape (DESIGN.md §8.5): nothing replicated
+      // yet — with the snapshot gate, a never-flushed session serves zero
+      // records — then the orb stops and restarts. Replication must resume
+      // cleanly from the null cursor instead of stranding the orb. Idle
+      // auto-stop is out of scope here (see unreachable-restart).
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const stopResult = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopResult.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "orb stopped with empty history",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 300_000 },
+            );
+            expect(harness.store.replicaRecords(ORB).length).toBe(0);
+            const startResult = await requestOrbStart(task, harness.deps, ORB);
+            expect(startResult.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "orb running again",
+              () => harness.store.orbSnapshot(ORB)?.state === "running",
+              { timeoutMs: 300_000 },
+            );
+            harness.world.appendMessage(ORB);
+            await waitUntil(
+              task,
+              "late record replicated",
+              () => harness.store.replicaRecords(ORB).length === 1,
+              { timeoutMs: 300_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
+      assertReplicaComplete(harness.world, harness.store, ORB);
     });
   });
 
