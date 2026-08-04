@@ -61,7 +61,7 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
           .status(400)
           .send(runtimeError("invalid_request", "limit must be an integer", false));
       }
-      const snapshot = agent.snapshot();
+      const snapshot = agent.replicationSnapshot();
       if (snapshot.isErr()) {
         return reply
           .status(503)

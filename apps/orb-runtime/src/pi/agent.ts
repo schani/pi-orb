@@ -23,6 +23,7 @@ import { err, ok, Result, ResultAsync } from "neverthrow";
 import { type BrokerEnv, HttpBrokerEndpoint } from "../broker/endpoint.ts";
 import { brokerProviderConfig } from "../broker/provider.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
+import { gateUnflushedSnapshot } from "../domain/history.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
@@ -454,7 +455,26 @@ export class PiOrbAgent {
 
   // -- synchronous views ----------------------------------------------------
 
-  /** Immutable snapshot of the persisted session (DESIGN.md §8.1). */
+  /**
+   * The snapshot served to the control plane's history pull (DESIGN.md
+   * §8.5): empty until the SDK has written the session file (no assistant
+   * message yet, pinned in session-flush.contract.test.ts), because every
+   * entry before that is memory-only and a committed cursor naming one would
+   * be unresolvable after a restart. Browser-facing views use `snapshot()`
+   * ungated — gating only part of them desynchronizes the head the client
+   * sees from the head its requests are validated against (stale_head).
+   */
+  replicationSnapshot(): Result<HarnessSnapshot, SnapshotError> {
+    const manager = this.sessionManager;
+    if (manager === null) {
+      return err({ type: "snapshot_error", message: "session is not ready" });
+    }
+    return this.snapshot().map((snapshot) =>
+      gateUnflushedSnapshot(snapshot, sessionFlushed(manager)),
+    );
+  }
+
+  /** Immutable snapshot of the full in-memory session (DESIGN.md §8.1). */
   snapshot(): Result<HarnessSnapshot, SnapshotError> {
     const manager = this.sessionManager;
     if (manager === null || this.health.status !== "ready") {
@@ -463,19 +483,6 @@ export class PiOrbAgent {
     const header = mapPiSessionHeader(manager.getHeader());
     if (header.isErr()) {
       return err({ type: "snapshot_error", message: header.error.message });
-    }
-    if (!sessionFlushed(manager)) {
-      // The SDK has not written the session file yet (no assistant message,
-      // §8.5): every entry is memory-only and would vanish in a restart, so
-      // none may be served — a replicated cursor must always be resolvable.
-      return ok({
-        orbId: this.options.orbId,
-        runtimeInstanceId: this.runtimeInstanceId,
-        activity: this.activity,
-        session: header.value,
-        records: [],
-        headId: null,
-      });
     }
     const records = [];
     for (const entry of manager.getEntries()) {

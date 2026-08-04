@@ -1,6 +1,6 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
-import { computePullHistory } from "./history.ts";
+import { computePullHistory, gateUnflushedSnapshot } from "./history.ts";
 import type { HarnessSnapshot } from "./types.ts";
 
 function makeRecords(n: number): HistoryRecord[] {
@@ -99,5 +99,34 @@ describe("computePullHistory", () => {
     const a = computePullHistory(snap, { after: "rec-1", limit: 2 });
     const b = computePullHistory(snap, { after: "rec-1", limit: 2 });
     expect(a).toEqual(b);
+  });
+});
+
+describe("gateUnflushedSnapshot", () => {
+  it("passes a flushed snapshot through unchanged", () => {
+    const snap = snapshot(3);
+    expect(gateUnflushedSnapshot(snap, true)).toBe(snap);
+  });
+
+  it("serves zero records and a null head while unflushed", () => {
+    const snap = snapshot(3);
+    const gated = gateUnflushedSnapshot(snap, false);
+    expect(gated.records).toEqual([]);
+    expect(gated.headId).toBeNull();
+    // Identity, activity, and session metadata still flow.
+    expect(gated.orbId).toBe(snap.orbId);
+    expect(gated.runtimeInstanceId).toBe(snap.runtimeInstanceId);
+    expect(gated.session).toBe(snap.session);
+    expect(gated.activity).toBe(snap.activity);
+  });
+
+  it("a pull over the gated snapshot replicates nothing at a null cursor", () => {
+    const gated = gateUnflushedSnapshot(snapshot(3), false);
+    const result = computePullHistory(gated, { after: null, limit: 100 });
+    expect(result.isOk()).toBe(true);
+    if (!result.isOk()) return;
+    expect(result.value.records).toEqual([]);
+    expect(result.value.cursor).toBeNull();
+    expect(result.value.headId).toBeNull();
   });
 });
