@@ -17,6 +17,13 @@ import { pollLoop, reconcileLoop } from "./loops.ts";
 const ORB = "orb-a";
 const PROJECT = "project-a";
 
+/**
+ * Recovering one dead runtime may cost a restart (one stop) plus the final
+ * stop of a completed drain; anything beyond that is a restart storm, not
+ * recovery (docs/postmortems/2026-08-05-unreachable-restart-livelock.md).
+ */
+const MAX_STOPS_PER_RECOVERY = 3;
+
 function seedCreatingOrb(
   task: SimulationTask,
   harness: ReturnType<typeof makeHarness>,
@@ -105,6 +112,10 @@ describe("orb lifecycle (DST)", () => {
       let challengeSeen = false;
       const result = await sim.runTasks([
         { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        // Both orbs must be running at the same instant, so the poll loop has
+        // to run: pulls are the liveness signal, and without them the
+        // reconciler correctly restarts each orb's host every grace period.
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
         {
           name: "driver",
           f: async (task) => {
@@ -503,7 +514,9 @@ describe("orb lifecycle (DST)", () => {
       // Idle auto-stop is out of scope here: the scenario generates no busy
       // activity, and adversarial schedules can stretch kill + grace + restart
       // past the test idle window, legitimately stopping the orb (trace-
-      // diagnosed 2026-08-03). The restart mechanism is what's under test.
+      // diagnosed 2026-08-03). The restart mechanism is what's under test: the
+      // restart is issued and replication resumes on the new incarnation, which
+      // now costs a full modeled boot through `starting`.
       const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
       const stop = new AbortController();
       const result = await sim.runTasks([
@@ -544,6 +557,176 @@ describe("orb lifecycle (DST)", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
       assertReplicaComplete(harness.world, harness.store, ORB);
+    });
+  });
+
+  // The reproducer for docs/postmortems/2026-08-05-unreachable-restart-livelock.md:
+  // before the 2026-08-06 fix the reconciler stopped and started the host every
+  // `unreachableGraceMs` (10s here) while the replacement boot needs the modeled
+  // 65s, so it never observed a success — 14 of 15 recorded schedules livelocked
+  // in the 38-cycle production shape. Recovery now runs through `starting`.
+  it("a preempted host recovers without a restart storm", async () => {
+    await runDst({ name: "preemption-while-running", iterations: 15 }, async (sim) => {
+      // Idle auto-stop is deliberately out of scope: recovering from a
+      // preemption legitimately takes longer than the 30s test idle window (a
+      // modeled boot alone is 65s), so leaving it on would stop the orb for an
+      // unrelated and correct reason and hide what is under test. In
+      // production it was idle-stop that eventually dragged the livelocking
+      // orb into `stopping` and then into `drain_runtime_unrecoverable`; the
+      // `running`-state loop it escaped from has no deadline of its own, which
+      // is precisely the defect this scenario pins down.
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            // Boot latency stays in force: the restart after the preemption is
+            // a full host boot, which is the point of the scenario.
+            seedRunningOrb(task, harness, ORB);
+            harness.world.appendMessage(ORB);
+            await waitUntil(
+              task,
+              "initial replication",
+              () => harness.store.replicaRecords(ORB).length === 1,
+            );
+            const stopsBefore = harness.world.hostStopCountOf(ORB);
+            const stopsSince = (): number => harness.world.hostStopCountOf(ORB) - stopsBefore;
+            // Hypervisor soft-off: the runtime is gone at once, the instance
+            // keeps observing `running` for its ACPI window.
+            harness.world.preemptHost(task, ORB);
+            let stopStorm: number | null = null;
+            await waitUntil(
+              task,
+              "orb running on a serving runtime again",
+              () => {
+                if (stopsSince() > MAX_STOPS_PER_RECOVERY) {
+                  // Fail the scenario at the first excess stop instead of
+                  // burning the whole budget on a livelock.
+                  stopStorm = stopsSince();
+                  return true;
+                }
+                return (
+                  harness.store.orbSnapshot(ORB)?.state === "running" &&
+                  harness.world.isRuntimeServing(task, ORB)
+                );
+              },
+              { timeoutMs: 20 * 60_000 },
+            );
+            expect(stopStorm, "provider stops issued while recovering").toBeNull();
+            // Recovery means replication, not just a state label.
+            harness.world.appendMessage(ORB);
+            await waitUntil(
+              task,
+              "replication resumes on the recovered runtime",
+              () => harness.store.replicaRecords(ORB).length === 2,
+              { timeoutMs: 300_000 },
+            );
+            expect(stopsSince()).toBeLessThanOrEqual(MAX_STOPS_PER_RECOVERY);
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
+      assertReplicaComplete(harness.world, harness.store, ORB);
+      assertAtMostOneHost(harness.world, ORB);
+    });
+  });
+
+  // The `stopping` half of the same postmortem: before the 2026-08-06 fix the
+  // inline restart livelocked here too and the drain deadline turned it into a
+  // terminal `drain_runtime_unrecoverable` with three undrained records — the
+  // exact ending of the production incident. The single restart now gets a
+  // boot-sized grace, so the drain completes on the rebooted runtime.
+  it("a runtime that dies during a drain still completes the stop", async () => {
+    await runDst({ name: "runtime-dies-during-stopping-drain", iterations: 15 }, async (sim) => {
+      // Idle auto-stop is left at its default: the orb is put into `stopping`
+      // explicitly within the first tick, so the idle path can never engage.
+      const harness = makeHarness();
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            // Boot latency stays in force for the restart the drain triggers.
+            seedRunningOrb(task, harness, ORB);
+            for (let i = 0; i < 3; i++) harness.world.appendMessage(ORB);
+            const stopResult = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopResult.isOk()).toBe(true);
+            // Nothing has been replicated yet (no poller), so the drain has
+            // real work when the runtime process dies under it.
+            expect(harness.store.replicaRecords(ORB).length).toBe(0);
+            const stopsBefore = harness.world.hostStopCountOf(ORB);
+            harness.world.killRuntimeProcess(ORB);
+            await waitUntil(
+              task,
+              "orb reaches a terminal state",
+              () => {
+                const state = harness.store.orbSnapshot(ORB)?.state;
+                return state === "stopped" || state === "failed";
+              },
+              { timeoutMs: 20 * 60_000 },
+            );
+            expect(harness.world.hostStopCountOf(ORB) - stopsBefore).toBeLessThanOrEqual(
+              MAX_STOPS_PER_RECOVERY,
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const orb = harness.store.orbSnapshot(ORB);
+      expect(orb?.lastError).toBeNull();
+      expect(orb?.state).toBe("stopped");
+      assertReplicaComplete(harness.world, harness.store, ORB);
+      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+    });
+  });
+
+  it("a drain whose restarted runtime never answers fails on evidence, not on the deadline", async () => {
+    await runDst({ name: "stopping-restart-cap", iterations: 15 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      let stoppingAt = 0;
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            for (let i = 0; i < 3; i++) harness.world.appendMessage(ORB);
+            const stopResult = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopResult.isOk()).toBe(true);
+            stoppingAt = task.wallNow();
+            const stopsBefore = harness.world.hostStopCountOf(ORB);
+            // Dark for far longer than a boot plus the post-restart grace: the
+            // restarted host comes up and still answers nothing.
+            harness.world.setRuntimeUnreachable(task, ORB, 20 * 60_000);
+            await waitUntil(
+              task,
+              "orb failed",
+              () => harness.store.orbSnapshot(ORB)?.state === "failed",
+              { timeoutMs: 20 * 60_000 },
+            );
+            // One restart, then the terminal stop: no second attempt.
+            expect(harness.world.hostStopCountOf(ORB) - stopsBefore).toBeLessThanOrEqual(2);
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const orb = harness.store.orbSnapshot(ORB);
+      expect(orb?.lastError).toContain("drain_runtime_unrecoverable");
+      // Evidence-based: the restart is what proved the runtime unrecoverable,
+      // so the failure lands well inside the stopping deadline.
+      expect(orb?.lastError).toContain("host restart");
+      expect((orb?.stateChangedAt ?? 0) - stoppingAt).toBeLessThan(
+        TEST_CONSTANTS.createStartDeadlineMs,
+      );
     });
   });
 
@@ -716,7 +899,10 @@ describe("idle auto-stop (DST)", () => {
               "idle orb stopped",
               () => {
                 const state = harness.store.orbSnapshot(ORB)?.state;
-                if (state !== "running" && firstStopSeenAt === null) {
+                // Only the stop edge is timed: a scheduler-legal liveness lapse
+                // restarts the host, which legitimately parks the orb in
+                // `starting` for a boot and restarts the idle countdown.
+                if ((state === "stopping" || state === "stopped") && firstStopSeenAt === null) {
                   firstStopSeenAt = task.wallNow();
                 }
                 return state === "stopped";
@@ -761,8 +947,25 @@ describe("idle auto-stop (DST)", () => {
             for (let i = 0; i < rounds; i++) {
               harness.world.setActivity(ORB, "busy");
               await task.sleep(TEST_CONSTANTS.historyPullIntervalMs, "stay busy");
+              // The subject is the absence of an idle stop, not the state
+              // label: a liveness lapse may legally restart the host, which
+              // spends a boot in `starting` before returning to `running`.
+              const state = harness.store.orbSnapshot(ORB)?.state;
+              expect(state === "stopping" || state === "stopped").toBe(false);
             }
-            expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
+            // A busy pull must have landed and persisted its timestamp; a
+            // restart in the middle only delays that.
+            await waitUntil(
+              task,
+              "busy activity persisted on a running orb",
+              () => {
+                harness.world.setActivity(ORB, "busy");
+                const orb = harness.store.orbSnapshot(ORB);
+                expect(orb?.state === "stopping" || orb?.state === "stopped").toBe(false);
+                return orb?.state === "running" && orb.lastBusyAt !== null;
+              },
+              { timeoutMs: 300_000 },
+            );
             stop.abort();
           },
         },
@@ -808,7 +1011,8 @@ describe("idle auto-stop (DST)", () => {
               "orb stopped after tab hidden",
               () => {
                 const state = harness.store.orbSnapshot(ORB)?.state;
-                if (state !== "running" && firstStopSeenAt === null) {
+                // As above: `starting` is a restart, not a stop.
+                if ((state === "stopping" || state === "stopped") && firstStopSeenAt === null) {
                   firstStopSeenAt = task.wallNow();
                 }
                 return state === "stopped";
@@ -849,6 +1053,12 @@ describe("idle auto-stop (DST)", () => {
             name: "driver",
             f: async (task) => {
               seedRunningOrb(task, harness, ORB);
+              // One flushed record up front so the long idle stretch cannot
+              // evaporate the session: a runtime restart of a session that
+              // never flushed mints a fresh session identity (the
+              // docs/history-replication.md contract), which would break the
+              // burst below on an unrelated axis (trace-diagnosed 2026-08-05).
+              harness.world.appendMessage(ORB);
               // Land a burst of work right at the idle deadline so the busy
               // refresh races the CAS into stopping.
               await task.sleep(
@@ -927,7 +1137,8 @@ describe("idle auto-stop (DST)", () => {
               "orb idle-stopped after restart",
               () => {
                 const state = after.store.orbSnapshot(ORB)?.state;
-                if (state !== "running" && firstStopSeenAt === null) {
+                // Only the stop edge is timed; `starting` is a restart.
+                if ((state === "stopping" || state === "stopped") && firstStopSeenAt === null) {
                   firstStopSeenAt = task.wallNow();
                 }
                 return state === "stopped";

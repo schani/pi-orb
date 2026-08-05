@@ -50,9 +50,12 @@ function validatePullResponse(
 }
 
 /**
- * Stop the host and mark the orb `failed` with a typed error — the shared
- * non-retryable integrity path (docs/history-replication.md). The host stop is attempted
- * here; the failed-state reconciler is the crash-safety backstop.
+ * Mark the orb `failed` with a typed error and stop its host — the shared
+ * non-retryable integrity path (docs/history-replication.md). The CAS comes
+ * first: stopping a `stopping` orb's host before claiming the row lets the
+ * drain reconciler observe the stop as an already-stopped host and CAS the orb
+ * to a clean `stopped`, discarding the integrity signal (DST-found 2026-08-06).
+ * The host stop is best effort; the failed-state reconciler is the backstop.
  */
 export async function failOrbForIntegrity(
   task: SimulationTask,
@@ -68,16 +71,6 @@ export async function failOrbForIntegrity(
     }
     const orb = orbResult.value;
     if (orb === null || orb.state === "failed" || orb.state === "stopped") return;
-    if (orb.hostRef !== null) {
-      const ref: OrbHostRef = { provider: deps.hostProvider.kind, resourceId: orb.hostRef };
-      // Best effort: a failure here is repaired by the failed-state backstop.
-      await withDeadline(
-        task,
-        deps.constants.providerOperationTimeoutMs,
-        "integrity fail: stop host",
-        (context) => deps.hostProvider.stop(task, ref, context),
-      );
-    }
     const cas = await deps.store.casTransition(task, {
       orbId,
       expectedStateVersion: orb.stateVersion,
@@ -85,15 +78,25 @@ export async function failOrbForIntegrity(
       now: task.wallNow(),
       lastError: formatOrbFailure("replication_integrity", `${error.reason}: ${error.message}`),
     });
-    if (cas.isOk()) {
-      deps.control.clearOrb(orbId);
-      return;
-    }
-    if (cas.error.type === "state_conflict") {
-      await task.checkpoint("integrity fail: state conflict, re-reading");
+    if (cas.isErr()) {
+      if (cas.error.type === "state_conflict") {
+        await task.checkpoint("integrity fail: state conflict, re-reading");
+        continue;
+      }
+      await sleepResult(task, deps.constants.retryBackoffBaseMs, "integrity fail: cas retry");
       continue;
     }
-    await sleepResult(task, deps.constants.retryBackoffBaseMs, "integrity fail: cas retry");
+    deps.control.clearOrb(orbId);
+    if (orb.hostRef !== null) {
+      const ref: OrbHostRef = { provider: deps.hostProvider.kind, resourceId: orb.hostRef };
+      await withDeadline(
+        task,
+        deps.constants.providerOperationTimeoutMs,
+        "integrity fail: stop host",
+        (context) => deps.hostProvider.stop(task, ref, context),
+      );
+    }
+    return;
   }
 }
 

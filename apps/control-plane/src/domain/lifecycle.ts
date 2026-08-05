@@ -1,6 +1,7 @@
 import type { OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
+import type { LivenessEntry } from "./control-state.ts";
 import { withDeadline } from "./dst.ts";
 import {
   formatOrbFailure,
@@ -445,6 +446,11 @@ async function reconcileCreateStart(
 // ---------------------------------------------------------------------------
 // running
 
+/** Ordinary grace, unless the baseline came from a restart that must boot first. */
+function livenessGraceMs(deps: ControlPlaneDeps, liveness: LivenessEntry): number {
+  return liveness.restartGraceMs ?? deps.constants.unreachableGraceMs;
+}
+
 async function reconcileRunning(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -475,7 +481,7 @@ async function reconcileRunning(
     deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
     return { type: "noop" };
   }
-  if (task.monotonicNow() - liveness.lastSuccessAt > deps.constants.unreachableGraceMs) {
+  if (task.monotonicNow() - liveness.lastSuccessAt > livenessGraceMs(deps, liveness)) {
     deps.control.markRestartPending(orb.id);
     const stopped = await stopHost(task, deps, orb.hostRef);
     if (stopped.isErr()) {
@@ -490,8 +496,17 @@ async function reconcileRunning(
         : failOrb(task, deps, orb, "provider_failed", started.error.message);
     }
     deps.control.clearRestartPending(orb.id);
-    deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
-    return { type: "progressed" };
+    // The restarted host is booting, which no liveness grace can outlast by
+    // repetition: re-enter `starting` so the patient readiness path owns the
+    // recovery (docs/lifecycle.md, 2026-08-06). The boot-sized baseline covers
+    // the case where this CAS loses — a `running` orb must never restart the
+    // same booting host twice.
+    deps.control.resetLivenessBaseline(
+      orb.id,
+      task.monotonicNow(),
+      deps.constants.postRestartGraceMs,
+    );
+    return transitionTo(task, deps, orb, "starting");
   }
 
   // Idle auto-stop (docs/lifecycle.md). Only a tab that affirmatively reports
@@ -551,7 +566,11 @@ async function reconcileStopping(
       const started = await startHost(task, deps, orb.hostRef);
       if (started.isErr()) return retryable(started.error.message);
       deps.control.clearRestartPending(orb.id);
-      deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
+      deps.control.resetLivenessBaseline(
+        orb.id,
+        task.monotonicNow(),
+        deps.constants.postRestartGraceMs,
+      );
       return { type: "progressed" };
     }
     // Absent or already-stopped host: no runtime to drain; complete records
@@ -592,17 +611,35 @@ async function reconcileStopping(
 
   // The unreachable-runtime restart applies during stopping too, so a pending
   // drain is never stranded behind a dead runtime process (docs/lifecycle.md).
+  // The drain must stay in `stopping`, so unlike `running` this cannot hand
+  // recovery to the readiness path: instead the restart gets a boot-sized
+  // grace and is attempted exactly once per stopping episode.
   const liveness = deps.control.getLiveness(orb.id);
   if (liveness === null) {
     deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
-  } else if (task.monotonicNow() - liveness.lastSuccessAt > deps.constants.unreachableGraceMs) {
+  } else if (task.monotonicNow() - liveness.lastSuccessAt > livenessGraceMs(deps, liveness)) {
+    if (liveness.restartGraceMs !== null) {
+      // The restarted host had a full boot's worth of grace and still never
+      // answered a pull; a second restart would only repeat the evidence.
+      return failOrbStoppingHost(
+        task,
+        deps,
+        orb,
+        "drain_runtime_unrecoverable",
+        `the runtime did not answer within ${liveness.restartGraceMs}ms of a host restart`,
+      );
+    }
     deps.control.markRestartPending(orb.id);
     const stopped = await stopHost(task, deps, orb.hostRef);
     if (stopped.isErr()) return retryable(stopped.error.message);
     const started = await startHost(task, deps, orb.hostRef);
     if (started.isErr()) return retryable(started.error.message);
     deps.control.clearRestartPending(orb.id);
-    deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
+    deps.control.resetLivenessBaseline(
+      orb.id,
+      task.monotonicNow(),
+      deps.constants.postRestartGraceMs,
+    );
     return { type: "progressed" };
   }
 

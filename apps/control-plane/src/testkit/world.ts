@@ -23,12 +23,21 @@ import { FAILPOINTS } from "./failpoints.ts";
 export type InitOutcome = "ready" | "failed_nonretryable" | "failed_retryable" | "never_ready";
 
 export interface FakeOrbConfig {
-  /** Time from host start until the runtime becomes ready. */
+  /** Time from runtime start until the runtime becomes ready. */
   initDurationMs?: number;
   initOutcome?: InitOutcome;
   checkoutCommit?: string;
   /** The host runs but its container never starts: HTTP stays dark. */
   containerNeverStarts?: boolean;
+  /**
+   * Time from a host start/provision until its runtime container serves HTTP.
+   * The host observes `running` immediately (the provider's start operation
+   * completes fast), but the runtime is indistinguishable from an unreachable
+   * one until then. Instant boots hid the restart livelock of
+   * `docs/postmortems/2026-08-05-unreachable-restart-livelock.md`, so the
+   * default is the measured GCE figure and every scenario runs with it.
+   */
+  bootLatencyMs?: number;
 }
 
 /** The persistent filesystem: survives host stop/start and runtime restarts. */
@@ -41,6 +50,10 @@ interface FakeFilesystem {
 
 interface FakeRuntimeInstance {
   instanceId: string;
+  /**
+   * Monotonic ms at which the runtime process starts serving; while it lies in
+   * the future the host is booting and the runtime answers nothing at all.
+   */
   startedAtMonotonic: number;
   activity: "idle" | "busy";
 }
@@ -52,6 +65,10 @@ interface FakeHost {
   runtime: FakeRuntimeInstance | null;
   /** Per-incarnation runtime token "carried in the host's env". */
   runtimeToken: string;
+  /** Monotonic ms of a hypervisor ACPI soft-off in progress, or null. */
+  preemptedAtMonotonic: number | null;
+  /** How long a preempted host keeps observing `running` before `stopped`. */
+  preemptionSoftWindowMs: number;
 }
 
 /** The deterministic stand-in for SHA-256 used by the fake provider. */
@@ -71,13 +88,23 @@ interface OrbWorldState {
   runtimeUnreachableUntil: number;
   /** When set, pull responses carry this orbId (host-routing mistake test). */
   reportOrbId: string | null;
+  /** Provider stop/start operations applied to this orb's host. */
+  hostStopCount: number;
+  hostStartCount: number;
 }
+
+/** Measured GCE figure: ~60–70s from `instances.start` to a serving container. */
+const DEFAULT_BOOT_LATENCY_MS = 65_000;
+
+/** The soft-off window a preempted Spot VM still observes as `running`. */
+const DEFAULT_PREEMPTION_SOFT_WINDOW_MS = 30_000;
 
 const DEFAULT_CONFIG: Required<FakeOrbConfig> = {
   initDurationMs: 2_000,
   initOutcome: "ready",
   checkoutCommit: "commit-0",
   containerNeverStarts: false,
+  bootLatencyMs: DEFAULT_BOOT_LATENCY_MS,
 };
 
 /**
@@ -99,6 +126,8 @@ export class FakeWorld {
       pullOutageUntil: 0,
       runtimeUnreachableUntil: 0,
       reportOrbId: null,
+      hostStopCount: 0,
+      hostStartCount: 0,
     });
   }
 
@@ -139,12 +168,35 @@ export class FakeWorld {
     return this.orbState(orbId).filesystem.header;
   }
 
+  /**
+   * The host state as the provider would report it. A preemption soft-off
+   * materializes on observation, so a test that watches for the `stopped` edge
+   * needs a reconciler (or its own `observeHost`) running alongside.
+   */
   hostStateOf(orbId: string): OrbHostState | null {
     return this.orbState(orbId).host?.state ?? null;
   }
 
+  /** The runtime incarnation the host will serve, booted or still booting. */
   runtimeInstanceIdOf(orbId: string): string | null {
     return this.orbState(orbId).host?.runtime?.instanceId ?? null;
+  }
+
+  /** Whether the orb's runtime answers HTTP right now (boot latency elapsed). */
+  isRuntimeServing(task: SimulationTask, orbId: string): boolean {
+    const host = this.orbState(orbId).host;
+    if (host === null || host.state !== "running") return false;
+    return host.runtime !== null && host.runtime.startedAtMonotonic <= task.monotonicNow();
+  }
+
+  /** Provider stop operations applied to the orb's host so far. */
+  hostStopCountOf(orbId: string): number {
+    return this.orbState(orbId).hostStopCount;
+  }
+
+  /** Provider start operations applied to the orb's host so far. */
+  hostStartCountOf(orbId: string): number {
+    return this.orbState(orbId).hostStartCount;
   }
 
   setActivity(orbId: string, activity: "idle" | "busy"): void {
@@ -152,7 +204,10 @@ export class FakeWorld {
     if (runtime !== null && runtime !== undefined) runtime.activity = activity;
   }
 
-  /** Simulate a runtime-process crash and supervised restart inside the host. */
+  /**
+   * Simulate a runtime-process crash and supervised restart inside the host.
+   * The host itself never went down, so this pays no boot latency.
+   */
   restartRuntimeProcess(task: SimulationTask, orbId: string): void {
     const state = this.orbState(orbId);
     if (state.host === null || state.host.state !== "running") return;
@@ -168,6 +223,33 @@ export class FakeWorld {
   killRuntimeProcess(orbId: string): void {
     const state = this.orbState(orbId);
     if (state.host !== null) state.host.runtime = null;
+  }
+
+  /**
+   * A hypervisor ACPI soft-off (the shape of a Spot preemption, see
+   * `docs/postmortems/2026-08-05-unreachable-restart-livelock.md`): the runtime
+   * goes dark at once while the instance still observes as `running` for
+   * `softWindowMs`, and only then as `stopped`. A stop or start of the host in
+   * between overrides the soft-off, exactly as `instances.stop` does in GCE.
+   */
+  preemptHost(
+    task: SimulationTask,
+    orbId: string,
+    softWindowMs: number = DEFAULT_PREEMPTION_SOFT_WINDOW_MS,
+  ): void {
+    const host = this.orbState(orbId).host;
+    if (host === null || host.state !== "running") return;
+    host.runtime = null;
+    host.preemptedAtMonotonic = task.monotonicNow();
+    host.preemptionSoftWindowMs = softWindowMs;
+  }
+
+  /** Fast-forward an in-flight boot: the runtime serves from now on. */
+  finishBoot(task: SimulationTask, orbId: string): void {
+    const runtime = this.orbState(orbId).host?.runtime;
+    if (runtime !== null && runtime !== undefined) {
+      runtime.startedAtMonotonic = task.monotonicNow();
+    }
   }
 
   setPullOutage(task: SimulationTask, orbId: string, durationMs: number): void {
@@ -231,7 +313,16 @@ export class FakeWorld {
     this.refCounter += 1;
     const ref: OrbHostRef = { provider: "fake", resourceId: `host-${orbId}-${this.refCounter}` };
     const runtimeToken = `token-${orbId}-${this.refCounter}`;
-    state.host = { ref, orbId, state: "running", runtime: null, runtimeToken };
+    state.host = {
+      ref,
+      orbId,
+      state: "running",
+      runtime: null,
+      runtimeToken,
+      preemptedAtMonotonic: null,
+      preemptionSoftWindowMs: DEFAULT_PREEMPTION_SOFT_WINDOW_MS,
+    };
+    state.hostStartCount += 1;
     this.bootRuntime(task, orbId);
     return { ref, runtimeTokenHash: fakeTokenHash(runtimeToken) };
   }
@@ -259,6 +350,8 @@ export class FakeWorld {
   startHost(task: SimulationTask, ref: OrbHostRef): void {
     const state = this.findByRef(ref);
     if (state === null || state.host === null) return;
+    state.hostStartCount += 1;
+    state.host.preemptedAtMonotonic = null;
     if (state.host.state === "running") return;
     state.host.state = "running";
     this.bootRuntime(task, state.host.orbId);
@@ -267,10 +360,16 @@ export class FakeWorld {
   stopHost(ref: OrbHostRef): void {
     const state = this.findByRef(ref);
     if (state === null || state.host === null) return;
+    state.hostStopCount += 1;
+    state.host.preemptedAtMonotonic = null;
     state.host.state = "stopped";
     state.host.runtime = null;
   }
 
+  /**
+   * Start the runtime container. It only serves after the configured boot
+   * latency; until then the host is up but nothing answers on port 8080.
+   */
   private bootRuntime(task: SimulationTask, orbId: string): void {
     const state = this.orbState(orbId);
     if (state.host === null) return;
@@ -287,9 +386,18 @@ export class FakeWorld {
     state.runtimeInstanceCounter += 1;
     state.host.runtime = {
       instanceId: `${orbId}-runtime-${state.runtimeInstanceCounter}`,
-      startedAtMonotonic: task.monotonicNow(),
+      startedAtMonotonic: task.monotonicNow() + state.config.bootLatencyMs,
       activity: "idle",
     };
+  }
+
+  /** Apply an elapsed preemption soft-off window: the instance is now down. */
+  private settlePreemption(task: SimulationTask, host: FakeHost): void {
+    if (host.preemptedAtMonotonic === null) return;
+    if (task.monotonicNow() - host.preemptedAtMonotonic < host.preemptionSoftWindowMs) return;
+    host.preemptedAtMonotonic = null;
+    host.state = "stopped";
+    host.runtime = null;
   }
 
   findByRef(ref: OrbHostRef): OrbWorldState | null {
@@ -299,9 +407,10 @@ export class FakeWorld {
     return null;
   }
 
-  observeHost(ref: OrbHostRef): OrbHostObservation | null {
+  observeHost(task: SimulationTask, ref: OrbHostRef): OrbHostObservation | null {
     const state = this.findByRef(ref);
     if (state === null || state.host === null) return null;
+    this.settlePreemption(task, state.host);
     const observation: OrbHostObservation = {
       ref: state.host.ref,
       orbId: state.host.orbId,
@@ -313,11 +422,11 @@ export class FakeWorld {
     return observation;
   }
 
-  listHosts(): OrbHostObservation[] {
+  listHosts(task: SimulationTask): OrbHostObservation[] {
     const result: OrbHostObservation[] = [];
     for (const state of this.orbs.values()) {
       if (state.host !== null) {
-        const observation = this.observeHost(state.host.ref);
+        const observation = this.observeHost(task, state.host.ref);
         if (observation !== null) result.push(observation);
       }
     }
@@ -326,6 +435,12 @@ export class FakeWorld {
 
   // -- runtime protocol view -----------------------------------------------
 
+  /**
+   * The runtime behind a base URL, or null when nothing answers there. A host
+   * still inside its boot latency resolves to null just like a dead one: the
+   * container is not listening yet, so health checks and pulls see exactly the
+   * same unreachable runtime.
+   */
   resolveRuntime(baseUrl: string, task: SimulationTask): OrbWorldState | null {
     for (const state of this.orbs.values()) {
       if (
@@ -333,6 +448,7 @@ export class FakeWorld {
         `http://${state.host.ref.resourceId}:8080` === baseUrl &&
         state.host.state === "running" &&
         state.host.runtime !== null &&
+        state.host.runtime.startedAtMonotonic <= task.monotonicNow() &&
         state.runtimeUnreachableUntil <= task.monotonicNow()
       ) {
         return state;
@@ -477,7 +593,7 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<OrbHostObservation | null, OrbHostProviderError> {
     return this.op(task, "observe", FAILPOINTS.providerObserve, context, () =>
-      this.world.observeHost(ref),
+      this.world.observeHost(task, ref),
     );
   }
 
@@ -485,7 +601,9 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     task: SimulationTask,
     context: OperationContext,
   ): ResultAsync<OrbHostObservation[], OrbHostProviderError> {
-    return this.op(task, "list", FAILPOINTS.providerObserve, context, () => this.world.listHosts());
+    return this.op(task, "list", FAILPOINTS.providerObserve, context, () =>
+      this.world.listHosts(task),
+    );
   }
 
   diagnose(

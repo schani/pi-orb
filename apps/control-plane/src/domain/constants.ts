@@ -7,6 +7,14 @@ export interface LifecycleConstants {
   readonly readinessPollMs: number;
   /** Grace period before an unreachable runtime triggers a host restart. */
   readonly unreachableGraceMs: number;
+  /**
+   * Grace granted to a liveness baseline seeded by a host restart. A restarted
+   * host must boot before anything can answer, so this has to exceed a full
+   * boot (~60–70s on GCE) with margin; anything shorter concludes "unreachable"
+   * against a booting host and livelocks
+   * (docs/postmortems/2026-08-05-unreachable-restart-livelock.md).
+   */
+  readonly postRestartGraceMs: number;
   /** Deadline for `creating`/`starting`, measured from `state_changed_at`. */
   readonly createStartDeadlineMs: number;
   /**
@@ -64,6 +72,7 @@ export const DEFAULT_BROKER_CONSTANTS: BrokerConstants = {
 export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {
   readinessPollMs: 5_000,
   unreachableGraceMs: 30_000,
+  postRestartGraceMs: 3 * 60_000,
   createStartDeadlineMs: 15 * 60_000,
   unreachableBootDeadlineMs: 3 * 60_000,
   historyPullIntervalMs: 10_000,

@@ -27,13 +27,13 @@ describe("boot-failure detection (DST)", () => {
             harness.world.setDiagnosis(ORB, "startup-script failed at: docker run");
             seedCreatingOrb(task, harness);
             const startedAt = task.monotonicNow();
-            // Must fail well before the 120s create deadline: the sub-deadline
-            // is 20s in test constants.
+            // Must fail well before the 300s create deadline: the sub-deadline
+            // is 120s in test constants (it has to outlast a modeled 65s boot).
             await waitUntil(
               task,
               "orb failed fast",
               () => harness.store.orbSnapshot(ORB)?.state === "failed",
-              { timeoutMs: 90_000 },
+              { timeoutMs: 220_000 },
             );
             failedAtMono = task.monotonicNow() - startedAt;
             // A cancelled best-effort stop is repaired by the backstop sweep.
@@ -52,7 +52,7 @@ describe("boot-failure detection (DST)", () => {
       expect(orb?.lastError).toContain("runtime_never_answered");
       // The provider's host-side evidence reaches the terminal error.
       expect(orb?.lastError).toContain("startup-script failed at: docker run");
-      expect(failedAtMono).toBeLessThan(90_000);
+      expect(failedAtMono).toBeLessThan(220_000);
       expect(harness.world.hostStateOf(ORB)).toBe("stopped");
     });
   });
@@ -66,15 +66,17 @@ describe("boot-failure detection (DST)", () => {
         {
           name: "driver",
           f: async (task) => {
-            // Health answers immediately (initializing) but ready only after
-            // 40s — twice the unreachable sub-deadline.
+            // Health answers as soon as the container is up (~65s of modeled
+            // boot latency) but reports ready only 40s later — together well
+            // past the 120s unreachable sub-deadline, which only counts hosts
+            // whose runtime has never answered at all.
             harness.world.configureOrb(ORB, { initDurationMs: 40_000 });
             seedCreatingOrb(task, harness);
             await waitUntil(
               task,
               "orb running despite slow init",
               () => harness.store.orbSnapshot(ORB)?.state === "running",
-              { timeoutMs: 110_000 },
+              { timeoutMs: 250_000 },
             );
             stop.abort();
           },

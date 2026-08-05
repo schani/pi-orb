@@ -5,6 +5,13 @@ export interface LivenessEntry {
   lastSuccessAt: number;
   activity: "idle" | "busy";
   runtimeInstanceId: string | null;
+  /**
+   * Non-null only while the baseline rests on a host restart rather than on a
+   * pull: the entitled grace must then outlast a boot, and a second expiry
+   * with no pull success in between is evidence the restart did not help
+   * (docs/lifecycle.md).
+   */
+  restartGraceMs: number | null;
 }
 
 export interface DrainStatus {
@@ -45,16 +52,25 @@ export class ControlState {
     activity: "idle" | "busy",
     runtimeInstanceId: string,
   ): void {
-    this.liveness.set(orbId, { lastSuccessAt: at, activity, runtimeInstanceId });
+    this.liveness.set(orbId, {
+      lastSuccessAt: at,
+      activity,
+      runtimeInstanceId,
+      restartGraceMs: null,
+    });
   }
 
-  /** Seed/reset the liveness baseline (orb became running, or host restarted). */
-  resetLivenessBaseline(orbId: string, at: number): void {
+  /**
+   * Seed/reset the liveness baseline (orb became running, or host restarted).
+   * `restartGraceMs` is passed only by a restart, which must outlast a boot.
+   */
+  resetLivenessBaseline(orbId: string, at: number, restartGraceMs: number | null = null): void {
     const existing = this.liveness.get(orbId);
     this.liveness.set(orbId, {
       lastSuccessAt: at,
       activity: existing?.activity ?? "idle",
       runtimeInstanceId: null,
+      restartGraceMs,
     });
   }
 
