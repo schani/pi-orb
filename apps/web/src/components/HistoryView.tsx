@@ -6,7 +6,7 @@ import type {
   MessageRecord,
 } from "@pi-orb/protocol";
 import type { ReactNode } from "react";
-import { AssistantMarkdown } from "./AssistantMarkdown.tsx";
+import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
 
 /** Streaming output block accumulated from `output_patch` events. */
@@ -89,15 +89,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
   record.content.forEach((block, index) => {
     switch (block.type) {
       case "text":
-        nodes.push(
-          record.role === "assistant" ? (
-            <AssistantMarkdown key={index}>{block.text}</AssistantMarkdown>
-          ) : (
-            <p className="msg-text" key={index}>
-              <PlainChatText>{block.text}</PlainChatText>
-            </p>
-          ),
-        );
+        nodes.push(<ChatMarkdown key={index}>{block.text}</ChatMarkdown>);
         break;
       case "reasoning":
         nodes.push(
@@ -276,7 +268,7 @@ export function HistoryView({ records, liveBlocks, tools, busy }: HistoryViewPro
                   </p>
                 </details>
               ) : (
-                <AssistantMarkdown key={block.blockId}>{block.text}</AssistantMarkdown>
+                <ChatMarkdown key={block.blockId}>{block.text}</ChatMarkdown>
               ),
             )}
           </div>
