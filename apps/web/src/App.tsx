@@ -26,18 +26,20 @@ export function App() {
   const route = parseRoute(hash);
   return (
     <div className="app">
-      <header className="app-header">
-        <a href="#/" className="app-title">
-          pi-orb
-        </a>
-      </header>
-      <div className="app-main">
-        {route.page === "projects" ? (
-          <ProjectsPage />
-        ) : (
-          <OrbPage key={route.orbId} orbId={route.orbId} />
-        )}
-      </div>
+      {route.page === "projects" ? (
+        <>
+          <header className="app-header">
+            <a href="#/" className="app-title">
+              pi-orb
+            </a>
+          </header>
+          <div className="app-main">
+            <ProjectsPage />
+          </div>
+        </>
+      ) : (
+        <OrbPage key={route.orbId} orbId={route.orbId} />
+      )}
     </div>
   );
 }

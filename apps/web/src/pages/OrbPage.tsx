@@ -474,36 +474,54 @@ export function OrbPage({ orbId }: { orbId: string }) {
     (state.welcome?.capabilities.includes(CAPABILITY_ABORT) ?? false);
 
   return (
-    <main className="page orb-page">
-      <section className="panel orb-status">
-        <div className="orb-status-row">
-          <h1 className="orb-title">orb {orbId}</h1>
-          {orb !== null && (
-            <span className={`state-badge state-${orb.state}`}>
-              {orb.stopReason === "idle" && (orb.state === "stopping" || orb.state === "stopped")
-                ? `${orb.state} (idle)`
-                : orb.state}
-            </span>
-          )}
+    <>
+      <header className="app-header orb-header">
+        <a href="#/" className="app-title">
+          pi-orb
+        </a>
+        <div className="orb-header-identity">
+          <h1 className="orb-title" title={`orb ${orbId}`}>
+            orb {orbId}
+          </h1>
+          <div className="orb-header-meta">
+            {orb === null ? (
+              <span>loading…</span>
+            ) : (
+              <>
+                <span>v{orb.stateVersion}</span>
+                {orb.checkoutCommit !== undefined && (
+                  <span className="orb-header-checkout">checkout {orb.checkoutCommit}</span>
+                )}
+              </>
+            )}
+          </div>
         </div>
         {orb !== null && (
-          <dl className="orb-meta">
-            <dt>state version</dt>
-            <dd>{orb.stateVersion}</dd>
-            {orb.checkoutCommit !== undefined && (
-              <>
-                <dt>checkout</dt>
-                <dd className="mono">{orb.checkoutCommit}</dd>
-              </>
-            )}
-            {orb.lastError !== undefined && (
-              <>
-                <dt>last error</dt>
-                <dd className="error-text">{orb.lastError}</dd>
-              </>
-            )}
-          </dl>
+          <span className={`state-badge state-${orb.state}`}>
+            {orb.stopReason === "idle" && (orb.state === "stopping" || orb.state === "stopped")
+              ? `${orb.state} (idle)`
+              : orb.state}
+          </span>
         )}
+        <span className="orb-header-live">
+          {orb?.state === "running" && (
+            <>
+              {state.connection}
+              {state.activity !== null && ` · ${state.activity}`}
+            </>
+          )}
+        </span>
+        <div className="orb-header-actions">
+          <button type="button" onClick={() => runLifecycle(startOrb)} disabled={!canStart}>
+            start
+          </button>
+          <button type="button" onClick={() => runLifecycle(stopOrb)} disabled={!canStop}>
+            stop
+          </button>
+        </div>
+      </header>
+
+      <main className="app-main page orb-page">
         {orb?.stateDetail?.type === "draining_history" && (
           <div className="banner banner-info">
             Stopping: draining history…
@@ -538,61 +556,48 @@ export function OrbPage({ orbId }: { orbId: string }) {
             <span className="muted"> (expires {orb.actionRequired.expiresAt})</span>
           </div>
         )}
-        <div className="orb-actions">
-          <button type="button" onClick={() => runLifecycle(startOrb)} disabled={!canStart}>
-            start
-          </button>
-          <button type="button" onClick={() => runLifecycle(stopOrb)} disabled={!canStop}>
-            stop
-          </button>
-          {orb?.state === "running" && (
-            <span className="muted">
-              live: {state.connection}
-              {state.activity !== null && ` · ${state.activity}`}
-            </span>
-          )}
-        </div>
+        {orb?.lastError !== undefined && <div className="banner banner-error">{orb.lastError}</div>}
         {orbError !== null && (
           <div className="banner banner-error">{describeApiError(orbError)}</div>
         )}
-      </section>
 
-      {state.serverError !== null && (
-        <div className="banner banner-error">
-          runtime error {state.serverError.code}: {state.serverError.message}
-        </div>
-      )}
-      {state.requestError !== null && (
-        <div className="banner banner-error">
-          request rejected ({state.requestError.code}): {state.requestError.message}
-        </div>
-      )}
-      {state.notice !== null && <div className="banner banner-info">{state.notice}</div>}
-      {state.historyError !== null && (
-        <div className="banner banner-error">
-          history unavailable: {describeApiError(state.historyError)}
-        </div>
-      )}
+        {state.serverError !== null && (
+          <div className="banner banner-error">
+            runtime error {state.serverError.code}: {state.serverError.message}
+          </div>
+        )}
+        {state.requestError !== null && (
+          <div className="banner banner-error">
+            request rejected ({state.requestError.code}): {state.requestError.message}
+          </div>
+        )}
+        {state.notice !== null && <div className="banner banner-info">{state.notice}</div>}
+        {state.historyError !== null && (
+          <div className="banner banner-error">
+            history unavailable: {describeApiError(state.historyError)}
+          </div>
+        )}
 
-      <HistoryView
-        records={[...state.records.values()]}
-        liveBlocks={[...state.liveBlocks.values()]}
-        tools={[...state.tools.values()]}
-        busy={state.activity === "busy"}
-      />
+        <HistoryView
+          records={[...state.records.values()]}
+          liveBlocks={[...state.liveBlocks.values()]}
+          tools={[...state.tools.values()]}
+          busy={state.activity === "busy"}
+        />
 
-      <Composer
-        text={state.composerText}
-        onTextChange={(text) => dispatch({ type: "composer_changed", text })}
-        images={state.composerImages}
-        onImageAdd={addImage}
-        onImageRemove={(id) => dispatch({ type: "image_removed", id })}
-        canSend={canSend}
-        onSend={sendMessage}
-        canAbort={canAbort}
-        onAbort={sendAbort}
-        pending={state.pendingRequest !== null}
-      />
-    </main>
+        <Composer
+          text={state.composerText}
+          onTextChange={(text) => dispatch({ type: "composer_changed", text })}
+          images={state.composerImages}
+          onImageAdd={addImage}
+          onImageRemove={(id) => dispatch({ type: "image_removed", id })}
+          canSend={canSend}
+          onSend={sendMessage}
+          canAbort={canAbort}
+          onAbort={sendAbort}
+          pending={state.pendingRequest !== null}
+        />
+      </main>
+    </>
   );
 }
