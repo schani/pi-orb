@@ -475,15 +475,6 @@ textarea:focus {
   color: var(--accent);
 }
 
-.turn-user .msg-text {
-  margin: 0;
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 18.5px;
-  line-height: 1.55;
-  letter-spacing: -0.003em;
-}
-
 /* agent turns: article flow beside the gutter */
 .turn-agent .turn-body {
   display: flex;
@@ -508,9 +499,9 @@ textarea:focus {
   margin: 0.5rem 0 0;
 }
 
-/* ---------- reading prose (agent markdown) ---------- */
+/* ---------- reading prose (user and agent markdown) ---------- */
 
-.assistant-markdown {
+.chat-markdown {
   font-family: var(--serif);
   font-size: 17.5px;
   line-height: 1.7;
@@ -518,24 +509,24 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
-.assistant-markdown > :first-child {
+.chat-markdown > :first-child {
   margin-top: 0;
 }
 
-.assistant-markdown > :last-child {
+.chat-markdown > :last-child {
   margin-bottom: 0;
 }
 
-.assistant-markdown p {
+.chat-markdown p {
   margin: 0 0 12px;
 }
 
-.assistant-markdown h1,
-.assistant-markdown h2,
-.assistant-markdown h3,
-.assistant-markdown h4,
-.assistant-markdown h5,
-.assistant-markdown h6 {
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
   font-variant-caps: small-caps;
   text-transform: lowercase;
   font-weight: 600;
@@ -544,50 +535,50 @@ textarea:focus {
   margin: 18px 0 8px;
 }
 
-.assistant-markdown h1 {
+.chat-markdown h1 {
   font-size: 18px;
 }
 
-.assistant-markdown h2 {
+.chat-markdown h2 {
   font-size: 17px;
 }
 
-.assistant-markdown h3,
-.assistant-markdown h4,
-.assistant-markdown h5,
-.assistant-markdown h6 {
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
   font-size: 16.5px;
 }
 
-.assistant-markdown ul,
-.assistant-markdown ol {
+.chat-markdown ul,
+.chat-markdown ol {
   margin: 0 0 14px;
   padding-left: 24px;
 }
 
-.assistant-markdown li {
+.chat-markdown li {
   margin: 4px 0;
 }
 
-.assistant-markdown ul li::marker {
+.chat-markdown ul li::marker {
   content: "\2013\2002";
   color: var(--accent);
 }
 
-.assistant-markdown code {
+.chat-markdown code {
   font-family: var(--mono);
   font-size: 0.74em;
   letter-spacing: normal;
 }
 
-.assistant-markdown :not(pre) > code {
+.chat-markdown :not(pre) > code {
   background: var(--inset);
   border: 1px solid var(--rule-soft);
   border-radius: 4px;
   padding: 1px 5px;
 }
 
-.assistant-markdown pre {
+.chat-markdown pre {
   margin: 12px 0 4px;
   padding: 10px 14px;
   background: var(--inset);
@@ -597,7 +588,7 @@ textarea:focus {
   overflow-x: auto;
 }
 
-.assistant-markdown pre code {
+.chat-markdown pre code {
   display: block;
   font-size: 11.5px;
   line-height: 1.65;
@@ -607,12 +598,28 @@ textarea:focus {
   white-space: pre;
 }
 
-.assistant-markdown blockquote {
+.chat-markdown blockquote {
   margin: 0 0 12px;
   padding-left: 0.75rem;
   border-left: 3px solid var(--rule);
   color: var(--ink-soft);
   font-style: italic;
+}
+
+/* Preserve the user turn's larger margin-note treatment around Markdown. */
+.turn-user .chat-markdown {
+  font-size: 18.5px;
+  line-height: 1.55;
+  letter-spacing: -0.003em;
+}
+
+.turn-user .chat-markdown p,
+.turn-user .chat-markdown li {
+  font-style: italic;
+}
+
+.turn-user .chat-markdown code {
+  font-style: normal;
 }
 
 /* ---------- reasoning aside ---------- */

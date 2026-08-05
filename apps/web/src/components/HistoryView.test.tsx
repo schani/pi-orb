@@ -88,11 +88,11 @@ describe("HistoryView turn structure", () => {
 });
 
 describe("HistoryView", () => {
-  it("renders committed and streaming assistant text as Markdown but keeps user text literal", () => {
+  it("renders user, committed assistant, and streaming assistant text as Markdown", () => {
     const html = renderToStaticMarkup(
       <HistoryView
         records={[
-          message("user", "user", "**literal user markdown**"),
+          message("user", "user", "**formatted user markdown** and `user code`"),
           message("assistant", "assistant", "## Answer\n\nUse **Markdown** and `code`."),
         ]}
         liveBlocks={[
@@ -108,14 +108,13 @@ describe("HistoryView", () => {
       />,
     );
 
-    expect(html).toContain("**literal user markdown**");
-    expect(html).not.toContain("<strong>literal user markdown</strong>");
+    expect(html).toContain("<strong>formatted user markdown</strong> and <code>user code</code>");
     expect(html).toContain("<h2>Answer</h2>");
     expect(html).toContain("Use <strong>Markdown</strong> and <code>code</code>.");
     expect(html).toContain("A <strong>streaming</strong> response");
   });
 
-  it("linkifies web URLs in Markdown and literal chat text without linking code or other schemes", () => {
+  it("linkifies web URLs in Markdown and other chat prose without linking code or other schemes", () => {
     const html = renderToStaticMarkup(
       <HistoryView
         records={[
@@ -154,7 +153,7 @@ describe("HistoryView", () => {
     );
     expect(html).toContain("ftp://example.com");
     expect(html).not.toContain('href="ftp://example.com"');
-    expect(html).toContain("**Markdown**");
+    expect(html).toContain("<strong>Markdown</strong>");
     expect(html).toContain("<code>https://example.com/code</code>");
     expect(html).not.toContain('href="https://example.com/code"');
   });
