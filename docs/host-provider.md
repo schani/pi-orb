@@ -236,7 +236,7 @@ Mapping onto the port:
 - **Network path**: same inversion as exe.dev — `runtimeAddress` grows provider-supplied headers (JWE token), the runtime broker needs public egress and token-refresh logic (tokens are minted per call with configurable expiry; maximum expiry undocumented), and WebSockets are officially supported (server-side connections can send headers, so the subprotocol workaround is browser-only).
 - **Endpoint bandwidth is capped** (1–16 MB/s scaling with size) but applies only to endpoint traffic; git and package traffic uses the egress path.
 
-Unverified empirically, in rough order of risk: (1) EFS/NFS mount through a VPC egress connector from inside a MicroVM — nothing documents it, it merely follows from "VPC egress + CAP_SYS_ADMIN"; (2) git/workspace performance on EFS; (3) NFS mount survival across suspend/resume; (4) `/terminate` hook timeout; (5) auth-token maximum expiry and mint rate limits; (6) account memory quota headroom (quota covers RUNNING+SUSPENDED combined). See open question 37.
+Unverified empirically, in rough order of risk: (1) EFS/NFS mount through a VPC egress connector from inside a MicroVM — nothing documents it, it merely follows from "VPC egress + CAP_SYS_ADMIN"; (2) git/workspace performance on EFS; (3) NFS mount survival across suspend/resume; (4) `/terminate` hook timeout; (5) auth-token maximum expiry and mint rate limits; (6) account memory quota headroom (quota covers RUNNING+SUSPENDED combined). Full writeup: [`docs/AWS-MICROVMS.md`](docs/AWS-MICROVMS.md). See open question 37.
 
 ## Rejected: Cloud Workstations
 
