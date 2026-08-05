@@ -20,7 +20,7 @@ async function main(): Promise<void> {
     mockOpenAi: readMockOpenAiEnv(process.env),
   });
 
-  // The health server starts before slow initialization (DESIGN.md §5.1).
+  // The health server starts before slow initialization (docs/host-provider.md).
   const app = buildRuntimeServer(agent);
   const listening = await app.listen({ port: 8080, host: "0.0.0.0" }).then(
     (address) => address,
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   const health = agent.getHealth();
   if (health.status === "failed") {
     // Stay reachable long enough for the control plane to record the typed
-    // error (DESIGN.md §5.1); supervision handles unexpected exits.
+    // error (docs/host-provider.md); supervision handles unexpected exits.
     console.error(`initialization failed: ${health.error.code}: ${health.error.message}`);
     return;
   }

@@ -1,7 +1,7 @@
 import { type Static, Type } from "typebox";
 
 /**
- * Runtime-facing credential-broker contract (DESIGN.md §15.1, §15.3).
+ * Runtime-facing credential-broker contract (docs/credentials.md, docs/credentials.md).
  * Versioned separately from the browser API: this surface is
  * deployment-internal between the control plane and orb runtimes. One
  * parameterized route serves every token; `{name}` is a logical token name,

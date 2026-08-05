@@ -26,7 +26,7 @@ export async function pollAllOnce(task: SimulationTask, deps: ControlPlaneDeps):
     const key = `poll:${orb.id}`;
     if (deps.control.getNextAttemptAt(key) > now) continue;
     await pollOrbUntilCaughtUp(task, deps, orb.id);
-    // Retryable failures retry at the ordinary polling cadence (§8.2); an
+    // Retryable failures retry at the ordinary polling cadence (docs/history-replication.md); an
     // integrity failure removed the orb from the pollable set.
     deps.control.setNextAttemptAt(key, task.monotonicNow() + deps.constants.historyPullIntervalMs);
   }
@@ -116,7 +116,7 @@ export async function reconcileLoop(
 }
 
 /**
- * One orphan-host sweep (DESIGN.md §3.4): stop any managed host whose orb row
+ * One orphan-host sweep (docs/lifecycle.md): stop any managed host whose orb row
  * is missing entirely, or terminal with a lost `host_ref`. The provider lists
  * only pi-orb-labeled hosts, so nothing else in the project is ever touched;
  * the sweep only moves hosts toward "stopped" and never starts or deletes.
@@ -150,7 +150,7 @@ export async function orphanSweepOnce(task: SimulationTask, deps: ControlPlaneDe
       );
     } else {
       // Live orbs and matching-ref terminal orbs are the reconciler's job
-      // (§5.2 backstop); the sweep never competes with it.
+      // (docs/lifecycle.md backstop); the sweep never competes with it.
       continue;
     }
     // Best effort; a failure here is retried on the next sweep.

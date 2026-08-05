@@ -1,6 +1,6 @@
 /**
  * Named failpoint vocabulary shared by every control-plane DST test
- * (DESIGN.md §14). Probabilities are configured per test by name.
+ * (docs/testing.md). Probabilities are configured per test by name.
  */
 export const FAILPOINTS = {
   storeRead: "store.read",

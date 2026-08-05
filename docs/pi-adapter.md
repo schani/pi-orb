@@ -1,0 +1,113 @@
+# Pi integration
+
+How Pi is embedded in the orb runtime and how its persisted session maps to the harness-agnostic history model (`docs/history-replication.md`).
+
+## Embedding decisions
+
+- Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`.
+- The orb runtime is a Node.js service that owns the Pi SDK session and exposes a harness-agnostic HTTP/WebSocket protocol.
+- The Pi adapter translates Pi-native persisted session entries into the shared history schema.
+- A Pi extension may still be useful for Pi-specific instrumentation, but it is not the infrastructure supervisor.
+- The orb runtime cannot restart itself reliably from inside its own failure domain. Docker initially, and GCE later, provide process/host supervision.
+- If the runtime enters an unrecoverable state, it should exit so its host can restart it.
+
+## Pi history behavior
+
+Pi session files are append-only JSONL trees. Each entry has an `id` and `parentId`; the session header is separate.
+
+Pi compaction does not delete earlier entries. It appends a `compaction` entry containing a summary and information about the retained context boundary.
+
+The embedded runtime can access complete persisted history through the retained `SessionManager`:
+
+```ts
+sessionManager.getHeader(); // session metadata
+sessionManager.getEntries(); // all entries, including pre-compaction
+sessionManager.getTree(); // full tree, including abandoned branches
+```
+
+The following APIs are model-context views and must not be used as the replication source:
+
+```ts
+sessionManager.buildContextEntries();
+sessionManager.buildSessionContext();
+```
+
+They intentionally apply compaction and active-branch selection. Similarly, model-facing `session.messages` is not the lossless full session log.
+
+Therefore:
+
+- the Pi runtime/SDK can read and replicate full pre-compaction history;
+- the LLM itself does not automatically receive that full history after compaction;
+- a future history-query tool could let the model explicitly retrieve older records if desired.
+
+### Session metadata
+
+The Pi `SessionHeader` is not a `HistoryRecord`. It has no entry parent and does not participate in Pi's entry tree. Map it to `HarnessSessionMetadata`:
+
+```ts
+{
+  id: header.id,
+  timestamp: header.timestamp,
+  overflow: { native: header }
+}
+```
+
+Store its complete JSON in `orbs.harness_session_header` and its ID in `harness_session_id`. It never advances the history cursor and never becomes an invented root parent. Repeated pulls require JSON-semantic equality with the stored header.
+
+### Entry mapping
+
+For every entry, preserve `entry.id`, `entry.parentId`, and `entry.timestamp` exactly and put the complete JSON-safe original in `overflow.native`. Normalized fields intentionally duplicate native data.
+
+| Pi persisted entry         | Normalized record                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `message` / user           | `MessageRecord`, role `user`; text/image blocks.                                                                                |
+| `message` / assistant      | `MessageRecord`, role `assistant`; text, thinking→reasoning, and tool-call blocks; provider/model, usage, stop reason.          |
+| `message` / tool result    | `MessageRecord`, role `tool`; one typed `tool_result` block containing call ID, nested text/image content, and error flag.      |
+| `message` / bash execution | `EventRecord`, `eventType: "pi.bash_execution"`; normalized textual content where useful.                                       |
+| `thinking_level_change`    | `EventRecord`, `eventType: "pi.thinking_level_change"`.                                                                         |
+| `model_change`             | `EventRecord`, `eventType: "pi.model_change"`.                                                                                  |
+| `compaction`               | `CompactionRecord`; summary as a text block, with first-kept ID/token/details retained natively.                                |
+| `branch_summary`           | `EventRecord`, `eventType: "pi.branch_summary"`, with summary text content.                                                     |
+| `custom`                   | `EventRecord`, `eventType: "pi.custom"`.                                                                                        |
+| `custom_message`           | `EventRecord`, `eventType: "pi.custom_message"`, with text/image content; retain `customType`, `display`, and details natively. |
+| `label`                    | `EventRecord`, `eventType: "pi.label"`.                                                                                         |
+| `session_info`             | `EventRecord`, `eventType: "pi.session_info"`.                                                                                  |
+| unknown future entry       | `EventRecord`, `eventType: "pi.<native-type>"`.                                                                                 |
+
+Content conversions are direct and lossless through native overflow:
+
+- Pi text → `ContentBlock { type: "text" }`;
+- Pi image `mimeType`/base64 data → normalized `mediaType`/data;
+- Pi thinking text → `ContentBlock { type: "reasoning" }`;
+- Pi tool call ID/name/arguments → typed `tool_call`;
+- Pi tool-result call ID/content/error → typed `tool_result`;
+- assistant provider/model/usage/cost/stop reason → normalized model, usage, and `finishReason` fields.
+
+An unknown message role maps to a generic event rather than inventing a shared role. A mapping/validation failure returns a typed history error and makes `pullHistory` fail; it must never silently omit an entry.
+
+### Completeness and cursor continuity
+
+`SessionManager.getEntries()` is the sole Pi replication source. Pi appends user/tool/assistant messages on awaited `message_end`; streaming `message_update` state is not present there and is never synthesized into persistence. Pi's `AgentSession` notifies SDK subscribers of `message_end` immediately before it appends the ordinary message entry, and its `entry_appended` event covers extension-created custom entries rather than ordinary messages. The adapter therefore schedules a session-entry scan after each `message_end`, deduplicates by native entry ID, and performs a final synchronous scan at `agent_settled` before emitting `operation_finished` and clearing transient output. Adapter tests reproduce this exact notify-then-append ordering; mapping-only tests are insufficient to verify live-history delivery.
+
+Every returned persisted entry maps one-to-one to exactly one record and advances the native-ID cursor exactly once. This includes labels and hidden custom entries. Unknown future types still become generic events, preserving cursor continuity across Pi upgrades.
+
+### Initial UI visibility
+
+Visibility is presentation policy, not persistence filtering:
+
+- show user and assistant messages normally; show tool names and states while keeping tool inputs and outputs collapsed by default;
+- show compaction as a collapsed boundary;
+- show `pi.custom_message` only when native `display` is true;
+- hide model/thinking changes, branch summaries, bash-execution events, labels, session-info entries, ordinary custom entries, and unknown events by default.
+
+The UI still traverses hidden records when reconstructing parent chains. Hidden records remain available for diagnostics and future richer renderers.
+
+## Rejected: Pi over tmux or subprocess RPC
+
+Rejected for the first slice:
+
+- tmux as UI/session transport;
+- running a remote Pi TUI;
+- running `pi --mode rpc` behind a gateway child process.
+
+Decision: embed Pi through the SDK in the orb runtime and build a web UI.

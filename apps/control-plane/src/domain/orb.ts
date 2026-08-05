@@ -1,7 +1,7 @@
 import type { HarnessSessionMetadata, OrbState, StopReason } from "@pi-orb/protocol";
 
 /**
- * Domain view of an orb row (DESIGN.md §8.6). Timestamps are wall-clock
+ * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
  * milliseconds; adapters convert to/from `timestamptz`.
  */
 export interface OrbRow {
@@ -17,14 +17,14 @@ export interface OrbRow {
   readonly harnessSessionHeader: HarnessSessionMetadata | null;
   readonly lastError: string | null;
   /**
-   * SHA-256 of the per-host-incarnation runtime token (DESIGN.md §15.1);
+   * SHA-256 of the per-host-incarnation runtime token (docs/credentials.md);
    * follows what the provisioned host actually carries. Never the plaintext.
    */
   readonly runtimeTokenHash: string | null;
   readonly replicationCursor: string | null;
   readonly replicatedHeadId: string | null;
   /**
-   * Restart-stable activity timestamp for idle auto-stop (DESIGN.md §3.4).
+   * Restart-stable activity timestamp for idle auto-stop (docs/lifecycle.md).
    * Advisory and monotone: written outside the state_version CAS.
    */
   readonly lastBusyAt: number | null;
@@ -42,7 +42,7 @@ export interface ProjectRow {
   readonly createdAt: number;
 }
 
-/** True when the orb has never reached runtime-ready (DESIGN.md §5.2 drain skip). */
+/** True when the orb has never reached runtime-ready (docs/lifecycle.md drain skip). */
 export function hasNeverBeenReady(orb: OrbRow): boolean {
   return orb.checkoutCommit === null && orb.harnessSessionId === null;
 }

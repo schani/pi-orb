@@ -36,7 +36,7 @@ function hashesEqual(a: string, b: string): boolean {
 }
 
 /**
- * The runtime-facing broker surface (DESIGN.md §15.1, §15.3). One
+ * The runtime-facing broker surface (docs/credentials.md, docs/credentials.md). One
  * parameterized route serves every token name; the name → provider mapping
  * is internal. Registered only when the deployment role includes runtime
  * routes — a hard allowlist, not a hidden path. Authentication is the

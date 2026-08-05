@@ -25,7 +25,7 @@ function isTransient(frame: ServerFrame): boolean {
 }
 
 /**
- * Per-connection ordered outbound writer (DESIGN.md §6.2/§6.4).
+ * Per-connection ordered outbound writer (docs/runtime-protocol.md/docs/runtime-protocol.md).
  *
  * The synchronization batch bypasses the budget entirely: it references
  * entries the harness already holds in memory, and closing on its size would
@@ -50,7 +50,7 @@ export class OutboundWriter {
     return this.closed;
   }
 
-  /** Send the §6.2 synchronization batch immediately; exempt from the budget. */
+  /** Send the docs/runtime-protocol.md synchronization batch immediately; exempt from the budget. */
   enqueueSyncBatch(frames: readonly ServerFrame[]): void {
     if (this.closed) return;
     for (const frame of frames) {

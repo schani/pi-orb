@@ -303,7 +303,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [orb, setOrb] = useState<OrbView | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);
 
-  // Poll the orb resource every 2s (DESIGN §11.3).
+  // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
@@ -324,7 +324,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
     };
   }, [orbId]);
 
-  // Database-first history load (DESIGN §8.3).
+  // Database-first history load (docs/history-replication.md).
   useEffect(() => {
     let cancelled = false;
     getOrbHistory(orbId).then((result) => {
@@ -383,7 +383,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
       onRequestLost: (requestId) => dispatch({ type: "request_lost", requestId }),
       getVisible: isVisible,
     });
-    // Only a visible tab counts as activity for idle auto-stop (DESIGN §3.4).
+    // Only a visible tab counts as activity for idle auto-stop (docs/lifecycle.md).
     const onVisibilityChange = () => connection.sendPresence(isVisible());
     document.addEventListener("visibilitychange", onVisibilityChange);
     liveRef.current = connection;

@@ -6,7 +6,7 @@ import type { StoreError, TokenError } from "./errors.ts";
 import type { BrokerDeps, CredentialPointerRow, StoredCredential } from "./ports.ts";
 
 /**
- * Credential broker (DESIGN.md §15.1): serves short-lived access tokens to
+ * Credential broker (docs/credentials.md): serves short-lived access tokens to
  * orb runtimes from the pointer-row + secret-store pair, coalescing upstream
  * refreshes behind a leased critical section. Every mutation is fenced by the
  * pointer's `rowVersion` CAS; a stale actor can never clobber a newer
@@ -16,7 +16,7 @@ import type { BrokerDeps, CredentialPointerRow, StoredCredential } from "./ports
 /** The model-credential slot of the first slice. */
 export const CODEX_PROVIDER = "openai-codex";
 
-/** The GitHub user-credential slot (DESIGN.md §15.3). */
+/** The GitHub user-credential slot (docs/credentials.md). */
 export const GITHUB_PROVIDER = "github";
 
 /**

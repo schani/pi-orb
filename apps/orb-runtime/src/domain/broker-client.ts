@@ -2,7 +2,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
 
 /**
- * Runtime-side broker token client (DESIGN.md §15.1): fetches short-lived
+ * Runtime-side broker token client (docs/credentials.md): fetches short-lived
  * access tokens from the control plane's `/runtime/v1/tokens/{name}`, with
  * singleflight, bounded retry windows, and typed terminal outcomes. Pure
  * domain logic — the HTTP transport sits behind `BrokerEndpoint`.
@@ -42,7 +42,7 @@ export interface BrokerEndpoint {
 export interface BrokerClientConstants {
   /**
    * How long startup fetches tolerate 401s: the host can be running before
-   * the control plane commits its token hash (DESIGN.md §15.1 read-back).
+   * the control plane commits its token hash (docs/credentials.md read-back).
    */
   readonly bootRetryWindowMs: number;
   /** Retry window for non-startup fetches (503s, transient network). */

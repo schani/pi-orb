@@ -76,7 +76,7 @@ async function main(): Promise<void> {
     bootTask.log("E2E mode: Codex OAuth/inference routed to", mockOpenAi.oauthBaseUrl);
   }
   // Secret store: file-backed locally, Secret Manager in the cloud
-  // (DESIGN.md §15.1). The GSM parent secrets are created by OpenTofu.
+  // (docs/credentials.md). The GSM parent secrets are created by OpenTofu.
   const secretStoreKind = env("PI_ORB_SECRET_STORE", "file");
   const secrets =
     secretStoreKind === "gsm"
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
           secretPrefix: env("PI_ORB_CREDENTIAL_SECRET_PREFIX", "pi-orb-credential"),
         })
       : new FileSecretStore(join(authDir, "broker-secrets"));
-  // GitHub App credentials for the gh/user-token flow (DESIGN.md §15.3).
+  // GitHub App credentials for the gh/user-token flow (docs/credentials.md).
   // Unset means "no GitHub integration": no gate, no refresher — tokens/github
   // answers auth_required and everything else is unchanged.
   const githubClientId = env("PI_ORB_GITHUB_CLIENT_ID", "");
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
   };
 
-  // Which route families this process registers (DESIGN.md §15.1): the cloud
+  // Which route families this process registers (docs/credentials.md): the cloud
   // deployment splits "browser" and "runtime" into separate services; local
   // development serves both from one process.
   const app = Fastify({ logger: false });
@@ -220,7 +220,7 @@ async function main(): Promise<void> {
   bootTask.log(`control plane listening on ${listening}`);
 
   // Background loops: history polling and lifecycle reconciliation
-  // (DESIGN.md §8.2). Same domain code as the simulations, on real time.
+  // (docs/history-replication.md). Same domain code as the simulations, on real time.
   // Only the browser-role service runs them — it is the always-on one; the
   // scale-to-zero runtime service must not depend on background work.
   if (browserRole) {

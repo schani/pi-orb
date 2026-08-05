@@ -6,7 +6,7 @@ import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
 
 /**
  * The classified result of pulling one orb until it is caught up
- * (DESIGN.md §8.2/§8.4). Failures are values, not exceptions; integrity
+ * (docs/history-replication.md/docs/history-replication.md). Failures are values, not exceptions; integrity
  * failures have already been acted on (host stopped, orb failed) when this
  * returns.
  */
@@ -51,7 +51,7 @@ function validatePullResponse(
 
 /**
  * Stop the host and mark the orb `failed` with a typed error — the shared
- * non-retryable integrity path (DESIGN.md §8.4). The host stop is attempted
+ * non-retryable integrity path (docs/history-replication.md). The host stop is attempted
  * here; the failed-state reconciler is the crash-safety backstop.
  */
 export async function failOrbForIntegrity(
@@ -99,7 +99,7 @@ export async function failOrbForIntegrity(
 
 /**
  * Pull one orb from its committed cursor until the runtime returns no new
- * complete records (DESIGN.md §8.1/§8.2). Non-empty commits loop immediately;
+ * complete records (docs/history-replication.md/docs/history-replication.md). Non-empty commits loop immediately;
  * cursor conflicts re-read and continue (another poller won); retryable
  * failures return to the ordinary polling cadence with the cursor unchanged.
  */
@@ -186,7 +186,7 @@ export async function pollOrbUntilCaughtUp(
       response.runtimeInstanceId,
     );
     if (response.activity === "busy") {
-      // Advisory idle-auto-stop timestamp (§3.4); a failure is ignored — the
+      // Advisory idle-auto-stop timestamp (docs/lifecycle.md); a failure is ignored — the
       // next busy pull refreshes it again.
       await deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
     }

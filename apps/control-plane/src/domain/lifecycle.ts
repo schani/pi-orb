@@ -165,7 +165,7 @@ async function reconcileCreateStart(
 ): Promise<ReconcileOutcome> {
   let orb = initial;
 
-  // 1. Codex auth is a prerequisite for host work (DESIGN.md §15.1).
+  // 1. Codex auth is a prerequisite for host work (docs/credentials.md).
   const auth = await deps.authGate.ensureAuth(task);
   if (auth.isErr()) return retryable(auth.error.message);
   const resolution = auth.value;
@@ -195,7 +195,7 @@ async function reconcileCreateStart(
   deps.control.setChallenge(null);
   if (deps.control.isAuthBlocked(orb.id)) {
     // OAuth completed: re-enter with a fresh state_changed_at so login time
-    // never consumes the create/start deadline (DESIGN.md §5.2).
+    // never consumes the create/start deadline (docs/lifecycle.md).
     const reentered = await deps.store.casReenterState(task, {
       orbId: orb.id,
       expectedStateVersion: orb.stateVersion,
@@ -210,7 +210,7 @@ async function reconcileCreateStart(
     orb = reentered.value;
   }
 
-  // 2. Create/start deadline (DESIGN.md §5.2 deadline_exceeded rule).
+  // 2. Create/start deadline (docs/lifecycle.md deadline_exceeded rule).
   if (task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs) {
     return failOrbStoppingHost(
       task,
@@ -275,7 +275,7 @@ async function reconcileCreateStart(
   }
   const observation = observed.value;
   if (observation === null) {
-    // Definitive absence: idempotent provision restores the host (§5.2).
+    // Definitive absence: idempotent provision restores the host (docs/lifecycle.md).
     const projectResult = await deps.store.getProject(task, orb.projectId);
     if (projectResult.isErr()) return retryable(projectResult.error.message);
     const project = projectResult.value;
@@ -368,7 +368,7 @@ async function reconcileCreateStart(
           answered: false,
           lastError: health.error.message,
         });
-        // Sub-deadline (DESIGN.md §5.2): the health server starts before slow
+        // Sub-deadline (docs/lifecycle.md): the health server starts before slow
         // init, so a running host that has never answered is a boot failure,
         // not a slow clone — fail fast with host-side evidence.
         const probe = deps.control.getBootProbe(orb.id);
@@ -417,7 +417,7 @@ async function reconcileCreateStart(
           `runtime identity mismatch: expected ${orb.id}, got ${status.orbId}`,
         );
       }
-      // Persist ready identity before the orb becomes running (§5.2).
+      // Persist ready identity before the orb becomes running (docs/lifecycle.md).
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
         expectedStateVersion: orb.stateVersion,
@@ -462,7 +462,7 @@ async function reconcileRunning(
   const observation = observed.value;
   if (observation === null || observation.state === "stopped" || observation.state === "failed") {
     // Unexpected absence/stop: restore the host around the retained
-    // filesystem (DESIGN.md §5.2).
+    // filesystem (docs/lifecycle.md).
     return transitionTo(task, deps, orb, "starting");
   }
   if (observation.state === "starting" || observation.state === "stopping") {
@@ -494,7 +494,7 @@ async function reconcileRunning(
     return { type: "progressed" };
   }
 
-  // Idle auto-stop (DESIGN.md §3.4). Only a tab that affirmatively reports
+  // Idle auto-stop (docs/lifecycle.md). Only a tab that affirmatively reports
   // itself visible counts as activity; hidden and non-reporting connections
   // do not, so a lost presence frame fails toward an earlier stop, never a
   // leaked host. The last pull's `busy` observation also blocks the stop:
@@ -530,7 +530,7 @@ async function reconcileStopping(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
-  // New live connections are rejected while stopping (DESIGN.md §5.2).
+  // New live connections are rejected while stopping (docs/lifecycle.md).
   deps.control.markStopping(orb.id);
 
   if (orb.hostRef === null) {
@@ -555,7 +555,7 @@ async function reconcileStopping(
       return { type: "progressed" };
     }
     // Absent or already-stopped host: no runtime to drain; complete records
-    // left on the persistent filesystem are found on the next start (§5.2).
+    // left on the persistent filesystem are found on the next start (docs/lifecycle.md).
     if (observation !== null && observation.state === "failed") {
       await stopHost(task, deps, orb.hostRef);
     }
@@ -568,7 +568,7 @@ async function reconcileStopping(
   // Host is running.
   if (hasNeverBeenReady(orb)) {
     // Never reached ready and has no session: no user request could have been
-    // accepted, so the drain is skipped (§5.2).
+    // accepted, so the drain is skipped (docs/lifecycle.md).
     const stopped = await stopHost(task, deps, orb.hostRef);
     if (stopped.isErr()) {
       return stopped.error.retryable
@@ -579,7 +579,7 @@ async function reconcileStopping(
   }
 
   // A drain stuck longer than the create/start deadline cannot be completed
-  // by waiting: the runtime cannot be restored to ready (§5.2).
+  // by waiting: the runtime cannot be restored to ready (docs/lifecycle.md).
   if (task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs) {
     return failOrbStoppingHost(
       task,
@@ -591,7 +591,7 @@ async function reconcileStopping(
   }
 
   // The unreachable-runtime restart applies during stopping too, so a pending
-  // drain is never stranded behind a dead runtime process (§5.2).
+  // drain is never stranded behind a dead runtime process (docs/lifecycle.md).
   const liveness = deps.control.getLiveness(orb.id);
   if (liveness === null) {
     deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
@@ -606,7 +606,7 @@ async function reconcileStopping(
     return { type: "progressed" };
   }
 
-  // The controlled-shutdown pull barrier (DESIGN.md §8.4).
+  // The controlled-shutdown pull barrier (docs/history-replication.md).
   const outcome = await pollOrbUntilCaughtUp(task, deps, orb.id);
   switch (outcome.type) {
     case "caught_up": {
@@ -676,7 +676,7 @@ export async function reconcileOrbOnce(
 }
 
 // ---------------------------------------------------------------------------
-// Commands (DESIGN.md §5.2)
+// Commands (docs/lifecycle.md)
 
 export interface CommandError {
   readonly type: "command_error";
@@ -701,7 +701,7 @@ function mapCasError(error: StoreError | StateConflict): CommandError {
     : commandError("unavailable", error.message, error.retryable);
 }
 
-/** Create inserts `creating` (DESIGN.md §11.3: creation also requests start). */
+/** Create inserts `creating` (docs/control-plane-api.md: creation also requests start). */
 export function createOrb(
   task: SimulationTask,
   deps: ControlPlaneDeps,

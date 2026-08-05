@@ -39,7 +39,7 @@ interface ActiveFlow {
 }
 
 /**
- * Codex auth gate over Pi's ModelRuntime (DESIGN.md §15.1). Auth resolves
+ * Codex auth gate over Pi's ModelRuntime (docs/credentials.md). Auth resolves
  * through the shared auth.json under Pi's credential-store lock; a missing or
  * unrefreshable credential starts exactly one global headless device-code
  * flow whose public challenge is shared by every blocked orb. No secret ever
@@ -64,7 +64,7 @@ export class PiAuthGate implements AuthGate {
 
   /**
    * Make sure the broker's pointer/secret pair holds the credential Pi's
-   * auth.json holds (DESIGN.md §15.1): after a fresh login, and on first boot
+   * auth.json holds (docs/credentials.md): after a fresh login, and on first boot
    * over a pre-broker auth.json. Idempotent via the pointer check; login
    * races resolve through the fenced commit inside the broker.
    */
@@ -206,7 +206,7 @@ export class PiAuthGate implements AuthGate {
           },
         };
       }
-      // The broker pointer is the durable authority (DESIGN.md §15.1):
+      // The broker pointer is the durable authority (docs/credentials.md):
       // auth.json is an ephemeral login artifact on Cloud Run, so a stored
       // credential must satisfy auth without a fresh device flow. An
       // invalid_grant clears the pointer, which re-opens the flow below.

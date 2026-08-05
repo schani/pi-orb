@@ -423,7 +423,7 @@ describe("control-plane API schemas", () => {
     ).toBe(true);
   });
 
-  it("never allows OAuth credential fields to serialize (DESIGN §15.1)", () => {
+  it("never allows OAuth credential fields to serialize (docs/credentials.md)", () => {
     // Walk every browser-facing schema: every object must be closed and no
     // property may be named `access` or `refresh`.
     const browserSchemas = [

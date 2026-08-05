@@ -35,7 +35,7 @@ function runtimeError(
 }
 
 /**
- * The orb runtime's HTTP surface (DESIGN.md §5.1, §6, §8.1): health,
+ * The orb runtime's HTTP surface (docs/host-provider.md, docs/runtime-protocol.md, docs/history-replication.md): health,
  * idempotent history pulls, and the live WebSocket with synchronous hello
  * synchronization. The health server starts before slow initialization.
  */
@@ -162,7 +162,7 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
           return;
         }
         // All mutating requests pass through this single synchronous gate on
-        // the event loop (DESIGN.md §6.5).
+        // the event loop (docs/runtime-protocol.md).
         const decision = decideRequest(agent.gateView(), frame.action);
         if (decision.type === "reject") {
           const result: RequestResult = {
@@ -188,7 +188,7 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
           void agent.abortOperation();
           return;
         }
-        // start_message: acceptance is not completion (§6.3). The operation
+        // start_message: acceptance is not completion (docs/runtime-protocol.md). The operation
         // id becomes visible through operation_started once Pi starts.
         const content = frame.action.type === "message" ? frame.action.content : [];
         const operationId = randomUUID();
@@ -235,14 +235,14 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
           return;
         }
         if (parsed.type === "client.presence") {
-          // Consumed by the control-plane proxy (DESIGN.md §3.4); ignore one
+          // Consumed by the control-plane proxy (docs/lifecycle.md); ignore one
           // that slips through rather than treating it as a request.
           return;
         }
         if (parsed.type === "client.hello") {
           if (helloSeen) return;
           helloSeen = true;
-          // Synchronous synchronization preparation (§6.2): no await between
+          // Synchronous synchronization preparation (docs/runtime-protocol.md): no await between
           // reading the snapshot and enqueueing the batch.
           const snapshot = agent.snapshot();
           const sessionId = agent.sessionId();

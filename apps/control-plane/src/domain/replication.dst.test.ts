@@ -256,7 +256,7 @@ describe("history replication (DST)", () => {
           name: "browser",
           f: async (task) => {
             // Wait until the orb exists and some history flows, then do the
-            // §8.3 handoff: DB snapshot at cursor C, then live records after C.
+            // docs/history-replication.md handoff: DB snapshot at cursor C, then live records after C.
             await waitUntil(task, "some replication", () => {
               return harness.store.replicaRecords(ORB).length >= 1;
             });

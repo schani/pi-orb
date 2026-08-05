@@ -10,7 +10,7 @@ import {
 import { Check } from "typebox/value";
 import { generateUuid } from "./uuid.ts";
 
-/** Stable UUID for this browser tab (DESIGN §6.2). */
+/** Stable UUID for this browser tab (docs/runtime-protocol.md). */
 export const CLIENT_INSTANCE_ID: string = generateUuid();
 
 export type LiveConnectionStatus = "connecting" | "open" | "retrying" | "closed";
@@ -23,12 +23,12 @@ export interface LiveConnectionOptions {
   onStatus: (status: LiveConnectionStatus) => void;
   /**
    * An unacknowledged request was dropped because the runtime instance
-   * changed across a reconnect, so auto-resending is unsafe (DESIGN §6.4).
+   * changed across a reconnect, so auto-resending is unsafe (docs/runtime-protocol.md).
    */
   onRequestLost: (requestId: string, action: ClientAction) => void;
   /**
    * Current tab visibility, reported to the control plane on every
-   * (re)connect for idle auto-stop (DESIGN §3.4).
+   * (re)connect for idle auto-stop (docs/lifecycle.md).
    */
   getVisible: () => boolean;
 }
@@ -82,7 +82,7 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
       for (const [requestId, entry] of [...pending.entries()]) {
         if (entry.runtimeInstanceId === newInstanceId) {
           // Same runtime process: identical request id + action is a safe
-          // duplicate and returns the original result (DESIGN §6.4).
+          // duplicate and returns the original result (docs/runtime-protocol.md).
           ws.send(JSON.stringify(entry.frame));
         } else {
           pending.delete(requestId);

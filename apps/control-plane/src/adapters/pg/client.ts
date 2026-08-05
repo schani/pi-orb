@@ -3,7 +3,7 @@ import pg from "pg";
 import type { StoreError } from "../../domain/errors.ts";
 
 /**
- * Thin Result-based wrapper over `pg` (DESIGN.md §17.5): explicit
+ * Thin Result-based wrapper over `pg` (docs/stack.md): explicit
  * BEGIN/COMMIT/ROLLBACK, every driver call caught at this boundary, and no
  * throwing transaction API.
  */

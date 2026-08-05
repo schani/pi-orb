@@ -1,6 +1,6 @@
 /**
  * Pinned-model selection for the hardcoded `openai-codex` provider
- * (DESIGN.md §15.1). The decided orb model is gpt-5.6-sol. If a future Pi
+ * (docs/credentials.md). The decided orb model is gpt-5.6-sol. If a future Pi
  * catalog drops that id, fall back to the first image-capable model — the
  * runtime advertises `input.image`, and pi-ai's request serializers include
  * image content only when `model.input` contains "image" — and only then to

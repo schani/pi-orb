@@ -30,7 +30,7 @@ export function sleepResult(
 
 /**
  * Runs `f` under a deadline whose signal aborts when time runs out
- * (DESIGN.md §14): the adapter receives the signal, and the timer is always
+ * (docs/testing.md): the adapter receives the signal, and the timer is always
  * cancelled when the operation settles. `f` must return a `ResultAsync` whose
  * error channel already models cancellation (adapters map aborts to typed
  * errors), so this helper never introduces a rejection.

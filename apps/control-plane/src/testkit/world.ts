@@ -277,7 +277,7 @@ export class FakeWorld {
     if (state.config.containerNeverStarts) return;
     const fs = state.filesystem;
     if (fs.sessionId !== null && fs.entries.length === 0) {
-      // Post-flush-gate runtime contract (DESIGN.md §8.5): a session that
+      // Post-flush-gate runtime contract (docs/history-replication.md): a session that
       // never flushed a record evaporates with the process — the next boot
       // starts a fresh session identity.
       fs.sessionId = null;

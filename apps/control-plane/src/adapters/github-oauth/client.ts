@@ -10,7 +10,7 @@ import type {
 import type { OperationContext, StoredCredential, UpstreamRefresher } from "../../domain/ports.ts";
 
 /**
- * GitHub App OAuth adapters (DESIGN.md §15.3): the device flow the auth gate
+ * GitHub App OAuth adapters (docs/credentials.md): the device flow the auth gate
  * drives and the rotating user-token refresh the broker drives. GitHub's
  * OAuth endpoints answer errors as HTTP 200 with an `error` field, so both
  * paths inspect the body, not just the status. The client secret is used

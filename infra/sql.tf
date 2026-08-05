@@ -1,5 +1,5 @@
 # Cloud SQL Postgres, private IP only, backups + PITR from day one
-# (DESIGN.md §3.5). The replica is the durable product history.
+# (docs/history-replication.md). The replica is the durable product history.
 
 resource "google_sql_database_instance" "pi_orb" {
   name                = "pi-orb"
@@ -63,7 +63,7 @@ resource "google_secret_manager_secret_iam_member" "cp_reads_database_url" {
   member    = "serviceAccount:${google_service_account.control_plane.email}"
 }
 
-# Parent secret for the broker's Codex credential (DESIGN.md §15.1); the
+# Parent secret for the broker's Codex credential (docs/credentials.md); the
 # GsmSecretStore only adds/reads/destroys versions on it.
 resource "google_secret_manager_secret" "codex_credential" {
   secret_id = "pi-orb-credential-openai-codex"

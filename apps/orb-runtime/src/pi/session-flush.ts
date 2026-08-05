@@ -6,7 +6,7 @@ export interface SessionFileSource {
 }
 
 /**
- * Whether the SDK has durably persisted the session (DESIGN.md §8.5). The
+ * Whether the SDK has durably persisted the session (docs/history-replication.md). The
  * pinned SessionManager writes its file only once the first assistant
  * message exists (session-flush.contract.test.ts); before that, entries are
  * memory-only and must never be served to the control plane — a committed

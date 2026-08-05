@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sessionFlushed } from "./session-flush.ts";
 
 /**
- * Pinned-SDK contract (DESIGN.md §8.5): the SessionManager does NOT write
+ * Pinned-SDK contract (docs/history-replication.md): the SessionManager does NOT write
  * its session file until the first assistant message exists — everything
  * before that lives only in memory. The runtime's snapshot gate
  * (`sessionFlushed`) relies on exactly this behavior; if an SDK upgrade

@@ -14,7 +14,7 @@ import { BrokerTokenClient } from "../domain/broker-client.ts";
 import { brokerProviderConfig } from "./provider.ts";
 
 /**
- * Pinned Pi SDK contract test (DESIGN.md §15.1): verifies, against the exact
+ * Pinned Pi SDK contract test (docs/credentials.md): verifies, against the exact
  * installed `@earendil-works/pi-coding-agent` version, the refresh behavior
  * the broker provider adapter assumes. If a Pi upgrade changes any of these
  * behaviors, this suite must fail before the E2E does.

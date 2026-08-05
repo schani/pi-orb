@@ -14,7 +14,7 @@ export interface CursorConflict {
 }
 
 /**
- * A replication problem no retry can repair (DESIGN.md §8.4): unknown cursor,
+ * A replication problem no retry can repair (docs/history-replication.md): unknown cursor,
  * session-header mismatch, conflicting immutable record, mapping/validation
  * failure.
  */
@@ -80,7 +80,7 @@ export interface StateConflict {
 }
 
 // ---------------------------------------------------------------------------
-// Credential broker (DESIGN.md §15.1)
+// Credential broker (docs/credentials.md)
 
 /** CAS on the credential pointer's `row_version` affected zero rows. */
 export interface PointerConflict {

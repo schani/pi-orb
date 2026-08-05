@@ -227,7 +227,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; now: number },
   ): ResultAsync<void, StoreError> {
-    // Same monotone, CAS-free semantics as the pg adapter (§3.4).
+    // Same monotone, CAS-free semantics as the pg adapter (docs/lifecycle.md).
     return this.access(task, FAILPOINTS.storeWrite, "touch last busy", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined) return;
@@ -278,7 +278,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     }
     if (orb.harnessSessionId !== session.id || !jsonEqual(orb.harnessSessionHeader, session)) {
       if (orb.replicationCursor === null) {
-        // An empty replica pins nothing (DESIGN.md §8.5): with no committed
+        // An empty replica pins nothing (docs/history-replication.md): with no committed
         // cursor, a changed session identity is legitimate rotation — a
         // runtime that never flushed starts a fresh session on reboot.
         return { id: session.id, header: session };

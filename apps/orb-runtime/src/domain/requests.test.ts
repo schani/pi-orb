@@ -55,7 +55,7 @@ describe("decideRequest", () => {
   });
 });
 
-describe("RequestRegistry (in-memory request identity, §6.4)", () => {
+describe("RequestRegistry (in-memory request identity, docs/runtime-protocol.md)", () => {
   it("returns the original result with duplicate: true for identical resends", () => {
     const registry = new RequestRegistry();
     const action = messageAction("rec-1");

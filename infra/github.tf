@@ -1,4 +1,4 @@
-# GitHub App integration (DESIGN.md §15.3). The app's client id is plain
+# GitHub App integration (docs/credentials.md). The app's client id is plain
 # configuration (var.github_client_id); its client secret and the brokered
 # user credential live in Secret Manager. Tofu creates the secrets; the
 # client-secret *version* is added manually after registering the app:

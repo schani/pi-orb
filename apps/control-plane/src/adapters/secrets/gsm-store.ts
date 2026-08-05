@@ -26,7 +26,7 @@ export interface GsmSecretStoreOptions {
 }
 
 /**
- * Secret-Manager-backed credential secret store (DESIGN.md §15.1): one
+ * Secret-Manager-backed credential secret store (docs/credentials.md): one
  * pre-created secret per provider, one immutable version per credential
  * generation. The pointer row addresses exact numeric versions — never
  * `latest`, whose consistency is not guaranteed.

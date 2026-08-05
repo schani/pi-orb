@@ -2,7 +2,7 @@ import type { SimulationTask } from "determined";
 import type { BrokerTokenClient, BrokerTokenGrant } from "../domain/broker-client.ts";
 
 /**
- * Pi provider config whose OAuth side is broker-backed (DESIGN.md §15.1):
+ * Pi provider config whose OAuth side is broker-backed (docs/credentials.md):
  * `login` fetches the first token, `refreshToken` fetches a newer one, and
  * the stored credential carries a synthetic refresh marker — the real
  * refresh token never exists in this process. Structural types match Pi's

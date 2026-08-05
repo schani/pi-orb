@@ -1,5 +1,5 @@
 # Service accounts. The orb-VM SA predates this plane (imported); the
-# control-plane SA is new. Least privilege per DESIGN.md §15.2.
+# control-plane SA is new. Least privilege per docs/credentials.md.
 
 import {
   to = google_service_account.orb_vm

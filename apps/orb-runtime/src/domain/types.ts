@@ -2,7 +2,7 @@ import type { HarnessSessionMetadata, HistoryRecord } from "@pi-orb/protocol";
 
 /**
  * A synchronous, immutable snapshot of the harness's persisted session
- * (DESIGN.md §8.1): complete records in append order plus identity/activity.
+ * (docs/history-replication.md): complete records in append order plus identity/activity.
  * Captured at the start of each request; records appended afterward belong to
  * the next request.
  */

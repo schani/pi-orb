@@ -26,7 +26,7 @@ export interface RepositoryUrlOptions {
 
 /**
  * Hosts accepted by default. Extending this list is configuration, not a
- * design change (DESIGN.md §11.1).
+ * design change (docs/control-plane-api.md).
  */
 export const DEFAULT_ALLOWED_REPOSITORY_HOSTS: readonly string[] = [
   "github.com",
@@ -67,7 +67,7 @@ function stripGitSuffix(segment: string): string {
 }
 
 /**
- * Strict allowlist validation per DESIGN.md §11.1. Runs at project creation
+ * Strict allowlist validation per docs/control-plane-api.md. Runs at project creation
  * and again in the runtime immediately before cloning.
  */
 export function validateRepositoryUrl(

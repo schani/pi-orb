@@ -21,7 +21,7 @@ export interface DockerOrbHostProviderOptions {
   readonly network: string;
   /**
    * Control-plane base URL as reachable *from orb containers* (the broker
-   * endpoint, DESIGN.md §15.1). When omitted, the provider resolves the
+   * endpoint, docs/credentials.md). When omitted, the provider resolves the
    * Docker network's gateway address and uses `http://<gateway>:<port>`.
    */
   readonly controlPlaneUrl?: string;
@@ -98,7 +98,7 @@ function mapContainerState(state: string): OrbHostState {
 }
 
 /**
- * Docker CLI host provider (DESIGN.md §5, §17.7): one container plus one
+ * Docker CLI host provider (docs/host-provider.md, docs/stack.md): one container plus one
  * persistent volume per orb, driven through `execFile` with every call caught
  * at this boundary. The runtime address uses the container name on the shared
  * Docker network.

@@ -581,7 +581,7 @@ describe("orb lifecycle (DST)", () => {
 
   it("an orb with no replicated history survives stop and restart", async () => {
     await runDst({ name: "empty-history-restart", iterations: 20 }, async (sim) => {
-      // The 2026-08-03 incident shape (DESIGN.md §8.5): nothing replicated
+      // The 2026-08-03 incident shape (docs/history-replication.md): nothing replicated
       // yet — with the snapshot gate, a never-flushed session serves zero
       // records — then the orb stops and restarts. Replication must resume
       // cleanly from the null cursor instead of stranding the orb. Idle

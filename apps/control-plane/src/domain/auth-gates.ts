@@ -4,7 +4,7 @@ import type { AuthGateError } from "./errors.ts";
 import type { AuthGate, AuthResolution } from "./ports.ts";
 
 /**
- * Chains auth gates in order (DESIGN.md §15.3): the first non-ok resolution
+ * Chains auth gates in order (docs/credentials.md): the first non-ok resolution
  * wins, so a later ceremony (GitHub) never starts while an earlier one
  * (Codex) still blocks — the user sees one device challenge at a time.
  */

@@ -8,7 +8,7 @@ import {
 } from "../domain/broker-client.ts";
 
 /**
- * Point-of-use GitHub token logic (DESIGN.md §15.3) shared by the `gh` shim
+ * Point-of-use GitHub token logic (docs/credentials.md) shared by the `gh` shim
  * and the git credential helper. Each invocation fetches a fresh short-lived
  * token from the broker; nothing is persisted — no hosts.yml, no cached
  * token on disk.

@@ -14,13 +14,13 @@ variable "zone" {
 }
 
 variable "iap_domain" {
-  description = "Google Workspace domain allowed through IAP (hardcoded decision, DESIGN.md §3.6)."
+  description = "Google Workspace domain allowed through IAP (hardcoded decision, docs/deployment.md)."
   type        = string
   default     = "heyglide.com"
 }
 
 variable "github_client_id" {
-  description = "GitHub App client id for the gh/user-token flow (DESIGN.md §15.3); empty disables the integration. Public by nature — it travels in every device-flow request; the client secret lives only in Secret Manager."
+  description = "GitHub App client id for the gh/user-token flow (docs/credentials.md); empty disables the integration. Public by nature — it travels in every device-flow request; the client secret lives only in Secret Manager."
   type        = string
   default     = "Iv23liA7Aecbetq28EHv"
 }

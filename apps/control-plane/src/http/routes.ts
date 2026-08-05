@@ -37,7 +37,7 @@ function sendCommandError(reply: FastifyReply, error: CommandError): FastifyRepl
 }
 
 /**
- * The §11.3 JSON API: Fastify handlers validate TypeBox schemas, call
+ * The docs/control-plane-api.md JSON API: Fastify handlers validate TypeBox schemas, call
  * Result-returning domain services, and fold each result into an explicit
  * response. No exceptions for normal control flow.
  */
@@ -70,7 +70,7 @@ export function registerRoutes(
       return reply.status(503).send(httpError("unavailable", existing.error.message, true));
     }
     if (existing.value !== null) {
-      // Client-generated IDs make retried creates idempotent (§11.3).
+      // Client-generated IDs make retried creates idempotent (docs/control-plane-api.md).
       if (existing.value.name === body.name && existing.value.repositoryUrl === url.value.url) {
         return reply.status(201).send(projectView(existing.value));
       }

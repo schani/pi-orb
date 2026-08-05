@@ -2,6 +2,8 @@
 
 pi-orb runs Pi coding agents in isolated, Docker-backed **orbs**, with a web UI for persistent conversations that can be stopped and resumed. It is currently an unauthenticated local-development prototype and must not be exposed publicly.
 
+Design documentation starts at [DESIGN.md](DESIGN.md), which indexes the topical design docs under `docs/`. The actionable backlog is [TODO.md](TODO.md).
+
 ## Run locally
 
 Requires Node.js 24 and Docker.

@@ -2,7 +2,7 @@ import type { RuntimeEvent, ServerFrame } from "@pi-orb/protocol";
 import type { HarnessSnapshot, LiveOperationView } from "./types.ts";
 
 /**
- * Compute the §6.2 synchronization batch: sync.started, replayed complete
+ * Compute the docs/runtime-protocol.md synchronization batch: sync.started, replayed complete
  * records after the client's cursor, reconstructing runtime events for the
  * live operation, sync.completed. Called synchronously from the hello handler
  * so no Pi callback can interleave; the caller enqueues the result on the

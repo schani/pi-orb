@@ -19,11 +19,11 @@ export interface PullHistoryError {
 }
 
 /**
- * Pure §8.1 pull semantics over one immutable snapshot. The HTTP handler
+ * Pure docs/history-replication.md pull semantics over one immutable snapshot. The HTTP handler
  * folds this Result into status codes.
  */
 /**
- * The replication view of a snapshot (DESIGN.md §8.5): while the SDK has not
+ * The replication view of a snapshot (docs/history-replication.md): while the SDK has not
  * durably flushed the session, the control plane must see zero records and a
  * null head — a committed cursor must always survive a restart. Browser-
  * facing views are intentionally NOT gated: they are upsert-based and
@@ -58,7 +58,7 @@ export function computePullHistory(
   if (query.after !== null) {
     const index = snapshot.records.findIndex((record) => record.id === query.after);
     if (index === -1) {
-      // Persistence never silently resets to a full replay (§8.1).
+      // Persistence never silently resets to a full replay (docs/history-replication.md).
       return err({
         type: "pull_history_error",
         code: "cursor_not_found",

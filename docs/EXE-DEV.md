@@ -1,7 +1,7 @@
 # exe.dev as an orb host provider — evaluation (2026-08-05)
 
 Status: **feasible with caveats — proposal, not decided.** Summary lives in
-`DESIGN.md` §5.3; the decision is tracked as open question 35. This document is
+`docs/host-provider.md`; the decision is tracked as open question 35. This document is
 the full writeup.
 
 ## What exe.dev is
@@ -29,7 +29,7 @@ limits). There are no async operations to poll — `new` completes in ~2 s.
 ## How it maps onto `OrbHostProvider`
 
 Checked against the port in `apps/control-plane/src/domain/ports.ts` and the
-contract in `DESIGN.md` §5.
+contract in `docs/host-provider.md`.
 
 | Port requirement | exe.dev mapping | Fit |
 |---|---|---|
@@ -125,7 +125,7 @@ Notes:
 
 ## Open verification items (blocking the decision)
 
-Tracked in DESIGN.md open question 35:
+Tracked in `docs/open-questions.md` question 35:
 
 1. WebSocket forwarding through the exe.dev HTTPS proxy (the live proxy
    depends on it).

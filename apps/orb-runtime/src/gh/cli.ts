@@ -9,7 +9,7 @@ import {
 
 /**
  * One-shot CLI behind the `gh` shim and the git credential helper
- * (DESIGN.md §15.3):
+ * (docs/credentials.md):
  *
  *   cli.ts print             print a fresh GitHub access token to stdout
  *   cli.ts credential get    answer git's credential-helper protocol

@@ -1,5 +1,5 @@
 /**
- * Lifecycle timing constants (DESIGN.md §3.4/§5.2). All time flows through the
+ * Lifecycle timing constants (docs/lifecycle.md/docs/lifecycle.md). All time flows through the
  * injected `SimulationTask` clock, so simulations tune these freely.
  */
 export interface LifecycleConstants {
@@ -12,7 +12,7 @@ export interface LifecycleConstants {
   /**
    * Sub-deadline: the runtime health server starts before slow init, so a
    * host observed running whose runtime has never answered for this long is
-   * a boot failure, not a slow clone (DESIGN.md §5.2).
+   * a boot failure, not a slow clone (docs/lifecycle.md).
    */
   readonly unreachableBootDeadlineMs: number;
   /** Approximate history-pull interval per active orb. */
@@ -30,13 +30,13 @@ export interface LifecycleConstants {
   readonly pullLimit: number;
   /** How often stopped/failed orbs are checked for stray running hosts. */
   readonly hostBackstopIntervalMs: number;
-  /** Idle duration after which a running orb is automatically stopped (§3.4). */
+  /** Idle duration after which a running orb is automatically stopped (docs/lifecycle.md). */
   readonly idleStopAfterMs: number;
-  /** Interval between orphan-host sweeps (§3.4). */
+  /** Interval between orphan-host sweeps (docs/lifecycle.md). */
   readonly orphanSweepIntervalMs: number;
 }
 
-/** Credential-broker timing constants (DESIGN.md §15.1). */
+/** Credential-broker timing constants (docs/credentials.md). */
 export interface BrokerConstants {
   /** Refresh proactively when remaining credential lifetime falls below this. */
   readonly refreshThresholdMs: number;

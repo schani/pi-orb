@@ -11,7 +11,7 @@ import type {
 } from "./ports.ts";
 
 /**
- * GitHub device-flow auth gate (DESIGN.md §15.3). Unlike the Pi gate, the
+ * GitHub device-flow auth gate (docs/credentials.md). Unlike the Pi gate, the
  * flow has no background driver: every `ensureAuth` call — the reconciler's
  * cadence — advances it by at most one poll, respecting the device-flow
  * interval (and GitHub's `slow_down` backoff). That makes the whole ceremony

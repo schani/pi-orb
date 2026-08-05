@@ -20,7 +20,7 @@ const readMigrations = Result.fromThrowable(
   }),
 );
 
-/** Numbered hand-written SQL migrations with a tiny runner (DESIGN.md §17.5). */
+/** Numbered hand-written SQL migrations with a tiny runner (docs/stack.md). */
 export function runMigrations(db: PgClient): ResultAsync<string[], StoreError> {
   const dir = join(dirname(fileURLToPath(import.meta.url)), "migrations");
   const run = async (): Promise<Result<string[], StoreError>> => {

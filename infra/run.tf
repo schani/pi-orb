@@ -1,4 +1,4 @@
-# The two Cloud Run services (DESIGN.md §15.1 "Cloud exposure"): one image,
+# The two Cloud Run services (docs/credentials.md "Cloud exposure"): one image,
 # role env var as the hard route allowlist. IAP on the browser service is
 # enabled by deploy.sh (gcloud) — the provider's IAP-on-Cloud-Run support
 # is still settling; revisit when it is stable.

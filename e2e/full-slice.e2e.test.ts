@@ -16,7 +16,7 @@ import {
 } from "./harness.ts";
 
 /**
- * The full §11.2 slice against real PostgreSQL, real Docker, the real Pi SDK
+ * The full docs/testing.md slice against real PostgreSQL, real Docker, the real Pi SDK
  * inside the orb container, and the fake OpenAI service: device login,
  * scripted streaming with a real tool round trip, history replication, and
  * the controlled-stop drain. Requires docker and network access to the fake;
@@ -149,7 +149,7 @@ describe("full slice E2E", () => {
   async function runScenario(): Promise<void> {
     const base = controlPlane.baseUrl;
 
-    // Project + orb through the real API (§11.2 steps 1-2).
+    // Project + orb through the real API (docs/testing.md steps 1-2).
     const projectId = randomUUID();
     const project = await api(base, "POST", "/api/v1/projects", {
       id: projectId,
@@ -175,7 +175,7 @@ describe("full slice E2E", () => {
     );
     await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: challenge });
 
-    // Clone + session + auth resolve inside the container (§11.2 steps 3-4).
+    // Clone + session + auth resolve inside the container (docs/testing.md steps 3-4).
     await waitFor(
       "orb running",
       async () => {
@@ -188,7 +188,7 @@ describe("full slice E2E", () => {
       { timeoutMs: 300_000, intervalMs: 2_000 },
     );
 
-    // Live connection through the content-agnostic proxy (§11.2 steps 5-6).
+    // Live connection through the content-agnostic proxy (docs/testing.md steps 5-6).
     const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const cursor = (history.body["cursor"] as string | null) ?? null;
 
@@ -301,7 +301,7 @@ describe("full slice E2E", () => {
     );
     expect(sawReasoningDelta, "streamed reasoning deltas reached the client").toBe(true);
 
-    // Replication lands through the HTTP pull, not the WebSocket (§8).
+    // Replication lands through the HTTP pull, not the WebSocket (docs/history-replication.md).
     const replicated = await waitFor(
       "history replicated to postgres",
       async () => {
@@ -325,7 +325,7 @@ describe("full slice E2E", () => {
 
     socket.close();
 
-    // Controlled stop: drain, then host stop (§11.2 step 8).
+    // Controlled stop: drain, then host stop (docs/testing.md step 8).
     const stop = await api(base, "POST", `/api/v1/orbs/${orbId}/stop`);
     expect(stop.status).toBe(202);
     await waitFor(
@@ -337,7 +337,7 @@ describe("full slice E2E", () => {
       { timeoutMs: 120_000, intervalMs: 2_000 },
     );
 
-    // Stopped-orb history serves from the database alone (§11.2 step 9).
+    // Stopped-orb history serves from the database alone (docs/testing.md step 9).
     const stopped = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const stoppedRecords = stopped.body["records"] as unknown[];
     expect(stoppedRecords.length).toBe(replicated);

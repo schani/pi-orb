@@ -26,7 +26,7 @@ class RefreshFailure extends Error {
 }
 
 /**
- * The control plane's upstream OAuth refresh (DESIGN.md §15.1): the standard
+ * The control plane's upstream OAuth refresh (docs/credentials.md): the standard
  * rotating `refresh_token` grant, form-encoded, against the real Codex OAuth
  * origin or the fake service. This is the only place a refresh token crosses
  * the network, and it never leaves this process in any other direction.

@@ -15,7 +15,7 @@ export function projectView(project: ProjectRow): ProjectView {
 
 /**
  * Fold an orb row plus in-memory reconciler state into the browser view
- * (DESIGN.md §11.3). `actionRequired` and `stateDetail` are synthesized, never
+ * (docs/control-plane-api.md). `actionRequired` and `stateDetail` are synthesized, never
  * stored; no host ref, credential, session ID, or replication field leaks.
  */
 export function orbView(orb: OrbRow, control: ControlState): OrbView {

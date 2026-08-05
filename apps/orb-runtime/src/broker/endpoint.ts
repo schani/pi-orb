@@ -18,7 +18,7 @@ export interface BrokerEnv {
   readonly runtimeToken: string;
 }
 
-/** Both variables are provider-delivered (DESIGN.md §15.1); one alone is a bug. */
+/** Both variables are provider-delivered (docs/credentials.md); one alone is a bug. */
 export function readBrokerEnv(env: Record<string, string | undefined>): BrokerEnv | null {
   const controlPlaneUrl = env[CONTROL_PLANE_URL_ENV];
   const runtimeToken = env[RUNTIME_TOKEN_ENV];

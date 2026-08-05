@@ -24,7 +24,7 @@ function clientError(
 }
 
 /**
- * `fetch`-based runtime client (DESIGN.md §17.4): the AbortSignal reaches
+ * `fetch`-based runtime client (docs/stack.md): the AbortSignal reaches
  * fetch so a hung request cannot pin a reconciler, responses are validated
  * against the shared TypeBox schemas, and malformed bodies become typed
  * `invalid_response` errors (a replication-integrity condition upstream).

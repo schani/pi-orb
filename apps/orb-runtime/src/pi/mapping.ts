@@ -9,7 +9,7 @@ import type {
 import { err, ok, type Result } from "neverthrow";
 
 /**
- * Lossless Pi-entry → normalized-record mapping (DESIGN.md §9.2). Every
+ * Lossless Pi-entry → normalized-record mapping (docs/pi-adapter.md). Every
  * persisted entry maps one-to-one; a failure here fails the whole pull rather
  * than silently omitting an entry. The complete native entry always lands in
  * `overflow.native`.
@@ -204,7 +204,7 @@ function mapMessageEntry(
       });
     default:
       // An unknown message role becomes a generic event rather than
-      // inventing a shared role (DESIGN.md §9.2).
+      // inventing a shared role (docs/pi-adapter.md).
       return ok({
         ...identity,
         type: "event",
@@ -268,7 +268,7 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
   }
 }
 
-/** Map Pi's SessionHeader to session metadata (never a history record, §9.1). */
+/** Map Pi's SessionHeader to session metadata (never a history record, docs/pi-adapter.md). */
 export function mapPiSessionHeader(header: unknown): Result<HarnessSessionMetadata, MappingError> {
   if (!isRecordObject(header) || typeof header["id"] !== "string") {
     return fail("session header has no id");

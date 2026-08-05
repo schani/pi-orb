@@ -1,4 +1,4 @@
-# pi-orb static plane (DESIGN.md §3.6). Per-orb VMs are dynamic resources
+# pi-orb static plane (docs/deployment.md). Per-orb VMs are dynamic resources
 # created by GceOrbHostProvider and are never managed here. Images are built
 # and pushed by build-push.sh, digests passed as vars.
 #

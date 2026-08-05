@@ -70,7 +70,7 @@ export const ClientRequestSchema = Type.Object(
 export type ClientRequest = Static<typeof ClientRequestSchema>;
 
 /**
- * Tab-visibility report for idle auto-stop (DESIGN.md §3.4). Sent on connect
+ * Tab-visibility report for idle auto-stop (docs/lifecycle.md). Sent on connect
  * and on every `visibilitychange`; consumed by the control-plane live proxy
  * and never forwarded to the runtime, which ignores one defensively.
  */

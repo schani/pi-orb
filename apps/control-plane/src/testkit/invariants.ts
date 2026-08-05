@@ -3,7 +3,7 @@ import type { InMemoryControlPlaneStore } from "./store.ts";
 import type { FakeWorld } from "./world.ts";
 
 /**
- * Core replication invariants (DESIGN.md §14): the replica is a duplicate-free
+ * Core replication invariants (docs/testing.md): the replica is a duplicate-free
  * prefix of the filesystem entries in append order, the cursor points at the
  * last replicated record, and the replicated head references a replicated
  * record.

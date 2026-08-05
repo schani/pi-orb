@@ -61,7 +61,7 @@ const stateConflict = (currentState?: OrbState): StateConflict => ({
   ...(currentState !== undefined ? { currentState } : {}),
 });
 
-/** PostgreSQL `ControlPlaneStore` (DESIGN.md §8.6/§17.5). */
+/** PostgreSQL `ControlPlaneStore` (docs/history-replication.md/docs/stack.md). */
 export class PgControlPlaneStore implements ControlPlaneStore {
   private readonly db: PgClient;
 
@@ -242,7 +242,7 @@ export class PgControlPlaneStore implements ControlPlaneStore {
     _task: SimulationTask,
     params: { orbId: string; now: number },
   ): ResultAsync<void, StoreError> {
-    // Monotone and CAS-free (§3.4): GREATEST keeps concurrent touches safe and
+    // Monotone and CAS-free (docs/lifecycle.md): GREATEST keeps concurrent touches safe and
     // no state_version bump means lifecycle CAS never conflicts with this.
     return this.db
       .query(
@@ -302,7 +302,7 @@ export class PgControlPlaneStore implements ControlPlaneStore {
           !jsonEqual(orbRow["harness_session_header"], params.session)
         ) {
           if (currentCursor === null) {
-            // An empty replica pins nothing (DESIGN.md §8.5): with no
+            // An empty replica pins nothing (docs/history-replication.md): with no
             // committed cursor a changed session identity is legitimate
             // rotation — a runtime that never flushed starts a fresh session
             // on reboot. Re-initialize instead of failing the orb.
@@ -326,7 +326,7 @@ export class PgControlPlaneStore implements ControlPlaneStore {
           if (inserted.isErr()) return err(inserted.error);
           if (inserted.value.rowCount === 0) {
             // Existing row: identical content is an idempotent repeat,
-            // different content is an integrity error (§8.6).
+            // different content is an integrity error (docs/history-replication.md).
             const existing = await query(
               "SELECT record FROM history_records WHERE orb_id = $1 AND record_id = $2",
               [params.orbId, record.id],
@@ -397,7 +397,7 @@ export class PgControlPlaneStore implements ControlPlaneStore {
         row["replication_cursor"] === null ? null : String(row["replication_cursor"]);
       if (
         storedSessionId === null ||
-        // An empty replica pins nothing (DESIGN.md §8.5): with no committed
+        // An empty replica pins nothing (docs/history-replication.md): with no committed
         // cursor, a changed session identity is legitimate rotation.
         (storedCursor === null &&
           (storedSessionId !== session.id || !jsonEqual(row["harness_session_header"], session)))
@@ -452,7 +452,7 @@ export class PgControlPlaneStore implements ControlPlaneStore {
       }
       const cursor = row["replication_cursor"] === null ? null : String(row["replication_cursor"]);
       // Linear order is reconstructed by following parent_id from the last
-      // committed record (DESIGN.md §8.6).
+      // committed record (docs/history-replication.md).
       const recordsResult = await query(
         `WITH RECURSIVE chain AS (
            SELECT record_id, parent_id, record, 0 AS depth

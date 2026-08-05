@@ -13,12 +13,12 @@ const UNSUPPORTED_DATA = 1003;
 let connectionCounter = 0;
 
 /**
- * Live proxy (DESIGN.md §6.1/§8.3): after routing, text frames and close
+ * Live proxy (docs/runtime-protocol.md/docs/history-replication.md): after routing, text frames and close
  * signals are forwarded without interpretation; the runtime's `client.hello`
  * is the first application frame. A connection race or an unavailable runtime
  * closes with 1013 and the browser returns to the HTTP lifecycle API.
  *
- * Idle auto-stop (§3.4) carves out the only two content sniffs: presence
+ * Idle auto-stop (docs/lifecycle.md) carves out the only two content sniffs: presence
  * frames are consumed here (the runtime has no use for tab visibility), and
  * client requests refresh the advisory `last_busy_at` timestamp before being
  * forwarded unchanged.
@@ -84,7 +84,7 @@ export async function registerLiveProxy(
           parsed !== null &&
           (parsed as { type?: unknown }).type === "client.request"
         ) {
-          // Fire-and-forget: the timestamp is advisory (§3.4).
+          // Fire-and-forget: the timestamp is advisory (docs/lifecycle.md).
           void deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
         }
         if (upstreamOpen && upstream !== null) {

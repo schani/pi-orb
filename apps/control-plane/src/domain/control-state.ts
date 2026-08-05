@@ -24,7 +24,7 @@ export interface BootProbe {
 }
 
 /**
- * Per-process in-memory reconciliation state (DESIGN.md §11.3, §15.1). It is
+ * Per-process in-memory reconciliation state (docs/control-plane-api.md, docs/credentials.md). It is
  * deliberately reconstructible: a control-plane restart loses it and the
  * durable orb rows drive recovery.
  */
@@ -62,7 +62,7 @@ export class ControlState {
     return this.liveness.get(orbId) ?? null;
   }
 
-  // -- browser presence (idle auto-stop, DESIGN.md §3.4) --
+  // -- browser presence (idle auto-stop, docs/lifecycle.md) --
 
   /** orbId → connectionId → tab visible. */
   private readonly browserVisibility = new Map<string, Map<string, boolean>>();
@@ -158,7 +158,7 @@ export class ControlState {
     return this.challenge;
   }
 
-  // -- boot probing (creating/starting visibility, DESIGN.md §5.2) --
+  // -- boot probing (creating/starting visibility, docs/lifecycle.md) --
 
   private readonly bootProbes = new Map<string, BootProbe>();
 

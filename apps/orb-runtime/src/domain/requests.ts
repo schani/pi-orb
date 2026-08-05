@@ -20,7 +20,7 @@ export type RequestDecision =
     };
 
 /**
- * Pure §6.3 request gate. All mutating requests pass through one serial
+ * Pure docs/runtime-protocol.md request gate. All mutating requests pass through one serial
  * executor, so the view is consistent at decision time.
  */
 export function decideRequest(view: AgentGateView, action: ClientAction): RequestDecision {
@@ -68,7 +68,7 @@ function actionsEqual(a: ClientAction, b: ClientAction): boolean {
 }
 
 /**
- * In-memory request identity, scoped to one runtime process (§6.4). A resent
+ * In-memory request identity, scoped to one runtime process (docs/runtime-protocol.md). A resent
  * known ID with an identical action replays the original result with
  * `duplicate: true`; a known ID with a different action is a conflict. The map
  * lives for the life of the process; `server.welcome.runtimeInstanceId` tells

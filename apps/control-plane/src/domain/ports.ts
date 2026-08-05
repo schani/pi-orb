@@ -36,7 +36,7 @@ export interface CasTransitionParams {
   readonly lastError?: string | null;
   readonly hostRef?: string | null;
   readonly checkoutCommit?: string | null;
-  /** Set entering `stopping` (idle) and cleared on explicit stops/starts (§3.4). */
+  /** Set entering `stopping` (idle) and cleared on explicit stops/starts (docs/lifecycle.md). */
   readonly stopReason?: StopReason | null;
 }
 
@@ -61,7 +61,7 @@ export interface CommitPullBatchParams {
 }
 
 /**
- * The single storage boundary of the control-plane domain (DESIGN.md §17.5).
+ * The single storage boundary of the control-plane domain (docs/stack.md).
  * Every mutation is transactional in the real adapter. Lifecycle writes use
  * `state_version` CAS; replication writes use cursor CAS; the two never touch
  * each other's correctness fields.
@@ -97,7 +97,7 @@ export interface ControlPlaneStore {
   ): ResultAsync<OrbRow, StoreError | StateConflict>;
 
   /**
-   * Monotone advisory update of `last_busy_at` (idle auto-stop, §3.4). Not a
+   * Monotone advisory update of `last_busy_at` (idle auto-stop, docs/lifecycle.md). Not a
    * correctness field: no state_version bump, so it can never conflict with
    * lifecycle CAS or replication cursor writes. `now` older than the stored
    * value is a no-op.
@@ -109,7 +109,7 @@ export interface ControlPlaneStore {
 
   /**
    * Same-state re-entry with a fresh `state_changed_at` (OAuth completion,
-   * DESIGN.md §5.2): user login time never consumes the create/start deadline.
+   * docs/lifecycle.md): user login time never consumes the create/start deadline.
    */
   casReenterState(
     task: SimulationTask,
@@ -117,7 +117,7 @@ export interface ControlPlaneStore {
   ): ResultAsync<OrbRow, StoreError | StateConflict>;
 
   /**
-   * One transaction (DESIGN.md §8.6): verify/initialize immutable session
+   * One transaction (docs/history-replication.md): verify/initialize immutable session
    * metadata, insert records (identical duplicates allowed, conflicts are
    * integrity errors), advance `replication_cursor` via compare-and-swap and
    * update `replicated_head_id`.
@@ -134,7 +134,7 @@ export interface ControlPlaneStore {
     session: HarnessSessionMetadata,
   ): ResultAsync<void, StoreError | import("./errors.ts").ReplicationIntegrityError>;
 
-  /** Consistent snapshot for the history API and live handoff (DESIGN.md §8.3). */
+  /** Consistent snapshot for the history API and live handoff (docs/history-replication.md). */
   readHistorySnapshot(
     task: SimulationTask,
     orbId: string,
@@ -150,7 +150,7 @@ export interface ControlPlaneStore {
 }
 
 // ---------------------------------------------------------------------------
-// Host provider (DESIGN.md §5)
+// Host provider (docs/host-provider.md)
 
 export type OrbHostState = "starting" | "running" | "stopping" | "stopped" | "failed";
 
@@ -178,7 +178,7 @@ export interface ProvisionOrbHostRequest {
  * the host *actually carries* — minted fresh when the provider created the
  * host, read back from the host's delivery channel (container env, instance
  * metadata) when an existing host was found. The control plane commits this
- * observed hash; it never needs the plaintext (DESIGN.md §15.1).
+ * observed hash; it never needs the plaintext (docs/credentials.md).
  */
 export interface ProvisionedOrbHost {
   readonly ref: OrbHostRef;
@@ -227,7 +227,7 @@ export interface OrbHostProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Runtime client (DESIGN.md §6)
+// Runtime client (docs/runtime-protocol.md)
 
 export interface PullHistoryClientRequest {
   readonly baseUrl: string;
@@ -249,7 +249,7 @@ export interface OrbRuntimeClient {
 }
 
 // ---------------------------------------------------------------------------
-// Auth gate (DESIGN.md §15.1)
+// Auth gate (docs/credentials.md)
 
 /** Which upstream a device challenge belongs to (drives the UI label). */
 export type ChallengeProvider = "openai-codex" | "github";
@@ -277,7 +277,7 @@ export interface AuthGate {
 }
 
 // ---------------------------------------------------------------------------
-// Credential broker (DESIGN.md §15.1)
+// Credential broker (docs/credentials.md)
 
 /**
  * The durable credential pointer. Lives in PostgreSQL; holds no secret

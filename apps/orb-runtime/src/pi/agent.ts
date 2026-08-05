@@ -36,7 +36,7 @@ export interface PiOrbAgentOptions {
   readonly repositoryUrl: string;
   /** Persistent orb filesystem root (the Docker volume). */
   readonly workDir: string;
-  /** Control-plane broker access (DESIGN.md §15.1); the only credential path. */
+  /** Control-plane broker access (docs/credentials.md); the only credential path. */
   readonly broker: BrokerEnv | null;
   /** E2E mode: route inference to the fake OpenAI service. */
   readonly mockOpenAi?: MockOpenAiConfig | null;
@@ -167,12 +167,12 @@ export class PiOrbAgent {
   }
 
   private async bootSteps(): Promise<Result<void, RuntimeHealth>> {
-    // 1. Clone (fresh temp dir + atomic rename; DESIGN.md §5.1).
+    // 1. Clone (fresh temp dir + atomic rename; docs/host-provider.md).
     this.health = this.initializing("cloning");
     const repoDir = join(this.options.workDir, "repo");
     if (!existsSync(repoDir)) {
       // Re-validate before cloning: the first-slice database is writable by
-      // anyone who can reach the control plane (DESIGN.md §11.1).
+      // anyone who can reach the control plane (docs/control-plane-api.md).
       const url = validateRepositoryUrl(this.options.repositoryUrl);
       if (url.isErr()) {
         return err(this.failed("invalid_repository_url", url.error.message, false));
@@ -198,7 +198,7 @@ export class PiOrbAgent {
     if (commit.isErr()) return err(this.failed("clone_failed", commit.error.message, true));
     this.checkoutCommit = commit.value;
 
-    // 2. Session: never replace an existing one (DESIGN.md §5.1).
+    // 2. Session: never replace an existing one (docs/host-provider.md).
     this.health = this.initializing("loading_session");
     const sessionDir = join(this.options.workDir, "pi-sessions");
     const managerResult = Result.fromThrowable(
@@ -206,7 +206,7 @@ export class PiOrbAgent {
         mkdirSync(sessionDir, { recursive: true });
         // Whether to create or load is decided solely from the persistent
         // filesystem: an existing session must be loaded, and one that cannot
-        // be loaded fails rather than being replaced (DESIGN.md §5.1).
+        // be loaded fails rather than being replaced (docs/host-provider.md).
         const existing = readdirSync(sessionDir)
           .filter((name) => name.endsWith(".jsonl"))
           .map((name) => join(sessionDir, name))
@@ -227,7 +227,7 @@ export class PiOrbAgent {
     this.sessionManager = managerResult.value;
 
     // 3. Codex credential resolves through the control-plane broker
-    // (DESIGN.md §15.1) — the only credential path on every provider.
+    // (docs/credentials.md) — the only credential path on every provider.
     this.health = this.initializing("checking_auth");
     const mockOpenAi = this.options.mockOpenAi ?? null;
     const broker = this.options.broker;
@@ -345,7 +345,7 @@ export class PiOrbAgent {
     return ok(undefined);
   }
 
-  // -- Pi event translation (DESIGN.md §6.3) --------------------------------
+  // -- Pi event translation (docs/runtime-protocol.md) --------------------------------
 
   private onAgentEvent(event: AgentSessionEvent): void {
     // Pi notifies subscribers of ordinary message_end before appending the
@@ -456,8 +456,8 @@ export class PiOrbAgent {
   // -- synchronous views ----------------------------------------------------
 
   /**
-   * The snapshot served to the control plane's history pull (DESIGN.md
-   * §8.5): empty until the SDK has written the session file (no assistant
+   * The snapshot served to the control plane's history pull
+   * (docs/history-replication.md): empty until the SDK has written the session file (no assistant
    * message yet, pinned in session-flush.contract.test.ts), because every
    * entry before that is memory-only and a committed cursor naming one would
    * be unresolvable after a restart. Browser-facing views use `snapshot()`
@@ -474,7 +474,7 @@ export class PiOrbAgent {
     );
   }
 
-  /** Immutable snapshot of the full in-memory session (DESIGN.md §8.1). */
+  /** Immutable snapshot of the full in-memory session (docs/history-replication.md). */
   snapshot(): Result<HarnessSnapshot, SnapshotError> {
     const manager = this.sessionManager;
     if (manager === null || this.health.status !== "ready") {
@@ -487,7 +487,7 @@ export class PiOrbAgent {
     const records = [];
     for (const entry of manager.getEntries()) {
       const mapped = mapPiEntry(entry);
-      // A mapping failure must fail the pull, never skip an entry (§9.2).
+      // A mapping failure must fail the pull, never skip an entry (docs/pi-adapter.md).
       if (mapped.isErr()) {
         return err({ type: "snapshot_error", message: mapped.error.message });
       }

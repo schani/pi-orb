@@ -21,7 +21,7 @@ export interface GceOrbHostProviderOptions {
   readonly machineType: string;
   /** Full or partial subnetwork URL, e.g. "regions/us-central1/subnetworks/pi-orb-us-central1". */
   readonly subnetwork: string;
-  /** Dedicated minimal service account for orb VMs (DESIGN.md §15.1). */
+  /** Dedicated minimal service account for orb VMs (docs/credentials.md). */
   readonly serviceAccount: string;
   /** Orb runtime container image (digest-pinned in deployment). */
   readonly runtimeImage: string;
@@ -53,7 +53,7 @@ function providerError(
   return { type: "orb_host_provider_error", provider: "gce", operation, code, message, retryable };
 }
 
-/** GCE instance status → OrbHostState (DESIGN.md §5). */
+/** GCE instance status → OrbHostState (docs/host-provider.md). */
 export function mapInstanceStatus(status: string): OrbHostState {
   switch (status) {
     case "RUNNING":
@@ -88,7 +88,7 @@ export function metadataValue(instance: Record<string, unknown>, key: string): s
 /**
  * Startup script: mount the persistent data disk, then run the orb runtime
  * container with docker (replacing konlet — the declaration mechanism has no
- * ordering against the disk mount, DESIGN.md §5). The runtime token is read
+ * ordering against the disk mount, docs/host-provider.md). The runtime token is read
  * back from instance metadata so it never appears in the script body.
  */
 export function buildStartupScript(options: {
@@ -142,7 +142,7 @@ report container-started
 }
 
 /**
- * `GceOrbHostProvider` (DESIGN.md §3.3/§5): one Spot COS VM plus one
+ * `GceOrbHostProvider` (docs/host-provider.md/docs/host-provider.md): one Spot COS VM plus one
  * persistent data disk per orb. Read-back token model: the token lives in
  * instance metadata; provision reports the hash of what the instance
  * actually carries. Restart-in-place: recovery from stop or preemption is
@@ -188,7 +188,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
    * Poll a zonal operation to DONE (HTTP acceptance is not completion). The
    * `wait` endpoint may return early; loop until DONE or cancellation. An
    * operation error surfaces typed — capacity exhaustion is non-retryable
-   * by decision (§3.3): the orb fails to the user.
+   * by decision (docs/host-provider.md): the orb fails to the user.
    */
   private async waitOperation(
     task: SimulationTask,
@@ -244,7 +244,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
   }
 
   /**
-   * Bring a reused instance's startup script up to date (§3.3 rollout
+   * Bring a reused instance's startup script up to date (docs/host-provider.md rollout
    * caveat, open question 32). The stamped script hash is compared with the
    * script this provider would generate; a mismatch means the instance was
    * created by a different control-plane revision — or predates stamping —
@@ -542,7 +542,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
           networkInterfaces: [
             {
               subnetwork: `projects/${this.options.projectId}/${this.options.subnetwork}`,
-              // Ephemeral external IP for outbound only (no NAT, §3.3); the
+              // Ephemeral external IP for outbound only (no NAT, docs/host-provider.md); the
               // VPC firewall denies all inbound except the control plane.
               accessConfigs: [{ type: "ONE_TO_ONE_NAT", name: "External NAT" }],
             },

@@ -17,8 +17,8 @@ const toStoreError = (reason: string) => (error: unknown) =>
   unavailable(`${reason}: ${error instanceof Error ? error.message : String(error)}`);
 
 /**
- * File-backed credential secret store for local development (DESIGN.md
- * §15.1): one JSON file per immutable version under a private directory,
+ * File-backed credential secret store for local development
+ * (docs/credentials.md): one JSON file per immutable version under a private directory,
  * mode 0600. The cloud deployment replaces this with a Secret-Manager-backed
  * implementation; the pointer row's `secret_version` addresses both the same
  * way.
