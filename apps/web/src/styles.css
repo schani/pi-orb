@@ -68,7 +68,7 @@ body {
 }
 
 /* The sticky composer provides its own bottom spacing on the orb page. */
-.app-main:has(.orb-page) {
+.orb-page {
   padding-bottom: 0;
 }
 
@@ -307,50 +307,77 @@ textarea:focus {
   background: var(--warn-soft);
 }
 
-/* ---------- orb page ---------- */
+/* ---------- orb page: compact sticky application header ---------- */
 
-.orb-status-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+.orb-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  min-height: 54px;
+  display: grid;
+  grid-template-areas: "brand identity status live actions";
+  grid-template-columns: auto minmax(140px, 1fr) auto auto auto;
+  gap: 14px;
+  padding: 7px var(--page-pad);
+  box-shadow: 0 5px 16px rgb(34 28 18 / 4%);
+}
+
+.orb-header .app-title {
+  grid-area: brand;
+  padding-right: 16px;
+  border-right: 1px solid var(--rule);
+}
+
+.orb-header-identity {
+  grid-area: identity;
+  min-width: 0;
 }
 
 .orb-title {
-  margin: 0;
+  margin: 0 0 4px;
+  overflow: hidden;
   font-family: var(--mono);
   font-variant-caps: normal;
+  text-overflow: ellipsis;
   text-transform: none;
+  white-space: nowrap;
   letter-spacing: 0.01em;
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.25;
   font-weight: 500;
 }
 
-.orb-meta {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.1rem 1rem;
-  margin: 0.75rem 0 0;
-  font-size: 12px;
-}
-
-.orb-meta dt {
-  color: var(--ink-faint);
-  font-variant-caps: small-caps;
-  font-family: var(--serif);
-  letter-spacing: 0.06em;
-}
-
-.orb-meta dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.orb-actions {
+.orb-header-meta {
   display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-top: 0.75rem;
-  font-size: 12px;
+  min-width: 0;
+  gap: 11px;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1;
+}
+
+.orb-header-checkout {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orb-header > .state-badge {
+  grid-area: status;
+}
+
+.orb-header-live {
+  grid-area: live;
+  color: var(--ink-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.orb-header-actions {
+  grid-area: actions;
+  display: flex;
+  gap: 7px;
 }
 
 /* ---------- history: gutter turns ---------- */
@@ -889,6 +916,31 @@ textarea:focus {
   background: var(--paper);
   font-family: var(--sans);
   text-transform: none;
+}
+
+@media (max-width: 680px) {
+  .orb-header {
+    grid-template-areas: "brand identity status actions";
+    grid-template-columns: auto minmax(90px, 1fr) auto auto;
+    gap: 9px;
+  }
+
+  .orb-header-checkout,
+  .orb-header-live {
+    display: none;
+  }
+
+  .orb-header .app-title {
+    padding-right: 10px;
+  }
+
+  .orb-header-actions {
+    gap: 5px;
+  }
+
+  .orb-header-actions button {
+    padding-inline: 8px;
+  }
 }
 
 @media (max-width: 560px) {
