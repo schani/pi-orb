@@ -257,7 +257,7 @@ export class PiOrbAgent {
       "openai-codex",
       brokerProviderConfig(brokerTask, brokerClient, {
         // E2E mode routes inference to the fake service; Pi keeps its
-        // built-in Codex catalog and parser (PI-CODEX-E2E.md).
+        // built-in Codex catalog and parser (docs/PI-CODEX-E2E.md).
         ...(mockOpenAi !== null ? { inferenceBaseUrl: mockOpenAi.inferenceBaseUrl } : {}),
       }),
     );
@@ -310,7 +310,7 @@ export class PiOrbAgent {
         ...(mockOpenAi !== null
           ? {
               // SSE keeps the first E2E deterministic; the fake refuses the
-              // WebSocket transport (PI-CODEX-E2E.md).
+              // WebSocket transport (docs/PI-CODEX-E2E.md).
               settingsManager: SettingsManager.inMemory({ transport: "sse" }),
             }
           : {}),

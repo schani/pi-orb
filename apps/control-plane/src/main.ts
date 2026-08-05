@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   }
 
   // E2E mode: when the fake-OpenAI URLs are set, the auth gate and every orb
-  // container route Codex OAuth/inference to the mock (PI-CODEX-E2E.md).
+  // container route Codex OAuth/inference to the mock (docs/PI-CODEX-E2E.md).
   const mockOpenAi = readMockOpenAiEnv(process.env);
   if (mockOpenAi !== null) {
     bootTask.log("E2E mode: Codex OAuth/inference routed to", mockOpenAi.oauthBaseUrl);

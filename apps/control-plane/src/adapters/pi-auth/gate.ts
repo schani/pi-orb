@@ -113,7 +113,7 @@ export class PiAuthGate implements AuthGate {
       });
       if (this.mockOpenAi !== null) {
         // E2E mode: OAuth and inference go to the fake OpenAI service
-        // through the supported provider override (PI-CODEX-E2E.md).
+        // through the supported provider override (docs/PI-CODEX-E2E.md).
         runtime.registerProvider(PROVIDER, mockOpenAiProviderConfig(this.mockOpenAi));
       }
       this.runtime = runtime;

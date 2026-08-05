@@ -86,7 +86,7 @@ export class BrokerTokenClient {
   /**
    * Fetch a token. Concurrent calls share one in-flight request — sharing a
    * promise across simulation tasks requires `determined` >= 0.4.1
-   * (DETERMINED-BUG.md).
+   * (docs/DETERMINED-BUG.md).
    */
   fetch(
     task: SimulationTask,

@@ -2,7 +2,7 @@
  * E2E-mode provider override for the fake OpenAI service
  * (https://fake-openai.flingit.run). Overriding the `openai-codex` provider
  * with a custom `baseUrl` and `oauth` implementation is a supported Pi
- * injection point (PI-CODEX-E2E.md): Pi keeps its built-in Codex model
+ * injection point (docs/PI-CODEX-E2E.md): Pi keeps its built-in Codex model
  * catalog, request serializer, and stream parser, while OAuth and inference
  * reach the mock. Production never registers this — it activates only when
  * both environment variables are set.
