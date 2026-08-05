@@ -7,6 +7,7 @@ import type {
 } from "@pi-orb/protocol";
 import type { ReactNode } from "react";
 import { AssistantMarkdown } from "./AssistantMarkdown.tsx";
+import { PlainChatText } from "./ChatText.tsx";
 
 /** Streaming output block accumulated from `output_patch` events. */
 export interface LiveBlock {
@@ -93,7 +94,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
             <AssistantMarkdown key={index}>{block.text}</AssistantMarkdown>
           ) : (
             <p className="msg-text" key={index}>
-              {block.text}
+              <PlainChatText>{block.text}</PlainChatText>
             </p>
           ),
         );
@@ -102,7 +103,9 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
         nodes.push(
           <details className="reasoning" key={index}>
             <summary>reasoning</summary>
-            <p className="reasoning-body">{block.text}</p>
+            <p className="reasoning-body">
+              <PlainChatText>{block.text}</PlainChatText>
+            </p>
           </details>,
         );
         break;
@@ -149,7 +152,9 @@ function renderAgentPart(record: MessageRecord | EventRecord): ReactNode {
   if (record.type === "event") {
     return (
       <div className="record-custom" key={record.id}>
-        <p className="msg-text">{blockText(record.content ?? [])}</p>
+        <p className="msg-text">
+          <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
+        </p>
       </div>
     );
   }
@@ -229,7 +234,9 @@ function renderTurn(turn: Turn): ReactNode {
           <span className="compaction-line">context compacted</span>
           <details>
             <summary>summary</summary>
-            <p className="msg-text">{blockText(turn.record.summary)}</p>
+            <p className="msg-text">
+              <PlainChatText>{blockText(turn.record.summary)}</PlainChatText>
+            </p>
           </details>
         </div>
       );
@@ -264,7 +271,9 @@ export function HistoryView({ records, liveBlocks, tools, busy }: HistoryViewPro
               block.blockType === "reasoning" ? (
                 <details className="reasoning" key={block.blockId}>
                   <summary>reasoning</summary>
-                  <p className="reasoning-body">{block.text}</p>
+                  <p className="reasoning-body">
+                    <PlainChatText>{block.text}</PlainChatText>
+                  </p>
                 </details>
               ) : (
                 <AssistantMarkdown key={block.blockId}>{block.text}</AssistantMarkdown>

@@ -115,6 +115,50 @@ describe("HistoryView", () => {
     expect(html).toContain("A <strong>streaming</strong> response");
   });
 
+  it("linkifies web URLs in Markdown and literal chat text without linking code or other schemes", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[
+          message(
+            "user",
+            "user",
+            "Open https://example.com/from-user, not ftp://example.com or **Markdown**.",
+          ),
+          message(
+            "assistant",
+            "assistant",
+            "PR: https://github.com/schani/pi-orb/pull/1. Keep `https://example.com/code` literal.",
+          ),
+        ]}
+        liveBlocks={[
+          {
+            blockId: "live-url",
+            blockType: "text",
+            text: "Docs: www.example.org/docs",
+            revision: 1,
+          },
+        ]}
+        tools={[]}
+        busy={false}
+      />,
+    );
+
+    expect(html).toContain(
+      '<a href="https://example.com/from-user" target="_blank" rel="noopener noreferrer">https://example.com/from-user</a>,',
+    );
+    expect(html).toContain(
+      '<a href="https://github.com/schani/pi-orb/pull/1" target="_blank" rel="noopener noreferrer">https://github.com/schani/pi-orb/pull/1</a>.',
+    );
+    expect(html).toContain(
+      '<a href="http://www.example.org/docs" target="_blank" rel="noopener noreferrer">www.example.org/docs</a>',
+    );
+    expect(html).toContain("ftp://example.com");
+    expect(html).not.toContain('href="ftp://example.com"');
+    expect(html).toContain("**Markdown**");
+    expect(html).toContain("<code>https://example.com/code</code>");
+    expect(html).not.toContain('href="https://example.com/code"');
+  });
+
   it("renders image blocks inline from base64 data or url, with a placeholder fallback", () => {
     const record = (
       id: string,
