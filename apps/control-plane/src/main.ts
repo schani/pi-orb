@@ -6,7 +6,7 @@ import {
   MOCK_OPENAI_OAUTH_URL_ENV,
   readMockOpenAiEnv,
 } from "@pi-orb/mock-openai";
-import { NoSimulationTask, noSimulation } from "determined";
+import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
@@ -40,6 +40,30 @@ const env = (name: string, fallback: string): string => {
   const value = process.env[name];
   return value !== undefined && value !== "" ? value : fallback;
 };
+
+/**
+ * The production task: real time, and `task.log` on stdout so the reconciler's
+ * event log reaches Cloud Logging (docs/lifecycle.md). `noSimulation` cannot be
+ * used for the background loops because it hardwires logging *off* — which is
+ * why the 2026-08-05 incident had no app-level logs at all
+ * (`docs/postmortems/2026-08-05-unreachable-restart-livelock.md`).
+ * Checkpoints, failpoints and blockpoints stay silent: they are
+ * simulation-control primitives, and one of them fires on every history commit.
+ */
+class ControlPlaneTask extends NoSimulationTask {
+  constructor(name: string) {
+    super(name, true);
+  }
+  override checkpoint(): Promise<void> {
+    return Promise.resolve();
+  }
+  override failpoint(): Promise<void> {
+    return Promise.resolve();
+  }
+  override blockpoint(): void {
+    // Nothing to do outside a simulation.
+  }
+}
 
 async function main(): Promise<void> {
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
@@ -176,7 +200,8 @@ async function main(): Promise<void> {
   // deployment splits "browser" and "runtime" into separate services; local
   // development serves both from one process.
   const app = Fastify({ logger: false });
-  const httpTask = new NoSimulationTask("http", false);
+  // Commands issued over HTTP log their transitions too (docs/lifecycle.md).
+  const httpTask = new ControlPlaneTask("http");
   if (browserRole || opsRole) {
     await registerLiveProxy(app, httpTask, deps);
     registerRoutes(app, httpTask, deps);
@@ -224,11 +249,18 @@ async function main(): Promise<void> {
   // Only the browser-role service runs them — it is the always-on one; the
   // scale-to-zero runtime service must not depend on background work.
   if (browserRole) {
-    await noSimulation.runTasks([
-      { name: "poller", f: (task) => pollLoop(task, deps, stop.signal) },
-      { name: "reconciler", f: (task) => reconcileLoop(task, deps, stop.signal) },
-      { name: "sweeper", f: (task) => orphanSweepLoop(task, deps, stop.signal) },
-    ]);
+    const loops: readonly Promise<void>[] = [
+      pollLoop(new ControlPlaneTask("poller"), deps, stop.signal),
+      reconcileLoop(new ControlPlaneTask("reconciler"), deps, stop.signal),
+      orphanSweepLoop(new ControlPlaneTask("sweeper"), deps, stop.signal),
+    ];
+    await Promise.all(
+      loops.map((loop) =>
+        loop.catch((error: unknown) => {
+          bootTask.error("background loop crashed:", error);
+        }),
+      ),
+    );
   }
 }
 

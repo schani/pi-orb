@@ -11,11 +11,52 @@ import {
   SimulationImpl,
   type SimulationTask,
 } from "determined";
+import { LIFECYCLE_LOG_PREFIX } from "../domain/log.ts";
 
 const silentLogger: Logger = {
   log: () => undefined,
   error: () => undefined,
 };
+
+/**
+ * Captures the app-level lifecycle log of a simulation so scenarios can assert
+ * on what the control plane would have written to Cloud Logging
+ * (docs/testing.md). The simulation logger also receives the scheduler's own
+ * timer/checkpoint/entropy chatter; only lines carrying `LIFECYCLE_LOG_PREFIX`
+ * are retained, which is what makes "a healthy fleet logs nothing" a testable
+ * property rather than a wish.
+ */
+export class LogCapture implements Logger {
+  private readonly captured: string[] = [];
+
+  log(...parts: readonly unknown[]): void {
+    // Cheap rejection of scheduler noise before any string building.
+    if (!parts.some((part) => typeof part === "string" && part.startsWith(LIFECYCLE_LOG_PREFIX))) {
+      return;
+    }
+    this.captured.push(
+      parts.map((part) => (typeof part === "string" ? part : String(part))).join(" "),
+    );
+  }
+
+  error(...parts: readonly unknown[]): void {
+    this.log(...parts);
+  }
+
+  /** Called by `runDst` before each iteration: every schedule asserts on its own log. */
+  reset(): void {
+    this.captured.length = 0;
+  }
+
+  lines(): readonly string[] {
+    return this.captured;
+  }
+
+  /** Every captured line containing `pattern` (a plain substring). */
+  matching(pattern: string): readonly string[] {
+    return this.captured.filter((line) => line.includes(pattern));
+  }
+}
 
 export interface DstOptions {
   readonly name: string;
@@ -25,6 +66,8 @@ export interface DstOptions {
   readonly maxSchedulingSteps?: number;
   readonly maxVirtualDurationMs?: number;
   readonly wallClockEpoch?: number;
+  /** Collects the app-level log lines of every iteration (reset per iteration). */
+  readonly logCapture?: LogCapture;
 }
 
 /** Fixed epoch so wall-clock assertions are stable: 2026-01-01T00:00:00Z. */
@@ -57,7 +100,7 @@ function pickTimerBiasedEarliest(
 export function makeSimulation(options: DstOptions, entropy: EntropySource): SimulationImpl {
   const probabilities = options.failpointProbabilities ?? {};
   return new SimulationImpl(
-    silentLogger,
+    options.logCapture ?? silentLogger,
     entropy,
     (...log: readonly unknown[]) => {
       const name = log[0];
@@ -94,6 +137,7 @@ export async function runDst(
     const { readFileSync } = await import("node:fs");
     const trace = JSON.parse(readFileSync(replayPath, "utf8"));
     const replaySim = makeSimulation(options, new ReplayingTraceSource(trace.records));
+    options.logCapture?.reset();
     await scenario(replaySim);
     return;
   }
@@ -101,6 +145,7 @@ export async function runDst(
   const iterations = options.iterations ?? 30;
   for (let i = 0; i < iterations; i++) {
     const recording = new RecordingTraceSource(new SimpleEntropySource());
+    options.logCapture?.reset();
     const sim = makeSimulation(options, recording);
     try {
       await scenario(sim);
@@ -120,6 +165,7 @@ export async function runDst(
       let reproduced = false;
       try {
         const replaySim = makeSimulation(options, new ReplayingTraceSource(recording.getTrace()));
+        options.logCapture?.reset();
         await scenario(replaySim);
       } catch {
         reproduced = true;

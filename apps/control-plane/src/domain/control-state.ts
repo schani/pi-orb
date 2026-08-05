@@ -261,12 +261,39 @@ export class ControlState {
     return this.drainStatus.get(orbId) ?? null;
   }
 
+  // -- edge detection for logging (docs/lifecycle.md noise rule) --
+
+  private readonly activeConditions = new Set<string>();
+
+  /**
+   * Returns true only when `key`'s condition changes, so a condition that
+   * persists across loop ticks (a store outage, say) is logged once when it
+   * starts and once when it clears instead of once per tick.
+   */
+  noteCondition(key: string, active: boolean): boolean {
+    const wasActive = this.activeConditions.has(key);
+    if (active === wasActive) return false;
+    if (active) this.activeConditions.add(key);
+    else this.activeConditions.delete(key);
+    return true;
+  }
+
+  /** Both scheduling maps are keyed `<loop>:<orbId>` by their callers. */
+  private static forgetOrb(map: Map<string, number>, orbId: string): void {
+    map.delete(orbId);
+    for (const key of map.keys()) {
+      if (key.endsWith(`:${orbId}`)) map.delete(key);
+    }
+  }
+
   /** Drop all per-orb state after a terminal transition. */
   clearOrb(orbId: string): void {
     this.bootProbes.delete(orbId);
     this.liveness.delete(orbId);
-    this.nextAttemptAt.delete(orbId);
-    this.retryAttempts.delete(orbId);
+    ControlState.forgetOrb(this.nextAttemptAt, orbId);
+    // Without this a stale attempt counter would survive a stop/start and
+    // swallow the first-failure log line of the next episode.
+    ControlState.forgetOrb(this.retryAttempts, orbId);
     this.authBlocked.delete(orbId);
     this.drainStatus.delete(orbId);
     this.stoppingOrbs.delete(orbId);

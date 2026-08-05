@@ -10,8 +10,14 @@ import {
   type StateConflict,
   type StoreError,
 } from "./errors.ts";
+import { logOrbEvent } from "./log.ts";
 import { hasNeverBeenReady, type OrbRow } from "./orb.ts";
-import type { ControlPlaneDeps, OrbHostObservation, OrbHostRef } from "./ports.ts";
+import type {
+  ControlPlaneDeps,
+  OrbHostObservation,
+  OrbHostRef,
+  ProvisionedOrbHost,
+} from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 
 export type ReconcileOutcome =
@@ -74,24 +80,98 @@ async function observeHost(
   );
 }
 
+/**
+ * Every provider stop/start/provision the reconciler issues is a decision an
+ * incident needs to see, so all three go through helpers that log exactly one
+ * line each — the operation, the orb, the host, why it was issued, and the
+ * provider's answer when it failed (docs/lifecycle.md, learned from
+ * `docs/postmortems/2026-08-05-unreachable-restart-livelock.md`, where 38
+ * stop/start cycles were invisible to the control plane's own logs).
+ */
 async function stopHost(
   task: SimulationTask,
   deps: ControlPlaneDeps,
+  orbId: string,
   resourceId: string,
+  reason: string,
 ): Promise<Result<void, OrbHostProviderError>> {
-  return withDeadline(task, deps.constants.providerOperationTimeoutMs, "stop host", (context) =>
-    deps.hostProvider.stop(task, hostRefOf(deps, resourceId), context),
+  const result = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "stop host",
+    (context) => deps.hostProvider.stop(task, hostRefOf(deps, resourceId), context),
   );
+  logOrbEvent(task, orbId, "host-stop", {
+    host: resourceId,
+    reason,
+    ...(result.isErr()
+      ? { error: result.error.message, retryable: result.error.retryable }
+      : { outcome: "ok" }),
+  });
+  return result;
 }
 
 async function startHost(
   task: SimulationTask,
   deps: ControlPlaneDeps,
+  orbId: string,
   resourceId: string,
+  reason: string,
 ): Promise<Result<void, OrbHostProviderError>> {
-  return withDeadline(task, deps.constants.providerOperationTimeoutMs, "start host", (context) =>
-    deps.hostProvider.start(task, hostRefOf(deps, resourceId), context),
+  const result = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "start host",
+    (context) => deps.hostProvider.start(task, hostRefOf(deps, resourceId), context),
   );
+  logOrbEvent(task, orbId, "host-start", {
+    host: resourceId,
+    reason,
+    ...(result.isErr()
+      ? { error: result.error.message, retryable: result.error.retryable }
+      : { outcome: "ok" }),
+  });
+  return result;
+}
+
+/**
+ * Idempotent provision (docs/host-provider.md). The logged `outcome` is the
+ * control plane's view, which is all it can know: `created` when no host was
+ * recorded, `adopted` when the provider handed back the recorded one, and
+ * `replaced` when the ref changed under us.
+ */
+async function provisionHost(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  repositoryUrl: string,
+  reason: string,
+): Promise<Result<ProvisionedOrbHost, OrbHostProviderError>> {
+  const result = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "provision host",
+    (context) =>
+      deps.hostProvider.provision(task, { orbId: orb.id, bootstrap: { repositoryUrl } }, context),
+  );
+  if (result.isErr()) {
+    logOrbEvent(task, orb.id, "provision", {
+      reason,
+      error: result.error.message,
+      retryable: result.error.retryable,
+    });
+    return result;
+  }
+  const resourceId = result.value.ref.resourceId;
+  logOrbEvent(task, orb.id, "provision", {
+    host: resourceId,
+    reason,
+    outcome: orb.hostRef === null ? "created" : orb.hostRef === resourceId ? "adopted" : "replaced",
+    ...(orb.runtimeTokenHash !== null && orb.runtimeTokenHash !== result.value.runtimeTokenHash
+      ? { token_rotated: true }
+      : {}),
+  });
+  return result;
 }
 
 /** CAS the orb to `failed` with a typed error. */
@@ -114,6 +194,12 @@ async function failOrb(
       ? { type: "conflict" }
       : retryable(cas.error.message);
   }
+  logOrbEvent(task, orb.id, "transition", {
+    from: orb.state,
+    to: "failed",
+    code,
+    error: message,
+  });
   deps.control.clearOrb(orb.id);
   return { type: "transitioned", toState: "failed" };
 }
@@ -127,7 +213,7 @@ async function failOrbStoppingHost(
   message: string,
 ): Promise<ReconcileOutcome> {
   if (orb.hostRef !== null) {
-    await stopHost(task, deps, orb.hostRef);
+    await stopHost(task, deps, orb.id, orb.hostRef, `orb_failing:${code}`);
   }
   return failOrb(task, deps, orb, code, message);
 }
@@ -137,7 +223,12 @@ async function transitionTo(
   deps: ControlPlaneDeps,
   orb: OrbRow,
   toState: OrbState,
-  extra?: { lastError?: string | null; stopReason?: StopReason | null },
+  extra?: {
+    lastError?: string | null;
+    stopReason?: StopReason | null;
+    /** Log-only: why the reconciler decided on this transition. */
+    reason?: string;
+  },
 ): Promise<ReconcileOutcome> {
   const cas = await deps.store.casTransition(task, {
     orbId: orb.id,
@@ -152,6 +243,12 @@ async function transitionTo(
       ? { type: "conflict" }
       : retryable(cas.error.message);
   }
+  logOrbEvent(task, orb.id, "transition", {
+    from: orb.state,
+    to: toState,
+    reason: extra?.reason,
+    stop_reason: extra?.stopReason,
+  });
   if (toState === "stopped" || toState === "failed") deps.control.clearOrb(orb.id);
   return { type: "transitioned", toState };
 }
@@ -171,6 +268,11 @@ async function reconcileCreateStart(
   if (auth.isErr()) return retryable(auth.error.message);
   const resolution = auth.value;
   if (resolution.status === "pending") {
+    // Edge only: the readiness poll re-enters this branch every few seconds
+    // for as long as the user takes to log in.
+    if (!deps.control.isAuthBlocked(orb.id)) {
+      logOrbEvent(task, orb.id, "auth-blocked", { reason: "device_login_pending" });
+    }
     deps.control.markAuthBlocked(orb.id);
     deps.control.setChallenge(resolution.challenge);
     return waiting("auth");
@@ -208,6 +310,7 @@ async function reconcileCreateStart(
         : retryable(reentered.error.message);
     }
     deps.control.clearAuthBlocked(orb.id);
+    logOrbEvent(task, orb.id, "auth-resolved", { reason: "state_reentered" });
     orb = reentered.value;
   }
 
@@ -235,17 +338,7 @@ async function reconcileCreateStart(
     if (project === null) {
       return failOrb(task, deps, orb, "provider_failed", `project ${orb.projectId} not found`);
     }
-    const provisioned = await withDeadline(
-      task,
-      deps.constants.providerOperationTimeoutMs,
-      "provision host",
-      (context) =>
-        deps.hostProvider.provision(
-          task,
-          { orbId: orb.id, bootstrap: { repositoryUrl: project.repositoryUrl } },
-          context,
-        ),
-    );
+    const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "no_host_ref");
     if (provisioned.isErr()) {
       return provisioned.error.retryable
         ? retryable(provisioned.error.message)
@@ -283,17 +376,7 @@ async function reconcileCreateStart(
     if (project === null) {
       return failOrb(task, deps, orb, "provider_failed", `project ${orb.projectId} not found`);
     }
-    const provisioned = await withDeadline(
-      task,
-      deps.constants.providerOperationTimeoutMs,
-      "re-provision absent host",
-      (context) =>
-        deps.hostProvider.provision(
-          task,
-          { orbId: orb.id, bootstrap: { repositoryUrl: project.repositoryUrl } },
-          context,
-        ),
-    );
+    const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "host_absent");
     if (provisioned.isErr()) {
       return provisioned.error.retryable
         ? retryable(provisioned.error.message)
@@ -334,7 +417,13 @@ async function reconcileCreateStart(
       return waiting("host_transition");
     case "stopped":
     case "failed": {
-      const started = await startHost(task, deps, hostResourceId);
+      const started = await startHost(
+        task,
+        deps,
+        orb.id,
+        hostResourceId,
+        `host_observed_${observation.state}`,
+      );
       if (started.isErr()) {
         return started.error.retryable
           ? retryable(started.error.message)
@@ -384,6 +473,14 @@ async function reconcileCreateStart(
           if (!diagnosis.settled) return waiting("readiness");
           const seconds = Math.round((nowMono - probe.hostRunningSinceMono) / 1000);
           const evidence = diagnosis.evidence;
+          logOrbEvent(task, orb.id, "boot-failed", {
+            reason: "runtime_never_answered",
+            host: hostResourceId,
+            host_running_s: seconds,
+            probes: probe.attempts,
+            last_error: health.error.message,
+            diagnostics: evidence,
+          });
           return failOrbStoppingHost(
             task,
             deps,
@@ -434,6 +531,7 @@ async function reconcileCreateStart(
       deps.control.clearBootProbe(orb.id);
       const transitioned = await transitionTo(task, deps, updated.value, "running", {
         lastError: null,
+        reason: "runtime_ready",
       });
       if (transitioned.type === "transitioned") {
         deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
@@ -457,7 +555,7 @@ async function reconcileRunning(
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
   if (orb.hostRef === null) {
-    return transitionTo(task, deps, orb, "starting");
+    return transitionTo(task, deps, orb, "starting", { reason: "no_host_ref" });
   }
   const observed = await observeHost(task, deps, orb.hostRef);
   if (observed.isErr()) {
@@ -469,7 +567,9 @@ async function reconcileRunning(
   if (observation === null || observation.state === "stopped" || observation.state === "failed") {
     // Unexpected absence/stop: restore the host around the retained
     // filesystem (docs/lifecycle.md).
-    return transitionTo(task, deps, orb, "starting");
+    return transitionTo(task, deps, orb, "starting", {
+      reason: observation === null ? "host_absent" : `host_observed_${observation.state}`,
+    });
   }
   if (observation.state === "starting" || observation.state === "stopping") {
     return waiting("host_transition");
@@ -481,15 +581,24 @@ async function reconcileRunning(
     deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
     return { type: "noop" };
   }
-  if (task.monotonicNow() - liveness.lastSuccessAt > livenessGraceMs(deps, liveness)) {
+  const graceMs = livenessGraceMs(deps, liveness);
+  const silentMs = task.monotonicNow() - liveness.lastSuccessAt;
+  if (silentMs > graceMs) {
+    logOrbEvent(task, orb.id, "unreachable-restart", {
+      host: orb.hostRef,
+      state: "running",
+      grace_ms: graceMs,
+      grace_kind: liveness.restartGraceMs !== null ? "post_restart" : "ordinary",
+      silent_ms: Math.round(silentMs),
+    });
     deps.control.markRestartPending(orb.id);
-    const stopped = await stopHost(task, deps, orb.hostRef);
+    const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
     if (stopped.isErr()) {
       return stopped.error.retryable
         ? retryable(stopped.error.message)
         : failOrb(task, deps, orb, "provider_failed", stopped.error.message);
     }
-    const started = await startHost(task, deps, orb.hostRef);
+    const started = await startHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
     if (started.isErr()) {
       return started.error.retryable
         ? retryable(started.error.message)
@@ -506,7 +615,7 @@ async function reconcileRunning(
       task.monotonicNow(),
       deps.constants.postRestartGraceMs,
     );
-    return transitionTo(task, deps, orb, "starting");
+    return transitionTo(task, deps, orb, "starting", { reason: "unreachable_restart" });
   }
 
   // Idle auto-stop (docs/lifecycle.md). Only a tab that affirmatively reports
@@ -530,7 +639,10 @@ async function reconcileRunning(
     return { type: "noop" };
   }
   if (now - lastActivityAt > deps.constants.idleStopAfterMs) {
-    const transitioned = await transitionTo(task, deps, orb, "stopping", { stopReason: "idle" });
+    const transitioned = await transitionTo(task, deps, orb, "stopping", {
+      stopReason: "idle",
+      reason: `idle_for_${Math.round((now - lastActivityAt) / 1000)}s`,
+    });
     if (transitioned.type === "transitioned") deps.control.markStopping(orb.id);
     return transitioned;
   }
@@ -550,7 +662,7 @@ async function reconcileStopping(
 
   if (orb.hostRef === null) {
     // Nothing was ever provisioned; nothing to drain or stop.
-    return transitionTo(task, deps, orb, "stopped");
+    return transitionTo(task, deps, orb, "stopped", { reason: "no_host_ref" });
   }
   const observed = await observeHost(task, deps, orb.hostRef);
   if (observed.isErr()) {
@@ -563,7 +675,7 @@ async function reconcileStopping(
     // A host we stopped ourselves as half of an unreachable-runtime restart
     // is not "already stopped": complete the restart so the drain can finish.
     if (observation !== null && deps.control.isRestartPending(orb.id)) {
-      const started = await startHost(task, deps, orb.hostRef);
+      const started = await startHost(task, deps, orb.id, orb.hostRef, "complete_pending_restart");
       if (started.isErr()) return retryable(started.error.message);
       deps.control.clearRestartPending(orb.id);
       deps.control.resetLivenessBaseline(
@@ -576,9 +688,11 @@ async function reconcileStopping(
     // Absent or already-stopped host: no runtime to drain; complete records
     // left on the persistent filesystem are found on the next start (docs/lifecycle.md).
     if (observation !== null && observation.state === "failed") {
-      await stopHost(task, deps, orb.hostRef);
+      await stopHost(task, deps, orb.id, orb.hostRef, "host_observed_failed");
     }
-    return transitionTo(task, deps, orb, "stopped");
+    return transitionTo(task, deps, orb, "stopped", {
+      reason: observation === null ? "host_absent" : `host_observed_${observation.state}`,
+    });
   }
   if (observation.state === "starting" || observation.state === "stopping") {
     return waiting("host_transition");
@@ -588,13 +702,14 @@ async function reconcileStopping(
   if (hasNeverBeenReady(orb)) {
     // Never reached ready and has no session: no user request could have been
     // accepted, so the drain is skipped (docs/lifecycle.md).
-    const stopped = await stopHost(task, deps, orb.hostRef);
+    logOrbEvent(task, orb.id, "drain-skipped", { reason: "never_ready" });
+    const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "drain_skipped");
     if (stopped.isErr()) {
       return stopped.error.retryable
         ? retryable(stopped.error.message)
         : failOrb(task, deps, orb, "provider_failed", stopped.error.message);
     }
-    return transitionTo(task, deps, orb, "stopped");
+    return transitionTo(task, deps, orb, "stopped", { reason: "drain_skipped" });
   }
 
   // A drain stuck longer than the create/start deadline cannot be completed
@@ -618,9 +733,16 @@ async function reconcileStopping(
   if (liveness === null) {
     deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
   } else if (task.monotonicNow() - liveness.lastSuccessAt > livenessGraceMs(deps, liveness)) {
+    const silentMs = Math.round(task.monotonicNow() - liveness.lastSuccessAt);
     if (liveness.restartGraceMs !== null) {
       // The restarted host had a full boot's worth of grace and still never
       // answered a pull; a second restart would only repeat the evidence.
+      logOrbEvent(task, orb.id, "drain-restart-cap", {
+        host: orb.hostRef,
+        grace_ms: liveness.restartGraceMs,
+        silent_ms: silentMs,
+        decision: "fail_drain",
+      });
       return failOrbStoppingHost(
         task,
         deps,
@@ -629,10 +751,17 @@ async function reconcileStopping(
         `the runtime did not answer within ${liveness.restartGraceMs}ms of a host restart`,
       );
     }
+    logOrbEvent(task, orb.id, "unreachable-restart", {
+      host: orb.hostRef,
+      state: "stopping",
+      grace_ms: deps.constants.unreachableGraceMs,
+      grace_kind: "ordinary",
+      silent_ms: silentMs,
+    });
     deps.control.markRestartPending(orb.id);
-    const stopped = await stopHost(task, deps, orb.hostRef);
+    const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
     if (stopped.isErr()) return retryable(stopped.error.message);
-    const started = await startHost(task, deps, orb.hostRef);
+    const started = await startHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
     if (started.isErr()) return retryable(started.error.message);
     deps.control.clearRestartPending(orb.id);
     deps.control.resetLivenessBaseline(
@@ -647,21 +776,31 @@ async function reconcileStopping(
   const outcome = await pollOrbUntilCaughtUp(task, deps, orb.id);
   switch (outcome.type) {
     case "caught_up": {
+      logOrbEvent(task, orb.id, "drain-caught-up", {
+        records: outcome.committedRecords,
+        after_retrying: deps.control.getDrainStatus(orb.id)?.retrying === true ? true : undefined,
+      });
       deps.control.setDrainStatus(orb.id, { retrying: false });
-      const stopped = await stopHost(task, deps, orb.hostRef);
+      const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "drain_complete");
       if (stopped.isErr()) {
         return stopped.error.retryable
           ? retryable(stopped.error.message)
           : failOrb(task, deps, orb, "provider_failed", stopped.error.message);
       }
-      return transitionTo(task, deps, orb, "stopped");
+      return transitionTo(task, deps, orb, "stopped", { reason: "drain_complete" });
     }
     case "retryable":
-      // The stop must not proceed; the host stays running while we retry.
+      // The stop must not proceed; the host stays running while we retry. A
+      // blocked drain re-enters this branch every reconcile tick, so only the
+      // edge into "retrying" is logged (docs/lifecycle.md noise rule).
+      if (deps.control.getDrainStatus(orb.id)?.retrying !== true) {
+        logOrbEvent(task, orb.id, "drain-blocked", { message: outcome.message });
+      }
       deps.control.setDrainStatus(orb.id, { retrying: true, message: outcome.message });
       return waiting("drain_blocked");
     case "integrity":
       // Already stopped the host and failed the orb inside the poll.
+      logOrbEvent(task, orb.id, "drain-integrity", { reason: outcome.reason });
       return { type: "transitioned", toState: "failed" };
     case "orb_gone":
       return { type: "conflict" };
@@ -682,7 +821,7 @@ async function reconcileTerminalBackstop(
   const observation = observed.value;
   if (observation === null || observation.state === "stopped") return { type: "noop" };
   if (observation.state === "stopping") return waiting("host_transition");
-  const stopped = await stopHost(task, deps, orb.hostRef);
+  const stopped = await stopHost(task, deps, orb.id, orb.hostRef, `terminal_backstop:${orb.state}`);
   if (stopped.isErr()) return retryable(stopped.error.message);
   return { type: "progressed" };
 }
@@ -783,6 +922,7 @@ export function createOrb(
     };
     const inserted = await deps.store.insertOrb(task, row);
     if (inserted.isErr()) return err(commandError("unavailable", inserted.error.message, true));
+    logOrbEvent(task, params.orbId, "created", { project: params.projectId });
     return ok(inserted.value);
   };
   return new ResultAsync(run());
@@ -820,7 +960,14 @@ export function requestOrbStart(
             lastError: null,
             stopReason: null,
           });
-          if (cas.isOk()) return ok(cas.value);
+          if (cas.isOk()) {
+            logOrbEvent(task, orbId, "transition", {
+              from: orb.state,
+              to: "starting",
+              reason: "start_requested",
+            });
+            return ok(cas.value);
+          }
           if (cas.error.type === "state_conflict") continue;
           return err(mapCasError(cas.error));
         }
@@ -853,6 +1000,11 @@ export function requestOrbStop(
         stopReason: null,
       });
       if (cas.isOk()) {
+        logOrbEvent(task, orbId, "transition", {
+          from: orb.state,
+          to: "stopping",
+          reason: "stop_requested",
+        });
         deps.control.markStopping(orbId);
         return ok(cas.value);
       }

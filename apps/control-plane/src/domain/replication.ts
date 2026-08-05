@@ -2,6 +2,7 @@ import type { PullHistoryResponse } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { sleepResult, withDeadline } from "./dst.ts";
 import { formatOrbFailure, type ReplicationIntegrityError } from "./errors.ts";
+import { logOrbEvent } from "./log.ts";
 import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
 
 /**
@@ -86,15 +87,29 @@ export async function failOrbForIntegrity(
       await sleepResult(task, deps.constants.retryBackoffBaseMs, "integrity fail: cas retry");
       continue;
     }
+    logOrbEvent(task, orbId, "transition", {
+      from: orb.state,
+      to: "failed",
+      code: "replication_integrity",
+      reason: error.reason,
+      error: error.message,
+    });
     deps.control.clearOrb(orbId);
     if (orb.hostRef !== null) {
       const ref: OrbHostRef = { provider: deps.hostProvider.kind, resourceId: orb.hostRef };
-      await withDeadline(
+      const stopped = await withDeadline(
         task,
         deps.constants.providerOperationTimeoutMs,
         "integrity fail: stop host",
         (context) => deps.hostProvider.stop(task, ref, context),
       );
+      logOrbEvent(task, orbId, "host-stop", {
+        host: orb.hostRef,
+        reason: "integrity_failure",
+        ...(stopped.isErr()
+          ? { error: stopped.error.message, retryable: stopped.error.retryable }
+          : { outcome: "ok" }),
+      });
     }
     return;
   }
@@ -179,6 +194,23 @@ export async function pollOrbUntilCaughtUp(
     if (invalid !== null) {
       await failOrbForIntegrity(task, deps, orbId, invalid);
       return { type: "integrity", reason: invalid.reason };
+    }
+
+    if (
+      orb.replicationCursor === null &&
+      orb.harnessSessionId !== null &&
+      orb.harnessSessionId !== response.session.id
+    ) {
+      // An empty replica pins nothing, so the store accepts this as legitimate
+      // rotation (docs/history-replication.md) — silently, which would make a
+      // lost session look like nothing happened. The domain re-derives the
+      // store's condition here so the acceptance is on the record; adapters
+      // stay quiet. Logged once: the commit below adopts the new identity.
+      logOrbEvent(task, orbId, "session-rotated", {
+        stored: orb.harnessSessionId,
+        pulled: response.session.id,
+        reason: "null_cursor",
+      });
     }
 
     // A successful pull is the running-orb liveness/activity signal.
