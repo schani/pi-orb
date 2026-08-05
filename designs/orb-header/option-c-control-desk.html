@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orb header C — Control desk</title>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+  <header class="sticky-shell desk" aria-label="Orb controls">
+    <div class="desk-brand"><a class="brand" href="#">pi-orb</a></div>
+    <div class="desk-body">
+      <div class="desk-state">
+        <div class="desk-title"><div class="orb-name" title="orb a7002162-2a05-4b43-8c09-f9e5fdb4c2c2">orb a7002162-2a05-4b43-8c09-f9e5fdb4c2c2</div><span class="badge">running</span></div>
+        <div class="desk-meta"><span>state v3</span><span class="commit">checkout 6fb702f1a656543191f6e6df25b4c3167a5a8706</span></div>
+      </div>
+      <div class="desk-live">open · idle</div>
+      <div class="desk-actions"><button class="action" disabled>start</button><button class="action">stop</button></div>
+    </div>
+  </header>
+  <main class="content">
+    <div class="turn user"><div class="mark">Y</div><div class="body">Make the orb header stay visible while I read through a long conversation.</div></div>
+    <div class="turn agent"><div class="mark">O</div><div class="body"><div class="who">agent</div><p>I’ll integrate the lifecycle controls into the application bar and keep it pinned to the top of the viewport.</p><p>This option is a <strong>control desk</strong>. The dark brand rail gives the application a stronger anchor, and live connectivity is promoted to an explicit operational signal.</p><div class="code">header.sticky-shell {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}</div></div></div>
+    <div class="turn user"><div class="mark">Y</div><div class="body">Does it still work on a narrow screen?</div></div>
+    <div class="turn agent"><div class="mark">O</div><div class="body"><div class="who">agent</div><p>Yes. The brand rail narrows, checkout and live state hide, and lifecycle actions remain at the right edge.</p><p>This feels the most application-like, but departs furthest from the quiet Reading Room aesthetic.</p></div></div>
+  </main>
+  <nav class="option-switcher" aria-label="Design options"><span>C · Control desk</span><a href="option-a-ledger.html">A</a><a href="option-b-one-line.html">B</a><a aria-current="page" href="option-c-control-desk.html">C</a><a href="option-d-minimal.html">D</a></nav>
+</body>
+</html>

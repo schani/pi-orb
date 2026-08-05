@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orb header D — Minimal</title>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+  <header class="sticky-shell minimal" aria-label="Orb controls">
+    <a class="brand" href="#">pi-orb</a>
+    <div class="orb-name" title="orb a7002162-2a05-4b43-8c09-f9e5fdb4c2c2">orb a7002162-2a05-4b43-8c09-f9e5fdb4c2c2</div>
+    <span class="badge">running</span>
+    <span class="live">open · idle</span>
+    <details class="minimal-details">
+      <summary>details</summary>
+      <div class="details-popover">
+        <span class="meta-label">state version</span><span class="meta-value">3</span>
+        <span class="meta-label">checkout</span><span class="meta-value">6fb702f1a656543191f6e6df25b4c3167a5a8706</span>
+        <span class="meta-label">connection</span><span class="meta-value">open · idle</span>
+      </div>
+    </details>
+    <div class="minimal-actions"><button class="action" disabled>start</button><button class="action">stop</button></div>
+  </header>
+  <main class="content">
+    <div class="turn user"><div class="mark">Y</div><div class="body">Make the orb header stay visible while I read through a long conversation.</div></div>
+    <div class="turn agent"><div class="mark">O</div><div class="body"><div class="who">agent</div><p>I’ll integrate the lifecycle controls into the application bar and keep it pinned to the top of the viewport.</p><p>This is the quietest option: a <strong>49-pixel minimal bar</strong>. Rarely-needed state version and checkout metadata move behind the “details” disclosure. Try opening it.</p><div class="code">header.sticky-shell {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}</div></div></div>
+    <div class="turn user"><div class="mark">Y</div><div class="body">Does it still work on a narrow screen?</div></div>
+    <div class="turn agent"><div class="mark">O</div><div class="body"><div class="who">agent</div><p>Yes. The running badge hides because the active stop control and live text already imply runtime state; all metadata remains available in the disclosure.</p><p>This gives chat the most room, at the cost of hiding diagnostic information.</p></div></div>
+  </main>
+  <nav class="option-switcher" aria-label="Design options"><span>D · Minimal</span><a href="option-a-ledger.html">A</a><a href="option-b-one-line.html">B</a><a href="option-c-control-desk.html">C</a><a aria-current="page" href="option-d-minimal.html">D</a></nav>
+</body>
+</html>

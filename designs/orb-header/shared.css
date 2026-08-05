@@ -1,0 +1,291 @@
+/* Static design exploration: compact, sticky orb headers. */
+:root {
+  color-scheme: light;
+  --paper: #f8f3e9;
+  --paper-2: #f1eadb;
+  --inset: #efe7d5;
+  --ink: #221c12;
+  --ink-soft: #5f5544;
+  --ink-faint: #8a7e68;
+  --rule: #ddd2bc;
+  --rule-soft: #e7ddc9;
+  --accent: #a03e1c;
+  --accent-soft: #f3e2d6;
+  --green: #35662f;
+  --green-soft: #e2ecd9;
+  --green-rule: #c4d4b6;
+  --serif: Charter, "Bitstream Charter", "Iowan Old Style", Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font: 14px/1.5 var(--sans);
+}
+button { font: inherit; }
+.sticky-shell {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  background: color-mix(in srgb, var(--paper-2) 96%, transparent);
+  border-bottom: 1px solid var(--rule);
+  box-shadow: 0 5px 16px rgb(34 28 18 / 4%);
+  backdrop-filter: blur(8px);
+}
+.brand {
+  color: var(--ink);
+  font: 600 13px/1 var(--mono);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.orb-name {
+  min-width: 0;
+  overflow: hidden;
+  font: 500 12px/1.25 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge {
+  flex: none;
+  padding: 3px 8px;
+  color: var(--green);
+  background: var(--green-soft);
+  border: 1px solid var(--green-rule);
+  border-radius: 99px;
+  font: 700 9px/1 var(--sans);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.meta-label {
+  color: var(--ink-faint);
+  font: 600 9px/1.2 var(--serif);
+  font-variant-caps: small-caps;
+  letter-spacing: .08em;
+}
+.meta-value { font: 11px/1.2 var(--mono); }
+.meta-value.commit {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live {
+  color: var(--ink-faint);
+  font: 11px/1.2 var(--sans);
+  white-space: nowrap;
+}
+.action {
+  min-height: 28px;
+  padding: 4px 11px;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--ink-faint);
+  border-radius: 5px;
+  cursor: pointer;
+  font: 600 11px/1 var(--serif);
+  font-variant-caps: small-caps;
+  letter-spacing: .08em;
+}
+.action:hover { background: var(--inset); }
+.action[disabled] { opacity: .35; cursor: default; }
+.content {
+  min-height: 135vh;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 30px clamp(20px, 4vw, 46px) 120px;
+}
+.turn {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 13px;
+  max-width: 900px;
+}
+.mark {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  color: var(--paper);
+  background: var(--accent);
+  border-radius: 5px;
+  font: 700 11px/1 var(--serif);
+}
+.agent .mark {
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--ink-soft);
+}
+.who {
+  margin-bottom: 7px;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+.turn p { margin: 0 0 12px; }
+.user .body {
+  padding: 10px 15px;
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  font: italic 18px/1.5 var(--serif);
+}
+.agent .body { font: 17px/1.7 var(--serif); }
+.code {
+  padding: 12px;
+  overflow: hidden;
+  color: var(--ink-soft);
+  background: var(--inset);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font: 12px/1.55 var(--mono);
+  white-space: pre;
+}
+.option-switcher {
+  position: fixed;
+  z-index: 50;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  background: var(--ink);
+  border-radius: 8px;
+  box-shadow: 0 4px 18px rgb(34 28 18 / 18%);
+}
+.option-switcher span { padding: 0 7px; color: var(--paper-2); font: 10px var(--sans); }
+.option-switcher a {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  color: var(--paper-2);
+  border-radius: 5px;
+  font: 600 11px var(--mono);
+  text-decoration: none;
+}
+.option-switcher a:hover, .option-switcher a[aria-current="page"] { color: var(--ink); background: var(--paper-2); }
+
+/* A — Ledger: two very shallow rows, with every current field visible. */
+.ledger-main, .ledger-meta {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding-inline: clamp(16px, 3vw, 34px);
+}
+.ledger-main { min-height: 43px; }
+.ledger-main .brand { padding-right: 16px; border-right: 1px solid var(--rule); }
+.ledger-main .orb-name { flex: 1; }
+.ledger-actions { display: flex; align-items: center; gap: 7px; }
+.ledger-meta {
+  min-height: 28px;
+  color: var(--ink-soft);
+  background: rgb(248 243 233 / 55%);
+  border-top: 1px solid var(--rule-soft);
+}
+.ledger-meta .commit { flex: 1; }
+
+/* B — One line: all operational information in a 54px strip. */
+.single-line {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: auto minmax(140px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 0 clamp(16px, 3vw, 34px);
+}
+.single-line .brand { padding-right: 16px; border-right: 1px solid var(--rule); }
+.identity-stack { min-width: 0; }
+.identity-stack .orb-name { margin-bottom: 4px; }
+.identity-sub { display: flex; min-width: 0; gap: 11px; color: var(--ink-faint); font: 9.5px/1 var(--mono); }
+.identity-sub .commit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.single-actions { display: flex; gap: 7px; }
+
+/* C — Control desk: brand rail and explicit live signal. */
+.desk { min-height: 66px; display: flex; align-items: stretch; }
+.desk-brand {
+  width: 112px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  background: var(--ink);
+}
+.desk-brand .brand { color: var(--paper); }
+.desk-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px clamp(16px, 3vw, 30px);
+}
+.desk-state { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 6px; }
+.desk-title { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.desk-meta { display: flex; min-width: 0; gap: 16px; color: var(--ink-faint); font: 10px var(--mono); }
+.desk-meta .commit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-live {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: 5px;
+  font: 600 10px var(--mono);
+  white-space: nowrap;
+}
+.desk-live::before { width: 6px; height: 6px; content: ""; background: var(--green); border-radius: 50%; }
+.desk-actions { display: flex; align-items: center; gap: 7px; }
+
+/* D — Minimal: metadata moves into a native disclosure. */
+.minimal { position: relative; min-height: 49px; display: flex; align-items: center; gap: 12px; padding: 0 clamp(16px, 3vw, 34px); }
+.minimal .brand { padding-right: 15px; border-right: 1px solid var(--rule); }
+.minimal .orb-name { flex: 1; }
+.minimal-details { position: relative; }
+.minimal-details summary {
+  padding: 5px 8px;
+  color: var(--ink-faint);
+  border-radius: 5px;
+  cursor: pointer;
+  font: 10px var(--mono);
+  list-style: none;
+}
+.minimal-details summary::-webkit-details-marker { display: none; }
+.minimal-details summary::after { content: " ▾"; }
+.minimal-details[open] summary { background: var(--inset); }
+.minimal-details[open] summary::after { content: " ▴"; }
+.details-popover {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  width: min(410px, calc(100vw - 30px));
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 14px;
+  padding: 14px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  box-shadow: 0 12px 30px rgb(34 28 18 / 14%);
+}
+.details-popover .meta-value { overflow-wrap: anywhere; }
+.minimal-actions { display: flex; gap: 7px; }
+
+@media (max-width: 680px) {
+  .live, .single-line > .live, .desk-live { display: none; }
+  .ledger-meta .meta-label:nth-of-type(2), .ledger-meta .commit { display: none; }
+  .single-line { grid-template-columns: auto minmax(90px, 1fr) auto auto; gap: 9px; }
+  .single-line .identity-sub .commit { display: none; }
+  .desk-brand { width: 78px; }
+  .desk-meta .commit { display: none; }
+  .minimal .badge { display: none; }
+  .action { padding-inline: 8px; }
+}

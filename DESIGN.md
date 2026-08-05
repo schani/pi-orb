@@ -1137,6 +1137,7 @@ The UI uses the "Reading Room" variant of the Manuscript × Gutter design, chose
 - **Turn gutter.** Every chat turn carries a gutter column: a marked square (`Y` filled terracotta for the user, `O` outlined ink for the agent) with a fading vertical rail. Adjacent agent-side records (assistant, tool results, displayed events) group into a single agent turn; compaction renders as a full-width dashed divider crossing the gutter.
 - **Fluid width.** No max-width constraint — the manuscript fills the window at any size.
 - **Composer.** Sticky at the viewport bottom, full-bleed; serif input, round ink send button (`↑`, ⌘⏎ shortcut), small-caps terracotta abort in the same row; chat scrolls in the normal document flow with bottom-pinned auto-follow (§ scroll pinning in `apps/web/src/lib/scroll-pin.ts`).
+- **Orb header direction (decided 2026-08-05; exact layout unresolved).** On the orb chat route, the standalone orb-status card will be removed. Orb identity, runtime state, connection/activity, lifecycle controls, and access to diagnostic metadata will instead be integrated into the global `pi-orb` header. That combined header is compact and sticky at the top of the viewport, so lifecycle state and controls remain visible while the conversation scrolls. Four static alternatives are under review in `designs/orb-header/`; choosing among their information-density and metadata-disclosure trade-offs remains an open visual-design question.
 
 ## 11. Projects, source checkout, and first end-to-end slice
 

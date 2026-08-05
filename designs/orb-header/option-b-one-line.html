@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orb header B — One line</title>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+  <header class="sticky-shell single-line" aria-label="Orb controls">
+    <a class="brand" href="#">pi-orb</a>
+    <div class="identity-stack">
+      <div class="orb-name" title="orb a7002162-2a05-4b43-8c09-f9e5fdb4c2c2">orb a7002162-2a05-4b43-8c09-f9e5fdb4c2c2</div>
+      <div class="identity-sub"><span>v3</span><span class="commit">checkout 6fb702f1a656543191f6e6df25b4c3167a5a8706</span></div>
+    </div>
+    <span class="badge">running</span>
+    <span class="live">open · idle</span>
+    <div class="single-actions"><button class="action" disabled>start</button><button class="action">stop</button></div>
+  </header>
+  <main class="content">
+    <div class="turn user"><div class="mark">Y</div><div class="body">Make the orb header stay visible while I read through a long conversation.</div></div>
+    <div class="turn agent"><div class="mark">O</div><div class="body"><div class="who">agent</div><p>I’ll integrate the lifecycle controls into the application bar and keep it pinned to the top of the viewport.</p><p>This is the most compact always-visible option: <strong>one line, 54 pixels high</strong>. Secondary metadata becomes a tiny subtitle under the orb id.</p><div class="code">header.sticky-shell {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}</div></div></div>
+    <div class="turn user"><div class="mark">Y</div><div class="body">Does it still work on a narrow screen?</div></div>
+    <div class="turn agent"><div class="mark">O</div><div class="body"><div class="who">agent</div><p>Yes. The checkout and connection copy disappear at the mobile breakpoint while status and stop remain visible.</p><p>The trade-off is density: the state version and checkout are less scannable than in option A.</p></div></div>
+  </main>
+  <nav class="option-switcher" aria-label="Design options"><span>B · One line</span><a href="option-a-ledger.html">A</a><a aria-current="page" href="option-b-one-line.html">B</a><a href="option-c-control-desk.html">C</a><a href="option-d-minimal.html">D</a></nav>
+</body>
+</html>
