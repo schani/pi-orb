@@ -13,6 +13,8 @@ How ports inside an orb (dev servers the agent starts) are reached from outside.
 
 Scope note: this intentionally serves the current single-user deployment. The user's device must be on the tailnet; there is no in-UI embedded preview and no public sharing yet.
 
+Field-validated 2026-08-05 on the Docker provider with a real tailnet: provisioning minted a key through the OAuth client, the orb joined as a tagged node, and both the runtime's own port and an ad-hoc localhost-bound server on another port were fetched from a tailnet device via the MagicDNS FQDN — no per-port configuration. The GCE path (metadata key delivery, startup-script fetch, mint-on-repair) is unit-tested but was not yet observed live at that date.
+
 ## Mechanism
 
 **Auth keys.** The control plane is configured with a Tailscale **OAuth client** (`PI_ORB_TAILSCALE_OAUTH_CLIENT_ID` / `PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET`, scope `auth_keys`, owning `tag:pi-orb`) plus the tailnet DNS name (`PI_ORB_TAILSCALE_TAILNET_DNS_NAME`, e.g. `tailabc123.ts.net`). When any of the three is unset the feature is off: providers inject nothing, the runtime skips tailscaled, `previewHost` is absent, and nothing else changes — the same all-or-none pattern as the GitHub integration. The host provider mints one auth key per orb through the Tailscale API **only at actual host creation**, mirroring the runtime-token read-back model: provision-reuse never re-mints, so idempotent re-provisioning cannot leak keys. A mint failure is a retryable provider error handled by the existing reconciliation machinery.
