@@ -4,7 +4,11 @@ import { Composer } from "./Composer.tsx";
 
 const noop = () => {};
 
-function render(mode: "message" | "shell" | "excluded_shell", withImage = false): string {
+function render(
+  mode: "message" | "shell" | "excluded_shell",
+  withImage = false,
+  canSend = true,
+): string {
   return renderToStaticMarkup(
     <Composer
       text="npm test"
@@ -13,7 +17,7 @@ function render(mode: "message" | "shell" | "excluded_shell", withImage = false)
       images={withImage ? [{ id: "image-1", mediaType: "image/png", data: "aGVsbG8=" }] : []}
       onImageAdd={noop}
       onImageRemove={noop}
-      canSend
+      canSend={canSend}
       onSend={noop}
       canAbort={false}
       onAbort={noop}
@@ -38,6 +42,12 @@ describe("Composer shell presentation", () => {
     const html = render("shell", true);
     expect(html).toContain('alt="pasted attachment"');
     expect(html).toContain('title="remove image attachments to run"');
+    expect(html).toMatch(/<button[^>]*class="composer-send"[^>]*disabled=""/);
+    expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
+  });
+
+  it("keeps the textarea editable while sending is unavailable so the next message can be drafted", () => {
+    const html = render("message", false, false);
     expect(html).toMatch(/<button[^>]*class="composer-send"[^>]*disabled=""/);
     expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
   });

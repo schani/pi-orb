@@ -1,4 +1,4 @@
-import type { ClipboardEvent, KeyboardEvent } from "react";
+import { type ClipboardEvent, type KeyboardEvent, useRef } from "react";
 import {
   type ComposerMode,
   composerModeLabel,
@@ -54,6 +54,12 @@ export function Composer({
   const shellBlockedByAttachment = isShell && images.length > 0;
   const hasInput = isShell ? text.trim() !== "" : text.trim() !== "" || images.length > 0;
   const sendEnabled = canSend && hasInput && !shellBlockedByAttachment;
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const submit = () => {
+    onSend();
+    inputRef.current?.focus();
+  };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = [...event.clipboardData.items]
@@ -94,6 +100,7 @@ export function Composer({
       )}
       <div className="composer-row">
         <textarea
+          ref={inputRef}
           className={`composer-input${isShell ? " composer-input-shell" : ""}`}
           value={text}
           onChange={(event) => {
@@ -134,7 +141,7 @@ export function Composer({
                 onShellAttachmentBlocked();
               } else if (sendEnabled) {
                 event.preventDefault();
-                onSend();
+                submit();
               }
             }
           }}
@@ -144,7 +151,6 @@ export function Composer({
               : "Message the agent… (paste images directly, ⌘⏎ to send)"
           }
           rows={3}
-          disabled={!canSend}
         />
         {canAbort && (
           <button type="button" className="danger" onClick={onAbort}>
@@ -156,7 +162,7 @@ export function Composer({
           className="composer-send"
           aria-label="send"
           title={shellBlockedByAttachment ? "remove image attachments to run" : "send (⌘⏎)"}
-          onClick={onSend}
+          onClick={submit}
           disabled={!sendEnabled}
         >
           {pending ? "…" : "↑"}
