@@ -31,4 +31,4 @@ For UI work, run Vite with its in-process protocol fixture; Docker, PostgreSQL, 
 npm run dev:frontend
 ```
 
-Open http://localhost:5173. The seeded orb streams an echo for each message and keeps fixture history in memory until Vite restarts. See [docs/web-ui.md](docs/web-ui.md).
+Open http://localhost:5173. The seeded orb streams an echo for each message, simulates `!`/`!!` shell commands, and keeps fixture history in memory until Vite restarts. See [docs/web-ui.md](docs/web-ui.md).
