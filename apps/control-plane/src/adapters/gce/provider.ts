@@ -44,16 +44,78 @@ export interface GceOrbHostProviderOptions {
    * — and mints the auth key they are missing while doing so.
    */
   readonly tailscale?: TailscaleHostOptions;
+  /**
+   * Deploy-monotonic script generation (docs/host-provider.md). Stamped into
+   * instance metadata and used to fence script repairs: a revision never
+   * repairs a host stamped by a *newer* one, which is what turns the deploy
+   * rollover from a repair war into a one-way upgrade
+   * (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
+   * Absent means 0 — see the note on `stampedGeneration` for why that is the
+   * safe direction to fail.
+   */
+  readonly scriptGeneration?: number;
 }
 
 const ORB_LABEL = "pi-orb-orb-id";
 const TOKEN_METADATA_KEY = "pi-orb-runtime-token";
 const SCRIPT_HASH_METADATA_KEY = "pi-orb-script-sha256";
+/**
+ * The generation of the control-plane revision that last wrote the script.
+ * Decimal string; absent or unparseable reads as 0.
+ */
+const SCRIPT_GENERATION_METADATA_KEY = "pi-orb-script-generation";
 const REPO_URL_METADATA_KEY = "pi-orb-repository-url";
 /** The auth key lives in metadata, never in the script: it is per-orb state
  * and would otherwise make `pi-orb-script-sha256` differ for every host. */
 const TAILSCALE_KEY_METADATA_KEY = "pi-orb-tailscale-auth-key";
+/**
+ * Guest attributes are off by default. Without this key every `report()` PUT
+ * from the startup script 404s (swallowed by its `|| true`) and `diagnose`
+ * has nothing to read — which is how the 2026-08-06 crash loop stayed
+ * invisible (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
+ */
+const GUEST_ATTRIBUTES_METADATA_KEY = "enable-guest-attributes";
+/**
+ * COS's logging agent ships container stdout/stderr to Cloud Logging: the one
+ * evidence channel that outlives the VM, which matters because the lifecycle
+ * machinery stops failed hosts aggressively (same postmortem).
+ */
+const LOGGING_METADATA_KEY = "google-logging-enabled";
 const DATA_DEVICE = "pi-orb-data";
+/**
+ * Guest-attribute paths this provider writes from the VM and reads back. A
+ * guest attribute is `namespace/key`, so both live directly under the `pi-orb`
+ * namespace and each `getGuestAttributes?queryPath=…` returns one item.
+ */
+const STARTUP_ATTRIBUTE = { path: "pi-orb/startup", key: "startup" } as const;
+const CONTAINER_ATTRIBUTE = { path: "pi-orb/container", key: "container" } as const;
+const GUEST_ATTRIBUTES_URL =
+  "http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes";
+/** Transient systemd unit that owns the container-state reporter loop. */
+const REPORTER_UNIT = "pi-orb-container-reporter";
+
+/**
+ * Observability metadata every host must carry. Written on insert and
+ * rewritten by `ensureCurrentScript`, so hosts created before these existed
+ * adopt them on their next repair rather than staying blind forever.
+ */
+const observabilityMetadataItems = (): { key: string; value: string }[] => [
+  { key: GUEST_ATTRIBUTES_METADATA_KEY, value: "TRUE" },
+  { key: LOGGING_METADATA_KEY, value: "true" },
+];
+
+/**
+ * The generation stamped on an instance. Anything unreadable is 0, the lowest
+ * generation there is, so an unstamped host (every host created before this
+ * existed) is repaired forward by the first revision that meets it instead of
+ * being fenced off from repairs forever.
+ */
+export function stampedGeneration(instance: Record<string, unknown>): number {
+  const raw = metadataValue(instance, SCRIPT_GENERATION_METADATA_KEY);
+  if (raw === null) return 0;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
 const instanceName = (orbId: string): string => `pi-orb-${orbId}`;
 const diskName = (orbId: string): string => `pi-orb-data-${orbId}`;
@@ -144,7 +206,7 @@ export function buildStartupScript(options: {
 set -euo pipefail
 report() {
   curl -sf -X PUT -H 'Metadata-Flavor: Google' --data "$1" \\
-    'http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes/pi-orb/startup' || true
+    '${GUEST_ATTRIBUTES_URL}/${STARTUP_ATTRIBUTE.path}' || true
 }
 trap 'report "failed: line $LINENO: $BASH_COMMAND"' ERR
 report starting
@@ -175,6 +237,35 @@ docker run --detach --name pi-orb-runtime --restart unless-stopped \\
   -e ${CONTROL_PLANE_URL_ENV}='${options.controlPlaneUrl}' \\
 ${tailscaleEnv}${extra}  '${options.runtimeImage}'
 report container-started
+# The startup script ends here, but a container that crash-loops afterwards is
+# invisible to the control plane (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
+# Keep publishing its state for as long as the VM lives.
+REPORTER=/var/lib/${REPORTER_UNIT}.sh
+# COS runs this script from a systemd unit whose exit reaps everything left in
+# its cgroup, so a plain background child (even under setsid/nohup) dies with
+# it; only a transient unit owned by PID 1 survives. Re-running the script must
+# replace that unit rather than stack a second reporter, and must never be the
+# thing that fails the boot. Stop first: bash reads a script file lazily, so
+# rewriting it under a running reporter would corrupt that reporter.
+systemctl stop ${REPORTER_UNIT}.service >/dev/null 2>&1 || true
+systemctl reset-failed ${REPORTER_UNIT}.service >/dev/null 2>&1 || true
+cat >"$REPORTER" <<'REPORTER_EOF'
+#!/bin/bash
+# Best-effort by construction: neither a missing container nor an unreachable
+# metadata server may end the loop.
+while true; do
+  STATE=$(docker inspect \\
+    -f 'status={{.State.Status}} restartCount={{.RestartCount}} lastExitCode={{.State.ExitCode}}' \\
+    pi-orb-runtime 2>/dev/null || echo 'status=absent restartCount=0 lastExitCode=0')
+  curl -sf -X PUT -H 'Metadata-Flavor: Google' \\
+    --data "$STATE at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+    '${GUEST_ATTRIBUTES_URL}/${CONTAINER_ATTRIBUTE.path}' || true
+  sleep 15
+done
+REPORTER_EOF
+systemd-run --unit=${REPORTER_UNIT} --collect \\
+  --property=Restart=always --property=RestartSec=15 \\
+  /bin/bash "$REPORTER" || report container-reporter-failed
 `;
 }
 
@@ -329,9 +420,16 @@ export class GceOrbHostProvider implements OrbHostProvider {
    * needed, rewrites the script metadata while preserving the runtime token
    * (so the committed token hash stays valid), and starts it. Provision and
    * start only run while the orb is `creating`/`starting`, so the bounce
-   * never interrupts a ready runtime. A draining stale revision can still
-   * "repair" a fresh host backward during its bounded drain window; the
-   * surviving revision repairs it forward on its next pass.
+   * never interrupts a ready runtime.
+   *
+   * Repairs are fenced forward-only by `pi-orb-script-generation`: a revision
+   * that meets a host stamped by a *newer* generation leaves it alone. Without
+   * that fence two revisions with different expected scripts each read the
+   * other's script as damage, and every repair's stop re-arms the other side —
+   * the war that hard-bounced a VM through its first image pull on 2026-08-06
+   * (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md). Equal
+   * generations still repair on hash mismatch, which is what local development
+   * (always generation 0) and same-revision config changes need.
    */
   private async ensureCurrentScript(
     task: SimulationTask,
@@ -345,6 +443,14 @@ export class GceOrbHostProvider implements OrbHostProvider {
     const script = this.expectedScript(orbId, repositoryUrl);
     const expectedHash = sha256Hex(script);
     if (metadataValue(instance, SCRIPT_HASH_METADATA_KEY) === expectedHash) return ok("current");
+    const generation = this.options.scriptGeneration ?? 0;
+    const stamped = stampedGeneration(instance);
+    if (stamped > generation) {
+      // A newer revision owns this host's script. Its script is the one that
+      // should boot, so the mismatch is not damage — it is the future.
+      task.log(`gce host ${name} carries newer script generation ${stamped}; skipping repair`);
+      return ok("current");
+    }
 
     let current = instance;
     const status = String(current["status"] ?? "");
@@ -404,12 +510,19 @@ export class GceOrbHostProvider implements OrbHostProvider {
     const items = Array.isArray(metadata["items"])
       ? (metadata["items"] as { key?: unknown; value?: unknown }[])
       : [];
-    const preserved = items.filter(
-      (item) =>
-        item.key !== "startup-script" &&
-        item.key !== SCRIPT_HASH_METADATA_KEY &&
-        item.key !== REPO_URL_METADATA_KEY,
-    );
+    // Everything not rewritten below survives the repair (the runtime token
+    // and the tailscale auth key most importantly). The observability keys are
+    // rewritten rather than merely preserved so hosts created before they
+    // existed adopt them here — the repair is the only upgrade path they get.
+    const rewritten = new Set<unknown>([
+      "startup-script",
+      SCRIPT_HASH_METADATA_KEY,
+      SCRIPT_GENERATION_METADATA_KEY,
+      REPO_URL_METADATA_KEY,
+      GUEST_ATTRIBUTES_METADATA_KEY,
+      LOGGING_METADATA_KEY,
+    ]);
+    const preserved = items.filter((item) => !rewritten.has(item.key));
     // Preserved above (like the runtime token) when the host already has one.
     // When it does not, the repair is what turns tailscale on for this host,
     // and the new script would `curl -sf` a metadata key that does not exist
@@ -429,11 +542,15 @@ export class GceOrbHostProvider implements OrbHostProvider {
         fingerprint,
         items: [
           ...preserved,
+          ...observabilityMetadataItems(),
           ...(adopted.value === null
             ? []
             : [{ key: TAILSCALE_KEY_METADATA_KEY, value: adopted.value }]),
           { key: "startup-script", value: script },
           { key: SCRIPT_HASH_METADATA_KEY, value: expectedHash },
+          // The repair takes ownership of the script, so it takes ownership of
+          // the fence too: from here on, older revisions leave this host alone.
+          { key: SCRIPT_GENERATION_METADATA_KEY, value: String(generation) },
           { key: REPO_URL_METADATA_KEY, value: repositoryUrl },
         ],
       },
@@ -458,7 +575,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
     if (metadataWaited.isErr()) return err(metadataWaited.error);
     const started = await this.startByName(task, name, context);
     if (started.isErr()) return err(started.error);
-    task.log(`gce host ${name} startup script repaired to ${expectedHash.slice(0, 12)}`);
+    task.log(
+      `gce host ${name} startup script repaired to ${expectedHash.slice(0, 12)} ` +
+        `(generation ${stamped} -> ${generation})`,
+    );
     return ok("repaired");
   }
 
@@ -644,13 +764,19 @@ export class GceOrbHostProvider implements OrbHostProvider {
           metadata: {
             items: [
               { key: TOKEN_METADATA_KEY, value: runtimeToken },
+              ...observabilityMetadataItems(),
               ...(tailscaleKey.value === null
                 ? []
                 : [{ key: TAILSCALE_KEY_METADATA_KEY, value: tailscaleKey.value }]),
               { key: "startup-script", value: startupScript },
               // Script-version stamp plus the input needed to re-derive the
-              // script on later starts (ensureCurrentScript).
+              // script on later starts (ensureCurrentScript), plus the
+              // generation that fences repairs forward-only.
               { key: SCRIPT_HASH_METADATA_KEY, value: sha256Hex(startupScript) },
+              {
+                key: SCRIPT_GENERATION_METADATA_KEY,
+                value: String(this.options.scriptGeneration ?? 0),
+              },
               { key: REPO_URL_METADATA_KEY, value: request.bootstrap.repositoryUrl },
             ],
           },
@@ -830,15 +956,17 @@ export class GceOrbHostProvider implements OrbHostProvider {
     });
   }
 
-  diagnose(
-    _task: SimulationTask,
-    ref: OrbHostRef,
+  /** One guest-attribute query; null whenever the attribute was never written. */
+  private guestAttribute(
+    resourceId: string,
+    attribute: { readonly path: string; readonly key: string },
     context: OperationContext,
   ): ResultAsync<string | null, OrbHostProviderError> {
+    const query = encodeURIComponent(attribute.path);
     return this.request(
       "observe",
       "GET",
-      this.zonePath(`instances/${ref.resourceId}/getGuestAttributes?queryPath=pi-orb%2Fstartup`),
+      this.zonePath(`instances/${resourceId}/getGuestAttributes?queryPath=${query}`),
       context,
     ).andThen((response) => {
       // 404: instance gone or no attribute written yet — nothing known.
@@ -852,12 +980,36 @@ export class GceOrbHostProvider implements OrbHostProvider {
       if (!Array.isArray(items)) return ok<string | null, OrbHostProviderError>(null);
       for (const item of items) {
         const entry = item as Record<string, unknown>;
-        if (entry["key"] === "startup" && typeof entry["value"] === "string") {
-          return ok<string | null, OrbHostProviderError>(`startup-script: ${entry["value"]}`);
+        if (entry["key"] === attribute.key && typeof entry["value"] === "string") {
+          return ok<string | null, OrbHostProviderError>(entry["value"]);
         }
       }
       return ok<string | null, OrbHostProviderError>(null);
     });
+  }
+
+  diagnose(
+    _task: SimulationTask,
+    ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<string | null, OrbHostProviderError> {
+    const run = async (): Promise<Result<string | null, OrbHostProviderError>> => {
+      const startup = await this.guestAttribute(ref.resourceId, STARTUP_ATTRIBUTE, context);
+      if (startup.isErr()) return err(startup.error);
+      // Container state is supplementary evidence: a failure reading it must
+      // never make the whole diagnosis uncertain (the caller defers its
+      // decision a poll on Err) and so suppress the startup markers.
+      const container = await this.guestAttribute(
+        ref.resourceId,
+        CONTAINER_ATTRIBUTE,
+        context,
+      ).unwrapOr(null);
+      const parts: string[] = [];
+      if (startup.value !== null) parts.push(`startup-script: ${startup.value}`);
+      if (container !== null) parts.push(`container: ${container}`);
+      return ok(parts.length === 0 ? null : parts.join("; "));
+    };
+    return new ResultAsync(run());
   }
 
   listManagedHosts(

@@ -37,12 +37,42 @@ export interface BootProbe {
  */
 export class ControlState {
   private readonly liveness = new Map<string, LivenessEntry>();
+  /** orbId → `state_changed_at` of the episode this process's memory describes. */
+  private readonly episodes = new Map<string, number>();
   private readonly nextAttemptAt = new Map<string, number>();
   private readonly retryAttempts = new Map<string, number>();
   private readonly authBlocked = new Set<string>();
   private readonly drainStatus = new Map<string, DrainStatus>();
   private challenge: DeviceChallenge | null = null;
   private readonly stoppingOrbs = new Set<string>();
+
+  /**
+   * Drop everything this process remembers about a *previous* visit to a
+   * state, keyed by the orb row's durable `state_changed_at`.
+   *
+   * The boot probe, the drain status, a half-finished restart and the liveness
+   * baseline with the grace it was granted all describe one episode: this
+   * boot, this drain. A reconciler that did not make the transition itself
+   * never clears them — and during a deploy there is always such a reconciler
+   * (docs/testing.md: version skew is part of the model). Carrying that memory
+   * into the next episode makes it act on an expired clock: a boot window from
+   * the previous start fails the next one as `runtime_never_answered`, and a
+   * restart grace from the previous drain fails the next one as
+   * `drain_runtime_unrecoverable`. Both were found by
+   * `mixed-generation.dst.test.ts`. Deriving the window from the row instead
+   * of from an observed transition makes it hold for every reconciler.
+   *
+   * Forgetting is always safe: it is exactly the state a control-plane restart
+   * loses, and every path reseeds it from the row on the next pass.
+   */
+  noteStateEpisode(orbId: string, stateChangedAt: number): void {
+    if (this.episodes.get(orbId) === stateChangedAt) return;
+    this.episodes.set(orbId, stateChangedAt);
+    this.bootProbes.delete(orbId);
+    this.drainStatus.delete(orbId);
+    this.restartPending.delete(orbId);
+    this.liveness.delete(orbId);
+  }
 
   // -- runtime liveness (successful pulls double as the liveness signal) --
 
@@ -289,6 +319,7 @@ export class ControlState {
   /** Drop all per-orb state after a terminal transition. */
   clearOrb(orbId: string): void {
     this.bootProbes.delete(orbId);
+    this.episodes.delete(orbId);
     this.liveness.delete(orbId);
     ControlState.forgetOrb(this.nextAttemptAt, orbId);
     // Without this a stale attempt counter would survive a stop/start and

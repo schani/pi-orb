@@ -37,6 +37,12 @@ variable "tailscale_tailnet_dns_name" {
   default     = "tail8fb2d0.ts.net"
 }
 
+variable "deploy_generation" {
+  description = "Monotonic script generation for forward-only repair fencing (docs/host-provider.md); build-push.sh prints a fresh value next to the image vars. An apply that omits it runs at generation 0: such a revision never repairs a host stamped by a real deploy, so a forgotten var delays an upgrade to the next deploy instead of repairing anything backward."
+  type        = number
+  default     = 0
+}
+
 variable "control_plane_image" {
   description = "Digest-pinned control-plane image (from build-push.sh)."
   type        = string
