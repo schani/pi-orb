@@ -25,6 +25,11 @@ import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
+import {
+  FetchTailscaleApiTransport,
+  HttpTailscaleAuthKeyMinter,
+  type TailscaleHostOptions,
+} from "./adapters/tailscale/client.ts";
 import { CompositeAuthGate } from "./domain/auth-gates.ts";
 import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
@@ -155,6 +160,34 @@ async function main(): Promise<void> {
           },
         }
       : {};
+  // Tailscale tier-1 port exposure (docs/ports.md). All three settings or
+  // none: without the OAuth client there is no key to mint, and without the
+  // tailnet DNS name there is no host to publish. Unset means orbs are
+  // created exactly as before and the browser view carries no preview host.
+  const tailscaleEnvNames = [
+    "PI_ORB_TAILSCALE_OAUTH_CLIENT_ID",
+    "PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET",
+    "PI_ORB_TAILSCALE_TAILNET_DNS_NAME",
+  ] as const;
+  const [tailscaleClientId, tailscaleClientSecret, tailnetDnsName] = tailscaleEnvNames.map((name) =>
+    env(name, ""),
+  ) as [string, string, string];
+  const tailscale: TailscaleHostOptions | null =
+    tailscaleClientId !== "" && tailscaleClientSecret !== "" && tailnetDnsName !== ""
+      ? {
+          minter: new HttpTailscaleAuthKeyMinter(new FetchTailscaleApiTransport(), {
+            clientId: tailscaleClientId,
+            clientSecret: tailscaleClientSecret,
+          }),
+          tailnetDnsName,
+        }
+      : null;
+  if (tailscale === null) {
+    const missing = tailscaleEnvNames.filter((name) => env(name, "") === "");
+    bootTask.log(`Tailscale port exposure disabled (${missing.join(", ")} unset)`);
+  }
+  const tailscaleOption = tailscale !== null ? { tailscale } : {};
+  const viewConfig = tailscale !== null ? { tailnetDnsName } : {};
   const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
   const hostProvider =
     providerKind === "gce"
@@ -170,6 +203,7 @@ async function main(): Promise<void> {
           runtimeImage,
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
           ...mockExtraEnv,
+          ...tailscaleOption,
         })
       : new DockerOrbHostProvider({
           image: runtimeImage,
@@ -180,6 +214,7 @@ async function main(): Promise<void> {
             ? { controlPlaneUrl: process.env["PI_ORB_BROKER_URL"] }
             : {}),
           ...mockExtraEnv,
+          ...tailscaleOption,
         });
   const deps: ControlPlaneDeps = {
     store: new PgControlPlaneStore(db),
@@ -204,7 +239,7 @@ async function main(): Promise<void> {
   const httpTask = new ControlPlaneTask("http");
   if (browserRole || opsRole) {
     await registerLiveProxy(app, httpTask, deps);
-    registerRoutes(app, httpTask, deps);
+    registerRoutes(app, httpTask, deps, viewConfig);
     // Cloud deployment serves the built web UI from the same process; local
     // development keeps the vite dev server + proxy instead.
     const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";

@@ -16,6 +16,10 @@ locals {
       PI_ORB_RUNTIME_IMAGE        = var.runtime_image
     },
     var.github_client_id != "" ? { PI_ORB_GITHUB_CLIENT_ID = var.github_client_id } : {},
+    var.tailscale_oauth_client_id != "" ? {
+      PI_ORB_TAILSCALE_OAUTH_CLIENT_ID  = var.tailscale_oauth_client_id
+      PI_ORB_TAILSCALE_TAILNET_DNS_NAME = var.tailscale_tailnet_dns_name
+    } : {},
   )
 }
 
@@ -144,6 +148,19 @@ resource "google_cloud_run_v2_service" "browser" {
           }
         }
       }
+      # The reconciler mints a per-orb tailnet auth key at host creation.
+      dynamic "env" {
+        for_each = var.tailscale_oauth_client_id != "" ? [1] : []
+        content {
+          name = "PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.tailscale_oauth_client_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
       resources {
         limits             = { cpu = "1", memory = "1Gi" }
         cpu_idle           = false # always-allocated CPU: the poller/reconciler run here
@@ -198,6 +215,21 @@ resource "google_cloud_run_v2_service" "ops" {
         content {
           name  = env.key
           value = env.value
+        }
+      }
+      # Not for minting (ops runs no loops): the control plane treats the
+      # three tailscale settings as all-or-none, and without the secret this
+      # service would omit previewHost from the orb view the browser shows.
+      dynamic "env" {
+        for_each = var.tailscale_oauth_client_id != "" ? [1] : []
+        content {
+          name = "PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.tailscale_oauth_client_secret.secret_id
+              version = "latest"
+            }
+          }
         }
       }
       resources {

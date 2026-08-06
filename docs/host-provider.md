@@ -119,7 +119,7 @@ new GceOrbHostProvider({
 });
 ```
 
-The contract shared by every provider is: a persistent filesystem plus a host running the orb runtime container image with provider-delivered environment variables. Where that container runs — the local Docker daemon or a Container-Optimized OS VM — never appears in the control plane or lifecycle engine.
+The contract shared by every provider is: a persistent filesystem plus a host running the orb runtime container image with provider-delivered environment variables (the broker pair in `docs/credentials.md` plus, when port exposure is enabled, the Tailscale variables in `docs/ports.md`, whose auth key providers mint only at actual host creation). Where that container runs — the local Docker daemon or a Container-Optimized OS VM — never appears in the control plane or lifecycle engine.
 
 `provision` returns the host ref together with `runtimeTokenHash` — the SHA-256 of the per-incarnation runtime token the host actually carries, minted at creation and read back from the delivery channel for existing hosts (docs/credentials.md). The lifecycle machine commits this observed hash next to the host ref and re-commits when either changes.
 

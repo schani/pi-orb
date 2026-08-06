@@ -492,6 +492,15 @@ export function OrbPage({ orbId }: { orbId: string }) {
                 {orb.checkoutCommit !== undefined && (
                   <span className="orb-header-checkout">checkout {orb.checkoutCommit}</span>
                 )}
+                {orb.previewHost !== undefined && (
+                  <span
+                    className="orb-header-preview"
+                    title="Any port a server listens on inside the orb is reachable at this host over your tailnet"
+                  >
+                    Ports: http://<span className="orb-preview-host">{orb.previewHost}</span>:
+                    {"<port>"}
+                  </span>
+                )}
               </>
             )}
           </div>

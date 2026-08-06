@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { NoSimulationTask } from "determined";
+import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
+import type { TailscaleAuthKeyMinter, TailscaleHostOptions } from "../tailscale/client.ts";
 import type { GceApiTransport, GceResponse } from "./api.ts";
 import {
   buildStartupScript,
@@ -46,7 +48,10 @@ class FakeTransport implements GceApiTransport {
   }
 }
 
-function makeProvider(transport: GceApiTransport): GceOrbHostProvider {
+function makeProvider(
+  transport: GceApiTransport,
+  tailscale?: TailscaleHostOptions,
+): GceOrbHostProvider {
   return new GceOrbHostProvider(transport, {
     projectId: "proj",
     zone: "us-central1-a",
@@ -55,8 +60,25 @@ function makeProvider(transport: GceApiTransport): GceOrbHostProvider {
     serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
     runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
     controlPlaneUrl: "https://runtime.example",
+    ...(tailscale === undefined ? {} : { tailscale }),
   });
 }
+
+const countingMinter = (): TailscaleAuthKeyMinter & { minted: () => number } => {
+  let count = 0;
+  return {
+    mintAuthKey: () => {
+      count += 1;
+      return okAsync(`tskey-auth-${count}`);
+    },
+    minted: () => count,
+  };
+};
+
+const tailscaleOptions = (minter: TailscaleAuthKeyMinter): TailscaleHostOptions => ({
+  minter,
+  tailnetDnsName: "tailnet.ts.net",
+});
 
 const ok200 = (body: Record<string, unknown>): GceResponse => ({ status: 200, body });
 const notFound: GceResponse = { status: 404, body: {} };
@@ -400,6 +422,204 @@ describe("GceOrbHostProvider", () => {
     expect(script).toContain("iptables -w -A INPUT -p tcp --dport 8080 -j ACCEPT");
     expect(script).toContain("report container-started");
     expect(script).toContain("guest-attributes/pi-orb/startup");
+  });
+
+  it("keeps the auth key out of the script and in metadata on insert", async () => {
+    const minter = countingMinter();
+    const transport = new FakeTransport([
+      () => notFound, // instance get
+      () => ok200(existingInstance()), // disk exists
+      () => ok200({ name: "op-inst" }), // instance insert
+      () => done,
+    ]);
+    const provider = makeProvider(transport, tailscaleOptions(minter));
+    const result = await provider.provision(task, provisionRequest, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(minter.minted()).toBe(1);
+    const insert = transport.requests.find(
+      (request) => request.method === "POST" && request.path.endsWith("/instances"),
+    );
+    const metadata = insert?.body?.["metadata"] as
+      | { items: { key: string; value: string }[] }
+      | undefined;
+    const items = metadata?.items ?? [];
+    expect(items.find((item) => item.key === "pi-orb-tailscale-auth-key")?.value).toBe(
+      "tskey-auth-1",
+    );
+    const script = items.find((item) => item.key === "startup-script")?.value ?? "";
+    // The secret is fetched at boot, exactly like the runtime token; only the
+    // pure functions of orbId + static config are literals.
+    expect(script).not.toContain("tskey-auth-1");
+    expect(script).toContain("instance/attributes/pi-orb-tailscale-auth-key");
+    expect(script).toContain('-e PI_ORB_TAILSCALE_AUTH_KEY="$TS_AUTHKEY"');
+    expect(script).toContain("-e PI_ORB_TAILSCALE_HOSTNAME='pi-orb-orb-1'");
+    expect(script).toContain("-e PI_ORB_PREVIEW_HOST='pi-orb-orb-1.tailnet.ts.net'");
+    // The stamp still describes the script that was written.
+    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(sha256(script));
+  });
+
+  it("fails provisioning retryably and inserts nothing when minting fails", async () => {
+    const transport = new FakeTransport([
+      () => notFound, // instance get
+      () => ok200(existingInstance()), // disk exists
+    ]);
+    const provider = makeProvider(transport, {
+      minter: {
+        mintAuthKey: () =>
+          errAsync({
+            type: "tailscale_error" as const,
+            code: "rejected" as const,
+            message: "tailnet said no",
+            retryable: false,
+          }),
+      },
+      tailnetDnsName: "tailnet.ts.net",
+    });
+    const result = await provider.provision(task, provisionRequest, context);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.retryable).toBe(true);
+      expect(result.error.message).toContain("tailnet said no");
+    }
+    expect(
+      transport.requests.some(
+        (request) => request.method === "POST" && request.path.endsWith("/instances"),
+      ),
+    ).toBe(false);
+  });
+
+  it("preserves an existing auth key through a script repair", async () => {
+    const minter = countingMinter();
+    const staleItems = [
+      { key: "pi-orb-runtime-token", value: "tok" },
+      { key: "pi-orb-tailscale-auth-key", value: "tskey-auth-existing" },
+      { key: "pi-orb-script-sha256", value: "stale-hash" },
+      { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
+    ];
+    const transport = new FakeTransport([
+      () =>
+        ok200(
+          existingInstance({
+            status: "TERMINATED",
+            metadata: { fingerprint: "fp-1", items: staleItems },
+          }),
+        ),
+      () => ok200({ name: "op-meta" }), // setMetadata (no stop needed)
+      () => done,
+      () => ok200({ name: "op-start" }),
+      () => done,
+    ]);
+    const provider = makeProvider(transport, tailscaleOptions(minter));
+    const result = await provider.provision(task, provisionRequest, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    // An existing host is never re-keyed: it keeps the identity it joined with.
+    expect(minter.minted()).toBe(0);
+    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
+    const items = (setMetadata?.body?.["items"] ?? []) as { key: string; value: string }[];
+    expect(items.find((item) => item.key === "pi-orb-tailscale-auth-key")?.value).toBe(
+      "tskey-auth-existing",
+    );
+    expect(items.find((item) => item.key === "pi-orb-runtime-token")?.value).toBe("tok");
+  });
+
+  it("mints the key a pre-tailscale host is missing while repairing it", async () => {
+    const minter = countingMinter();
+    const transport = new FakeTransport([
+      () => ok200(existingInstance({ status: "TERMINATED" })), // no tailscale key
+      () => ok200({ name: "op-meta" }),
+      () => done,
+      () => ok200({ name: "op-start" }),
+      () => done,
+    ]);
+    const provider = makeProvider(transport, tailscaleOptions(minter));
+    const result = await provider.start(
+      task,
+      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      context,
+    );
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(minter.minted()).toBe(1);
+    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
+    const items = (setMetadata?.body?.["items"] ?? []) as { key: string; value: string }[];
+    // Key and script land together: the new script curls that attribute under
+    // `set -e`, so a repair without it would brick the host at boot.
+    expect(items.find((item) => item.key === "pi-orb-tailscale-auth-key")?.value).toBe(
+      "tskey-auth-1",
+    );
+    const script = items.find((item) => item.key === "startup-script")?.value ?? "";
+    expect(script).toContain("instance/attributes/pi-orb-tailscale-auth-key");
+  });
+
+  it("start() re-derives the identical tailscale script (no repeat repair)", async () => {
+    const minter = countingMinter();
+    const tailscaleScriptHash = sha256(
+      buildStartupScript({
+        runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
+        orbId: provisionRequest.orbId,
+        repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
+        controlPlaneUrl: "https://runtime.example",
+        extraEnv: {},
+        tailscale: {
+          hostname: "pi-orb-orb-1",
+          previewHost: "pi-orb-orb-1.tailnet.ts.net",
+        },
+      }),
+    );
+    const transport = new FakeTransport([
+      () =>
+        ok200(
+          existingInstance({
+            status: "TERMINATED",
+            metadata: {
+              fingerprint: "fp-1",
+              items: [
+                { key: "pi-orb-runtime-token", value: "tok" },
+                { key: "pi-orb-tailscale-auth-key", value: "tskey-auth-existing" },
+                { key: "pi-orb-script-sha256", value: tailscaleScriptHash },
+                { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
+              ],
+            },
+          }),
+        ),
+      () => ok200({ name: "op-start" }),
+      () => done,
+    ]);
+    const provider = makeProvider(transport, tailscaleOptions(minter));
+    const result = await provider.start(
+      task,
+      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      context,
+    );
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(transport.requests.some((request) => request.path.endsWith("/setMetadata"))).toBe(false);
+    expect(minter.minted()).toBe(0);
+  });
+
+  it("emits no tailscale plumbing when the feature is off", () => {
+    const script = buildStartupScript({
+      runtimeImage: "img",
+      orbId: "o",
+      repositoryUrl: "https://x",
+      controlPlaneUrl: "https://cp",
+      extraEnv: {},
+    });
+    expect(script).not.toContain("TS_AUTHKEY");
+    expect(script).not.toContain("PI_ORB_PREVIEW_HOST");
+    expect(script).not.toMatch(/\\\n\s*\n/);
+    expect(script).toMatch(/\\\n {2}'img'\n/);
+  });
+
+  it("keeps the tailscale docker run well-formed with extra env", () => {
+    const script = buildStartupScript({
+      runtimeImage: "img",
+      orbId: "o",
+      repositoryUrl: "https://x",
+      controlPlaneUrl: "https://cp",
+      extraEnv: { A: "1" },
+      tailscale: { hostname: "pi-orb-o", previewHost: "pi-orb-o.tailnet.ts.net" },
+    });
+    expect(script).not.toMatch(/\\\n\s*\n/);
+    expect(script).toMatch(/\\\n {2}'img'\n/);
   });
 
   it("reads metadata attributes defensively", () => {

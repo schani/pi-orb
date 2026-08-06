@@ -357,10 +357,16 @@ textarea:focus {
   line-height: 1;
 }
 
-.orb-header-checkout {
+.orb-header-checkout,
+.orb-header-preview {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* One click selects the whole host so it can be pasted into a browser. */
+.orb-preview-host {
+  user-select: all;
 }
 
 .orb-header > .state-badge {

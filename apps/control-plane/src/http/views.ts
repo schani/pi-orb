@@ -1,6 +1,16 @@
-import type { OrbView, ProjectView } from "@pi-orb/protocol";
+import { type OrbView, type ProjectView, previewHost } from "@pi-orb/protocol";
 import type { ControlState } from "../domain/control-state.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
+
+/**
+ * Static deployment configuration the view layer derives fields from. It is
+ * deliberately separate from `ControlPlaneDeps`: the domain knows nothing
+ * about tailscale.
+ */
+export interface ViewConfig {
+  /** MagicDNS suffix; absent when tailscale port exposure is not configured. */
+  readonly tailnetDnsName?: string;
+}
 
 const iso = (ms: number): string => new Date(ms).toISOString();
 
@@ -18,7 +28,7 @@ export function projectView(project: ProjectRow): ProjectView {
  * (docs/control-plane-api.md). `actionRequired` and `stateDetail` are synthesized, never
  * stored; no host ref, credential, session ID, or replication field leaks.
  */
-export function orbView(orb: OrbRow, control: ControlState): OrbView {
+export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig): OrbView {
   const challenge = control.getChallenge();
   const showChallenge =
     challenge !== null &&
@@ -61,6 +71,9 @@ export function orbView(orb: OrbRow, control: ControlState): OrbView {
         : {}),
     ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),
     stateChangedAt: iso(orb.stateChangedAt),
+    ...(config.tailnetDnsName === undefined
+      ? {}
+      : { previewHost: previewHost(orb.id, config.tailnetDnsName) }),
     ...(showChallenge
       ? {
           actionRequired: {

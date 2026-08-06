@@ -95,6 +95,12 @@ export const OrbViewSchema = Type.Object(
     /** Present when the last stop was automatic ("stopped (idle)", docs/lifecycle.md). */
     stopReason: Type.Optional(StopReasonSchema),
     stateChangedAt: Type.String(),
+    /**
+     * MagicDNS host every port inside the orb is reachable at (docs/ports.md).
+     * Derived from the orb id and the configured tailnet, never stored;
+     * absent when tailscale port exposure is not configured.
+     */
+    previewHost: Type.Optional(Type.String()),
     /** Synthesized from the in-memory device flow; never stored. */
     actionRequired: Type.Optional(OrbActionRequiredSchema),
     createdAt: Type.String(),

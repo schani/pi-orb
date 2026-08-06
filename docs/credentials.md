@@ -35,7 +35,7 @@ Only one global login attempt may run at once, and simultaneous blocked orbs sha
 
 ### Storage and runtime access
 
-The control plane keeps Pi's standard `AuthStorage` with `auth.json` in a dedicated control-plane-owned location (default `~/.pi-orb/auth`, configurable via `PI_ORB_AUTH_DIR`) as the device-login artifact for the gate's `ModelRuntime`, plus a private `broker-secrets/` directory as the local secret store. Nothing under that directory is ever mounted into an orb: orb containers receive exactly two environment variables — `PI_ORB_CONTROL_PLANE_URL` and `PI_ORB_RUNTIME_TOKEN` — and obtain access tokens from the broker (below). An earlier first-slice mechanism that bind-mounted `auth.json` into every orb container was replaced by the broker and removed.
+The control plane keeps Pi's standard `AuthStorage` with `auth.json` in a dedicated control-plane-owned location (default `~/.pi-orb/auth`, configurable via `PI_ORB_AUTH_DIR`) as the device-login artifact for the gate's `ModelRuntime`, plus a private `broker-secrets/` directory as the local secret store. Nothing under that directory is ever mounted into an orb: orb containers receive `PI_ORB_CONTROL_PLANE_URL` and `PI_ORB_RUNTIME_TOKEN` — plus, when port exposure is enabled, the three Tailscale variables of `docs/ports.md` — and obtain access tokens from the broker (below). An earlier first-slice mechanism that bind-mounted `auth.json` into every orb container was replaced by the broker and removed.
 
 Do not write OAuth credentials to PostgreSQL, images, project volumes, Pi session history, logs, or HTTP responses. No browser-facing response type imports or contains Pi's stored credential type; `OrbView.actionRequired` can represent only the public device-login challenge. Add a response-schema test that fails if `access` or `refresh` can be serialized.
 
@@ -46,7 +46,7 @@ Decided for the cloud slice: replace the mounted file with a **control-plane cre
 - The broker lives in the control plane next to `PiAuthGate`, which continues to own `ModelRuntime` and `auth.json`. Refresh tokens never leave the control plane.
 - A runtime-facing control-plane endpoint returns a current short-lived access token. It is authenticated by a per-host-incarnation bearer token scoped to that orb only and valid only while the orb is meant to be running.
 - The orb runtime registers a provider config (the same `registerProvider` mechanism the E2E mock uses) whose `getApiKey`/`refreshToken` delegate to that endpoint; from Pi's perspective nothing is unusual.
-- Providers deliver exactly two environment variables — the control-plane base URL and the orb token — via `--env` on Docker and via instance metadata forwarded into the container on GCE. This env contract is the entire provider-specific surface.
+- Providers deliver two environment variables for the broker — the control-plane base URL and the orb token — via `--env` on Docker and via instance metadata forwarded into the container on GCE. Together with the Tailscale port-exposure variables (`docs/ports.md`), this env contract is the entire provider-specific surface.
 - Accepted limitation until the identity model exists (open question 24): repository code inside an orb can read the orb token and thus obtain short-lived access tokens. What it can no longer obtain is the refresh token.
 - Token lifetime/renewal semantics, refresh coalescing, and the 401-retry path are settled in the detailed design below.
 

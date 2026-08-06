@@ -1,6 +1,14 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV } from "@pi-orb/protocol";
+import {
+  CONTROL_PLANE_URL_ENV,
+  PREVIEW_HOST_ENV,
+  previewHost,
+  RUNTIME_TOKEN_ENV,
+  TAILSCALE_AUTH_KEY_ENV,
+  TAILSCALE_HOSTNAME_ENV,
+  tailscaleHostname,
+} from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError } from "../../domain/errors.ts";
@@ -13,6 +21,7 @@ import type {
   ProvisionedOrbHost,
   ProvisionOrbHostRequest,
 } from "../../domain/ports.ts";
+import type { TailscaleHostOptions } from "../tailscale/client.ts";
 
 export interface DockerOrbHostProviderOptions {
   /** Orb runtime image, e.g. "pi-orb-runtime:dev". */
@@ -29,6 +38,11 @@ export interface DockerOrbHostProviderOptions {
   readonly controlPlanePort: number;
   /** Extra environment passed to every orb container (e.g. E2E mock-OpenAI URLs). */
   readonly extraEnv?: Readonly<Record<string, string>>;
+  /**
+   * Tailscale port exposure (docs/ports.md). When absent the container is
+   * created exactly as before and the runtime never sees the feature.
+   */
+  readonly tailscale?: TailscaleHostOptions;
 }
 
 const ORB_LABEL = "pi-orb.orb-id";
@@ -256,6 +270,39 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     return observation;
   }
 
+  /**
+   * `docker run` arguments that join the new container to the tailnet, or an
+   * empty list when the feature is off. A mint failure is reported retryable
+   * whatever its cause: the reconciler simply provisions again rather than
+   * failing the orb over a tailnet hiccup.
+   */
+  private async tailscaleEnv(
+    orbId: string,
+    context: OperationContext,
+  ): Promise<Result<string[], OrbHostProviderError>> {
+    const tailscale = this.options.tailscale;
+    if (tailscale === undefined) return ok([]);
+    const key = await tailscale.minter.mintAuthKey(orbId, context.signal);
+    if (key.isErr()) {
+      return err(
+        providerError(
+          "provision",
+          "operation_failed",
+          `tailscale auth key mint failed: ${key.error.message}`,
+          true,
+        ),
+      );
+    }
+    return ok([
+      "--env",
+      `${TAILSCALE_AUTH_KEY_ENV}=${key.value}`,
+      "--env",
+      `${TAILSCALE_HOSTNAME_ENV}=${tailscaleHostname(orbId)}`,
+      "--env",
+      `${PREVIEW_HOST_ENV}=${previewHost(orbId, tailscale.tailnetDnsName)}`,
+    ]);
+  }
+
   provision(
     task: SimulationTask,
     request: ProvisionOrbHostRequest,
@@ -283,6 +330,11 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         const removed = await this.exec("provision", ["rm", "--force", name], context);
         if (removed.isErr()) return err(removed.error);
       }
+      // Minted only for a container that is actually about to be created —
+      // the reuse path above keeps whatever env its incarnation was born
+      // with, exactly like the runtime token.
+      const tailscaleEnv = await this.tailscaleEnv(request.orbId, context);
+      if (tailscaleEnv.isErr()) return err(tailscaleEnv.error);
       const volume = await this.exec(
         "provision",
         ["volume", "create", "--label", `${ORB_LABEL}=${request.orbId}`, volumeName(request.orbId)],
@@ -320,6 +372,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           `${RUNTIME_TOKEN_ENV}=${runtimeToken}`,
           "--env",
           `${CONTROL_PLANE_URL_ENV}=${this.controlPlaneUrl()}`,
+          ...tailscaleEnv.value,
           ...Object.entries(this.options.extraEnv ?? {}).flatMap(([key, value]) => [
             "--env",
             `${key}=${value}`,
