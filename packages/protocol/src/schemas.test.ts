@@ -196,10 +196,36 @@ describe("frame schemas", () => {
       Check(ClientFrameSchema, {
         v: 1,
         type: "client.request",
+        requestId: "req-shell",
+        action: {
+          type: "shell",
+          expectedHeadId: "rec-2",
+          command: "npm test",
+          excludeFromContext: true,
+        },
+      }),
+    ).toBe(true);
+    expect(
+      Check(ClientFrameSchema, {
+        v: 1,
+        type: "client.request",
         requestId: "req-2",
         action: { type: "abort", operationId: "op-1" },
       }),
     ).toBe(true);
+    expect(
+      Check(ClientFrameSchema, {
+        v: 1,
+        type: "client.request",
+        requestId: "req-empty-shell",
+        action: {
+          type: "shell",
+          expectedHeadId: null,
+          command: "",
+          excludeFromContext: false,
+        },
+      }),
+    ).toBe(false);
   });
 
   it("accepts presence frames and rejects malformed ones (idle auto-stop)", () => {
@@ -314,6 +340,21 @@ describe("frame schemas", () => {
           blockType: "text",
           revision: 3,
           patch: { type: "append", text: "more" },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      Check(RuntimeEventFrameSchema, {
+        v: 1,
+        type: "runtime.event",
+        at: "2026-07-20T10:00:00.000Z",
+        event: {
+          type: "output_patch",
+          operationId: "op-shell",
+          blockId: "shell-1",
+          blockType: "shell",
+          revision: 2,
+          patch: { type: "append", text: "output" },
         },
       }),
     ).toBe(true);

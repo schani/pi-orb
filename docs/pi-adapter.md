@@ -10,6 +10,23 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 - A Pi extension may still be useful for Pi-specific instrumentation, but it is not the infrastructure supervisor.
 - The orb runtime cannot restart itself reliably from inside its own failure domain. Docker initially, and GCE later, provide process/host supervision.
 - If the runtime enters an unrecoverable state, it should exit so its host can restart it.
+- User-shell commands call the Pi SDK's `AgentSession.executeBash()` directly. pi-orb does not reproduce the Pi TUI's separate `InteractiveMode` `user_bash` extension-interception layer (decided 2026-08-05).
+
+## User shell API and persistence
+
+The pinned Pi SDK 0.80.10 exposes the required public API:
+
+```ts
+session.executeBash(command, onChunk, { excludeFromContext }): Promise<BashResult>;
+session.abortBash(): void;
+session.isBashRunning: boolean;
+```
+
+`executeBash` runs in the session cwd using Pi's configured shell, streams sanitized output through `onChunk`, supports cancellation, and truncates retained output using Pi's bash limits. Normal completion, including cancellation and nonzero exit, appends a native `bashExecution` message to agent state and the persistent session. `excludeFromContext` changes only later model-context conversion: ordinary shell results are transformed into a user-context message, while excluded-shell results are skipped by `convertToLlm`. Both modes therefore remain in Pi history and replicate to PostgreSQL; exclusion does not mean ephemeral or absent from the history log.
+
+Abort dispatch depends on the active operation kind: agent work calls `session.abort()`, while shell work calls `session.abortBash()`. A nonzero command exit is a normal `BashResult`, not an SDK failure.
+
+`executeBash` appends its history entry directly and does not produce the prompt path's ordinary `message_end`/`agent_settled` persistence boundaries. After it resolves, the adapter must explicitly scan/publish the newly appended entry before broadcasting `operation_finished`. A cancelled result follows the same persistence ordering. If the SDK call rejects before producing a `BashResult`, the adapter reports a failed operation and must not invent a history record.
 
 ## Pi history behavior
 
@@ -98,7 +115,8 @@ Visibility is presentation policy, not persistence filtering:
 - show user and assistant messages normally; show tool names and states while keeping tool inputs and outputs collapsed by default;
 - show compaction as a collapsed boundary;
 - show `pi.custom_message` only when native `display` is true;
-- hide model/thinking changes, branch summaries, bash-execution events, labels, session-info entries, ordinary custom entries, and unknown events by default.
+- show `pi.bash_execution` as a preformatted shell command/output block; show exit, cancellation, and truncation status, and mark excluded-shell entries as excluded from model context;
+- hide model/thinking changes, branch summaries, labels, session-info entries, ordinary custom entries, and unknown events by default.
 
 The UI still traverses hidden records when reconstructing parent chains. Hidden records remain available for diagnostics and future richer renderers.
 

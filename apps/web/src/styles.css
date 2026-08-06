@@ -434,8 +434,14 @@ textarea:focus {
   color: var(--paper);
 }
 
-.turn-user .turn-rail {
+.turn-user .turn-rail,
+.turn-shell .turn-rail {
   background: linear-gradient(var(--accent) 0%, rgba(160, 62, 28, 0.15) 100%);
+}
+
+.turn-shell .turn-mark {
+  background: var(--accent);
+  color: var(--paper);
 }
 
 .turn-agent .turn-mark {
@@ -488,6 +494,37 @@ textarea:focus {
   border-bottom: 1px solid var(--rule-soft);
   padding-bottom: 4px;
   margin-bottom: 0;
+}
+
+.turn-shell .turn-body {
+  min-width: 0;
+  padding: 10px 14px;
+  background: var(--inset);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 var(--r) var(--r) 0;
+}
+
+.turn-shell .turn-label {
+  color: var(--accent);
+}
+
+.shell-output {
+  max-height: 28rem;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.shell-status {
+  margin-top: 7px;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .msg-image {
@@ -874,6 +911,20 @@ textarea:focus {
   font-family: var(--serif);
   font-size: 15.5px;
   line-height: 1.5;
+}
+
+.composer-input-shell {
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+.composer-mode {
+  padding-left: 2px;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
 }
 
 .composer-send {

@@ -12,7 +12,7 @@ import { PlainChatText } from "./ChatText.tsx";
 /** Streaming output block accumulated from `output_patch` events. */
 export interface LiveBlock {
   blockId: string;
-  blockType: "text" | "reasoning";
+  blockType: "text" | "reasoning" | "shell";
   text: string;
   revision: number;
 }
@@ -130,7 +130,39 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 type Turn =
   | { kind: "user"; record: MessageRecord }
   | { kind: "agent"; key: string; parts: ReactNode[] }
+  | { kind: "shell"; record: EventRecord }
   | { kind: "compaction"; record: CompactionRecord };
+
+interface BashExecutionView {
+  command: string;
+  output: string;
+  exitCode: number | null;
+  cancelled: boolean;
+  truncated: boolean;
+  excludeFromContext: boolean;
+}
+
+function bashExecutionView(record: EventRecord): BashExecutionView {
+  const native = record.overflow["native"];
+  const entry =
+    typeof native === "object" && native !== null && !Array.isArray(native)
+      ? (native as Record<string, unknown>)
+      : null;
+  const rawMessage = entry?.["message"];
+  const message =
+    typeof rawMessage === "object" && rawMessage !== null && !Array.isArray(rawMessage)
+      ? (rawMessage as Record<string, unknown>)
+      : null;
+  return {
+    command: typeof message?.["command"] === "string" ? message["command"] : "",
+    output:
+      typeof message?.["output"] === "string" ? message["output"] : blockText(record.content ?? []),
+    exitCode: typeof message?.["exitCode"] === "number" ? message["exitCode"] : null,
+    cancelled: message?.["cancelled"] === true,
+    truncated: message?.["truncated"] === true,
+    excludeFromContext: message?.["excludeFromContext"] === true,
+  };
+}
 
 /** Per docs/pi-adapter.md, only `pi.custom_message` with native `display: true` is shown. */
 function isDisplayedCustomMessage(record: EventRecord): boolean {
@@ -182,7 +214,11 @@ function groupTurns(records: readonly HistoryRecord[]): Turn[] {
         turns.push({ kind: "compaction", record });
         break;
       case "event":
-        if (isDisplayedCustomMessage(record)) appendAgentPart(record);
+        if (record.eventType === "pi.bash_execution") {
+          turns.push({ kind: "shell", record });
+        } else if (isDisplayedCustomMessage(record)) {
+          appendAgentPart(record);
+        }
         break;
     }
   }
@@ -220,6 +256,30 @@ function renderTurn(turn: Turn): ReactNode {
           </div>
         </article>
       );
+    case "shell": {
+      const shell = bashExecutionView(turn.record);
+      const statuses = [
+        ...(shell.excludeFromContext ? ["excluded from model context"] : []),
+        ...(shell.cancelled
+          ? ["cancelled"]
+          : shell.exitCode !== null && shell.exitCode !== 0
+            ? [`exit ${shell.exitCode}`]
+            : []),
+        ...(shell.truncated ? ["output truncated"] : []),
+      ];
+      return (
+        <article className="turn turn-shell" key={turn.record.id}>
+          <Gutter mark="Y" />
+          <div className="turn-body">
+            <span className="turn-label">Shell</span>
+            <pre className="shell-output">
+              {`$ ${shell.command}${shell.output === "" ? "" : `\n${shell.output}`}`}
+            </pre>
+            {statuses.length > 0 && <div className="shell-status">{statuses.join(" · ")}</div>}
+          </div>
+        </article>
+      );
+    }
     case "compaction":
       return (
         <div className="record-compaction" key={turn.record.id}>
@@ -240,11 +300,22 @@ function toolChipClass(state: ToolChip["state"]): string {
 }
 
 export function HistoryView({ records, liveBlocks, tools, busy }: HistoryViewProps) {
-  const hasLive = liveBlocks.length > 0 || tools.length > 0;
+  const shellBlocks = liveBlocks.filter((block) => block.blockType === "shell");
+  const agentBlocks = liveBlocks.filter((block) => block.blockType !== "shell");
+  const hasAgentLive = agentBlocks.length > 0 || tools.length > 0;
   return (
     <div className="history">
       {groupTurns(records).map(renderTurn)}
-      {hasLive && (
+      {shellBlocks.map((block) => (
+        <article className="turn turn-shell turn-live" key={block.blockId}>
+          <Gutter mark="Y" />
+          <div className="turn-body">
+            <span className="turn-label">Shell</span>
+            <pre className="shell-output">{block.text}</pre>
+          </div>
+        </article>
+      ))}
+      {hasAgentLive && (
         <article className="turn turn-agent turn-live">
           <Gutter mark="O" />
           <div className="turn-body">
@@ -259,7 +330,7 @@ export function HistoryView({ records, liveBlocks, tools, busy }: HistoryViewPro
                 ))}
               </div>
             )}
-            {liveBlocks.map((block) =>
+            {agentBlocks.map((block) =>
               block.blockType === "reasoning" ? (
                 <details className="reasoning" key={block.blockId}>
                   <summary>reasoning</summary>

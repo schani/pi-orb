@@ -8,6 +8,13 @@ const messageAction = (expectedHeadId: string | null): ClientAction => ({
   content: [{ type: "text", text: "do it" }],
 });
 
+const shellAction = (expectedHeadId: string | null): ClientAction => ({
+  type: "shell",
+  expectedHeadId,
+  command: "npm test",
+  excludeFromContext: false,
+});
+
 const idleView = (headId: string | null): AgentGateView => ({
   activity: "idle",
   headId,
@@ -34,6 +41,20 @@ describe("decideRequest", () => {
   it("rejects a stale head", () => {
     const decision = decideRequest(idleView("rec-9"), messageAction("rec-5"));
     expect(decision).toMatchObject({ type: "reject", code: "stale_head" });
+  });
+
+  it("accepts a shell command only while idle at the expected head", () => {
+    expect(decideRequest(idleView("rec-5"), shellAction("rec-5"))).toEqual({
+      type: "start_shell",
+    });
+    expect(decideRequest(busyView("rec-5", "op-1"), shellAction("rec-5"))).toMatchObject({
+      type: "reject",
+      code: "busy",
+    });
+    expect(decideRequest(idleView("rec-9"), shellAction("rec-5"))).toMatchObject({
+      type: "reject",
+      code: "stale_head",
+    });
   });
 
   it("accepts an abort of the active operation", () => {
@@ -83,6 +104,7 @@ describe("RequestRegistry (in-memory request identity, docs/runtime-protocol.md)
     expect(registry.lookup("req-1", { type: "abort", operationId: "op-1" })).toEqual({
       type: "conflict",
     });
+    expect(registry.lookup("req-1", shellAction("rec-1"))).toEqual({ type: "conflict" });
   });
 
   it("replays rejected outcomes verbatim", () => {

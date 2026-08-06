@@ -70,6 +70,52 @@ describe("HistoryView turn structure", () => {
     expect(html.match(/turn-agent/g)).toHaveLength(1);
   });
 
+  it("renders persisted and live shell output as preformatted shell turns", () => {
+    const shellRecord: HistoryRecord = {
+      id: "shell-1",
+      parentId: null,
+      timestamp: "time-shell-1",
+      type: "event",
+      eventType: "pi.bash_execution",
+      content: [{ type: "text", text: "npm test\npassing" }],
+      overflow: {
+        native: {
+          type: "message",
+          message: {
+            role: "bashExecution",
+            command: "npm test",
+            output: "passing",
+            exitCode: 2,
+            cancelled: false,
+            truncated: true,
+            excludeFromContext: true,
+          },
+        },
+      },
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[shellRecord]}
+        liveBlocks={[
+          {
+            blockId: "shell-live",
+            blockType: "shell",
+            text: "$ git status\nclean",
+            revision: 2,
+          },
+        ]}
+        tools={[]}
+        busy
+      />,
+    );
+
+    expect(html.match(/turn-shell/g)).toHaveLength(2);
+    expect(html).toContain("$ npm test\npassing");
+    expect(html).toContain("excluded from model context · exit 2 · output truncated");
+    expect(html).toContain("$ git status\nclean");
+    expect(html).not.toContain("<strong>passing</strong>");
+  });
+
   it("renders live streaming output and tool chips as an agent turn", () => {
     const html = renderToStaticMarkup(
       <HistoryView

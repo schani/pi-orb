@@ -100,6 +100,12 @@ type ClientAction =
       content: MessageInputBlock[];
     }
   | {
+      type: "shell";
+      expectedHeadId: string | null;
+      command: string;
+      excludeFromContext: boolean;
+    }
+  | {
       type: "abort";
       operationId: string;
     };
@@ -121,7 +127,7 @@ type ServerFrame =
   | ServerErrorFrame;
 ```
 
-`expectedHeadId` prevents a stale tab from silently starting a turn against a different conversation head. Requiring an operation ID prevents a delayed abort from affecting a later operation. An operation is one continuous busy period from an accepted new message until the runtime returns to idle. When steering and follow-ups are added in a later slice, they will join the operation they target rather than starting new ones.
+`expectedHeadId` prevents a stale tab from silently starting a turn or shell command against a different conversation head. Requiring an operation ID prevents a delayed abort from affecting a later operation. An operation is one continuous busy period from an accepted new message or shell command until the runtime returns to idle. When steering and follow-ups are added in a later slice, they will join the operation they target rather than starting new ones.
 
 A request receives exactly one requester-only result:
 
@@ -170,7 +176,7 @@ interface OutputPatchEvent {
   type: "output_patch";
   operationId: string;
   blockId: string;
-  blockType: "text" | "reasoning";
+  blockType: "text" | "reasoning" | "shell";
   revision: number;
   patch: { type: "append"; text: string } | { type: "replace"; text: string };
 }
@@ -197,7 +203,7 @@ All schemas will be closed TypeBox schemas. An invalid request receives a reject
 
 WebSocket ordering is sufficient within one connection, so frames do not have an event sequence number. Synchronous hello preparation creates the synchronization boundary. Reconnection uses complete record IDs and reconstructed live events, not a socket event offset.
 
-`client.hello` is non-mutating: it observes and synchronizes state. Both request actions are mutating: `message` starts agent work, and `abort` changes a running operation. HTTP health and history pulls are also non-mutating from the runtime's perspective. Control-plane host start/stop operations are mutations in a different API.
+`client.hello` is non-mutating: it observes and synchronizes state. All request actions are mutating: `message` starts agent work, `shell` starts a foreground command, and `abort` changes a running operation. HTTP health and history pulls are also non-mutating from the runtime's perspective. Control-plane host start/stop operations are mutations in a different API.
 
 Request identity is in-memory and scoped to one runtime process. The runtime keeps a map from request ID to its action and outcome for the life of the process. Resending a known request ID with an identical action returns the original result with `duplicate: true`; reusing a known ID with a different action returns `request_id_conflict`; an abort naming a finished or unknown operation returns `stale_operation`.
 
@@ -207,9 +213,19 @@ There is deliberately no durable request inbox. An earlier proposal appended a `
 
 Under outbound pressure, transient output and tool-state events may be coalesced to their newest equivalent state. Welcome, synchronization boundaries, request results, complete history records, operation transitions, and errors are never intentionally dropped. If critical queued data exceeds the configured budget, the runtime closes the connection and the browser reconstructs state through a new handshake.
 
-Harness capabilities differ. `server.welcome.capabilities` initially advertises values such as `abort` and `input.image`; later slices can add `steer` and `follow_up` behind new capability values without a wire-version change. Unsupported actions are rejected explicitly.
+Harness capabilities differ. `server.welcome.capabilities` initially advertises values such as `abort` and `input.image`; later slices can add `steer` and `follow_up` behind new capability values without a wire-version change. User-shell execution is mandatory in the current Pi runtime contract rather than capability-gated; if a second harness without an equivalent operation is introduced, revisit that contract from concrete adapter evidence. Unsupported actions are rejected explicitly.
 
 `input.image` is implemented end to end (2026-08-01): the browser composer accepts pasted images and sends them as `image` input blocks, the runtime forwards them to Pi's `sendUserMessage` as native image content (`mediaType` → Pi's `mimeType`), and they replicate losslessly through the ordinary history path like any other Pi-persisted content. To accommodate base64 payloads, the runtime's limits are 8 MiB per incoming frame and 6 MiB per prompt (`server.welcome.limits` remains authoritative for clients; the browser enforces the limit at paste time).
+
+## User shell operations
+
+Decided 2026-08-05: a browser shell submission is an explicit `shell` action, not a `message` whose leading characters the runtime interprets. This keeps validation, request identity, stale-head checking, and future harness adaptation explicit while the control plane remains content-agnostic. Shell support is mandatory for the current Pi runtime and is not advertised as an optional capability.
+
+A shell command is a serialized foreground operation. It is accepted only while the runtime is idle and `expectedHeadId` matches, receives an operation ID, and marks activity busy synchronously at acceptance. The runtime records the active operation kind: abort dispatches agent work to the harness's agent-abort operation and shell work to its shell-abort operation. A cancelled command finishes with operation outcome `aborted`. A nonzero exit is a completed operation with an unsuccessful command and visible exit code; only harness/runtime failures use operation outcome `failed`.
+
+Live shell output uses `output_patch` with `blockType: "shell"`. The block is preformatted as `$ <command>` plus streamed output, bounded using the shell-output safety limit, and participates in the existing coalescing and reconnect reconstruction path. `LiveOperationView` retains the active operation kind and bounded shell block so the ordinary synchronous handshake reconstructs an in-flight command. The complete persisted history record must be emitted before `operation_finished`, just as it is for agent operations.
+
+A shell action never carries image input. The browser prevents such submission, and the runtime schema/action handler rejects malformed attempts defensively. Command input uses the existing incoming-frame/prompt-size safety envelope.
 
 ## Multiple connections
 

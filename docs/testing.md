@@ -9,6 +9,7 @@
 - Failing entropy traces must be recordable and exactly replayable.
 - Explicit failpoints and scheduling checkpoints should cover replication, lifecycle, retry, reconciliation, and shutdown races.
 - DST complements rather than replaces normal unit, database integration, Docker, browser, and eventual GCE tests.
+- User-shell support requires tests for composer mode/caret transitions, paste normalization, attachment-blocked submission, send reset/preservation, both context modes and their persistent history, closed protocol schemas, stale-head/busy/request-replay races, bounded streaming/coalescing/reconnect reconstruction, success/nonzero/failure/cancellation, history publication before operation finish, abort dispatch, and a real runtime-protocol E2E shell command (decided 2026-08-05).
 
 ## Deterministic simulation testing strategy
 
