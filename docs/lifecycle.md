@@ -80,6 +80,8 @@ A restarted host is a booting host, and any liveness grace shorter than a boot c
 
 Rejected: keeping the restart inline everywhere and merely enlarging the grace past a boot. That fixes the livelock's period, not its shape — a `running` orb still has no deadline of its own, so an unrecoverable host would cycle forever at a slower rate, and every cycle hard-stops a host that may still be flushing (the durability gap in `docs/history-replication.md`). Re-entering `starting` instead reuses machinery that already has a deadline, a boot-failure sub-deadline, and host-side diagnostic evidence.
 
+Known false-positive (2026-08-05, `docs/postmortems/2026-08-05-egress-blip-false-unreachable-restart.md`): the silence measurement can fire against a healthy runtime, because "time since last pull success" also accumulates while the poller is stuck behind a slow provider observe or the control plane's own egress is broken — that incident restarted a runtime mid-turn without having sent it a single request during the measured silence, and discarded the in-flight agent turn. Follow-ups (corroborating silence; detecting and resuming an interrupted turn) are in `TODO.md`.
+
 DST coverage in `lifecycle.dst.test.ts`, all with the modeled 65 s host boot of `docs/testing.md`: `preemption-while-running` (a hypervisor soft-off mid-`running` recovers within a bounded number of provider stops), `runtime-dies-during-stopping-drain` (a drain whose runtime dies still completes on the rebooted runtime), and `stopping-restart-cap` (a restarted runtime that never answers fails the drain on evidence, well inside the stopping deadline).
 
 **Decided — the reconciler's event log (2026-08-06, closing the last defect of `docs/postmortems/2026-08-05-unreachable-restart-livelock.md`):**
