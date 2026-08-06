@@ -295,6 +295,74 @@ function completeEcho(
   session.operation = null;
 }
 
+function completeShell(
+  state: MockState,
+  session: LiveSession,
+  operationId: string,
+  command: string,
+  output: string,
+  excludeFromContext: boolean,
+): void {
+  if (session.operation?.id !== operationId) return;
+  const records = state.histories.get(session.orbId) ?? [];
+  const recordId = randomUUID();
+  const timestamp = now();
+  const parentId = records.at(-1)?.id ?? null;
+  const record: HistoryRecord = {
+    id: recordId,
+    parentId,
+    timestamp,
+    type: "event",
+    eventType: "pi.bash_execution",
+    content: [{ type: "text", text: `${command}\n${output}` }],
+    overflow: {
+      native: {
+        type: "message",
+        id: recordId,
+        parentId,
+        timestamp,
+        message: {
+          role: "bashExecution",
+          command,
+          output,
+          exitCode: 0,
+          cancelled: false,
+          truncated: false,
+          excludeFromContext,
+          timestamp: Date.now(),
+        },
+      },
+    },
+  };
+  appendRecord(state, session.orbId, record);
+  send(session.socket, {
+    v: 1,
+    type: "history.record",
+    at: now(),
+    record,
+    headId: record.id,
+  });
+  send(
+    session.socket,
+    eventFrame({
+      v: 1,
+      type: "runtime.event",
+      at: now(),
+      event: { type: "operation_finished", operationId, outcome: "completed" },
+    }),
+  );
+  send(
+    session.socket,
+    eventFrame({
+      v: 1,
+      type: "runtime.event",
+      at: now(),
+      event: { type: "status", activity: "idle" },
+    }),
+  );
+  session.operation = null;
+}
+
 function handleAction(
   state: MockState,
   session: LiveSession,
@@ -345,6 +413,20 @@ function handleAction(
     return;
   }
 
+  if (session.operation !== null) {
+    send(session.socket, {
+      v: 1,
+      type: "request.result",
+      at: now(),
+      requestId,
+      result: {
+        type: "rejected",
+        error: { code: "busy", message: "fixture operation is active", retryable: true },
+      },
+    });
+    return;
+  }
+
   const records = state.histories.get(session.orbId) ?? [];
   const headId = records.at(-1)?.id ?? null;
   if (action.expectedHeadId !== headId) {
@@ -361,6 +443,84 @@ function handleAction(
     return;
   }
   const operationId = randomUUID();
+  if (action.type === "shell") {
+    const output = `fixture output for: ${action.command}`;
+    send(session.socket, {
+      v: 1,
+      type: "request.result",
+      at: now(),
+      requestId,
+      result: { type: "accepted", operationId, duplicate: false },
+    });
+    send(
+      session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: { type: "operation_started", operationId },
+      }),
+    );
+    send(
+      session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: { type: "status", activity: "busy", operationId },
+      }),
+    );
+    send(
+      session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: {
+          type: "output_patch",
+          operationId,
+          blockId: `${operationId}-shell`,
+          blockType: "shell",
+          revision: 1,
+          patch: { type: "replace", text: `$ ${action.command}` },
+        },
+      }),
+    );
+    const timer = setTimeout(() => {
+      if (session.operation?.id !== operationId) return;
+      send(
+        session.socket,
+        eventFrame({
+          v: 1,
+          type: "runtime.event",
+          at: now(),
+          event: {
+            type: "output_patch",
+            operationId,
+            blockId: `${operationId}-shell`,
+            blockType: "shell",
+            revision: 2,
+            patch: { type: "append", text: `\n${output}` },
+          },
+        }),
+      );
+      session.operation.timer = setTimeout(
+        () =>
+          completeShell(
+            state,
+            session,
+            operationId,
+            action.command,
+            output,
+            action.excludeFromContext,
+          ),
+        350,
+      );
+    }, 350);
+    session.operation = { id: operationId, timer };
+    return;
+  }
+
   const inputText = action.content
     .filter((block) => block.type === "text")
     .map((block) => block.text)
