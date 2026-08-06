@@ -71,6 +71,7 @@ describe("computeSyncFrames", () => {
   it("reconstructs live operation state with replace patches and tool states", () => {
     const live: LiveOperationView = {
       operationId: "op-1",
+      operationKind: "agent",
       blocks: [{ blockId: "b1", blockType: "text", revision: 7, text: "partial out" }],
       tools: [{ callId: "c1", name: "bash", revision: 3, state: "running" }],
     };
@@ -98,6 +99,36 @@ describe("computeSyncFrames", () => {
       },
       { type: "status", activity: "busy", operationId: "op-1" },
     ]);
+  });
+
+  it("reconstructs a live shell block through the ordinary patch path", () => {
+    const live: LiveOperationView = {
+      operationId: "op-shell",
+      operationKind: "shell",
+      blocks: [
+        {
+          blockId: "op-shell-shell",
+          blockType: "shell",
+          revision: 4,
+          text: "$ npm test\npassing",
+        },
+      ],
+      tools: [],
+    };
+    const frames = computeSyncFrames(snapshot(1, "busy"), live, "rec-1", "now");
+    expect(frames).toContainEqual({
+      v: 1,
+      type: "runtime.event",
+      at: "now",
+      event: {
+        type: "output_patch",
+        operationId: "op-shell",
+        blockId: "op-shell-shell",
+        blockType: "shell",
+        revision: 4,
+        patch: { type: "replace", text: "$ npm test\npassing" },
+      },
+    });
   });
 
   it("emits an idle status event when no operation is live", () => {

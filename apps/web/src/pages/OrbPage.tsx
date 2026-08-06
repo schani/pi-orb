@@ -10,6 +10,7 @@ import {
 } from "@pi-orb/protocol";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { Composer, type ComposerImage } from "../components/Composer.tsx";
+import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
 import {
   type ApiError,
@@ -50,8 +51,9 @@ interface OrbPageState {
   liveBlocks: Map<string, LiveBlock>;
   tools: Map<string, ToolChip>;
   composerText: string;
+  composerMode: ComposerMode;
   composerImages: ComposerImage[];
-  pendingRequest: { requestId: string; kind: "message" | "abort" } | null;
+  pendingRequest: { requestId: string; kind: "message" | "shell" | "abort" } | null;
   requestError: { code: string; message: string } | null;
   serverError: { code: string; message: string } | null;
   notice: string | null;
@@ -62,11 +64,11 @@ type OrbPageAction =
   | { type: "history_failed"; error: ApiError }
   | { type: "frame"; frame: ServerFrame }
   | { type: "connection_status"; status: LiveConnectionStatus }
-  | { type: "composer_changed"; text: string }
+  | { type: "composer_changed"; text: string; mode: ComposerMode }
   | { type: "image_added"; image: ComposerImage }
   | { type: "image_removed"; id: string }
   | { type: "notice"; message: string }
-  | { type: "request_sent"; requestId: string; kind: "message" | "abort" }
+  | { type: "request_sent"; requestId: string; kind: "message" | "shell" | "abort" }
   | { type: "request_lost"; requestId: string }
   | { type: "send_unavailable" };
 
@@ -84,6 +86,7 @@ function initialState(): OrbPageState {
     liveBlocks: new Map(),
     tools: new Map(),
     composerText: "",
+    composerMode: "message",
     composerImages: [],
     pendingRequest: null,
     requestError: null,
@@ -143,6 +146,13 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
         tools: new Map(),
         operationId: null,
         activity: "idle",
+        serverError:
+          event.outcome === "failed"
+            ? {
+                code: "operation_failed",
+                message: event.message ?? "the runtime operation failed",
+              }
+            : state.serverError,
       };
   }
 }
@@ -192,12 +202,13 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         return state;
       }
       if (frame.result.type === "accepted") {
-        const clearComposer = state.pendingRequest.kind === "message";
+        const clearComposer = state.pendingRequest.kind !== "abort";
         return {
           ...state,
           pendingRequest: null,
           requestError: null,
           composerText: clearComposer ? "" : state.composerText,
+          composerMode: clearComposer ? "message" : state.composerMode,
           composerImages: clearComposer ? [] : state.composerImages,
         };
       }
@@ -239,7 +250,7 @@ function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
     case "connection_status":
       return { ...state, connection: action.status };
     case "composer_changed":
-      return { ...state, composerText: action.text };
+      return { ...state, composerText: action.text, composerMode: action.mode, notice: null };
     case "image_added":
       return { ...state, composerImages: [...state.composerImages, action.image], notice: null };
     case "image_removed":
@@ -409,11 +420,33 @@ export function OrbPage({ orbId }: { orbId: string }) {
     dispatch({ type: "image_added", image: { id: crypto.randomUUID(), mediaType, data } });
   };
 
-  const sendMessage = () => {
+  const sendComposer = () => {
     const connection = liveRef.current;
     const text = state.composerText.trim();
     const images = state.composerImages;
-    if (connection === null || (text === "" && images.length === 0)) return;
+    if (connection === null) return;
+
+    if (state.composerMode !== "message") {
+      if (images.length > 0) {
+        dispatch({
+          type: "notice",
+          message: "Remove image attachments before running a shell command.",
+        });
+        return;
+      }
+      if (text === "") return;
+      const requestId = connection.sendRequest({
+        type: "shell",
+        expectedHeadId: state.headId,
+        command: text,
+        excludeFromContext: state.composerMode === "excluded_shell",
+      });
+      if (requestId === null) dispatch({ type: "send_unavailable" });
+      else dispatch({ type: "request_sent", requestId, kind: "shell" });
+      return;
+    }
+
+    if (text === "" && images.length === 0) return;
     if (
       images.length > 0 &&
       !(state.welcome?.capabilities.includes(CAPABILITY_INPUT_IMAGE) ?? false)
@@ -596,15 +629,22 @@ export function OrbPage({ orbId }: { orbId: string }) {
 
         <Composer
           text={state.composerText}
-          onTextChange={(text) => dispatch({ type: "composer_changed", text })}
+          mode={state.composerMode}
+          onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}
           images={state.composerImages}
           onImageAdd={addImage}
           onImageRemove={(id) => dispatch({ type: "image_removed", id })}
           canSend={canSend}
-          onSend={sendMessage}
+          onSend={sendComposer}
           canAbort={canAbort}
           onAbort={sendAbort}
           pending={state.pendingRequest !== null}
+          onShellAttachmentBlocked={() =>
+            dispatch({
+              type: "notice",
+              message: "Remove image attachments before running a shell command.",
+            })
+          }
         />
       </main>
     </>

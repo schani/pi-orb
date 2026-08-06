@@ -43,6 +43,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The orb's lifetime is independent of the browser or local CLI session.
 - There is one agent/conversation per orb in the first version.
 - Pi compaction is supported; Pi tree navigation and multiple sessions are not exposed initially.
+- The composer supports foreground Pi user-shell commands through explicit `message`, `shell`, and `excluded shell` modes. `!` and `!!` at input offset zero enter the shell modes without leaving a visible prefix; both persist to history, while excluded shell alone is omitted from later model context. Shell submission requires an idle runtime and no image attachments (decided 2026-08-05).
 - Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes mutations and broadcasts state.
 - Multiplayer product features such as presence, attribution, and per-user permissions are out of scope for the first slice.
 

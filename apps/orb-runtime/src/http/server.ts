@@ -149,13 +149,25 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
           });
           return;
         }
-        if (
-          frame.action.type === "message" &&
-          JSON.stringify(frame.action.content).length > MAX_PROMPT_BYTES
-        ) {
+        const actionBytes =
+          frame.action.type === "message"
+            ? JSON.stringify(frame.action.content).length
+            : frame.action.type === "shell"
+              ? frame.action.command.length
+              : 0;
+        if (actionBytes > MAX_PROMPT_BYTES) {
           const result: RequestResult = {
             type: "rejected",
-            error: { code: "invalid_request", message: "prompt too large", retryable: false },
+            error: { code: "invalid_request", message: "input too large", retryable: false },
+          };
+          registry.record(frame.requestId, frame.action, result);
+          sendResult(frame.requestId, result);
+          return;
+        }
+        if (frame.action.type === "shell" && frame.action.command.trim() === "") {
+          const result: RequestResult = {
+            type: "rejected",
+            error: { code: "invalid_request", message: "shell command is empty", retryable: false },
           };
           registry.record(frame.requestId, frame.action, result);
           sendResult(frame.requestId, result);
@@ -188,14 +200,21 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
           void agent.abortOperation();
           return;
         }
-        // start_message: acceptance is not completion (docs/runtime-protocol.md). The operation
-        // id becomes visible through operation_started once Pi starts.
-        const content = frame.action.type === "message" ? frame.action.content : [];
+        // Acceptance is not completion (docs/runtime-protocol.md).
         const operationId = randomUUID();
         const result: RequestResult = { type: "accepted", operationId, duplicate: false };
         registry.record(frame.requestId, frame.action, result);
         sendResult(frame.requestId, result);
-        void agent.submitMessage(content, operationId);
+        if (decision.type === "start_shell" && frame.action.type === "shell") {
+          void agent.submitShell(
+            frame.action.command.trim(),
+            frame.action.excludeFromContext,
+            operationId,
+          );
+        } else if (frame.action.type === "message") {
+          // The operation id becomes visible through operation_started once Pi starts.
+          void agent.submitMessage(frame.action.content, operationId);
+        }
       };
 
       socket.on("message", (data: Buffer, isBinary: boolean) => {

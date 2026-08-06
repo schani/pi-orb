@@ -1,6 +1,7 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { HistoryRecord } from "@pi-orb/protocol";
-import { mapPiEntry } from "./mapping.ts";
+import { err, ok, type Result } from "neverthrow";
+import { type MappingError, mapPiEntry } from "./mapping.ts";
 
 interface PiEntrySource {
   getEntries(): unknown[];
@@ -34,8 +35,24 @@ export class LiveHistoryPublisher {
     } else if (type === "entry_appended" || type === "agent_settled") {
       // entry_appended follows persistence. agent_settled is the final
       // synchronous barrier before transient operation state is cleared.
-      this.flush();
+      void this.flushPersisted();
     }
+  }
+
+  /** Publish entries appended directly by SDK paths without agent lifecycle events. */
+  flushPersisted(): Result<void, MappingError> {
+    for (const entry of this.source.getEntries()) {
+      const id = this.entryId(entry);
+      if (id !== null && this.knownIds.has(id)) continue;
+
+      const mapped = mapPiEntry(entry);
+      // Preserve append-order continuity: a bad entry makes the operation and
+      // HTTP pull fail; it must never be skipped in the live stream.
+      if (mapped.isErr()) return err(mapped.error);
+      this.knownIds.add(mapped.value.id);
+      this.publish(mapped.value);
+    }
+    return ok(undefined);
   }
 
   private scheduleFlushAfterPiPersistsMessage(): void {
@@ -43,22 +60,8 @@ export class LiveHistoryPublisher {
     this.flushScheduled = true;
     queueMicrotask(() => {
       this.flushScheduled = false;
-      this.flush();
+      void this.flushPersisted();
     });
-  }
-
-  private flush(): void {
-    for (const entry of this.source.getEntries()) {
-      const id = this.entryId(entry);
-      if (id !== null && this.knownIds.has(id)) continue;
-
-      const mapped = mapPiEntry(entry);
-      // Preserve append-order continuity: a bad entry makes the HTTP pull fail
-      // and must not be skipped in the live stream either.
-      if (mapped.isErr()) return;
-      this.knownIds.add(mapped.value.id);
-      this.publish(mapped.value);
-    }
   }
 
   private entryId(entry: unknown): string | null {

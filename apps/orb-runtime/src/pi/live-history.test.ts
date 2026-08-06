@@ -36,6 +36,37 @@ describe("LiveHistoryPublisher", () => {
     });
   });
 
+  it("publishes a directly appended bash execution on an explicit flush", () => {
+    const entries: unknown[] = [];
+    const published: HistoryRecord[] = [];
+    const publisher = new LiveHistoryPublisher({ getEntries: () => entries }, (record) =>
+      published.push(record),
+    );
+    entries.push({
+      id: "bash-1",
+      parentId: null,
+      type: "message",
+      timestamp: "time-bash-1",
+      message: {
+        role: "bashExecution",
+        command: "npm test",
+        output: "passing",
+        exitCode: 0,
+        cancelled: false,
+        truncated: false,
+        excludeFromContext: true,
+        timestamp: 1,
+      },
+    });
+
+    const result = publisher.flushPersisted();
+
+    expect(result.isOk()).toBe(true);
+    expect(published).toMatchObject([
+      { type: "event", eventType: "pi.bash_execution", id: "bash-1" },
+    ]);
+  });
+
   it("flushes committed responses before agent_settled and never republishes entries", () => {
     const entries: unknown[] = [];
     const published: HistoryRecord[] = [];
