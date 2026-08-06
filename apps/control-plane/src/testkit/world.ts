@@ -63,6 +63,12 @@ interface FakeHost {
   orbId: string;
   state: OrbHostState;
   runtime: FakeRuntimeInstance | null;
+  /**
+   * The script generation stamped on the host, as the GCE provider stamps
+   * `pi-orb-script-generation` (docs/host-provider.md). Every host carries
+   * one; the single-provider harness stamps 0 everywhere and never repairs.
+   */
+  scriptGeneration: number;
   /** Per-incarnation runtime token "carried in the host's env". */
   runtimeToken: string;
   /** Monotonic ms of a hypervisor ACPI soft-off in progress, or null. */
@@ -74,6 +80,13 @@ interface FakeHost {
 /** The deterministic stand-in for SHA-256 used by the fake provider. */
 export function fakeTokenHash(token: string): string {
   return `sha256(${token})`;
+}
+
+/** One completed script repair: the host's stamp moved `from` → `to`. */
+export interface ScriptRepair {
+  readonly orbId: string;
+  readonly from: number;
+  readonly to: number;
 }
 
 interface OrbWorldState {
@@ -91,6 +104,8 @@ interface OrbWorldState {
   /** Provider stop/start operations applied to this orb's host. */
   hostStopCount: number;
   hostStartCount: number;
+  /** Every completed script repair of this orb's host, in order. */
+  scriptRepairs: ScriptRepair[];
 }
 
 /** Measured GCE figure: ~60–70s from `instances.start` to a serving container. */
@@ -128,6 +143,7 @@ export class FakeWorld {
       reportOrbId: null,
       hostStopCount: 0,
       hostStartCount: 0,
+      scriptRepairs: [],
     });
   }
 
@@ -300,11 +316,17 @@ export class FakeWorld {
     }
   }
 
-  provisionHost(task: SimulationTask, orbId: string): ProvisionedOrbHost {
+  provisionHost(
+    task: SimulationTask,
+    orbId: string,
+    scriptGeneration: number = 0,
+  ): ProvisionedOrbHost {
     const state = this.orbState(orbId);
     if (state.host !== null) {
       // Idempotent: return the existing host (starting it if stopped) and
-      // read its token back — never re-mint for an existing incarnation.
+      // read its token back — never re-mint for an existing incarnation. A
+      // reused host keeps the generation it was stamped with; only a repair
+      // (`completeScriptRepair`) restamps it.
       if (state.host.state === "stopped" || state.host.state === "failed") {
         this.startHost(task, state.host.ref);
       }
@@ -319,12 +341,63 @@ export class FakeWorld {
       state: "running",
       runtime: null,
       runtimeToken,
+      scriptGeneration,
       preemptedAtMonotonic: null,
       preemptionSoftWindowMs: DEFAULT_PREEMPTION_SOFT_WINDOW_MS,
     };
     state.hostStartCount += 1;
     this.bootRuntime(task, orbId);
     return { ref, runtimeTokenHash: fakeTokenHash(runtimeToken) };
+  }
+
+  /** The orb's host reference, or null when it has none. */
+  hostRefOf(orbId: string): OrbHostRef | null {
+    return this.orbState(orbId).host?.ref ?? null;
+  }
+
+  /** The script generation stamped on the orb's host. */
+  scriptGenerationOf(orbId: string): number | null {
+    return this.orbState(orbId).host?.scriptGeneration ?? null;
+  }
+
+  /** Every completed script repair of the orb's host, oldest first. */
+  scriptRepairsOf(orbId: string): readonly ScriptRepair[] {
+    return this.orbState(orbId).scriptRepairs;
+  }
+
+  /**
+   * The fencing rule, in one place: a repair only ever moves a host's stamp
+   * *forward*. An older revision meeting a newer host's script leaves it
+   * alone; an equal generation repairs nothing, because the stamp already
+   * says the host carries this revision's script (the real adapter compares
+   * script hashes at equal generation — the fake has no script text, so the
+   * generation is the whole comparison).
+   */
+  private repairIsNeeded(stamped: number, generation: number): boolean {
+    return stamped < generation;
+  }
+
+  /** Whether `generation` would repair the host behind `ref` right now. */
+  needsScriptRepair(ref: OrbHostRef, generation: number): boolean {
+    const host = this.findByRef(ref)?.host;
+    if (host === null || host === undefined) return false;
+    return this.repairIsNeeded(host.scriptGeneration, generation);
+  }
+
+  /**
+   * The second half of a repair: restamp and start. Re-checks the fence, so a
+   * repair whose stop half raced another revision's repair cannot write the
+   * stamp backward, and only a repair that actually moved the stamp counts.
+   */
+  completeScriptRepair(task: SimulationTask, ref: OrbHostRef, generation: number): void {
+    const state = this.findByRef(ref);
+    if (state === null || state.host === null) return;
+    const host = state.host;
+    if (this.repairIsNeeded(host.scriptGeneration, generation)) {
+      state.scriptRepairs.push({ orbId: host.orbId, from: host.scriptGeneration, to: generation });
+      host.scriptGeneration = generation;
+    }
+    this.startHost(task, ref);
   }
 
   /** The host vanishes entirely (manual removal, definitive absence). */
@@ -524,14 +597,46 @@ const providerError = (
   retryable,
 });
 
+/**
+ * How long a script repair holds the host stopped between its stop and its
+ * restamp+start, standing in for the GCE stop operation plus `setMetadata`.
+ * It has to be long enough for another reconciler to *observe* the stopped
+ * host — that window is what turned dueling repairs into a war on 2026-08-06
+ * (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md) — and
+ * short enough to fit inside a provider operation deadline.
+ */
+const SCRIPT_REPAIR_STOP_MS = 2_000;
+
 export class FakeOrbHostProvider implements OrbHostProvider {
   readonly kind = "fake";
   private readonly world: FakeWorld;
   private readonly maxLatencyMs: number;
+  private readonly scriptGeneration: number;
 
-  constructor(world: FakeWorld, maxLatencyMs: number = 50) {
+  constructor(world: FakeWorld, maxLatencyMs: number = 50, scriptGeneration: number = 0) {
     this.world = world;
     this.maxLatencyMs = maxLatencyMs;
+    this.scriptGeneration = scriptGeneration;
+  }
+
+  /**
+   * The fake's mirror of `GceOrbHostProvider.ensureCurrentScript`: before
+   * provisioning-by-reuse or starting a host, bring its stamped script
+   * generation up to this provider's — stop, wait, restamp, start — and let
+   * the host pay a full boot again. Fenced forward-only in the world, so a
+   * revision never repairs a host stamped by a newer one. Returns whether it
+   * repaired (and therefore already started the host).
+   */
+  private async repairScriptIfNeeded(
+    task: SimulationTask,
+    ref: OrbHostRef,
+    context: OperationContext,
+  ): Promise<boolean> {
+    if (!this.world.needsScriptRepair(ref, this.scriptGeneration)) return false;
+    this.world.stopHost(ref);
+    await task.sleep(SCRIPT_REPAIR_STOP_MS, "script repair", { signal: context.signal });
+    this.world.completeScriptRepair(task, ref, this.scriptGeneration);
+    return true;
   }
 
   private op<T>(
@@ -539,7 +644,7 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     operation: OrbHostProviderError["operation"],
     failpoint: string,
     context: OperationContext,
-    f: () => T,
+    f: () => T | Promise<T>,
   ): ResultAsync<T, OrbHostProviderError> {
     const run = async (): Promise<T> => {
       await task.sleep(
@@ -564,9 +669,13 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     request: ProvisionOrbHostRequest,
     context: OperationContext,
   ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError> {
-    return this.op(task, "provision", FAILPOINTS.providerProvision, context, () =>
-      this.world.provisionHost(task, request.orbId),
-    );
+    return this.op(task, "provision", FAILPOINTS.providerProvision, context, async () => {
+      // Reuse repairs the script first, exactly as the GCE provider does, so
+      // the start below finds an already-running host.
+      const existing = this.world.hostRefOf(request.orbId);
+      if (existing !== null) await this.repairScriptIfNeeded(task, existing, context);
+      return this.world.provisionHost(task, request.orbId, this.scriptGeneration);
+    });
   }
 
   start(
@@ -574,9 +683,11 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     ref: OrbHostRef,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
-    return this.op(task, "start", FAILPOINTS.providerStart, context, () =>
-      this.world.startHost(task, ref),
-    );
+    return this.op(task, "start", FAILPOINTS.providerStart, context, async () => {
+      // A repair has already started the host (GceOrbHostProvider.start).
+      if (await this.repairScriptIfNeeded(task, ref, context)) return;
+      this.world.startHost(task, ref);
+    });
   }
 
   stop(

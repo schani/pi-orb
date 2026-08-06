@@ -188,6 +188,13 @@ async function main(): Promise<void> {
   }
   const tailscaleOption = tailscale !== null ? { tailscale } : {};
   const viewConfig = tailscale !== null ? { tailnetDnsName } : {};
+  // Forward-only script-repair fencing (docs/host-provider.md): the deploy
+  // stamps a monotonic generation, and a revision refuses to repair a host
+  // stamped by a newer one. Unset means 0, which is also what an apply that
+  // forgets `-var deploy_generation=…` produces: such a revision repairs
+  // nothing that a real deploy stamped, and the next real deploy repairs
+  // forward. Never backward, at the cost of a delayed upgrade.
+  const scriptGeneration = Number.parseInt(env("PI_ORB_SCRIPT_GENERATION", "0"), 10);
   const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
   const hostProvider =
     providerKind === "gce"
@@ -202,6 +209,7 @@ async function main(): Promise<void> {
           serviceAccount: env("PI_ORB_GCE_SERVICE_ACCOUNT", ""),
           runtimeImage,
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
+          scriptGeneration: Number.isFinite(scriptGeneration) ? scriptGeneration : 0,
           ...mockExtraEnv,
           ...tailscaleOption,
         })

@@ -369,6 +369,14 @@ async function reconcileCreateStart(
   }
   const observation = observed.value;
   if (observation === null) {
+    // Whatever boot this probe was measuring is over (docs/lifecycle.md): the
+    // sub-deadline below must time *this* host incarnation, not a previous one.
+    deps.control.recordBootProbe(orb.id, {
+      hostState: null,
+      hostRunningSinceWall: null,
+      hostRunningSinceMono: null,
+      answered: false,
+    });
     // Definitive absence: idempotent provision restores the host (docs/lifecycle.md).
     const projectResult = await deps.store.getProject(task, orb.projectId);
     if (projectResult.isErr()) return retryable(projectResult.error.message);
@@ -417,6 +425,19 @@ async function reconcileCreateStart(
       return waiting("host_transition");
     case "stopped":
     case "failed": {
+      // The host is down, so any "running since" this probe carries belongs to
+      // a boot that is already over; null resets it and the boot sub-deadline
+      // times the incarnation the start below creates. Without this reset a
+      // reconciler that watched an earlier boot — a draining revision that
+      // never made the `running` transition itself, so never cleared its probe
+      // — fails the next start as `runtime_never_answered` the moment the old
+      // clock runs out (found by `mixed-generation.dst.test.ts`).
+      deps.control.recordBootProbe(orb.id, {
+        hostState: observation.state,
+        hostRunningSinceWall: null,
+        hostRunningSinceMono: null,
+        answered: false,
+      });
       const started = await startHost(
         task,
         deps,
@@ -837,6 +858,10 @@ export async function reconcileOrbOnce(
   if (orbResult.isErr()) return retryable(orbResult.error.message);
   const orb = orbResult.value;
   if (orb === null) return { type: "noop" };
+  // Everything this process remembers is scoped to the orb's current visit to
+  // its state (docs/lifecycle.md): a reconciler that never made the transition
+  // itself must not judge this episode by the previous one's clocks.
+  deps.control.noteStateEpisode(orb.id, orb.stateChangedAt);
   switch (orb.state) {
     case "creating":
     case "starting":

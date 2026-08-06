@@ -23,6 +23,38 @@ function clientError(
   return { type: "runtime_client_error", code, message, retryable };
 }
 
+/** Bounded walk depth; also the cycle guard for a self-referential cause. */
+const CAUSE_DEPTH_LIMIT = 8;
+
+/**
+ * First syscall-level `code` reachable from a fetch rejection. undici reports
+ * every connection failure as the message "fetch failed" and hides the real
+ * reason in `cause` (or, when it tried several addresses, in an
+ * `AggregateError`'s `errors`), which is why the 2026-08-06 incident could not
+ * tell "no listener in the container" from "host unreachable"
+ * (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
+ */
+function causeCode(error: unknown, depth = 0): string | null {
+  if (depth >= CAUSE_DEPTH_LIMIT || typeof error !== "object" || error === null) return null;
+  const record = error as { code?: unknown; errors?: unknown; cause?: unknown };
+  // DOMException carries a numeric `code`; only a string one is a syscall code.
+  if (typeof record.code === "string" && record.code !== "") return record.code;
+  if (Array.isArray(record.errors)) {
+    for (const nested of record.errors) {
+      const code = causeCode(nested, depth + 1);
+      if (code !== null) return code;
+    }
+  }
+  return causeCode(record.cause, depth + 1);
+}
+
+/** Adapter-boundary rendering of a fetch rejection: message plus its cause code. */
+export function describeFetchError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = causeCode(error);
+  return code === null ? message : `${message} (${code})`;
+}
+
 /**
  * `fetch`-based runtime client (docs/stack.md): the AbortSignal reaches
  * fetch so a hung request cannot pin a reconciler, responses are validated
@@ -40,7 +72,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
       const response = await ResultAsync.fromPromise(
         fetch(url, { signal: context.signal }),
         (error) => {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = describeFetchError(error);
           if (context.signal.aborted) return clientError("cancelled", message, true);
           return clientError("unreachable", message, true);
         },
