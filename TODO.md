@@ -8,8 +8,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **E2E cannot pass on macOS Docker Desktop** (2026-08-04, was open question 34). The Docker provider hands the control plane the container's bridge IP, which is unreachable from the host on Docker Desktop (verified empirically — connections hang, readiness always times out). Candidate fixes: publish the runtime port to a host loopback port and use it in the observation when the control plane is host-run, or run the E2E control plane inside the Docker network. Until then the E2E only passes where container IPs are host-routable (Linux, OrbStack).
-
 ## Hardening
 
 - **Close the served-vs-durable persistence gap** (was open question 33; incident: `docs/postmortems/2026-08-03-cursor-not-found.md`). The runtime answers history pulls from in-memory session entries while the SDK persists with `appendFileSync` and no fsync, and the SDK loader silently drops a truncated tail line on reload. A hard host stop can therefore lose a record the control plane already replicated and committed as its cursor, stranding the orb in a `cursor_not_found` integrity failure. Candidate fixes: serve only durably-persisted entries (fsync barrier or persisted-watermark cursor), fsync at drain time, and/or make the loader surface a truncated tail as a load error instead of silence.

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
+import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError } from "../../domain/errors.ts";
 import type {
   OperationContext,
@@ -21,8 +21,8 @@ export interface DockerOrbHostProviderOptions {
   readonly network: string;
   /**
    * Control-plane base URL as reachable *from orb containers* (the broker
-   * endpoint, docs/credentials.md). When omitted, the provider resolves the
-   * Docker network's gateway address and uses `http://<gateway>:<port>`.
+   * endpoint, docs/credentials.md). When omitted, containers use
+   * `http://host.docker.internal:<port>` via the `host-gateway` host entry.
    */
   readonly controlPlaneUrl?: string;
   /** Port for the gateway-derived control-plane URL. */
@@ -32,6 +32,43 @@ export interface DockerOrbHostProviderOptions {
 }
 
 const ORB_LABEL = "pi-orb.orb-id";
+
+/** Port the orb runtime listens on inside the container (apps/orb-runtime). */
+export const RUNTIME_PORT = 8080;
+
+/**
+ * Hostname orb containers use for the control plane, mapped to the Docker
+ * `host-gateway` special value (Docker 20.10+). It resolves to the real host on
+ * Docker Desktop and to the bridge gateway — i.e. the host — on Linux, so it is
+ * one uniform mechanism rather than a macOS special case.
+ */
+export const DOCKER_HOST_ALIAS = "host.docker.internal";
+
+/**
+ * Host-loopback port the runtime port is published on, from `docker inspect`'s
+ * `NetworkSettings.Ports` map. Docker Desktop (macOS) makes container bridge IPs
+ * unreachable from the host, so the published loopback mapping is the only
+ * address a host-run control plane can dial. The mapping is ephemeral — Docker
+ * re-picks the host port on every container start — which is fine because
+ * `runtimeAddress` is re-read at observe time and never persisted
+ * (docs/host-provider.md).
+ */
+export function publishedRuntimePort(info: Record<string, unknown>): string | null {
+  const networkSettings = (info["NetworkSettings"] ?? {}) as Record<string, unknown>;
+  const ports = (networkSettings["Ports"] ?? {}) as Record<string, unknown>;
+  const bindings = ports[`${RUNTIME_PORT}/tcp`];
+  if (!Array.isArray(bindings)) return null;
+  for (const binding of bindings) {
+    if (typeof binding !== "object" || binding === null) continue;
+    const entry = binding as Record<string, unknown>;
+    const hostIp = entry["HostIp"];
+    const hostPort = entry["HostPort"];
+    if (typeof hostPort !== "string" || hostPort === "") continue;
+    // Only IPv4 bindings reachable on loopback; `""` means all interfaces.
+    if (hostIp === "127.0.0.1" || hostIp === "0.0.0.0" || hostIp === "") return hostPort;
+  }
+  return null;
+}
 
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -100,44 +137,29 @@ function mapContainerState(state: string): OrbHostState {
 /**
  * Docker CLI host provider (docs/host-provider.md, docs/stack.md): one container plus one
  * persistent volume per orb, driven through `execFile` with every call caught
- * at this boundary. The runtime address uses the container name on the shared
- * Docker network.
+ * at this boundary. The runtime address prefers the published host-loopback
+ * mapping, falling back to the bridge IP and then the container name on the
+ * shared Docker network.
  */
 export class DockerOrbHostProvider implements OrbHostProvider {
   readonly kind = "docker";
   private readonly options: DockerOrbHostProviderOptions;
-  private controlPlaneUrl: string | null = null;
 
   constructor(options: DockerOrbHostProviderOptions) {
     this.options = options;
-    this.controlPlaneUrl = options.controlPlaneUrl ?? null;
   }
 
-  /** The broker URL orb containers use; gateway-derived unless configured. */
-  private resolveControlPlaneUrl(
-    context: OperationContext,
-  ): ResultAsync<string, OrbHostProviderError> {
-    if (this.controlPlaneUrl !== null) return okAsync(this.controlPlaneUrl);
-    return this.exec(
-      "provision",
-      [
-        "network",
-        "inspect",
-        this.options.network,
-        "--format",
-        "{{(index .IPAM.Config 0).Gateway}}",
-      ],
-      context,
-    ).andThen((result) => {
-      const gateway = result.stdout.trim();
-      if (gateway === "") {
-        return errAsync(
-          providerError("provision", "operation_failed", "docker network has no gateway", true),
-        );
-      }
-      this.controlPlaneUrl = `http://${gateway}:${this.options.controlPlanePort}`;
-      return okAsync(this.controlPlaneUrl);
-    });
+  /**
+   * The broker URL orb containers use. Unless configured explicitly, containers
+   * reach the control plane through `host.docker.internal`, published into the
+   * container by `--add-host=host.docker.internal:host-gateway`. The bridge
+   * gateway IP this used to inspect is the host only on Linux; on Docker Desktop
+   * it is the VM's internal gateway where nothing listens, so the runtime's
+   * credential-broker call hangs and the orb never reaches `running`.
+   */
+  private controlPlaneUrl(): string {
+    const { controlPlaneUrl, controlPlanePort } = this.options;
+    return controlPlaneUrl ?? `http://${DOCKER_HOST_ALIAS}:${controlPlanePort}`;
   }
 
   private exec(
@@ -195,6 +217,24 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     return new ResultAsync(run());
   }
 
+  /**
+   * The single place a runtime address is derived from `docker inspect`, shared
+   * by every observation path. Prefers the published host-loopback mapping
+   * (the only address that works on Docker Desktop), then the bridge-network IP,
+   * then the container name (which resolves when the control plane shares the
+   * Docker network).
+   */
+  private runtimeBaseUrl(info: Record<string, unknown>, name: string): string {
+    const published = publishedRuntimePort(info);
+    if (published !== null) return `http://127.0.0.1:${published}`;
+    const networkSettings = (info["NetworkSettings"] ?? {}) as Record<string, unknown>;
+    const networks = (networkSettings["Networks"] ?? {}) as Record<string, unknown>;
+    const networkInfo = (networks[this.options.network] ?? {}) as Record<string, unknown>;
+    const ip = typeof networkInfo["IPAddress"] === "string" ? networkInfo["IPAddress"] : "";
+    const host = ip !== "" ? ip : name;
+    return `http://${host}:${RUNTIME_PORT}`;
+  }
+
   private toObservation(info: Record<string, unknown>): OrbHostObservation | null {
     const config = info["Config"] as Record<string, unknown> | undefined;
     const labels = (config?.["Labels"] ?? {}) as Record<string, unknown>;
@@ -204,19 +244,13 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     const status = String(stateInfo["Status"] ?? "dead");
     const state = mapContainerState(status);
     const name = containerName(orbId);
-    // Prefer the bridge-network IP so a host-run control plane can reach the
-    // runtime; the container name works when the control plane shares the
-    // Docker network.
-    const networkSettings = (info["NetworkSettings"] ?? {}) as Record<string, unknown>;
-    const networks = (networkSettings["Networks"] ?? {}) as Record<string, unknown>;
-    const networkInfo = (networks[this.options.network] ?? {}) as Record<string, unknown>;
-    const ip = typeof networkInfo["IPAddress"] === "string" ? networkInfo["IPAddress"] : "";
-    const host = ip !== "" ? ip : name;
     const observation: OrbHostObservation = {
       ref: { provider: "docker", resourceId: name },
       orbId,
       state,
-      ...(state === "running" ? { runtimeAddress: { baseUrl: `http://${host}:8080` } } : {}),
+      ...(state === "running"
+        ? { runtimeAddress: { baseUrl: this.runtimeBaseUrl(info, name) } }
+        : {}),
       ...(status === "dead" ? { failure: { code: "dead", message: "container is dead" } } : {}),
     };
     return observation;
@@ -249,8 +283,6 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         const removed = await this.exec("provision", ["rm", "--force", name], context);
         if (removed.isErr()) return err(removed.error);
       }
-      const controlPlaneUrl = await this.resolveControlPlaneUrl(context);
-      if (controlPlaneUrl.isErr()) return err(controlPlaneUrl.error);
       const volume = await this.exec(
         "provision",
         ["volume", "create", "--label", `${ORB_LABEL}=${request.orbId}`, volumeName(request.orbId)],
@@ -269,6 +301,13 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           `${ORB_LABEL}=${request.orbId}`,
           "--network",
           this.options.network,
+          // Publish the runtime port on an ephemeral host-loopback port: bridge
+          // IPs are unreachable from the host on Docker Desktop (macOS), and on
+          // Linux a loopback publication is harmless.
+          "--publish",
+          `127.0.0.1:0:${RUNTIME_PORT}`,
+          // Reach the host-run control plane from inside the container.
+          `--add-host=${DOCKER_HOST_ALIAS}:host-gateway`,
           "--restart",
           "unless-stopped",
           "--volume",
@@ -280,7 +319,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           "--env",
           `${RUNTIME_TOKEN_ENV}=${runtimeToken}`,
           "--env",
-          `${CONTROL_PLANE_URL_ENV}=${controlPlaneUrl.value}`,
+          `${CONTROL_PLANE_URL_ENV}=${this.controlPlaneUrl()}`,
           ...Object.entries(this.options.extraEnv ?? {}).flatMap(([key, value]) => [
             "--env",
             `${key}=${value}`,
