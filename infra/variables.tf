@@ -26,15 +26,15 @@ variable "github_client_id" {
 }
 
 variable "tailscale_oauth_client_id" {
-  description = "Tailscale OAuth client id used to mint per-orb auth keys (docs/ports.md); empty disables port exposure. The client must own tag:pi-orb; its secret lives in Secret Manager."
+  description = "Tailscale OAuth client id used to mint per-orb auth keys (docs/ports.md); empty disables port exposure. An identifier, not a credential — it grants nothing without the client secret, which lives only in Secret Manager. The client must own tag:pi-orb."
   type        = string
-  default     = ""
+  default     = "kcjtdpKcAL11CNTRL"
 }
 
 variable "tailscale_tailnet_dns_name" {
-  description = "MagicDNS suffix of the tailnet, e.g. \"tailabc123.ts.net\"; orbs are reachable at pi-orb-<orbId>.<this>."
+  description = "MagicDNS suffix of the tailnet; orbs are reachable at pi-orb-<orbId>.<this> by tailnet members only — the name itself grants no access."
   type        = string
-  default     = ""
+  default     = "tail8fb2d0.ts.net"
 }
 
 variable "control_plane_image" {
