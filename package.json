@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "test": "vitest run",
+    "dev:frontend": "npm run dev:frontend --workspace @pi-orb/web",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e",
     "lint": "biome check .",
     "format": "biome check --write .",
