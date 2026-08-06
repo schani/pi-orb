@@ -15,6 +15,18 @@ The first UI needs to display at least:
 
 Remaining UI questions include rendering unknown content blocks, large/truncated tool output, and image storage. Transient token deltas are ephemeral presentation events and are reconstructed after reconnect through ordinary live events; they are not stored in PostgreSQL.
 
+## Frontend-only development (decided 2026-08-06)
+
+The web workspace has an in-process development fixture activated by Vite's `frontend` mode. Run it with:
+
+```sh
+npm run dev:frontend
+```
+
+This starts only Vite and needs no PostgreSQL, Docker, control plane, runtime, credentials, or model service. The fixture owns the `/api/v1` HTTP routes and live WebSocket upgrade on the Vite server. It starts with one running orb and a short conversation; messages receive a simulated streamed echo, and start, stop, project/orb creation, history reload, and abort use the real browser-facing contracts.
+
+The fixture is a transport-level adapter, not a mock branch in React. Production UI code still calls the same relative HTTP URLs, validates the same `@pi-orb/protocol` schemas, and runs the same WebSocket reducer. This keeps frontend-only behavior representative and makes protocol drift fail visibly. It is intentionally ephemeral and process-local: restarting Vite resets all fixture data, and it is for manual UI development rather than backend or E2E correctness. Normal `npm run dev --workspace @pi-orb/web` retains the proxy to the real control plane.
+
 ## Visual design (decided)
 
 The UI uses the "Reading Room" variant of the Manuscript × Gutter design, chosen from a design exploration (five initial directions, then a Manuscript × Gutter hybrid, then five typography variations). Decisions:

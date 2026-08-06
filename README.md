@@ -22,3 +22,13 @@ npm run dev --workspace @pi-orb/web
 ```
 
 Open http://localhost:5173.
+
+### Frontend only
+
+For UI work, run Vite with its in-process protocol fixture; Docker, PostgreSQL, the control plane, and the orb runtime are not needed:
+
+```sh
+npm run dev:frontend
+```
+
+Open http://localhost:5173. The seeded orb streams an echo for each message and keeps fixture history in memory until Vite restarts. See [docs/web-ui.md](docs/web-ui.md).
