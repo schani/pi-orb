@@ -29,6 +29,7 @@ import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { pickCodexModel } from "./model-select.ts";
+import { createPortExposureLoader } from "./resource-loader.ts";
 import { sessionFlushed } from "./session-flush.ts";
 
 export interface PiOrbAgentOptions {
@@ -40,6 +41,11 @@ export interface PiOrbAgentOptions {
   readonly broker: BrokerEnv | null;
   /** E2E mode: route inference to the fake OpenAI service. */
   readonly mockOpenAi?: MockOpenAiConfig | null;
+  /**
+   * Tailnet FQDN the orb's ports are reachable at (docs/ports.md), or null
+   * when tier-1 port exposure is off. Only the agent's system prompt uses it.
+   */
+  readonly previewHost?: string | null;
 }
 
 export interface SnapshotError {
@@ -300,20 +306,36 @@ export class PiOrbAgent {
     if (model === undefined) {
       return err(this.failed("session_init_failed", "no openai-codex model available", true));
     }
+    const agentDir = join(this.options.workDir, "pi-agent");
+    // SSE keeps the first E2E deterministic; the fake refuses the WebSocket
+    // transport (docs/PI-CODEX-E2E.md).
+    const settingsManager =
+      mockOpenAi !== null ? SettingsManager.inMemory({ transport: "sse" }) : undefined;
+    // Tier-1 port exposure is only discoverable through the system prompt
+    // (docs/ports.md); a loader that fails to build is not worth failing the
+    // boot over, so the session falls back to the SDK's implicit one.
+    const previewHost = this.options.previewHost ?? null;
+    const loader =
+      previewHost === null
+        ? null
+        : await createPortExposureLoader({
+            cwd: repoDir,
+            agentDir,
+            settingsManager,
+            previewHost,
+          }).unwrapOr(null);
+    if (previewHost !== null && loader === null) {
+      console.error("tailscale: system prompt injection failed; ports stay undocumented");
+    }
     const sessionResult = await ResultAsync.fromPromise(
       createAgentSession({
         cwd: repoDir,
-        agentDir: join(this.options.workDir, "pi-agent"),
+        agentDir,
         modelRuntime,
         sessionManager: this.sessionManager,
         model,
-        ...(mockOpenAi !== null
-          ? {
-              // SSE keeps the first E2E deterministic; the fake refuses the
-              // WebSocket transport (docs/PI-CODEX-E2E.md).
-              settingsManager: SettingsManager.inMemory({ transport: "sse" }),
-            }
-          : {}),
+        ...(settingsManager !== undefined ? { settingsManager } : {}),
+        ...(loader !== null ? { resourceLoader: loader } : {}),
       }),
       (error) => (error instanceof Error ? error.message : String(error)),
     );

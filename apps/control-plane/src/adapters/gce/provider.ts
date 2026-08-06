@@ -1,5 +1,13 @@
 import { createHash, randomBytes } from "node:crypto";
-import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV } from "@pi-orb/protocol";
+import {
+  CONTROL_PLANE_URL_ENV,
+  PREVIEW_HOST_ENV,
+  previewHost,
+  RUNTIME_TOKEN_ENV,
+  TAILSCALE_AUTH_KEY_ENV,
+  TAILSCALE_HOSTNAME_ENV,
+  tailscaleHostname,
+} from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError } from "../../domain/errors.ts";
@@ -12,6 +20,7 @@ import type {
   ProvisionedOrbHost,
   ProvisionOrbHostRequest,
 } from "../../domain/ports.ts";
+import type { TailscaleHostOptions } from "../tailscale/client.ts";
 import type { GceApiTransport, GceResponse } from "./api.ts";
 
 export interface GceOrbHostProviderOptions {
@@ -29,12 +38,21 @@ export interface GceOrbHostProviderOptions {
   readonly controlPlaneUrl: string;
   readonly dataDiskSizeGb?: number;
   readonly extraEnv?: Readonly<Record<string, string>>;
+  /**
+   * Tailscale port exposure (docs/ports.md). Enabling it changes the startup
+   * script text, so `ensureCurrentScript` repairs existing hosts onto it once
+   * — and mints the auth key they are missing while doing so.
+   */
+  readonly tailscale?: TailscaleHostOptions;
 }
 
 const ORB_LABEL = "pi-orb-orb-id";
 const TOKEN_METADATA_KEY = "pi-orb-runtime-token";
 const SCRIPT_HASH_METADATA_KEY = "pi-orb-script-sha256";
 const REPO_URL_METADATA_KEY = "pi-orb-repository-url";
+/** The auth key lives in metadata, never in the script: it is per-orb state
+ * and would otherwise make `pi-orb-script-sha256` differ for every host. */
+const TAILSCALE_KEY_METADATA_KEY = "pi-orb-tailscale-auth-key";
 const DATA_DEVICE = "pi-orb-data";
 
 const instanceName = (orbId: string): string => `pi-orb-${orbId}`;
@@ -97,12 +115,31 @@ export function buildStartupScript(options: {
   readonly repositoryUrl: string;
   readonly controlPlaneUrl: string;
   readonly extraEnv: Readonly<Record<string, string>>;
+  /**
+   * Present only when tailscale port exposure is configured. Hostname and
+   * preview host are pure functions of the orb id and static config, so they
+   * are literals here; the secret auth key is read from metadata like the
+   * runtime token.
+   */
+  readonly tailscale?: { readonly hostname: string; readonly previewHost: string };
 }): string {
   // Each entry carries its own trailing continuation so an empty map never
   // leaves a blank line inside the docker run command.
   const extra = Object.entries(options.extraEnv)
     .map(([key, value]) => `  -e ${key}='${value}' \\\n`)
     .join("");
+  const tailscaleFetch =
+    options.tailscale === undefined
+      ? ""
+      : `TS_AUTHKEY=$(curl -sf -H 'Metadata-Flavor: Google' \\
+  'http://metadata.google.internal/computeMetadata/v1/instance/attributes/${TAILSCALE_KEY_METADATA_KEY}')
+`;
+  const tailscaleEnv =
+    options.tailscale === undefined
+      ? ""
+      : `  -e ${TAILSCALE_AUTH_KEY_ENV}="$TS_AUTHKEY" \\\n` +
+        `  -e ${TAILSCALE_HOSTNAME_ENV}='${options.tailscale.hostname}' \\\n` +
+        `  -e ${PREVIEW_HOST_ENV}='${options.tailscale.previewHost}' \\\n`;
   return `#!/bin/bash
 set -euo pipefail
 report() {
@@ -124,7 +161,7 @@ iptables -w -A INPUT -p tcp --dport 8080 -j ACCEPT
 report port-opened
 TOKEN=$(curl -sf -H 'Metadata-Flavor: Google' \\
   'http://metadata.google.internal/computeMetadata/v1/instance/attributes/${TOKEN_METADATA_KEY}')
-# COS mounts / read-only; docker config must live on the stateful partition.
+${tailscaleFetch}# COS mounts / read-only; docker config must live on the stateful partition.
 export DOCKER_CONFIG=/var/lib/pi-orb-docker
 mkdir -p "$DOCKER_CONFIG"
 docker-credential-gcr configure-docker --registries=$(echo '${options.runtimeImage}' | cut -d/ -f1)
@@ -136,7 +173,7 @@ docker run --detach --name pi-orb-runtime --restart unless-stopped \\
   -e PI_ORB_REPOSITORY_URL='${options.repositoryUrl}' \\
   -e ${RUNTIME_TOKEN_ENV}="$TOKEN" \\
   -e ${CONTROL_PLANE_URL_ENV}='${options.controlPlaneUrl}' \\
-${extra}  '${options.runtimeImage}'
+${tailscaleEnv}${extra}  '${options.runtimeImage}'
 report container-started
 `;
 }
@@ -233,14 +270,54 @@ export class GceOrbHostProvider implements OrbHostProvider {
     }
   }
 
+  /**
+   * The one script generator for this provider: insert, script-hash repair,
+   * and `start()`'s re-derivation all go through it, so the three can never
+   * disagree about what the current script is.
+   */
   private expectedScript(orbId: string, repositoryUrl: string): string {
+    const tailscale = this.options.tailscale;
     return buildStartupScript({
       runtimeImage: this.options.runtimeImage,
       orbId,
       repositoryUrl,
       controlPlaneUrl: this.options.controlPlaneUrl,
       extraEnv: this.options.extraEnv ?? {},
+      ...(tailscale === undefined
+        ? {}
+        : {
+            tailscale: {
+              hostname: tailscaleHostname(orbId),
+              previewHost: previewHost(orbId, tailscale.tailnetDnsName),
+            },
+          }),
     });
+  }
+
+  /**
+   * Mint the per-orb tailnet auth key, or nothing when the feature is off. A
+   * mint failure is retryable whatever its cause: the reconciler provisions
+   * again rather than failing the orb over a tailnet hiccup.
+   */
+  private async mintTailscaleKey(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    context: OperationContext,
+  ): Promise<Result<string | null, OrbHostProviderError>> {
+    const tailscale = this.options.tailscale;
+    if (tailscale === undefined) return ok(null);
+    const key = await tailscale.minter.mintAuthKey(orbId, context.signal);
+    if (key.isErr()) {
+      return err(
+        providerError(
+          operation,
+          "operation_failed",
+          `tailscale auth key mint failed: ${key.error.message}`,
+          true,
+        ),
+      );
+    }
+    return ok(key.value);
   }
 
   /**
@@ -333,6 +410,16 @@ export class GceOrbHostProvider implements OrbHostProvider {
         item.key !== SCRIPT_HASH_METADATA_KEY &&
         item.key !== REPO_URL_METADATA_KEY,
     );
+    // Preserved above (like the runtime token) when the host already has one.
+    // When it does not, the repair is what turns tailscale on for this host,
+    // and the new script would `curl -sf` a metadata key that does not exist
+    // — fatal under `set -e`. Mint it here so script and metadata land in the
+    // same setMetadata call.
+    const adopted =
+      metadataValue(current, TAILSCALE_KEY_METADATA_KEY) === null
+        ? await this.mintTailscaleKey(operation, orbId, context)
+        : ok<string | null, OrbHostProviderError>(null);
+    if (adopted.isErr()) return err(adopted.error);
     const updated = await this.request(
       operation,
       "POST",
@@ -342,6 +429,9 @@ export class GceOrbHostProvider implements OrbHostProvider {
         fingerprint,
         items: [
           ...preserved,
+          ...(adopted.value === null
+            ? []
+            : [{ key: TAILSCALE_KEY_METADATA_KEY, value: adopted.value }]),
           { key: "startup-script", value: script },
           { key: SCRIPT_HASH_METADATA_KEY, value: expectedHash },
           { key: REPO_URL_METADATA_KEY, value: repositoryUrl },
@@ -504,13 +594,11 @@ export class GceOrbHostProvider implements OrbHostProvider {
       }
 
       const runtimeToken = randomBytes(32).toString("hex");
-      const startupScript = buildStartupScript({
-        runtimeImage: this.options.runtimeImage,
-        orbId: request.orbId,
-        repositoryUrl: request.bootstrap.repositoryUrl,
-        controlPlaneUrl: this.options.controlPlaneUrl,
-        extraEnv: this.options.extraEnv ?? {},
-      });
+      // Minted only for an instance actually about to be inserted; a reused
+      // one keeps the key it was created with (read-back model).
+      const tailscaleKey = await this.mintTailscaleKey("provision", request.orbId, context);
+      if (tailscaleKey.isErr()) return err(tailscaleKey.error);
+      const startupScript = this.expectedScript(request.orbId, request.bootstrap.repositoryUrl);
       const inserted = await this.request(
         "provision",
         "POST",
@@ -556,6 +644,9 @@ export class GceOrbHostProvider implements OrbHostProvider {
           metadata: {
             items: [
               { key: TOKEN_METADATA_KEY, value: runtimeToken },
+              ...(tailscaleKey.value === null
+                ? []
+                : [{ key: TAILSCALE_KEY_METADATA_KEY, value: tailscaleKey.value }]),
               { key: "startup-script", value: startupScript },
               // Script-version stamp plus the input needed to re-derive the
               // script on later starts (ensureCurrentScript).

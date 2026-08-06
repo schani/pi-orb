@@ -100,6 +100,7 @@ Subsystem designs:
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
+- [docs/ports.md](docs/ports.md) — port exposure and preview URLs: tier-1 Tailscale, per-orb auth keys, the preview-host contract
 - [docs/deployment.md](docs/deployment.md) — Cloud Run/OpenTofu deployment direction (operational workflow: `infra/README.md`)
 - [docs/testing.md](docs/testing.md) — DST strategy, the E2E slice, testing decisions
 - [docs/stack.md](docs/stack.md) — language, repository layout, dependency, and error-handling choices

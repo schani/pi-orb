@@ -1,0 +1,55 @@
+# Port exposure and preview URLs
+
+How ports inside an orb (dev servers the agent starts) are reached from outside. Decided 2026-08-05 (resolves the ports/preview part of open question 17): **tier-1 Tailscale** — every orb host joins the user's tailnet, and every TCP port a server listens on inside the orb is directly reachable from the user's devices, with no per-port configuration, no proxy code, and no inbound firewall changes on any provider.
+
+## Decision (2026-08-05)
+
+- Each orb host runs `tailscaled` in **userspace-networking mode** (no TUN device, no `NET_ADMIN` — works in the unprivileged Docker container and inside the GCE COS container alike) and joins the user's tailnet as machine `pi-orb-<orbId>`.
+- Userspace mode forwards inbound tailnet connections to the same port on `127.0.0.1`, so dev servers that bind localhost (Vite, Next defaults) are reachable **without** `--host 0.0.0.0`.
+- The **control plane generates the preview URL**: `http://pi-orb-<orbId>.<tailnet dns name>:<port>`. It is a pure function of orb id + static configuration — no database column, no runtime round-trip.
+- The preview host is surfaced in three places: the orb detail page in the web UI, the browser API (`OrbView.previewHost`, optional field), and **the agent's system prompt**, which tells the agent the host, explains the mechanism in two sentences, and instructs it to give the user full URLs when it starts a server.
+- All connectivity is outbound from the orb (WireGuard to the tailnet), so the GCE deny-all-inbound firewall and the Docker private network are untouched. This also works on macOS Docker Desktop, where bridge IPs are not host-routable.
+- Access control is tailnet membership plus ACLs on `tag:pi-orb`. Traffic is WireGuard-encrypted on the wire but plain `http://` to the browser (see the tier-2 upgrade path below).
+
+Scope note: this intentionally serves the current single-user deployment. The user's device must be on the tailnet; there is no in-UI embedded preview and no public sharing yet.
+
+## Mechanism
+
+**Auth keys.** The control plane is configured with a Tailscale **OAuth client** (`PI_ORB_TAILSCALE_OAUTH_CLIENT_ID` / `PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET`, scope `auth_keys`, owning `tag:pi-orb`) plus the tailnet DNS name (`PI_ORB_TAILSCALE_TAILNET_DNS_NAME`, e.g. `tailabc123.ts.net`). When any of the three is unset the feature is off: providers inject nothing, the runtime skips tailscaled, `previewHost` is absent, and nothing else changes — the same all-or-none pattern as the GitHub integration. The host provider mints one auth key per orb through the Tailscale API **only at actual host creation**, mirroring the runtime-token read-back model: provision-reuse never re-mints, so idempotent re-provisioning cannot leak keys. A mint failure is a retryable provider error handled by the existing reconciliation machinery.
+
+Key shape and rationale: **pre-authorized** and **tagged `tag:pi-orb`** (no admin interaction; ACL-scoped); **reusable** (if tailscaled state is ever lost the node can rejoin with the same key); **non-ephemeral** (the device record must survive the orb being stopped/offline; tagged devices have no node-key expiry, so a long-stopped orb still reconnects). Rejected: ephemeral keys — Tailscale deletes an ephemeral node's device record when it goes offline, which fights the stop/start lifecycle. Rejected: one static shared auth key in control-plane config — less code (no API client) but one 90-day-expiring manually-rotated secret shared by all orbs with no per-orb revocation; per-orb minting via a non-expiring OAuth client costs one small adapter.
+
+**Env contract.** Providers deliver three additional environment variables at host creation (constants and helpers in `packages/protocol/src/tailscale.ts`):
+
+- `PI_ORB_TAILSCALE_AUTH_KEY` — the per-orb auth key (secret);
+- `PI_ORB_TAILSCALE_HOSTNAME` — `pi-orb-<orbId>`;
+- `PI_ORB_PREVIEW_HOST` — `pi-orb-<orbId>.<tailnet dns name>`; what the system prompt shows the agent. The runtime enables the feature only when all three variables are present — advertising ports to the agent without an auth key would be a lie.
+
+On Docker these are ordinary `--env` values. On GCE the auth key lives in instance metadata (`pi-orb-tailscale-auth-key`, fetched by the startup script like the runtime token) so the secret and the per-orb variability stay out of the hashed script body; hostname and preview host are literal script text. Enabling the feature changes the generated script, so existing orbs are repaired once by the standard script-hash repair path on their next provision/start — that is the designed upgrade mechanism, not an accident. The repair also **mints the auth key for a host that lacks the metadata** (in the same `setMetadata` call that installs the new script): without that, the repaired script's `curl -sf` of a missing metadata key would kill the startup script under `set -e` and brick every pre-feature host. A host that already carries a key is never re-keyed.
+
+**Runtime.** When the env vars are present, the runtime spawns `tailscaled --tun=userspace-networking` before agent boot and runs `tailscale up --authkey … --hostname …`. The tailscaled state directory lives on the persistent orb volume, so node identity survives container replacement and VM stop/start; the auth key is normally consumed exactly once per orb. Failure policy: port exposure is optional — any Tailscale failure is logged loudly and the runtime boots and reports healthy anyway; a dead tailscaled never takes the orb down. The runtime never parses Tailscale state beyond this; readiness is unaffected.
+
+**Prompt injection.** The port-exposure section (`apps/orb-runtime/src/tailscale/prompt.ts`) reaches the agent through a `DefaultResourceLoader` the runtime hands to `createAgentSession` (`apps/orb-runtime/src/pi/resource-loader.ts`). The loader mirrors the one the SDK builds implicitly when it gets no `resourceLoader` (`new DefaultResourceLoader({ cwd, agentDir, settingsManager })` plus `reload()`) and adds only `appendSystemPromptOverride: (base) => [...base, prompt]`. The override form is load-bearing: the `appendSystemPrompt` option would *replace* the SDK's own discovery of `APPEND_SYSTEM.md`, whereas the override runs on top of whatever was discovered, so our section is a strict superset of the default prompt rather than a substitute. With no preview host the runtime passes no loader at all and the SDK's implicit one is used unchanged. Pinned by `apps/orb-runtime/src/pi/resource-loader.contract.test.ts` against the exact installed Pi version: the section lands in `getAppendSystemPrompt()` — the accessor `AgentSession` reads, joining the parts with a blank line before handing them to its prompt builder — after the discovered append content; `SYSTEM.md`, `APPEND_SYSTEM.md` (project `.pi/` and agent-dir variants), AGENTS.md context files, skills, prompts and themes all still resolve identically to a control loader. **Pinned finding (2026-08-05):** the override is applied inside `reload()`, never in the constructor, so an unreloaded loader silently yields an empty append array — which is why the builder awaits `reload()` before handing the loader over.
+
+**Exposure note** (same accepted class as the orb token, `docs/credentials.md`): repository code inside the orb can read the auth key and could join additional nodes to the tailnet. Those nodes carry `tag:pi-orb` (pre-authorized keys only mint their own tag), so ACLs bound what they can reach; keys expire in 90 days; per-orb keys can be revoked individually. Accepted for the single-user phase.
+
+## Tier model and upgrade path
+
+Evaluated 2026-08-05 during the design conversation:
+
+- **Tier 1 (this decision):** raw tailnet connectivity. Every port, zero per-port config, plain `http://`. Limitation: no secure context in the browser (service workers, `crypto.subtle`, camera/clipboard APIs fail), and an `https://` control-plane UI cannot embed the preview (mixed content).
+- **Tier 2 (deliberate next step, not built):** `tailscale serve` — tailscaled terminates HTTPS with a real Let's Encrypt cert at `https://pi-orb-<orbId>.<tailnet>.ts.net`, proxying to a chosen localhost port; adds identity headers; limited to three listen ports (443/8443/10000). Everything tier 1 builds (daemon, keys, hostname, persisted state, prompt/UI plumbing) carries over; the delta is enabling HTTPS certs on the tailnet, one `tailscale serve` invocation per promoted port, and the control-plane URL builder emitting the `https` form. Because the control plane owns URL generation, the UI/prompt never hardcode the URL shape.
+- **Tier 3 (available later):** `tailscale funnel` — a genuinely public URL per preview; requires granting the `funnel` node attribute to `tag:pi-orb` in the ACL. Explicit per-preview opt-in only, since public means unauthenticated.
+
+## Rejected and deferred alternatives (evaluated 2026-08-05)
+
+- **Control-plane reverse proxy** (browser → control plane → runtime → localhost port): composes best with the existing architecture (no client install, one identity perimeter behind IAP, multi-tenant-capable) and remains the likely product-endgame answer. Not chosen now because it is strictly more code (runtime proxy route, browser-facing route, URL-shape/subdomain work, wildcard DNS + cert + LB for the cloud) and the single-user deployment gets everything it needs from the tailnet. The path-prefix URL variant additionally breaks absolute-path apps and would serve untrusted preview JS from the control-plane origin; a real deployment needs subdomain isolation on a separate origin.
+- **Direct host exposure** — Docker `-p` publishing (ports fixed at container creation; doesn't cover GCE) and GCE public-IP firewall openings (breaks deny-all-inbound, plain HTTP on a changing IP, unauthenticated): rejected.
+- **Provider-native proxies** (exe.dev per-VM HTTPS proxy, Lambda MicroVM endpoints): not applicable to Docker/GCE, but the reason URL generation is centralized in the control plane is so a provider-supplied preview address could replace the tailnet URL per provider later.
+
+## Operational setup (one-time, per tailnet)
+
+1. In the Tailscale admin console: add `tag:pi-orb` to the ACL `tagOwners`; ensure an ACL rule grants the user's devices access to `tag:pi-orb` (default allow-all suffices on a personal tailnet); enable MagicDNS.
+2. Create an OAuth client with the `auth_keys` scope, allowed to mint keys for `tag:pi-orb`.
+3. Configure the control plane: `PI_ORB_TAILSCALE_OAUTH_CLIENT_ID`, `PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET`, `PI_ORB_TAILSCALE_TAILNET_DNS_NAME` (the `tailXXXX.ts.net` name from the DNS page). In the cloud, the client secret follows the GitHub client-secret Secret Manager pattern (`infra/`).
+4. The user's own devices must be on the same tailnet to open preview URLs.

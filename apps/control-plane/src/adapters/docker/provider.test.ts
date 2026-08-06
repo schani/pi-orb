@@ -1,6 +1,15 @@
-import { CONTROL_PLANE_URL_ENV, RUNTIME_TOKEN_ENV } from "@pi-orb/protocol";
+import {
+  CONTROL_PLANE_URL_ENV,
+  PREVIEW_HOST_ENV,
+  RUNTIME_TOKEN_ENV,
+  TAILSCALE_AUTH_KEY_ENV,
+  TAILSCALE_HOSTNAME_ENV,
+} from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
+import { errAsync, okAsync } from "neverthrow";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TailscaleError } from "../../domain/errors.ts";
+import type { TailscaleAuthKeyMinter } from "../tailscale/client.ts";
 import { DockerOrbHostProvider, publishedRuntimePort } from "./provider.ts";
 
 interface DockerReply {
@@ -47,29 +56,36 @@ vi.mock("node:child_process", () => ({
 
 const task = new NoSimulationTask("docker test", false);
 const context = { signal: new AbortController().signal };
+const request = { orbId: "orb-1", bootstrap: { repositoryUrl: "https://github.com/o/r" } };
 
-function makeProvider(controlPlaneUrl?: string): DockerOrbHostProvider {
+interface ProviderOverrides {
+  readonly controlPlaneUrl?: string;
+  readonly tailscale?: { minter: TailscaleAuthKeyMinter; tailnetDnsName: string };
+}
+
+function makeProvider(overrides: ProviderOverrides = {}): DockerOrbHostProvider {
   return new DockerOrbHostProvider({
     image: "pi-orb-runtime:dev",
     network: "pi-orb",
     controlPlanePort: 3000,
-    ...(controlPlaneUrl === undefined ? {} : { controlPlaneUrl }),
+    ...overrides,
   });
 }
 
-/** Provisions a fresh orb against the scripted CLI and returns the `run` argv. */
-async function provisionArgv(provider: DockerOrbHostProvider): Promise<string[]> {
+/** Scripts a fresh (no existing container) provision against the CLI fake. */
+function installFreshHost(): void {
   dockerFake.install((args) => {
     if (args[0] === "inspect") return { error: "docker inspect: No such object: pi-orb-orb-1" };
     if (args[0] === "volume") return { stdout: "pi-orb-data-orb-1\n" };
     if (args[0] === "run") return { stdout: "deadbeef\n" };
     return { error: `unexpected docker ${args[0]}` };
   });
-  const result = await provider.provision(
-    task,
-    { orbId: "orb-1", bootstrap: { repositoryUrl: "https://github.com/o/r" } },
-    context,
-  );
+}
+
+/** Provisions a fresh orb against the scripted CLI and returns the `run` argv. */
+async function provisionArgv(provider: DockerOrbHostProvider): Promise<string[]> {
+  installFreshHost();
+  const result = await provider.provision(task, request, context);
   expect(result.isOk(), JSON.stringify(result)).toBe(true);
   const run = dockerFake.calls.find((args) => args[0] === "run");
   expect(run).toBeDefined();
@@ -120,6 +136,16 @@ const withoutMappingOrIp = { Ports: {}, Networks: { "pi-orb": { IPAddress: "" } 
 
 const ref = { provider: "docker", resourceId: "pi-orb-orb-1" };
 
+const minterReturning = (key: string): TailscaleAuthKeyMinter => ({
+  mintAuthKey: () => okAsync(key),
+});
+
+const minterFailing = (error: TailscaleError): TailscaleAuthKeyMinter => ({
+  mintAuthKey: () => errAsync(error),
+});
+
+const tailnet = { tailnetDnsName: "tailnet.ts.net" };
+
 describe("DockerOrbHostProvider", () => {
   beforeEach(() => {
     dockerFake.reset();
@@ -141,7 +167,7 @@ describe("DockerOrbHostProvider", () => {
   });
 
   it("keeps a configured control-plane URL verbatim", async () => {
-    const run = await provisionArgv(makeProvider("https://broker.example"));
+    const run = await provisionArgv(makeProvider({ controlPlaneUrl: "https://broker.example" }));
     expect(envValue(run, CONTROL_PLANE_URL_ENV)).toBe("https://broker.example");
   });
 
@@ -223,5 +249,88 @@ describe("DockerOrbHostProvider", () => {
         NetworkSettings: { Ports: { "8080/tcp": [{ HostIp: "", HostPort: "55002" }] } },
       }),
     ).toBe("55002");
+  });
+});
+
+describe("DockerOrbHostProvider tailscale env", () => {
+  beforeEach(() => {
+    dockerFake.reset();
+  });
+
+  it("omits the tailscale variables when the feature is not configured", async () => {
+    const run = await provisionArgv(makeProvider());
+    expect(envValue(run, TAILSCALE_AUTH_KEY_ENV)).toBeNull();
+    expect(envValue(run, TAILSCALE_HOSTNAME_ENV)).toBeNull();
+    expect(envValue(run, PREVIEW_HOST_ENV)).toBeNull();
+  });
+
+  it("delivers the auth key, hostname and preview host on creation", async () => {
+    const run = await provisionArgv(
+      makeProvider({ tailscale: { minter: minterReturning("tskey-auth-abc"), ...tailnet } }),
+    );
+    expect(envValue(run, TAILSCALE_AUTH_KEY_ENV)).toBe("tskey-auth-abc");
+    expect(envValue(run, TAILSCALE_HOSTNAME_ENV)).toBe("pi-orb-orb-1");
+    expect(envValue(run, PREVIEW_HOST_ENV)).toBe("pi-orb-orb-1.tailnet.ts.net");
+  });
+
+  it("fails provisioning retryably and creates no container when minting fails", async () => {
+    installFreshHost();
+    const provider = makeProvider({
+      tailscale: {
+        minter: minterFailing({
+          type: "tailscale_error",
+          code: "rejected",
+          message: "tailnet said no",
+          retryable: false,
+        }),
+        ...tailnet,
+      },
+    });
+    const result = await provider.provision(task, request, context);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      // Retryable even for a terminal tailscale error: the reconciler
+      // provisions again rather than failing the orb over port exposure.
+      expect(result.error.retryable).toBe(true);
+      expect(result.error.code).toBe("operation_failed");
+      expect(result.error.message).toContain("tailnet said no");
+    }
+    expect(dockerFake.calls.some((args) => args[0] === "run")).toBe(false);
+  });
+
+  it("does not re-mint for a reused container", async () => {
+    let minted = 0;
+    const provider = makeProvider({
+      tailscale: {
+        minter: {
+          mintAuthKey: () => {
+            minted += 1;
+            return okAsync("tskey-auth-new");
+          },
+        },
+        ...tailnet,
+      },
+    });
+    dockerFake.install((args) => {
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Config: {
+                Env: [`${RUNTIME_TOKEN_ENV}=tok`, `${TAILSCALE_AUTH_KEY_ENV}=tskey-auth-old`],
+                Labels: { "pi-orb.orb-id": "orb-1" },
+              },
+              State: { Status: "running" },
+              NetworkSettings: { Networks: { "pi-orb": { IPAddress: "172.20.0.5" } } },
+            },
+          ]),
+        };
+      }
+      return { stdout: "ok\n" };
+    });
+    const result = await provider.provision(task, request, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(minted).toBe(0);
+    expect(dockerFake.calls.some((args) => args[0] === "run")).toBe(false);
   });
 });

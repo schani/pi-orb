@@ -1,5 +1,8 @@
-# Orb runtime image (DESIGN.md §3.3, §17.7): Debian-based Node 24 with git
-# and the GitHub CLI (§15.3). Build from the repository root:
+# Orb runtime image (DESIGN.md §3.3, §17.7): Debian-based Node 24 with git,
+# the GitHub CLI (§15.3), and Tailscale for tier-1 port exposure
+# (docs/ports.md). No systemd unit is enabled — the runtime process spawns
+# tailscaled itself, in userspace-networking mode, so the container needs
+# neither a TUN device nor NET_ADMIN. Build from the repository root:
 #   docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
 FROM node:24-bookworm-slim
 
@@ -11,8 +14,13 @@ RUN apt-get update \
   && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
        > /etc/apt/sources.list.d/github-cli.list \
+  && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+       -o /etc/apt/keyrings/tailscale-archive-keyring.gpg \
+  && chmod go+r /etc/apt/keyrings/tailscale-archive-keyring.gpg \
+  && echo "deb [signed-by=/etc/apt/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian bookworm main" \
+       > /etc/apt/sources.list.d/tailscale.list \
   && apt-get update \
-  && apt-get install -y --no-install-recommends gh \
+  && apt-get install -y --no-install-recommends gh tailscale \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -5,3 +5,4 @@ export * from "./history.ts";
 export * from "./json.ts";
 export * from "./repository-url.ts";
 export * from "./runtime-http.ts";
+export * from "./tailscale.ts";

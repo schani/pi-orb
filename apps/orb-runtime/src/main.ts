@@ -2,6 +2,8 @@ import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import { readBrokerEnv } from "./broker/endpoint.ts";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
+import { startTailscale } from "./tailscale/daemon.ts";
+import { readTailscaleEnv } from "./tailscale/env.ts";
 
 const env = (name: string, fallback?: string): string => {
   const value = process.env[name];
@@ -11,13 +13,21 @@ const env = (name: string, fallback?: string): string => {
   process.exit(1);
 };
 
+/** `startTailscale` resolves with a typed failure; a rejection is a bug. */
+const unreachableRejection = (error: unknown): void => {
+  console.error("tailscale: unexpected rejection:", error);
+};
+
 async function main(): Promise<void> {
+  const workDir = env("PI_ORB_WORK_DIR", "/workspace");
+  const tailscale = readTailscaleEnv(process.env);
   const agent = new PiOrbAgent({
     orbId: env("PI_ORB_ID"),
     repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
-    workDir: env("PI_ORB_WORK_DIR", "/workspace"),
+    workDir,
     broker: readBrokerEnv(process.env),
     mockOpenAi: readMockOpenAiEnv(process.env),
+    previewHost: tailscale?.previewHost ?? null,
   });
 
   // The health server starts before slow initialization (docs/host-provider.md).
@@ -31,6 +41,20 @@ async function main(): Promise<void> {
     },
   );
   console.log(`orb runtime listening on ${listening}`);
+
+  // Tier-1 port exposure (docs/ports.md) is optional and never blocks the
+  // boot: joining the tailnet runs alongside it and only ever logs.
+  if (tailscale !== null) {
+    void startTailscale({ config: tailscale, workDir }).then((result) => {
+      if (result.isErr()) {
+        console.error(
+          `tailscale: port exposure unavailable (${result.error.code}): ${result.error.message}`,
+        );
+        return;
+      }
+      console.log(`tailscale: ports are reachable at http://${tailscale.previewHost}:<port>`);
+    }, unreachableRejection);
+  }
 
   await agent.boot();
   const health = agent.getHealth();

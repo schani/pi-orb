@@ -15,7 +15,7 @@ import {
 } from "../domain/lifecycle.ts";
 import type { ProjectRow } from "../domain/orb.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
-import { orbView, projectView } from "./views.ts";
+import { orbView, projectView, type ViewConfig } from "./views.ts";
 
 function httpError(
   code: ControlPlaneHttpError["error"]["code"],
@@ -45,6 +45,7 @@ export function registerRoutes(
   app: FastifyInstance,
   task: SimulationTask,
   deps: ControlPlaneDeps,
+  config: ViewConfig,
 ): void {
   app.get("/api/v1/projects", async (_request, reply) => {
     const projects = await deps.store.listProjects(task);
@@ -112,7 +113,7 @@ export function registerRoutes(
       if (orbs.isErr()) {
         return reply.status(503).send(httpError("unavailable", orbs.error.message, true));
       }
-      return reply.send({ items: orbs.value.map((orb) => orbView(orb, deps.control)) });
+      return reply.send({ items: orbs.value.map((orb) => orbView(orb, deps.control, config)) });
     },
   );
 
@@ -129,7 +130,7 @@ export function registerRoutes(
       });
       if (created.isErr()) return sendCommandError(reply, created.error);
       // Creation also requests the initial start; reconciliation picks it up.
-      return reply.status(202).send(orbView(created.value, deps.control));
+      return reply.status(202).send(orbView(created.value, deps.control, config));
     },
   );
 
@@ -141,19 +142,19 @@ export function registerRoutes(
     if (orb.value === null) {
       return reply.status(404).send(httpError("not_found", "orb not found", false));
     }
-    return reply.send(orbView(orb.value, deps.control));
+    return reply.send(orbView(orb.value, deps.control, config));
   });
 
   app.post<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/start", async (request, reply) => {
     const started = await requestOrbStart(task, deps, request.params.orbId);
     if (started.isErr()) return sendCommandError(reply, started.error);
-    return reply.status(202).send(orbView(started.value, deps.control));
+    return reply.status(202).send(orbView(started.value, deps.control, config));
   });
 
   app.post<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/stop", async (request, reply) => {
     const stopped = await requestOrbStop(task, deps, request.params.orbId);
     if (stopped.isErr()) return sendCommandError(reply, stopped.error);
-    return reply.status(202).send(orbView(stopped.value, deps.control));
+    return reply.status(202).send(orbView(stopped.value, deps.control, config));
   });
 
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/history", async (request, reply) => {

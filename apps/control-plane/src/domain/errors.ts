@@ -53,6 +53,19 @@ export interface OrbHostProviderError {
   readonly retryable: boolean;
 }
 
+/**
+ * Tailscale control-API failure (docs/ports.md). `rejected` is the terminal
+ * class — bad OAuth credentials, a key request the tailnet refuses — while
+ * `unavailable` covers network trouble and 5xx, which a later attempt may
+ * survive.
+ */
+export interface TailscaleError {
+  readonly type: "tailscale_error";
+  readonly code: "unavailable" | "rejected";
+  readonly message: string;
+  readonly retryable: boolean;
+}
+
 export interface AuthGateError {
   readonly type: "auth_gate_error";
   readonly message: string;
