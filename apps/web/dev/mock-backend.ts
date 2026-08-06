@@ -18,12 +18,14 @@ import { WebSocket, WebSocketServer } from "ws";
 
 const PROJECT_ID = "frontend-fixture-project";
 const ORB_ID = "frontend-fixture-orb";
+const NEW_ORB_STARTUP_DELAY_MS = 10_000;
 const now = () => new Date().toISOString();
 
 interface MockState {
   projects: Map<string, ProjectView>;
   orbs: Map<string, OrbView>;
   histories: Map<string, HistoryRecord[]>;
+  startupTimers: Map<string, NodeJS.Timeout>;
 }
 
 function initialState(): MockState {
@@ -66,6 +68,7 @@ function initialState(): MockState {
     projects: new Map([[project.id, project]]),
     orbs: new Map([[orb.id, orb]]),
     histories: new Map([[orb.id, records]]),
+    startupTimers: new Map(),
   };
 }
 
@@ -173,7 +176,7 @@ async function handleApi(
       const orb: OrbView = {
         id: body.id,
         projectId,
-        state: "running",
+        state: "creating",
         stateVersion: 1,
         stateChangedAt: createdAt,
         createdAt,
@@ -181,6 +184,14 @@ async function handleApi(
       };
       state.orbs.set(orb.id, orb);
       state.histories.set(orb.id, []);
+      const timer = setTimeout(() => {
+        state.startupTimers.delete(orb.id);
+        const current = state.orbs.get(orb.id);
+        if (current?.state === "creating") {
+          state.orbs.set(orb.id, updateOrb(current, "running"));
+        }
+      }, NEW_ORB_STARTUP_DELAY_MS);
+      state.startupTimers.set(orb.id, timer);
       sendJson(response, 202, orb);
       return true;
     }
@@ -720,6 +731,8 @@ export function mockBackendPlugin(): Plugin {
       server.httpServer?.prependListener("upgrade", onUpgrade);
       server.httpServer?.once("close", () => {
         server.httpServer?.removeListener("upgrade", onUpgrade);
+        for (const timer of state.startupTimers.values()) clearTimeout(timer);
+        state.startupTimers.clear();
         sockets.close();
       });
     },
