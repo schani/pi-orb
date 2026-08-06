@@ -22,9 +22,12 @@ Impersonates `pi-orb-debug@...` against the ops service — no IAP involved.
 
 - Every `tofu apply` that touches the browser service detaches IAP; run
   `deploy.sh` immediately after.
-- During a revision rollover the draining instance's reconciler can create
-  orb VMs with the previous startup script (docs/host-provider.md caveat, open
-  question 32). Wait ~2 minutes after deploying before restarting orbs.
+- During a revision rollover the draining instance's reconciler keeps running
+  with the previous startup-script generation for 12+ minutes — not ~2 — and
+  fights the new revision over orb VMs (dueling script repairs; see
+  docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
+  `deploy.sh` now deletes drained revisions of the browser service; do not
+  restart orbs until it has run.
 - Workspace session policy expires gcloud user credentials roughly daily:
   `gcloud auth login` interactively when everything returns empty/errors.
 - Orb VM boot diagnostics: `gcloud compute instances get-guest-attributes

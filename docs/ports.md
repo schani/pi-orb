@@ -13,7 +13,7 @@ How ports inside an orb (dev servers the agent starts) are reached from outside.
 
 Scope note: this intentionally serves the current single-user deployment. The user's device must be on the tailnet; there is no in-UI embedded preview and no public sharing yet.
 
-Field-validated 2026-08-05 on the Docker provider with a real tailnet: provisioning minted a key through the OAuth client, the orb joined as a tagged node, and both the runtime's own port and an ad-hoc localhost-bound server on another port were fetched from a tailnet device via the MagicDNS FQDN — no per-port configuration. The GCE path (metadata key delivery, startup-script fetch, mint-on-repair) is unit-tested but was not yet observed live at that date.
+Field-validated 2026-08-05 on the Docker provider with a real tailnet: provisioning minted a key through the OAuth client, the orb joined as a tagged node, and both the runtime's own port and an ad-hoc localhost-bound server on another port were fetched from a tailnet device via the MagicDNS FQDN — no per-port configuration. The GCE path (metadata key delivery, startup-script fetch, mint-on-repair, tailscaled inside the COS-hosted container) was validated live 2026-08-06 during the first cloud rollout; the rollout itself hit a deploy-rollover repair war plus a corrupted docker layer cache, unrelated to Tailscale — `docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md`.
 
 ## Mechanism
 

@@ -11,3 +11,17 @@ gcloud beta iap web add-iam-policy-binding \
   --project "$PROJECT" --resource-type=cloud-run --service=pi-orb --region="$REGION" \
   --member="domain:$DOMAIN" --role=roles/iap.httpsResourceAccessor
 echo "IAP enabled on pi-orb; access restricted to @$DOMAIN"
+
+# Delete drained-out revisions of the reconciler-running service. A draining
+# old revision keeps reconciling with the previous startup-script generation
+# for many minutes and fights the new revision over orb VMs
+# (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
+serving=$(gcloud run services describe pi-orb --project "$PROJECT" --region "$REGION" \
+  --format="value(status.traffic[0].revisionName)")
+for rev in $(gcloud run revisions list --service pi-orb --project "$PROJECT" --region "$REGION" \
+  --format="value(name)"); do
+  if [ "$rev" != "$serving" ]; then
+    gcloud run revisions delete "$rev" --project "$PROJECT" --region "$REGION" --quiet
+    echo "deleted drained revision $rev"
+  fi
+done

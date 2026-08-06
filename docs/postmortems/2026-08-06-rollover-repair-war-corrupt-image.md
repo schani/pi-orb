@@ -1,0 +1,28 @@
+# 2026-08-06 — deploy-rollover repair war corrupts an orb VM's docker cache; runtime crash-loops for hours
+
+Status: root-caused and recovered; hardening follow-ups in `TODO.md`. Occasioned by the first cloud rollout of Tailscale port exposure (`docs/ports.md`), but neither defect is Tailscale-specific.
+
+**Field finding: after a control-plane deploy, the draining old Cloud Run revision kept reconciling for 12+ minutes (the `infra/README.md` gotcha assumed ~2), fought the new revision over an orb VM's startup script, and the resulting hard VM stops mid-image-pull left a corrupted docker layer cache — a 0-byte `/app/package.json` in a layer dockerd believed complete — so every subsequent boot crash-looped the runtime with `ERR_INVALID_PACKAGE_CONFIG` and the orb failed `runtime_never_answered` on four consecutive starts.**
+
+Timeline (orb 08ab89f2, all times UTC, from the reconciler event log + GCE audit + serial console + in-VM inspection):
+
+- 06:05–06:09 — tailscale-enabled control plane deployed (`tofu apply` + `deploy.sh`); orb created ~150 s later, honoring the documented ~2-minute rollover wait.
+- 06:13:36 / 06:13:43 — new revision `00018` and old revision `00017` **both** provision the host (idempotent, benign so far).
+- 06:14–06:16 — first boot (created by whichever revision won; old script) reaches `running`; pulls succeed.
+- 06:17–06:18 — after a user-requested stop/start, the revisions race `ensureCurrentScript`: dueling `setMetadata`+start attempts fail with "resource fingerprint changed during the start operation" eight times in 40 s; `00017` wins the last write at 06:18:18, repairing the script **backward** (old script; the minted tailscale key survives in metadata because repairs preserve unknown keys). The VM is hard-stopped/started repeatedly during exactly the window the new runtime image was first being pulled.
+- 06:20 — `runtime_never_answered` (183 s, probes all `fetch failed`). Its best-effort host stop loses a race, so a later start finds the host `RUNNING` and correctly refuses to bounce a live runtime — masking the stale script until the next clean stop/start.
+- 06:21 — old revision deleted manually (it was still logging 8 s earlier). All later boots run the forward-repaired script and new image, yet still never answer.
+- ~14:30 — in-VM inspection (temporary IAP-SSH firewall rule): container `Restarting`, crash loop on `Error: Invalid package config /app/package.json`; `wc -c` inside the image on the VM: **0 bytes**, while the same digest pulled locally: 563 bytes, valid. Disk not full; manifest a plain single-arch v2 (attestation-index theory disproven).
+- 15:0x — `docker rmi` of the corrupt image on the VM + re-pull + restart: orb `running`, tailnet joined, health served through the MagicDNS FQDN. GCE tier-1 port exposure validated live.
+
+Root defects:
+
+- (a) **The rollover drain window is far longer than assumed, and the old revision's reconciler runs at full authority the whole time.** "Wait ~2 minutes after deploying" is not a mitigation: `00017` was reconciling 12+ minutes after the deploy, and only deleting the revision ended it. Two same-authority reconcilers with *different desired scripts* turn the idempotent repair mechanism into a war: each sees the other's script as stale. The existing open-question-32 residual anticipated one backward repair healed on the next pass; it did not anticipate sustained dueling with hard stops.
+- (b) **A hard VM stop mid-`docker pull` can corrupt the layer cache in a way dockerd never detects.** Layer checksums are verified at download, not re-verified at container start; a kill between extraction and durable metadata left a truncated file in a "complete" layer. Every subsequent boot reused it. Nothing in the system distinguishes "image cached" from "image cached intact", and a crash-looping container is invisible to the control plane — probes just fail until the deadline. Spot preemption during a first pull could reproduce this without any deploy involved.
+
+What went right: boot-failure detection failed fast with probe evidence each time; the orphan sweep kept stopping out-of-band manually-started hosts (it also kept interrupting debugging — working as designed); the reconciler event log again made the control-plane side reconstructable in minutes; and the disposable-boot-disk design meant recovery was `docker rmi` + re-pull, with orb state on the data disk untouched throughout.
+
+Remedies:
+
+- Applied immediately: `infra/deploy.sh` now deletes the old revision of the browser service after IAP re-attachment, ending the drain-war window at its source; the `infra/README.md` gotcha rewritten accordingly.
+- Tracked in `TODO.md` (hardening): repair fencing so an older control plane can never repair a host backward (monotonic script-generation stamp; repair only forward); detect a crash-looping runtime container and treat it as evidence (distinct from "never answered"), with re-pull-on-crash-loop as the recovery.
