@@ -15,6 +15,10 @@ const project: ProjectRow = {
 const orb: OrbRow = {
   id: "00000000-0000-4000-8000-000000000002",
   projectId: project.id,
+  name: null,
+  autoNameLeaseUntil: null,
+  autoNameAttempts: 0,
+  autoNameNextAttemptAt: null,
   state: "creating",
   stateVersion: 0,
   hostKind: "process",
@@ -95,6 +99,36 @@ export function storeContractTests(name: string, open: () => Promise<ControlPlan
         now: 3_000,
       });
       expect(stale.isErr() && stale.error.type).toBe("state_conflict");
+    });
+
+    it("coordinates auto-naming and preserves a manual name", async () => {
+      await seed();
+      const claimed = await store.claimOrbAutoName(task, {
+        orbId: orb.id,
+        now: 2_000,
+        leaseUntil: 32_000,
+      });
+      expect(claimed.isOk() && claimed.value).toBe("claimed");
+      const duplicate = await store.claimOrbAutoName(task, {
+        orbId: orb.id,
+        now: 3_000,
+        leaseUntil: 33_000,
+      });
+      expect(duplicate.isOk() && duplicate.value).toBe("in_progress");
+      const manual = await store.setOrbName(task, {
+        orbId: orb.id,
+        name: "Manual Name",
+        now: 4_000,
+        onlyIfNull: false,
+      });
+      expect(manual.isOk() && manual.value?.name).toBe("Manual Name");
+      const generated = await store.setOrbName(task, {
+        orbId: orb.id,
+        name: "Generated Name",
+        now: 5_000,
+        onlyIfNull: true,
+      });
+      expect(generated.isOk() && generated.value).toBeNull();
     });
 
     it("atomically commits idempotent history and reconstructs its linear chain", async () => {

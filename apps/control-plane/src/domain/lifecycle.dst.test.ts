@@ -109,6 +109,11 @@ describe("orb lifecycle (DST)", () => {
     await runDst({ name: "shared-device-flow", iterations: 25 }, async (sim) => {
       const harness = makeHarness({
         authMode: { kind: "requires_login", autoCompleteAfterMs: 20_000, challengeTtlMs: 600_000 },
+        // This scenario asserts that both independently booted orbs overlap in
+        // running after sharing auth. Its modeled 65s boots can legitimately
+        // outlast the ordinary 30s test idle window, so idle-stop is outside
+        // this scenario rather than an accidental race against its assertion.
+        constants: { idleStopAfterMs: 600_000 },
       });
       const stop = new AbortController();
       let challengeSeen = false;

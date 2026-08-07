@@ -52,6 +52,7 @@ function initialState(): MockState {
   const authOrb: OrbView = {
     id: AUTH_ORB_ID,
     projectId: PROJECT_ID,
+    name: null,
     state: "starting",
     stateVersion: 1,
     actionRequired: {
