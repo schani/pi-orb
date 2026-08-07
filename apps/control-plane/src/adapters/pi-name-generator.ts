@@ -82,13 +82,7 @@ export class PiOrbNameGenerator implements OrbNameGenerator {
               reasoningSummary: "off",
               textVerbosity: "low",
               toolChoice: "none",
-              // The scripted E2E fake matches this auxiliary request by
-              // session so the quoted first message cannot select the agent
-              // turn's rule. Production calls remain isolated from each other.
-              sessionId:
-                this.inferenceBaseUrl === null
-                  ? `pi-orb-auto-name-${randomUUID()}`
-                  : "pi-orb-mock-auto-name",
+              sessionId: `pi-orb-auto-name-${randomUUID()}`,
             },
           ),
           (error) => failure(error instanceof Error ? error.message : String(error)),

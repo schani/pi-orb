@@ -42,13 +42,6 @@ const SCENARIO = {
   model: {
     rules: [
       {
-        match: { session: "pi-orb-mock-auto-name" },
-        steps: [
-          { type: "text", content: "Run E2E Tool Check" },
-          { type: "stop", status: "completed" },
-        ],
-      },
-      {
         match: { userMessage: { regex: "run the e2e tool check" } },
         steps: [
           { type: "reasoning", text: "I will run the requested check with bash.", deltas: 3 },
@@ -76,13 +69,30 @@ const SCENARIO = {
   },
 };
 
+const NAME_SCENARIO = {
+  auth: { accountId: "acct_pi_orb_e2e" },
+  model: {
+    rules: [
+      {
+        match: { default: true },
+        steps: [
+          { type: "text", content: "Run E2E Tool Check" },
+          { type: "stop", status: "completed" },
+        ],
+      },
+    ],
+  },
+};
+
 let fake: FakeSession;
+let nameFake: FakeSession;
 let controlPlane: ControlPlaneHandle;
 let orbId = "";
 let localStateDirectory = "";
 
 beforeAll(async () => {
   fake = await createFakeSession(`pi-orb-e2e-${Date.now()}`, SCENARIO);
+  nameFake = await createFakeSession(`pi-orb-name-e2e-${Date.now()}`, NAME_SCENARIO);
 
   if (PROCESS_BACKEND) {
     localStateDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-local-"));
@@ -91,6 +101,7 @@ beforeAll(async () => {
       processStateDirectory: join(localStateDirectory, "process-hosts"),
       port: CP_PORT,
       fake,
+      nameFake,
     });
     return;
   }
@@ -132,6 +143,7 @@ beforeAll(async () => {
     databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
     port: CP_PORT,
     fake,
+    nameFake,
     dockerNetwork: NETWORK,
     runtimeImage: RUNTIME_IMAGE,
   });
@@ -145,6 +157,7 @@ afterAll(async () => {
   await controlPlane?.stop();
   if (!PROCESS_BACKEND) await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
   if (fake !== undefined) await deleteFakeSession(fake.sessionKey);
+  if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
   if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
 }, 120_000);
 
@@ -156,6 +169,8 @@ describe("full slice E2E", () => {
       // Dump every diagnostic surface before failing.
       console.error("=== control-plane logs (tail) ===");
       console.error(controlPlane.logs.join("").split("\n").slice(-40).join("\n"));
+      const requests = await fakeControl(fake.sessionKey, "/requests").catch(() => null);
+      console.error("=== fake inference requests ===", JSON.stringify(requests));
       if (orbId !== "") {
         const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${orbId}`).catch(
           () => null,

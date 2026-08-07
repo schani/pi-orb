@@ -255,7 +255,11 @@ async function main(): Promise<void> {
             ...mockExtraEnv,
             ...tailscaleOption,
           });
-  const nameGenerator = new PiOrbNameGenerator(broker, mockOpenAi?.inferenceBaseUrl ?? null);
+  const nameInferenceUrl = env("PI_ORB_NAME_INFERENCE_URL", mockOpenAi?.inferenceBaseUrl ?? "");
+  const nameGenerator = new PiOrbNameGenerator(
+    broker,
+    nameInferenceUrl === "" ? null : nameInferenceUrl,
+  );
   const deps: ControlPlaneDeps = {
     store: database.store,
     hostProvider,
