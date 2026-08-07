@@ -40,6 +40,7 @@ function initialState(): MockState {
   const orb: OrbView = {
     id: ORB_ID,
     projectId: PROJECT_ID,
+    name: "Frontend Playground",
     state: "running",
     stateVersion: 1,
     checkoutCommit: "fixture123",
@@ -198,6 +199,7 @@ async function handleApi(
       const orb: OrbView = {
         id: body.id,
         projectId,
+        name: "name" in body && typeof body.name === "string" ? body.name : null,
         state: "creating",
         stateVersion: 1,
         stateChangedAt: createdAt,
@@ -230,6 +232,25 @@ async function handleApi(
     }
     if (method === "GET" && action === undefined) {
       sendJson(response, 200, orb);
+      return true;
+    }
+    if (method === "PATCH" && action === undefined) {
+      const body = await readJson(request);
+      if (
+        body === null ||
+        typeof body !== "object" ||
+        !("name" in body) ||
+        typeof body.name !== "string" ||
+        body.name.trim() === ""
+      ) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "invalid orb name", retryable: false },
+        });
+        return true;
+      }
+      const updated = { ...orb, name: body.name.trim(), updatedAt: now() };
+      state.orbs.set(orbId, updated);
+      sendJson(response, 200, updated);
       return true;
     }
     if (method === "GET" && action === "history") {
@@ -568,6 +589,16 @@ function handleAction(
     overflow: {},
   };
   appendRecord(state, session.orbId, userRecord);
+  const unnamedOrb = state.orbs.get(session.orbId);
+  if (unnamedOrb?.name === null) {
+    const generated = (inputText || "Image Request").trim().split(/\s+/u).slice(0, 5).join(" ");
+    setTimeout(() => {
+      const current = state.orbs.get(session.orbId);
+      if (current?.name === null) {
+        state.orbs.set(session.orbId, { ...current, name: generated, updatedAt: now() });
+      }
+    }, 400);
+  }
   send(session.socket, {
     v: 1,
     type: "request.result",

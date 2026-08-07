@@ -8,6 +8,10 @@ import { orbView } from "./views.ts";
 const orb: OrbRow = {
   id: "orb-1",
   projectId: "proj-1",
+  name: "Reconnect Repair",
+  autoNameLeaseUntil: null,
+  autoNameAttempts: 0,
+  autoNameNextAttemptAt: null,
   state: "running",
   stateVersion: 3,
   hostKind: "gce",

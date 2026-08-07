@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { runtimeTokenPath, type TokenName } from "@pi-orb/protocol";
+import { ORB_NAME_TRIGGER_PATH, runtimeTokenPath, type TokenName } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
+import { okAsync } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
-import type { BrokerDeps } from "../domain/ports.ts";
+import type { BrokerDeps, OrbNameGenerator } from "../domain/ports.ts";
 import {
   FakePointerStore,
   FakeSecretStore,
@@ -44,7 +45,10 @@ describe("runtime broker routes", () => {
       constants: { ...DEFAULT_BROKER_CONSTANTS, requestDeadlineMs: 100, waiterPollMs: 5 },
     };
     store.seedProject(makeProjectRow(PROJECT));
-    registerRuntimeRoutes(app, task, { store, broker });
+    const nameGenerator: OrbNameGenerator = {
+      generate: () => okAsync("Repair Runtime Auth"),
+    };
+    registerRuntimeRoutes(app, task, { store, broker, nameGenerator, nameLeaseMs: 30_000 });
     await app.ready();
   });
 
@@ -198,6 +202,34 @@ describe("runtime broker routes", () => {
     seedOrb("running");
     const response = await request({ reason: "startup" }, "wrong-token", "github");
     expect(response.statusCode).toBe(401);
+  });
+
+  it("assigns a Luna name only while the orb remains unnamed", async () => {
+    seedOrb("running");
+    const first = await app.inject({
+      method: "POST",
+      url: ORB_NAME_TRIGGER_PATH,
+      headers: { authorization: `Bearer ${TOKEN}` },
+      payload: { text: "repair runtime auth", imageOnly: false, readme: "# pi-orb" },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toEqual({ outcome: "assigned" });
+    expect(store.orbSnapshot(ORB)?.name).toBe("Repair Runtime Auth");
+
+    await store.setOrbName(task, {
+      orbId: ORB,
+      name: "Manual Name",
+      now: task.wallNow(),
+      onlyIfNull: false,
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: ORB_NAME_TRIGGER_PATH,
+      headers: { authorization: `Bearer ${TOKEN}` },
+      payload: { text: "something else", imageOnly: false },
+    });
+    expect(second.json()).toEqual({ outcome: "already_named" });
+    expect(store.orbSnapshot(ORB)?.name).toBe("Manual Name");
   });
 
   it("no longer serves the retired model-token path", async () => {

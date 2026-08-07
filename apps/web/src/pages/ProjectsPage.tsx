@@ -164,8 +164,9 @@ export function ProjectsPage() {
                 {orbList.items.length === 0 && <li className="muted">no orbs</li>}
                 {orbList.items.map((orb) => (
                   <li key={orb.id}>
-                    <a href={`#/orbs/${orb.id}`} className="mono">
-                      {orb.id}
+                    <a href={`#/orbs/${orb.id}`}>
+                      {orb.name ?? "untitled orb"}
+                      <span className="muted mono"> · {orb.id.slice(0, 8)}</span>
                     </a>
                     <span className={`state-badge state-${orb.state}`}>{orb.state}</span>
                   </li>

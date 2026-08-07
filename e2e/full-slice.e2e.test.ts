@@ -42,6 +42,13 @@ const SCENARIO = {
   model: {
     rules: [
       {
+        match: { userMessage: { regex: "Return only a short descriptive orb name" } },
+        steps: [
+          { type: "text", content: "Run E2E Tool Check" },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
         match: { userMessage: { regex: "run the e2e tool check" } },
         steps: [
           { type: "reasoning", text: "I will run the requested check with bash.", deltas: 3 },
@@ -383,6 +390,16 @@ describe("full slice E2E", () => {
           frame.event.outcome === "completed",
       ),
     );
+
+    const generatedName = await waitFor(
+      "orb auto-named",
+      async () => {
+        const current = await api(base, "GET", `/api/v1/orbs/${orbId}`);
+        return current.body["name"] === "Run E2E Tool Check" ? current.body["name"] : null;
+      },
+      { timeoutMs: 60_000, intervalMs: 1_000 },
+    );
+    expect(generatedName).toBe("Run E2E Tool Check");
 
     // Replication lands through the HTTP pull, not the WebSocket (docs/history-replication.md).
     const replicated = await waitFor(

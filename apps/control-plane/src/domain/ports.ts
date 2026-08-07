@@ -83,6 +83,18 @@ export interface ControlPlaneStore {
     states: readonly OrbState[],
   ): ResultAsync<OrbRow[], StoreError>;
   insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError>;
+  setOrbName(
+    task: SimulationTask,
+    params: { orbId: string; name: string; now: number; onlyIfNull: boolean },
+  ): ResultAsync<OrbRow | null, StoreError>;
+  claimOrbAutoName(
+    task: SimulationTask,
+    params: { orbId: string; now: number; leaseUntil: number },
+  ): ResultAsync<"claimed" | "already_named" | "in_progress" | "backoff", StoreError>;
+  failOrbAutoName(
+    task: SimulationTask,
+    params: { orbId: string; now: number; nextAttemptAt: number },
+  ): ResultAsync<void, StoreError>;
 
   /** State transition: bumps `state_version`, sets `state_changed_at` to `now`. */
   casTransition(
@@ -369,11 +381,32 @@ export interface BrokerDeps {
 
 // ---------------------------------------------------------------------------
 
+export interface OrbNameGeneratorError {
+  readonly type: "orb_name_generation_error";
+  readonly message: string;
+  readonly retryable: boolean;
+}
+
+export interface OrbNameGenerator {
+  generate(
+    task: SimulationTask,
+    input: {
+      projectName: string;
+      repositoryUrl: string;
+      message: string;
+      readme: string | null;
+    },
+    context: OperationContext,
+  ): ResultAsync<string, OrbNameGeneratorError>;
+}
+
 export interface ControlPlaneDeps {
   readonly store: ControlPlaneStore;
   readonly hostProvider: OrbHostProvider;
   readonly runtimeClient: OrbRuntimeClient;
   readonly authGate: AuthGate;
+  readonly nameGenerator: OrbNameGenerator;
+  readonly nameLeaseMs: number;
   readonly control: import("./control-state.ts").ControlState;
   readonly constants: import("./constants.ts").LifecycleConstants;
 }

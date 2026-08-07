@@ -2,6 +2,7 @@ import {
   type ControlPlaneHttpError,
   CreateOrbRequestSchema,
   CreateProjectRequestSchema,
+  UpdateOrbRequestSchema,
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
@@ -14,6 +15,7 @@ import {
   requestOrbStop,
 } from "../domain/lifecycle.ts";
 import type { ProjectRow } from "../domain/orb.ts";
+import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
@@ -124,9 +126,16 @@ export function registerRoutes(
       if (!Check(CreateOrbRequestSchema, body)) {
         return reply.status(400).send(httpError("invalid_request", "invalid orb body", false));
       }
+      const normalizedName = body.name === undefined ? null : normalizeOrbName(body.name);
+      if (normalizedName?.isErr()) {
+        return reply
+          .status(400)
+          .send(httpError("invalid_request", normalizedName.error.message, false));
+      }
       const created = await createOrb(task, deps, {
         orbId: body.id,
         projectId: request.params.projectId,
+        ...(normalizedName?.isOk() ? { name: normalizedName.value } : {}),
       });
       if (created.isErr()) return sendCommandError(reply, created.error);
       // Creation also requests the initial start; reconciliation picks it up.
@@ -143,6 +152,37 @@ export function registerRoutes(
       return reply.status(404).send(httpError("not_found", "orb not found", false));
     }
     return reply.send(orbView(orb.value, deps.control, config));
+  });
+
+  app.patch<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId", async (request, reply) => {
+    if (!Check(UpdateOrbRequestSchema, request.body)) {
+      return reply.status(400).send(httpError("invalid_request", "invalid orb update body", false));
+    }
+    const updated = await setOrbName(
+      task,
+      deps.store,
+      request.params.orbId,
+      request.body.name,
+      task.wallNow(),
+    );
+    if (updated.isErr()) {
+      const status =
+        updated.error.code === "not_found"
+          ? 404
+          : updated.error.code === "invalid_name"
+            ? 400
+            : 503;
+      const code =
+        updated.error.code === "not_found"
+          ? "not_found"
+          : updated.error.code === "invalid_name"
+            ? "invalid_request"
+            : "unavailable";
+      return reply
+        .status(status)
+        .send(httpError(code, updated.error.message, updated.error.retryable));
+    }
+    return reply.send(orbView(updated.value, deps.control, config));
   });
 
   app.post<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/start", async (request, reply) => {

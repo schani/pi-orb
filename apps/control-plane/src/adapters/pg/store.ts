@@ -27,6 +27,12 @@ function mapOrbRow(row: PgRow): OrbRow {
   return {
     id: String(row["id"]),
     projectId: String(row["project_id"]),
+    name: row["name"] === null ? null : String(row["name"]),
+    autoNameLeaseUntil:
+      row["auto_name_lease_until"] == null ? null : toMs(row["auto_name_lease_until"]),
+    autoNameAttempts: Number(row["auto_name_attempts"]),
+    autoNameNextAttemptAt:
+      row["auto_name_next_attempt_at"] == null ? null : toMs(row["auto_name_next_attempt_at"]),
     state: String(row["state"]) as OrbState,
     stateVersion: Number(row["state_version"]),
     hostKind: String(row["host_kind"]),
@@ -123,14 +129,19 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   insertOrb(_task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError> {
     return this.db
       .query(
-        `INSERT INTO orbs (id, project_id, state, state_version, host_kind, host_ref,
+        `INSERT INTO orbs (id, project_id, name, auto_name_lease_until, auto_name_attempts,
+           auto_name_next_attempt_at, state, state_version, host_kind, host_ref,
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, state_changed_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
         [
           orb.id,
           orb.projectId,
+          orb.name,
+          orb.autoNameLeaseUntil === null ? null : new Date(orb.autoNameLeaseUntil),
+          orb.autoNameAttempts,
+          orb.autoNameNextAttemptAt === null ? null : new Date(orb.autoNameNextAttemptAt),
           orb.state,
           orb.stateVersion,
           orb.hostKind,
@@ -150,6 +161,68 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         ],
       )
       .map((result) => mapOrbRow(result.rows[0] ?? {}));
+  }
+
+  setOrbName(
+    _task: SimulationTask,
+    params: { orbId: string; name: string; now: number; onlyIfNull: boolean },
+  ): ResultAsync<OrbRow | null, StoreError> {
+    return this.db
+      .query(
+        `UPDATE orbs SET name = $2, auto_name_lease_until = NULL,
+           auto_name_next_attempt_at = NULL, updated_at = $3
+         WHERE id = $1 ${params.onlyIfNull ? "AND name IS NULL" : ""} RETURNING *`,
+        [params.orbId, params.name, new Date(params.now)],
+      )
+      .map((result) => (result.rows[0] === undefined ? null : mapOrbRow(result.rows[0])));
+  }
+
+  claimOrbAutoName(
+    _task: SimulationTask,
+    params: { orbId: string; now: number; leaseUntil: number },
+  ): ResultAsync<"claimed" | "already_named" | "in_progress" | "backoff", StoreError> {
+    const run = async (): Promise<
+      Result<"claimed" | "already_named" | "in_progress" | "backoff", StoreError>
+    > => {
+      const claimed = await this.db.query(
+        `UPDATE orbs SET auto_name_lease_until = $3,
+           auto_name_attempts = auto_name_attempts + 1
+         WHERE id = $1 AND name IS NULL
+           AND (auto_name_lease_until IS NULL OR auto_name_lease_until <= $2)
+           AND (auto_name_next_attempt_at IS NULL OR auto_name_next_attempt_at <= $2)
+         RETURNING id`,
+        [params.orbId, new Date(params.now), new Date(params.leaseUntil)],
+      );
+      if (claimed.isErr()) return err(claimed.error);
+      if (claimed.value.rows[0] !== undefined) return ok("claimed");
+      const current = await this.db.query(
+        "SELECT name, auto_name_lease_until, auto_name_next_attempt_at FROM orbs WHERE id = $1",
+        [params.orbId],
+      );
+      if (current.isErr()) return err(current.error);
+      const row = current.value.rows[0];
+      if (row === undefined || row["name"] !== null) return ok("already_named");
+      if (
+        row["auto_name_next_attempt_at"] != null &&
+        toMs(row["auto_name_next_attempt_at"]) > params.now
+      )
+        return ok("backoff");
+      return ok("in_progress");
+    };
+    return new ResultAsync(run());
+  }
+
+  failOrbAutoName(
+    _task: SimulationTask,
+    params: { orbId: string; now: number; nextAttemptAt: number },
+  ): ResultAsync<void, StoreError> {
+    return this.db
+      .query(
+        `UPDATE orbs SET auto_name_lease_until = NULL, auto_name_next_attempt_at = $2,
+           updated_at = $3 WHERE id = $1 AND name IS NULL`,
+        [params.orbId, new Date(params.nextAttemptAt), new Date(params.now)],
+      )
+      .map(() => undefined);
   }
 
   private casUpdate(

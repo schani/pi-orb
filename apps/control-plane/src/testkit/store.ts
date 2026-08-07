@@ -156,6 +156,62 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  setOrbName(
+    task: SimulationTask,
+    params: { orbId: string; name: string; now: number; onlyIfNull: boolean },
+  ): ResultAsync<OrbRow | null, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "set orb name", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined || (params.onlyIfNull && orb.name !== null)) return null;
+      const updated = {
+        ...orb,
+        name: params.name,
+        autoNameLeaseUntil: null,
+        autoNameNextAttemptAt: null,
+        updatedAt: params.now,
+      };
+      this.orbs.set(params.orbId, updated);
+      return updated;
+    });
+  }
+
+  claimOrbAutoName(
+    task: SimulationTask,
+    params: { orbId: string; now: number; leaseUntil: number },
+  ): ResultAsync<"claimed" | "already_named" | "in_progress" | "backoff", StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "claim orb auto name", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined || orb.name !== null) return "already_named" as const;
+      if (orb.autoNameNextAttemptAt !== null && orb.autoNameNextAttemptAt > params.now)
+        return "backoff" as const;
+      if (orb.autoNameLeaseUntil !== null && orb.autoNameLeaseUntil > params.now)
+        return "in_progress" as const;
+      this.orbs.set(params.orbId, {
+        ...orb,
+        autoNameLeaseUntil: params.leaseUntil,
+        autoNameAttempts: orb.autoNameAttempts + 1,
+      });
+      return "claimed" as const;
+    });
+  }
+
+  failOrbAutoName(
+    task: SimulationTask,
+    params: { orbId: string; now: number; nextAttemptAt: number },
+  ): ResultAsync<void, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "fail orb auto name", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb !== undefined && orb.name === null) {
+        this.orbs.set(params.orbId, {
+          ...orb,
+          autoNameLeaseUntil: null,
+          autoNameNextAttemptAt: params.nextAttemptAt,
+          updatedAt: params.now,
+        });
+      }
+    });
+  }
+
   // -- lifecycle CAS --------------------------------------------------------
 
   casTransition(

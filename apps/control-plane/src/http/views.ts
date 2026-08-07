@@ -43,6 +43,7 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
   return {
     id: orb.id,
     projectId: orb.projectId,
+    name: orb.name,
     state: orb.state,
     stateVersion: orb.stateVersion,
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),

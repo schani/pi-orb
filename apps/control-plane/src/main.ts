@@ -20,6 +20,7 @@ import {
 } from "./adapters/github-oauth/client.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
+import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
@@ -254,6 +255,7 @@ async function main(): Promise<void> {
             ...mockExtraEnv,
             ...tailscaleOption,
           });
+  const nameGenerator = new PiOrbNameGenerator(broker, mockOpenAi?.inferenceBaseUrl ?? null);
   const deps: ControlPlaneDeps = {
     store: database.store,
     hostProvider,
@@ -265,6 +267,8 @@ async function main(): Promise<void> {
             new GithubAuthGate(broker, new GithubOAuthHttpClient(githubOauth)),
           ])
         : new PiAuthGate(authDir, mockOpenAi, broker),
+    nameGenerator,
+    nameLeaseMs: 60_000,
     control: new ControlState(),
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
   };
@@ -294,7 +298,12 @@ async function main(): Promise<void> {
     }
   }
   if (role === "all" || role === "runtime") {
-    registerRuntimeRoutes(app, httpTask, { store: deps.store, broker });
+    registerRuntimeRoutes(app, httpTask, {
+      store: deps.store,
+      broker,
+      nameGenerator: deps.nameGenerator,
+      nameLeaseMs: deps.nameLeaseMs,
+    });
   }
 
   const stop = new AbortController();

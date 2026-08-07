@@ -212,6 +212,8 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
             operationId,
           );
         } else if (frame.action.type === "message") {
+          // Naming is auxiliary and starts only after the request gate accepted this message.
+          agent.triggerAutoName(frame.action.content);
           // The operation id becomes visible through operation_started once Pi starts.
           void agent.submitMessage(frame.action.content, operationId);
         }

@@ -48,6 +48,7 @@ GET  /api/v1/projects/:projectId
 GET  /api/v1/projects/:projectId/orbs
 POST /api/v1/projects/:projectId/orbs
 GET  /api/v1/orbs/:orbId
+PATCH /api/v1/orbs/:orbId
 POST /api/v1/orbs/:orbId/start
 POST /api/v1/orbs/:orbId/stop
 
@@ -55,7 +56,7 @@ GET  /api/v1/orbs/:orbId/history
 WS   /api/v1/orbs/:orbId/live
 ```
 
-There are no project/orb update/delete, credential, model-selection, admin, or generic host-operation endpoints in the first slice. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
+There are no project update/delete, orb delete, credential, model-selection, admin, or generic host-operation endpoints in the first slice. The one orb update is the narrow naming endpoint described below. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
 
 The browser generates project and orb UUIDs with `crypto.randomUUID()` and includes them in create requests:
 
@@ -68,6 +69,11 @@ interface CreateProjectRequest {
 
 interface CreateOrbRequest {
   id: string;
+  name?: string;
+}
+
+interface UpdateOrbRequest {
+  name: string;
 }
 ```
 
@@ -84,6 +90,7 @@ interface ProjectView {
 interface OrbView {
   id: string;
   projectId: string;
+  name: string | null;
   state: "creating" | "starting" | "running" | "stopping" | "stopped" | "failed";
   stateVersion: number;
   checkoutCommit?: string;
@@ -112,6 +119,24 @@ interface OrbHistoryView {
   records: HistoryRecord[];
 }
 ```
+
+### Orb names and first-message auto-naming (decided and implemented)
+
+An orb has a nullable, non-unique display name. A user may supply it in `CreateOrbRequest` or set/replace it through `PATCH /api/v1/orbs/:orbId`; manual naming is allowed in every lifecycle state and is idempotent. Names are trimmed, whitespace-normalized Unicode strings of 1–80 characters. Clearing a name is not initially supported. No name-source field is needed: both user and generated names occupy the same column, generation may write only while `name IS NULL`, and any later user rename is an ordinary unconditional name update. `OrbView.name` is nullable so an unnamed orb can render as “untitled orb” plus a short ID.
+
+Generation runs in the **control plane**, not in the orb. When the runtime accepts the first user `message` request, it reads bounded project context from its checkout and starts a bounded, non-blocking call to `POST /runtime/v1/orb-name-trigger`, authenticated by the existing per-incarnation orb bearer token. The body is `{ text: string, imageOnly: boolean, readme?: string }`, has a small fixed byte limit, and carries no orb ID because authentication already identifies the orb. A successful assignment, an already-named orb, or another worker holding the naming lease is an idempotent success; transient generation/storage failure is retryable. The endpoint fetches the project name and canonical repository URL, then its control-plane model adapter invokes the `openai-codex` catalog model `gpt-5.6-luna`. Keeping inference here centralizes the prompt/model policy, credential use, leases, retries, and conditional database write; the orb is only the source of checkout-local context. The request remains active until generation/assignment finishes rather than enqueueing fragile in-memory background work, but neither it nor Luna delays the agent turn.
+
+The runtime includes a root README when available. It chooses deterministically from regular, non-symlink files whose basename matches `README` or `README.*` case-insensitively, rejects a resolved path outside the checkout, decodes UTF-8 text only, and truncates it to a fixed byte budget before sending. README lookup/read failure is non-fatal and simply omits the field. Project metadata, README text, and first-message text are all quoted as untrusted prompt data. Shell records do not trigger naming. For an image-only first message, the trigger sends an explicit image-only marker rather than copying image bytes into a second inference call.
+
+On runtime boot, an orb with an existing first user message replays the same trigger from persisted session history and the current checkout README; the control-plane endpoint checks the name before claiming inference, so already-named orbs make this a cheap no-op. Replicated-history reconciliation is a final fallback and may generate from project metadata plus the first message when no runtime is reachable; in that case README is not available to the control plane.
+
+The naming prompt treats project/message text as quoted untrusted data and asks for one short descriptive name, with no tools and minimal reasoning. The adapter validates and normalizes the result against the same name rules; malformed output is a retryable generation failure rather than a reason to alter the conversation or orb lifecycle state.
+
+This stays out of the live proxy, which remains content-agnostic: the runtime is the authority that knows a message was accepted and can read the checkout, while replicated history is the durable fallback. Generation runs asynchronously relative to the agent operation and never delays or fails the user's turn. A durable lease/backoff on the orb row prevents the immediate trigger, fallback reconciler, and rollout-overlap workers from repeatedly paying for the same generation while allowing recovery after process death or transient model/storage failure. The final write is conditional on `name IS NULL`; therefore a user rename at any point, including while Luna is running, always wins. Failures are logged without message content and retried with capped exponential backoff; they do not populate the orb's lifecycle `lastError`.
+
+The browser shows the name as the primary identity in project orb lists and the sticky orb header, keeps the short orb ID as secondary metadata, and offers inline rename. Existing orb polling makes an asynchronously generated name appear without a new push protocol.
+
+Implementation: migration `005_orb_names.sql`; protocol schemas in `packages/protocol/src/orb-naming.ts` and `control-plane-api.ts`; lease/race domain logic in `domain/orb-naming.ts`; Luna adapter `adapters/pi-name-generator.ts`; runtime trigger and replicated-history fallback in `http/runtime-routes.ts`, `orb-runtime/src/pi/agent.ts`, and `domain/replication.ts`. The user-wins and concurrent-trigger schedules are covered by `orb-naming.dst.test.ts`; the full-slice E2E asserts the generated name.
 
 Do not expose `host_ref`, model credentials, harness session ID, or internal replication fields in `OrbView`. `actionRequired` is synthesized from the current in-memory device flow and can contain only its public challenge; it is not stored in the orb row. `stateDetail` is synthesized the same way from in-memory reconciler state: while `stopping` it reports the history-drain blocker — for example a retrying database outage — so a long stop is explained rather than an unlabeled spinner, and new detail variants can be added later without schema changes. The dedicated history response exposes only the cursor/head needed for live handoff.
 

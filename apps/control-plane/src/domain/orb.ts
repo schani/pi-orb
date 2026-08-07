@@ -7,6 +7,10 @@ import type { HarnessSessionMetadata, OrbState, StopReason } from "@pi-orb/proto
 export interface OrbRow {
   readonly id: string;
   readonly projectId: string;
+  readonly name: string | null;
+  readonly autoNameLeaseUntil: number | null;
+  readonly autoNameAttempts: number;
+  readonly autoNameNextAttemptAt: number | null;
   readonly state: OrbState;
   readonly stateVersion: number;
   readonly hostKind: string;
