@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { complete } from "@earendil-works/pi-ai/compat";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import type { SimulationTask } from "determined";
@@ -81,7 +82,13 @@ export class PiOrbNameGenerator implements OrbNameGenerator {
               reasoningSummary: "off",
               textVerbosity: "low",
               toolChoice: "none",
-              sessionId: `pi-orb-name-${task.wallNow()}`,
+              // The scripted E2E fake matches this auxiliary request by
+              // session so the quoted first message cannot select the agent
+              // turn's rule. Production calls remain isolated from each other.
+              sessionId:
+                this.inferenceBaseUrl === null
+                  ? `pi-orb-auto-name-${randomUUID()}`
+                  : "pi-orb-mock-auto-name",
             },
           ),
           (error) => failure(error instanceof Error ? error.message : String(error)),

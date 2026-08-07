@@ -42,7 +42,7 @@ const SCENARIO = {
   model: {
     rules: [
       {
-        match: { userMessage: { regex: "Return only a short descriptive orb name" } },
+        match: { session: "pi-orb-mock-auto-name" },
         steps: [
           { type: "text", content: "Run E2E Tool Check" },
           { type: "stop", status: "completed" },
