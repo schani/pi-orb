@@ -18,13 +18,18 @@ Remaining UI questions include rendering unknown content blocks, large/truncated
 
 ## Frontend-only development (decided 2026-08-06)
 
-The web workspace has an in-process development fixture activated by Vite's `frontend` mode. Run it with:
+Two Docker-free development compositions exist and must not be confused:
+
+- **Full service with process-hosted orbs:** run `npm run dev:local` for the control plane/SQLite/process supervisor and `npm run dev --workspace @pi-orb/web` for the normal web server. This exercises real Pi runtimes, lifecycle, protocol, replication, credentials, and model inference, but runs repository code unsandboxed (`docs/host-provider.md`).
+- **Frontend-only fixture:** run only `npm run dev:frontend`. Vite replaces the HTTP/WebSocket backend in process; no control plane, database, orb process, Pi session, or model call exists.
+
+The web workspace's in-process fixture is activated by Vite's `frontend` mode. Run it with:
 
 ```sh
 npm run dev:frontend
 ```
 
-This starts only Vite and needs no PostgreSQL, Docker, control plane, runtime, credentials, or model service. The fixture owns the `/api/v1` HTTP routes and live WebSocket upgrade on the Vite server. It starts with one running orb and a short conversation plus a starting orb with an OpenAI device-login challenge for testing the authentication UI; messages receive a simulated streamed echo, user-shell commands receive simulated streamed command output and persisted `pi.bash_execution` records (including excluded-context state), and start, stop, project/orb creation, history reload, and abort use the real browser-facing contracts. Newly created fixture orbs remain in `creating` for about 10 seconds before becoming `running`, so the editable-while-send-is-unavailable composer behavior can be exercised manually.
+This starts only Vite and needs no PostgreSQL, Docker, control plane, runtime, credentials, or model service. It is not the frontend command for `npm run dev:local`; that full-service composition uses the normal `npm run dev --workspace @pi-orb/web` command in a second terminal. The fixture owns the `/api/v1` HTTP routes and live WebSocket upgrade on the Vite server. It starts with one running orb and a short conversation plus a starting orb with an OpenAI device-login challenge for testing the authentication UI; messages receive a simulated streamed echo, user-shell commands receive simulated streamed command output and persisted `pi.bash_execution` records (including excluded-context state), and start, stop, project/orb creation, history reload, and abort use the real browser-facing contracts. Newly created fixture orbs remain in `creating` for about 10 seconds before becoming `running`, so the editable-while-send-is-unavailable composer behavior can be exercised manually.
 
 The fixture is a transport-level adapter, not a mock branch in React. Production UI code still calls the same relative HTTP URLs, validates the same `@pi-orb/protocol` schemas, and runs the same WebSocket reducer. This keeps frontend-only behavior representative and makes protocol drift fail visibly. It is intentionally ephemeral and process-local: restarting Vite resets all fixture data, and it is for manual UI development rather than backend or E2E correctness. Normal `npm run dev --workspace @pi-orb/web` retains the proxy to the real control plane.
 
