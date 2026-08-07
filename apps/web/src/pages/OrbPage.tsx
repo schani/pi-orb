@@ -20,6 +20,7 @@ import {
   startOrb,
   stopOrb,
 } from "../lib/api.ts";
+import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { isPinnedToBottom } from "../lib/scroll-pin.ts";
 
@@ -287,24 +288,22 @@ function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
 
 /** Copies the device-login code; flips its label briefly as feedback. */
 function CopyCodeButton({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1500);
+    if (copyStatus === "idle") return;
+    const timer = setTimeout(() => setCopyStatus("idle"), 1500);
     return () => clearTimeout(timer);
-  }, [copied]);
+  }, [copyStatus]);
   return (
     <button
       type="button"
       className="copy-code"
+      title={copyStatus === "failed" ? "Clipboard access is unavailable" : "Copy device code"}
       onClick={() => {
-        navigator.clipboard.writeText(code).then(
-          () => setCopied(true),
-          () => {},
-        );
+        copyToClipboard(code).then((result) => setCopyStatus(result.isOk() ? "copied" : "failed"));
       }}
     >
-      {copied ? "copied" : "copy"}
+      {copyStatus === "copied" ? "copied" : copyStatus === "failed" ? "copy failed" : "copy"}
     </button>
   );
 }

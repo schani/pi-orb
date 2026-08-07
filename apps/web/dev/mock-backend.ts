@@ -18,6 +18,7 @@ import { WebSocket, WebSocketServer } from "ws";
 
 const PROJECT_ID = "frontend-fixture-project";
 const ORB_ID = "frontend-fixture-orb";
+const AUTH_ORB_ID = "frontend-auth-copy-test";
 const NEW_ORB_STARTUP_DELAY_MS = 10_000;
 const now = () => new Date().toISOString();
 
@@ -47,6 +48,21 @@ function initialState(): MockState {
     createdAt,
     updatedAt: createdAt,
   };
+  const authOrb: OrbView = {
+    id: AUTH_ORB_ID,
+    projectId: PROJECT_ID,
+    state: "starting",
+    stateVersion: 1,
+    actionRequired: {
+      type: "openai_codex_device_login",
+      verificationUri: "https://auth.openai.com/codex/device",
+      userCode: "COPY-2468",
+      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+    },
+    stateChangedAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  };
   const welcomeId = randomUUID();
   const records: HistoryRecord[] = [
     {
@@ -66,8 +82,14 @@ function initialState(): MockState {
   ];
   return {
     projects: new Map([[project.id, project]]),
-    orbs: new Map([[orb.id, orb]]),
-    histories: new Map([[orb.id, records]]),
+    orbs: new Map([
+      [orb.id, orb],
+      [authOrb.id, authOrb],
+    ]),
+    histories: new Map([
+      [orb.id, records],
+      [authOrb.id, []],
+    ]),
     startupTimers: new Map(),
   };
 }
