@@ -329,6 +329,20 @@ export function OrbPage({ orbId }: { orbId: string }) {
     notificationPermission(),
   );
 
+  // Ask as soon as an orb page opens. The header button remains as a fallback for browsers that
+  // require a user gesture or suppress the first prompt; denied permission still requires the
+  // user to change browser site settings.
+  useEffect(() => {
+    if (notifications !== "default") return;
+    let cancelled = false;
+    void requestNotificationPermission().then((permission) => {
+      if (!cancelled) setNotifications(permission);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [notifications]);
+
   // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {
     let cancelled = false;

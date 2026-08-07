@@ -1,4 +1,5 @@
 const displayed = new Set<string>();
+let pendingPermissionRequest: Promise<BrowserNotificationPermission> | null = null;
 
 export type BrowserNotificationPermission = "default" | "denied" | "granted" | "unsupported";
 
@@ -14,13 +15,16 @@ export function notificationPermission(): BrowserNotificationPermission {
   return "Notification" in window ? Notification.permission : "unsupported";
 }
 
-export async function requestNotificationPermission(): Promise<BrowserNotificationPermission> {
-  if (!("Notification" in window)) return "unsupported";
-  try {
-    return await Notification.requestPermission();
-  } catch {
-    return Notification.permission;
-  }
+export function requestNotificationPermission(): Promise<BrowserNotificationPermission> {
+  if (!("Notification" in window)) return Promise.resolve("unsupported");
+  if (pendingPermissionRequest !== null) return pendingPermissionRequest;
+  pendingPermissionRequest = Promise.resolve()
+    .then(() => Notification.requestPermission())
+    .catch(() => Notification.permission)
+    .finally(() => {
+      pendingPermissionRequest = null;
+    });
+  return pendingPermissionRequest;
 }
 
 export function notificationDecision(
