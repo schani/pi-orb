@@ -1,5 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
+import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
 
 const closed = { additionalProperties: false } as const;
 
@@ -30,10 +31,17 @@ export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 export const CreateOrbRequestSchema = Type.Object(
   {
     id: Type.String(),
+    name: Type.Optional(Type.String({ maxLength: ORB_NAME_MAX_CHARS })),
   },
   closed,
 );
 export type CreateOrbRequest = Static<typeof CreateOrbRequestSchema>;
+
+export const UpdateOrbRequestSchema = Type.Object(
+  { name: Type.String({ minLength: 1, maxLength: ORB_NAME_MAX_CHARS }) },
+  closed,
+);
+export type UpdateOrbRequest = Static<typeof UpdateOrbRequestSchema>;
 
 export const ProjectViewSchema = Type.Object(
   {
@@ -86,6 +94,7 @@ export const OrbViewSchema = Type.Object(
   {
     id: Type.String(),
     projectId: Type.String(),
+    name: Type.Union([Type.String(), Type.Null()]),
     state: OrbStateSchema,
     stateVersion: Type.Number(),
     checkoutCommit: Type.Optional(Type.String()),

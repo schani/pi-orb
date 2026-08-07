@@ -1,5 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  ORB_NAME_MESSAGE_MAX_BYTES,
+  ORB_NAME_README_MAX_BYTES,
+  ORB_NAME_TRIGGER_PATH,
+  type OrbNameTriggerResponse,
+  OrbNameTriggerSchema,
   RUNTIME_TOKENS_PREFIX,
   type TokenErrorBody,
   type TokenGrantBody,
@@ -15,11 +20,14 @@ import {
   TOKEN_PROVIDERS,
   type TokenRequest,
 } from "../domain/broker.ts";
-import type { BrokerDeps, ControlPlaneStore } from "../domain/ports.ts";
+import { generateOrbName } from "../domain/orb-naming.ts";
+import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
 
 export interface RuntimeRouteDeps {
   readonly store: ControlPlaneStore;
   readonly broker: BrokerDeps;
+  readonly nameGenerator: OrbNameGenerator;
+  readonly nameLeaseMs: number;
 }
 
 const unauthorized: TokenErrorBody = { error: "unauthorized" };
@@ -48,6 +56,24 @@ export function registerRuntimeRoutes(
   task: SimulationTask,
   deps: RuntimeRouteDeps,
 ): void {
+  const authenticate = async (authorization: unknown) => {
+    if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) return null;
+    const tokenHash = createHash("sha256")
+      .update(authorization.slice("Bearer ".length))
+      .digest("hex");
+    const orbResult = await deps.store.getOrbByRuntimeTokenHash(task, tokenHash);
+    if (orbResult.isErr()) return null;
+    const orb = orbResult.value;
+    if (
+      orb === null ||
+      orb.runtimeTokenHash === null ||
+      !hashesEqual(orb.runtimeTokenHash, tokenHash) ||
+      !RUNTIME_TOKEN_STATES.includes(orb.state)
+    )
+      return null;
+    return orb;
+  };
+
   app.post<{ Params: { name: string } }>(
     `${RUNTIME_TOKENS_PREFIX}/:name`,
     async (request, reply) => {
@@ -116,4 +142,42 @@ export function registerRuntimeRoutes(
       return reply.send(response);
     },
   );
+
+  app.post(ORB_NAME_TRIGGER_PATH, async (request, reply) => {
+    const orb = await authenticate(request.headers.authorization);
+    if (orb === null) return sendUnauthorized(reply);
+    if (!Check(OrbNameTriggerSchema, request.body)) {
+      return reply.status(400).send({ error: "invalid_request" });
+    }
+    const textBytes = Buffer.byteLength(request.body.text);
+    const readmeBytes =
+      request.body.readme === undefined ? 0 : Buffer.byteLength(request.body.readme);
+    if (textBytes > ORB_NAME_MESSAGE_MAX_BYTES || readmeBytes > ORB_NAME_README_MAX_BYTES) {
+      return reply.status(413).send({ error: "invalid_request" });
+    }
+    const generated = await generateOrbName(
+      task,
+      { store: deps.store, generator: deps.nameGenerator, leaseMs: deps.nameLeaseMs },
+      orb.id,
+      {
+        message:
+          request.body.text === "" && request.body.imageOnly
+            ? "[image-only request]"
+            : request.body.text,
+        readme: request.body.readme ?? null,
+      },
+    );
+    if (generated.isErr()) {
+      const status = generated.error.retryable
+        ? 503
+        : generated.error.code === "not_found"
+          ? 404
+          : 400;
+      return reply
+        .status(status)
+        .send({ error: generated.error.code, message: generated.error.message });
+    }
+    const response: OrbNameTriggerResponse = { outcome: generated.value };
+    return reply.send(response);
+  });
 }

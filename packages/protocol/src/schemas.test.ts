@@ -464,6 +464,7 @@ describe("control-plane API schemas", () => {
       Check(OrbViewSchema, {
         id: "o1",
         projectId: "p1",
+        name: "Drain History",
         state: "stopping",
         stateVersion: 4,
         checkoutCommit: "abc123",
@@ -477,6 +478,7 @@ describe("control-plane API schemas", () => {
       Check(OrbViewSchema, {
         id: "o1",
         projectId: "p1",
+        name: null,
         state: "creating",
         stateVersion: 0,
         actionRequired: {

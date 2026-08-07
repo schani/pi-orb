@@ -98,6 +98,21 @@ const SCENARIO = {
   },
 };
 
+const NAME_SCENARIO = {
+  auth: { accountId: "acct_pi_orb_e2e_resume" },
+  model: {
+    rules: [
+      {
+        match: { default: true },
+        steps: [
+          { type: "text", content: "Resume Interrupted Job" },
+          { type: "stop", status: "completed" },
+        ],
+      },
+    ],
+  },
+};
+
 /** Just enough of one recorded fake request to inspect the resumed turn. */
 interface ModelRequest {
   surface?: string;
@@ -123,11 +138,13 @@ function customRecords(records: unknown[], customType: string): Record<string, u
 }
 
 let fake: FakeSession;
+let nameFake: FakeSession;
 let controlPlane: ControlPlaneHandle;
 let orbId = "";
 
 beforeAll(async () => {
   fake = await createFakeSession(`pi-orb-e2e-resume-${Date.now()}`, SCENARIO);
+  nameFake = await createFakeSession(`pi-orb-name-e2e-resume-${Date.now()}`, NAME_SCENARIO);
 
   await docker(["network", "create", NETWORK]).catch(() => undefined);
   const hasImage = await docker(["image", "inspect", RUNTIME_IMAGE, "--format", "ok"]).catch(
@@ -166,6 +183,7 @@ beforeAll(async () => {
     databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
     port: CP_PORT,
     fake,
+    nameFake,
     dockerNetwork: NETWORK,
     runtimeImage: RUNTIME_IMAGE,
   });
@@ -179,6 +197,7 @@ afterAll(async () => {
   await controlPlane?.stop();
   await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
   if (fake !== undefined) await deleteFakeSession(fake.sessionKey);
+  if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
 }, 120_000);
 
 describe("interrupted-turn resume E2E", () => {

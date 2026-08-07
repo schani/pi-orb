@@ -19,6 +19,7 @@ import {
   getOrbHistory,
   startOrb,
   stopOrb,
+  updateOrb,
 } from "../lib/api.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
@@ -312,6 +313,8 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [orb, setOrb] = useState<OrbView | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameText, setRenameText] = useState("");
 
   // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {
@@ -491,6 +494,17 @@ export function OrbPage({ orbId }: { orbId: string }) {
     }
   };
 
+  const saveName = async () => {
+    const result = await updateOrb(orbId, { name: renameText });
+    if (result.isOk()) {
+      setOrb(result.value);
+      setOrbError(null);
+      setRenaming(false);
+    } else {
+      setOrbError(result.error);
+    }
+  };
+
   const canStart = orb !== null && (orb.state === "stopped" || orb.state === "failed");
   const canStop =
     orb !== null &&
@@ -512,14 +526,46 @@ export function OrbPage({ orbId }: { orbId: string }) {
           pi-orb
         </a>
         <div className="orb-header-identity">
-          <h1 className="orb-title" title={`orb ${orbId}`}>
-            orb {orbId}
-          </h1>
+          {renaming ? (
+            <form
+              className="orb-rename-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveName();
+              }}
+            >
+              <input
+                aria-label="orb name"
+                value={renameText}
+                maxLength={80}
+                onChange={(event) => setRenameText(event.target.value)}
+              />
+              <button type="submit">save</button>
+              <button type="button" onClick={() => setRenaming(false)}>
+                cancel
+              </button>
+            </form>
+          ) : (
+            <h1 className="orb-title" title={`orb ${orbId}`}>
+              {orb?.name ?? "untitled orb"}
+              <button
+                type="button"
+                className="orb-rename-button"
+                onClick={() => {
+                  setRenameText(orb?.name ?? "");
+                  setRenaming(true);
+                }}
+              >
+                rename
+              </button>
+            </h1>
+          )}
           <div className="orb-header-meta">
             {orb === null ? (
               <span>loading…</span>
             ) : (
               <>
+                <span>orb {orbId.slice(0, 8)}</span>
                 <span>v{orb.stateVersion}</span>
                 {orb.checkoutCommit !== undefined && (
                   <span className="orb-header-checkout">checkout {orb.checkoutCommit}</span>

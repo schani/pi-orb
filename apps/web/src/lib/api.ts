@@ -9,6 +9,7 @@ import {
   OrbViewSchema,
   type ProjectView,
   ProjectViewSchema,
+  type UpdateOrbRequest,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import type { Static, TSchema } from "typebox";
@@ -124,6 +125,17 @@ export function createOrb(
 ): Promise<Result<OrbView, ApiError>> {
   return apiFetch(OrbViewSchema, `/api/v1/projects/${encodeURIComponent(projectId)}/orbs`, {
     method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateOrb(
+  orbId: string,
+  request: UpdateOrbRequest,
+): Promise<Result<OrbView, ApiError>> {
+  return apiFetch(OrbViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}`, {
+    method: "PATCH",
     headers: jsonHeaders,
     body: JSON.stringify(request),
   });

@@ -13,6 +13,8 @@ import {
 import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
   type MessageInputBlock,
+  ORB_NAME_MESSAGE_MAX_BYTES,
+  ORB_NAME_README_MAX_BYTES,
   type RuntimeEvent,
   type RuntimeHealth,
   type RuntimeTurnResume,
@@ -27,6 +29,8 @@ import { BrokerTokenClient } from "../domain/broker-client.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
+import { triggerOrbName } from "../naming/client.ts";
+import { readRootReadme } from "../naming/context.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { pickCodexModel } from "./model-select.ts";
@@ -123,6 +127,7 @@ export class PiOrbAgent {
   private readonly liveBlocks = new Map<string, LiveBlock>();
   private readonly liveTools = new Map<string, LiveTool>();
   private readonly listeners = new Set<FrameListener>();
+  private autoNameTriggered = false;
 
   constructor(options: PiOrbAgentOptions) {
     this.options = options;
@@ -376,6 +381,20 @@ export class PiOrbAgent {
       checkoutCommit: this.checkoutCommit,
       activity: this.activity,
     };
+    const firstUser = this.snapshot().map((snapshot) =>
+      snapshot.records.find((record) => record.type === "message" && record.role === "user"),
+    );
+    if (firstUser.isOk() && firstUser.value !== undefined && firstUser.value.type === "message") {
+      const content: MessageInputBlock[] = firstUser.value.content.flatMap(
+        (block): MessageInputBlock[] =>
+          block.type === "text"
+            ? [{ type: "text" as const, text: block.text }]
+            : block.type === "image"
+              ? [{ type: "image" as const, mediaType: block.mediaType ?? "image/png", data: "" }]
+              : [],
+      );
+      this.triggerAutoName(content);
+    }
 
     // 5. Resume a turn a host restart interrupted (docs/lifecycle.md). The
     // runtime is already ready here: the resumed turn is never awaited, and it
@@ -604,6 +623,32 @@ export class PiOrbAgent {
 
   sessionId(): string | null {
     return this.sessionManager?.getSessionId() ?? null;
+  }
+
+  /** Trigger first-message naming without delaying or failing the agent turn. */
+  triggerAutoName(content: readonly MessageInputBlock[]): void {
+    if (this.autoNameTriggered) return;
+    this.autoNameTriggered = true;
+    const broker = this.options.broker;
+    if (broker === null) return;
+    const text = content
+      .filter(
+        (block): block is Extract<MessageInputBlock, { type: "text" }> => block.type === "text",
+      )
+      .map((block) => block.text)
+      .join("\n");
+    const textBytes = Buffer.from(text);
+    const boundedText = textBytes.subarray(0, ORB_NAME_MESSAGE_MAX_BYTES).toString("utf8");
+    const imageOnly = boundedText.trim() === "" && content.some((block) => block.type === "image");
+    const checkoutDir = join(this.options.workDir, "repo");
+    void readRootReadme(checkoutDir, ORB_NAME_README_MAX_BYTES).then(async (readme) => {
+      const sent = await triggerOrbName(broker, {
+        text: boundedText,
+        imageOnly,
+        ...(readme.isOk() && readme.value !== null ? { readme: readme.value } : {}),
+      });
+      if (sent.isErr()) console.error(`orb naming unavailable: ${sent.error.message}`);
+    });
   }
 
   /**

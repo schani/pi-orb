@@ -3,6 +3,7 @@ import type { SimulationTask } from "determined";
 import { sleepResult, withDeadline } from "./dst.ts";
 import { formatOrbFailure, type ReplicationIntegrityError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
+import { generateOrbName } from "./orb-naming.ts";
 import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
 
 /**
@@ -121,6 +122,40 @@ export async function failOrbForIntegrity(
  * cursor conflicts re-read and continue (another poller won); retryable
  * failures return to the ordinary polling cadence with the cursor unchanged.
  */
+async function reconcileOrbName(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): Promise<void> {
+  const orb = await deps.store.getOrb(task, orbId);
+  if (orb.isErr() || orb.value === null || orb.value.name !== null) return;
+  const history = await deps.store.readHistorySnapshot(task, orbId);
+  if (history.isErr()) return;
+  const firstUser = history.value.records.find(
+    (record) => record.type === "message" && record.role === "user",
+  );
+  if (firstUser === undefined || firstUser.type !== "message") return;
+  const message = firstUser.content
+    .filter(
+      (block): block is Extract<(typeof firstUser.content)[number], { type: "text" }> =>
+        block.type === "text",
+    )
+    .map((block) => block.text)
+    .join("\n");
+  const imageOnly =
+    message.trim() === "" && firstUser.content.some((block) => block.type === "image");
+  if (message.trim() === "" && !imageOnly) return;
+  const generated = await generateOrbName(
+    task,
+    { store: deps.store, generator: deps.nameGenerator, leaseMs: deps.nameLeaseMs },
+    orbId,
+    { message: imageOnly ? "[image-only request]" : message, readme: null },
+  );
+  if (generated.isErr()) {
+    logOrbEvent(task, orbId, "auto-name-failed", { error: generated.error.message });
+  }
+}
+
 export async function pollOrbUntilCaughtUp(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -236,6 +271,7 @@ export async function pollOrbUntilCaughtUp(
         }
         return { type: "retryable", message: error.message };
       }
+      await reconcileOrbName(task, deps, orbId);
       return { type: "caught_up", committedRecords };
     }
 

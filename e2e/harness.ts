@@ -96,6 +96,7 @@ export async function startControlPlane(options: {
   processStateDirectory?: string;
   port: number;
   fake: FakeSession;
+  nameFake?: FakeSession;
   dockerNetwork?: string;
   runtimeImage?: string;
 }): Promise<ControlPlaneHandle> {
@@ -119,6 +120,9 @@ export async function startControlPlane(options: {
       PI_ORB_DOCKER_NETWORK: options.dockerNetwork,
       PI_ORB_FAKE_OPENAI_OAUTH_URL: options.fake.oauthBaseUrl,
       PI_ORB_FAKE_OPENAI_INFERENCE_URL: options.fake.inferenceBaseUrl,
+      ...(options.nameFake === undefined
+        ? {}
+        : { PI_ORB_NAME_INFERENCE_URL: options.nameFake.inferenceBaseUrl }),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

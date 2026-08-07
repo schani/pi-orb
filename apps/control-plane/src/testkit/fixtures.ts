@@ -1,9 +1,10 @@
 import type { OrbState } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
+import { okAsync } from "neverthrow";
 import { DEFAULT_LIFECYCLE_CONSTANTS, type LifecycleConstants } from "../domain/constants.ts";
 import { ControlState } from "../domain/control-state.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
-import type { ControlPlaneDeps } from "../domain/ports.ts";
+import type { ControlPlaneDeps, OrbNameGenerator } from "../domain/ports.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
 import { type FakeOrbConfig, FakeOrbHostProvider, FakeRuntimeClient, FakeWorld } from "./world.ts";
@@ -50,11 +51,16 @@ export function makeHarness(options?: {
   const world = new FakeWorld();
   const store = new InMemoryControlPlaneStore();
   const authGate = new FakeAuthGate(options?.authMode ?? { kind: "always_ok" });
+  const nameGenerator: OrbNameGenerator = {
+    generate: (_task, input) => okAsync(`Work on ${input.projectName}`),
+  };
   const deps: ControlPlaneDeps = {
     store,
     hostProvider: new FakeOrbHostProvider(world),
     runtimeClient: new FakeRuntimeClient(world),
     authGate,
+    nameGenerator,
+    nameLeaseMs: 30_000,
     control: new ControlState(),
     constants: { ...TEST_CONSTANTS, ...options?.constants },
   };
@@ -88,6 +94,10 @@ export function makeOrbRow(
   return {
     id,
     projectId,
+    name: null,
+    autoNameLeaseUntil: null,
+    autoNameAttempts: 0,
+    autoNameNextAttemptAt: null,
     state,
     stateVersion: 0,
     hostKind: "fake",

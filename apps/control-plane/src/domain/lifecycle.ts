@@ -916,7 +916,7 @@ function mapCasError(error: StoreError | StateConflict): CommandError {
 export function createOrb(
   task: SimulationTask,
   deps: ControlPlaneDeps,
-  params: { orbId: string; projectId: string },
+  params: { orbId: string; projectId: string; name?: string },
 ): ResultAsync<OrbRow, CommandError> {
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     const projectResult = await deps.store.getProject(task, params.projectId);
@@ -929,7 +929,10 @@ export function createOrb(
     const existing = await deps.store.getOrb(task, params.orbId);
     if (existing.isErr()) return err(commandError("unavailable", existing.error.message, true));
     if (existing.value !== null) {
-      if (existing.value.projectId !== params.projectId) {
+      if (
+        existing.value.projectId !== params.projectId ||
+        (params.name !== undefined && existing.value.name !== params.name)
+      ) {
         return err(commandError("conflict", "orb id exists with different content", false));
       }
       return ok(existing.value);
@@ -938,6 +941,10 @@ export function createOrb(
     const row: OrbRow = {
       id: params.orbId,
       projectId: params.projectId,
+      name: params.name ?? null,
+      autoNameLeaseUntil: null,
+      autoNameAttempts: 0,
+      autoNameNextAttemptAt: null,
       state: "creating",
       stateVersion: 0,
       hostKind: deps.hostProvider.kind,

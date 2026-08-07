@@ -306,6 +306,11 @@ CREATE TABLE orbs (
   )),
   state_version bigint NOT NULL DEFAULT 0,
 
+  name text CHECK (name IS NULL OR (btrim(name) <> '' AND char_length(name) <= 80)),
+  auto_name_lease_until timestamptz,
+  auto_name_attempts integer NOT NULL DEFAULT 0 CHECK (auto_name_attempts >= 0),
+  auto_name_next_attempt_at timestamptz,
+
   host_kind text NOT NULL,
   host_ref text,
   checkout_commit text,
@@ -359,6 +364,8 @@ ALTER TABLE orbs ADD CONSTRAINT orbs_replicated_head_fk
   REFERENCES history_records(orb_id, record_id)
   DEFERRABLE INITIALLY DEFERRED;
 ```
+
+Orb naming reuses the `orbs` row rather than adding a job table (`docs/control-plane-api.md`). The nullable name is product state; no source discriminator is needed because generated assignment is conditional on null and later user updates simply replace the name. The lease, attempt count, and next-attempt time are restart-stable coordination for the asynchronous Luna call: a worker claims without holding a database lock across inference, and assignment remains conditional on the name still being null.
 
 `history_records.record` stores the complete normalized `HistoryRecord`, including its lossless native `overflow`. The few duplicated columns exist only for keys and tree traversal. There is deliberately no database conversation sequence number: linear order is reconstructed by following `parent_id` from `replicated_head_id`, and future branching uses the same graph.
 
