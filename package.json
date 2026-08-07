@@ -5,6 +5,7 @@
   "workspaces": [
     "packages/protocol",
     "packages/mock-openai",
+    "packages/luna",
     "apps/control-plane",
     "apps/orb-runtime",
     "apps/web"
