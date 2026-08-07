@@ -15,7 +15,7 @@ The harness-agnostic history model, the pull-only replication pipeline, and the 
 - Shutdown does not wait for Pi to settle. A user or parent agent may stop an orb during active work and accepts the risk of terminating an incomplete turn.
 - If a pre-stop pull or database commit fails retryably, the stop must not proceed; the control plane retries while leaving the host running. A non-retryable replication-integrity failure (unknown cursor, session-header mismatch, mapping failure) instead abandons the drain, marks the orb `failed` with a typed error, and then stops the host; the authoritative filesystem retains everything not yet replicated.
 - Cloud SQL for PostgreSQL is preferred over AlloyDB for the first cloud deployment because cheaper small configurations are sufficient for expected load. Private IP only, with automated backups and point-in-time recovery from day one — the replica is the durable product history.
-- Local development should use a local PostgreSQL-compatible database, likely a Docker container.
+- Default local development uses PostgreSQL in Docker. Container-restricted trusted testing may instead use the test-only built-in SQLite adapter selected by `npm run dev:local`; it preserves the single-control-plane storage contract but does not validate PostgreSQL concurrency or constraint behavior (`docs/stack.md`).
 - Database access must be behind an interface so tests can use an in-memory/fake implementation where appropriate and local/cloud deployments can select different adapters.
 
 ## Harness-agnostic history model

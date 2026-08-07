@@ -12,6 +12,7 @@
   "scripts": {
     "test": "vitest run",
     "dev:frontend": "npm run dev:frontend --workspace @pi-orb/web",
+    "dev:local": "PI_ORB_HOST_PROVIDER=process PI_ORB_DATABASE_KIND=sqlite npm run dev --workspace @pi-orb/control-plane",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e",
     "lint": "biome check .",
     "format": "biome check --write .",

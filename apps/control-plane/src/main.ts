@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   MOCK_OPENAI_INFERENCE_URL_ENV,
   MOCK_OPENAI_OAUTH_URL_ENV,
@@ -8,6 +9,7 @@ import {
 } from "@pi-orb/mock-openai";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
+import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
@@ -17,11 +19,8 @@ import {
   GithubUpstreamRefresher,
 } from "./adapters/github-oauth/client.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
-import { PgClient } from "./adapters/pg/client.ts";
-import { PgCredentialPointerStore } from "./adapters/pg/credential-pointers.ts";
-import { runMigrations } from "./adapters/pg/migrate.ts";
-import { PgControlPlaneStore } from "./adapters/pg/store.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
+import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
@@ -72,6 +71,11 @@ class ControlPlaneTask extends NoSimulationTask {
 
 async function main(): Promise<void> {
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
+  const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
+  const sqlitePath = env(
+    "PI_ORB_SQLITE_PATH",
+    join(homedir(), ".pi-orb", "local", "control-plane.sqlite"),
+  );
   const port = Number(env("PORT", "7100"));
   const authDir = env("PI_ORB_AUTH_DIR", join(homedir(), ".pi-orb", "auth"));
   const runtimeImage = env("PI_ORB_RUNTIME_IMAGE", "pi-orb-runtime:dev");
@@ -79,8 +83,18 @@ async function main(): Promise<void> {
 
   mkdirSync(authDir, { recursive: true });
 
-  const db = new PgClient(databaseUrl);
   const bootTask = new NoSimulationTask("boot", true);
+  const openedDatabase = openControlPlaneDatabase(
+    databaseKind === "sqlite"
+      ? { kind: "sqlite", path: sqlitePath }
+      : { kind: "postgresql", connectionString: databaseUrl },
+  );
+  if (openedDatabase.isErr()) {
+    bootTask.error("database open failed:", openedDatabase.error.message);
+    process.exitCode = 1;
+    return;
+  }
+  const database = openedDatabase.value;
   const role = env("PI_ORB_ROLE", "all");
   const browserRole = role === "all" || role === "browser";
   // "ops": the browser API surface for tooling, with no background loops,
@@ -89,7 +103,7 @@ async function main(): Promise<void> {
   // Only the single-instance browser role migrates; the runtime role's
   // queries fail retryably until the schema exists.
   if (browserRole) {
-    const migrated = await runMigrations(db);
+    const migrated = await database.migrate();
     if (migrated.isErr()) {
       bootTask.error("migration failed:", migrated.error.message);
       process.exitCode = 1;
@@ -138,7 +152,7 @@ async function main(): Promise<void> {
     bootTask.log("GitHub integration disabled (PI_ORB_GITHUB_CLIENT_ID/SECRET unset)");
   }
   const broker: BrokerDeps = {
-    pointers: new PgCredentialPointerStore(db),
+    pointers: database.pointers,
     secrets,
     upstreams: {
       [CODEX_PROVIDER]: new OAuthUpstreamRefresher(
@@ -186,8 +200,13 @@ async function main(): Promise<void> {
     const missing = tailscaleEnvNames.filter((name) => env(name, "") === "");
     bootTask.log(`Tailscale port exposure disabled (${missing.join(", ")} unset)`);
   }
-  const tailscaleOption = tailscale !== null ? { tailscale } : {};
-  const viewConfig = tailscale !== null ? { tailnetDnsName } : {};
+  const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
+  const tailscaleForProvider = tailscale !== null && providerKind !== "process";
+  if (tailscale !== null && !tailscaleForProvider) {
+    bootTask.log("Tailscale port exposure disabled for process host provider");
+  }
+  const tailscaleOption = tailscaleForProvider ? { tailscale } : {};
+  const viewConfig = tailscaleForProvider ? { tailnetDnsName } : {};
   // Forward-only script-repair fencing (docs/host-provider.md): the deploy
   // stamps a monotonic generation, and a revision refuses to repair a host
   // stamped by a newer one. Unset means 0, which is also what an apply that
@@ -195,7 +214,6 @@ async function main(): Promise<void> {
   // nothing that a real deploy stamped, and the next real deploy repairs
   // forward. Never backward, at the cost of a delayed upgrade.
   const scriptGeneration = Number.parseInt(env("PI_ORB_SCRIPT_GENERATION", "0"), 10);
-  const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
   const hostProvider =
     providerKind === "gce"
       ? new GceOrbHostProvider(new RestGceApiTransport(), {
@@ -213,19 +231,31 @@ async function main(): Promise<void> {
           ...mockExtraEnv,
           ...tailscaleOption,
         })
-      : new DockerOrbHostProvider({
-          image: runtimeImage,
-          network: dockerNetwork,
-          controlPlanePort: port,
-          ...(process.env["PI_ORB_BROKER_URL"] !== undefined &&
-          process.env["PI_ORB_BROKER_URL"] !== ""
-            ? { controlPlaneUrl: process.env["PI_ORB_BROKER_URL"] }
-            : {}),
-          ...mockExtraEnv,
-          ...tailscaleOption,
-        });
+      : providerKind === "process"
+        ? new ProcessOrbHostProvider({
+            stateDirectory: env(
+              "PI_ORB_PROCESS_STATE_DIR",
+              join(homedir(), ".pi-orb", "local", "process-hosts"),
+            ),
+            runtimeEntryPoint: fileURLToPath(
+              new URL("../../orb-runtime/src/main.ts", import.meta.url),
+            ),
+            controlPlaneUrl: env("PI_ORB_BROKER_URL", `http://127.0.0.1:${port}`),
+            ...mockExtraEnv,
+          })
+        : new DockerOrbHostProvider({
+            image: runtimeImage,
+            network: dockerNetwork,
+            controlPlanePort: port,
+            ...(process.env["PI_ORB_BROKER_URL"] !== undefined &&
+            process.env["PI_ORB_BROKER_URL"] !== ""
+              ? { controlPlaneUrl: process.env["PI_ORB_BROKER_URL"] }
+              : {}),
+            ...mockExtraEnv,
+            ...tailscaleOption,
+          });
   const deps: ControlPlaneDeps = {
-    store: new PgControlPlaneStore(db),
+    store: database.store,
     hostProvider,
     runtimeClient: new FetchRuntimeClient(),
     authGate:
@@ -271,7 +301,11 @@ async function main(): Promise<void> {
   const shutdown = (): void => {
     bootTask.log("shutting down");
     stop.abort();
-    void app.close().then(() => db.end());
+    void app.close().then(async () => {
+      if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
+      const closed = await database.close();
+      if (closed.isErr()) bootTask.error("database close failed:", closed.error.message);
+    });
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

@@ -62,7 +62,7 @@ const stateConflict = (currentState?: OrbState): StateConflict => ({
 });
 
 /** PostgreSQL `ControlPlaneStore` (docs/history-replication.md/docs/stack.md). */
-export class PgControlPlaneStore implements ControlPlaneStore {
+export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   private readonly db: PgClient;
 
   constructor(db: PgClient) {

@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RUNTIME_SUBPROTOCOL, type ServerFrame } from "@pi-orb/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
@@ -16,11 +19,11 @@ import {
 } from "./harness.ts";
 
 /**
- * The full docs/testing.md slice against real PostgreSQL, real Docker, the real Pi SDK
- * inside the orb container, and the fake OpenAI service: device login,
- * scripted streaming with a real tool round trip, history replication, and
- * the controlled-stop drain. Requires docker and network access to the fake;
- * the runtime image is built on demand.
+ * The full docs/testing.md slice against the real Pi SDK and fake OpenAI
+ * service: device login, scripted streaming with a real tool round trip,
+ * history replication, and the controlled-stop drain. The default backend is
+ * real PostgreSQL + Docker. PI_ORB_E2E_BACKEND=process selects the Docker-free
+ * SQLite + process-provider composition and exercises the same scenario.
  */
 
 const PG_CONTAINER = "pi-orb-e2e-pg";
@@ -29,6 +32,7 @@ const CP_PORT = 7144;
 const NETWORK = "pi-orb";
 const RUNTIME_IMAGE = "pi-orb-runtime:dev";
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
+const PROCESS_BACKEND = process.env["PI_ORB_E2E_BACKEND"] === "process";
 
 const SCENARIO = {
   auth: {
@@ -68,9 +72,21 @@ const SCENARIO = {
 let fake: FakeSession;
 let controlPlane: ControlPlaneHandle;
 let orbId = "";
+let localStateDirectory = "";
 
 beforeAll(async () => {
   fake = await createFakeSession(`pi-orb-e2e-${Date.now()}`, SCENARIO);
+
+  if (PROCESS_BACKEND) {
+    localStateDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-local-"));
+    controlPlane = await startControlPlane({
+      sqlitePath: join(localStateDirectory, "control-plane.sqlite"),
+      processStateDirectory: join(localStateDirectory, "process-hosts"),
+      port: CP_PORT,
+      fake,
+    });
+    return;
+  }
 
   await docker(["network", "create", NETWORK]).catch(() => undefined);
   const hasImage = await docker(["image", "inspect", RUNTIME_IMAGE, "--format", "ok"]).catch(
@@ -115,13 +131,14 @@ beforeAll(async () => {
 }, 720_000);
 
 afterAll(async () => {
-  if (orbId !== "") {
+  if (!PROCESS_BACKEND && orbId !== "") {
     await docker(["rm", "-f", `pi-orb-${orbId}`]).catch(() => undefined);
     await docker(["volume", "rm", "-f", `pi-orb-data-${orbId}`]).catch(() => undefined);
   }
   await controlPlane?.stop();
-  await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
+  if (!PROCESS_BACKEND) await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
   if (fake !== undefined) await deleteFakeSession(fake.sessionKey);
+  if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
 }, 120_000);
 
 describe("full slice E2E", () => {
@@ -137,10 +154,21 @@ describe("full slice E2E", () => {
           () => null,
         );
         console.error("=== orb view ===", JSON.stringify(view?.body));
-        const logs = await docker(["logs", "--tail", "40", `pi-orb-${orbId}`]).catch(
-          (e: unknown) => `unavailable: ${String(e)}`,
-        );
-        console.error("=== orb container logs ===\n", logs);
+        const logs = PROCESS_BACKEND
+          ? (() => {
+              try {
+                return readFileSync(
+                  join(localStateDirectory, "process-hosts", orbId, "runtime.err.log"),
+                  "utf8",
+                );
+              } catch (error) {
+                return `unavailable: ${String(error)}`;
+              }
+            })()
+          : await docker(["logs", "--tail", "40", `pi-orb-${orbId}`]).catch(
+              (error: unknown) => `unavailable: ${String(error)}`,
+            );
+        console.error("=== orb runtime logs ===\n", logs);
       }
       throw error;
     }
@@ -358,7 +386,7 @@ describe("full slice E2E", () => {
 
     // Replication lands through the HTTP pull, not the WebSocket (docs/history-replication.md).
     const replicated = await waitFor(
-      "history replicated to postgres",
+      "history replicated to database",
       async () => {
         const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
         const records = snapshot.body["records"] as unknown[];

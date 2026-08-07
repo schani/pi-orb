@@ -12,7 +12,7 @@ Pi is the first agent harness, embedded through the Pi SDK. The host lifecycle, 
 
 The first target is deliberately narrow:
 
-- Run locally using Docker.
+- Run locally using Docker; container-restricted trusted test environments may use the unsandboxed process-host + SQLite composition.
 - Drive the product entirely through the web UI; a local checkout is not required.
 - Let users register a project with a name and public Git repository URL.
 - Clone the repository into a fresh orb without caching or synchronization optimizations.
@@ -64,6 +64,7 @@ Control plane
    v
 Orb host
    |-- Docker container initially
+   |-- unsandboxed local process for container-restricted testing
    |-- GCE VM later
    |
    `-- Orb runtime (Node.js)

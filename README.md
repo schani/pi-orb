@@ -1,6 +1,6 @@
 # pi-orb
 
-pi-orb runs Pi coding agents in isolated, Docker-backed **orbs**, with a web UI for persistent conversations that can be stopped and resumed. It is currently an unauthenticated local-development prototype and must not be exposed publicly.
+pi-orb runs Pi coding agents in isolated, Docker-backed **orbs**, with a web UI for persistent conversations that can be stopped and resumed. A deliberately unsandboxed process backend is available for trusted Docker-free testing. It is currently an unauthenticated local-development prototype and must not be exposed publicly.
 
 Design documentation starts at [DESIGN.md](DESIGN.md), which indexes the topical design docs under `docs/`. The actionable backlog is [TODO.md](TODO.md).
 
@@ -22,6 +22,16 @@ npm run dev --workspace @pi-orb/web
 ```
 
 Open http://localhost:5173.
+
+### Docker-free local backend
+
+Node.js 24 includes the SQLite driver used by the test-only process host provider, so the control plane, database, and orb-process supervisor need no Docker or PostgreSQL service:
+
+```sh
+npm run dev:local
+```
+
+State defaults to `~/.pi-orb/local`; override the independent paths with `PI_ORB_SQLITE_PATH` and `PI_ORB_PROCESS_STATE_DIR`. Orb runtimes are unsandboxed child processes and must only run trusted repositories. Run the normal web dev server separately with `npm run dev --workspace @pi-orb/web`, then open http://localhost:5173.
 
 ### Frontend only
 

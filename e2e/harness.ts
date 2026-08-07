@@ -91,11 +91,13 @@ export interface ControlPlaneHandle {
 }
 
 export async function startControlPlane(options: {
-  databaseUrl: string;
+  databaseUrl?: string;
+  sqlitePath?: string;
+  processStateDirectory?: string;
   port: number;
   fake: FakeSession;
-  dockerNetwork: string;
-  runtimeImage: string;
+  dockerNetwork?: string;
+  runtimeImage?: string;
 }): Promise<ControlPlaneHandle> {
   const authDir = mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const logs: string[] = [];
@@ -103,7 +105,14 @@ export async function startControlPlane(options: {
     cwd: join(import.meta.dirname, ".."),
     env: {
       ...process.env,
-      DATABASE_URL: options.databaseUrl,
+      ...(options.sqlitePath === undefined
+        ? { DATABASE_URL: options.databaseUrl }
+        : {
+            PI_ORB_DATABASE_KIND: "sqlite",
+            PI_ORB_SQLITE_PATH: options.sqlitePath,
+            PI_ORB_HOST_PROVIDER: "process",
+            PI_ORB_PROCESS_STATE_DIR: options.processStateDirectory,
+          }),
       PORT: String(options.port),
       PI_ORB_AUTH_DIR: authDir,
       PI_ORB_RUNTIME_IMAGE: options.runtimeImage,

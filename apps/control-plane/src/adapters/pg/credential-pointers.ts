@@ -20,7 +20,7 @@ function mapRow(row: PgRow): CredentialPointerRow {
 }
 
 /** PostgreSQL credential-pointer store (docs/credentials.md): CAS on `row_version`. */
-export class PgCredentialPointerStore implements CredentialPointerStore {
+export class PostgreSQLCredentialPointerStore implements CredentialPointerStore {
   private readonly db: PgClient;
 
   constructor(db: PgClient) {

@@ -32,7 +32,24 @@ async function main(): Promise<void> {
 
   // The health server starts before slow initialization (docs/host-provider.md).
   const app = buildRuntimeServer(agent);
-  const listening = await app.listen({ port: 8080, host: "0.0.0.0" }).then(
+  const configuredPort = Number(env("PI_ORB_RUNTIME_PORT", "8080"));
+  if (!Number.isInteger(configuredPort) || configuredPort < 1 || configuredPort > 65_535) {
+    console.error("PI_ORB_RUNTIME_PORT must be an integer from 1 through 65535");
+    process.exit(1);
+  }
+  // Process-backed test hosts keep an IPC channel to the control plane. A
+  // disconnect means the in-process supervisor disappeared, so this runtime
+  // must not survive as an unmanaged orphan.
+  process.on("disconnect", () => {
+    void app.close().then(
+      () => process.exit(0),
+      (error: unknown) => {
+        console.error("shutdown after supervisor disconnect failed:", error);
+        process.exit(1);
+      },
+    );
+  });
+  const listening = await app.listen({ port: configuredPort, host: "0.0.0.0" }).then(
     (address) => address,
     (error: unknown) => {
       console.error("listen failed:", error);

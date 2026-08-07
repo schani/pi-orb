@@ -23,7 +23,7 @@ apps/
   control-plane/
     src/
       domain/           # polling/lifecycle state machines and interfaces
-      adapters/         # PostgreSQL and Docker CLI adapters
+      adapters/         # PostgreSQL/SQLite and Docker/process/GCE adapters
       http/             # Fastify routes and WebSocket proxy
   orb-runtime/
     src/
@@ -56,7 +56,7 @@ Runtime dependencies:
 - `fastify`: robust HTTP routing, body limits, lifecycle, and schema integration for both servers;
 - `@fastify/websocket`: WebSocket upgrade/lifecycle integration (and its `ws` implementation);
 - `typebox`: one source for runtime JSON validation and inferred TypeScript protocol types;
-- `pg`: the only database layer;
+- `pg`: the production/default-local PostgreSQL layer; Node 24's built-in `node:sqlite` serves only the Docker-free test composition;
 - `react` and `react-dom`: the web UI.
 
 Development/build dependencies:
@@ -86,6 +86,23 @@ Use `pg` directly with parameterized SQL. The initial schema and query set are s
 - Provide a deterministic in-memory implementation for DST and real PostgreSQL integration tests.
 
 Add a typed query builder later only if query volume or refactoring pain demonstrates the need. Do not use a transaction API that requires throwing to roll back.
+
+### Test-only SQLite composition (decided and implemented 2026-08-07)
+
+The container-restricted pi coding-agent environment has no PostgreSQL server or client binaries installed, and its apt package indexes are absent. Node 24 does provide the built-in `node:sqlite` module, so local process-host testing avoids installing or supervising another service. `PI_ORB_DATABASE_KIND=sqlite` uses the configured `PI_ORB_SQLITE_PATH` (the adapter does not choose a state directory) and is selected together with `PI_ORB_HOST_PROVIDER=process` by the root `npm run dev:local` command. Production and the default Docker/GCE E2E continue to use PostgreSQL.
+
+The domain abstraction was sufficient: lifecycle/history code depends on `ControlPlaneStore`, and the credential broker depends on `CredentialPointerStore`. PostgreSQL leaks into application composition and its adapter implementation, not into those domain interfaces. The implementation adds `SqliteControlPlaneStore`, `SqliteCredentialPointerStore`, SQLite-specific schema initialization, and a composition-level `ControlPlaneDatabase` lifecycle interface, so `main.ts` no longer constructs, migrates, and closes `PgClient` unconditionally. The PostgreSQL classes are named `PostgreSQLControlPlaneStore` and `PostgreSQLCredentialPointerStore` consistently with their SQLite peers. SQLite uses built-in `node:sqlite`; SQL is adapter-specific rather than translated or hidden behind an ORM/query builder.
+
+SQLite can preserve the required semantics for a **single control-plane process**:
+
+- lifecycle compare-and-swap remains an `UPDATE ... WHERE state_version = ?` followed by a row-count check;
+- replication commit and session initialization run under one serialized transaction, preserving cursor CAS, idempotent record insertion, and atomic cursor/head advancement;
+- JSON values are encoded as text and validated/mapped at the adapter boundary; timestamps are integer milliseconds; UUIDs are text;
+- recursive CTEs can reconstruct the parent chain; indexes and foreign keys remain available (`PRAGMA foreign_keys = ON`);
+- credential pointer writes retain their row-version CAS;
+- one synchronous `node:sqlite` connection makes each transaction callback non-interleavable in the single JS process; adapter operations are short local calls wrapped immediately into typed `Result`/`ResultAsync` values, and no exception crosses the adapter boundary.
+
+This mode deliberately does **not** establish PostgreSQL behavior. SQLite has one-writer locking and different isolation, type, constraint, JSON, and error-code behavior; in particular, it cannot validate the production adapter's row-locking and deferred-constraint behavior under multiple control-plane instances. PostgreSQL integration tests, the Docker/GCE E2E, and deploy smoke tests remain authoritative for those properties. SQLite is sufficient for the real browser/control-plane/runtime handshake, local persistence, stop/start, history replication semantics, and credential-broker behavior in the one-process test composition. This is covered by adapter tests and by running the full-slice E2E with `PI_ORB_E2E_BACKEND=process`; the same E2E remains PostgreSQL + Docker by default.
 
 ## Web UI
 
