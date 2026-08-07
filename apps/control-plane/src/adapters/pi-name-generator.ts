@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { OpenAICodexResponsesOptions } from "@earendil-works/pi-ai";
 import { complete } from "@earendil-works/pi-ai/compat";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import type { SimulationTask } from "determined";
@@ -12,6 +13,20 @@ import type {
 } from "../domain/ports.ts";
 
 const MODEL_ID = "gpt-5.6-luna";
+export function orbNameRequestOptions(
+  sessionId: string,
+  signal: AbortSignal,
+): OpenAICodexResponsesOptions {
+  return {
+    signal,
+    maxTokens: 64,
+    reasoningEffort: "minimal",
+    textVerbosity: "low",
+    toolChoice: "none",
+    sessionId,
+  };
+}
+
 const failure = (message: string): OrbNameGeneratorError => ({
   type: "orb_name_generation_error",
   message,
@@ -75,14 +90,8 @@ export class PiOrbNameGenerator implements OrbNameGenerator {
               messages: [{ role: "user", content: prompt(input), timestamp: task.wallNow() }],
             },
             {
+              ...orbNameRequestOptions(`pi-orb-auto-name-${randomUUID()}`, context.signal),
               apiKey: grant.accessToken,
-              signal: context.signal,
-              maxTokens: 64,
-              reasoningEffort: "minimal",
-              reasoningSummary: "off",
-              textVerbosity: "low",
-              toolChoice: "none",
-              sessionId: `pi-orb-auto-name-${randomUUID()}`,
             },
           ),
           (error) => failure(error instanceof Error ? error.message : String(error)),
