@@ -15,6 +15,7 @@ import {
   type MessageInputBlock,
   type RuntimeEvent,
   type RuntimeHealth,
+  type RuntimeTurnResume,
   type ServerFrame,
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
@@ -31,6 +32,7 @@ import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { pickCodexModel } from "./model-select.ts";
 import { createPortExposureLoader } from "./resource-loader.ts";
 import { sessionFlushed } from "./session-flush.ts";
+import { describeTurnResumeDecision, startInterruptedTurnResume } from "./turn-resume.ts";
 
 export interface PiOrbAgentOptions {
   readonly orbId: string;
@@ -109,6 +111,8 @@ export class PiOrbAgent {
   private liveHistory: LiveHistoryPublisher | null = null;
   private checkoutCommit = "";
   private activity: "idle" | "busy" = "idle";
+  /** This boot's interrupted-turn decision, when notable (docs/lifecycle.md). */
+  private turnResume: RuntimeTurnResume | null = null;
   private operationId: string | null = null;
   private operationKind: "agent" | "shell" | null = null;
   /** Operation ID promised to the requester before Pi emits agent_start. */
@@ -153,6 +157,7 @@ export class PiOrbAgent {
       ...this.health,
       activity: this.activity,
       ...(this.operationId !== null ? { operationId: this.operationId } : {}),
+      ...(this.turnResume !== null ? { turnResume: this.turnResume } : {}),
     };
   }
 
@@ -371,7 +376,40 @@ export class PiOrbAgent {
       checkoutCommit: this.checkoutCommit,
       activity: this.activity,
     };
+
+    // 5. Resume a turn a host restart interrupted (docs/lifecycle.md). The
+    // runtime is already ready here: the resumed turn is never awaited, and it
+    // surfaces as ordinary `busy` activity through Pi's agent_start.
+    this.resumeInterruptedTurn(manager, this.session);
     return ok(undefined);
+  }
+
+  /**
+   * Boot's interrupted-turn hook. The marker is appended and its turn is
+   * triggered without blocking readiness — with `triggerTurn` the SDK settles
+   * its promise only when the whole resumed turn does, so awaiting it here
+   * would hold the runtime in `initializing` for the length of a turn. The
+   * decision is kept for `RuntimeHealth`, where the control plane's readiness
+   * path turns it into one log line (docs/lifecycle.md).
+   */
+  private resumeInterruptedTurn(manager: SessionManager, session: AgentSession): void {
+    // The LiveHistoryPublisher already seeded the restored entries as known,
+    // so the record appended below publishes and replicates normally.
+    const attempt = startInterruptedTurnResume(manager.buildContextEntries(), session);
+    this.turnResume = attempt.observation;
+    console.log(`${describeTurnResumeDecision(attempt.decision)} orb=${this.options.orbId}`);
+    const issued = attempt.issued;
+    if (issued === null) return;
+    const customType = attempt.marker?.customType ?? "";
+    void issued.mapErr((error) => {
+      console.error(`turn-resume: ${customType} record failed: ${error.message}`);
+      // A resume the harness refused never happened: health must not claim it
+      // did. A failed decline record leaves the decline itself standing.
+      if (this.turnResume?.outcome === "resumed") {
+        this.turnResume = { ...this.turnResume, outcome: "resume_failed" };
+      }
+      return error;
+    });
   }
 
   // -- Pi event translation (docs/runtime-protocol.md) --------------------------------

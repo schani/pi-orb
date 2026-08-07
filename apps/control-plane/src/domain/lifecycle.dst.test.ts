@@ -11,6 +11,7 @@ import {
 } from "../testkit/fixtures.ts";
 import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
 import { LogCapture, makeRecordingSimulation, runDst, waitUntil } from "../testkit/sim.ts";
+import { isDeclineMarker, isResumeMarker } from "../testkit/world.ts";
 import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
 import { pollAllOnce, pollLoop, reconcileLoop } from "./loops.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
@@ -667,6 +668,212 @@ describe("orb lifecycle (DST)", () => {
         // records the decision.)
         expect(capture.matching(" host-stop ").length).toBeGreaterThanOrEqual(totalStops);
         for (const line of capture.matching(" host-stop ")) expect(line).toContain("reason=");
+      },
+    );
+  });
+
+  // The compounding failure of docs/postmortems/2026-08-07-preemption-lost-turn.md,
+  // from the control plane's side: recovery worked (96s, no storm), but the
+  // runtime came back idle with a truncated turn and the idle reaper — working
+  // exactly as designed against a genuinely idle orb — collected it 15 minutes
+  // later. With the runtime's interrupted-turn resume (docs/lifecycle.md,
+  // decided 2026-08-07) the recovered runtime is busy again, so the reaper
+  // never fires. This scenario therefore runs on the DEFAULT idle window,
+  // unlike its restart-cluster neighbours: *not* idle-stopping the resumed orb
+  // is the property under test, and opting out would erase it.
+  it("a preemption mid-turn resumes the turn and the orb is never idle-stopped", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "preemption-mid-turn-resumes", iterations: 15, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              // A turn in flight: its user message is flushed and the runtime
+              // is busy working on it.
+              harness.world.beginTurn(ORB);
+              await waitUntil(
+                task,
+                "the turn is replicated and observed busy",
+                () =>
+                  harness.store.replicaRecords(ORB).length === 1 &&
+                  harness.store.orbSnapshot(ORB)?.lastBusyAt !== null,
+              );
+              const busyBeforePreemption = harness.store.orbSnapshot(ORB)?.lastBusyAt ?? 0;
+              const stopsBefore = harness.world.hostStopCountOf(ORB);
+              // The Spot preemption, mid-turn.
+              harness.world.preemptHost(task, ORB);
+              await waitUntil(
+                task,
+                "orb running on a serving runtime again",
+                () =>
+                  harness.store.orbSnapshot(ORB)?.state === "running" &&
+                  harness.world.isRuntimeServing(task, ORB),
+                { timeoutMs: 20 * 60_000 },
+              );
+              // Whichever path recovered it (silence or observed-stopped), the
+              // orb is back at the cost of one restart, not a storm.
+              expect(harness.world.hostStopCountOf(ORB) - stopsBefore).toBeLessThanOrEqual(
+                MAX_STOPS_PER_RECOVERY,
+              );
+              // The boot resumed the turn: exactly one marker record, flushed
+              // and therefore replicable like any other record.
+              const markers = harness.world.resumeMarkersOf(ORB);
+              expect(markers.length).toBe(1);
+              const markerId = markers[0]?.id;
+              await waitUntil(
+                task,
+                "the resume marker replicates",
+                () => harness.store.replicaRecords(ORB).some((record) => record.id === markerId),
+                { timeoutMs: 300_000 },
+              );
+              // The resumed turn is ordinary `busy` activity, so the pulls
+              // refresh the idle-stop anchor again.
+              await waitUntil(
+                task,
+                "busy refreshed on the resumed runtime",
+                () => (harness.store.orbSnapshot(ORB)?.lastBusyAt ?? 0) > busyBeforePreemption,
+                { timeoutMs: 300_000 },
+              );
+              // Two full default idle windows, watched in pull-sized steps (a
+              // single long sleep would let the scheduler leap virtual time
+              // past the liveness grace): the orb must never head for a stop.
+              // Before resume existed this is where the incident's second half
+              // happened — one idle window after the recovery, `idle_for_`.
+              const rounds = Math.ceil(
+                (2 * TEST_CONSTANTS.idleStopAfterMs) / TEST_CONSTANTS.historyPullIntervalMs,
+              );
+              for (let round = 0; round < rounds; round++) {
+                await task.sleep(TEST_CONSTANTS.historyPullIntervalMs, "watching the resumed orb");
+                const state = harness.store.orbSnapshot(ORB)?.state;
+                expect(state === "stopping" || state === "stopped").toBe(false);
+              }
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        // One interruption, one resume — for the whole scenario.
+        expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
+        assertReplicaComplete(harness.world, harness.store, ORB);
+        assertAtMostOneHost(harness.world, ORB);
+        // The recovery is legible from the log, as in the neighbouring
+        // preemption scenario...
+        expect(
+          capture.matching("transition from=running to=starting").length,
+        ).toBeGreaterThanOrEqual(1);
+        // ...the boot decision is legible from the event log alone: the
+        // question "did the interrupted turn come back?" is answered without
+        // any guest-log spelunking (docs/lifecycle.md).
+        expect(capture.matching("turn-resume outcome=resumed").length).toBeGreaterThanOrEqual(1);
+        // ...and the incident's compounding is simply absent: no idle decision
+        // was ever taken against the orb whose turn was interrupted.
+        expect(capture.matching("reason=idle_for_")).toEqual([]);
+        expect(capture.matching("stop_reason=idle")).toEqual([]);
+      },
+    );
+  });
+
+  // The loop guard of the same design: at most one auto-resume per
+  // interruption. A turn that dies with its host again after resuming sees
+  // marker-then-dangling-tail on the next boot and stays idle — so the orb is
+  // genuinely idle and the reaper collects it, which is the designed outcome
+  // rather than a regression: resuming forever would burn tokens and VM hours
+  // on a turn that kills its host every time.
+  it("a turn interrupted again after resuming resumes only once and then idle-stops", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "resume-guard-single-shot", iterations: 12, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        let stopsDuringScenario = 0;
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              harness.world.beginTurn(ORB);
+              await waitUntil(
+                task,
+                "the turn is replicated",
+                () => harness.store.replicaRecords(ORB).length === 1,
+              );
+              const stopsBefore = harness.world.hostStopCountOf(ORB);
+              harness.world.preemptHost(task, ORB);
+              await waitUntil(
+                task,
+                "orb running on the resumed runtime",
+                () =>
+                  harness.store.orbSnapshot(ORB)?.state === "running" &&
+                  harness.world.isRuntimeServing(task, ORB),
+                { timeoutMs: 20 * 60_000 },
+              );
+              expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
+              const resumedInstance = harness.world.runtimeInstanceIdOf(ORB);
+              // The resumed turn kills its host a second time.
+              harness.world.preemptHost(task, ORB);
+              await waitUntil(
+                task,
+                "orb running again after the second host death",
+                () =>
+                  harness.store.orbSnapshot(ORB)?.state === "running" &&
+                  harness.world.isRuntimeServing(task, ORB) &&
+                  harness.world.runtimeInstanceIdOf(ORB) !== resumedInstance,
+                { timeoutMs: 20 * 60_000 },
+              );
+              // No second resume: the marker in the tail is the guard.
+              expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
+              // The orb is now genuinely idle, and the idle auto-stop collects
+              // it on the ordinary default window — the designed ending.
+              await waitUntil(
+                task,
+                "the un-resumed orb idle-stops",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+                { timeoutMs: 20 * 60_000 },
+              );
+              stopsDuringScenario = harness.world.hostStopCountOf(ORB) - stopsBefore;
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        const orb = harness.store.orbSnapshot(ORB);
+        expect(orb?.state).toBe("stopped");
+        expect(orb?.stopReason).toBe("idle");
+        expect(orb?.lastError).toBeNull();
+        // Exactly one marker, on the filesystem and in the replica: the drain
+        // barrier carried it across the stop.
+        expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
+        expect(harness.store.replicaRecords(ORB).filter(isResumeMarker).length).toBe(1);
+        // The guard declined out loud, exactly once for the one interruption
+        // it suppressed — and that record replicated like any other, so the
+        // user finds it in the history the UI shows them.
+        expect(harness.world.declineMarkersOf(ORB).length).toBe(1);
+        expect(harness.store.replicaRecords(ORB).filter(isDeclineMarker).length).toBe(1);
+        expect(
+          capture.matching("turn-resume outcome=declined_already_resumed").length,
+        ).toBeGreaterThanOrEqual(1);
+        // Two recoveries plus the final idle stop, and nothing beyond that: a
+        // turn that keeps dying does not become a restart storm.
+        expect(stopsDuringScenario).toBeLessThanOrEqual(2 * MAX_STOPS_PER_RECOVERY);
+        assertReplicaComplete(harness.world, harness.store, ORB);
+        assertAtMostOneHost(harness.world, ORB);
+        // Both host deaths recovered through `starting`, and the ending names
+        // itself: one idle decision with its stop_reason.
+        expect(
+          capture.matching("transition from=running to=starting").length,
+        ).toBeGreaterThanOrEqual(2);
+        expect(capture.matching("to=stopping reason=idle_for_").length).toBe(1);
+        expect(capture.matching("stop_reason=idle").length).toBe(1);
       },
     );
   });

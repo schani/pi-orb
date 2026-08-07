@@ -556,6 +556,16 @@ async function reconcileCreateStart(
       });
       if (transitioned.type === "transitioned") {
         deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
+        // The runtime's boot resume decision, on the transition that ends the
+        // boot episode — one line per boot, never one per health poll
+        // (docs/lifecycle.md). Only notable decisions carry the field.
+        if (status.turnResume !== undefined) {
+          logOrbEvent(task, orb.id, "turn-resume", {
+            outcome: status.turnResume.outcome,
+            shape: status.turnResume.shape,
+            head_record_id: status.turnResume.headRecordId,
+          });
+        }
       }
       return transitioned;
     }

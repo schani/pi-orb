@@ -133,6 +133,48 @@ describe("runtime HTTP schemas", () => {
     ).toBe(true);
   });
 
+  it("accepts a ready health carrying a notable boot resume decision", () => {
+    const ready = {
+      v: 1,
+      orbId: "orb-1",
+      runtimeInstanceId: "run-1",
+      status: "ready",
+      sessionId: "session-1",
+      checkoutCommit: "abc123",
+      activity: "busy",
+    };
+    expect(
+      Check(RuntimeHealthSchema, {
+        ...ready,
+        turnResume: {
+          outcome: "resumed",
+          shape: "dangling_tool_calls",
+          headRecordId: "entry-7",
+        },
+      }),
+    ).toBe(true);
+    // The guard's decline knows the head it suppressed, not a fresh shape.
+    expect(
+      Check(RuntimeHealthSchema, {
+        ...ready,
+        activity: "idle",
+        turnResume: { outcome: "declined_already_resumed", headRecordId: "entry-7" },
+      }),
+    ).toBe(true);
+    expect(Check(RuntimeHealthSchema, { ...ready, turnResume: { outcome: "resume_failed" } })).toBe(
+      true,
+    );
+    expect(Check(RuntimeHealthSchema, { ...ready, turnResume: { outcome: "declined" } })).toBe(
+      false,
+    );
+    expect(
+      Check(RuntimeHealthSchema, {
+        ...ready,
+        turnResume: { outcome: "resumed", shape: "half_a_turn" },
+      }),
+    ).toBe(false);
+  });
+
   it("rejects a ready health without session identity", () => {
     expect(
       Check(RuntimeHealthSchema, {

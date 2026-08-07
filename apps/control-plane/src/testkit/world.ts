@@ -3,6 +3,7 @@ import type {
   HistoryRecord,
   PullHistoryResponse,
   RuntimeHealth,
+  RuntimeTurnResume,
 } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
@@ -46,6 +47,17 @@ interface FakeFilesystem {
   header: HarnessSessionMetadata | null;
   entries: HistoryRecord[];
   headId: string | null;
+  /**
+   * Whether the flushed session tail is a *dangling turn*: a turn that was
+   * in flight when the runtime process last died (docs/lifecycle.md,
+   * "interrupted-turn resume at runtime boot"). The real runtime derives this
+   * from the tail's shape — a trailing tool result, a trailing assistant
+   * message with open tool calls, or a trailing user message with no reply —
+   * which this world does not model at record granularity; `beginTurn` sets
+   * the flag and `finishTurn` clears it, and the boot-time contract keys off
+   * it exactly as the runtime keys off the tail.
+   */
+  turnInFlight: boolean;
 }
 
 interface FakeRuntimeInstance {
@@ -56,6 +68,19 @@ interface FakeRuntimeInstance {
    */
   startedAtMonotonic: number;
   activity: "idle" | "busy";
+  /**
+   * Whether this incarnation has loaded the persisted session yet. The load —
+   * and with it the interrupted-turn resume decision — happens once, at the
+   * moment the runtime starts serving, so a process killed while still booting
+   * never appends a marker and never resumes.
+   */
+  sessionLoaded: boolean;
+  /**
+   * The notable part of this incarnation's boot resume decision, reported in
+   * `RuntimeHealth` exactly as the real runtime reports it, or null for an
+   * ordinary boot (docs/lifecycle.md: edges, not levels).
+   */
+  turnResume: RuntimeTurnResume | null;
 }
 
 interface FakeHost {
@@ -114,6 +139,47 @@ const DEFAULT_BOOT_LATENCY_MS = 65_000;
 /** The soft-off window a preempted Spot VM still observes as `running`. */
 const DEFAULT_PREEMPTION_SOFT_WINDOW_MS = 30_000;
 
+/**
+ * The native `customType` of the resume marker the runtime appends when it
+ * picks an interrupted turn back up (docs/lifecycle.md; one
+ * `sendCustomMessage(..., { triggerTurn: true, display: true })`, which the Pi
+ * adapter normalizes to an `event` record — docs/pi-adapter.md).
+ */
+// Mirrors TURN_RESUME_CUSTOM_TYPE in apps/orb-runtime/src/pi/turn-resume.ts.
+const RESUME_MARKER_CUSTOM_TYPE = "pi-orb.turn-resume";
+
+/**
+ * The record the loop guard appends instead of resuming a second time: a
+ * declined resume must be as visible as a performed one (docs/lifecycle.md).
+ */
+// Mirrors TURN_RESUME_DECLINED_CUSTOM_TYPE in the same runtime module.
+const DECLINE_MARKER_CUSTOM_TYPE = "pi-orb.turn-resume-declined";
+
+const RESUME_MARKER_TEXT = "turn interrupted by a host restart — resuming";
+
+const DECLINE_MARKER_TEXT = "turn interrupted again — not resuming; send a message to continue";
+
+function hasCustomType(record: HistoryRecord, customType: string): boolean {
+  if (record.type !== "event" || record.eventType !== "pi.custom_message") return false;
+  const native = record.overflow["native"];
+  return (
+    typeof native === "object" &&
+    native !== null &&
+    !Array.isArray(native) &&
+    native["customType"] === customType
+  );
+}
+
+/** Whether a record is the runtime's interrupted-turn resume marker. */
+export function isResumeMarker(record: HistoryRecord): boolean {
+  return hasCustomType(record, RESUME_MARKER_CUSTOM_TYPE);
+}
+
+/** Whether a record is the runtime's declined-resume announcement. */
+export function isDeclineMarker(record: HistoryRecord): boolean {
+  return hasCustomType(record, DECLINE_MARKER_CUSTOM_TYPE);
+}
+
 const DEFAULT_CONFIG: Required<FakeOrbConfig> = {
   initDurationMs: 2_000,
   initOutcome: "ready",
@@ -134,7 +200,13 @@ export class FakeWorld {
   configureOrb(orbId: string, config: FakeOrbConfig = {}): void {
     this.orbs.set(orbId, {
       config: { ...DEFAULT_CONFIG, ...config },
-      filesystem: { sessionId: null, header: null, entries: [], headId: null },
+      filesystem: {
+        sessionId: null,
+        header: null,
+        entries: [],
+        headId: null,
+        turnInFlight: false,
+      },
       host: null,
       runtimeInstanceCounter: 0,
       sessionCounter: 0,
@@ -155,25 +227,99 @@ export class FakeWorld {
 
   // -- test drivers ---------------------------------------------------------
 
+  /**
+   * Flush one record to the orb's persistent session, as the runtime's flush
+   * gate does: it is now replicable and survives the process.
+   */
+  private flushRecord(
+    orbId: string,
+    fs: FakeFilesystem,
+    make: (seq: number, parentId: string | null) => HistoryRecord,
+  ): HistoryRecord {
+    if (fs.sessionId === null) throw new Error(`orb ${orbId} has no session yet`);
+    const seq = fs.entries.length + 1;
+    const record = make(seq, fs.entries.at(-1)?.id ?? null);
+    fs.entries.push(record);
+    fs.headId = record.id;
+    return record;
+  }
+
+  private makeMessage(
+    orbId: string,
+    seq: number,
+    parentId: string | null,
+    role: "user" | "assistant",
+    text: string,
+  ): HistoryRecord {
+    return {
+      id: `${orbId}-rec-${seq}`,
+      parentId,
+      timestamp: `t${seq}`,
+      overflow: { native: { seq } },
+      type: "message",
+      role,
+      content: [{ type: "text", text }],
+    };
+  }
+
   /** Append a complete message record to the orb's persistent session. */
   appendMessage(orbId: string, text?: string): HistoryRecord {
     const state = this.orbState(orbId);
     const fs = state.filesystem;
-    if (fs.sessionId === null) throw new Error(`orb ${orbId} has no session yet`);
-    const seq = fs.entries.length + 1;
-    const parent = fs.entries.at(-1)?.id ?? null;
-    const record: HistoryRecord = {
-      id: `${orbId}-rec-${seq}`,
-      parentId: parent,
-      timestamp: `t${seq}`,
-      overflow: { native: { seq } },
-      type: "message",
-      role: seq % 2 === 1 ? "user" : "assistant",
-      content: [{ type: "text", text: text ?? `message ${seq}` }],
-    };
-    fs.entries.push(record);
-    fs.headId = record.id;
+    return this.flushRecord(orbId, fs, (seq, parentId) =>
+      this.makeMessage(
+        orbId,
+        seq,
+        parentId,
+        seq % 2 === 1 ? "user" : "assistant",
+        text ?? `message ${seq}`,
+      ),
+    );
+  }
+
+  /**
+   * Start an agent turn: flush the user message that triggers it and leave the
+   * runtime `busy` with the turn in flight. Until `finishTurn`, every death of
+   * the runtime process leaves the session tail dangling, which is what the
+   * next boot resumes from (docs/lifecycle.md).
+   */
+  beginTurn(orbId: string, text?: string): HistoryRecord {
+    const state = this.orbState(orbId);
+    const fs = state.filesystem;
+    const record = this.flushRecord(orbId, fs, (seq, parentId) =>
+      this.makeMessage(orbId, seq, parentId, "user", text ?? `turn ${seq}`),
+    );
+    fs.turnInFlight = true;
+    const runtime = state.host?.runtime;
+    if (runtime !== null && runtime !== undefined) {
+      // A runtime that accepts a message has its session loaded by
+      // definition, so this incarnation is past its own resume decision.
+      runtime.sessionLoaded = true;
+      runtime.activity = "busy";
+    }
     return record;
+  }
+
+  /** The turn completes normally: a closing assistant message, runtime idle. */
+  finishTurn(orbId: string, text?: string): HistoryRecord {
+    const state = this.orbState(orbId);
+    const fs = state.filesystem;
+    const record = this.flushRecord(orbId, fs, (seq, parentId) =>
+      this.makeMessage(orbId, seq, parentId, "assistant", text ?? `turn ${seq} done`),
+    );
+    fs.turnInFlight = false;
+    this.setActivity(orbId, "idle");
+    return record;
+  }
+
+  /** Every resume marker the runtime has appended to this orb's session. */
+  resumeMarkersOf(orbId: string): readonly HistoryRecord[] {
+    return this.orbState(orbId).filesystem.entries.filter(isResumeMarker);
+  }
+
+  /** Every declined-resume record the runtime has appended to this session. */
+  declineMarkersOf(orbId: string): readonly HistoryRecord[] {
+    return this.orbState(orbId).filesystem.entries.filter(isDeclineMarker);
   }
 
   entriesOf(orbId: string): readonly HistoryRecord[] {
@@ -200,8 +346,10 @@ export class FakeWorld {
 
   /** Whether the orb's runtime answers HTTP right now (boot latency elapsed). */
   isRuntimeServing(task: SimulationTask, orbId: string): boolean {
-    const host = this.orbState(orbId).host;
+    const state = this.orbState(orbId);
+    const host = state.host;
     if (host === null || host.state !== "running") return false;
+    this.loadSessionIfServing(task, state);
     return host.runtime !== null && host.runtime.startedAtMonotonic <= task.monotonicNow();
   }
 
@@ -222,7 +370,9 @@ export class FakeWorld {
 
   /**
    * Simulate a runtime-process crash and supervised restart inside the host.
-   * The host itself never went down, so this pays no boot latency.
+   * The host itself never went down, so this pays no boot latency — but the
+   * new process still loads the session, so the interrupted-turn resume
+   * applies exactly as it does after a host boot.
    */
   restartRuntimeProcess(task: SimulationTask, orbId: string): void {
     const state = this.orbState(orbId);
@@ -232,6 +382,8 @@ export class FakeWorld {
       instanceId: `${orbId}-runtime-${state.runtimeInstanceCounter}`,
       startedAtMonotonic: task.monotonicNow(),
       activity: "idle",
+      sessionLoaded: false,
+      turnResume: null,
     };
   }
 
@@ -455,13 +607,110 @@ export class FakeWorld {
       fs.sessionId = null;
       fs.header = null;
       fs.headId = null;
+      // Nothing of the turn reached the disk, so nothing can be resumed from it.
+      fs.turnInFlight = false;
     }
     state.runtimeInstanceCounter += 1;
     state.host.runtime = {
       instanceId: `${orbId}-runtime-${state.runtimeInstanceCounter}`,
       startedAtMonotonic: task.monotonicNow() + state.config.bootLatencyMs,
+      // The session is loaded (and any interrupted turn resumed) when this
+      // incarnation starts serving, not now: see `loadSessionIfServing`.
       activity: "idle",
+      sessionLoaded: false,
+      turnResume: null,
     };
+  }
+
+  /**
+   * The runtime's boot-time **interrupted-turn resume** (docs/lifecycle.md,
+   * decided 2026-08-07), applied once per incarnation at the instant it starts
+   * serving — the runtime has loaded the persisted session by then, and the
+   * marker must be visible to a pull exactly when the runtime answers one.
+   *
+   * The contract, cause-agnostically (preemption, unreachable restart, user
+   * stop/start and idle auto-stop are indistinguishable on disk):
+   *
+   * - flushed tail is a dangling turn and no resume marker follows the last
+   *   real user message → append the marker record and come up `busy`, the
+   *   turn continues;
+   * - flushed tail is a dangling turn *under* a marker → the guard declines:
+   *   come up `idle`, and announce the decline with its own record, at most
+   *   one per interruption. A turn that crashes its host again after resuming
+   *   is not resumed a second time, and never silently;
+   * - anything else → come up `idle` and report nothing.
+   *
+   * Either notable decision is reported in this incarnation's health, as the
+   * real runtime reports it: the readiness path logs it once per boot.
+   */
+  private loadSessionIfServing(task: SimulationTask, state: OrbWorldState): void {
+    const host = state.host;
+    if (host === null || host.state !== "running") return;
+    const runtime = host.runtime;
+    if (runtime === null || runtime.sessionLoaded) return;
+    if (runtime.startedAtMonotonic > task.monotonicNow()) return;
+    runtime.sessionLoaded = true;
+    const fs = state.filesystem;
+    if (!fs.turnInFlight || fs.sessionId === null) return;
+    // The head the decision keys off: the last record that is not pi-orb's own
+    // bookkeeping, which is what the runtime's detection walks back to.
+    const headRecordId = fs.entries.findLast(
+      (record) => !isResumeMarker(record) && !isDeclineMarker(record),
+    )?.id;
+    // The world flushes no partial assistant output, so the dangling tail it
+    // models is always the turn's user message with no reply at all.
+    const shape = "unanswered_user_message" as const;
+    if (!this.hasMarkerAfterLastUserMessage(fs, isResumeMarker)) {
+      this.flushMarkerRecord(host.orbId, fs, "resume");
+      runtime.activity = "busy";
+      runtime.turnResume = {
+        outcome: "resumed",
+        shape,
+        ...(headRecordId !== undefined ? { headRecordId } : {}),
+      };
+      return;
+    }
+    // The guard is suppressing a resume; health says so on every boot that
+    // declines, the record only on the first.
+    runtime.turnResume = {
+      outcome: "declined_already_resumed",
+      shape,
+      ...(headRecordId !== undefined ? { headRecordId } : {}),
+    };
+    if (this.hasMarkerAfterLastUserMessage(fs, isDeclineMarker)) return;
+    this.flushMarkerRecord(host.orbId, fs, "decline");
+  }
+
+  /**
+   * One of the runtime's own custom-message records, flushed to the session.
+   * The resume marker triggers the continued turn; the decline record is
+   * visible but deliberately inert.
+   */
+  private flushMarkerRecord(orbId: string, fs: FakeFilesystem, kind: "resume" | "decline"): void {
+    const resuming = kind === "resume";
+    const customType = resuming ? RESUME_MARKER_CUSTOM_TYPE : DECLINE_MARKER_CUSTOM_TYPE;
+    const text = resuming ? RESUME_MARKER_TEXT : DECLINE_MARKER_TEXT;
+    this.flushRecord(orbId, fs, (seq, parentId) => ({
+      id: `${orbId}-${kind}-${seq}`,
+      parentId,
+      timestamp: `t${seq}`,
+      overflow: { native: { seq, customType, display: true, triggerTurn: resuming } },
+      type: "event",
+      eventType: "pi.custom_message",
+      content: [{ type: "text", text }],
+    }));
+  }
+
+  /** The loop guard's key: does such a record follow the last user message? */
+  private hasMarkerAfterLastUserMessage(
+    fs: FakeFilesystem,
+    isMarker: (record: HistoryRecord) => boolean,
+  ): boolean {
+    let lastUserMessage = -1;
+    fs.entries.forEach((record, index) => {
+      if (record.type === "message" && record.role === "user") lastUserMessage = index;
+    });
+    return fs.entries.some((record, index) => index > lastUserMessage && isMarker(record));
   }
 
   /** Apply an elapsed preemption soft-off window: the instance is now down. */
@@ -516,12 +765,15 @@ export class FakeWorld {
    */
   resolveRuntime(baseUrl: string, task: SimulationTask): OrbWorldState | null {
     for (const state of this.orbs.values()) {
+      const host = state.host;
+      if (host === null || `http://${host.ref.resourceId}:8080` !== baseUrl) continue;
+      // A request that arrives after the boot latency finds a runtime that has
+      // loaded its session — and resumed any interrupted turn — by now.
+      this.loadSessionIfServing(task, state);
       if (
-        state.host !== null &&
-        `http://${state.host.ref.resourceId}:8080` === baseUrl &&
-        state.host.state === "running" &&
-        state.host.runtime !== null &&
-        state.host.runtime.startedAtMonotonic <= task.monotonicNow() &&
+        host.state === "running" &&
+        host.runtime !== null &&
+        host.runtime.startedAtMonotonic <= task.monotonicNow() &&
         state.runtimeUnreachableUntil <= task.monotonicNow()
       ) {
         return state;
@@ -575,6 +827,7 @@ export class FakeWorld {
           sessionId: fs.sessionId,
           checkoutCommit: state.config.checkoutCommit,
           activity: runtime.activity,
+          ...(runtime.turnResume !== null ? { turnResume: runtime.turnResume } : {}),
         };
       }
     }

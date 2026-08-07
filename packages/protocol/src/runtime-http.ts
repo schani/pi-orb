@@ -3,6 +3,34 @@ import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts"
 
 const closed = { additionalProperties: false } as const;
 
+/**
+ * The boot-time interrupted-turn decision, reported only when it is notable
+ * (docs/lifecycle.md): a resume performed, a resume the loop guard suppressed,
+ * or a resume whose marker never reached the harness. Ordinary boots — a
+ * settled tail, a fresh session — report nothing at all: edges, not levels.
+ */
+export const RuntimeTurnResumeSchema = Type.Object(
+  {
+    outcome: Type.Union([
+      Type.Literal("resumed"),
+      Type.Literal("declined_already_resumed"),
+      Type.Literal("resume_failed"),
+    ]),
+    /** The interrupted tail shape the runtime detected. */
+    shape: Type.Optional(
+      Type.Union([
+        Type.Literal("trailing_tool_result"),
+        Type.Literal("dangling_tool_calls"),
+        Type.Literal("unanswered_user_message"),
+      ]),
+    ),
+    /** Record ID of the dangling tail entry the decision keyed off. */
+    headRecordId: Type.Optional(Type.String()),
+  },
+  closed,
+);
+export type RuntimeTurnResume = Static<typeof RuntimeTurnResumeSchema>;
+
 export const RuntimeHealthSchema = Type.Union([
   Type.Object(
     {
@@ -29,6 +57,7 @@ export const RuntimeHealthSchema = Type.Union([
       checkoutCommit: Type.String(),
       activity: Type.Union([Type.Literal("idle"), Type.Literal("busy")]),
       operationId: Type.Optional(Type.String()),
+      turnResume: Type.Optional(RuntimeTurnResumeSchema),
     },
     closed,
   ),

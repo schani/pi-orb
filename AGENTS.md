@@ -32,3 +32,7 @@ Run `npm run test:e2e` before deploying any change that touches the runtime prot
 
 DST tests must never be flaky. A DST failure that does not reproduce on every run is not noise — it is a schedule the scenario cannot survive, and it must be root-caused before any fix: replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`), understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never "fix" DST flakiness by rerunning, loosening assertions blindly, or deleting the trace.
 
+## Observability
+
+For every feature, before it ships, ask: **if something goes wrong with this feature in the field, what observability will we wish we had?** Then implement that observability as part of the feature, not as a follow-up. Concretely: decisions taken by autonomous machinery (reconcilers, boot hooks, guards) must be reconstructable afterwards from durable, queryable places — the `lifecycle:` event log, replicated history records, persisted columns — never only from ephemeral process stdout or guest logs; and outcomes that affect the user must be visible to the user in the product, not just to operators — a guard that declines silently is invisible at exactly the moment someone asks "why did nothing happen?". Respect the noise rules in `docs/lifecycle.md`: edges, not levels; a healthy fleet logs nothing.
+
