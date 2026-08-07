@@ -223,12 +223,24 @@ export const OperationFinishedEventSchema = Type.Object(
 );
 export type OperationFinishedEvent = Static<typeof OperationFinishedEventSchema>;
 
+/** Best-effort, live-only Luna summary for browser notifications. Never replayed or persisted. */
+export const TurnNotificationEventSchema = Type.Object(
+  {
+    type: Type.Literal("turn_notification"),
+    operationId: Type.String(),
+    summary: Type.String({ minLength: 1, maxLength: 240 }),
+  },
+  closed,
+);
+export type TurnNotificationEvent = Static<typeof TurnNotificationEventSchema>;
+
 export const RuntimeEventSchema = Type.Union([
   RuntimeStatusEventSchema,
   OperationStartedEventSchema,
   OutputPatchEventSchema,
   ToolStateEventSchema,
   OperationFinishedEventSchema,
+  TurnNotificationEventSchema,
 ]);
 export type RuntimeEvent = Static<typeof RuntimeEventSchema>;
 

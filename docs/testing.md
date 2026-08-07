@@ -10,6 +10,7 @@
 - Explicit failpoints and scheduling checkpoints should cover replication, lifecycle, retry, reconciliation, and shutdown races.
 - DST complements rather than replaces normal unit, database integration, Docker, browser, and eventual GCE tests.
 - User-shell support requires tests for composer mode/caret transitions, paste normalization, attachment-blocked submission, send reset/preservation, both context modes and their persistent history, closed protocol schemas, stale-head/busy/request-replay races, bounded streaming/coalescing/reconnect reconstruction, success/nonzero/failure/cancellation, history publication before operation finish, abort dispatch, and a real runtime-protocol E2E shell command (decided 2026-08-05).
+- The live-only Luna turn-summary coordinator is DST-covered: inference is detached from operation completion, accepts later turns while earlier summaries are pending, and retains originating operation IDs under varied completion schedules. Luna errors and timeouts are consumed without mutating agent/runtime state. Browser Notification API behavior is an ordinary frontend-adapter test concern rather than a simulation target (decided 2026-08-06).
 
 ## Deterministic simulation testing strategy
 

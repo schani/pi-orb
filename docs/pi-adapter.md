@@ -11,6 +11,7 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 - The orb runtime cannot restart itself reliably from inside its own failure domain. Docker initially, and GCE later, provide process/host supervision.
 - If the runtime enters an unrecoverable state, it should exit so its host can restart it.
 - User-shell commands call the Pi SDK's `AgentSession.executeBash()` directly. pi-orb does not reproduce the Pi TUI's separate `InteractiveMode` `user_bash` extension-interception layer (decided 2026-08-05).
+- Completed agent turns are summarized asynchronously by OpenAI's Luna model through a separate `ModelRuntime.completeSimple` call. The adapter captures a bounded turn view after Pi settles, excluding reasoning and raw tool output, broadcasts completion/idle first, and only then queues Luna. The call never touches `AgentSession`, session history, operation outcome, or runtime health; failures are error-logged and produce no notification (decided 2026-08-06).
 
 ## User shell API and persistence
 

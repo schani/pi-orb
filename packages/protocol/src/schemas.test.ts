@@ -423,6 +423,18 @@ describe("frame schemas", () => {
         event: { type: "status", activity: "busy", operationId: "op-1" },
       }),
     ).toBe(true);
+    expect(
+      Check(RuntimeEventFrameSchema, {
+        v: 1,
+        type: "runtime.event",
+        at: "2026-07-20T10:00:00.000Z",
+        event: {
+          type: "turn_notification",
+          operationId: "op-1",
+          summary: "Updated the runtime and added tests.",
+        },
+      }),
+    ).toBe(true);
   });
 
   it("accepts request results", () => {

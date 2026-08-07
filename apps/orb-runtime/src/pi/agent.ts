@@ -28,10 +28,16 @@ import { brokerProviderConfig } from "../broker/provider.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import type { AgentGateView } from "../domain/requests.ts";
+import {
+  buildTurnSummaryInput,
+  type TurnSummarizer,
+  TurnSummaryCoordinator,
+} from "../domain/turn-summary.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
+import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { pickCodexModel } from "./model-select.ts";
 import { createPortExposureLoader } from "./resource-loader.ts";
@@ -52,6 +58,8 @@ export interface PiOrbAgentOptions {
    * when tier-1 port exposure is off. Only the agent's system prompt uses it.
    */
   readonly previewHost?: string | null;
+  /** Test seam; production creates the Luna adapter from the orb's existing ModelRuntime. */
+  readonly turnSummarizer?: TurnSummarizer;
 }
 
 export interface SnapshotError {
@@ -121,6 +129,8 @@ export class PiOrbAgent {
   private operationKind: "agent" | "shell" | null = null;
   /** Operation ID promised to the requester before Pi emits agent_start. */
   private pendingOperationId: string | null = null;
+  private summaryStartIndex: number | null = null;
+  private summaryCoordinator: TurnSummaryCoordinator | null = null;
   private shellCommand = "";
   private shellOutput = "";
   private shellOutputTruncated = false;
@@ -360,6 +370,20 @@ export class PiOrbAgent {
       return err(this.failed("session_init_failed", sessionResult.error, true));
     }
     this.session = sessionResult.value.session;
+    const summarizer = this.options.turnSummarizer ?? new LunaTurnSummarizer(modelRuntime, model);
+    this.summaryCoordinator = new TurnSummaryCoordinator({
+      task: new NoSimulationTask(`turn-summary-${this.options.orbId}`, false),
+      summarizer,
+      timeoutMs: 15_000,
+      maxConcurrency: 2,
+      maxQueued: 8,
+      onSummary: (operationId, summary) => {
+        this.broadcastEvent({ type: "turn_notification", operationId, summary });
+      },
+      onError: (operationId, error) => {
+        console.error(`Luna summary failed for operation ${operationId}: ${error.message}`);
+      },
+    });
     const manager = this.sessionManager;
     this.liveHistory = new LiveHistoryPublisher(manager, (record) => {
       this.broadcast({
@@ -522,6 +546,7 @@ export class PiOrbAgent {
       case "agent_settled": {
         if (this.operationKind !== "agent") break;
         const operationId = this.operationId;
+        const summaryInput = this.captureTurnSummaryInput();
         this.operationId = null;
         this.operationKind = null;
         this.activity = "idle";
@@ -535,11 +560,34 @@ export class PiOrbAgent {
           });
         }
         this.broadcastEvent({ type: "status", activity: "idle" });
+        if (operationId !== null && summaryInput !== null) {
+          // Agent completion is already visible and the runtime is idle. Luna runs strictly
+          // best-effort in the background and cannot change this operation's outcome.
+          this.summaryCoordinator?.enqueue(operationId, summaryInput);
+        }
         break;
       }
       default:
         break;
     }
+  }
+
+  private captureTurnSummaryInput() {
+    const manager = this.sessionManager;
+    const startIndex = this.summaryStartIndex;
+    this.summaryStartIndex = null;
+    if (manager === null || startIndex === null) return null;
+
+    const records = [];
+    for (const entry of manager.getEntries().slice(startIndex)) {
+      const mapped = mapPiEntry(entry);
+      if (mapped.isErr()) {
+        console.error(`Luna summary input mapping failed: ${mapped.error.message}`);
+        return null;
+      }
+      records.push(mapped.value);
+    }
+    return buildTurnSummaryInput(records);
   }
 
   // -- synchronous views ----------------------------------------------------
@@ -666,6 +714,7 @@ export class PiOrbAgent {
       );
     }
     this.pendingOperationId = operationId;
+    this.summaryStartIndex = this.sessionManager?.getEntries().length ?? null;
     const piContent = content.map((block) =>
       block.type === "text"
         ? { type: "text" as const, text: block.text }

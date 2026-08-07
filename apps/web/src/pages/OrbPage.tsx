@@ -24,6 +24,12 @@ import {
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { isPinnedToBottom } from "../lib/scroll-pin.ts";
+import {
+  type BrowserNotificationPermission,
+  notificationPermission,
+  requestNotificationPermission,
+  showTurnNotification,
+} from "../lib/turn-notifications.ts";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -137,6 +143,9 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       });
       return { ...state, tools };
     }
+    case "turn_notification":
+      // Notification display is a browser side effect handled before reduction.
+      return state;
     case "operation_finished":
       // Complete records for the operation have already arrived as
       // history.record frames, so transient live state can be dropped. The
@@ -315,6 +324,9 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [orbError, setOrbError] = useState<ApiError | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
+  const [notifications, setNotifications] = useState<BrowserNotificationPermission>(() =>
+    notificationPermission(),
+  );
 
   // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {
@@ -391,7 +403,16 @@ export function OrbPage({ orbId }: { orbId: string }) {
     const connection = openLiveConnection({
       orbId,
       getAfterRecordId: () => afterRecordIdRef.current,
-      onFrame: (frame) => dispatch({ type: "frame", frame }),
+      onFrame: (frame) => {
+        if (frame.type === "runtime.event" && frame.event.type === "turn_notification") {
+          showTurnNotification({
+            orbId,
+            operationId: frame.event.operationId,
+            summary: frame.event.summary,
+          });
+        }
+        dispatch({ type: "frame", frame });
+      },
       onStatus: (status) => dispatch({ type: "connection_status", status }),
       onRequestLost: (requestId) => dispatch({ type: "request_lost", requestId }),
       getVisible: isVisible,
@@ -599,6 +620,20 @@ export function OrbPage({ orbId }: { orbId: string }) {
           )}
         </span>
         <div className="orb-header-actions">
+          {notifications !== "granted" && notifications !== "unsupported" && (
+            <button
+              type="button"
+              title={
+                notifications === "denied"
+                  ? "Notifications are blocked in browser settings"
+                  : "Notify me when an agent turn finishes"
+              }
+              disabled={notifications === "denied"}
+              onClick={() => void requestNotificationPermission().then(setNotifications)}
+            >
+              notify
+            </button>
+          )}
           <button type="button" onClick={() => runLifecycle(startOrb)} disabled={!canStart}>
             start
           </button>
