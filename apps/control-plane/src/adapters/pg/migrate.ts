@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
-import type { PgClient } from "./client.ts";
+import type { PostgreSQLClient } from "./client.ts";
 
 const readMigrations = Result.fromThrowable(
   (dir: string) => {
@@ -21,7 +21,7 @@ const readMigrations = Result.fromThrowable(
 );
 
 /** Numbered hand-written SQL migrations with a tiny runner (docs/stack.md). */
-export function runMigrations(db: PgClient): ResultAsync<string[], StoreError> {
+export function runMigrations(db: PostgreSQLClient): ResultAsync<string[], StoreError> {
   const dir = join(dirname(fileURLToPath(import.meta.url)), "migrations");
   const run = async (): Promise<Result<string[], StoreError>> => {
     const migrations = readMigrations(dir);
@@ -36,8 +36,8 @@ export function runMigrations(db: PgClient): ResultAsync<string[], StoreError> {
     const ran: string[] = [];
     for (const migration of migrations.value) {
       if (applied.has(migration.name)) continue;
-      const outcome = await db.transaction<void, StoreError>(async (query) => {
-        const executed = await query(migration.sql);
+      const outcome = await db.transaction<void, StoreError>(async (query, execute) => {
+        const executed = await execute(migration.sql);
         if (executed.isErr()) return err(executed.error);
         const recorded = await query("INSERT INTO schema_migrations (name) VALUES ($1)", [
           migration.name,

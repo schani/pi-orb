@@ -23,7 +23,7 @@ import {
  * service: device login, scripted streaming with a real tool round trip,
  * history replication, and the controlled-stop drain. The default backend is
  * real PostgreSQL + Docker. PI_ORB_E2E_BACKEND=process selects the Docker-free
- * SQLite + process-provider composition and exercises the same scenario.
+ * PGlite + process-provider composition and exercises the same scenario.
  */
 
 const PG_CONTAINER = "pi-orb-e2e-pg";
@@ -80,7 +80,7 @@ beforeAll(async () => {
   if (PROCESS_BACKEND) {
     localStateDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-local-"));
     controlPlane = await startControlPlane({
-      sqlitePath: join(localStateDirectory, "control-plane.sqlite"),
+      pglitePath: join(localStateDirectory, "control-plane.pglite"),
       processStateDirectory: join(localStateDirectory, "process-hosts"),
       port: CP_PORT,
       fake,

@@ -72,9 +72,9 @@ class ControlPlaneTask extends NoSimulationTask {
 async function main(): Promise<void> {
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
-  const sqlitePath = env(
-    "PI_ORB_SQLITE_PATH",
-    join(homedir(), ".pi-orb", "local", "control-plane.sqlite"),
+  const pglitePath = env(
+    "PI_ORB_PGLITE_PATH",
+    join(homedir(), ".pi-orb", "local", "control-plane.pglite"),
   );
   const port = Number(env("PORT", "7100"));
   const authDir = env("PI_ORB_AUTH_DIR", join(homedir(), ".pi-orb", "auth"));
@@ -85,8 +85,8 @@ async function main(): Promise<void> {
 
   const bootTask = new NoSimulationTask("boot", true);
   const openedDatabase = openControlPlaneDatabase(
-    databaseKind === "sqlite"
-      ? { kind: "sqlite", path: sqlitePath }
+    databaseKind === "pglite"
+      ? { kind: "pglite", path: pglitePath }
       : { kind: "postgresql", connectionString: databaseUrl },
   );
   if (openedDatabase.isErr()) {

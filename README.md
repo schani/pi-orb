@@ -25,13 +25,13 @@ Open http://localhost:5173.
 
 ### Docker-free local backend
 
-Node.js 24 includes the SQLite driver used by the test-only process host provider, so the control plane, database, and orb-process supervisor need no Docker or PostgreSQL service:
+The embedded PGlite database and test-only process host provider let the control plane and orb-process supervisor run without Docker or an external PostgreSQL service:
 
 ```sh
 npm run dev:local
 ```
 
-State defaults to `~/.pi-orb/local`; override the independent paths with `PI_ORB_SQLITE_PATH` and `PI_ORB_PROCESS_STATE_DIR`. Orb runtimes are unsandboxed child processes and must only run trusted repositories. Run the normal web dev server separately with `npm run dev --workspace @pi-orb/web`, then open http://localhost:5173.
+State defaults to `~/.pi-orb/local`; override the independent paths with `PI_ORB_PGLITE_PATH` and `PI_ORB_PROCESS_STATE_DIR`. Orb runtimes are unsandboxed child processes and must only run trusted repositories. Run the normal web dev server separately with `npm run dev --workspace @pi-orb/web`, then open http://localhost:5173.
 
 ### Frontend only
 

@@ -92,7 +92,7 @@ export interface ControlPlaneHandle {
 
 export async function startControlPlane(options: {
   databaseUrl?: string;
-  sqlitePath?: string;
+  pglitePath?: string;
   processStateDirectory?: string;
   port: number;
   fake: FakeSession;
@@ -105,11 +105,11 @@ export async function startControlPlane(options: {
     cwd: join(import.meta.dirname, ".."),
     env: {
       ...process.env,
-      ...(options.sqlitePath === undefined
+      ...(options.pglitePath === undefined
         ? { DATABASE_URL: options.databaseUrl }
         : {
-            PI_ORB_DATABASE_KIND: "sqlite",
-            PI_ORB_SQLITE_PATH: options.sqlitePath,
+            PI_ORB_DATABASE_KIND: "pglite",
+            PI_ORB_PGLITE_PATH: options.pglitePath,
             PI_ORB_HOST_PROVIDER: "process",
             PI_ORB_PROCESS_STATE_DIR: options.processStateDirectory,
           }),

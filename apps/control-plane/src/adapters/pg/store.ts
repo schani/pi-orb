@@ -15,7 +15,7 @@ import type {
   CommitPullBatchParams,
   ControlPlaneStore,
 } from "../../domain/ports.ts";
-import type { PgClient, PgRow } from "./client.ts";
+import type { PgRow, PostgreSQLClient } from "./client.ts";
 
 function toMs(value: unknown): number {
   if (value instanceof Date) return value.getTime();
@@ -63,9 +63,9 @@ const stateConflict = (currentState?: OrbState): StateConflict => ({
 
 /** PostgreSQL `ControlPlaneStore` (docs/history-replication.md/docs/stack.md). */
 export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
-  private readonly db: PgClient;
+  private readonly db: PostgreSQLClient;
 
-  constructor(db: PgClient) {
+  constructor(db: PostgreSQLClient) {
     this.db = db;
   }
 

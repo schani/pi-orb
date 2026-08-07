@@ -15,6 +15,18 @@ export interface PgQueryResult {
   rowCount: number;
 }
 
+/** Query surface shared by network PostgreSQL and embedded PGlite. */
+export interface PostgreSQLClient {
+  query(text: string, values?: unknown[]): ResultAsync<PgQueryResult, StoreError>;
+  transaction<T, E>(
+    f: (
+      query: (text: string, values?: unknown[]) => ResultAsync<PgQueryResult, StoreError>,
+      execute: (text: string) => ResultAsync<void, StoreError>,
+    ) => Promise<Result<T, E>>,
+  ): ResultAsync<T, E | StoreError>;
+  end(): ResultAsync<void, StoreError>;
+}
+
 const CORRUPTION_CODES = new Set([
   "23503", // foreign_key_violation (deferred FKs fire at COMMIT)
   "23505", // unique_violation
@@ -33,7 +45,7 @@ export function mapPgError(error: unknown): StoreError {
   return { type: "store_error", code: "unavailable", message, retryable: true };
 }
 
-export class PgClient {
+export class PgClient implements PostgreSQLClient {
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
@@ -57,6 +69,7 @@ export class PgClient {
   transaction<T, E>(
     f: (
       query: (text: string, values?: unknown[]) => ResultAsync<PgQueryResult, StoreError>,
+      execute: (text: string) => ResultAsync<void, StoreError>,
     ) => Promise<Result<T, E>>,
   ): ResultAsync<T, E | StoreError> {
     const run = async (): Promise<Result<T, E | StoreError>> => {
@@ -76,8 +89,10 @@ export class PgClient {
         client.release();
         return err(begin.error);
       }
-      const outcome = await ResultAsync.fromPromise(f(clientQuery), mapPgError).andThen((inner) =>
-        ResultAsync.fromSafePromise(Promise.resolve(inner)),
+      const execute = (text: string): ResultAsync<void, StoreError> =>
+        clientQuery(text).map(() => undefined);
+      const outcome = await ResultAsync.fromPromise(f(clientQuery, execute), mapPgError).andThen(
+        (inner) => ResultAsync.fromSafePromise(Promise.resolve(inner)),
       );
       if (outcome.isErr() || outcome.value.isErr()) {
         await clientQuery("ROLLBACK");

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@electric-sql/pglite": "^0.5.4",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.0.0",
     "@google-cloud/secret-manager": "^6.3.0",

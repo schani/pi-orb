@@ -6,7 +6,7 @@ import type {
   CredentialPointerStore,
   CredentialPointerWrite,
 } from "../../domain/ports.ts";
-import type { PgClient, PgRow } from "./client.ts";
+import type { PgRow, PostgreSQLClient } from "./client.ts";
 
 function mapRow(row: PgRow): CredentialPointerRow {
   return {
@@ -21,9 +21,9 @@ function mapRow(row: PgRow): CredentialPointerRow {
 
 /** PostgreSQL credential-pointer store (docs/credentials.md): CAS on `row_version`. */
 export class PostgreSQLCredentialPointerStore implements CredentialPointerStore {
-  private readonly db: PgClient;
+  private readonly db: PostgreSQLClient;
 
-  constructor(db: PgClient) {
+  constructor(db: PostgreSQLClient) {
     this.db = db;
   }
 
