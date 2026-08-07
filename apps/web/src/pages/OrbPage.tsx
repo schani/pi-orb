@@ -323,6 +323,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [orb, setOrb] = useState<OrbView | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);
+  const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
   const [notifications, setNotifications] = useState<BrowserNotificationPermission>(() =>
@@ -363,6 +364,10 @@ export function OrbPage({ orbId }: { orbId: string }) {
       window.clearInterval(timer);
     };
   }, [orbId]);
+
+  useEffect(() => {
+    orbNameRef.current = orb?.name ?? null;
+  }, [orb?.name]);
 
   // Database-first history load (docs/history-replication.md).
   useEffect(() => {
@@ -414,22 +419,32 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const shouldConnect = orb?.state === "running" && state.historyLoaded;
   useEffect(() => {
     if (!shouldConnect) return;
+    let active = true;
     const isVisible = () => document.visibilityState === "visible";
     const connection = openLiveConnection({
       orbId,
       getAfterRecordId: () => afterRecordIdRef.current,
       onFrame: (frame) => {
         if (frame.type === "runtime.event" && frame.event.type === "turn_notification") {
-          const result = showTurnNotification({
-            orbId,
-            operationId: frame.event.operationId,
-            summary: frame.event.summary,
+          const event = frame.event;
+          // Auto-naming runs concurrently with the first turn. Refresh once at notification time
+          // so a just-committed display name wins even if the ordinary 2s orb poll has not seen it.
+          void getOrb(orbId).then((latest) => {
+            if (!active) return;
+            const orbName = latest.isOk() ? (latest.value.name ?? null) : orbNameRef.current;
+            if (latest.isOk()) {
+              setOrb(latest.value);
+              orbNameRef.current = orbName;
+            }
+            const result = showTurnNotification({
+              orbId,
+              orbName,
+              operationId: event.operationId,
+              summary: event.summary,
+            });
+            console.info("turn notification", { operationId: event.operationId, result });
+            dispatch({ type: "notice", message: describeTurnNotificationResult(result) });
           });
-          console.info("turn notification", {
-            operationId: frame.event.operationId,
-            result,
-          });
-          dispatch({ type: "notice", message: describeTurnNotificationResult(result) });
         }
         dispatch({ type: "frame", frame });
       },
@@ -442,6 +457,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
     document.addEventListener("visibilitychange", onVisibilityChange);
     liveRef.current = connection;
     return () => {
+      active = false;
       document.removeEventListener("visibilitychange", onVisibilityChange);
       liveRef.current = null;
       connection.dispose();

@@ -38,9 +38,15 @@ export function notificationDecision(
   return null;
 }
 
+export function turnNotificationTitle(orbId: string, orbName?: string | null): string {
+  const name = orbName?.trim();
+  return name !== undefined && name !== "" ? name : `Orb ${orbId}`;
+}
+
 /** Live-only, best-effort notification. The protocol intentionally never replays this event. */
 export function showTurnNotification(options: {
   readonly orbId: string;
+  readonly orbName?: string | null;
   readonly operationId: string;
   readonly summary: string;
 }): TurnNotificationResult {
@@ -53,7 +59,7 @@ export function showTurnNotification(options: {
   // Browsers replace same-origin notifications sharing a tag. This also suppresses duplicate
   // notifications when more than one open tab receives the runtime broadcast.
   try {
-    const notification = new Notification(`Orb ${options.orbId} finished`, {
+    const notification = new Notification(turnNotificationTitle(options.orbId, options.orbName), {
       body: options.summary,
       tag: key,
     });
