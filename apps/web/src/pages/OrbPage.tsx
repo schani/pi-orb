@@ -26,6 +26,7 @@ import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } fr
 import { isPinnedToBottom } from "../lib/scroll-pin.ts";
 import {
   type BrowserNotificationPermission,
+  describeTurnNotificationResult,
   notificationPermission,
   requestNotificationPermission,
   showTurnNotification,
@@ -405,11 +406,16 @@ export function OrbPage({ orbId }: { orbId: string }) {
       getAfterRecordId: () => afterRecordIdRef.current,
       onFrame: (frame) => {
         if (frame.type === "runtime.event" && frame.event.type === "turn_notification") {
-          showTurnNotification({
+          const result = showTurnNotification({
             orbId,
             operationId: frame.event.operationId,
             summary: frame.event.summary,
           });
+          console.info("turn notification", {
+            operationId: frame.event.operationId,
+            result,
+          });
+          dispatch({ type: "notice", message: describeTurnNotificationResult(result) });
         }
         dispatch({ type: "frame", frame });
       },
@@ -620,20 +626,28 @@ export function OrbPage({ orbId }: { orbId: string }) {
           )}
         </span>
         <div className="orb-header-actions">
-          {notifications !== "granted" && notifications !== "unsupported" && (
-            <button
-              type="button"
-              title={
-                notifications === "denied"
+          <button
+            type="button"
+            title={
+              notifications === "unsupported"
+                ? "Notifications require a secure browser context (HTTPS or localhost)"
+                : notifications === "denied"
                   ? "Notifications are blocked in browser settings"
-                  : "Notify me when an agent turn finishes"
-              }
-              disabled={notifications === "denied"}
-              onClick={() => void requestNotificationPermission().then(setNotifications)}
-            >
-              notify
-            </button>
-          )}
+                  : notifications === "granted"
+                    ? "Desktop notifications are enabled"
+                    : "Enable a desktop notification whenever an agent turn finishes"
+            }
+            disabled={notifications !== "default"}
+            onClick={() => void requestNotificationPermission().then(setNotifications)}
+          >
+            {notifications === "unsupported"
+              ? "notify unavailable"
+              : notifications === "denied"
+                ? "notify blocked"
+                : notifications === "granted"
+                  ? "notifications on"
+                  : "enable notifications"}
+          </button>
           <button type="button" onClick={() => runLifecycle(startOrb)} disabled={!canStart}>
             start
           </button>

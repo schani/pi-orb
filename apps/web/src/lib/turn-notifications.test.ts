@@ -1,42 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { shouldDisplayTurnNotification } from "./turn-notifications.ts";
+import { notificationDecision } from "./turn-notifications.ts";
 
 describe("turn notifications", () => {
-  it("shows only granted notifications for background pages", () => {
-    expect(
-      shouldDisplayTurnNotification({
-        permission: "granted",
-        visibility: "hidden",
-        focused: false,
-        alreadyDisplayed: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldDisplayTurnNotification({
-        permission: "granted",
-        visibility: "visible",
-        focused: true,
-        alreadyDisplayed: false,
-      }),
-    ).toBe(false);
-    expect(
-      shouldDisplayTurnNotification({
-        permission: "denied",
-        visibility: "hidden",
-        focused: false,
-        alreadyDisplayed: false,
-      }),
-    ).toBe(false);
+  it("shows granted notifications even while the orb page is foregrounded", () => {
+    expect(notificationDecision("granted", false)).toBeNull();
+  });
+
+  it("reports unavailable and ungranted notification states", () => {
+    expect(notificationDecision("unsupported", false)).toEqual({
+      type: "skipped",
+      reason: "unsupported",
+    });
+    expect(notificationDecision("default", false)).toEqual({
+      type: "skipped",
+      reason: "permission_default",
+    });
+    expect(notificationDecision("denied", false)).toEqual({
+      type: "skipped",
+      reason: "permission_denied",
+    });
   });
 
   it("deduplicates an orb operation", () => {
-    expect(
-      shouldDisplayTurnNotification({
-        permission: "granted",
-        visibility: "hidden",
-        focused: false,
-        alreadyDisplayed: true,
-      }),
-    ).toBe(false);
+    expect(notificationDecision("granted", true)).toEqual({
+      type: "skipped",
+      reason: "duplicate",
+    });
   });
 });

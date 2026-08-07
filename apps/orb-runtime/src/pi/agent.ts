@@ -378,6 +378,9 @@ export class PiOrbAgent {
       maxConcurrency: 2,
       maxQueued: 8,
       onSummary: (operationId, summary) => {
+        console.log(
+          `Luna summary completed operation=${operationId} chars=${summary.length} live_connections=${this.listeners.size}`,
+        );
         this.broadcastEvent({ type: "turn_notification", operationId, summary });
       },
       onError: (operationId, error) => {
@@ -563,7 +566,14 @@ export class PiOrbAgent {
         if (operationId !== null && summaryInput !== null) {
           // Agent completion is already visible and the runtime is idle. Luna runs strictly
           // best-effort in the background and cannot change this operation's outcome.
+          console.log(
+            `Luna summary queued operation=${operationId} input_chars=${summaryInput.transcript.length}`,
+          );
           this.summaryCoordinator?.enqueue(operationId, summaryInput);
+        } else if (operationId !== null) {
+          console.error(
+            `Luna summary skipped operation=${operationId}: no turn input was captured`,
+          );
         }
         break;
       }
