@@ -38,6 +38,9 @@ export const RUNTIME_TOKEN_STATES: readonly string[] = [
   "starting",
   "running",
   "stopping",
+  // Archive may temporarily restore a stopped runtime solely to finish and
+  // seal its transcript; authorization is revoked at archived finalization.
+  "archiving",
 ];
 
 export interface TokenRequest {

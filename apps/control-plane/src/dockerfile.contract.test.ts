@@ -33,9 +33,10 @@ describe("control-plane Dockerfile workspace contract", () => {
       expect(dockerfile, `${dependency} package.json must be copied before npm ci`).toContain(
         `COPY ${workspacePath}/package.json ${workspacePath}/`,
       );
-      expect(dockerfile, `${dependency} source must be copied into the control-plane image`).toContain(
-        `COPY ${workspacePath}/src ${workspacePath}/src`,
-      );
+      expect(
+        dockerfile,
+        `${dependency} source must be copied into the control-plane image`,
+      ).toContain(`COPY ${workspacePath}/src ${workspacePath}/src`);
     }
   });
 });

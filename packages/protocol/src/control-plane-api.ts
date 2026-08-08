@@ -12,6 +12,8 @@ export const OrbStateSchema = Type.Union([
   Type.Literal("stopped"),
   Type.Literal("failed"),
   Type.Literal("deleting"),
+  Type.Literal("archiving"),
+  Type.Literal("archived"),
 ]);
 export type OrbState = Static<typeof OrbStateSchema>;
 
@@ -74,6 +76,19 @@ export const OrbStateDetailSchema = Type.Union([
   ),
   Type.Object(
     {
+      type: Type.Literal("archiving_orb"),
+      phase: Type.Union([
+        Type.Literal("waiting_for_idle"),
+        Type.Literal("sealing_history"),
+        Type.Literal("deleting_resources"),
+      ]),
+      retrying: Type.Boolean(),
+      message: Type.Optional(Type.String()),
+    },
+    closed,
+  ),
+  Type.Object(
+    {
       type: Type.Literal("waiting_for_runtime"),
       hostState: Type.Union([Type.String(), Type.Null()]),
       secondsSinceHostRunning: Type.Union([Type.Number(), Type.Null()]),
@@ -113,6 +128,7 @@ export const OrbViewSchema = Type.Object(
     /** Present when the last stop was automatic ("stopped (idle)", docs/lifecycle.md). */
     stopReason: Type.Optional(StopReasonSchema),
     stateChangedAt: Type.String(),
+    archivedAt: Type.Optional(Type.String()),
     /**
      * MagicDNS host every port inside the orb is reachable at (docs/ports.md).
      * Derived from the orb id and the configured tailnet, never stored;

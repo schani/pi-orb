@@ -232,7 +232,7 @@ async function handleApi(
     }
   }
 
-  const orbRoute = /^\/api\/v1\/orbs\/([^/]+)(?:\/(history|start|stop))?$/.exec(path);
+  const orbRoute = /^\/api\/v1\/orbs\/([^/]+)(?:\/(history|start|stop|archive))?$/.exec(path);
   if (orbRoute !== null) {
     const orbId = decodeURIComponent(orbRoute[1] ?? "");
     const action = orbRoute[2];
@@ -289,7 +289,29 @@ async function handleApi(
       sendJson(response, 200, view);
       return true;
     }
+    if (method === "POST" && action === "archive") {
+      const archiving = updateOrb(orb, "archiving");
+      state.orbs.set(orbId, archiving);
+      sendJson(response, 202, archiving);
+      const timer = setTimeout(() => {
+        const current = state.orbs.get(orbId);
+        if (current?.state === "archiving") {
+          state.orbs.set(orbId, {
+            ...updateOrb(current, "archived"),
+            archivedAt: now(),
+          });
+        }
+      }, 1_000);
+      state.startupTimers.set(orbId, timer);
+      return true;
+    }
     if (method === "POST" && (action === "start" || action === "stop")) {
+      if (orb.state === "archived" || orb.state === "archiving") {
+        sendJson(response, 409, {
+          error: { code: "conflict", message: "archived orbs cannot be started", retryable: false },
+        });
+        return true;
+      }
       const updated = updateOrb(orb, action === "start" ? "running" : "stopped");
       state.orbs.set(orbId, updated);
       sendJson(response, 202, updated);

@@ -26,8 +26,14 @@ export function deriveOrbFaviconStatus(
 ): OrbFaviconStatus {
   if (orbState === null) return "neutral";
   if (orbState === "failed") return "failed";
-  if (orbState === "stopped") return "stopped";
-  if (orbState === "creating" || orbState === "starting" || orbState === "stopping") {
+  if (orbState === "stopped" || orbState === "archived") return "stopped";
+  if (
+    orbState === "creating" ||
+    orbState === "starting" ||
+    orbState === "stopping" ||
+    orbState === "deleting" ||
+    orbState === "archiving"
+  ) {
     return "transitional";
   }
   return connection === "open" && activity === "busy" ? "busy" : "running";

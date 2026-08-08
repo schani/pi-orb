@@ -864,22 +864,13 @@ async function reconcileStopping(
 }
 
 // ---------------------------------------------------------------------------
-// deleting
+// shared irreversible resource disposal (delete + archive)
 
-async function reconcileDeleting(
+async function reconcileResourceDisposal(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orb: OrbRow,
-): Promise<ReconcileOutcome> {
-  deps.control.markStopping(orb.id);
-  deps.control.closeBrowserConnections(orb.id);
-
-  const tombstone = await deps.store.getOrbDeletion(task, orb.id);
-  if (tombstone.isErr()) return retryable(tombstone.error.message);
-  if (tombstone.value === null) {
-    return retryable("deleting orb has no cleanup tombstone");
-  }
-
+): Promise<ReconcileOutcome | null> {
   const cleaned = await withDeadline(
     task,
     deps.constants.providerOperationTimeoutMs,
@@ -889,7 +880,7 @@ async function reconcileDeleting(
   if (cleaned.isErr()) {
     await deps.store.recordOrbDeletionError(task, {
       orbId: orb.id,
-      message: `deletion cleanup: ${cleaned.error.message}`,
+      message: `resource cleanup: ${cleaned.error.message}`,
       now: task.wallNow(),
     });
     return retryable(cleaned.error.message);
@@ -899,13 +890,16 @@ async function reconcileDeleting(
   if (destroyed.isErr()) {
     await deps.store.recordOrbDeletionError(task, {
       orbId: orb.id,
-      message: `deletion cleanup: ${destroyed.error.message}`,
+      message: `resource cleanup: ${destroyed.error.message}`,
       now: task.wallNow(),
     });
     return retryable(destroyed.error.message);
   }
 
-  if (tombstone.value.lastError !== null || orb.lastError !== null) {
+  const intent = await deps.store.getOrbDeletion(task, orb.id);
+  if (intent.isErr()) return retryable(intent.error.message);
+  if (intent.value === null) return retryable(`${orb.state} orb has no cleanup intent`);
+  if (intent.value.lastError !== null || orb.lastError !== null) {
     const cleared = await deps.store.recordOrbDeletionError(task, {
       orbId: orb.id,
       message: null,
@@ -913,11 +907,24 @@ async function reconcileDeleting(
     });
     if (cleared.isErr()) return retryable(cleared.error.message);
   }
+  if (task.wallNow() < intent.value.cleanupAfter) return waiting("deletion_quarantine");
+  return null;
+}
 
-  if (task.wallNow() < tombstone.value.cleanupAfter) return waiting("deletion_quarantine");
-
-  // One final absence pass just completed. The transaction removes the
-  // replica, orb row, and tombstone together; GET becomes 404 only now.
+async function reconcileDeleting(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+): Promise<ReconcileOutcome> {
+  deps.control.markStopping(orb.id);
+  deps.control.closeBrowserConnections(orb.id);
+  const intent = await deps.store.getOrbDeletion(task, orb.id);
+  if (intent.isErr()) return retryable(intent.error.message);
+  if (intent.value === null || intent.value.kind !== "delete") {
+    return retryable("deleting orb has no deletion cleanup intent");
+  }
+  const disposal = await reconcileResourceDisposal(task, deps, orb);
+  if (disposal !== null) return disposal;
   const finalized = await deps.store.finalizeOrbDeletion(task, {
     orbId: orb.id,
     expectedStateVersion: orb.stateVersion,
@@ -930,6 +937,101 @@ async function reconcileDeleting(
   deps.control.clearOrb(orb.id);
   logOrbEvent(task, orb.id, "deleted", { outcome: "all_resources_removed" });
   return { type: "progressed" };
+}
+
+async function reconcileArchiving(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+): Promise<ReconcileOutcome> {
+  deps.control.markStopping(orb.id);
+  deps.control.closeBrowserConnections(orb.id);
+  const intent = await deps.store.getOrbDeletion(task, orb.id);
+  if (intent.isErr()) return retryable(intent.error.message);
+  if (intent.value === null || intent.value.kind !== "archive") {
+    return retryable("archiving orb has no archive cleanup intent");
+  }
+
+  if (intent.value.historySealedAt === null) {
+    if (!hasNeverBeenReady(orb)) {
+      if (orb.hostRef === null) {
+        const message = "archive cannot restore the authoritative runtime: no host reference";
+        await deps.store.recordOrbDeletionError(task, {
+          orbId: orb.id,
+          message,
+          now: task.wallNow(),
+        });
+        return retryable(message);
+      }
+      const observed = await observeHost(task, deps, orb.hostRef);
+      if (observed.isErr()) return retryable(observed.error.message);
+      if (observed.value === null) {
+        const message = "archive cannot restore the authoritative runtime: host is absent";
+        await deps.store.recordOrbDeletionError(task, {
+          orbId: orb.id,
+          message,
+          now: task.wallNow(),
+        });
+        return retryable(message);
+      }
+      if (observed.value.state === "stopped" || observed.value.state === "failed") {
+        const started = await startHost(task, deps, orb.id, orb.hostRef, "archive_history_seal");
+        return started.isErr() ? retryable(started.error.message) : { type: "progressed" };
+      }
+      if (observed.value.state !== "running" || observed.value.runtimeAddress === undefined) {
+        return waiting("readiness");
+      }
+      const pulled = await pollOrbUntilCaughtUp(task, deps, orb.id);
+      if (pulled.type === "retryable") return retryable(pulled.message);
+      if (pulled.type === "integrity") {
+        const message = `archive blocked by replication integrity: ${pulled.reason}`;
+        await deps.store.recordOrbDeletionError(task, {
+          orbId: orb.id,
+          message,
+          now: task.wallNow(),
+        });
+        return retryable(message);
+      }
+      if (pulled.type === "orb_gone") return { type: "conflict" };
+      if (deps.control.getLiveness(orb.id)?.activity === "busy") {
+        return waiting("drain_blocked");
+      }
+    }
+    const current = await deps.store.getOrb(task, orb.id);
+    if (current.isErr()) return retryable(current.error.message);
+    if (current.value === null || current.value.state !== "archiving") return { type: "conflict" };
+    const sealed = await deps.store.sealOrbArchive(task, {
+      orbId: orb.id,
+      expectedStateVersion: current.value.stateVersion,
+      now: task.wallNow(),
+      cursor: current.value.replicationCursor,
+      headId: current.value.replicatedHeadId,
+    });
+    if (sealed.isErr())
+      return sealed.error.type === "state_conflict"
+        ? { type: "conflict" }
+        : retryable(sealed.error.message);
+    logOrbEvent(task, orb.id, "archive-history-sealed", {
+      cursor: current.value.replicationCursor,
+      head: current.value.replicatedHeadId,
+    });
+    return { type: "progressed" };
+  }
+
+  const disposal = await reconcileResourceDisposal(task, deps, orb);
+  if (disposal !== null) return disposal;
+  const finalized = await deps.store.finalizeOrbArchive(task, {
+    orbId: orb.id,
+    expectedStateVersion: orb.stateVersion,
+    now: task.wallNow(),
+  });
+  if (finalized.isErr())
+    return finalized.error.type === "state_conflict"
+      ? { type: "conflict" }
+      : retryable(finalized.error.message);
+  deps.control.clearOrb(orb.id);
+  logOrbEvent(task, orb.id, "archived", { outcome: "transcript_retained_resources_removed" });
+  return { type: "transitioned", toState: "archived" };
 }
 
 // ---------------------------------------------------------------------------
@@ -977,6 +1079,10 @@ export async function reconcileOrbOnce(
     case "stopped":
     case "failed":
       return reconcileTerminalBackstop(task, deps, orb);
+    case "archived":
+      return { type: "noop" };
+    case "archiving":
+      return reconcileArchiving(task, deps, orb);
     case "deleting":
       return reconcileDeleting(task, deps, orb);
   }
@@ -1093,6 +1199,9 @@ export function requestOrbStart(
           return err(commandError("conflict", "orb is stopping; retry after it has stopped", true));
         case "deleting":
           return err(commandError("conflict", "orb is being permanently deleted", false));
+        case "archiving":
+        case "archived":
+          return err(commandError("conflict", "archived orbs cannot be started", false));
         case "stopped":
         case "failed": {
           const cas = await deps.store.casTransition(task, {
@@ -1121,7 +1230,47 @@ export function requestOrbStart(
   return new ResultAsync(run());
 }
 
-/** Idempotent for stopping/stopped; everything else enters stopping. */
+/** Irreversibly retain a read-only transcript while deleting runtime resources. */
+export function requestOrbArchive(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): ResultAsync<OrbRow, CommandError> {
+  const run = async (): Promise<Result<OrbRow, CommandError>> => {
+    for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
+      const orbResult = await deps.store.getOrb(task, orbId);
+      if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
+      const orb = orbResult.value;
+      if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
+      if (orb.state === "archiving" || orb.state === "archived") return ok(orb);
+      if (orb.state === "deleting") {
+        return err(commandError("conflict", "orb is being permanently deleted", false));
+      }
+      const now = task.wallNow();
+      const requested = await deps.store.requestOrbArchive(task, {
+        orbId,
+        expectedStateVersion: orb.stateVersion,
+        now,
+        cleanupAfter: now + deps.constants.deletionQuarantineMs,
+      });
+      if (requested.isOk()) {
+        deps.control.markStopping(orbId);
+        deps.control.closeBrowserConnections(orbId);
+        logOrbEvent(task, orbId, "transition", {
+          from: orb.state,
+          to: "archiving",
+          reason: "archive_requested",
+        });
+        return ok(requested.value);
+      }
+      if (requested.error.type === "state_conflict") continue;
+      return err(mapCasError(requested.error));
+    }
+    return err(commandError("conflict", "concurrent state changes; retry", true));
+  };
+  return new ResultAsync(run());
+}
+
 export function requestOrbDeletion(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -1173,6 +1322,9 @@ export function requestOrbStop(
       if (orb.state === "stopping" || orb.state === "stopped") return ok(orb);
       if (orb.state === "deleting") {
         return err(commandError("conflict", "orb is being permanently deleted", false));
+      }
+      if (orb.state === "archiving" || orb.state === "archived") {
+        return err(commandError("conflict", "archived orbs cannot be stopped or restarted", false));
       }
       const cas = await deps.store.casTransition(task, {
         orbId,

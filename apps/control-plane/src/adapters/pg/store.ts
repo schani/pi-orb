@@ -14,6 +14,7 @@ import type {
   CasUpdateFieldsParams,
   CommitPullBatchParams,
   ControlPlaneStore,
+  RequestOrbArchiveParams,
   RequestOrbDeletionParams,
 } from "../../domain/ports.ts";
 import type { PgRow, PostgreSQLClient } from "./client.ts";
@@ -49,6 +50,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     lastBusyAt: row["last_busy_at"] == null ? null : toMs(row["last_busy_at"]),
     stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
     stateChangedAt: toMs(row["state_changed_at"]),
+    archivedAt: row["archived_at"] == null ? null : toMs(row["archived_at"]),
     createdAt: toMs(row["created_at"]),
     updatedAt: toMs(row["updated_at"]),
   };
@@ -58,8 +60,12 @@ function mapDeletionRow(row: PgRow): OrbDeletionRow {
   return {
     orbId: String(row["orb_id"]),
     hostKind: String(row["host_kind"]),
+    kind: String(row["kind"]) as "archive" | "delete",
     requestedAt: toMs(row["requested_at"]),
     cleanupAfter: toMs(row["cleanup_after"]),
+    historySealedAt: row["history_sealed_at"] == null ? null : toMs(row["history_sealed_at"]),
+    sealedCursor: row["sealed_cursor"] == null ? null : String(row["sealed_cursor"]),
+    sealedHeadId: row["sealed_head_id"] == null ? null : String(row["sealed_head_id"]),
     lastError: row["last_error"] === null ? null : String(row["last_error"]),
     updatedAt: toMs(row["updated_at"]),
   };
@@ -183,7 +189,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .query(
         `UPDATE orbs SET name = $2, auto_name_lease_until = NULL,
            auto_name_next_attempt_at = NULL, updated_at = $3
-         WHERE id = $1 AND state <> 'deleting'
+         WHERE id = $1 AND state NOT IN ('deleting', 'archiving')
            ${params.onlyIfNull ? "AND name IS NULL" : ""} RETURNING *`,
         [params.orbId, params.name, new Date(params.now)],
       )
@@ -200,7 +206,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const claimed = await this.db.query(
         `UPDATE orbs SET auto_name_lease_until = $3,
            auto_name_attempts = auto_name_attempts + 1
-         WHERE id = $1 AND name IS NULL AND state <> 'deleting'
+         WHERE id = $1 AND name IS NULL AND state NOT IN ('deleting', 'archiving', 'archived')
            AND (auto_name_lease_until IS NULL OR auto_name_lease_until <= $2)
            AND (auto_name_next_attempt_at IS NULL OR auto_name_next_attempt_at <= $2)
          RETURNING id`,
@@ -232,10 +238,112 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     return this.db
       .query(
         `UPDATE orbs SET auto_name_lease_until = NULL, auto_name_next_attempt_at = $2,
-           updated_at = $3 WHERE id = $1 AND name IS NULL AND state <> 'deleting'`,
+           updated_at = $3 WHERE id = $1 AND name IS NULL
+             AND state NOT IN ('deleting', 'archiving', 'archived')`,
         [params.orbId, new Date(params.nextAttemptAt), new Date(params.now)],
       )
       .map(() => undefined);
+  }
+
+  requestOrbArchive(
+    _task: SimulationTask,
+    params: RequestOrbArchiveParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
+      const updated = await query(
+        `UPDATE orbs SET state = 'archiving', state_version = state_version + 1,
+           state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
+           auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
+         WHERE id = $1 AND state_version = $2 RETURNING *`,
+        [params.orbId, params.expectedStateVersion, new Date(params.now)],
+      );
+      if (updated.isErr()) return err(updated.error);
+      const row = updated.value.rows[0];
+      if (row === undefined) {
+        const current = await query("SELECT state FROM orbs WHERE id = $1", [params.orbId]);
+        if (current.isErr()) return err(current.error);
+        const state = current.value.rows[0]?.["state"];
+        return err(stateConflict(typeof state === "string" ? (state as OrbState) : undefined));
+      }
+      const intent = await query(
+        `INSERT INTO orb_deletions
+           (orb_id, host_kind, kind, requested_at, cleanup_after, last_error, updated_at)
+         VALUES ($1, $2, 'archive', $3, $4, NULL, $3)`,
+        [
+          params.orbId,
+          String(row["host_kind"]),
+          new Date(params.now),
+          new Date(params.cleanupAfter),
+        ],
+      );
+      if (intent.isErr()) return err(intent.error);
+      return ok(mapOrbRow(row));
+    });
+  }
+
+  sealOrbArchive(
+    _task: SimulationTask,
+    params: {
+      orbId: string;
+      expectedStateVersion: number;
+      now: number;
+      cursor: string | null;
+      headId: string | null;
+    },
+  ): ResultAsync<void, StoreError | StateConflict> {
+    return this.db.transaction<void, StoreError | StateConflict>(async (query) => {
+      const current = await query(
+        "SELECT state, state_version FROM orbs WHERE id = $1 FOR UPDATE",
+        [params.orbId],
+      );
+      if (current.isErr()) return err(current.error);
+      const row = current.value.rows[0];
+      if (
+        row?.["state"] !== "archiving" ||
+        Number(row["state_version"]) !== params.expectedStateVersion
+      ) {
+        return err(
+          stateConflict(
+            typeof row?.["state"] === "string" ? (row["state"] as OrbState) : undefined,
+          ),
+        );
+      }
+      const sealed = await query(
+        `UPDATE orb_deletions SET history_sealed_at = $2, sealed_cursor = $3,
+           sealed_head_id = $4, last_error = NULL, updated_at = $2
+         WHERE orb_id = $1 AND kind = 'archive'`,
+        [params.orbId, new Date(params.now), params.cursor, params.headId],
+      );
+      if (sealed.isErr()) return err(sealed.error);
+      if (sealed.value.rowCount !== 1) return err(stateConflict("archiving"));
+      return ok(undefined);
+    });
+  }
+
+  finalizeOrbArchive(
+    _task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
+      const updated = await query(
+        `UPDATE orbs SET state = 'archived', state_version = state_version + 1,
+           state_changed_at = $3, updated_at = $3, archived_at = $3,
+           host_ref = NULL, runtime_token_hash = NULL, last_busy_at = NULL,
+           stop_reason = NULL, last_error = NULL, auto_name_lease_until = NULL,
+           auto_name_next_attempt_at = NULL
+         WHERE id = $1 AND state = 'archiving' AND state_version = $2
+           AND EXISTS (SELECT 1 FROM orb_deletions d WHERE d.orb_id = $1
+             AND d.kind = 'archive' AND d.history_sealed_at IS NOT NULL)
+         RETURNING *`,
+        [params.orbId, params.expectedStateVersion, new Date(params.now)],
+      );
+      if (updated.isErr()) return err(updated.error);
+      const row = updated.value.rows[0];
+      if (row === undefined) return err(stateConflict());
+      const removed = await query("DELETE FROM orb_deletions WHERE orb_id = $1", [params.orbId]);
+      if (removed.isErr()) return err(removed.error);
+      return ok(mapOrbRow(row));
+    });
   }
 
   requestOrbDeletion(
@@ -259,9 +367,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       }
       const tombstone = await query(
         `INSERT INTO orb_deletions
-           (orb_id, host_kind, requested_at, cleanup_after, last_error, updated_at)
-         VALUES ($1, $2, $3, $4, NULL, $3)
-         ON CONFLICT (orb_id) DO NOTHING`,
+           (orb_id, host_kind, kind, requested_at, cleanup_after, last_error, updated_at)
+         VALUES ($1, $2, 'delete', $3, $4, NULL, $3)
+         ON CONFLICT (orb_id) DO UPDATE SET kind = 'delete', cleanup_after = EXCLUDED.cleanup_after,
+           history_sealed_at = NULL, sealed_cursor = NULL, sealed_head_id = NULL,
+           last_error = NULL, updated_at = EXCLUDED.updated_at`,
         [
           params.orbId,
           String(row["host_kind"]),
@@ -294,7 +404,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       );
       if (deletion.isErr()) return err(deletion.error);
       const orb = await query(
-        "UPDATE orbs SET last_error = $2, updated_at = $3 WHERE id = $1 AND state = 'deleting'",
+        "UPDATE orbs SET last_error = $2, updated_at = $3 WHERE id = $1 AND state IN ('deleting', 'archiving')",
         [params.orbId, params.message, new Date(params.now)],
       );
       if (orb.isErr()) return err(orb.error);

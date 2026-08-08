@@ -14,6 +14,7 @@ import type {
   CasUpdateFieldsParams,
   CommitPullBatchParams,
   ControlPlaneStore,
+  RequestOrbArchiveParams,
   RequestOrbDeletionParams,
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
@@ -168,7 +169,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<OrbRow | null, StoreError> {
     return this.access(task, FAILPOINTS.storeWrite, "set orb name", () => {
       const orb = this.orbs.get(params.orbId);
-      if (orb === undefined || orb.state === "deleting" || (params.onlyIfNull && orb.name !== null))
+      if (
+        orb === undefined ||
+        orb.state === "deleting" ||
+        orb.state === "archiving" ||
+        (params.onlyIfNull && orb.name !== null)
+      )
         return null;
       const updated = {
         ...orb,
@@ -188,7 +194,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<"claimed" | "already_named" | "in_progress" | "backoff", StoreError> {
     return this.access(task, FAILPOINTS.storeWrite, "claim orb auto name", () => {
       const orb = this.orbs.get(params.orbId);
-      if (orb === undefined || orb.name !== null || orb.state === "deleting") {
+      if (
+        orb === undefined ||
+        orb.name !== null ||
+        orb.state === "deleting" ||
+        orb.state === "archiving" ||
+        orb.state === "archived"
+      ) {
         return "already_named" as const;
       }
       if (orb.autoNameNextAttemptAt !== null && orb.autoNameNextAttemptAt > params.now)
@@ -210,7 +222,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<void, StoreError> {
     return this.access(task, FAILPOINTS.storeWrite, "fail orb auto name", () => {
       const orb = this.orbs.get(params.orbId);
-      if (orb !== undefined && orb.name === null && orb.state !== "deleting") {
+      if (
+        orb !== undefined &&
+        orb.name === null &&
+        orb.state !== "deleting" &&
+        orb.state !== "archiving" &&
+        orb.state !== "archived"
+      ) {
         this.orbs.set(params.orbId, {
           ...orb,
           autoNameLeaseUntil: null,
@@ -219,6 +237,132 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         });
       }
     });
+  }
+
+  requestOrbArchive(
+    task: SimulationTask,
+    params: RequestOrbArchiveParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.access(task, FAILPOINTS.storeWrite, "request orb archive", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
+        return { conflict: true as const, currentState: orb?.state };
+      }
+      const updated: OrbRow = {
+        ...orb,
+        state: "archiving",
+        stateVersion: orb.stateVersion + 1,
+        stateChangedAt: params.now,
+        updatedAt: params.now,
+        lastError: null,
+        stopReason: null,
+        autoNameLeaseUntil: null,
+        autoNameNextAttemptAt: null,
+      };
+      this.orbs.set(orb.id, updated);
+      this.deletions.set(orb.id, {
+        orbId: orb.id,
+        hostKind: orb.hostKind,
+        kind: "archive",
+        requestedAt: params.now,
+        cleanupAfter: params.cleanupAfter,
+        historySealedAt: null,
+        sealedCursor: null,
+        sealedHeadId: null,
+        lastError: null,
+        updatedAt: params.now,
+      });
+      return { conflict: false as const, row: updated };
+    }).andThen((outcome) =>
+      outcome.conflict
+        ? errAsync<OrbRow, StateConflict>({
+            type: "state_conflict",
+            ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
+          })
+        : okAsync(outcome.row),
+    );
+  }
+
+  sealOrbArchive(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      expectedStateVersion: number;
+      now: number;
+      cursor: string | null;
+      headId: string | null;
+    },
+  ): ResultAsync<void, StoreError | StateConflict> {
+    return this.access(task, FAILPOINTS.storeWrite, "seal orb archive", () => {
+      const orb = this.orbs.get(params.orbId);
+      const intent = this.deletions.get(params.orbId);
+      if (
+        orb?.state !== "archiving" ||
+        orb.stateVersion !== params.expectedStateVersion ||
+        intent?.kind !== "archive"
+      ) {
+        return { conflict: true as const, currentState: orb?.state };
+      }
+      this.deletions.set(params.orbId, {
+        ...intent,
+        historySealedAt: params.now,
+        sealedCursor: params.cursor,
+        sealedHeadId: params.headId,
+        lastError: null,
+        updatedAt: params.now,
+      });
+      return { conflict: false as const };
+    }).andThen((outcome) =>
+      outcome.conflict
+        ? errAsync<void, StateConflict>({
+            type: "state_conflict",
+            ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
+          })
+        : okAsync(undefined),
+    );
+  }
+
+  finalizeOrbArchive(
+    task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.access(task, FAILPOINTS.storeWrite, "finalize orb archive", () => {
+      const orb = this.orbs.get(params.orbId);
+      const intent = this.deletions.get(params.orbId);
+      if (
+        orb?.state !== "archiving" ||
+        orb.stateVersion !== params.expectedStateVersion ||
+        intent?.kind !== "archive" ||
+        intent.historySealedAt === null
+      ) {
+        return { conflict: true as const, currentState: orb?.state };
+      }
+      const updated: OrbRow = {
+        ...orb,
+        state: "archived",
+        stateVersion: orb.stateVersion + 1,
+        stateChangedAt: params.now,
+        updatedAt: params.now,
+        archivedAt: params.now,
+        hostRef: null,
+        runtimeTokenHash: null,
+        lastBusyAt: null,
+        stopReason: null,
+        lastError: null,
+        autoNameLeaseUntil: null,
+        autoNameNextAttemptAt: null,
+      };
+      this.orbs.set(params.orbId, updated);
+      this.deletions.delete(params.orbId);
+      return { conflict: false as const, row: updated };
+    }).andThen((outcome) =>
+      outcome.conflict
+        ? errAsync<OrbRow, StateConflict>({
+            type: "state_conflict",
+            ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
+          })
+        : okAsync(outcome.row),
+    );
   }
 
   requestOrbDeletion(
@@ -243,8 +387,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       this.deletions.set(orb.id, {
         orbId: orb.id,
         hostKind: orb.hostKind,
+        kind: "delete",
         requestedAt: params.now,
         cleanupAfter: params.cleanupAfter,
+        historySealedAt: null,
+        sealedCursor: null,
+        sealedHeadId: null,
         lastError: null,
         updatedAt: params.now,
       });
@@ -285,7 +433,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         });
       }
       const orb = this.orbs.get(params.orbId);
-      if (orb !== undefined && orb.state === "deleting") {
+      if (orb !== undefined && (orb.state === "deleting" || orb.state === "archiving")) {
         this.orbs.set(params.orbId, {
           ...orb,
           lastError: params.message,

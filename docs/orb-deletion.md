@@ -83,6 +83,10 @@ Add a migration that:
 
 Do not add soft-delete columns to history and do not retain a browsable transcript. Database backups and PITR may contain old rows until their configured retention expires; product copy and documentation must say so.
 
+## Sharing with archival
+
+`docs/orb-archival.md` extends this tombstone into a generalized cleanup intent and extracts a shared resource-disposal routine. Permanent deletion semantics do not change: it still skips history drain and purges database records. Archive adds a history-seal precondition and a retaining finalizer, while calling these exact Tailscale cleanup, host `destroy`, quarantine, and final-absence operations. Delete may upgrade an in-progress archive and remains available after archival.
+
 ## Verification
 
 Implemented coverage includes provider tests for Docker/GCE/process complete, repeated, and ownership-checked destruction; PostgreSQL/PGlite contract coverage for atomic tombstone creation and circular-FK-safe history/orb removal; DST coverage for full deletion, retryable destroy/store failures, command conflicts, quarantine, and control-plane restart recovery; protocol and UI type coverage; and the full-slice E2E, which proves the process/Docker host persistence and database history disappear and the API reaches final `404`. `npm run test:e2e` was run with the process backend on 2026-08-08 and passed the full slice (the Docker-only interrupted-turn suite was correctly skipped).

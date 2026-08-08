@@ -56,33 +56,49 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
             ...(orb.lastError !== null ? { message: orb.lastError } : {}),
           },
         }
-      : drain !== null
+      : orb.state === "archiving"
         ? {
             stateDetail: {
-              type: "draining_history" as const,
-              retrying: drain.retrying,
-              ...(drain.message !== undefined ? { message: drain.message } : {}),
+              type: "archiving_orb" as const,
+              phase:
+                control.getLiveness(orb.id)?.activity === "busy"
+                  ? ("waiting_for_idle" as const)
+                  : ("sealing_history" as const),
+              retrying: orb.lastError !== null,
+              ...(orb.lastError !== null ? { message: orb.lastError } : {}),
             },
           }
-        : bootProbe !== null
+        : drain !== null
           ? {
               stateDetail: {
-                type: "waiting_for_runtime" as const,
-                hostState: bootProbe.hostState,
-                secondsSinceHostRunning:
-                  bootProbe.hostRunningSinceWall === null
-                    ? null
-                    : Math.max(0, Math.round((Date.now() - bootProbe.hostRunningSinceWall) / 1000)),
-                probeAttempts: bootProbe.attempts,
-                ...(bootProbe.lastError !== undefined
-                  ? { lastProbeError: bootProbe.lastError }
-                  : {}),
+                type: "draining_history" as const,
+                retrying: drain.retrying,
+                ...(drain.message !== undefined ? { message: drain.message } : {}),
               },
             }
-          : {}),
+          : bootProbe !== null
+            ? {
+                stateDetail: {
+                  type: "waiting_for_runtime" as const,
+                  hostState: bootProbe.hostState,
+                  secondsSinceHostRunning:
+                    bootProbe.hostRunningSinceWall === null
+                      ? null
+                      : Math.max(
+                          0,
+                          Math.round((Date.now() - bootProbe.hostRunningSinceWall) / 1000),
+                        ),
+                  probeAttempts: bootProbe.attempts,
+                  ...(bootProbe.lastError !== undefined
+                    ? { lastProbeError: bootProbe.lastError }
+                    : {}),
+                },
+              }
+            : {}),
     ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),
     stateChangedAt: iso(orb.stateChangedAt),
-    ...(config.tailnetDnsName === undefined
+    ...(orb.archivedAt != null ? { archivedAt: iso(orb.archivedAt) } : {}),
+    ...(config.tailnetDnsName === undefined || orb.state === "archiving" || orb.state === "archived"
       ? {}
       : { previewHost: previewHost(orb.id, config.tailnetDnsName) }),
     ...(showChallenge

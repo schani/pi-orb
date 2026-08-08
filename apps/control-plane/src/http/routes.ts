@@ -11,6 +11,7 @@ import { Check } from "typebox/value";
 import {
   type CommandError,
   createOrb,
+  requestOrbArchive,
   requestOrbDeletion,
   requestOrbStart,
   requestOrbStop,
@@ -200,6 +201,12 @@ export function registerRoutes(
     const stopped = await requestOrbStop(task, deps, request.params.orbId);
     if (stopped.isErr()) return sendCommandError(reply, stopped.error);
     return reply.status(202).send(orbView(stopped.value, deps.control, config));
+  });
+
+  app.post<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/archive", async (request, reply) => {
+    const archived = await requestOrbArchive(task, deps, request.params.orbId);
+    if (archived.isErr()) return sendCommandError(reply, archived.error);
+    return reply.status(202).send(orbView(archived.value, deps.control, config));
   });
 
   app.delete<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId", async (request, reply) => {

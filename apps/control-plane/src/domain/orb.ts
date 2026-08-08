@@ -35,6 +35,7 @@ export interface OrbRow {
   /** Why the orb last entered `stopping`; null for explicit stops. */
   readonly stopReason: StopReason | null;
   readonly stateChangedAt: number;
+  readonly archivedAt?: number | null;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -42,8 +43,12 @@ export interface OrbRow {
 export interface OrbDeletionRow {
   readonly orbId: string;
   readonly hostKind: string;
+  readonly kind: "archive" | "delete";
   readonly requestedAt: number;
   readonly cleanupAfter: number;
+  readonly historySealedAt: number | null;
+  readonly sealedCursor: string | null;
+  readonly sealedHeadId: string | null;
   readonly lastError: string | null;
   readonly updatedAt: number;
 }

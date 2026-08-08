@@ -34,6 +34,8 @@ The database state is desired/reconciliation intent as well as user-visible stat
 
 **Deletion extension implemented 2026-08-08.** `docs/orb-deletion.md` adds terminal-intent state `deleting`. It closes live access, revokes runtime-broker authorization, skips the history drain because the replica will be erased, destroys provider storage/compute and Tailscale identity, then transactionally removes history and the orb row. A short-lived tombstone and deletion sweep fence stale provisions and make cleanup recoverable; the tombstone, history, and orb row are removed together only after final absence checks.
 
+**Archival extension implemented 2026-08-08.** `docs/orb-archival.md` adds `archiving` and terminal `archived`. Archival first restores a readable runtime when needed, waits for idle, and durably seals a pull-until-empty replica; it then reuses deletion's external cleanup, destroy, quarantine, and absence-check path, retaining the orb row and transcript. Archived orbs are permanently non-startable.
+
 | Database state | Reconciler behavior                                                                                                                                                                                                                          |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `creating`     | Ensure Codex auth, provision by orb ID, then wait for runtime ready.                                                                                                                                                                         |
@@ -43,6 +45,8 @@ The database state is desired/reconciliation intent as well as user-visible stat
 | `stopped`      | Perform no runtime work; reconcile any unexpectedly running host back to stopped.                                                                                                                                                            |
 | `failed`       | Preserve filesystem and error; wait for an explicit start request.                                                                                                                                                                           |
 | `deleting`     | Refuse all ordinary orb work; retry complete host, filesystem, Tailscale, and database cleanup as specified in `docs/orb-deletion.md`.                                                                                                        |
+| `archiving`    | Refuse live mutations, restore runtime if needed, seal complete replicated history, then run shared destructive resource cleanup (`docs/orb-archival.md`).                                                                                     |
+| `archived`     | Serve retained metadata/history read-only; never provision, start, or adopt a host.                                                                                                                                                             |
 
 Commands:
 
@@ -50,6 +54,7 @@ Commands:
 - start is idempotent for `creating`, `starting`, or `running`; from `stopped` or `failed` it clears `last_error`, enters `starting`, and wakes reconciliation;
 - stop is idempotent for `stopping` or `stopped`; from `creating`, `starting`, `running`, or `failed` it enters `stopping`;
 - delete is idempotent while `deleting`, may enter it from every other state, and makes start/stop/rename/history/live operations conflict;
+- archive is idempotent in `archiving`/`archived`, preserves history reads, and permanently conflicts with start; delete may upgrade an in-progress archive or remove an archived orb (`docs/orb-archival.md`);
 - start while `stopping` returns `409 conflict`; the caller retries after stopped;
 - runtime message requests are rejected once the database enters `stopping` because the control plane closes and refuses live proxy connections for that orb.
 

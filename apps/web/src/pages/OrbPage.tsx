@@ -14,6 +14,7 @@ import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
 import {
   type ApiError,
+  archiveOrb,
   deleteOrb,
   describeApiError,
   getOrb,
@@ -590,6 +591,23 @@ export function OrbPage({ orbId }: { orbId: string }) {
     }
   };
 
+  const archive = async () => {
+    if (
+      !window.confirm(
+        "Archive this orb? Its checkout, files, compute, and port access will be permanently deleted. Its conversation will remain readable, but the orb can never start again.",
+      )
+    )
+      return;
+    const result = await archiveOrb(orbId);
+    if (result.isOk()) {
+      setOrb(result.value);
+      setOrbError(null);
+      setRenaming(false);
+    } else {
+      setOrbError(result.error);
+    }
+  };
+
   const permanentlyDelete = async () => {
     if (
       !window.confirm(
@@ -669,7 +687,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
                 className="orb-rename-button"
                 aria-label="Rename orb"
                 title="Rename orb"
-                disabled={orb?.state === "deleting"}
+                disabled={orb?.state === "deleting" || orb?.state === "archiving"}
                 onClick={() => {
                   setRenameText(orb?.name ?? "");
                   setRenaming(true);
@@ -709,6 +727,18 @@ export function OrbPage({ orbId }: { orbId: string }) {
           </button>
           <button
             type="button"
+            onClick={() => void archive()}
+            disabled={
+              orb === null ||
+              orb.state === "deleting" ||
+              orb.state === "archiving" ||
+              orb.state === "archived"
+            }
+          >
+            {orb?.state === "archiving" ? "archiving…" : "archive"}
+          </button>
+          <button
+            type="button"
             className="danger"
             onClick={() => void permanentlyDelete()}
             disabled={orb?.state === "deleting"}
@@ -724,6 +754,22 @@ export function OrbPage({ orbId }: { orbId: string }) {
             Permanently deleting orb resources…
             {orb.stateDetail.retrying && " (retrying)"}
             {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+          </div>
+        )}
+        {orb?.stateDetail?.type === "archiving_orb" && (
+          <div className="banner banner-info">
+            {orb.stateDetail.phase === "waiting_for_idle"
+              ? "Archiving: waiting for the agent to become idle…"
+              : orb.stateDetail.phase === "sealing_history"
+                ? "Archiving: sealing complete history…"
+                : "Archiving: permanently removing runtime resources…"}
+            {orb.stateDetail.retrying && " (retrying)"}
+            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+          </div>
+        )}
+        {orb?.state === "archived" && (
+          <div className="banner banner-info">
+            Archived — this transcript is read-only and the orb can never be started again.
           </div>
         )}
         {orb?.stateDetail?.type === "draining_history" && (
@@ -789,25 +835,27 @@ export function OrbPage({ orbId }: { orbId: string }) {
           busy={state.activity === "busy"}
         />
 
-        <Composer
-          text={state.composerText}
-          mode={state.composerMode}
-          onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}
-          images={state.composerImages}
-          onImageAdd={addImage}
-          onImageRemove={(id) => dispatch({ type: "image_removed", id })}
-          canSend={canSend}
-          onSend={sendComposer}
-          canAbort={canAbort}
-          onAbort={sendAbort}
-          pending={state.pendingRequest !== null}
-          onShellAttachmentBlocked={() =>
-            dispatch({
-              type: "notice",
-              message: "Remove image attachments before running a shell command.",
-            })
-          }
-        />
+        {orb?.state !== "archived" && orb?.state !== "archiving" && (
+          <Composer
+            text={state.composerText}
+            mode={state.composerMode}
+            onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}
+            images={state.composerImages}
+            onImageAdd={addImage}
+            onImageRemove={(id) => dispatch({ type: "image_removed", id })}
+            canSend={canSend}
+            onSend={sendComposer}
+            canAbort={canAbort}
+            onAbort={sendAbort}
+            pending={state.pendingRequest !== null}
+            onShellAttachmentBlocked={() =>
+              dispatch({
+                type: "notice",
+                message: "Remove image attachments before running a shell command.",
+              })
+            }
+          />
+        )}
       </main>
     </>
   );

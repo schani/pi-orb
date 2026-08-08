@@ -76,7 +76,9 @@ export async function failOrbForIntegrity(
       orb === null ||
       orb.state === "failed" ||
       orb.state === "stopped" ||
-      orb.state === "deleting"
+      orb.state === "deleting" ||
+      orb.state === "archiving" ||
+      orb.state === "archived"
     )
       return;
     const cas = await deps.store.casTransition(task, {
@@ -172,7 +174,10 @@ export async function pollOrbUntilCaughtUp(
     const orbResult = await deps.store.getOrb(task, orbId);
     if (orbResult.isErr()) return { type: "retryable", message: orbResult.error.message };
     const orb = orbResult.value;
-    if (orb === null || (orb.state !== "running" && orb.state !== "stopping")) {
+    if (
+      orb === null ||
+      (orb.state !== "running" && orb.state !== "stopping" && orb.state !== "archiving")
+    ) {
       return { type: "orb_gone" };
     }
     const hostRef = orb.hostRef;

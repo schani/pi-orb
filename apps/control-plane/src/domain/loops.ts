@@ -15,9 +15,12 @@ const RECONCILABLE_STATES: readonly OrbState[] = [
   "stopped",
   "failed",
   "deleting",
+  "archiving",
+  "archived",
 ];
 
-const isTerminal = (state: OrbState): boolean => state === "stopped" || state === "failed";
+const isTerminal = (state: OrbState): boolean =>
+  state === "stopped" || state === "failed" || state === "archived";
 
 /** One sweep: pull every due running orb until caught up. */
 export async function pollAllOnce(task: SimulationTask, deps: ControlPlaneDeps): Promise<void> {
@@ -176,11 +179,28 @@ export async function orphanSweepOnce(task: SimulationTask, deps: ControlPlaneDe
     logEvent(task, "orphan-sweep-recovered");
   }
   for (const observation of listed.value) {
-    if (observation.state === "stopped" || observation.state === "stopping") continue;
+    if (observation.state === "stopping") continue;
     const orbResult = await deps.store.getOrb(task, observation.orbId);
     if (orbResult.isErr()) continue; // Store outage: the next sweep retries.
     const orb = orbResult.value;
     const host = `${observation.ref.provider}/${observation.ref.resourceId}`;
+    if (orb?.state === "archived") {
+      logOrbEvent(task, orb.id, "archived-host-resurrected", { host, decision: "destroy" });
+      const destroyed = await withDeadline(
+        task,
+        deps.constants.providerOperationTimeoutMs,
+        "destroy resurrected archived host",
+        (context) => deps.hostProvider.destroy(task, orb.id, context),
+      );
+      if (destroyed.isErr()) {
+        logOrbEvent(task, orb.id, "archived-host-destroy-failed", {
+          host,
+          error: destroyed.error.message,
+        });
+      }
+      continue;
+    }
+    if (observation.state === "stopped") continue;
     // An orphan is an integrity signal (docs/lifecycle.md): logged loudly, and
     // logged again on every sweep for as long as the host survives the stop.
     if (orb === null) {

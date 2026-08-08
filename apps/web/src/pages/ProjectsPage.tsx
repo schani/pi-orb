@@ -2,6 +2,7 @@ import { type OrbView, type ProjectView, validateRepositoryUrl } from "@pi-orb/p
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import {
   type ApiError,
+  archiveOrb,
   createOrb,
   createProject,
   deleteOrb,
@@ -28,6 +29,7 @@ export function ProjectsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [creatingOrbFor, setCreatingOrbFor] = useState<string | null>(null);
   const [deletingOrb, setDeletingOrb] = useState<string | null>(null);
+  const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
   const [orbCreateError, setOrbCreateError] = useState<{
     projectId: string;
     message: string;
@@ -71,7 +73,9 @@ export function ProjectsPage() {
   // until finalization removes it instead of requiring a manual page reload.
   useEffect(() => {
     const deletionInProgress = Object.values(orbLists).some(
-      (list) => list?.type === "loaded" && list.items.some((orb) => orb.state === "deleting"),
+      (list) =>
+        list?.type === "loaded" &&
+        list.items.some((orb) => orb.state === "deleting" || orb.state === "archiving"),
     );
     if (!deletionInProgress) return;
     const timer = window.setInterval(() => void refresh(), 2_000);
@@ -107,6 +111,23 @@ export function ProjectsPage() {
     setName("");
     setRepositoryUrl("");
     refresh();
+  };
+
+  const onArchiveOrb = async (orb: OrbView) => {
+    if (
+      !window.confirm(
+        `Archive ${orb.name ?? "this orb"}? Its checkout, files, compute, and port access will be permanently deleted. Its conversation will remain readable, but the orb can never start again.`,
+      )
+    )
+      return;
+    setArchivingOrb(orb.id);
+    const result = await archiveOrb(orb.id);
+    setArchivingOrb(null);
+    if (result.isErr()) {
+      setOrbCreateError({ projectId: orb.projectId, message: describeApiError(result.error) });
+      return;
+    }
+    await refresh();
   };
 
   const onDeleteOrb = async (orb: OrbView) => {
@@ -199,6 +220,20 @@ export function ProjectsPage() {
                       <span className="muted mono"> · {orb.id.slice(0, 8)}</span>
                     </a>
                     <span className={`state-badge state-${orb.state}`}>{orb.state}</span>
+                    <button
+                      type="button"
+                      disabled={
+                        orb.state === "deleting" ||
+                        orb.state === "archiving" ||
+                        orb.state === "archived" ||
+                        archivingOrb === orb.id
+                      }
+                      onClick={() => void onArchiveOrb(orb)}
+                    >
+                      {orb.state === "archiving" || archivingOrb === orb.id
+                        ? "archiving…"
+                        : "archive"}
+                    </button>
                     <button
                       type="button"
                       className="danger"

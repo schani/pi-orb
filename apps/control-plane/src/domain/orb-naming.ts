@@ -67,7 +67,11 @@ export function setOrbName(
         retryable: false,
       });
     }
-    if (current.value.state === "deleting") {
+    if (
+      current.value.state === "deleting" ||
+      current.value.state === "archiving" ||
+      current.value.state === "archived"
+    ) {
       return err({
         type: "orb_naming_error",
         code: "conflict",
@@ -118,7 +122,11 @@ export function generateOrbName(
         retryable: false,
       });
     }
-    if (orb.value.state === "deleting") {
+    if (
+      orb.value.state === "deleting" ||
+      orb.value.state === "archiving" ||
+      orb.value.state === "archived"
+    ) {
       return err({
         type: "orb_naming_error",
         code: "conflict",

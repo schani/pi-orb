@@ -57,6 +57,13 @@ export interface RequestOrbDeletionParams {
   readonly cleanupAfter: number;
 }
 
+export interface RequestOrbArchiveParams {
+  readonly orbId: string;
+  readonly expectedStateVersion: number;
+  readonly now: number;
+  readonly cleanupAfter: number;
+}
+
 export interface CommitPullBatchParams {
   readonly orbId: string;
   /** Cursor read before the pull; commit only if it is still current. */
@@ -103,7 +110,27 @@ export interface ControlPlaneStore {
     params: { orbId: string; now: number; nextAttemptAt: number },
   ): ResultAsync<void, StoreError>;
 
-  /** Atomically enter deleting and create its durable cleanup tombstone. */
+  /** Atomically enter archiving and create its durable cleanup intent. */
+  requestOrbArchive(
+    task: SimulationTask,
+    params: RequestOrbArchiveParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+  sealOrbArchive(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      expectedStateVersion: number;
+      now: number;
+      cursor: string | null;
+      headId: string | null;
+    },
+  ): ResultAsync<void, StoreError | StateConflict>;
+  finalizeOrbArchive(
+    task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+
+  /** Atomically enter deleting and create or upgrade its durable cleanup intent. */
   requestOrbDeletion(
     task: SimulationTask,
     params: RequestOrbDeletionParams,
