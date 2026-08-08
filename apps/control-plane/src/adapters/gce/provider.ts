@@ -292,7 +292,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
 
   private request(
     operation: OrbHostProviderError["operation"],
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "DELETE",
     path: string,
     context: OperationContext,
     body?: Record<string, unknown>,
@@ -931,6 +931,123 @@ export class GceOrbHostProvider implements OrbHostProvider {
         );
       }
       return this.waitOperation(task, "stop", String(stopped.value.body["name"] ?? ""), context);
+    };
+    return new ResultAsync(run());
+  }
+
+  destroy(
+    task: SimulationTask,
+    orbId: string,
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError> {
+    const run = async (): Promise<Result<void, OrbHostProviderError>> => {
+      const name = instanceName(orbId);
+      const gotInstance = await this.request(
+        "destroy",
+        "GET",
+        this.zonePath(`instances/${name}`),
+        context,
+      );
+      if (gotInstance.isErr()) return err(gotInstance.error);
+      if (gotInstance.value.status !== 404) {
+        if (gotInstance.value.status !== 200) {
+          return err(
+            providerError(
+              "destroy",
+              "unavailable",
+              `instance get HTTP ${gotInstance.value.status}`,
+              true,
+            ),
+          );
+        }
+        const labels = (gotInstance.value.body["labels"] ?? {}) as Record<string, unknown>;
+        if (labels[ORB_LABEL] !== orbId) {
+          return err(
+            providerError(
+              "destroy",
+              "conflict",
+              `instance ${name} is not labeled for orb ${orbId}`,
+              false,
+            ),
+          );
+        }
+        const instance = await this.request(
+          "destroy",
+          "DELETE",
+          this.zonePath(`instances/${name}`),
+          context,
+        );
+        if (instance.isErr()) return err(instance.error);
+        if (instance.value.status !== 404) {
+          if (instance.value.status !== 200) {
+            return err(
+              providerError(
+                "destroy",
+                "operation_failed",
+                `instance delete HTTP ${instance.value.status}`,
+                true,
+              ),
+            );
+          }
+          const waited = await this.waitOperation(
+            task,
+            "destroy",
+            String(instance.value.body["name"] ?? ""),
+            context,
+          );
+          if (waited.isErr()) return err(waited.error);
+        }
+      }
+
+      const dataDiskName = diskName(orbId);
+      const gotDisk = await this.request(
+        "destroy",
+        "GET",
+        this.zonePath(`disks/${dataDiskName}`),
+        context,
+      );
+      if (gotDisk.isErr()) return err(gotDisk.error);
+      if (gotDisk.value.status === 404) return ok(undefined);
+      if (gotDisk.value.status !== 200) {
+        return err(
+          providerError(
+            "destroy",
+            "unavailable",
+            `data disk get HTTP ${gotDisk.value.status}`,
+            true,
+          ),
+        );
+      }
+      const diskLabels = (gotDisk.value.body["labels"] ?? {}) as Record<string, unknown>;
+      if (diskLabels[ORB_LABEL] !== orbId) {
+        return err(
+          providerError(
+            "destroy",
+            "conflict",
+            `data disk ${dataDiskName} is not labeled for orb ${orbId}`,
+            false,
+          ),
+        );
+      }
+      const disk = await this.request(
+        "destroy",
+        "DELETE",
+        this.zonePath(`disks/${dataDiskName}`),
+        context,
+      );
+      if (disk.isErr()) return err(disk.error);
+      if (disk.value.status === 404) return ok(undefined);
+      if (disk.value.status !== 200) {
+        return err(
+          providerError(
+            "destroy",
+            "operation_failed",
+            `data disk delete HTTP ${disk.value.status}`,
+            true,
+          ),
+        );
+      }
+      return this.waitOperation(task, "destroy", String(disk.value.body["name"] ?? ""), context);
     };
     return new ResultAsync(run());
   }

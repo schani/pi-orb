@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
@@ -394,6 +395,35 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         if (written.isErr()) return err(written.error);
         await this.terminate(ref.resourceId);
         return ok(undefined);
+      }),
+    );
+  }
+
+  destroy(
+    _task: SimulationTask,
+    orbId: string,
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError> {
+    return new ResultAsync(
+      this.withLock(orbId, async () => {
+        if (context.signal.aborted)
+          return err(hostError("destroy", "cancelled", "destroy cancelled", true));
+        const found = this.readMetadata("destroy", orbId);
+        if (found.isErr()) return err(found.error);
+        if (found.value !== null) {
+          const written = this.writeMetadata("destroy", {
+            ...found.value,
+            desiredState: "stopped",
+          });
+          if (written.isErr()) return err(written.error);
+        }
+        await this.terminate(orbId);
+        try {
+          rmSync(this.hostDirectory(orbId), { recursive: true, force: true });
+          return ok(undefined);
+        } catch (error) {
+          return err(hostError("destroy", "unavailable", String(error), true));
+        }
       }),
     );
   }

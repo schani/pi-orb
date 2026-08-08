@@ -54,6 +54,7 @@ describe("live proxy", () => {
       provision: (task, request, context) => delegate.provision(task, request, context),
       start: (task, ref, context) => delegate.start(task, ref, context),
       stop: (task, ref, context) => delegate.stop(task, ref, context),
+      destroy: (task, id, context) => delegate.destroy(task, id, context),
       listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
       observe: (_task, ref) => {
         markObserveStarted();
@@ -119,6 +120,7 @@ describe("live proxy", () => {
       provision: (task, request, context) => delegate.provision(task, request, context),
       start: (task, ref, context) => delegate.start(task, ref, context),
       stop: (task, ref, context) => delegate.stop(task, ref, context),
+      destroy: (task, id, context) => delegate.destroy(task, id, context),
       listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
       observe: (_task, ref) =>
         ResultAsync.fromSafePromise(Promise.resolve()).map(() => ({

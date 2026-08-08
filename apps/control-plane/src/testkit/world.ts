@@ -452,7 +452,15 @@ export class FakeWorld {
 
   /** Count of hosts that exist (any state) for invariant checks. */
   hostCount(orbId: string): number {
-    return this.orbState(orbId).host === null ? 0 : 1;
+    return this.orbs.get(orbId)?.host === null || !this.orbs.has(orbId) ? 0 : 1;
+  }
+
+  filesystemExists(orbId: string): boolean {
+    return this.orbs.has(orbId);
+  }
+
+  destroyOrb(orbId: string): void {
+    this.orbs.delete(orbId);
   }
 
   // -- internal transitions used by the provider ----------------------------
@@ -949,6 +957,16 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     return this.op(task, "stop", FAILPOINTS.providerStop, context, () => this.world.stopHost(ref));
+  }
+
+  destroy(
+    task: SimulationTask,
+    orbId: string,
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError> {
+    return this.op(task, "destroy", FAILPOINTS.providerDestroy, context, () =>
+      this.world.destroyOrb(orbId),
+    );
   }
 
   observe(

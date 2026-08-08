@@ -430,6 +430,76 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     return new ResultAsync(run());
   }
 
+  destroy(
+    _task: SimulationTask,
+    orbId: string,
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError> {
+    const run = async (): Promise<Result<void, OrbHostProviderError>> => {
+      const name = containerName(orbId);
+      const existing = await this.inspect("destroy", name, context);
+      if (existing.isErr()) return err(existing.error);
+      if (existing.value !== null) {
+        const labels = ((existing.value["Config"] as Record<string, unknown> | undefined)?.[
+          "Labels"
+        ] ?? {}) as Record<string, unknown>;
+        if (labels[ORB_LABEL] !== orbId) {
+          return err(
+            providerError(
+              "destroy",
+              "conflict",
+              `container ${name} is not labeled for orb ${orbId}`,
+              false,
+            ),
+          );
+        }
+        const removed = await this.exec("destroy", ["rm", "--force", name], context);
+        if (removed.isErr() && !/no such (object|container)/i.test(removed.error.message)) {
+          return err(removed.error);
+        }
+      }
+
+      const volumeNameForOrb = volumeName(orbId);
+      const inspectedVolume = await this.exec(
+        "destroy",
+        ["volume", "inspect", volumeNameForOrb],
+        context,
+      );
+      if (inspectedVolume.isErr()) {
+        if (/no such volume/i.test(inspectedVolume.error.message)) return ok(undefined);
+        return err(inspectedVolume.error);
+      }
+      const parsed = Result.fromThrowable(
+        () => JSON.parse(inspectedVolume.value.stdout) as unknown,
+        () => providerError("destroy", "operation_failed", "unparseable volume inspect", false),
+      )();
+      if (parsed.isErr()) return err(parsed.error);
+      const first = Array.isArray(parsed.value) ? parsed.value[0] : undefined;
+      const labels =
+        typeof first === "object" && first !== null
+          ? (((first as Record<string, unknown>)["Labels"] ?? {}) as Record<string, unknown>)
+          : {};
+      if (labels[ORB_LABEL] !== orbId) {
+        return err(
+          providerError(
+            "destroy",
+            "conflict",
+            `volume ${volumeNameForOrb} is not labeled for orb ${orbId}`,
+            false,
+          ),
+        );
+      }
+      const volume = await this.exec(
+        "destroy",
+        ["volume", "rm", "--force", volumeNameForOrb],
+        context,
+      );
+      if (volume.isErr() && !/no such volume/i.test(volume.error.message)) return err(volume.error);
+      return ok(undefined);
+    };
+    return new ResultAsync(run());
+  }
+
   observe(
     _task: SimulationTask,
     ref: OrbHostRef,

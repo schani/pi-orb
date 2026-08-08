@@ -11,6 +11,7 @@ import { Check } from "typebox/value";
 import {
   type CommandError,
   createOrb,
+  requestOrbDeletion,
   requestOrbStart,
   requestOrbStop,
 } from "../domain/lifecycle.ts";
@@ -169,15 +170,19 @@ export function registerRoutes(
       const status =
         updated.error.code === "not_found"
           ? 404
-          : updated.error.code === "invalid_name"
-            ? 400
-            : 503;
+          : updated.error.code === "conflict"
+            ? 409
+            : updated.error.code === "invalid_name"
+              ? 400
+              : 503;
       const code =
         updated.error.code === "not_found"
           ? "not_found"
-          : updated.error.code === "invalid_name"
-            ? "invalid_request"
-            : "unavailable";
+          : updated.error.code === "conflict"
+            ? "conflict"
+            : updated.error.code === "invalid_name"
+              ? "invalid_request"
+              : "unavailable";
       return reply
         .status(status)
         .send(httpError(code, updated.error.message, updated.error.retryable));
@@ -197,6 +202,12 @@ export function registerRoutes(
     return reply.status(202).send(orbView(stopped.value, deps.control, config));
   });
 
+  app.delete<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId", async (request, reply) => {
+    const deleted = await requestOrbDeletion(task, deps, request.params.orbId);
+    if (deleted.isErr()) return sendCommandError(reply, deleted.error);
+    return reply.status(202).send(orbView(deleted.value, deps.control, config));
+  });
+
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/history", async (request, reply) => {
     const orb = await deps.store.getOrb(task, request.params.orbId);
     if (orb.isErr()) {
@@ -204,6 +215,11 @@ export function registerRoutes(
     }
     if (orb.value === null) {
       return reply.status(404).send(httpError("not_found", "orb not found", false));
+    }
+    if (orb.value.state === "deleting") {
+      return reply
+        .status(409)
+        .send(httpError("conflict", "orb is being permanently deleted", false));
     }
     const snapshot = await deps.store.readHistorySnapshot(task, request.params.orbId);
     if (snapshot.isErr()) {

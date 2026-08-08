@@ -51,12 +51,13 @@ GET  /api/v1/orbs/:orbId
 PATCH /api/v1/orbs/:orbId
 POST /api/v1/orbs/:orbId/start
 POST /api/v1/orbs/:orbId/stop
+DELETE /api/v1/orbs/:orbId
 
 GET  /api/v1/orbs/:orbId/history
 WS   /api/v1/orbs/:orbId/live
 ```
 
-There are no project update/delete, orb delete, credential, model-selection, admin, or generic host-operation endpoints in the first slice. The one orb update is the narrow naming endpoint described below. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
+There are no project update/delete, credential, model-selection, admin, or generic host-operation endpoints in the first slice. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
 
 The browser generates project and orb UUIDs with `crypto.randomUUID()` and includes them in create requests:
 
@@ -91,7 +92,7 @@ interface OrbView {
   id: string;
   projectId: string;
   name: string | null;
-  state: "creating" | "starting" | "running" | "stopping" | "stopped" | "failed";
+  state: "creating" | "starting" | "running" | "stopping" | "stopped" | "failed" | "deleting";
   stateVersion: number;
   checkoutCommit?: string;
   lastError?: string;
@@ -147,9 +148,10 @@ Status behavior:
 - before creating/starting the host, the backend resolves and refreshes Codex OAuth; if user interaction is required, the orb remains in `creating`/`starting` and the response returns the device-login challenge in `actionRequired`;
 - the browser polls only the normal orb resource, not an auth resource; when login succeeds the backend resumes lifecycle work automatically;
 - lifecycle endpoints are idempotent when already moving toward or in the requested state;
+- delete returns `202` with `state: "deleting"`, conflicts with every other orb mutation once accepted, and eventually makes the orb and history endpoints return `404` (`docs/orb-deletion.md`);
 - lifecycle work is asynchronous and recoverable from `orbs.state`; the browser polls `GET /api/v1/orbs/:orbId`;
 - while an orb is `stopping`, the orb resource includes `stateDetail` so the requester sees drain progress and retryable blockers instead of an unexplained wait;
-- a process restart finds `creating`, `starting`, and `stopping` rows and resumes reconciliation, including restarting a required OAuth flow, so no job table is needed;
+- a process restart finds `creating`, `starting`, `stopping`, and `deleting` rows and resumes reconciliation, including restarting a required OAuth flow or destructive cleanup, so no transient job is authoritative;
 - history is returned as one complete database snapshot without pagination in the first slice;
 - the live upgrade is accepted only for a running orb; otherwise it fails with `409`/`1013` as appropriate.
 

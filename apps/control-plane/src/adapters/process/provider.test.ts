@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NoSimulationTask } from "determined";
@@ -94,6 +94,24 @@ describe("ProcessOrbHostProvider", () => {
     expect(observed.isOk() && observed.value?.runtimeAddress?.baseUrl).toBe(
       `http://127.0.0.1:${values.port}`,
     );
+    rmSync(observedEnv, { force: true });
+  });
+
+  it("terminates the runtime and removes its complete state directory", async () => {
+    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+    const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
+    const provisioned = await provider.provision(task, request, context);
+    expect(provisioned.isOk()).toBe(true);
+    if (provisioned.isErr()) return;
+    await eventually(() => (existsSync(observedEnv) ? true : null));
+    const hostDirectory = join(root, "configured-state", request.orbId);
+    expect(existsSync(hostDirectory)).toBe(true);
+
+    expect((await provider.destroy(task, request.orbId, context)).isOk()).toBe(true);
+    expect(existsSync(hostDirectory)).toBe(false);
+    const observed = await provider.observe(task, provisioned.value.ref, context);
+    expect(observed.isOk() && observed.value).toBeNull();
+    expect((await provider.destroy(task, request.orbId, context)).isOk()).toBe(true);
     rmSync(observedEnv, { force: true });
   });
 

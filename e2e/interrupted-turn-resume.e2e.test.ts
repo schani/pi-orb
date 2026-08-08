@@ -41,6 +41,7 @@ const CP_PORT = 7145;
 const NETWORK = "pi-orb";
 const RUNTIME_IMAGE = "pi-orb-runtime:dev";
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
+const PROCESS_BACKEND = process.env["PI_ORB_E2E_BACKEND"] === "process";
 
 /** Marker text of the resume record the runtime appends (turn-resume.ts). */
 const RESUME_CUSTOM_TYPE = "pi-orb.turn-resume";
@@ -143,6 +144,7 @@ let controlPlane: ControlPlaneHandle;
 let orbId = "";
 
 beforeAll(async () => {
+  if (PROCESS_BACKEND) return;
   fake = await createFakeSession(`pi-orb-e2e-resume-${Date.now()}`, SCENARIO);
   nameFake = await createFakeSession(`pi-orb-name-e2e-resume-${Date.now()}`, NAME_SCENARIO);
 
@@ -190,6 +192,7 @@ beforeAll(async () => {
 }, 720_000);
 
 afterAll(async () => {
+  if (PROCESS_BACKEND) return;
   if (orbId !== "") {
     await docker(["rm", "-f", `pi-orb-${orbId}`]).catch(() => undefined);
     await docker(["volume", "rm", "-f", `pi-orb-data-${orbId}`]).catch(() => undefined);
@@ -201,33 +204,40 @@ afterAll(async () => {
 }, 120_000);
 
 describe("interrupted-turn resume E2E", () => {
-  it("resumes a turn a docker kill interrupted mid-tool-call", async () => {
-    try {
-      await runScenario();
-    } catch (error) {
-      console.error("=== control-plane logs (tail) ===");
-      console.error(controlPlane.logs.join("").split("\n").slice(-60).join("\n"));
-      if (orbId !== "") {
-        const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${orbId}`).catch(
-          () => null,
-        );
-        console.error("=== orb view ===", JSON.stringify(view?.body));
-        const history = await api(
-          controlPlane.baseUrl,
-          "GET",
-          `/api/v1/orbs/${orbId}/history`,
-        ).catch(() => null);
-        console.error("=== replicated history ===", JSON.stringify(history?.body).slice(0, 20_000));
-        const logs = await docker(["logs", "--tail", "80", `pi-orb-${orbId}`]).catch(
-          (e: unknown) => `unavailable: ${String(e)}`,
-        );
-        console.error("=== orb container logs ===\n", logs);
-        const requests = await fakeControl(fake.sessionKey, "/requests").catch(() => null);
-        console.error("=== fake requests ===", JSON.stringify(requests).slice(0, 20_000));
+  it.skipIf(PROCESS_BACKEND)(
+    "resumes a turn a docker kill interrupted mid-tool-call",
+    async () => {
+      try {
+        await runScenario();
+      } catch (error) {
+        console.error("=== control-plane logs (tail) ===");
+        console.error(controlPlane.logs.join("").split("\n").slice(-60).join("\n"));
+        if (orbId !== "") {
+          const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${orbId}`).catch(
+            () => null,
+          );
+          console.error("=== orb view ===", JSON.stringify(view?.body));
+          const history = await api(
+            controlPlane.baseUrl,
+            "GET",
+            `/api/v1/orbs/${orbId}/history`,
+          ).catch(() => null);
+          console.error(
+            "=== replicated history ===",
+            JSON.stringify(history?.body).slice(0, 20_000),
+          );
+          const logs = await docker(["logs", "--tail", "80", `pi-orb-${orbId}`]).catch(
+            (e: unknown) => `unavailable: ${String(e)}`,
+          );
+          console.error("=== orb container logs ===\n", logs);
+          const requests = await fakeControl(fake.sessionKey, "/requests").catch(() => null);
+          console.error("=== fake requests ===", JSON.stringify(requests).slice(0, 20_000));
+        }
+        throw error;
       }
-      throw error;
-    }
-  }, 720_000);
+    },
+    720_000,
+  );
 
   async function runScenario(): Promise<void> {
     const base = controlPlane.baseUrl;

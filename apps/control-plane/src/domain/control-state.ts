@@ -112,17 +112,32 @@ export class ControlState {
 
   /** orbId → connectionId → tab visible. */
   private readonly browserVisibility = new Map<string, Map<string, boolean>>();
+  private readonly browserClosers = new Map<string, Map<string, () => void>>();
   /** Wall ms when the orb last had a visible tab; lost on process restart. */
   private readonly lastVisibleAt = new Map<string, number>();
 
   /** A connection counts as hidden until it affirmatively reports visible. */
-  registerBrowserConnection(orbId: string, connectionId: string): void {
+  registerBrowserConnection(orbId: string, connectionId: string, close?: () => void): void {
     let connections = this.browserVisibility.get(orbId);
     if (connections === undefined) {
       connections = new Map();
       this.browserVisibility.set(orbId, connections);
     }
     connections.set(connectionId, false);
+    if (close !== undefined) {
+      let closers = this.browserClosers.get(orbId);
+      if (closers === undefined) {
+        closers = new Map();
+        this.browserClosers.set(orbId, closers);
+      }
+      closers.set(connectionId, close);
+    }
+  }
+
+  closeBrowserConnections(orbId: string): void {
+    const closers = this.browserClosers.get(orbId);
+    if (closers === undefined) return;
+    for (const close of closers.values()) close();
   }
 
   setBrowserVisibility(orbId: string, connectionId: string, visible: boolean, at: number): void {
@@ -141,6 +156,9 @@ export class ControlState {
     if (connections === undefined) return;
     if (connections.get(connectionId) === true) this.lastVisibleAt.set(orbId, at);
     connections.delete(connectionId);
+    const closers = this.browserClosers.get(orbId);
+    closers?.delete(connectionId);
+    if (closers?.size === 0) this.browserClosers.delete(orbId);
     if (connections.size === 0) this.browserVisibility.delete(orbId);
   }
 
@@ -330,6 +348,7 @@ export class ControlState {
     this.stoppingOrbs.delete(orbId);
     this.restartPending.delete(orbId);
     this.browserVisibility.delete(orbId);
+    this.browserClosers.delete(orbId);
     this.lastVisibleAt.delete(orbId);
   }
 }

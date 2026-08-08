@@ -252,6 +252,45 @@ describe("DockerOrbHostProvider", () => {
   });
 });
 
+describe("DockerOrbHostProvider deletion", () => {
+  beforeEach(() => dockerFake.reset());
+
+  it("force-removes the container before its persistent volume and is idempotent", async () => {
+    dockerFake.install((args) => {
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([{ Config: { Labels: { "pi-orb.orb-id": "orb-1" } } }]),
+        };
+      }
+      if (args[0] === "volume" && args[1] === "inspect") {
+        return { stdout: JSON.stringify([{ Labels: { "pi-orb.orb-id": "orb-1" } }]) };
+      }
+      if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) {
+        return { stdout: "" };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().destroy(task, "orb-1", context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(dockerFake.calls).toEqual([
+      ["inspect", "--type", "container", "pi-orb-orb-1"],
+      ["rm", "--force", "pi-orb-orb-1"],
+      ["volume", "inspect", "pi-orb-data-orb-1"],
+      ["volume", "rm", "--force", "pi-orb-data-orb-1"],
+    ]);
+  });
+  it("refuses to delete a deterministic-name container without the orb label", async () => {
+    dockerFake.install((args) =>
+      args[0] === "inspect"
+        ? { stdout: JSON.stringify([{ Config: { Labels: {} } }]) }
+        : { error: `unexpected docker ${args.join(" ")}` },
+    );
+    const result = await makeProvider().destroy(task, "orb-1", context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(dockerFake.calls).toHaveLength(1);
+  });
+});
+
 describe("DockerOrbHostProvider tailscale env", () => {
   beforeEach(() => {
     dockerFake.reset();

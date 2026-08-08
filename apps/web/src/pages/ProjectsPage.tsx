@@ -4,6 +4,7 @@ import {
   type ApiError,
   createOrb,
   createProject,
+  deleteOrb,
   describeApiError,
   listOrbs,
   listProjects,
@@ -26,6 +27,7 @@ export function ProjectsPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [creatingOrbFor, setCreatingOrbFor] = useState<string | null>(null);
+  const [deletingOrb, setDeletingOrb] = useState<string | null>(null);
   const [orbCreateError, setOrbCreateError] = useState<{
     projectId: string;
     message: string;
@@ -65,6 +67,17 @@ export function ProjectsPage() {
     refresh();
   }, [refresh]);
 
+  // A deleting row remains visible through the race-fencing quarantine. Poll
+  // until finalization removes it instead of requiring a manual page reload.
+  useEffect(() => {
+    const deletionInProgress = Object.values(orbLists).some(
+      (list) => list?.type === "loaded" && list.items.some((orb) => orb.state === "deleting"),
+    );
+    if (!deletionInProgress) return;
+    const timer = window.setInterval(() => void refresh(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [orbLists, refresh]);
+
   const onCreateProject = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
@@ -94,6 +107,23 @@ export function ProjectsPage() {
     setName("");
     setRepositoryUrl("");
     refresh();
+  };
+
+  const onDeleteOrb = async (orb: OrbView) => {
+    if (
+      !window.confirm(
+        `Delete ${orb.name ?? "this orb"} permanently? Its checkout, files, and conversation history will be lost.`,
+      )
+    )
+      return;
+    setDeletingOrb(orb.id);
+    const result = await deleteOrb(orb.id);
+    setDeletingOrb(null);
+    if (result.isErr()) {
+      setOrbCreateError({ projectId: orb.projectId, message: describeApiError(result.error) });
+      return;
+    }
+    await refresh();
   };
 
   const onCreateOrb = async (projectId: string) => {
@@ -169,6 +199,14 @@ export function ProjectsPage() {
                       <span className="muted mono"> · {orb.id.slice(0, 8)}</span>
                     </a>
                     <span className={`state-badge state-${orb.state}`}>{orb.state}</span>
+                    <button
+                      type="button"
+                      className="danger"
+                      disabled={orb.state === "deleting" || deletingOrb === orb.id}
+                      onClick={() => void onDeleteOrb(orb)}
+                    >
+                      {orb.state === "deleting" || deletingOrb === orb.id ? "deleting…" : "delete"}
+                    </button>
                   </li>
                 ))}
               </ul>

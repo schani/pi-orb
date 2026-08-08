@@ -11,7 +11,7 @@ The host provider only manages infrastructure. It does not know about Pi, Claude
 ```ts
 type OrbHostState = "starting" | "running" | "stopping" | "stopped" | "failed";
 
-type OrbHostProviderOperation = "provision" | "start" | "stop" | "observe" | "list";
+type OrbHostProviderOperation = "provision" | "start" | "stop" | "destroy" | "observe" | "list";
 
 interface OrbHostProviderError {
   type: "orb_host_provider_error";
@@ -74,6 +74,9 @@ interface OrbHostProvider {
   /** Gracefully stops compute while retaining its filesystem. Idempotent. */
   stop(ref: OrbHostRef, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
 
+  /** Permanently removes every provider resource owned by orbId. Idempotent. */
+  destroy(orbId: string, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
+
   /**
    * Returns null only when the provider definitively reports that the
    * resource does not exist. Provider/transport uncertainty is Err.
@@ -92,11 +95,12 @@ interface OrbHostProvider {
 
 Every finite provider call receives an `OperationContext`. The provider passes its signal to the underlying HTTP/process API and returns a typed `cancelled` error after cancellation is observed. Cancellation does not promise rollback of an external side effect: an ambiguous provision/start/stop is resolved by later idempotent `observe` and reconciliation.
 
+**Deletion extension implemented 2026-08-08.** `docs/orb-deletion.md` adds an idempotent `destroy(orbId, context)` operation and `destroy` operation discriminant. Unlike `stop`, it removes compute and the authoritative persistent filesystem; it addresses resources by deterministic orb identity so cleanup still works when `host_ref` was lost. The durable `deleting` lifecycle and tombstone sweep own retries and stale-provision races.
+
 There is intentionally no `unknown` host state. Failure to determine state is an error, not a durable state. There is also no `missing` state; definitive absence is represented by `observe()` returning `null`.
 
 The interface intentionally omits:
 
-- `destroy` and a `deleting` state: nothing in the first slice deletes an orb, so permanent host/filesystem removal is specified only when an orb-deletion feature exists;
 - `restart`: the control plane composes `stop` and `start`;
 - `exec`: runtime operations go through the orb runtime protocol;
 - per-orb machine type, CPU, RAM, region, OS, or image configuration;

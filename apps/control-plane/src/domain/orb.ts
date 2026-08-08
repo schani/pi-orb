@@ -39,6 +39,15 @@ export interface OrbRow {
   readonly updatedAt: number;
 }
 
+export interface OrbDeletionRow {
+  readonly orbId: string;
+  readonly hostKind: string;
+  readonly requestedAt: number;
+  readonly cleanupAfter: number;
+  readonly lastError: string | null;
+  readonly updatedAt: number;
+}
+
 export interface ProjectRow {
   readonly id: string;
   readonly name: string;

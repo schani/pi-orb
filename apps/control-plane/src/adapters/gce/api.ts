@@ -13,7 +13,7 @@ export interface GceResponse {
 
 export interface GceApiTransport {
   request(args: {
-    readonly method: "GET" | "POST";
+    readonly method: "GET" | "POST" | "DELETE";
     /** Path under https://compute.googleapis.com/compute/v1/. */
     readonly path: string;
     readonly body?: Record<string, unknown>;
@@ -27,7 +27,7 @@ export class RestGceApiTransport implements GceApiTransport {
   });
 
   async request(args: {
-    readonly method: "GET" | "POST";
+    readonly method: "GET" | "POST" | "DELETE";
     readonly path: string;
     readonly body?: Record<string, unknown>;
     readonly signal: AbortSignal;

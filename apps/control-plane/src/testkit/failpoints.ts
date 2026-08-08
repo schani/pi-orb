@@ -12,6 +12,7 @@ export const FAILPOINTS = {
   providerProvision: "provider.provision",
   providerStart: "provider.start",
   providerStop: "provider.stop",
+  providerDestroy: "provider.destroy",
   providerObserve: "provider.observe",
   runtimeHealth: "runtime.health",
   runtimePull: "runtime.pull",

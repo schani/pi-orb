@@ -35,6 +35,8 @@ On Docker these are ordinary `--env` values. On GCE the auth key lives in instan
 
 **Exposure note** (same accepted class as the orb token, `docs/credentials.md`): repository code inside the orb can read the auth key and could join additional nodes to the tailnet. Those nodes carry `tag:pi-orb` (pre-authorized keys only mint their own tag), so ACLs bound what they can reach; keys expire in 90 days; per-orb keys can be revoked individually. Accepted for the single-user phase.
 
+**Deletion extension implemented 2026-08-08.** Orb deletion revokes every auth key with the orb's exact pi-orb description and removes every exactly matching `tag:pi-orb` device before host destruction; repeated quarantine passes verify all three resource classes remain absent before database finalization. Cleanup is idempotent. The Tailscale adapter and OAuth client therefore need key/device list and delete permissions (`auth_keys` plus `devices:core`), not key creation alone; details and race ordering are in `docs/orb-deletion.md`.
+
 ## Tier model and upgrade path
 
 Evaluated 2026-08-05 during the design conversation:
@@ -52,6 +54,6 @@ Evaluated 2026-08-05 during the design conversation:
 ## Operational setup (one-time, per tailnet)
 
 1. In the Tailscale admin console: add `tag:pi-orb` to the ACL `tagOwners`; ensure an ACL rule grants the user's devices access to `tag:pi-orb` (default allow-all suffices on a personal tailnet); enable MagicDNS.
-2. Create an OAuth client with the `auth_keys` scope, allowed to mint keys for `tag:pi-orb`.
+2. Create an OAuth client with `auth_keys` and `devices:core`, allowed to mint keys for `tag:pi-orb`; deletion uses the latter to list and remove the orb's tailnet device.
 3. Configure the control plane: `PI_ORB_TAILSCALE_OAUTH_CLIENT_ID`, `PI_ORB_TAILSCALE_OAUTH_CLIENT_SECRET`, `PI_ORB_TAILSCALE_TAILNET_DNS_NAME` (the `tailXXXX.ts.net` name from the DNS page). In the cloud, the client secret follows the GitHub client-secret Secret Manager pattern (`infra/`).
 4. The user's own devices must be on the same tailnet to open preview URLs.

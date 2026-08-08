@@ -42,7 +42,6 @@ export async function registerLiveProxy(
       const orbId = request.params.orbId;
       connectionCounter += 1;
       const connectionId = `browser-${connectionCounter}`;
-      deps.control.registerBrowserConnection(orbId, connectionId);
       let upstream: WebSocket | null = null;
       let upstreamOpen = false;
       let browserClosed = false;
@@ -59,6 +58,9 @@ export async function registerLiveProxy(
           // Socket already closing; nothing to do.
         }
       };
+      deps.control.registerBrowserConnection(orbId, connectionId, () =>
+        closeBoth(TRY_AGAIN_LATER, "orb is being deleted"),
+      );
 
       // Attach handlers synchronously: the browser sends client.hello as soon
       // as its upgrade completes, while routing below crosses async adapter

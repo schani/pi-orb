@@ -72,7 +72,13 @@ export async function failOrbForIntegrity(
       continue;
     }
     const orb = orbResult.value;
-    if (orb === null || orb.state === "failed" || orb.state === "stopped") return;
+    if (
+      orb === null ||
+      orb.state === "failed" ||
+      orb.state === "stopped" ||
+      orb.state === "deleting"
+    )
+      return;
     const cas = await deps.store.casTransition(task, {
       orbId,
       expectedStateVersion: orb.stateVersion,

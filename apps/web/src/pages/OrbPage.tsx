@@ -14,6 +14,7 @@ import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
 import {
   type ApiError,
+  deleteOrb,
   describeApiError,
   getOrb,
   getOrbHistory,
@@ -326,6 +327,10 @@ export function OrbPage({ orbId }: { orbId: string }) {
         setOrb(result.value);
         setOrbError(null);
       } else {
+        if (result.error.type === "http" && result.error.status === 404) {
+          window.location.hash = "#/";
+          return;
+        }
         setOrbError(result.error);
       }
     };
@@ -494,6 +499,23 @@ export function OrbPage({ orbId }: { orbId: string }) {
     }
   };
 
+  const permanentlyDelete = async () => {
+    if (
+      !window.confirm(
+        "Delete this orb permanently? Its checkout, files, and conversation history will be lost.",
+      )
+    )
+      return;
+    const result = await deleteOrb(orbId);
+    if (result.isOk()) {
+      setOrb(result.value);
+      setOrbError(null);
+      setRenaming(false);
+    } else {
+      setOrbError(result.error);
+    }
+  };
+
   const saveName = async () => {
     const result = await updateOrb(orbId, { name: renameText });
     if (result.isOk()) {
@@ -551,6 +573,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
               <button
                 type="button"
                 className="orb-rename-button"
+                disabled={orb?.state === "deleting"}
                 onClick={() => {
                   setRenameText(orb?.name ?? "");
                   setRenaming(true);
@@ -605,10 +628,25 @@ export function OrbPage({ orbId }: { orbId: string }) {
           <button type="button" onClick={() => runLifecycle(stopOrb)} disabled={!canStop}>
             stop
           </button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => void permanentlyDelete()}
+            disabled={orb?.state === "deleting"}
+          >
+            {orb?.state === "deleting" ? "deleting…" : "delete"}
+          </button>
         </div>
       </header>
 
       <main className="app-main page orb-page">
+        {orb?.stateDetail?.type === "deleting_resources" && (
+          <div className="banner banner-info">
+            Permanently deleting orb resources…
+            {orb.stateDetail.retrying && " (retrying)"}
+            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+          </div>
+        )}
         {orb?.stateDetail?.type === "draining_history" && (
           <div className="banner banner-info">
             Stopping: draining history…

@@ -9,6 +9,7 @@ import {
 } from "@pi-orb/mock-openai";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
+import { okAsync } from "neverthrow";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
@@ -187,16 +188,15 @@ async function main(): Promise<void> {
   const [tailscaleClientId, tailscaleClientSecret, tailnetDnsName] = tailscaleEnvNames.map((name) =>
     env(name, ""),
   ) as [string, string, string];
-  const tailscale: TailscaleHostOptions | null =
+  const tailscaleClient =
     tailscaleClientId !== "" && tailscaleClientSecret !== "" && tailnetDnsName !== ""
-      ? {
-          minter: new HttpTailscaleAuthKeyMinter(new FetchTailscaleApiTransport(), {
-            clientId: tailscaleClientId,
-            clientSecret: tailscaleClientSecret,
-          }),
-          tailnetDnsName,
-        }
+      ? new HttpTailscaleAuthKeyMinter(new FetchTailscaleApiTransport(), {
+          clientId: tailscaleClientId,
+          clientSecret: tailscaleClientSecret,
+        })
       : null;
+  const tailscale: TailscaleHostOptions | null =
+    tailscaleClient === null ? null : { minter: tailscaleClient, tailnetDnsName };
   if (tailscale === null) {
     const missing = tailscaleEnvNames.filter((name) => env(name, "") === "");
     bootTask.log(`Tailscale port exposure disabled (${missing.join(", ")} unset)`);
@@ -263,6 +263,13 @@ async function main(): Promise<void> {
   const deps: ControlPlaneDeps = {
     store: database.store,
     hostProvider,
+    resourceCleaner:
+      tailscaleForProvider && tailscaleClient !== null
+        ? {
+            cleanupOrb: (_task, orbId, context) =>
+              tailscaleClient.cleanupOrb(orbId, context.signal),
+          }
+        : { cleanupOrb: () => okAsync(undefined) },
     runtimeClient: new FetchRuntimeClient(),
     authGate:
       githubOauth !== null

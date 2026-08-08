@@ -17,7 +17,7 @@ import type {
   StateConflict,
   StoreError,
 } from "./errors.ts";
-import type { OrbRow, ProjectRow } from "./orb.ts";
+import type { OrbDeletionRow, OrbRow, ProjectRow } from "./orb.ts";
 
 /** In-process adapter context; never serialized on the wire. */
 export interface OperationContext {
@@ -48,6 +48,13 @@ export interface CasUpdateFieldsParams {
   readonly checkoutCommit?: string | null;
   readonly lastError?: string | null;
   readonly runtimeTokenHash?: string | null;
+}
+
+export interface RequestOrbDeletionParams {
+  readonly orbId: string;
+  readonly expectedStateVersion: number;
+  readonly now: number;
+  readonly cleanupAfter: number;
 }
 
 export interface CommitPullBatchParams {
@@ -95,6 +102,25 @@ export interface ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; now: number; nextAttemptAt: number },
   ): ResultAsync<void, StoreError>;
+
+  /** Atomically enter deleting and create its durable cleanup tombstone. */
+  requestOrbDeletion(
+    task: SimulationTask,
+    params: RequestOrbDeletionParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+  getOrbDeletion(
+    task: SimulationTask,
+    orbId: string,
+  ): ResultAsync<OrbDeletionRow | null, StoreError>;
+  recordOrbDeletionError(
+    task: SimulationTask,
+    params: { orbId: string; message: string | null; now: number },
+  ): ResultAsync<void, StoreError>;
+  /** Atomically removes history, orb row, and deletion tombstone. */
+  finalizeOrbDeletion(
+    task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number },
+  ): ResultAsync<void, StoreError | StateConflict>;
 
   /** State transition: bumps `state_version`, sets `state_changed_at` to `now`. */
   casTransition(
@@ -215,6 +241,12 @@ export interface OrbHostProvider {
   stop(
     task: SimulationTask,
     ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError>;
+  /** Permanently removes compute and authoritative storage by orb identity. Idempotent. */
+  destroy(
+    task: SimulationTask,
+    orbId: string,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError>;
   /** Returns null only on definitive absence; uncertainty is an Err. */
@@ -400,9 +432,18 @@ export interface OrbNameGenerator {
   ): ResultAsync<string, OrbNameGeneratorError>;
 }
 
+export interface OrbResourceCleaner {
+  cleanupOrb(
+    task: SimulationTask,
+    orbId: string,
+    context: OperationContext,
+  ): ResultAsync<void, { readonly message: string; readonly retryable: boolean }>;
+}
+
 export interface ControlPlaneDeps {
   readonly store: ControlPlaneStore;
   readonly hostProvider: OrbHostProvider;
+  readonly resourceCleaner: OrbResourceCleaner;
   readonly runtimeClient: OrbRuntimeClient;
   readonly authGate: AuthGate;
   readonly nameGenerator: OrbNameGenerator;

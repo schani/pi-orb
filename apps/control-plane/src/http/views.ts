@@ -48,28 +48,38 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
     stateVersion: orb.stateVersion,
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
-    ...(drain !== null
+    ...(orb.state === "deleting"
       ? {
           stateDetail: {
-            type: "draining_history" as const,
-            retrying: drain.retrying,
-            ...(drain.message !== undefined ? { message: drain.message } : {}),
+            type: "deleting_resources" as const,
+            retrying: orb.lastError !== null,
+            ...(orb.lastError !== null ? { message: orb.lastError } : {}),
           },
         }
-      : bootProbe !== null
+      : drain !== null
         ? {
             stateDetail: {
-              type: "waiting_for_runtime" as const,
-              hostState: bootProbe.hostState,
-              secondsSinceHostRunning:
-                bootProbe.hostRunningSinceWall === null
-                  ? null
-                  : Math.max(0, Math.round((Date.now() - bootProbe.hostRunningSinceWall) / 1000)),
-              probeAttempts: bootProbe.attempts,
-              ...(bootProbe.lastError !== undefined ? { lastProbeError: bootProbe.lastError } : {}),
+              type: "draining_history" as const,
+              retrying: drain.retrying,
+              ...(drain.message !== undefined ? { message: drain.message } : {}),
             },
           }
-        : {}),
+        : bootProbe !== null
+          ? {
+              stateDetail: {
+                type: "waiting_for_runtime" as const,
+                hostState: bootProbe.hostState,
+                secondsSinceHostRunning:
+                  bootProbe.hostRunningSinceWall === null
+                    ? null
+                    : Math.max(0, Math.round((Date.now() - bootProbe.hostRunningSinceWall) / 1000)),
+                probeAttempts: bootProbe.attempts,
+                ...(bootProbe.lastError !== undefined
+                  ? { lastProbeError: bootProbe.lastError }
+                  : {}),
+              },
+            }
+          : {}),
     ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),
     stateChangedAt: iso(orb.stateChangedAt),
     ...(config.tailnetDnsName === undefined

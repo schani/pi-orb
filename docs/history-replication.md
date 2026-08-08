@@ -276,7 +276,7 @@ The filesystem is assumed to survive process, container, VM, and Spot failures. 
 
 For Pi, the adapter can enumerate every persisted entry. A full ID-based reconciliation endpoint or diagnostic mode may become useful as a backstop if the stored cursor is invalid or the adapter/session disagree, but it is not required to reconstruct the orb, and by decision all such repair remains manual until the system is demonstrably stable.
 
-The replica is explicitly **not** an orb backup or reconstruction source. If orb deletion is added later, replicated history may remain browsable according to retention policy, but that history is not used to recreate a deleted filesystem or resume the Pi session.
+The replica is explicitly **not** an orb backup or reconstruction source. **Deletion requirement 2026-08-08:** permanent orb deletion removes replicated history together with the authoritative filesystem; no browsable transcript is retained. Database backup/PITR copies age out under infrastructure retention and are not presented as immediate cryptographic erasure. See `docs/orb-deletion.md`.
 
 **Field finding (2026-08-03) — first real `cursor_not_found` integrity failure.** An orb failed with `replication_integrity: cursor_not_found` on its second start. Disk forensics proved the SDK had never written the session file — it deliberately does not persist until the first assistant message exists — so the control plane had replicated in-memory-only init events and committed one as its cursor, which the idle stop then discarded with the container. Full forensics: `docs/postmortems/2026-08-03-cursor-not-found.md`. The resulting design rules:
 
@@ -285,7 +285,7 @@ The replica is explicitly **not** an orb backup or reconstruction source. If orb
 **An empty replica pins nothing (corollary, 2026-08-04).** The gate's second field lesson: pulls still carry the session identity, and the store used to pin it durably on first sight — so a never-flushed orb that restarted (fresh session id) failed with `session_mismatch` even though nothing had been replicated. Both stores now treat a changed session as legitimate rotation and re-initialize whenever the replication cursor is null; `session_mismatch` remains a strict integrity failure once any record is committed. The FakeWorld models the rotation (an unflushed session evaporates with the runtime process), which turns the `empty-history-restart` DST scenario into the full regression test for the incident shape. The SDK's lazy-flush behavior and id stability across reopen are pinned in `session-flush.contract.test.ts`; the stop-before-first-reply restart shape is covered in lifecycle DST (`empty-history-restart`). Forcing the SDK to flush eagerly was rejected: it requires mutating two private SessionManager members in exactly the right order (`_rewriteFile` plus the `flushed` flag, whose interplay with the SDK's own `wx`-mode flush would otherwise throw) — a public `eagerPersist` option upstream remains the cleaner long-term alternative. The remaining hardening from this incident is tracked in `TODO.md`. The pull model's unknown-cursor rule itself worked as designed: loud `failed`, no silent rewind.
 ## Minimal PostgreSQL schema
 
-The first slice uses three tables only: `projects`, `orbs`, and `history_records`. Replication state lives on the orb row. Do not add user/auth, live-event, command, polling-job, host-resource, audit, or request-claim tables.
+The initial slice used three tables: `projects`, `orbs`, and `history_records`; credential pointers were subsequently added for the broker. Replication state lives on the orb row. Orb deletion in `docs/orb-deletion.md` adds one minimal, short-lived tombstone table to record cleanup and fence stale external operations before history, the orb row, and the tombstone are removed together. Do not add user/auth, live-event, command, polling-job, generic host-resource, audit, or request-claim tables.
 
 Application code generates UUIDs with Node's `crypto.randomUUID()`; PostgreSQL does not need a UUID extension.
 
@@ -302,7 +302,7 @@ CREATE TABLE orbs (
   project_id uuid NOT NULL REFERENCES projects(id),
 
   state text NOT NULL CHECK (state IN (
-    'creating', 'starting', 'running', 'stopping', 'stopped', 'failed'
+    'creating', 'starting', 'running', 'stopping', 'stopped', 'failed', 'deleting'
   )),
   state_version bigint NOT NULL DEFAULT 0,
 
