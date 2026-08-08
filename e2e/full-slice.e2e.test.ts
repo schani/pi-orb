@@ -460,27 +460,67 @@ describe("full slice E2E", () => {
     expect(JSON.stringify(stoppedRecords)).toContain("The check succeeded: E2E_TOOL_OK.");
     expect(JSON.stringify(stoppedRecords)).toContain("USER_SHELL_E2E_OK");
 
-    // Permanent deletion removes both persistence copies and the host resource.
-    const deletion = await api(base, "DELETE", `/api/v1/orbs/${orbId}`);
+    // Whole-project deletion fans out through the same deletion-grade cleanup.
+    // Keep one child stopped with replicated history and a second child running
+    // so completion proves mixed-state resources are all gone before the row.
+    const secondOrbId = randomUUID();
+    const secondOrb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
+      id: secondOrbId,
+    });
+    expect(secondOrb.status, JSON.stringify(secondOrb.body)).toBe(202);
+    await waitFor(
+      "second orb running",
+      async () => {
+        const view = await api(base, "GET", `/api/v1/orbs/${secondOrbId}`);
+        if (view.body["state"] === "failed") {
+          throw new FatalProbeError(`second orb failed: ${String(view.body["lastError"])}`);
+        }
+        return view.body["state"] === "running" ? true : null;
+      },
+      { timeoutMs: 300_000, intervalMs: 2_000 },
+    );
+
+    const deletion = await api(base, "DELETE", `/api/v1/projects/${projectId}`);
     expect(deletion.status, JSON.stringify(deletion.body)).toBe(202);
     expect(deletion.body["state"]).toBe("deleting");
+    expect(deletion.body["deletionProgress"]).toMatchObject({
+      total: 2,
+      remaining: 2,
+      blocked: 0,
+    });
+    const lateChild = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
+      id: randomUUID(),
+    });
+    expect(lateChild.status).toBe(409);
+
     await waitFor(
-      "orb deletion completed",
+      "project deletion completed",
       async () => {
-        const view = await api(base, "GET", `/api/v1/orbs/${orbId}`);
+        const view = await api(base, "GET", `/api/v1/projects/${projectId}`);
         return view.status === 404 ? true : null;
       },
-      { timeoutMs: 180_000, intervalMs: 1_000 },
+      { timeoutMs: 240_000, intervalMs: 1_000 },
     );
-    const deletedHistory = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-    expect(deletedHistory.status).toBe(404);
-    if (PROCESS_BACKEND) {
-      expect(() =>
-        readFileSync(join(localStateDirectory, "process-hosts", orbId, "host.json"), "utf8"),
-      ).toThrow();
-    } else {
-      await expect(docker(["inspect", `pi-orb-${orbId}`])).rejects.toThrow();
-      await expect(docker(["volume", "inspect", `pi-orb-data-${orbId}`])).rejects.toThrow();
+    for (const deletedOrbId of [orbId, secondOrbId]) {
+      expect((await api(base, "GET", `/api/v1/orbs/${deletedOrbId}`)).status).toBe(404);
+      expect((await api(base, "GET", `/api/v1/orbs/${deletedOrbId}/history`)).status).toBe(404);
+      if (PROCESS_BACKEND) {
+        expect(() =>
+          readFileSync(
+            join(localStateDirectory, "process-hosts", deletedOrbId, "host.json"),
+            "utf8",
+          ),
+        ).toThrow();
+      } else {
+        await expect(docker(["inspect", `pi-orb-${deletedOrbId}`])).rejects.toThrow();
+        await expect(
+          docker(["volume", "inspect", `pi-orb-data-${deletedOrbId}`]),
+        ).rejects.toThrow();
+      }
     }
+    const projects = await api(base, "GET", "/api/v1/projects");
+    expect(
+      (projects.body["items"] as Array<{ id: string }>).some((item) => item.id === projectId),
+    ).toBe(false);
   }
 });

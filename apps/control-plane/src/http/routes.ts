@@ -19,6 +19,7 @@ import {
 import type { ProjectRow } from "../domain/orb.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
+import { requestProjectDeletion } from "../domain/project-deletion.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
 function httpError(
@@ -56,7 +57,27 @@ export function registerRoutes(
     if (projects.isErr()) {
       return reply.status(503).send(httpError("unavailable", projects.error.message, true));
     }
-    return reply.send({ items: projects.value.map(projectView) });
+    const items = [];
+    for (const project of projects.value) {
+      if (project.state === "active") {
+        items.push(projectView(project));
+        continue;
+      }
+      const progress = await deps.store.getProjectDeletionProgress(task, project.id);
+      if (progress.isErr()) {
+        // Finalization may win after listProjects returned its snapshot.
+        if (progress.error.type === "project_conflict" && progress.error.reason === "not_found") {
+          continue;
+        }
+        const message =
+          progress.error.type === "store_error"
+            ? progress.error.message
+            : "project deletion progress unavailable";
+        return reply.status(503).send(httpError("unavailable", message, true));
+      }
+      items.push(projectView(project, progress.value));
+    }
+    return reply.send({ items });
   });
 
   app.post("/api/v1/projects", async (request, reply) => {
@@ -75,6 +96,11 @@ export function registerRoutes(
       return reply.status(503).send(httpError("unavailable", existing.error.message, true));
     }
     if (existing.value !== null) {
+      if (existing.value.state === "deleting") {
+        return reply
+          .status(409)
+          .send(httpError("conflict", "project is being permanently deleted", false));
+      }
       // Client-generated IDs make retried creates idempotent (docs/control-plane-api.md).
       if (existing.value.name === body.name && existing.value.repositoryUrl === url.value.url) {
         return reply.status(201).send(projectView(existing.value));
@@ -87,7 +113,12 @@ export function registerRoutes(
       id: body.id,
       name: body.name,
       repositoryUrl: url.value.url,
+      state: "active",
+      stateVersion: 0,
+      deletionRequestedAt: null,
+      deletionInitialOrbCount: null,
       createdAt: task.wallNow(),
+      updatedAt: task.wallNow(),
     };
     const inserted = await deps.store.insertProject(task, row);
     if (inserted.isErr()) {
@@ -106,13 +137,60 @@ export function registerRoutes(
       if (project.value === null) {
         return reply.status(404).send(httpError("not_found", "project not found", false));
       }
-      return reply.send(projectView(project.value));
+      if (project.value.state === "active") return reply.send(projectView(project.value));
+      const progress = await deps.store.getProjectDeletionProgress(task, project.value.id);
+      if (progress.isErr()) {
+        if (progress.error.type === "project_conflict" && progress.error.reason === "not_found") {
+          return reply.status(404).send(httpError("not_found", "project not found", false));
+        }
+        const message =
+          progress.error.type === "store_error"
+            ? progress.error.message
+            : "project deletion progress unavailable";
+        return reply.status(503).send(httpError("unavailable", message, true));
+      }
+      return reply.send(projectView(project.value, progress.value));
+    },
+  );
+
+  app.delete<{ Params: { projectId: string } }>(
+    "/api/v1/projects/:projectId",
+    async (request, reply) => {
+      const deleted = await requestProjectDeletion(task, deps, request.params.projectId);
+      if (deleted.isErr()) return sendCommandError(reply, deleted.error);
+      const progress = await deps.store.getProjectDeletionProgress(task, deleted.value.id);
+      if (progress.isErr()) {
+        // A zero-child project can finalize between the accepted command and
+        // this presentation read. The command still returns its required 202.
+        if (progress.error.type === "project_conflict" && progress.error.reason === "not_found") {
+          return reply.status(202).send(
+            projectView(deleted.value, {
+              total: deleted.value.deletionInitialOrbCount ?? 0,
+              remaining: 0,
+              blocked: 0,
+            }),
+          );
+        }
+        const message =
+          progress.error.type === "store_error"
+            ? progress.error.message
+            : "project deletion progress unavailable";
+        return reply.status(503).send(httpError("unavailable", message, true));
+      }
+      return reply.status(202).send(projectView(deleted.value, progress.value));
     },
   );
 
   app.get<{ Params: { projectId: string } }>(
     "/api/v1/projects/:projectId/orbs",
     async (request, reply) => {
+      const project = await deps.store.getProject(task, request.params.projectId);
+      if (project.isErr()) {
+        return reply.status(503).send(httpError("unavailable", project.error.message, true));
+      }
+      if (project.value === null) {
+        return reply.status(404).send(httpError("not_found", "project not found", false));
+      }
       const orbs = await deps.store.listOrbsByProject(task, request.params.projectId);
       if (orbs.isErr()) {
         return reply.status(503).send(httpError("unavailable", orbs.error.message, true));

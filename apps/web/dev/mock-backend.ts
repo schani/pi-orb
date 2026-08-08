@@ -35,7 +35,9 @@ function initialState(): MockState {
     id: PROJECT_ID,
     name: "Frontend playground",
     repositoryUrl: "https://github.com/example/frontend-playground",
+    state: "active",
     createdAt,
+    updatedAt: createdAt,
   };
   const orb: OrbView = {
     id: ORB_ID,
@@ -143,14 +145,37 @@ async function handleApi(
     return true;
   }
   const projectRoute = /^\/api\/v1\/projects\/([^/]+)$/.exec(path);
-  if (method === "GET" && projectRoute !== null) {
-    const project = state.projects.get(decodeURIComponent(projectRoute[1] ?? ""));
+  if (projectRoute !== null) {
+    const projectId = decodeURIComponent(projectRoute[1] ?? "");
+    const project = state.projects.get(projectId);
     if (project === undefined) {
       notFound(response);
       return true;
     }
-    sendJson(response, 200, project);
-    return true;
+    if (method === "GET") {
+      sendJson(response, 200, project);
+      return true;
+    }
+    if (method === "DELETE") {
+      const children = [...state.orbs.values()].filter((orb) => orb.projectId === projectId);
+      const deleting: ProjectView = {
+        ...project,
+        state: "deleting",
+        deletionProgress: { total: children.length, remaining: children.length, blocked: 0 },
+        updatedAt: now(),
+      };
+      state.projects.set(projectId, deleting);
+      for (const orb of children) state.orbs.set(orb.id, updateOrb(orb, "deleting"));
+      setTimeout(() => {
+        for (const orb of children) {
+          state.orbs.delete(orb.id);
+          state.histories.delete(orb.id);
+        }
+        state.projects.delete(projectId);
+      }, 1_000);
+      sendJson(response, 202, deleting);
+      return true;
+    }
   }
   if (method === "POST" && path === "/api/v1/projects") {
     const body = await readJson(request);
@@ -173,7 +198,9 @@ async function handleApi(
       id: body.id,
       name: body.name,
       repositoryUrl: body.repositoryUrl,
+      state: "active",
       createdAt: now(),
+      updatedAt: now(),
     };
     state.projects.set(project.id, project);
     sendJson(response, 201, project);
@@ -183,8 +210,19 @@ async function handleApi(
   const projectOrbs = /^\/api\/v1\/projects\/([^/]+)\/orbs$/.exec(path);
   if (projectOrbs !== null) {
     const projectId = decodeURIComponent(projectOrbs[1] ?? "");
-    if (!state.projects.has(projectId)) {
+    const project = state.projects.get(projectId);
+    if (project === undefined) {
       notFound(response);
+      return true;
+    }
+    if (method === "POST" && project.state === "deleting") {
+      sendJson(response, 409, {
+        error: {
+          code: "conflict",
+          message: "project is being permanently deleted",
+          retryable: false,
+        },
+      });
       return true;
     }
     if (method === "GET") {

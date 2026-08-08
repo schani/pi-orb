@@ -34,6 +34,8 @@ The database state is desired/reconciliation intent as well as user-visible stat
 
 **Deletion extension implemented 2026-08-08.** `docs/orb-deletion.md` adds terminal-intent state `deleting`. It closes live access, revokes runtime-broker authorization, skips the history drain because the replica will be erased, destroys provider storage/compute and Tailscale identity, then transactionally removes history and the orb row. A short-lived tombstone and deletion sweep fence stale provisions and make cleanup recoverable; the tombstone, history, and orb row are removed together only after final absence checks.
 
+**Project deletion required and implemented 2026-08-09.** `docs/project-deletion.md` composes this exact orb deletion path for every child. One atomic project command fences new orb creation and moves all existing children to `deleting`; a separate deterministic finalizer removes the project only after every child has completed deletion-grade absence checks. It introduces no provider-level project operation.
+
 **Archival extension implemented 2026-08-08.** `docs/orb-archival.md` adds `archiving` and terminal `archived`. Archival first restores a readable runtime when needed, waits for idle, and durably seals a pull-until-empty replica; it then reuses deletion's external cleanup, destroy, quarantine, and absence-check path, retaining the orb row and transcript. Archived orbs are permanently non-startable.
 
 | Database state | Reconciler behavior                                                                                                                                                                                                                          |

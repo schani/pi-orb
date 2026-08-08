@@ -46,12 +46,28 @@ export const UpdateOrbRequestSchema = Type.Object(
 );
 export type UpdateOrbRequest = Static<typeof UpdateOrbRequestSchema>;
 
+export const ProjectStateSchema = Type.Union([Type.Literal("active"), Type.Literal("deleting")]);
+export type ProjectState = Static<typeof ProjectStateSchema>;
+
+export const ProjectDeletionProgressSchema = Type.Object(
+  {
+    total: Type.Number(),
+    remaining: Type.Number(),
+    blocked: Type.Number(),
+  },
+  closed,
+);
+export type ProjectDeletionProgress = Static<typeof ProjectDeletionProgressSchema>;
+
 export const ProjectViewSchema = Type.Object(
   {
     id: Type.String(),
     name: Type.String(),
     repositoryUrl: Type.String(),
+    state: ProjectStateSchema,
+    deletionProgress: Type.Optional(ProjectDeletionProgressSchema),
     createdAt: Type.String(),
+    updatedAt: Type.String(),
   },
   closed,
 );

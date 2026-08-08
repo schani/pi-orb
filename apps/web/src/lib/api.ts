@@ -109,6 +109,12 @@ export function getProject(projectId: string): Promise<Result<ProjectView, ApiEr
   return apiFetch(ProjectViewSchema, `/api/v1/projects/${encodeURIComponent(projectId)}`);
 }
 
+export function deleteProject(projectId: string): Promise<Result<ProjectView, ApiError>> {
+  return apiFetch(ProjectViewSchema, `/api/v1/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+  });
+}
+
 export function createProject(
   request: CreateProjectRequest,
 ): Promise<Result<ProjectView, ApiError>> {

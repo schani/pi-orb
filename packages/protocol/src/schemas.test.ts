@@ -469,7 +469,9 @@ describe("control-plane API schemas", () => {
         id: "p1",
         name: "demo",
         repositoryUrl: "https://github.com/owner/repo",
+        state: "active",
         createdAt: "2026-07-20T10:00:00.000Z",
+        updatedAt: "2026-07-20T10:00:00.000Z",
       }),
     ).toBe(true);
     expect(

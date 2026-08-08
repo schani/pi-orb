@@ -4,7 +4,7 @@ Permanent removal of an orb and every resource owned by it.
 
 ## Requirement and scope
 
-**Required and implemented 2026-08-08.** A user can permanently delete an orb. Completion means that neither the authoritative filesystem nor the replicated conversation remains recoverable through pi-orb. Deletion is asynchronous, idempotent while in progress, retryable after process failure, and available from every lifecycle state. It does not delete the parent project or shared deployment infrastructure.
+**Required and implemented 2026-08-08.** A user can permanently delete an orb. Completion means that neither the authoritative filesystem nor the replicated conversation remains recoverable through pi-orb. Deletion is asynchronous, idempotent while in progress, retryable after process failure, and available from every lifecycle state. Deleting one orb does not delete its parent project or shared deployment infrastructure. Whole-project deletion is the separate atomic fan-out design in `docs/project-deletion.md`; it invokes this same cleanup protocol for every child and removes the parent only after all child finalizers complete.
 
 Export-before-delete is not part of this requirement and remains open in `docs/open-questions.md`.
 

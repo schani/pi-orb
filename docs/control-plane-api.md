@@ -44,6 +44,7 @@ The browser uses a small unauthenticated JSON API under `/api/v1`:
 GET  /api/v1/projects
 POST /api/v1/projects
 GET  /api/v1/projects/:projectId
+DELETE /api/v1/projects/:projectId
 
 GET  /api/v1/projects/:projectId/orbs
 POST /api/v1/projects/:projectId/orbs
@@ -58,7 +59,7 @@ GET  /api/v1/orbs/:orbId/history
 WS   /api/v1/orbs/:orbId/live
 ```
 
-There are no project update/delete, credential, model-selection, admin, or generic host-operation endpoints in the first slice. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
+There is no project update endpoint. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
 
 The browser generates project and orb UUIDs with `crypto.randomUUID()` and includes them in create requests:
 
@@ -86,7 +87,14 @@ interface ProjectView {
   id: string;
   name: string;
   repositoryUrl: string;
+  state: "active" | "deleting";
+  deletionProgress?: {
+    total: number;
+    remaining: number;
+    blocked: number;
+  };
   createdAt: string;
+  updatedAt: string;
 }
 
 interface OrbView {
@@ -146,6 +154,7 @@ Do not expose `host_ref`, model credentials, harness session ID, or internal rep
 Status behavior:
 
 - project creation returns `201`;
+- project delete returns `202` with `state: "deleting"`, atomically prevents new child creation, and eventually makes the project and all child orb resources return `404` (`docs/project-deletion.md`);
 - orb creation and start/stop requests return `202` with the current `OrbView`;
 - before creating/starting the host, the backend resolves and refreshes Codex OAuth; if user interaction is required, the orb remains in `creating`/`starting` and the response returns the device-login challenge in `actionRequired`;
 - the browser polls only the normal orb resource, not an auth resource; when login succeeds the backend resumes lifecycle work automatically;

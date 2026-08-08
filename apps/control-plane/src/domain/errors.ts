@@ -92,6 +92,12 @@ export interface StateConflict {
   readonly currentState?: OrbState;
 }
 
+/** The parent project disappeared or no longer accepts child creation. */
+export interface ProjectConflict {
+  readonly type: "project_conflict";
+  readonly reason: "not_found" | "deleting" | "children_remain" | "concurrent_change";
+}
+
 // ---------------------------------------------------------------------------
 // Credential broker (docs/credentials.md)
 

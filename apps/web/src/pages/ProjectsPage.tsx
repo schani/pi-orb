@@ -6,10 +6,15 @@ import {
   createOrb,
   createProject,
   deleteOrb,
+  deleteProject,
   describeApiError,
   listOrbs,
   listProjects,
 } from "../lib/api.ts";
+import {
+  projectDeletionConfirmation,
+  projectDeletionProgressText,
+} from "../lib/project-deletion.ts";
 import { generateUuid } from "../lib/uuid.ts";
 
 type OrbListState =
@@ -28,6 +33,7 @@ export function ProjectsPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [creatingOrbFor, setCreatingOrbFor] = useState<string | null>(null);
+  const [deletingProject, setDeletingProject] = useState<string | null>(null);
   const [deletingOrb, setDeletingOrb] = useState<string | null>(null);
   const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
   const [orbCreateError, setOrbCreateError] = useState<{
@@ -72,15 +78,17 @@ export function ProjectsPage() {
   // A deleting row remains visible through the race-fencing quarantine. Poll
   // until finalization removes it instead of requiring a manual page reload.
   useEffect(() => {
-    const deletionInProgress = Object.values(orbLists).some(
-      (list) =>
-        list?.type === "loaded" &&
-        list.items.some((orb) => orb.state === "deleting" || orb.state === "archiving"),
-    );
+    const deletionInProgress =
+      projects?.some((project) => project.state === "deleting") === true ||
+      Object.values(orbLists).some(
+        (list) =>
+          list?.type === "loaded" &&
+          list.items.some((orb) => orb.state === "deleting" || orb.state === "archiving"),
+      );
     if (!deletionInProgress) return;
     const timer = window.setInterval(() => void refresh(), 2_000);
     return () => window.clearInterval(timer);
-  }, [orbLists, refresh]);
+  }, [orbLists, projects, refresh]);
 
   const onCreateProject = async (event: FormEvent) => {
     event.preventDefault();
@@ -111,6 +119,19 @@ export function ProjectsPage() {
     setName("");
     setRepositoryUrl("");
     refresh();
+  };
+
+  const onDeleteProject = async (project: ProjectView) => {
+    if (!window.confirm(projectDeletionConfirmation(project.name))) return;
+    setDeletingProject(project.id);
+    setFormError(null);
+    const result = await deleteProject(project.id);
+    setDeletingProject(null);
+    if (result.isErr()) {
+      setFormError(describeApiError(result.error));
+      return;
+    }
+    await refresh();
   };
 
   const onArchiveOrb = async (orb: OrbView) => {
@@ -203,7 +224,25 @@ export function ProjectsPage() {
             <div className="project-header">
               <h2>{project.name}</h2>
               <span className="muted mono">{project.repositoryUrl}</span>
+              <span className={`state-badge state-${project.state}`}>{project.state}</span>
+              <button
+                type="button"
+                className="danger"
+                disabled={project.state === "deleting" || deletingProject === project.id}
+                onClick={() => void onDeleteProject(project)}
+              >
+                {project.state === "deleting" || deletingProject === project.id
+                  ? "deleting project…"
+                  : "delete project"}
+              </button>
             </div>
+            {project.deletionProgress !== undefined && (
+              <div
+                className={project.deletionProgress.blocked > 0 ? "banner banner-error" : "muted"}
+              >
+                {projectDeletionProgressText(project.deletionProgress)}
+              </div>
+            )}
             {orbList.type === "loading" && <p className="muted">loading orbs…</p>}
             {orbList.type === "failed" && (
               <div className="banner banner-error">
@@ -234,6 +273,11 @@ export function ProjectsPage() {
                         ? "archiving…"
                         : "archive"}
                     </button>
+                    {orb.state === "deleting" &&
+                      orb.stateDetail?.type === "deleting_resources" &&
+                      orb.stateDetail.message !== undefined && (
+                        <span className="banner banner-error">{orb.stateDetail.message}</span>
+                      )}
                     <button
                       type="button"
                       className="danger"
@@ -249,7 +293,7 @@ export function ProjectsPage() {
             <button
               type="button"
               onClick={() => onCreateOrb(project.id)}
-              disabled={creatingOrbFor === project.id}
+              disabled={creatingOrbFor === project.id || project.state === "deleting"}
             >
               {creatingOrbFor === project.id ? "creating…" : "new orb"}
             </button>

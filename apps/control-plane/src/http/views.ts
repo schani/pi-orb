@@ -1,6 +1,6 @@
 import { type OrbView, type ProjectView, previewHost } from "@pi-orb/protocol";
 import type { ControlState } from "../domain/control-state.ts";
-import type { OrbRow, ProjectRow } from "../domain/orb.ts";
+import type { OrbRow, ProjectDeletionProgress, ProjectRow } from "../domain/orb.ts";
 
 /**
  * Static deployment configuration the view layer derives fields from. It is
@@ -14,12 +14,18 @@ export interface ViewConfig {
 
 const iso = (ms: number): string => new Date(ms).toISOString();
 
-export function projectView(project: ProjectRow): ProjectView {
+export function projectView(
+  project: ProjectRow,
+  deletionProgress?: ProjectDeletionProgress,
+): ProjectView {
   return {
     id: project.id,
     name: project.name,
     repositoryUrl: project.repositoryUrl,
+    state: project.state,
+    ...(deletionProgress !== undefined ? { deletionProgress } : {}),
     createdAt: iso(project.createdAt),
+    updatedAt: iso(project.updatedAt),
   };
 }
 

@@ -36,7 +36,7 @@ import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
-import { orphanSweepLoop, pollLoop, reconcileLoop } from "./domain/loops.ts";
+import { orphanSweepLoop, pollLoop, projectDeletionLoop, reconcileLoop } from "./domain/loops.ts";
 import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
@@ -349,6 +349,7 @@ async function main(): Promise<void> {
     const loops: readonly Promise<void>[] = [
       pollLoop(new ControlPlaneTask("poller"), deps, stop.signal),
       reconcileLoop(new ControlPlaneTask("reconciler"), deps, stop.signal),
+      projectDeletionLoop(new ControlPlaneTask("project-deletion"), deps, stop.signal),
       orphanSweepLoop(new ControlPlaneTask("sweeper"), deps, stop.signal),
     ];
     await Promise.all(

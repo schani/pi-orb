@@ -74,7 +74,9 @@ describe("orb deletion (DST)", () => {
             name: "driver",
             f: async (task) => {
               seedRunningOrb(task, harness, ORB);
-              while (harness.store.orbSnapshot(ORB)?.state !== "deleting") {
+              while (true) {
+                const snapshot = harness.store.orbSnapshot(ORB);
+                if (snapshot === null || snapshot.state === "deleting") break;
                 await requestOrbDeletion(task, firstDeps, ORB);
                 await task.sleep(100, "retry delete request");
               }

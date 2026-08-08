@@ -1,4 +1,4 @@
-import type { HarnessSessionMetadata, OrbState, StopReason } from "@pi-orb/protocol";
+import type { HarnessSessionMetadata, OrbState, ProjectState, StopReason } from "@pi-orb/protocol";
 
 /**
  * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
@@ -57,7 +57,18 @@ export interface ProjectRow {
   readonly id: string;
   readonly name: string;
   readonly repositoryUrl: string;
+  readonly state: ProjectState;
+  readonly stateVersion: number;
+  readonly deletionRequestedAt: number | null;
+  readonly deletionInitialOrbCount: number | null;
   readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export interface ProjectDeletionProgress {
+  readonly total: number;
+  readonly remaining: number;
+  readonly blocked: number;
 }
 
 /** True when the orb has never reached runtime-ready (docs/lifecycle.md drain skip). */

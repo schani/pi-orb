@@ -10,7 +10,12 @@ const project: ProjectRow = {
   id: "00000000-0000-4000-8000-000000000001",
   name: "project",
   repositoryUrl: "https://github.com/o/r",
+  state: "active",
+  stateVersion: 0,
+  deletionRequestedAt: null,
+  deletionInitialOrbCount: null,
   createdAt: 1_000,
+  updatedAt: 1_000,
 };
 const orb: OrbRow = {
   id: "00000000-0000-4000-8000-000000000002",
@@ -194,6 +199,90 @@ export function storeContractTests(name: string, open: () => Promise<ControlPlan
       expect(recordConflict.isErr() && recordConflict.error.type).toBe("replication_integrity");
       const snapshot = await store.readHistorySnapshot(task, orb.id);
       expect(snapshot.isOk() && snapshot.value.cursor).toBe(first.id);
+    });
+
+    it("atomically fences project creation, fans out deletion, and finalizes last", async () => {
+      await seed();
+      const requested = await store.requestProjectDeletion(task, {
+        projectId: project.id,
+        now: 2_000,
+        cleanupAfter: 3_000,
+      });
+      expect(requested.isOk() && requested.value.newlyRequested).toBe(true);
+      expect(requested.isOk() && requested.value.orbs[0]?.state).toBe("deleting");
+      expect((await store.getOrbDeletion(task, orb.id))._unsafeUnwrap()?.kind).toBe("delete");
+
+      const lateOrb = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
+      const lateInsert = await store.insertOrb(task, lateOrb);
+      expect(lateInsert.isErr() && lateInsert.error.type).toBe("project_conflict");
+      const progress = await store.getProjectDeletionProgress(task, project.id);
+      expect(progress._unsafeUnwrap()).toEqual({ total: 1, remaining: 1, blocked: 0 });
+      expect(
+        (
+          await store.recordOrbDeletionError(task, {
+            orbId: orb.id,
+            message: "provider unavailable",
+            now: 2_500,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect(
+        (
+          await store.requestProjectDeletion(task, {
+            projectId: project.id,
+            now: 2_600,
+            cleanupAfter: 3_600,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect(
+        (await store.getProjectDeletionProgress(task, project.id))._unsafeUnwrap().blocked,
+      ).toBe(1);
+      const earlyFinalize = await store.finalizeProjectDeletion(task, {
+        projectId: project.id,
+        expectedStateVersion: requested._unsafeUnwrap().project.stateVersion,
+      });
+      expect(earlyFinalize.isErr() && earlyFinalize.error.type).toBe("project_conflict");
+
+      const deletingOrb = requested._unsafeUnwrap().orbs[0];
+      if (deletingOrb === undefined) return;
+      expect(
+        (
+          await store.finalizeOrbDeletion(task, {
+            orbId: orb.id,
+            expectedStateVersion: deletingOrb.stateVersion,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect(
+        (
+          await store.finalizeProjectDeletion(task, {
+            projectId: project.id,
+            expectedStateVersion: requested._unsafeUnwrap().project.stateVersion,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect((await store.getProject(task, project.id))._unsafeUnwrap()).toBeNull();
+    });
+
+    it("upgrades an in-progress archive when its project is deleted", async () => {
+      await seed();
+      const archived = await store.requestOrbArchive(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        cleanupAfter: 3_000,
+      });
+      expect(archived.isOk()).toBe(true);
+      const projectDelete = await store.requestProjectDeletion(task, {
+        projectId: project.id,
+        now: 2_500,
+        cleanupAfter: 3_500,
+      });
+      expect(projectDelete.isOk() && projectDelete.value.orbs[0]?.state).toBe("deleting");
+      const intent = await store.getOrbDeletion(task, orb.id);
+      expect(intent.isOk() && intent.value?.kind).toBe("delete");
+      expect(intent.isOk() && intent.value?.historySealedAt).toBeNull();
     });
 
     it("atomically requests and finalizes permanent deletion with history", async () => {

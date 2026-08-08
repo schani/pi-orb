@@ -2,8 +2,9 @@ import type { OrbState } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { sleepResult, withDeadline } from "./dst.ts";
 import { type ReconcileOutcome, reconcileOrbOnce } from "./lifecycle.ts";
-import { logEvent, logOrbEvent } from "./log.ts";
+import { logEvent, logOrbEvent, logProjectEvent } from "./log.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
+import { reconcileProjectDeletionOnce } from "./project-deletion.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 
 const POLLABLE_STATES: readonly OrbState[] = ["running"];
@@ -161,6 +162,51 @@ export async function reconcileLoop(
  * only pi-orb-labeled hosts, so nothing else in the project is ever touched;
  * the sweep only moves hosts toward "stopped" and never starts or deletes.
  */
+/** One sweep over durable project deletion intents. */
+export async function projectDeletionAllOnce(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+): Promise<void> {
+  const projects = await deps.store.listProjectsInState(task, "deleting");
+  if (projects.isErr()) {
+    if (deps.control.noteCondition("project-deletion-loop:list", true)) {
+      logEvent(task, "project-deletion-loop-blind", { error: projects.error.message });
+    }
+    return;
+  }
+  if (deps.control.noteCondition("project-deletion-loop:list", false)) {
+    logEvent(task, "project-deletion-loop-recovered");
+  }
+  for (const project of projects.value) {
+    const outcome = await reconcileProjectDeletionOnce(task, deps, project.id);
+    const condition = `project-deletion-retry:${project.id}`;
+    if (outcome.type === "retryable") {
+      if (deps.control.noteCondition(condition, true)) {
+        logProjectEvent(task, project.id, "deletion-retry", { message: outcome.message });
+      }
+    } else if (deps.control.noteCondition(condition, false)) {
+      logProjectEvent(task, project.id, "deletion-retry-recovered");
+    }
+  }
+}
+
+export async function projectDeletionLoop(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  stop: AbortSignal,
+): Promise<void> {
+  while (!stop.aborted) {
+    await projectDeletionAllOnce(task, deps);
+    const slept = await sleepResult(
+      task,
+      deps.constants.reconcileTickMs,
+      "project deletion tick",
+      stop,
+    );
+    if (slept.isErr()) return;
+  }
+}
+
 export async function orphanSweepOnce(task: SimulationTask, deps: ControlPlaneDeps): Promise<void> {
   const listed = await withDeadline(
     task,

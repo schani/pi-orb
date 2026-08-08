@@ -83,7 +83,12 @@ export function makeProjectRow(id: string): ProjectRow {
     id,
     name: `project-${id}`,
     repositoryUrl: "https://github.com/owner/repo",
+    state: "active",
+    stateVersion: 0,
+    deletionRequestedAt: null,
+    deletionInitialOrbCount: null,
     createdAt: 0,
+    updatedAt: 0,
   };
 }
 

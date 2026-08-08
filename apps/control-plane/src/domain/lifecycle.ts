@@ -1128,6 +1128,9 @@ export function createOrb(
     if (projectResult.value === null) {
       return err(commandError("not_found", `project ${params.projectId} not found`, false));
     }
+    if (projectResult.value.state === "deleting") {
+      return err(commandError("conflict", "project is being permanently deleted", false));
+    }
     const existing = await deps.store.getOrb(task, params.orbId);
     if (existing.isErr()) return err(commandError("unavailable", existing.error.message, true));
     if (existing.value !== null) {
@@ -1168,7 +1171,14 @@ export function createOrb(
       updatedAt: now,
     };
     const inserted = await deps.store.insertOrb(task, row);
-    if (inserted.isErr()) return err(commandError("unavailable", inserted.error.message, true));
+    if (inserted.isErr()) {
+      if (inserted.error.type === "project_conflict") {
+        return inserted.error.reason === "not_found"
+          ? err(commandError("not_found", `project ${params.projectId} not found`, false))
+          : err(commandError("conflict", "project is being permanently deleted", false));
+      }
+      return err(commandError("unavailable", inserted.error.message, true));
+    }
     logOrbEvent(task, params.orbId, "created", { project: params.projectId });
     return ok(inserted.value);
   };

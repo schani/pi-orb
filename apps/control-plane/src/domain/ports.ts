@@ -13,11 +13,12 @@ import type {
   CommitPullError,
   OrbHostProviderError,
   PointerConflict,
+  ProjectConflict,
   RuntimeClientError,
   StateConflict,
   StoreError,
 } from "./errors.ts";
-import type { OrbDeletionRow, OrbRow, ProjectRow } from "./orb.ts";
+import type { OrbDeletionRow, OrbRow, ProjectDeletionProgress, ProjectRow } from "./orb.ts";
 
 /** In-process adapter context; never serialized on the wire. */
 export interface OperationContext {
@@ -83,7 +84,27 @@ export interface CommitPullBatchParams {
 export interface ControlPlaneStore {
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError>;
   listProjects(task: SimulationTask): ResultAsync<ProjectRow[], StoreError>;
+  listProjectsInState(
+    task: SimulationTask,
+    state: "deleting",
+  ): ResultAsync<ProjectRow[], StoreError>;
   insertProject(task: SimulationTask, project: ProjectRow): ResultAsync<ProjectRow, StoreError>;
+  /** Atomically fences child creation and moves every child to permanent deletion. */
+  requestProjectDeletion(
+    task: SimulationTask,
+    params: { projectId: string; now: number; cleanupAfter: number },
+  ): ResultAsync<
+    { project: ProjectRow; orbs: OrbRow[]; newlyRequested: boolean; repaired: number },
+    StoreError | ProjectConflict
+  >;
+  getProjectDeletionProgress(
+    task: SimulationTask,
+    projectId: string,
+  ): ResultAsync<ProjectDeletionProgress, StoreError | ProjectConflict>;
+  finalizeProjectDeletion(
+    task: SimulationTask,
+    params: { projectId: string; expectedStateVersion: number },
+  ): ResultAsync<void, StoreError | ProjectConflict>;
 
   getOrb(task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError>;
   /** Bearer-token lookup for the runtime broker routes (indexed hash). */
@@ -96,7 +117,8 @@ export interface ControlPlaneStore {
     task: SimulationTask,
     states: readonly OrbState[],
   ): ResultAsync<OrbRow[], StoreError>;
-  insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError>;
+  /** Inserts only while the parent project is active, fencing create-vs-delete. */
+  insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict>;
   setOrbName(
     task: SimulationTask,
     params: { orbId: string; name: string; now: number; onlyIfNull: boolean },

@@ -3,6 +3,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type {
   CommitPullError,
+  ProjectConflict,
   ReplicationIntegrityError,
   StateConflict,
   StoreError,
@@ -76,7 +77,14 @@ function mapProjectRow(row: PgRow): ProjectRow {
     id: String(row["id"]),
     name: String(row["name"]),
     repositoryUrl: String(row["repository_url"]),
+    state: String(row["state"]) as ProjectRow["state"],
+    stateVersion: Number(row["state_version"]),
+    deletionRequestedAt:
+      row["deletion_requested_at"] == null ? null : toMs(row["deletion_requested_at"]),
+    deletionInitialOrbCount:
+      row["deletion_initial_orb_count"] == null ? null : Number(row["deletion_initial_orb_count"]),
     createdAt: toMs(row["created_at"]),
+    updatedAt: toMs(row["updated_at"]),
   };
 }
 
@@ -105,13 +113,179 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) => result.rows.map(mapProjectRow));
   }
 
+  listProjectsInState(
+    _task: SimulationTask,
+    state: "deleting",
+  ): ResultAsync<ProjectRow[], StoreError> {
+    return this.db
+      .query("SELECT * FROM projects WHERE state = $1 ORDER BY created_at", [state])
+      .map((result) => result.rows.map(mapProjectRow));
+  }
+
   insertProject(_task: SimulationTask, project: ProjectRow): ResultAsync<ProjectRow, StoreError> {
     return this.db
       .query(
-        "INSERT INTO projects (id, name, repository_url, created_at) VALUES ($1, $2, $3, $4) RETURNING *",
-        [project.id, project.name, project.repositoryUrl, new Date(project.createdAt)],
+        `INSERT INTO projects (id, name, repository_url, state, state_version,
+           deletion_requested_at, deletion_initial_orb_count, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+        [
+          project.id,
+          project.name,
+          project.repositoryUrl,
+          project.state,
+          project.stateVersion,
+          project.deletionRequestedAt === null ? null : new Date(project.deletionRequestedAt),
+          project.deletionInitialOrbCount,
+          new Date(project.createdAt),
+          new Date(project.updatedAt),
+        ],
       )
       .map((result) => mapProjectRow(result.rows[0] ?? {}));
+  }
+
+  requestProjectDeletion(
+    _task: SimulationTask,
+    params: { projectId: string; now: number; cleanupAfter: number },
+  ): ResultAsync<
+    { project: ProjectRow; orbs: OrbRow[]; newlyRequested: boolean; repaired: number },
+    StoreError | ProjectConflict
+  > {
+    return this.db.transaction<
+      { project: ProjectRow; orbs: OrbRow[]; newlyRequested: boolean; repaired: number },
+      StoreError | ProjectConflict
+    >(async (query) => {
+      const locked = await query("SELECT * FROM projects WHERE id = $1 FOR UPDATE", [
+        params.projectId,
+      ]);
+      if (locked.isErr()) return err(locked.error);
+      const current = locked.value.rows[0];
+      if (current === undefined) {
+        return err({ type: "project_conflict" as const, reason: "not_found" as const });
+      }
+      const newlyRequested = current["state"] === "active";
+      let projectRow = current;
+      if (newlyRequested) {
+        const changed = await query(
+          `UPDATE projects SET state = 'deleting', state_version = state_version + 1,
+             deletion_requested_at = $2,
+             deletion_initial_orb_count = (SELECT count(*) FROM orbs WHERE project_id = $1),
+             updated_at = $2 WHERE id = $1 RETURNING *`,
+          [params.projectId, new Date(params.now)],
+        );
+        if (changed.isErr()) return err(changed.error);
+        projectRow = changed.value.rows[0] ?? {};
+      }
+      const repairCount = await query(
+        `SELECT count(*)::int AS count FROM orbs o
+           LEFT JOIN orb_deletions d ON d.orb_id = o.id
+         WHERE o.project_id = $1
+           AND (o.state <> 'deleting' OR d.orb_id IS NULL OR d.kind <> 'delete')`,
+        [params.projectId],
+      );
+      if (repairCount.isErr()) return err(repairCount.error);
+      const transitioned = await query(
+        `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
+           state_changed_at = $2, updated_at = $2, last_error = NULL, stop_reason = NULL,
+           auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
+         WHERE project_id = $1 AND state <> 'deleting'`,
+        [params.projectId, new Date(params.now)],
+      );
+      if (transitioned.isErr()) return err(transitioned.error);
+      const intents = await query(
+        `INSERT INTO orb_deletions
+           (orb_id, host_kind, kind, requested_at, cleanup_after, last_error, updated_at)
+         SELECT id, host_kind, 'delete', $2, $3, NULL, $2 FROM orbs WHERE project_id = $1
+         ON CONFLICT (orb_id) DO UPDATE SET kind = 'delete',
+           cleanup_after = CASE WHEN orb_deletions.kind = 'delete'
+             THEN orb_deletions.cleanup_after ELSE EXCLUDED.cleanup_after END,
+           history_sealed_at = NULL, sealed_cursor = NULL, sealed_head_id = NULL,
+           last_error = CASE WHEN orb_deletions.kind = 'delete'
+             THEN orb_deletions.last_error ELSE NULL END,
+           updated_at = EXCLUDED.updated_at`,
+        [params.projectId, new Date(params.now), new Date(params.cleanupAfter)],
+      );
+      if (intents.isErr()) return err(intents.error);
+      const children = await query("SELECT * FROM orbs WHERE project_id = $1 ORDER BY created_at", [
+        params.projectId,
+      ]);
+      if (children.isErr()) return err(children.error);
+      return ok({
+        project: mapProjectRow(projectRow),
+        orbs: children.value.rows.map(mapOrbRow),
+        newlyRequested,
+        repaired: Number(repairCount.value.rows[0]?.["count"] ?? 0),
+      });
+    });
+  }
+
+  getProjectDeletionProgress(
+    _task: SimulationTask,
+    projectId: string,
+  ): ResultAsync<
+    import("../../domain/orb.ts").ProjectDeletionProgress,
+    StoreError | ProjectConflict
+  > {
+    return this.db.transaction<
+      import("../../domain/orb.ts").ProjectDeletionProgress,
+      StoreError | ProjectConflict
+    >(async (query) => {
+      const project = await query(
+        "SELECT state, deletion_initial_orb_count FROM projects WHERE id = $1",
+        [projectId],
+      );
+      if (project.isErr()) return err(project.error);
+      const row = project.value.rows[0];
+      if (row === undefined)
+        return err({ type: "project_conflict" as const, reason: "not_found" as const });
+      if (row["state"] !== "deleting")
+        return err({ type: "project_conflict" as const, reason: "concurrent_change" as const });
+      const counts = await query(
+        `SELECT count(*)::int AS remaining,
+           count(*) FILTER (WHERE d.last_error IS NOT NULL)::int AS blocked
+         FROM orbs o LEFT JOIN orb_deletions d ON d.orb_id = o.id
+         WHERE o.project_id = $1`,
+        [projectId],
+      );
+      if (counts.isErr()) return err(counts.error);
+      return ok({
+        total: Number(row["deletion_initial_orb_count"] ?? 0),
+        remaining: Number(counts.value.rows[0]?.["remaining"] ?? 0),
+        blocked: Number(counts.value.rows[0]?.["blocked"] ?? 0),
+      });
+    });
+  }
+
+  finalizeProjectDeletion(
+    _task: SimulationTask,
+    params: { projectId: string; expectedStateVersion: number },
+  ): ResultAsync<void, StoreError | ProjectConflict> {
+    return this.db.transaction<void, StoreError | ProjectConflict>(async (query) => {
+      const removed = await query(
+        `DELETE FROM projects p WHERE p.id = $1 AND p.state = 'deleting'
+           AND p.state_version = $2
+           AND NOT EXISTS (SELECT 1 FROM orbs WHERE project_id = p.id)
+         RETURNING id`,
+        [params.projectId, params.expectedStateVersion],
+      );
+      if (removed.isErr()) return err(removed.error);
+      if (removed.value.rowCount === 1) return ok(undefined);
+      const current = await query("SELECT state_version FROM projects WHERE id = $1", [
+        params.projectId,
+      ]);
+      if (current.isErr()) return err(current.error);
+      if (current.value.rows[0] === undefined) return ok(undefined);
+      const children = await query("SELECT 1 FROM orbs WHERE project_id = $1 LIMIT 1", [
+        params.projectId,
+      ]);
+      if (children.isErr()) return err(children.error);
+      return err({
+        type: "project_conflict" as const,
+        reason:
+          children.value.rowCount > 0
+            ? ("children_remain" as const)
+            : ("concurrent_change" as const),
+      });
+    });
   }
 
   getOrb(_task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError> {
@@ -144,9 +318,20 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) => result.rows.map(mapOrbRow));
   }
 
-  insertOrb(_task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError> {
-    return this.db
-      .query(
+  insertOrb(_task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict> {
+    return this.db.transaction<OrbRow, StoreError | ProjectConflict>(async (query) => {
+      // Shares the parent-row lock used by requestProjectDeletion. Whichever
+      // transaction wins decides whether this child is included or rejected.
+      const parent = await query("SELECT state FROM projects WHERE id = $1 FOR UPDATE", [
+        orb.projectId,
+      ]);
+      if (parent.isErr()) return err(parent.error);
+      const state = parent.value.rows[0]?.["state"];
+      if (state === undefined)
+        return err({ type: "project_conflict" as const, reason: "not_found" as const });
+      if (state !== "active")
+        return err({ type: "project_conflict" as const, reason: "deleting" as const });
+      const inserted = await query(
         `INSERT INTO orbs (id, project_id, name, auto_name_lease_until, auto_name_attempts,
            auto_name_next_attempt_at, state, state_version, host_kind, host_ref,
            checkout_commit, harness_session_id, harness_session_header, last_error,
@@ -177,8 +362,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           new Date(orb.createdAt),
           new Date(orb.updatedAt),
         ],
-      )
-      .map((result) => mapOrbRow(result.rows[0] ?? {}));
+      );
+      if (inserted.isErr()) return err(inserted.error);
+      return ok(mapOrbRow(inserted.value.rows[0] ?? {}));
+    });
   }
 
   setOrbName(

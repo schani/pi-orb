@@ -3,6 +3,7 @@ import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import type {
   CommitPullError,
+  ProjectConflict,
   ReplicationIntegrityError,
   StateConflict,
   StoreError,
@@ -56,6 +57,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
 
   seedOrb(orb: OrbRow): void {
     this.orbs.set(orb.id, orb);
+  }
+
+  projectSnapshot(projectId: string): ProjectRow | null {
+    return this.projects.get(projectId) ?? null;
   }
 
   orbSnapshot(orbId: string): OrbRow | null {
@@ -118,11 +123,144 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     ]);
   }
 
+  listProjectsInState(
+    task: SimulationTask,
+    state: "deleting",
+  ): ResultAsync<ProjectRow[], StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "list deleting projects", () =>
+      [...this.projects.values()].filter((project) => project.state === state),
+    );
+  }
+
   insertProject(task: SimulationTask, project: ProjectRow): ResultAsync<ProjectRow, StoreError> {
     return this.access(task, FAILPOINTS.storeWrite, "insert project", () => {
       this.projects.set(project.id, project);
       return project;
     });
+  }
+
+  requestProjectDeletion(
+    task: SimulationTask,
+    params: { projectId: string; now: number; cleanupAfter: number },
+  ): ResultAsync<
+    { project: ProjectRow; orbs: OrbRow[]; newlyRequested: boolean; repaired: number },
+    StoreError | ProjectConflict
+  > {
+    return this.access(task, FAILPOINTS.storeWrite, "request project deletion", () => {
+      const project = this.projects.get(params.projectId);
+      if (project === undefined) return { conflict: "not_found" as const };
+      const children = [...this.orbs.values()].filter((orb) => orb.projectId === params.projectId);
+      const newlyRequested = project.state === "active";
+      const repaired = children.filter((orb) => {
+        const intent = this.deletions.get(orb.id);
+        return orb.state !== "deleting" || intent === undefined || intent.kind !== "delete";
+      }).length;
+      const updatedProject: ProjectRow = newlyRequested
+        ? {
+            ...project,
+            state: "deleting",
+            stateVersion: project.stateVersion + 1,
+            deletionRequestedAt: params.now,
+            deletionInitialOrbCount: children.length,
+            updatedAt: params.now,
+          }
+        : project;
+      this.projects.set(project.id, updatedProject);
+      const updatedOrbs: OrbRow[] = [];
+      for (const orb of children) {
+        const updated: OrbRow =
+          orb.state === "deleting"
+            ? orb
+            : {
+                ...orb,
+                state: "deleting",
+                stateVersion: orb.stateVersion + 1,
+                stateChangedAt: params.now,
+                updatedAt: params.now,
+                lastError: null,
+                stopReason: null,
+                autoNameLeaseUntil: null,
+                autoNameNextAttemptAt: null,
+              };
+        this.orbs.set(orb.id, updated);
+        const existing = this.deletions.get(orb.id);
+        this.deletions.set(orb.id, {
+          orbId: orb.id,
+          hostKind: orb.hostKind,
+          kind: "delete",
+          requestedAt: existing?.requestedAt ?? params.now,
+          cleanupAfter: existing?.kind === "delete" ? existing.cleanupAfter : params.cleanupAfter,
+          historySealedAt: null,
+          sealedCursor: null,
+          sealedHeadId: null,
+          lastError: existing?.kind === "delete" ? existing.lastError : null,
+          updatedAt: params.now,
+        });
+        updatedOrbs.push(updated);
+      }
+      return {
+        conflict: null,
+        project: updatedProject,
+        orbs: updatedOrbs,
+        newlyRequested,
+        repaired,
+      };
+    }).andThen((outcome) =>
+      outcome.conflict === "not_found"
+        ? errAsync({ type: "project_conflict" as const, reason: "not_found" as const })
+        : okAsync({
+            project: outcome.project,
+            orbs: outcome.orbs,
+            newlyRequested: outcome.newlyRequested,
+            repaired: outcome.repaired,
+          }),
+    );
+  }
+
+  getProjectDeletionProgress(
+    task: SimulationTask,
+    projectId: string,
+  ): ResultAsync<import("../domain/orb.ts").ProjectDeletionProgress, StoreError | ProjectConflict> {
+    return this.access(task, FAILPOINTS.storeRead, "get project deletion progress", () => {
+      const project = this.projects.get(projectId);
+      if (project === undefined) return { conflict: "not_found" as const };
+      if (project.state !== "deleting") return { conflict: "concurrent_change" as const };
+      const children = [...this.orbs.values()].filter((orb) => orb.projectId === projectId);
+      return {
+        conflict: null,
+        progress: {
+          total: project.deletionInitialOrbCount ?? 0,
+          remaining: children.length,
+          blocked: children.filter((orb) => this.deletions.get(orb.id)?.lastError !== null).length,
+        },
+      };
+    }).andThen((outcome) =>
+      outcome.conflict !== null
+        ? errAsync({ type: "project_conflict" as const, reason: outcome.conflict })
+        : okAsync(outcome.progress),
+    );
+  }
+
+  finalizeProjectDeletion(
+    task: SimulationTask,
+    params: { projectId: string; expectedStateVersion: number },
+  ): ResultAsync<void, StoreError | ProjectConflict> {
+    return this.access(task, FAILPOINTS.storeWrite, "finalize project deletion", () => {
+      const project = this.projects.get(params.projectId);
+      if (project === undefined) return { conflict: null };
+      if ([...this.orbs.values()].some((orb) => orb.projectId === params.projectId)) {
+        return { conflict: "children_remain" as const };
+      }
+      if (project.state !== "deleting" || project.stateVersion !== params.expectedStateVersion) {
+        return { conflict: "concurrent_change" as const };
+      }
+      this.projects.delete(params.projectId);
+      return { conflict: null };
+    }).andThen((outcome) =>
+      outcome.conflict === null
+        ? okAsync(undefined)
+        : errAsync({ type: "project_conflict" as const, reason: outcome.conflict }),
+    );
   }
 
   getOrb(task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError> {
@@ -156,11 +294,18 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
-  insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError> {
+  insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict> {
     return this.access(task, FAILPOINTS.storeWrite, "insert orb", () => {
+      const project = this.projects.get(orb.projectId);
+      if (project === undefined) return { conflict: "not_found" as const };
+      if (project.state !== "active") return { conflict: "deleting" as const };
       this.orbs.set(orb.id, orb);
-      return orb;
-    });
+      return { conflict: null, orb };
+    }).andThen((outcome) =>
+      outcome.conflict !== null
+        ? errAsync({ type: "project_conflict" as const, reason: outcome.conflict })
+        : okAsync(outcome.orb),
+    );
   }
 
   setOrbName(
