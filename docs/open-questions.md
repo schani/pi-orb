@@ -27,7 +27,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 12. Choose the runtime container base-image pin and Node 24 release/update policy. (The VM host-OS half of this question dissolved: cloud hosts boot Container-Optimized OS and only run the runtime container, docs/host-provider.md.)
 13. Decide whether to adopt `.agents/setup` and a restart hook inspired by Amp.
 14. Decide how setup caching/prebuilt snapshots work after the unoptimized first slice.
-15. Decide which tools and services are installed in the prescribed base image. (Resolved for `gh`: installed in the runtime image with brokered auth, docs/credentials.md; the broader tool list remains open.)
+15. Decide which tools and services are installed in the prescribed base image. (Resolved for `gh`: installed in the runtime image with brokered auth, `docs/credentials.md`. Resolved for Python on 2026-08-08: Python 3, the `python` alias, and virtual-environment support are installed by default; global pip and a native build toolchain are not, `docs/host-provider.md`. The broader tool list remains open.)
 16. Decide if/when an Orbfile is introduced and what it is allowed to configure.
 17. Decide how services, ports, logs, browser automation, and preview URLs work. (Ports/preview URLs resolved 2026-08-05: tier-1 Tailscale port exposure, docs/ports.md — every orb joins the user's tailnet, control-plane-generated `http://pi-orb-<orbId>.<tailnet>.ts.net:<port>` URLs. Logs and browser automation remain open.)
 

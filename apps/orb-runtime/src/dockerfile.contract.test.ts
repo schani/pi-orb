@@ -11,7 +11,13 @@ const rootPackage = JSON.parse(readFileSync(join(repositoryRoot, "package.json")
 };
 const dockerfile = readFileSync(join(repositoryRoot, "apps/orb-runtime/Dockerfile"), "utf8");
 
-describe("orb runtime Dockerfile workspace contract", () => {
+describe("orb runtime Dockerfile contract", () => {
+  it("installs the prescribed Python environment", () => {
+    expect(dockerfile).toContain("python3");
+    expect(dockerfile).toContain("python3-venv");
+    expect(dockerfile).toContain("python-is-python3");
+  });
+
   it("copies every local runtime dependency's package metadata and source", () => {
     const workspacePaths = rootPackage.workspaces ?? [];
     const localPackages = new Map<string, string>();
