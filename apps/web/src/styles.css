@@ -277,17 +277,188 @@ textarea:focus {
   margin-bottom: 0.5rem;
 }
 
-.orb-list {
-  list-style: none;
-  margin: 0.5rem 0;
-  padding: 0;
-}
-
-.orb-list li {
+.project-header-actions {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.25rem 0;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.project-orb-shelves {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  gap: 28px;
+  margin: 1rem 0 0.25rem;
+}
+
+.project-orb-shelf h3 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0 0 7px;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.17em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.project-orb-shelf h3 span {
+  font-weight: 400;
+}
+
+.project-orb-archive-shelf {
+  padding: 0 16px 5px;
+  background: var(--inset);
+  border-radius: var(--r);
+}
+
+.project-orb-row {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.project-orb-archive-shelf .project-orb-row {
+  border-color: var(--rule);
+}
+
+.project-orb-identity {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+}
+
+.project-orb-link {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-orb-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-orb-state {
+  position: relative;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  outline: none;
+}
+
+.project-orb-state img {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.project-orb-state:focus-visible {
+  box-shadow: 0 0 0 3px rgb(160 62 28 / 22%);
+}
+
+.project-orb-state-tooltip {
+  position: absolute;
+  z-index: 10;
+  left: 50%;
+  bottom: calc(100% + 9px);
+  padding: 5px 8px;
+  color: var(--paper);
+  background: var(--ink);
+  border-radius: 4px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 3px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  white-space: nowrap;
+}
+
+.project-orb-state-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  border: 4px solid transparent;
+  border-top-color: var(--ink);
+  transform: translateX(-50%);
+}
+
+.project-orb-state:hover .project-orb-state-tooltip,
+.project-orb-link:focus .project-orb-state-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.project-orb-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+
+button.project-orb-action {
+  padding: 2px 0;
+  color: var(--ink-soft);
+  background: none;
+  border-width: 0 0 1px;
+  border-color: var(--rule);
+  border-radius: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+button.project-orb-action:hover:not(:disabled) {
+  background: none;
+  border-color: var(--ink-soft);
+}
+
+button.project-orb-action.danger {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+button.project-orb-action.danger:hover:not(:disabled) {
+  background: none;
+  border-color: var(--accent);
+}
+
+.project-orb-blocker {
+  max-width: 16rem;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-orb-shelf-empty {
+  min-height: 52px;
+  margin: 0;
+  padding: 16px 0;
+  color: var(--ink-faint);
+  font-family: var(--serif);
+  font-size: 12px;
+  font-style: italic;
 }
 
 .state-badge {
@@ -1069,6 +1240,20 @@ textarea:focus {
 }
 
 @media (max-width: 760px) {
+  .project-orb-shelves {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .project-orb-archive-shelf {
+    padding-inline: 0;
+  }
+
+  .project-header-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
   .orb-project-tag {
     display: none;
   }
@@ -1092,6 +1277,21 @@ textarea:focus {
   :root {
     --gutter: 26px;
     --page-pad: 12px;
+  }
+
+  .project-orb-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 10px 0;
+  }
+
+  .project-orb-identity {
+    flex-basis: calc(100% - 1px);
+  }
+
+  .project-orb-actions,
+  .project-orb-blocker {
+    margin-left: 30px;
   }
 
   .orb-header {

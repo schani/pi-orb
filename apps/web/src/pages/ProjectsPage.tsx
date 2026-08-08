@@ -15,12 +15,119 @@ import {
   projectDeletionConfirmation,
   projectDeletionProgressText,
 } from "../lib/project-deletion.ts";
+import {
+  projectOrbActions,
+  projectOrbFaviconStatus,
+  splitProjectOrbs,
+} from "../lib/project-orbs.ts";
 import { generateUuid } from "../lib/uuid.ts";
 
 type OrbListState =
   | { type: "loading" }
   | { type: "loaded"; items: OrbView[] }
   | { type: "failed"; error: ApiError };
+
+interface ProjectOrbShelvesProps {
+  items: OrbView[];
+  archivingOrb: string | null;
+  deletingOrb: string | null;
+  onArchive(orb: OrbView): Promise<void>;
+  onDelete(orb: OrbView): Promise<void>;
+}
+
+function ProjectOrbRow({
+  orb,
+  archivingOrb,
+  deletingOrb,
+  onArchive,
+  onDelete,
+}: Omit<ProjectOrbShelvesProps, "items"> & { orb: OrbView }) {
+  const actions = projectOrbActions(orb.state);
+  const favicon = projectOrbFaviconStatus(orb.state);
+  const blocker =
+    orb.state === "deleting" &&
+    orb.stateDetail?.type === "deleting_resources" &&
+    orb.stateDetail.message !== undefined
+      ? orb.stateDetail.message
+      : null;
+
+  return (
+    <div className="project-orb-row">
+      <div className="project-orb-identity">
+        <a className="project-orb-link" href={`#/orbs/${orb.id}`}>
+          <span
+            className="project-orb-state"
+            role="img"
+            aria-label={`State: ${orb.state}`}
+            title={orb.state}
+          >
+            <img src={`/favicons/${favicon}.svg`} alt="" />
+            <span className="project-orb-state-tooltip" role="tooltip">
+              {orb.state}
+            </span>
+          </span>
+          <span className="project-orb-name">
+            {orb.name ?? "untitled orb"}
+            <span className="muted mono"> · {orb.id.slice(0, 8)}</span>
+          </span>
+        </a>
+      </div>
+      {blocker !== null && <span className="project-orb-blocker">{blocker}</span>}
+      <div className="project-orb-actions">
+        {actions.archive && (
+          <button
+            type="button"
+            className="project-orb-action"
+            disabled={archivingOrb === orb.id}
+            onClick={() => void onArchive(orb)}
+          >
+            {archivingOrb === orb.id ? "archiving…" : "archive"}
+          </button>
+        )}
+        {actions.delete && (
+          <button
+            type="button"
+            className="project-orb-action danger"
+            disabled={deletingOrb === orb.id}
+            onClick={() => void onDelete(orb)}
+          >
+            {deletingOrb === orb.id ? "deleting…" : "delete"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProjectOrbShelves(props: ProjectOrbShelvesProps) {
+  const shelves = splitProjectOrbs(props.items);
+  const row = (orb: OrbView) => <ProjectOrbRow key={orb.id} orb={orb} {...props} />;
+
+  return (
+    <div className="project-orb-shelves">
+      <section className="project-orb-shelf">
+        <h3>
+          working set <span>{shelves.working.length}</span>
+        </h3>
+        {shelves.working.length === 0 ? (
+          <p className="project-orb-shelf-empty">no working orbs</p>
+        ) : (
+          shelves.working.map(row)
+        )}
+      </section>
+      <section className="project-orb-shelf project-orb-archive-shelf">
+        <h3>
+          archive shelf <span>{shelves.archive.length}</span>
+        </h3>
+        {shelves.archive.length === 0 ? (
+          <p className="project-orb-shelf-empty">no archived orbs</p>
+        ) : (
+          shelves.archive.map(row)
+        )}
+      </section>
+    </div>
+  );
+}
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
@@ -225,16 +332,25 @@ export function ProjectsPage() {
               <h2>{project.name}</h2>
               <span className="muted mono">{project.repositoryUrl}</span>
               <span className={`state-badge state-${project.state}`}>{project.state}</span>
-              <button
-                type="button"
-                className="danger"
-                disabled={project.state === "deleting" || deletingProject === project.id}
-                onClick={() => void onDeleteProject(project)}
-              >
-                {project.state === "deleting" || deletingProject === project.id
-                  ? "deleting project…"
-                  : "delete project"}
-              </button>
+              <div className="project-header-actions">
+                <button
+                  type="button"
+                  onClick={() => onCreateOrb(project.id)}
+                  disabled={creatingOrbFor === project.id || project.state === "deleting"}
+                >
+                  {creatingOrbFor === project.id ? "creating…" : "new orb"}
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={project.state === "deleting" || deletingProject === project.id}
+                  onClick={() => void onDeleteProject(project)}
+                >
+                  {project.state === "deleting" || deletingProject === project.id
+                    ? "deleting project…"
+                    : "delete project"}
+                </button>
+              </div>
             </div>
             {project.deletionProgress !== undefined && (
               <div
@@ -249,54 +365,18 @@ export function ProjectsPage() {
                 failed to load orbs: {describeApiError(orbList.error)}
               </div>
             )}
-            {orbList.type === "loaded" && (
-              <ul className="orb-list">
-                {orbList.items.length === 0 && <li className="muted">no orbs</li>}
-                {orbList.items.map((orb) => (
-                  <li key={orb.id}>
-                    <a href={`#/orbs/${orb.id}`}>
-                      {orb.name ?? "untitled orb"}
-                      <span className="muted mono"> · {orb.id.slice(0, 8)}</span>
-                    </a>
-                    <span className={`state-badge state-${orb.state}`}>{orb.state}</span>
-                    <button
-                      type="button"
-                      disabled={
-                        orb.state === "deleting" ||
-                        orb.state === "archiving" ||
-                        orb.state === "archived" ||
-                        archivingOrb === orb.id
-                      }
-                      onClick={() => void onArchiveOrb(orb)}
-                    >
-                      {orb.state === "archiving" || archivingOrb === orb.id
-                        ? "archiving…"
-                        : "archive"}
-                    </button>
-                    {orb.state === "deleting" &&
-                      orb.stateDetail?.type === "deleting_resources" &&
-                      orb.stateDetail.message !== undefined && (
-                        <span className="banner banner-error">{orb.stateDetail.message}</span>
-                      )}
-                    <button
-                      type="button"
-                      className="danger"
-                      disabled={orb.state === "deleting" || deletingOrb === orb.id}
-                      onClick={() => void onDeleteOrb(orb)}
-                    >
-                      {orb.state === "deleting" || deletingOrb === orb.id ? "deleting…" : "delete"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <button
-              type="button"
-              onClick={() => onCreateOrb(project.id)}
-              disabled={creatingOrbFor === project.id || project.state === "deleting"}
-            >
-              {creatingOrbFor === project.id ? "creating…" : "new orb"}
-            </button>
+            {orbList.type === "loaded" &&
+              (orbList.items.length === 0 ? (
+                <p className="muted">no orbs</p>
+              ) : (
+                <ProjectOrbShelves
+                  items={orbList.items}
+                  archivingOrb={archivingOrb}
+                  deletingOrb={deletingOrb}
+                  onArchive={onArchiveOrb}
+                  onDelete={onDeleteOrb}
+                />
+              ))}
             {orbCreateError !== null && orbCreateError.projectId === project.id && (
               <div className="banner banner-error">{orbCreateError.message}</div>
             )}

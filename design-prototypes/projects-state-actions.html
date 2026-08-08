@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pi-orb · project list directions</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f8f3e9;
+      --paper-2: #f1eadb;
+      --inset: #ebe1cd;
+      --ink: #221c12;
+      --ink-soft: #5f5544;
+      --ink-faint: #8a7e68;
+      --rule: #ddd2bc;
+      --rule-strong: #cbbda2;
+      --accent: #a03e1c;
+      --accent-soft: #f3e2d6;
+      --serif: Charter, "Bitstream Charter", "Iowan Old Style", Georgia, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 14px/1.5 var(--sans);
+    }
+    a { color: var(--accent); }
+    button { font: inherit; }
+    .prototype-header {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      min-height: 58px;
+      padding: 10px clamp(16px, 4vw, 58px);
+      background: rgb(248 243 233 / 94%);
+      border-bottom: 1px solid var(--rule);
+      backdrop-filter: blur(12px);
+    }
+    .brand { font: 700 17px var(--mono); letter-spacing: -.04em; }
+    .prototype-header nav { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+    .prototype-header nav a {
+      min-width: 28px;
+      padding: 3px 9px;
+      color: var(--ink-soft);
+      border: 1px solid var(--rule);
+      border-radius: 999px;
+      text-align: center;
+      text-decoration: none;
+    }
+    .prototype-header nav a:hover { color: var(--accent); border-color: var(--accent); }
+    .intro, .direction { width: min(1180px, calc(100% - 32px)); margin-inline: auto; }
+    .intro { padding: 54px 0 30px; }
+    .eyebrow {
+      color: var(--accent);
+      font: 700 10px var(--mono);
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    h1 { max-width: 800px; margin: 8px 0 12px; font: 500 clamp(32px, 5vw, 58px)/1.05 var(--serif); }
+    .intro p { max-width: 710px; margin: 0; color: var(--ink-soft); font-size: 16px; }
+    .direction { padding: 44px 0 62px; border-top: 1px solid var(--rule); scroll-margin-top: 58px; }
+    .direction-heading { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 14px; margin-bottom: 20px; }
+    .number { color: var(--accent); font: 500 28px var(--serif); }
+    h2 { margin: 0; font: 600 25px var(--serif); }
+    .rationale { max-width: 760px; margin: 3px 0 0; color: var(--ink-faint); }
+    .canvas { overflow: hidden; background: var(--paper-2); border: 1px solid var(--rule); border-radius: 14px; box-shadow: 0 15px 45px rgb(83 61 24 / 6%); }
+    .project-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px 20px; }
+    .project-name { font: 700 18px var(--serif); font-variant-caps: small-caps; letter-spacing: .08em; }
+    .repo { color: var(--ink-faint); font-family: var(--mono); }
+    .new-orb, .action {
+      color: var(--ink-soft);
+      background: transparent;
+      border: 1px solid var(--ink-faint);
+      border-radius: 6px;
+      cursor: pointer;
+      font: 700 11px var(--serif);
+      font-variant-caps: small-caps;
+      letter-spacing: .08em;
+    }
+    .new-orb { padding: 7px 13px; }
+    .action { padding: 5px 10px; }
+    .action:hover, .new-orb:hover { background: var(--inset); }
+    .action.delete { color: var(--accent); border-color: var(--accent); }
+    .action.delete:hover { background: var(--accent-soft); }
+    .name-link { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    .orb-id { color: var(--ink-faint); font-family: var(--mono); font-size: 12px; }
+    .identity { min-width: 0; display: flex; align-items: center; gap: 10px; }
+    .identity-text { min-width: 0; }
+    .state {
+      position: relative;
+      flex: 0 0 auto;
+      width: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 50%;
+      outline: none;
+    }
+    .state img { display: block; width: 20px; height: 20px; }
+    .state:focus-visible { box-shadow: 0 0 0 3px rgb(160 62 28 / 22%); }
+    .tooltip {
+      position: absolute;
+      z-index: 10;
+      left: 50%;
+      bottom: calc(100% + 9px);
+      padding: 5px 8px;
+      color: var(--paper);
+      background: var(--ink);
+      border-radius: 4px;
+      font: 600 11px var(--sans);
+      letter-spacing: .02em;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 3px);
+      transition: opacity 120ms, transform 120ms;
+      white-space: nowrap;
+    }
+    .tooltip::after { content: ""; position: absolute; top: 100%; left: 50%; border: 4px solid transparent; border-top-color: var(--ink); transform: translateX(-50%); }
+    .state:hover .tooltip, .state:focus .tooltip { opacity: 1; transform: translate(-50%, 0); }
+    .processing-note { color: var(--ink-faint); font: italic 12px var(--serif); }
+
+    /* 01 — manuscript */
+    .manuscript { padding: 26px 30px 24px; }
+    .manuscript .project-top { margin-bottom: 15px; }
+    .manuscript .orb-row { display: flex; align-items: center; gap: 12px; min-height: 48px; border-top: 1px solid var(--rule); }
+    .manuscript .identity { flex: 1; }
+    .manuscript .actions { display: flex; gap: 8px; }
+    .manuscript .new-orb { margin-top: 15px; }
+
+    /* 02 — ledger */
+    .ledger .project-top { padding: 20px 24px; border-bottom: 2px solid var(--ink-soft); }
+    .ledger .repo { margin-right: auto; }
+    .ledger-head, .ledger .orb-row { display: grid; grid-template-columns: minmax(260px, 1fr) 105px 178px; align-items: center; gap: 12px; padding-inline: 24px; }
+    .ledger-head { min-height: 34px; color: var(--ink-faint); background: var(--inset); font: 700 9px var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+    .ledger .orb-row { min-height: 52px; border-top: 1px solid var(--rule); }
+    .ledger .actions { display: flex; justify-content: flex-end; gap: 14px; }
+    .text-action { padding: 2px 0; color: var(--ink-soft); background: none; border: 0; border-bottom: 1px solid var(--rule-strong); cursor: pointer; font: 600 11px var(--serif); }
+    .text-action.delete { color: var(--accent); border-color: #d3a18f; }
+
+    /* 03 — cards */
+    .cards { padding: 24px; }
+    .cards .project-top { margin-bottom: 20px; }
+    .cards .repo { margin-right: auto; }
+    .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .orb-card { min-height: 112px; display: flex; flex-direction: column; padding: 16px; background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; }
+    .orb-card .identity { align-items: flex-start; }
+    .orb-card .name-link { font: 600 16px var(--serif); }
+    .orb-card .orb-id { display: block; margin-top: 4px; }
+    .orb-card .actions { display: flex; gap: 7px; margin: auto 0 0 30px; padding-top: 13px; }
+    .orb-card.processing { background: transparent; border-style: dashed; }
+
+    /* 04 — focus reveal */
+    .focus-list { padding: 20px 24px 24px; }
+    .focus-list .project-top { margin-bottom: 10px; }
+    .focus-list .repo { margin-right: auto; }
+    .focus-list .orb-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 12px; border-top: 1px solid var(--rule); border-radius: 5px; }
+    .focus-list .orb-row:hover, .focus-list .orb-row:focus-within { background: var(--paper); }
+    .focus-list .identity { flex: 1; }
+    .focus-list .actions { display: flex; gap: 8px; opacity: .12; transition: opacity 120ms; }
+    .focus-list .orb-row:hover .actions, .focus-list .orb-row:focus-within .actions { opacity: 1; }
+    .focus-list .action { border-color: transparent; }
+    .focus-list .action:hover { border-color: var(--rule-strong); }
+    .focus-list .action.delete { border-color: transparent; }
+    .focus-list .action.delete:hover { border-color: var(--accent); }
+
+    /* 05 — shelves */
+    .shelves { padding: 22px 24px 26px; }
+    .shelves .project-top { margin-bottom: 22px; }
+    .shelves .repo { margin-right: auto; }
+    .shelf-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, .8fr); gap: 28px; }
+    .shelf-title { margin: 0 0 5px; padding-bottom: 7px; color: var(--ink-faint); border-bottom: 1px solid var(--rule-strong); font: 700 10px var(--mono); letter-spacing: .17em; text-transform: uppercase; }
+    .shelf-title span { float: right; font-weight: 400; }
+    .shelves .orb-row { display: flex; align-items: center; gap: 10px; min-height: 52px; border-bottom: 1px solid var(--rule); }
+    .shelves .identity { flex: 1; }
+    .shelves .actions { display: flex; gap: 7px; }
+    .shelves .archive-shelf { padding: 13px 16px 5px; background: var(--inset); border-radius: 7px; }
+    .shelves .archive-shelf .orb-row { border-color: var(--rule-strong); }
+
+    .footnote { margin-top: 18px; color: var(--ink-faint); font: 12px var(--mono); }
+    @media (max-width: 720px) {
+      .prototype-header { gap: 10px; }
+      .prototype-header .eyebrow { display: none; }
+      .direction-heading { grid-template-columns: 34px 1fr; }
+      .manuscript { padding-inline: 16px; }
+      .manuscript .orb-row { align-items: flex-start; padding-block: 10px; }
+      .manuscript .actions { flex-direction: column; }
+      .ledger-head { display: none; }
+      .ledger .orb-row { grid-template-columns: 1fr auto; padding-block: 10px; }
+      .ledger .orb-id { display: none; }
+      .card-grid, .shelf-layout { grid-template-columns: 1fr; }
+      .focus-list .actions { opacity: 1; }
+      .focus-list .orb-id { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="prototype-header">
+    <span class="brand">pi-orb</span>
+    <span class="eyebrow">project list study</span>
+    <nav aria-label="Design options">
+      <a href="#one">1</a><a href="#two">2</a><a href="#three">3</a><a href="#four">4</a><a href="#five">5</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="intro">
+      <span class="eyebrow">Five directions · hover any state mark</span>
+      <h1>State in the mark.<br>Only actions that matter.</h1>
+      <p>Every option replaces the state bubble with the real pi-orb favicon immediately to the left of the orb name. Hover or keyboard-focus a mark to see the full lifecycle state. Archived orbs offer only delete; deleting orbs offer no action.</p>
+    </section>
+
+    <section class="direction" id="one">
+      <div class="direction-heading"><span class="number">01</span><div><h2>Quiet manuscript</h2><p class="rationale">The smallest change to the current view. Familiar flowing rows, with the icon carrying status and buttons kept explicit.</p></div></div>
+      <div class="canvas manuscript">
+        <div class="project-top"><span class="project-name">cloud-smoke</span><span class="repo">https://github.com/schani/pi-orb</span></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Running" aria-label="State: Running"><img src="../apps/web/public/favicons/running.svg" alt=""><span class="tooltip">Running</span></span><div class="identity-text"><a class="name-link" href="#">Status in favicon</a> <span class="orb-id">· dfe1cd11</span></div></div><div class="actions"><button class="action">archive</button><button class="action delete">delete</button></div></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Stopped" aria-label="State: Stopped"><img src="../apps/web/public/favicons/stopped.svg" alt=""><span class="tooltip">Stopped</span></span><div><a class="name-link" href="#">Deploy via GitHub Actions</a> <span class="orb-id">· 2bbe9740</span></div></div><div class="actions"><button class="action">archive</button><button class="action delete">delete</button></div></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Archiving" aria-label="State: Archiving"><img src="../apps/web/public/favicons/transitional.svg" alt=""><span class="tooltip">Archiving</span></span><div><a class="name-link" href="#">Project Overview Inquiry</a> <span class="orb-id">· 6c61b026</span></div></div><div class="actions"><button class="action delete">delete</button></div></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Archived" aria-label="State: Archived"><img src="../apps/web/public/favicons/stopped.svg" alt=""><span class="tooltip">Archived</span></span><div><a class="name-link" href="#">Plan Orb Archiving Functionality</a> <span class="orb-id">· 583d611a</span></div></div><div class="actions"><button class="action delete">delete</button></div></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Deleting" aria-label="State: Deleting"><img src="../apps/web/public/favicons/transitional.svg" alt=""><span class="tooltip">Deleting</span></span><div><a class="name-link" href="#">Delete orb</a> <span class="orb-id">· acaa9bc5</span></div></div><span class="processing-note">cleanup underway</span></div>
+        <button class="new-orb">new orb</button>
+      </div>
+    </section>
+
+    <section class="direction" id="two">
+      <div class="direction-heading"><span class="number">02</span><div><h2>Ruled ledger</h2><p class="rationale">A scan-friendly table without looking like enterprise software. IDs line up, actions become quiet text links, and state remains attached to identity.</p></div></div>
+      <div class="canvas ledger">
+        <div class="project-top"><span class="project-name">cloud-smoke</span><span class="repo">https://github.com/schani/pi-orb</span><button class="new-orb">new orb</button></div>
+        <div class="ledger-head"><span>Orb</span><span>Short ID</span><span style="text-align:right">Available actions</span></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Running" aria-label="State: Running"><img src="../apps/web/public/favicons/running.svg" alt=""><span class="tooltip">Running</span></span><a class="name-link" href="#">Status in favicon</a></div><span class="orb-id">dfe1cd11</span><div class="actions"><button class="text-action">archive</button><button class="text-action delete">delete</button></div></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Failed" aria-label="State: Failed"><img src="../apps/web/public/favicons/failed.svg" alt=""><span class="tooltip">Failed</span></span><a class="name-link" href="#">Process host provider</a></div><span class="orb-id">35a8ed12</span><div class="actions"><button class="text-action">archive</button><button class="text-action delete">delete</button></div></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Archived" aria-label="State: Archived"><img src="../apps/web/public/favicons/stopped.svg" alt=""><span class="tooltip">Archived</span></span><a class="name-link" href="#">Names for orbs</a></div><span class="orb-id">7ecfd0e0</span><div class="actions"><button class="text-action delete">delete</button></div></div>
+        <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Deleting" aria-label="State: Deleting"><img src="../apps/web/public/favicons/transitional.svg" alt=""><span class="tooltip">Deleting</span></span><a class="name-link" href="#">Delete orb</a></div><span class="orb-id">acaa9bc5</span><div class="actions"><span class="processing-note">cleanup underway</span></div></div>
+      </div>
+    </section>
+
+    <section class="direction" id="three">
+      <div class="direction-heading"><span class="number">03</span><div><h2>Orb index cards</h2><p class="rationale">A more substantial change for projects with fewer orbs. Each orb gets a stable hit area and its valid actions occupy a predictable footer.</p></div></div>
+      <div class="canvas cards">
+        <div class="project-top"><span class="project-name">cloud-smoke</span><span class="repo">https://github.com/schani/pi-orb</span><button class="new-orb">new orb</button></div>
+        <div class="card-grid">
+          <article class="orb-card"><div class="identity"><span class="state" tabindex="0" title="Running" aria-label="State: Running"><img src="../apps/web/public/favicons/running.svg" alt=""><span class="tooltip">Running</span></span><div><a class="name-link" href="#">Status in favicon</a><span class="orb-id">dfe1cd11</span></div></div><div class="actions"><button class="action">archive</button><button class="action delete">delete</button></div></article>
+          <article class="orb-card"><div class="identity"><span class="state" tabindex="0" title="Stopped" aria-label="State: Stopped"><img src="../apps/web/public/favicons/stopped.svg" alt=""><span class="tooltip">Stopped</span></span><div><a class="name-link" href="#">Make message always submittable</a><span class="orb-id">c17bbe5a</span></div></div><div class="actions"><button class="action">archive</button><button class="action delete">delete</button></div></article>
+          <article class="orb-card processing"><div class="identity"><span class="state" tabindex="0" title="Archiving" aria-label="State: Archiving"><img src="../apps/web/public/favicons/transitional.svg" alt=""><span class="tooltip">Archiving</span></span><div><a class="name-link" href="#">Project Overview Inquiry</a><span class="orb-id">6c61b026</span></div></div><div class="actions"><button class="action delete">delete</button></div></article>
+          <article class="orb-card"><div class="identity"><span class="state" tabindex="0" title="Archived" aria-label="State: Archived"><img src="../apps/web/public/favicons/stopped.svg" alt=""><span class="tooltip">Archived</span></span><div><a class="name-link" href="#">Plan Orb Archiving Functionality</a><span class="orb-id">583d611a</span></div></div><div class="actions"><button class="action delete">delete</button></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="direction" id="four">
+      <div class="direction-heading"><span class="number">04</span><div><h2>Focus reveal</h2><p class="rationale">The calmest default view. Valid actions appear when a row is hovered or keyboard-focused; touch layouts keep them visible.</p></div></div>
+      <div class="canvas focus-list">
+        <div class="project-top"><span class="project-name">cloud-smoke</span><span class="repo">https://github.com/schani/pi-orb</span><button class="new-orb">new orb</button></div>
+        <div class="orb-row" tabindex="-1"><div class="identity"><span class="state" tabindex="0" title="Running" aria-label="State: Running"><img src="../apps/web/public/favicons/running.svg" alt=""><span class="tooltip">Running</span></span><div><a class="name-link" href="#">Status in favicon</a> <span class="orb-id">· dfe1cd11</span></div></div><div class="actions"><button class="action">archive</button><button class="action delete">delete</button></div></div>
+        <div class="orb-row" tabindex="-1"><div class="identity"><span class="state" tabindex="0" title="Starting" aria-label="State: Starting"><img src="../apps/web/public/favicons/transitional.svg" alt=""><span class="tooltip">Starting</span></span><div><a class="name-link" href="#">Deploy via GitHub Actions</a> <span class="orb-id">· 2bbe9740</span></div></div><div class="actions"><button class="action">archive</button><button class="action delete">delete</button></div></div>
+        <div class="orb-row" tabindex="-1"><div class="identity"><span class="state" tabindex="0" title="Archived" aria-label="State: Archived"><img src="../apps/web/public/favicons/stopped.svg" alt=""><span class="tooltip">Archived</span></span><div><a class="name-link" href="#">Plan Orb Archiving Functionality</a> <span class="orb-id">· 583d611a</span></div></div><div class="actions"><button class="action delete">delete</button></div></div>
+        <div class="orb-row" tabindex="-1"><div class="identity"><span class="state" tabindex="0" title="Deleting" aria-label="State: Deleting"><img src="../apps/web/public/favicons/transitional.svg" alt=""><span class="tooltip">Deleting</span></span><div><a class="name-link" href="#">Delete orb</a> <span class="orb-id">· acaa9bc5</span></div></div><span class="processing-note">cleanup underway</span></div>
+      </div>
+    </section>
+
+    <section class="direction" id="five">
+      <div class="direction-heading"><span class="number">05</span><div><h2>Working set + archive shelf</h2><p class="rationale">Separates active work from irreversible lifecycle states. Useful when archived orbs accumulate, while preserving the same project panel.</p></div></div>
+      <div class="canvas shelves">
+        <div class="project-top"><span class="project-name">cloud-smoke</span><span class="repo">https://github.com/schani/pi-orb</span><button class="new-orb">new orb</button></div>
+        <div class="shelf-layout">
+          <div><h3 class="shelf-title">Working set <span>3</span></h3>
+            <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Running" aria-label="State: Running"><img src="../apps/web/public/favicons/running.svg" alt=""><span class="tooltip">Running</span></span><div><a class="name-link" href="#">Status in favicon</a> <span class="orb-id">· dfe1cd11</span></div></div><div class="actions"><button class="text-action">archive</button><button class="text-action delete">delete</button></div></div>
+            <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Stopped" aria-label="State: Stopped"><img src="../apps/web/public/favicons/stopped.svg" alt=""><span class="tooltip">Stopped</span></span><div><a class="name-link" href="#">Notifications</a> <span class="orb-id">· 00e2edb4</span></div></div><div class="actions"><button class="text-action">archive</button><button class="text-action delete">delete</button></div></div>
+            <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Failed" aria-label="State: Failed"><img src="../apps/web/public/favicons/failed.svg" alt=""><span class="tooltip">Failed</span></span><div><a class="name-link" href="#">Process host provider</a> <span class="orb-id">· 35a8ed12</span></div></div><div class="actions"><button class="text-action">archive</button><button class="text-action delete">delete</button></div></div>
+          </div>
+          <div class="archive-shelf"><h3 class="shelf-title">Archive shelf <span>3</span></h3>
+            <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Archiving" aria-label="State: Archiving"><img src="../apps/web/public/favicons/transitional.svg" alt=""><span class="tooltip">Archiving</span></span><a class="name-link" href="#">Project Overview Inquiry</a></div><button class="text-action delete">delete</button></div>
+            <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Archived" aria-label="State: Archived"><img src="../apps/web/public/favicons/stopped.svg" alt=""><span class="tooltip">Archived</span></span><a class="name-link" href="#">Plan Orb Archiving</a></div><button class="text-action delete">delete</button></div>
+            <div class="orb-row"><div class="identity"><span class="state" tabindex="0" title="Deleting" aria-label="State: Deleting"><img src="../apps/web/public/favicons/transitional.svg" alt=""><span class="tooltip">Deleting</span></span><a class="name-link" href="#">Delete orb</a></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="footnote">All examples use the shipping favicon SVGs. “Archived” intentionally uses the stopped favicon glyph, matching the current favicon status mapping.</p>
+    </section>
+  </main>
+</body>
+</html>

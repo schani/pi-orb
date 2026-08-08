@@ -19,6 +19,7 @@ import { WebSocket, WebSocketServer } from "ws";
 const PROJECT_ID = "frontend-fixture-project";
 const ORB_ID = "frontend-fixture-orb";
 const AUTH_ORB_ID = "frontend-auth-copy-test";
+const ARCHIVED_ORB_ID = "frontend-archived-orb";
 const NEW_ORB_STARTUP_DELAY_MS = 10_000;
 const now = () => new Date().toISOString();
 
@@ -67,6 +68,17 @@ function initialState(): MockState {
     createdAt,
     updatedAt: createdAt,
   };
+  const archivedOrb: OrbView = {
+    id: ARCHIVED_ORB_ID,
+    projectId: PROJECT_ID,
+    name: "Finished design exploration",
+    state: "archived",
+    stateVersion: 2,
+    archivedAt: createdAt,
+    stateChangedAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  };
   const welcomeId = randomUUID();
   const records: HistoryRecord[] = [
     {
@@ -89,10 +101,12 @@ function initialState(): MockState {
     orbs: new Map([
       [orb.id, orb],
       [authOrb.id, authOrb],
+      [archivedOrb.id, archivedOrb],
     ]),
     histories: new Map([
       [orb.id, records],
       [authOrb.id, []],
+      [archivedOrb.id, []],
     ]),
     startupTimers: new Map(),
   };
