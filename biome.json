@@ -16,6 +16,7 @@
   },
   "linter": {
     "enabled": true,
+    "includes": ["**", "!design-prototypes/**"],
     "rules": {
       "preset": "recommended",
       "complexity": {
