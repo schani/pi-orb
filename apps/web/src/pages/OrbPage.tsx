@@ -23,8 +23,16 @@ import {
   updateOrb,
 } from "../lib/api.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
+import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { isPinnedToBottom } from "../lib/scroll-pin.ts";
+import {
+  type BrowserNotificationPermission,
+  describeTurnNotificationResult,
+  notificationPermission,
+  requestNotificationPermission,
+  showTurnNotification,
+} from "../lib/turn-notifications.ts";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -138,6 +146,9 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       });
       return { ...state, tools };
     }
+    case "turn_notification":
+      // Notification display is a browser side effect handled before reduction.
+      return state;
     case "operation_finished":
       // Complete records for the operation have already arrived as
       // history.record frames, so transient live state can be dropped. The
@@ -314,8 +325,34 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [orb, setOrb] = useState<OrbView | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);
+  const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
+  const [notifications, setNotifications] = useState<BrowserNotificationPermission>(() =>
+    notificationPermission(),
+  );
+
+  // Ask as soon as an orb page opens. The header button remains as a fallback for browsers that
+  // require a user gesture or suppress the first prompt; denied permission still requires the
+  // user to change browser site settings.
+  useEffect(() => {
+    if (notifications !== "default") return;
+    let cancelled = false;
+    void requestNotificationPermission().then((permission) => {
+      if (!cancelled) setNotifications(permission);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [notifications]);
+
+  const faviconStatus = deriveOrbFaviconStatus(
+    orb?.state ?? null,
+    state.connection,
+    state.activity,
+  );
+  useEffect(() => setOrbFavicon(faviconStatus), [faviconStatus]);
+  useEffect(() => () => setOrbFavicon("neutral"), []);
 
   // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {
@@ -341,6 +378,10 @@ export function OrbPage({ orbId }: { orbId: string }) {
       window.clearInterval(timer);
     };
   }, [orbId]);
+
+  useEffect(() => {
+    orbNameRef.current = orb?.name ?? null;
+  }, [orb?.name]);
 
   // Database-first history load (docs/history-replication.md).
   useEffect(() => {
@@ -392,11 +433,35 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const shouldConnect = orb?.state === "running" && state.historyLoaded;
   useEffect(() => {
     if (!shouldConnect) return;
+    let active = true;
     const isVisible = () => document.visibilityState === "visible";
     const connection = openLiveConnection({
       orbId,
       getAfterRecordId: () => afterRecordIdRef.current,
-      onFrame: (frame) => dispatch({ type: "frame", frame }),
+      onFrame: (frame) => {
+        if (frame.type === "runtime.event" && frame.event.type === "turn_notification") {
+          const event = frame.event;
+          // Auto-naming runs concurrently with the first turn. Refresh once at notification time
+          // so a just-committed display name wins even if the ordinary 2s orb poll has not seen it.
+          void getOrb(orbId).then((latest) => {
+            if (!active) return;
+            const orbName = latest.isOk() ? (latest.value.name ?? null) : orbNameRef.current;
+            if (latest.isOk()) {
+              setOrb(latest.value);
+              orbNameRef.current = orbName;
+            }
+            const result = showTurnNotification({
+              orbId,
+              orbName,
+              operationId: event.operationId,
+              summary: event.summary,
+            });
+            console.info("turn notification", { operationId: event.operationId, result });
+            dispatch({ type: "notice", message: describeTurnNotificationResult(result) });
+          });
+        }
+        dispatch({ type: "frame", frame });
+      },
       onStatus: (status) => dispatch({ type: "connection_status", status }),
       onRequestLost: (requestId) => dispatch({ type: "request_lost", requestId }),
       getVisible: isVisible,
@@ -406,6 +471,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
     document.addEventListener("visibilitychange", onVisibilityChange);
     liveRef.current = connection;
     return () => {
+      active = false;
       document.removeEventListener("visibilitychange", onVisibilityChange);
       liveRef.current = null;
       connection.dispose();
@@ -622,6 +688,28 @@ export function OrbPage({ orbId }: { orbId: string }) {
           )}
         </span>
         <div className="orb-header-actions">
+          <button
+            type="button"
+            title={
+              notifications === "unsupported"
+                ? "Notifications require a secure browser context (HTTPS or localhost)"
+                : notifications === "denied"
+                  ? "Notifications are blocked in browser settings"
+                  : notifications === "granted"
+                    ? "Desktop notifications are enabled"
+                    : "Enable a desktop notification whenever an agent turn finishes"
+            }
+            disabled={notifications !== "default"}
+            onClick={() => void requestNotificationPermission().then(setNotifications)}
+          >
+            {notifications === "unsupported"
+              ? "notify unavailable"
+              : notifications === "denied"
+                ? "notify blocked"
+                : notifications === "granted"
+                  ? "notifications on"
+                  : "enable notifications"}
+          </button>
           <button type="button" onClick={() => runLifecycle(startOrb)} disabled={!canStart}>
             start
           </button>

@@ -33,6 +33,7 @@ apps/
 
 packages/
   protocol/             # TypeBox schemas and inferred wire/history types
+  luna/                 # Shared Luna model/request/response adapter policy
 
 infra/
   opentofu/             # added when the cloud slice begins
@@ -42,7 +43,7 @@ package.json
 tsconfig.base.json
 ```
 
-Only `protocol` is a shared package initially because it has three real consumers. Keep `OrbHostProvider`, repositories, Pi integration, fakes, and tests inside the application that owns them. Extract `domain`, adapters, providers, or test-support packages only when another application genuinely needs them.
+`protocol` is shared because it has three real consumers. `luna` was extracted only after both the control plane's orb auto-naming and the runtime's turn notifications needed the same model selection, no-tool/minimal-reasoning options, response parsing, and typed provider-error mapping (decided 2026-08-07); prompts, credentials, scheduling, and product-specific output validation remain in their owning applications. Keep `OrbHostProvider`, repositories, broader Pi integration, fakes, and tests inside the application that owns them. Extract other domain, adapter, provider, or test-support packages only when another application genuinely needs them.
 
 The web app depends on `protocol`, not control-plane implementation code. Domain directories contain no Fastify, React, PostgreSQL, Docker, or Pi imports. Avoid generic `common` or `utils` packages.
 

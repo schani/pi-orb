@@ -359,6 +359,22 @@ function completeEcho(
       event: { type: "status", activity: "idle" },
     }),
   );
+  // Luna is asynchronous in production; a short delay keeps the fixture representative.
+  setTimeout(() => {
+    send(
+      session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: {
+          type: "turn_notification",
+          operationId,
+          summary: "The agent completed the requested frontend fixture work.",
+        },
+      }),
+    );
+  }, 100);
   session.operation = null;
 }
 

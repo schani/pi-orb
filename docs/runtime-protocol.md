@@ -169,7 +169,8 @@ interface RuntimeEventFrame {
     | OperationStartedEvent
     | OutputPatchEvent
     | ToolStateEvent
-    | OperationFinishedEvent;
+    | OperationFinishedEvent
+    | TurnNotificationEvent;
 }
 
 interface OutputPatchEvent {
@@ -194,6 +195,8 @@ interface ToolStateEvent {
 ```
 
 Complete records use `history.record` both during synchronization and live operation. They improve UI responsiveness, but the control plane ignores them for persistence. A successful `operation_finished` event is sent only after all complete history records caused by that operation have been emitted.
+
+Agent turns may later emit a live-only `turn_notification { operationId, summary }` runtime event. The Luna summary starts only after `operation_finished` and idle status have been broadcast, so inference never delays completion and failure can only be error-logged. This event is presentation data: it is not a Pi history record, is not replicated or replayed during synchronization, and is simply lost when no browser is connected. Shell operations do not produce it (decided 2026-08-06).
 
 No application-level ping frame is needed. The runtime and proxy use WebSocket protocol ping/pong for dead-peer detection; browsers respond to protocol pings automatically. Runtime status/health remains ordinary state, not a ping substitute.
 

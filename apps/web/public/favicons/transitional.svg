@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>pi-orb transitioning</title>
+  <circle cx="16" cy="16" r="12" fill="#f8f3e9" stroke="#8a6a1f" stroke-width="4" stroke-dasharray="10 5"/>
+  <path d="M12 9h8v3l-2.5 4 2.5 4v3h-8v-3l2.5-4-2.5-4z" fill="#8a6a1f"/>
+</svg>
