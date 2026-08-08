@@ -31,7 +31,7 @@ There is no standalone frontend auth API or auth-state polling. OAuth is a backe
 5. When login succeeds, Pi persists the credential and the backend wakes every orb blocked in `creating`/`starting`, resuming host lifecycle work automatically.
 6. If login expires or fails, waiting orbs move to `failed` with a typed non-secret error. A later start request may initiate a new flow.
 
-Only one global login attempt may run at once, and simultaneous blocked orbs share its challenge. Pending attempt/challenge state is in memory; each orb's `creating`/`starting` intent is durable in PostgreSQL. After a control-plane restart, the reconciler rechecks auth for those states and starts a fresh device flow if needed. Every Pi/OAuth rejection or exception is caught at this adapter boundary and converted to a typed `Result` error.
+Only one global login attempt may run at once, and simultaneous blocked orbs share its challenge. Since per-orb reconciliation became concurrent on 2026-08-08 (`docs/lifecycle.md`), a simulation-safe `SerializedAuthGate` singleflight wraps the complete Codex→GitHub gate chain: concurrent orb workers share one complete resolution, so they cannot both observe an empty in-memory flow, create competing ceremonies, or let one queued caller replace a flow that another just reported failed. Pending attempt/challenge state is in memory; each orb's `creating`/`starting` intent is durable in PostgreSQL. After a control-plane restart, the reconciler rechecks auth for those states and starts a fresh device flow if needed. Every Pi/OAuth rejection or exception is caught at this adapter boundary and converted to a typed `Result` error.
 
 ### Storage and runtime access
 

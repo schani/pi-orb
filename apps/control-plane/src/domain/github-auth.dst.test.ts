@@ -10,7 +10,7 @@ import {
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { FakeGithubOAuthClient } from "../testkit/github.ts";
 import { runDst } from "../testkit/sim.ts";
-import { CompositeAuthGate } from "./auth-gates.ts";
+import { CompositeAuthGate, SerializedAuthGate } from "./auth-gates.ts";
 import { GITHUB_PROVIDER, getToken } from "./broker.ts";
 import { DEFAULT_BROKER_CONSTANTS } from "./constants.ts";
 import { GithubAuthGate } from "./github-auth.ts";
@@ -66,6 +66,74 @@ async function driveUntil(
 }
 
 describe("GitHub auth gate (DST)", () => {
+  it("serializes concurrent callers onto one global device flow", async () => {
+    await runDst({ name: "github-login-concurrent-single-flow", iterations: 30 }, async (sim) => {
+      const harness = makeGithubHarness();
+      const gate = new SerializedAuthGate(harness.gate);
+      const result = await sim.runTasks([
+        { name: "orb-a", f: async (task) => await gate.ensureAuth(task) },
+        { name: "orb-b", f: async (task) => await gate.ensureAuth(task) },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      if (result.isErr()) return;
+      for (const resolution of result.value) {
+        expect(resolution.isOk()).toBe(true);
+        if (resolution.isOk()) {
+          expect(resolution.value.status).toBe("pending");
+          if (resolution.value.status === "pending") {
+            expect(resolution.value.challenge.userCode).toBe("CODE-1");
+          }
+        }
+      }
+      expect(harness.client.deviceCodeRequests).toBe(1);
+    });
+  });
+
+  it("shares one failed-flow result with callers already waiting in the same wave", async () => {
+    await runDst({ name: "github-login-concurrent-failure-wave", iterations: 30 }, async (sim) => {
+      const harness = makeGithubHarness({ intervalMs: 100 });
+      harness.client.pushPoll({ kind: "denied" });
+      const gate = new SerializedAuthGate(harness.gate);
+      let releaseCallers: () => void = () => undefined;
+      const callersReady = new Promise<void>((resolve) => {
+        releaseCallers = resolve;
+      });
+      const resolutions: AuthResolution[] = [];
+      const result = await sim.runTasks([
+        {
+          name: "prepare-flow",
+          f: async (task) => {
+            const pending = await gate.ensureAuth(task);
+            expect(pending.isOk() && pending.value.status).toBe("pending");
+            await task.sleep(101, "device poll becomes due");
+            releaseCallers();
+          },
+        },
+        {
+          name: "orb-a",
+          f: async (task) => {
+            await callersReady;
+            const resolution = await gate.ensureAuth(task);
+            expect(resolution.isOk()).toBe(true);
+            if (resolution.isOk()) resolutions.push(resolution.value);
+          },
+        },
+        {
+          name: "orb-b",
+          f: async (task) => {
+            await callersReady;
+            const resolution = await gate.ensureAuth(task);
+            expect(resolution.isOk()).toBe(true);
+            if (resolution.isOk()) resolutions.push(resolution.value);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(resolutions.map((resolution) => resolution.status)).toEqual(["failed", "failed"]);
+      expect(harness.client.deviceCodeRequests).toBe(1);
+    });
+  });
+
   it("runs the device flow to a committed credential the broker serves", async () => {
     await runDst({ name: "github-login-happy", iterations: 25 }, async (sim) => {
       const harness = makeGithubHarness();

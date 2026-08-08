@@ -61,7 +61,10 @@ export function assertReplicaComplete(
   const entries = world.entriesOf(orbId);
   if (replica.length !== entries.length) {
     throw new Error(
-      `replica has ${replica.length} records but filesystem has ${entries.length} entries`,
+      `replica has ${replica.length} records [${replica.map((record) => record.id).join(", ")}] ` +
+        `but filesystem has ${entries.length} entries [${entries
+          .map((record) => record.id)
+          .join(", ")}]`,
     );
   }
 }

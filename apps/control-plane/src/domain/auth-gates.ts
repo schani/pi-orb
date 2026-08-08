@@ -4,6 +4,43 @@ import type { AuthGateError } from "./errors.ts";
 import type { AuthGate, AuthResolution } from "./ports.ts";
 
 /**
+ * Process-local singleflight boundary for the global login ceremony. Concurrent
+ * orb reconciliation is per-orb, but auth state and its displayed challenge are
+ * intentionally fleet-global (docs/credentials.md).
+ */
+export class SerializedAuthGate implements AuthGate {
+  private readonly gate: AuthGate;
+  private inFlight: Promise<Result<AuthResolution, AuthGateError>> | null = null;
+
+  constructor(gate: AuthGate) {
+    this.gate = gate;
+  }
+
+  ensureAuth(task: SimulationTask): ResultAsync<AuthResolution, AuthGateError> {
+    const active = this.inFlight;
+    if (active !== null) return new ResultAsync(active);
+
+    const run = async (): Promise<Result<AuthResolution, AuthGateError>> =>
+      await this.gate.ensureAuth(task);
+    const operation = Promise.resolve(
+      ResultAsync.fromPromise(
+        run(),
+        (error): AuthGateError => ({
+          type: "auth_gate_error",
+          message: error instanceof Error ? error.message : String(error),
+          retryable: true,
+        }),
+      ).andThen((result) => result),
+    );
+    this.inFlight = operation;
+    void operation.then(() => {
+      if (this.inFlight === operation) this.inFlight = null;
+    });
+    return new ResultAsync(operation);
+  }
+}
+
+/**
  * Chains auth gates in order (docs/credentials.md): the first non-ok resolution
  * wins, so a later ceremony (GitHub) never starts while an earlier one
  * (Codex) still blocks — the user sees one device challenge at a time.

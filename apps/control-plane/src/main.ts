@@ -31,12 +31,18 @@ import {
   HttpTailscaleAuthKeyMinter,
   type TailscaleHostOptions,
 } from "./adapters/tailscale/client.ts";
-import { CompositeAuthGate } from "./domain/auth-gates.ts";
+import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
 import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
-import { orphanSweepLoop, pollLoop, projectDeletionLoop, reconcileLoop } from "./domain/loops.ts";
+import {
+  orphanSweepLoop,
+  pollLoop,
+  projectDeletionLoop,
+  type ReconcileTaskRunner,
+  reconcileLoop,
+} from "./domain/loops.ts";
 import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
@@ -271,13 +277,14 @@ async function main(): Promise<void> {
           }
         : { cleanupOrb: () => okAsync(undefined) },
     runtimeClient: new FetchRuntimeClient(),
-    authGate:
+    authGate: new SerializedAuthGate(
       githubOauth !== null
         ? new CompositeAuthGate([
             new PiAuthGate(authDir, mockOpenAi, broker),
             new GithubAuthGate(broker, new GithubOAuthHttpClient(githubOauth)),
           ])
         : new PiAuthGate(authDir, mockOpenAi, broker),
+    ),
     nameGenerator,
     nameLeaseMs: 60_000,
     control: new ControlState(),
@@ -318,14 +325,31 @@ async function main(): Promise<void> {
   }
 
   const stop = new AbortController();
-  const shutdown = (): void => {
-    bootTask.log("shutting down");
-    stop.abort();
-    void app.close().then(async () => {
+  let appClosePromise: Promise<void> | null = null;
+  let resourceClosePromise: Promise<void> | null = null;
+  const closeApp = (): Promise<void> => {
+    appClosePromise ??= app.close().catch((error: unknown) => {
+      bootTask.error("HTTP server close failed:", error);
+    });
+    return appClosePromise;
+  };
+  const closeResources = (): Promise<void> => {
+    resourceClosePromise ??= (async () => {
+      await closeApp();
       if (hostProvider instanceof ProcessOrbHostProvider) await hostProvider.close();
       const closed = await database.close();
       if (closed.isErr()) bootTask.error("database close failed:", closed.error.message);
-    });
+    })();
+    return resourceClosePromise;
+  };
+  const shutdown = (): void => {
+    if (stop.signal.aborted) return;
+    bootTask.log("shutting down");
+    stop.abort();
+    // Stop accepting requests immediately, but the browser service keeps its
+    // provider/database boundaries open until concurrent reconciliations drain.
+    void closeApp();
+    if (!browserRole) void closeResources();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
@@ -346,19 +370,29 @@ async function main(): Promise<void> {
   // Only the browser-role service runs them — it is the always-on one; the
   // scale-to-zero runtime service must not depend on background work.
   if (browserRole) {
+    const runReconcileTask: ReconcileTaskRunner = (orbId, operation) =>
+      operation(new ControlPlaneTask(`reconciler:${orbId}`));
     const loops: readonly Promise<void>[] = [
       pollLoop(new ControlPlaneTask("poller"), deps, stop.signal),
-      reconcileLoop(new ControlPlaneTask("reconciler"), deps, stop.signal),
+      reconcileLoop(
+        new ControlPlaneTask("reconcile-scheduler"),
+        deps,
+        stop.signal,
+        runReconcileTask,
+      ),
       projectDeletionLoop(new ControlPlaneTask("project-deletion"), deps, stop.signal),
       orphanSweepLoop(new ControlPlaneTask("sweeper"), deps, stop.signal),
     ];
-    await Promise.all(
-      loops.map((loop) =>
-        loop.catch((error: unknown) => {
-          bootTask.error("background loop crashed:", error);
-        }),
-      ),
-    );
+    try {
+      await Promise.all(loops);
+    } catch (error) {
+      bootTask.error("background loop crashed:", error);
+      process.exitCode = 1;
+      stop.abort();
+      void closeApp();
+      await Promise.allSettled(loops);
+    }
+    await closeResources();
   }
 }
 

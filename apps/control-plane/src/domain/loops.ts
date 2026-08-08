@@ -3,9 +3,27 @@ import type { SimulationTask } from "determined";
 import { sleepResult, withDeadline } from "./dst.ts";
 import { type ReconcileOutcome, reconcileOrbOnce } from "./lifecycle.ts";
 import { logEvent, logOrbEvent, logProjectEvent } from "./log.ts";
+import type { OrbRow } from "./orb.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
 import { reconcileProjectDeletionOnce } from "./project-deletion.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
+
+/**
+ * Starts one reconciliation on a task that is independent from the scheduler
+ * task. Production creates a fresh real-time task per orb; deterministic tests
+ * supply statically declared SimulationTask workers because `determined`
+ * intentionally models one sequential coroutine per task.
+ */
+export type ReconcileTaskRunner = (
+  orbId: string,
+  operation: (task: SimulationTask) => Promise<void>,
+) => Promise<void>;
+
+export type ReconcileOne = (
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+) => Promise<ReconcileOutcome>;
 
 const POLLABLE_STATES: readonly OrbState[] = ["running"];
 const RECONCILABLE_STATES: readonly OrbState[] = [
@@ -114,7 +132,19 @@ function reconcileDelayMs(
   }
 }
 
-/** One sweep: reconcile every due orb. */
+async function reconcileAndScheduleNext(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  retryKey: string,
+  reconcile: ReconcileOne = reconcileOrbOnce,
+): Promise<void> {
+  const outcome = await reconcile(task, deps, orb.id);
+  const delay = reconcileDelayMs(task, deps, orb.id, orb.state, outcome, retryKey);
+  deps.control.setNextAttemptAt(retryKey, task.monotonicNow() + delay);
+}
+
+/** One sequential sweep, retained as the small deterministic lifecycle-test seam. */
 export async function reconcileAllOnce(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -133,26 +163,134 @@ export async function reconcileAllOnce(
   for (const orb of orbsResult.value) {
     const key = `reconcile:${orb.id}`;
     if (deps.control.getNextAttemptAt(key) > now) continue;
-    const outcome = await reconcileOrbOnce(task, deps, orb.id);
-    const delay = reconcileDelayMs(task, deps, orb.id, orb.state, outcome, key);
-    deps.control.setNextAttemptAt(key, task.monotonicNow() + delay);
+    await reconcileAndScheduleNext(task, deps, orb, key);
   }
 }
 
+const unexpectedMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const hasStopped = (stop?: AbortSignal): boolean => stop?.aborted === true;
+
+/**
+ * Process-local dispatcher: scans remain sequential on the scheduler task,
+ * while every orb operation runs on its own task. The map is both the local
+ * at-most-one fence and the shutdown drain. Cross-process overlap remains
+ * fenced by the existing store CAS and idempotent provider operations.
+ */
+export class ReconcileDispatcher {
+  private readonly inFlight = new Map<string, Promise<void>>();
+  private fatalError: Error | null = null;
+  private readonly deps: ControlPlaneDeps;
+  private readonly runTask: ReconcileTaskRunner;
+  private readonly reconcile: ReconcileOne;
+
+  constructor(
+    deps: ControlPlaneDeps,
+    runTask: ReconcileTaskRunner,
+    reconcile: ReconcileOne = reconcileOrbOnce,
+  ) {
+    this.deps = deps;
+    this.runTask = runTask;
+    this.reconcile = reconcile;
+  }
+
+  async dispatchDue(task: SimulationTask, stop?: AbortSignal): Promise<void> {
+    this.throwIfFatal();
+    if (hasStopped(stop)) return;
+    const orbsResult = await this.deps.store.listOrbsInStates(task, RECONCILABLE_STATES);
+    this.throwIfFatal();
+    if (hasStopped(stop)) return;
+    if (orbsResult.isErr()) {
+      if (this.deps.control.noteCondition("reconcile-loop:list", true)) {
+        logEvent(task, "reconcile-loop-blind", { error: orbsResult.error.message });
+      }
+      return;
+    }
+    if (this.deps.control.noteCondition("reconcile-loop:list", false)) {
+      logEvent(task, "reconcile-loop-recovered");
+    }
+
+    const now = task.monotonicNow();
+    for (const orb of orbsResult.value) {
+      const key = `reconcile:${orb.id}`;
+      if (this.deps.control.getNextAttemptAt(key) > now || this.inFlight.has(orb.id)) continue;
+      this.dispatch(task, orb, key);
+    }
+  }
+
+  async drain(): Promise<void> {
+    await Promise.all(this.inFlight.values());
+    this.throwIfFatal();
+  }
+
+  private dispatch(schedulerTask: SimulationTask, orb: OrbRow, retryKey: string): void {
+    const operation = this.runTask(orb.id, async (orbTask) => {
+      await reconcileAndScheduleNext(orbTask, this.deps, orb, retryKey, this.reconcile);
+      this.deps.control.noteCondition(`reconcile-task-crashed:${orb.id}`, false);
+    }).catch((error: unknown) => this.captureFatal(schedulerTask, orb.id, error));
+    this.inFlight.set(orb.id, operation);
+    void operation.then(() => {
+      if (this.inFlight.get(orb.id) === operation) this.inFlight.delete(orb.id);
+    });
+  }
+
+  private captureFatal(task: SimulationTask, orbId: string, error: unknown): void {
+    const fatal = error instanceof Error ? error : new Error(unexpectedMessage(error));
+    this.fatalError ??= fatal;
+    if (this.deps.control.noteCondition(`reconcile-task-crashed:${orbId}`, true)) {
+      logOrbEvent(task, orbId, "reconcile-task-crashed", { error: fatal.message });
+    }
+  }
+
+  private throwIfFatal(): void {
+    // biome-ignore lint: This is the narrow background-loop supervisor boundary; unexpected worker failures must reject the loop promise.
+    if (this.fatalError !== null) throw this.fatalError;
+  }
+}
+
+/**
+ * Reconcile every due orb without allowing one orb's parked provider/runtime
+ * operation to stop discovery of unrelated work. When `runTask` is omitted,
+ * use the sequential loop required by the existing single-task DST scenarios;
+ * production always supplies an independent-task runner, and the concurrency
+ * DST supplies one statically declared worker task per orb.
+ */
 export async function reconcileLoop(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   stop: AbortSignal,
+  runTask?: ReconcileTaskRunner,
+  reconcile: ReconcileOne = reconcileOrbOnce,
 ): Promise<void> {
-  while (!stop.aborted) {
-    await reconcileAllOnce(task, deps);
-    const slept = await sleepResult(
-      task,
-      deps.constants.reconcileTickMs,
-      "reconcile loop tick",
-      stop,
-    );
-    if (slept.isErr()) return;
+  if (runTask === undefined) {
+    while (!stop.aborted) {
+      await reconcileAllOnce(task, deps);
+      const slept = await sleepResult(
+        task,
+        deps.constants.reconcileTickMs,
+        "reconcile loop tick",
+        stop,
+      );
+      if (slept.isErr()) return;
+    }
+    return;
+  }
+
+  const dispatcher = new ReconcileDispatcher(deps, runTask, reconcile);
+  try {
+    while (!stop.aborted) {
+      await dispatcher.dispatchDue(task, stop);
+      const slept = await sleepResult(
+        task,
+        deps.constants.reconcileTickMs,
+        "reconcile loop tick",
+        stop,
+      );
+      if (slept.isErr()) break;
+    }
+  } finally {
+    await dispatcher.drain();
   }
 }
 

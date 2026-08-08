@@ -759,6 +759,18 @@ describe("orb lifecycle (DST)", () => {
                 const state = harness.store.orbSnapshot(ORB)?.state;
                 expect(state === "stopping" || state === "stopped").toBe(false);
               }
+              // End with a controlled explicit stop rather than aborting the
+              // poller against a concurrently appended resume/decline marker.
+              // The drain makes replica completeness a valid postcondition;
+              // aborting both loops at an arbitrary running edge does not.
+              const requested = await requestOrbStop(task, harness.deps, ORB);
+              expect(requested.isOk()).toBe(true);
+              await waitUntil(
+                task,
+                "explicit final stop drains resumed history",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+                { timeoutMs: 300_000 },
+              );
               stop.abort();
             },
           },
