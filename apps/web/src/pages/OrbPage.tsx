@@ -18,6 +18,7 @@ import {
   describeApiError,
   getOrb,
   getOrbHistory,
+  getProject,
   startOrb,
   stopOrb,
   updateOrb,
@@ -325,6 +326,7 @@ function CopyCodeButton({ code }: { code: string }) {
 export function OrbPage({ orbId }: { orbId: string }) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [orb, setOrb] = useState<OrbView | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);
   const [orbNotFound, setOrbNotFound] = useState(false);
   const orbNameRef = useRef<string | null>(null);
@@ -389,6 +391,18 @@ export function OrbPage({ orbId }: { orbId: string }) {
   useEffect(() => {
     orbNameRef.current = orb?.name ?? null;
   }, [orb?.name]);
+
+  useEffect(() => {
+    const projectId = orb?.projectId;
+    if (projectId === undefined) return;
+    let cancelled = false;
+    void getProject(projectId).then((result) => {
+      if (!cancelled) setProjectName(result.isOk() ? result.value.name : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [orb?.projectId]);
 
   useEffect(() => {
     if (renaming) renameInputRef.current?.focus();
@@ -622,7 +636,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
 
   return (
     <>
-      <header className="app-header orb-header">
+      <header className={`app-header orb-header orb-header-state-${orb?.state ?? "loading"}`}>
         <a href="#/" className="app-title">
           pi-orb
         </a>
@@ -648,82 +662,45 @@ export function OrbPage({ orbId }: { orbId: string }) {
               </button>
             </form>
           ) : (
-            <h1 className="orb-title" title={`orb ${orbId}`}>
-              {orb?.name ?? "untitled orb"}
+            <>
+              <span className="orb-title">{orb?.name ?? "untitled orb"}</span>
               <button
                 type="button"
                 className="orb-rename-button"
+                aria-label="Rename orb"
+                title="Rename orb"
                 disabled={orb?.state === "deleting"}
                 onClick={() => {
                   setRenameText(orb?.name ?? "");
                   setRenaming(true);
                 }}
               >
-                rename
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                </svg>
               </button>
-            </h1>
+            </>
           )}
-          <div className="orb-header-meta">
-            {orb === null ? (
-              <span>loading…</span>
-            ) : (
-              <>
-                <span>orb {orbId.slice(0, 8)}</span>
-                <span>v{orb.stateVersion}</span>
-                {orb.checkoutCommit !== undefined && (
-                  <span className="orb-header-checkout">checkout {orb.checkoutCommit}</span>
-                )}
-                {orb.previewHost !== undefined && (
-                  <span
-                    className="orb-header-preview"
-                    title="Any port a server listens on inside the orb is reachable at this host over your tailnet"
-                  >
-                    Ports: http://<span className="orb-preview-host">{orb.previewHost}</span>:
-                    {"<port>"}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
+          <span className="orb-project-tag">{projectName ?? "project"}</span>
         </div>
         {orb !== null && (
           <span className={`state-badge state-${orb.state}`}>
+            <span className="orb-state-dot" aria-hidden="true" />
             {orb.stopReason === "idle" && (orb.state === "stopping" || orb.state === "stopped")
               ? `${orb.state} (idle)`
               : orb.state}
           </span>
         )}
-        <span className="orb-header-live">
-          {orb?.state === "running" && (
-            <>
-              {state.connection}
-              {state.activity !== null && ` · ${state.activity}`}
-            </>
-          )}
-        </span>
         <div className="orb-header-actions">
-          <button
-            type="button"
-            title={
-              notifications === "unsupported"
-                ? "Notifications require a secure browser context (HTTPS or localhost)"
-                : notifications === "denied"
-                  ? "Notifications are blocked in browser settings"
-                  : notifications === "granted"
-                    ? "Desktop notifications are enabled"
-                    : "Enable a desktop notification whenever an agent turn finishes"
-            }
-            disabled={notifications !== "default"}
-            onClick={() => void requestNotificationPermission().then(setNotifications)}
-          >
-            {notifications === "unsupported"
-              ? "notify unavailable"
-              : notifications === "denied"
-                ? "notify blocked"
-                : notifications === "granted"
-                  ? "notifications on"
-                  : "enable notifications"}
-          </button>
           <button type="button" onClick={() => runLifecycle(startOrb)} disabled={!canStart}>
             start
           </button>

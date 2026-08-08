@@ -105,6 +105,10 @@ export function listProjects(): Promise<Result<{ items: ProjectView[] }, ApiErro
   return apiFetch(ProjectListSchema, "/api/v1/projects");
 }
 
+export function getProject(projectId: string): Promise<Result<ProjectView, ApiError>> {
+  return apiFetch(ProjectViewSchema, `/api/v1/projects/${encodeURIComponent(projectId)}`);
+}
+
 export function createProject(
   request: CreateProjectRequest,
 ): Promise<Result<ProjectView, ApiError>> {

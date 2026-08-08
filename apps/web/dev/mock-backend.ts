@@ -142,6 +142,16 @@ async function handleApi(
     sendJson(response, 200, { items: [...state.projects.values()] });
     return true;
   }
+  const projectRoute = /^\/api\/v1\/projects\/([^/]+)$/.exec(path);
+  if (method === "GET" && projectRoute !== null) {
+    const project = state.projects.get(decodeURIComponent(projectRoute[1] ?? ""));
+    if (project === undefined) {
+      notFound(response);
+      return true;
+    }
+    sendJson(response, 200, project);
+    return true;
+  }
   if (method === "POST" && path === "/api/v1/projects") {
     const body = await readJson(request);
     if (
