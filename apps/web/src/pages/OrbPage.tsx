@@ -22,6 +22,7 @@ import {
   updateOrb,
 } from "../lib/api.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
+import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { isPinnedToBottom } from "../lib/scroll-pin.ts";
 import {
@@ -343,6 +344,14 @@ export function OrbPage({ orbId }: { orbId: string }) {
       cancelled = true;
     };
   }, [notifications]);
+
+  const faviconStatus = deriveOrbFaviconStatus(
+    orb?.state ?? null,
+    state.connection,
+    state.activity,
+  );
+  useEffect(() => setOrbFavicon(faviconStatus), [faviconStatus]);
+  useEffect(() => () => setOrbFavicon("neutral"), []);
 
   // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {

@@ -33,6 +33,14 @@ This starts only Vite and needs no PostgreSQL, Docker, control plane, runtime, c
 
 The fixture is a transport-level adapter, not a mock branch in React. Production UI code still calls the same relative HTTP URLs, validates the same `@pi-orb/protocol` schemas, and runs the same WebSocket reducer. This keeps frontend-only behavior representative and makes protocol drift fail visibly. It is intentionally ephemeral and process-local: restarting Vite resets all fixture data, and it is for manual UI development rather than backend or E2E correctness. Normal `npm run dev --workspace @pi-orb/web` retains the proxy to the real control plane.
 
+## Per-orb favicon status (decided and implemented 2026-08-07)
+
+The orb chat route makes its coarse state visible in the browser tab through a small, static set of SVG favicon variants derived entirely in the web client from state it already has; this requires no API or runtime-protocol change. The project-list route and an orb that has not loaded use the neutral pi-orb mark.
+
+For an orb route, `stopped` gets the stopped variant; `running` gets the running variant; and a `running` orb with an open live connection reporting `activity: busy` gets the busy variant. Busy has priority over running. A disconnected or reconnecting tab must not present stale runtime activity as current, so it falls back to running until synchronization reports busy again. Transitional (`creating`, `starting`, `stopping`) and `failed` lifecycle states have distinct variants rather than being mislabeled as one of the three primary states.
+
+The marks remain distinguishable at 16px by glyph/fill as well as color and avoid animation. Running/idle uses light green to suggest that the orb is ready for the user; busy uses the darker UI green, not the error-associated terracotta. `index.html` installs the neutral icon before React loads. Mounting an orb page updates that one icon link rather than accumulating links; leaving the route restores neutral. The pure status mapping and link replacement are unit-tested in `apps/web/src/lib/favicon.test.ts`; the SVG assets live under `apps/web/public/favicons/`.
+
 ## Visual design (decided)
 
 The UI uses the "Reading Room" variant of the Manuscript × Gutter design, chosen from a design exploration (five initial directions, then a Manuscript × Gutter hybrid, then five typography variations). Decisions:
