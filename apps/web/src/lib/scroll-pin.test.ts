@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPinnedToBottom } from "./scroll-pin.ts";
+import { isPinnedAfterScroll, isPinnedToBottom } from "./scroll-pin.ts";
 
 /**
  * Follow-the-tail behavior: when the chat is scrolled to (or near) the
@@ -23,5 +23,20 @@ describe("isPinnedToBottom", () => {
 
   it("is pinned when content fits the viewport entirely", () => {
     expect(isPinnedToBottom({ scrollY: 0, viewportHeight: 800, contentHeight: 500 })).toBe(true);
+  });
+});
+
+describe("isPinnedAfterScroll", () => {
+  it("does not unpin when content grows before an automatic scroll event is delivered", () => {
+    const viewAfterMoreContent = { scrollY: 600, viewportHeight: 400, contentHeight: 1200 };
+
+    expect(isPinnedToBottom(viewAfterMoreContent)).toBe(false);
+    expect(isPinnedAfterScroll(viewAfterMoreContent, 600)).toBe(true);
+  });
+
+  it("still unpins for a reader scroll away from the automatic target", () => {
+    expect(
+      isPinnedAfterScroll({ scrollY: 300, viewportHeight: 400, contentHeight: 1200 }, 600),
+    ).toBe(false);
   });
 });

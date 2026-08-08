@@ -8,7 +8,7 @@ import {
   type RuntimeEvent,
   type ServerFrame,
 } from "@pi-orb/protocol";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { Composer, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
@@ -27,7 +27,7 @@ import {
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
-import { isPinnedToBottom } from "../lib/scroll-pin.ts";
+import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
 import {
   type BrowserNotificationPermission,
   describeTurnNotificationResult,
@@ -429,23 +429,32 @@ export function OrbPage({ orbId }: { orbId: string }) {
   // content keeps the view pinned there; once they scroll up, their position
   // stays locked until they return to the bottom themselves.
   const pinnedRef = useRef(true);
+  const autoScrollYRef = useRef<number | null>(null);
   useEffect(() => {
     const onScroll = () => {
-      pinnedRef.current = isPinnedToBottom({
-        scrollY: window.scrollY,
-        viewportHeight: window.innerHeight,
-        contentHeight: document.documentElement.scrollHeight,
-      });
+      pinnedRef.current = isPinnedAfterScroll(
+        {
+          scrollY: window.scrollY,
+          viewportHeight: window.innerHeight,
+          contentHeight: document.documentElement.scrollHeight,
+        },
+        autoScrollYRef.current,
+      );
+      autoScrollYRef.current = null;
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
   // No dependency array: any render may have grown the page (records, live
-  // stream, tool chips). Scrolling to the bottom while already there is a
-  // no-op, so running after every render is cheap and always correct.
-  useEffect(() => {
+  // stream, tool chips). Run before paint so another fast stream update cannot
+  // make the previous bottom position look like the reader scrolled up.
+  useLayoutEffect(() => {
     if (state.historyLoaded && pinnedRef.current) {
-      window.scrollTo({ top: document.documentElement.scrollHeight });
+      const target = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      autoScrollYRef.current = target;
+      window.scrollTo({ top: target });
+      // Browsers can round the requested position; remember what was applied.
+      autoScrollYRef.current = window.scrollY;
     }
   });
 
