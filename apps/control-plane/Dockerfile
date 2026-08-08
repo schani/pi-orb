@@ -18,10 +18,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
+COPY packages/luna/package.json packages/luna/
 COPY apps/control-plane/package.json apps/control-plane/
 RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts
 COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src
+COPY packages/luna/src packages/luna/src
 COPY apps/control-plane/src apps/control-plane/src
 COPY --from=web-build /app/apps/web/dist apps/web/dist
 
