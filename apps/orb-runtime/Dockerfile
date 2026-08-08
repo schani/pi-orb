@@ -28,11 +28,13 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
+COPY packages/luna/package.json packages/luna/
 COPY apps/orb-runtime/package.json apps/orb-runtime/
 RUN npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
 
 COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src
+COPY packages/luna/src packages/luna/src
 COPY apps/orb-runtime/src apps/orb-runtime/src
 
 # Broker-backed GitHub auth (DESIGN.md §15.3): a gh shim ahead of /usr/bin/gh

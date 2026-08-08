@@ -42,6 +42,8 @@ export interface LifecycleConstants {
   readonly idleStopAfterMs: number;
   /** Interval between orphan-host sweeps (docs/lifecycle.md). */
   readonly orphanSweepIntervalMs: number;
+  /** Race-fencing window before deletion can remove its durable row. */
+  readonly deletionQuarantineMs: number;
 }
 
 /** Credential-broker timing constants (docs/credentials.md). */
@@ -85,4 +87,6 @@ export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {
   hostBackstopIntervalMs: 30_000,
   idleStopAfterMs: 15 * 60_000,
   orphanSweepIntervalMs: 5 * 60_000,
+  // Exceeds the 60-second bound on one provider operation.
+  deletionQuarantineMs: 65_000,
 };

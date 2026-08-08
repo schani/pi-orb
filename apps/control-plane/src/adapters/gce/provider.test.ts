@@ -32,7 +32,7 @@ class FakeTransport implements GceApiTransport {
   }
 
   async request(args: {
-    method: "GET" | "POST";
+    method: "GET" | "POST" | "DELETE";
     path: string;
     body?: Record<string, unknown>;
     signal: AbortSignal;
@@ -126,6 +126,34 @@ const existingInstance = (overrides: Record<string, unknown> = {}): Record<strin
 });
 
 describe("GceOrbHostProvider", () => {
+  it("deletes the instance before the retained data disk and waits for both", async () => {
+    const transport = new FakeTransport([
+      () => ok200({ labels: { "pi-orb-orb-id": "orb-1" } }),
+      () => ok200({ name: "delete-instance-op" }),
+      () => done,
+      () => ok200({ labels: { "pi-orb-orb-id": "orb-1" } }),
+      () => ok200({ name: "delete-disk-op" }),
+      () => done,
+    ]);
+    const result = await makeProvider(transport).destroy(task, "orb-1", context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(transport.requests.map((request) => [request.method, request.path])).toEqual([
+      ["GET", "projects/proj/zones/us-central1-a/instances/pi-orb-orb-1"],
+      ["DELETE", "projects/proj/zones/us-central1-a/instances/pi-orb-orb-1"],
+      ["POST", "projects/proj/zones/us-central1-a/operations/delete-instance-op/wait"],
+      ["GET", "projects/proj/zones/us-central1-a/disks/pi-orb-data-orb-1"],
+      ["DELETE", "projects/proj/zones/us-central1-a/disks/pi-orb-data-orb-1"],
+      ["POST", "projects/proj/zones/us-central1-a/operations/delete-disk-op/wait"],
+    ]);
+  });
+
+  it("refuses to delete a deterministic-name instance without the orb label", async () => {
+    const transport = new FakeTransport([() => ok200({ labels: {} })]);
+    const result = await makeProvider(transport).destroy(task, "orb-1", context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(transport.requests).toHaveLength(1);
+  });
+
   it("creates a Spot COS instance and reports the minted token hash", async () => {
     const transport = new FakeTransport([
       () => notFound, // instance get

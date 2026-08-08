@@ -24,7 +24,12 @@ export type ReconcileOutcome =
   | { readonly type: "noop" }
   | {
       readonly type: "waiting";
-      readonly reason: "auth" | "readiness" | "host_transition" | "drain_blocked";
+      readonly reason:
+        | "auth"
+        | "readiness"
+        | "host_transition"
+        | "drain_blocked"
+        | "deletion_quarantine";
     }
   | { readonly type: "progressed" }
   | { readonly type: "transitioned"; readonly toState: OrbState }
@@ -32,8 +37,9 @@ export type ReconcileOutcome =
   | { readonly type: "conflict" };
 
 const retryable = (message: string): ReconcileOutcome => ({ type: "retryable", message });
-const waiting = (reason: "auth" | "readiness" | "host_transition" | "drain_blocked") =>
-  ({ type: "waiting", reason }) as const;
+const waiting = (
+  reason: "auth" | "readiness" | "host_transition" | "drain_blocked" | "deletion_quarantine",
+) => ({ type: "waiting", reason }) as const;
 
 async function diagnoseHost(
   task: SimulationTask,
@@ -107,6 +113,25 @@ async function stopHost(
     ...(result.isErr()
       ? { error: result.error.message, retryable: result.error.retryable }
       : { outcome: "ok" }),
+  });
+  return result;
+}
+
+async function destroyHost(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): Promise<Result<void, OrbHostProviderError>> {
+  const result = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "destroy host",
+    (context) => deps.hostProvider.destroy(task, orbId, context),
+  );
+  logOrbEvent(task, orbId, "host-destroy", {
+    ...(result.isErr()
+      ? { error: result.error.message, retryable: result.error.retryable }
+      : { outcome: "absent" }),
   });
   return result;
 }
@@ -839,6 +864,75 @@ async function reconcileStopping(
 }
 
 // ---------------------------------------------------------------------------
+// deleting
+
+async function reconcileDeleting(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+): Promise<ReconcileOutcome> {
+  deps.control.markStopping(orb.id);
+  deps.control.closeBrowserConnections(orb.id);
+
+  const tombstone = await deps.store.getOrbDeletion(task, orb.id);
+  if (tombstone.isErr()) return retryable(tombstone.error.message);
+  if (tombstone.value === null) {
+    return retryable("deleting orb has no cleanup tombstone");
+  }
+
+  const cleaned = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "clean orb external resources",
+    (context) => deps.resourceCleaner.cleanupOrb(task, orb.id, context),
+  );
+  if (cleaned.isErr()) {
+    await deps.store.recordOrbDeletionError(task, {
+      orbId: orb.id,
+      message: `deletion cleanup: ${cleaned.error.message}`,
+      now: task.wallNow(),
+    });
+    return retryable(cleaned.error.message);
+  }
+
+  const destroyed = await destroyHost(task, deps, orb.id);
+  if (destroyed.isErr()) {
+    await deps.store.recordOrbDeletionError(task, {
+      orbId: orb.id,
+      message: `deletion cleanup: ${destroyed.error.message}`,
+      now: task.wallNow(),
+    });
+    return retryable(destroyed.error.message);
+  }
+
+  if (tombstone.value.lastError !== null || orb.lastError !== null) {
+    const cleared = await deps.store.recordOrbDeletionError(task, {
+      orbId: orb.id,
+      message: null,
+      now: task.wallNow(),
+    });
+    if (cleared.isErr()) return retryable(cleared.error.message);
+  }
+
+  if (task.wallNow() < tombstone.value.cleanupAfter) return waiting("deletion_quarantine");
+
+  // One final absence pass just completed. The transaction removes the
+  // replica, orb row, and tombstone together; GET becomes 404 only now.
+  const finalized = await deps.store.finalizeOrbDeletion(task, {
+    orbId: orb.id,
+    expectedStateVersion: orb.stateVersion,
+  });
+  if (finalized.isErr()) {
+    return finalized.error.type === "state_conflict"
+      ? { type: "conflict" }
+      : retryable(finalized.error.message);
+  }
+  deps.control.clearOrb(orb.id);
+  logOrbEvent(task, orb.id, "deleted", { outcome: "all_resources_removed" });
+  return { type: "progressed" };
+}
+
+// ---------------------------------------------------------------------------
 // stopped / failed backstop
 
 async function reconcileTerminalBackstop(
@@ -883,6 +977,8 @@ export async function reconcileOrbOnce(
     case "stopped":
     case "failed":
       return reconcileTerminalBackstop(task, deps, orb);
+    case "deleting":
+      return reconcileDeleting(task, deps, orb);
   }
 }
 
@@ -929,6 +1025,9 @@ export function createOrb(
     const existing = await deps.store.getOrb(task, params.orbId);
     if (existing.isErr()) return err(commandError("unavailable", existing.error.message, true));
     if (existing.value !== null) {
+      if (existing.value.state === "deleting") {
+        return err(commandError("conflict", "orb is being permanently deleted", false));
+      }
       if (
         existing.value.projectId !== params.projectId ||
         (params.name !== undefined && existing.value.name !== params.name)
@@ -992,6 +1091,8 @@ export function requestOrbStart(
           return ok(orb);
         case "stopping":
           return err(commandError("conflict", "orb is stopping; retry after it has stopped", true));
+        case "deleting":
+          return err(commandError("conflict", "orb is being permanently deleted", false));
         case "stopped":
         case "failed": {
           const cas = await deps.store.casTransition(task, {
@@ -1021,6 +1122,43 @@ export function requestOrbStart(
 }
 
 /** Idempotent for stopping/stopped; everything else enters stopping. */
+export function requestOrbDeletion(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): ResultAsync<OrbRow, CommandError> {
+  const run = async (): Promise<Result<OrbRow, CommandError>> => {
+    for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
+      const orbResult = await deps.store.getOrb(task, orbId);
+      if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
+      const orb = orbResult.value;
+      if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
+      if (orb.state === "deleting") return ok(orb);
+      const now = task.wallNow();
+      const requested = await deps.store.requestOrbDeletion(task, {
+        orbId,
+        expectedStateVersion: orb.stateVersion,
+        now,
+        cleanupAfter: now + deps.constants.deletionQuarantineMs,
+      });
+      if (requested.isOk()) {
+        deps.control.markStopping(orbId);
+        deps.control.closeBrowserConnections(orbId);
+        logOrbEvent(task, orbId, "transition", {
+          from: orb.state,
+          to: "deleting",
+          reason: "delete_requested",
+        });
+        return ok(requested.value);
+      }
+      if (requested.error.type === "state_conflict") continue;
+      return err(mapCasError(requested.error));
+    }
+    return err(commandError("conflict", "concurrent state changes; retry", true));
+  };
+  return new ResultAsync(run());
+}
+
 export function requestOrbStop(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -1033,6 +1171,9 @@ export function requestOrbStop(
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
       if (orb.state === "stopping" || orb.state === "stopped") return ok(orb);
+      if (orb.state === "deleting") {
+        return err(commandError("conflict", "orb is being permanently deleted", false));
+      }
       const cas = await deps.store.casTransition(task, {
         orbId,
         expectedStateVersion: orb.stateVersion,

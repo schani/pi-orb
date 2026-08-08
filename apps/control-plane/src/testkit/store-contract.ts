@@ -196,6 +196,42 @@ export function storeContractTests(name: string, open: () => Promise<ControlPlan
       expect(snapshot.isOk() && snapshot.value.cursor).toBe(first.id);
     });
 
+    it("atomically requests and finalizes permanent deletion with history", async () => {
+      await seed();
+      expect(
+        (
+          await store.commitPullBatch(task, {
+            orbId: orb.id,
+            expectedCursor: null,
+            session,
+            records: [first, second],
+            nextCursor: second.id,
+            nextHeadId: second.id,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const requested = await store.requestOrbDeletion(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        cleanupAfter: 3_000,
+      });
+      expect(requested.isOk() && requested.value.state).toBe("deleting");
+      expect((await store.getOrbDeletion(task, orb.id)).isOk()).toBe(true);
+      if (requested.isErr()) return;
+      expect(
+        (
+          await store.finalizeOrbDeletion(task, {
+            orbId: orb.id,
+            expectedStateVersion: requested.value.stateVersion,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.getOrbDeletion(task, orb.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap().records).toEqual([]);
+    });
+
     it("implements credential pointer CAS", async () => {
       const inserted = await pointers.casWritePointer(task, "openai-codex", null, {
         generation: 1,

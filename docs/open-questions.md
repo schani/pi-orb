@@ -45,7 +45,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 24. Define the future user/project/orb identity and authorization model before public deployment.
 25. Define future per-user/project model credentials and private-Git credentials/workload identity. (A proposal for brokered GitHub credentials exists in docs/credentials.md.)
 26. Define project trust and the security boundary for repository-controlled code.
-27. Define orb deletion/export behavior and retention of replicated history.
+27. Partially resolved 2026-08-08: orb deletion removes the authoritative filesystem and replicated history rather than retaining a browsable transcript; the implemented resource inventory and cleanup protocol are in `docs/orb-deletion.md`. Export-before-delete remains undecided.
 28. Define whether stopped hosts have an expiration/garbage-collection policy.
 29. Define the eventual suborb orchestration and filesystem handoff model.
 

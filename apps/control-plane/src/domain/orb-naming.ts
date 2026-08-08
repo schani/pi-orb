@@ -19,7 +19,7 @@ export interface OrbNamingDeps {
 
 export interface OrbNamingError {
   readonly type: "orb_naming_error";
-  readonly code: "not_found" | "invalid_name" | "store" | "generation";
+  readonly code: "not_found" | "conflict" | "invalid_name" | "store" | "generation";
   readonly message: string;
   readonly retryable: boolean;
 }
@@ -56,19 +56,40 @@ export function setOrbName(
   const name = normalizeOrbName(value);
   if (name.isErr())
     return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() => err(name.error));
-  return store
-    .setOrbName(task, { orbId, name: name.value, now, onlyIfNull: false })
-    .mapErr(storeError)
-    .andThen((orb) =>
-      orb === null
-        ? err({
-            type: "orb_naming_error" as const,
-            code: "not_found" as const,
-            message: "orb not found",
-            retryable: false,
-          })
-        : ok(orb),
-    );
+  const run = async (): Promise<Result<import("./orb.ts").OrbRow, OrbNamingError>> => {
+    const current = await store.getOrb(task, orbId);
+    if (current.isErr()) return err(storeError(current.error));
+    if (current.value === null) {
+      return err({
+        type: "orb_naming_error",
+        code: "not_found",
+        message: "orb not found",
+        retryable: false,
+      });
+    }
+    if (current.value.state === "deleting") {
+      return err({
+        type: "orb_naming_error",
+        code: "conflict",
+        message: "orb is being permanently deleted",
+        retryable: false,
+      });
+    }
+    return store
+      .setOrbName(task, { orbId, name: name.value, now, onlyIfNull: false })
+      .mapErr(storeError)
+      .andThen((orb) =>
+        orb === null
+          ? err({
+              type: "orb_naming_error" as const,
+              code: "not_found" as const,
+              message: "orb not found",
+              retryable: false,
+            })
+          : ok(orb),
+      );
+  };
+  return new ResultAsync(run());
 }
 
 function generationError(error: OrbNameGeneratorError): OrbNamingError {
@@ -94,6 +115,14 @@ export function generateOrbName(
         type: "orb_naming_error",
         code: "not_found",
         message: "orb not found",
+        retryable: false,
+      });
+    }
+    if (orb.value.state === "deleting") {
+      return err({
+        type: "orb_naming_error",
+        code: "conflict",
+        message: "orb is being permanently deleted",
         retryable: false,
       });
     }

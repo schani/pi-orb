@@ -35,6 +35,7 @@ export const TEST_CONSTANTS: LifecycleConstants = {
   hostBackstopIntervalMs: 2_000,
   idleStopAfterMs: 30_000,
   orphanSweepIntervalMs: 2_000,
+  deletionQuarantineMs: 6_000,
 };
 
 export interface TestHarness {
@@ -57,6 +58,7 @@ export function makeHarness(options?: {
   const deps: ControlPlaneDeps = {
     store,
     hostProvider: new FakeOrbHostProvider(world),
+    resourceCleaner: { cleanupOrb: () => okAsync(undefined) },
     runtimeClient: new FakeRuntimeClient(world),
     authGate,
     nameGenerator,

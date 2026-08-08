@@ -141,6 +141,12 @@ export function updateOrb(
   });
 }
 
+export function deleteOrb(orbId: string): Promise<Result<OrbView, ApiError>> {
+  return apiFetch(OrbViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}`, {
+    method: "DELETE",
+  });
+}
+
 export function getOrb(orbId: string): Promise<Result<OrbView, ApiError>> {
   return apiFetch(OrbViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}`);
 }

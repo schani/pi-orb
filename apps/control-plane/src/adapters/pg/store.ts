@@ -8,12 +8,13 @@ import type {
   StoreError,
 } from "../../domain/errors.ts";
 import { jsonEqual } from "../../domain/json-equal.ts";
-import type { OrbRow, ProjectRow } from "../../domain/orb.ts";
+import type { OrbDeletionRow, OrbRow, ProjectRow } from "../../domain/orb.ts";
 import type {
   CasTransitionParams,
   CasUpdateFieldsParams,
   CommitPullBatchParams,
   ControlPlaneStore,
+  RequestOrbDeletionParams,
 } from "../../domain/ports.ts";
 import type { PgRow, PostgreSQLClient } from "./client.ts";
 
@@ -49,6 +50,17 @@ function mapOrbRow(row: PgRow): OrbRow {
     stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
     stateChangedAt: toMs(row["state_changed_at"]),
     createdAt: toMs(row["created_at"]),
+    updatedAt: toMs(row["updated_at"]),
+  };
+}
+
+function mapDeletionRow(row: PgRow): OrbDeletionRow {
+  return {
+    orbId: String(row["orb_id"]),
+    hostKind: String(row["host_kind"]),
+    requestedAt: toMs(row["requested_at"]),
+    cleanupAfter: toMs(row["cleanup_after"]),
+    lastError: row["last_error"] === null ? null : String(row["last_error"]),
     updatedAt: toMs(row["updated_at"]),
   };
 }
@@ -171,7 +183,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .query(
         `UPDATE orbs SET name = $2, auto_name_lease_until = NULL,
            auto_name_next_attempt_at = NULL, updated_at = $3
-         WHERE id = $1 ${params.onlyIfNull ? "AND name IS NULL" : ""} RETURNING *`,
+         WHERE id = $1 AND state <> 'deleting'
+           ${params.onlyIfNull ? "AND name IS NULL" : ""} RETURNING *`,
         [params.orbId, params.name, new Date(params.now)],
       )
       .map((result) => (result.rows[0] === undefined ? null : mapOrbRow(result.rows[0])));
@@ -187,7 +200,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const claimed = await this.db.query(
         `UPDATE orbs SET auto_name_lease_until = $3,
            auto_name_attempts = auto_name_attempts + 1
-         WHERE id = $1 AND name IS NULL
+         WHERE id = $1 AND name IS NULL AND state <> 'deleting'
            AND (auto_name_lease_until IS NULL OR auto_name_lease_until <= $2)
            AND (auto_name_next_attempt_at IS NULL OR auto_name_next_attempt_at <= $2)
          RETURNING id`,
@@ -219,10 +232,111 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     return this.db
       .query(
         `UPDATE orbs SET auto_name_lease_until = NULL, auto_name_next_attempt_at = $2,
-           updated_at = $3 WHERE id = $1 AND name IS NULL`,
+           updated_at = $3 WHERE id = $1 AND name IS NULL AND state <> 'deleting'`,
         [params.orbId, new Date(params.nextAttemptAt), new Date(params.now)],
       )
       .map(() => undefined);
+  }
+
+  requestOrbDeletion(
+    _task: SimulationTask,
+    params: RequestOrbDeletionParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
+      const updated = await query(
+        `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
+           state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL
+         WHERE id = $1 AND state_version = $2 RETURNING *`,
+        [params.orbId, params.expectedStateVersion, new Date(params.now)],
+      );
+      if (updated.isErr()) return err(updated.error);
+      const row = updated.value.rows[0];
+      if (row === undefined) {
+        const current = await query("SELECT state FROM orbs WHERE id = $1", [params.orbId]);
+        if (current.isErr()) return err(current.error);
+        const state = current.value.rows[0]?.["state"];
+        return err(stateConflict(typeof state === "string" ? (state as OrbState) : undefined));
+      }
+      const tombstone = await query(
+        `INSERT INTO orb_deletions
+           (orb_id, host_kind, requested_at, cleanup_after, last_error, updated_at)
+         VALUES ($1, $2, $3, $4, NULL, $3)
+         ON CONFLICT (orb_id) DO NOTHING`,
+        [
+          params.orbId,
+          String(row["host_kind"]),
+          new Date(params.now),
+          new Date(params.cleanupAfter),
+        ],
+      );
+      if (tombstone.isErr()) return err(tombstone.error);
+      return ok(mapOrbRow(row));
+    });
+  }
+
+  getOrbDeletion(
+    _task: SimulationTask,
+    orbId: string,
+  ): ResultAsync<OrbDeletionRow | null, StoreError> {
+    return this.db
+      .query("SELECT * FROM orb_deletions WHERE orb_id = $1", [orbId])
+      .map((result) => (result.rows[0] === undefined ? null : mapDeletionRow(result.rows[0])));
+  }
+
+  recordOrbDeletionError(
+    _task: SimulationTask,
+    params: { orbId: string; message: string | null; now: number },
+  ): ResultAsync<void, StoreError> {
+    return this.db.transaction<void, StoreError>(async (query) => {
+      const deletion = await query(
+        "UPDATE orb_deletions SET last_error = $2, updated_at = $3 WHERE orb_id = $1",
+        [params.orbId, params.message, new Date(params.now)],
+      );
+      if (deletion.isErr()) return err(deletion.error);
+      const orb = await query(
+        "UPDATE orbs SET last_error = $2, updated_at = $3 WHERE id = $1 AND state = 'deleting'",
+        [params.orbId, params.message, new Date(params.now)],
+      );
+      if (orb.isErr()) return err(orb.error);
+      return ok(undefined);
+    });
+  }
+
+  finalizeOrbDeletion(
+    _task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number },
+  ): ResultAsync<void, StoreError | StateConflict> {
+    return this.db.transaction<void, StoreError | StateConflict>(async (query) => {
+      const current = await query(
+        "SELECT state, state_version FROM orbs WHERE id = $1 FOR UPDATE",
+        [params.orbId],
+      );
+      if (current.isErr()) return err(current.error);
+      const row = current.value.rows[0];
+      if (
+        row === undefined ||
+        row["state"] !== "deleting" ||
+        Number(row["state_version"]) !== params.expectedStateVersion
+      ) {
+        return err(
+          stateConflict(
+            typeof row?.["state"] === "string" ? (row["state"] as OrbState) : undefined,
+          ),
+        );
+      }
+      const cleared = await query(
+        "UPDATE orbs SET replication_cursor = NULL, replicated_head_id = NULL WHERE id = $1",
+        [params.orbId],
+      );
+      if (cleared.isErr()) return err(cleared.error);
+      const history = await query("DELETE FROM history_records WHERE orb_id = $1", [params.orbId]);
+      if (history.isErr()) return err(history.error);
+      const orb = await query("DELETE FROM orbs WHERE id = $1", [params.orbId]);
+      if (orb.isErr()) return err(orb.error);
+      const tombstone = await query("DELETE FROM orb_deletions WHERE orb_id = $1", [params.orbId]);
+      if (tombstone.isErr()) return err(tombstone.error);
+      return ok(undefined);
+    });
   }
 
   private casUpdate(
@@ -515,12 +629,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       StoreError
     >(async (query) => {
       const orbResult = await query(
-        "SELECT harness_session_header, replication_cursor, replicated_head_id FROM orbs WHERE id = $1",
+        "SELECT state, harness_session_header, replication_cursor, replicated_head_id FROM orbs WHERE id = $1",
         [orbId],
       );
       if (orbResult.isErr()) return err(orbResult.error);
       const row = orbResult.value.rows[0];
-      if (row === undefined) {
+      if (row === undefined || row["state"] === "deleting") {
         return ok({ session: null, cursor: null, headId: null, records: [] });
       }
       const cursor = row["replication_cursor"] === null ? null : String(row["replication_cursor"]);

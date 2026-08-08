@@ -459,5 +459,28 @@ describe("full slice E2E", () => {
     expect(stoppedRecords.length).toBe(replicated);
     expect(JSON.stringify(stoppedRecords)).toContain("The check succeeded: E2E_TOOL_OK.");
     expect(JSON.stringify(stoppedRecords)).toContain("USER_SHELL_E2E_OK");
+
+    // Permanent deletion removes both persistence copies and the host resource.
+    const deletion = await api(base, "DELETE", `/api/v1/orbs/${orbId}`);
+    expect(deletion.status, JSON.stringify(deletion.body)).toBe(202);
+    expect(deletion.body["state"]).toBe("deleting");
+    await waitFor(
+      "orb deletion completed",
+      async () => {
+        const view = await api(base, "GET", `/api/v1/orbs/${orbId}`);
+        return view.status === 404 ? true : null;
+      },
+      { timeoutMs: 180_000, intervalMs: 1_000 },
+    );
+    const deletedHistory = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+    expect(deletedHistory.status).toBe(404);
+    if (PROCESS_BACKEND) {
+      expect(() =>
+        readFileSync(join(localStateDirectory, "process-hosts", orbId, "host.json"), "utf8"),
+      ).toThrow();
+    } else {
+      await expect(docker(["inspect", `pi-orb-${orbId}`])).rejects.toThrow();
+      await expect(docker(["volume", "inspect", `pi-orb-data-${orbId}`])).rejects.toThrow();
+    }
   }
 });

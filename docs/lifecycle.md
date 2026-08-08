@@ -25,12 +25,14 @@ Idle auto-stop reuses existing machinery rather than adding a new lifecycle path
 Idle auto-stop cannot, by construction, handle a host the database has no row for — no row means no reconciler, no history pull, and no idle signal. That is the separate **orphan-host sweep** (open question 23), and the two should ship together:
 
 - A periodic control-plane loop (`orphanSweepLoop`, every 5 minutes, running as a third background task beside the poller and reconciler; one instance is enough since the operation is idempotent) calls `listManagedHosts` — already on the provider port for exactly this purpose; the GCE implementation lists by the `pi-orb-orb-id` label, Docker by its managed-container naming.
-- Each observation is joined against the orbs table. A running host whose orb row says `stopped`/`failed` is already covered by the lifecycle-transition reconciliation below when `host_ref` matches; the sweep additionally catches rows whose `host_ref` was lost. A running host with *no* orb row at all — a provision whose commit was lost, or a database reset — is stopped (never deleted: the filesystem is authoritative and deletion does not exist in the first slice) and logged loudly as an integrity signal.
-- The sweep only ever moves hosts toward "stopped"; it never starts or deletes anything, so a misfire costs a restart, not data.
+- Each observation is joined against the orbs table. A running host whose orb row says `stopped`/`failed` is already covered by the lifecycle-transition reconciliation below when `host_ref` matches; the sweep additionally catches rows whose `host_ref` was lost. A running host with *no* orb row at all — a provision whose commit was lost, or a database reset — is stopped and logged loudly as an integrity signal.
+- The ordinary sweep only ever moves hosts toward "stopped"; it never starts or deletes anything, so a misfire costs a restart, not data. The deletion extension in `docs/orb-deletion.md` adds a separate, explicit path: while a `deleting` orb row and its durable tombstone prove destructive intent, the deletion sweep destroys matching hosts rather than treating them as unknown orphans.
 
 ## Lifecycle transitions
 
 The database state is desired/reconciliation intent as well as user-visible state. Every transition uses `state_version` compare-and-swap; provider operations remain idempotent, so competing reconcilers are harmless.
+
+**Deletion extension implemented 2026-08-08.** `docs/orb-deletion.md` adds terminal-intent state `deleting`. It closes live access, revokes runtime-broker authorization, skips the history drain because the replica will be erased, destroys provider storage/compute and Tailscale identity, then transactionally removes history and the orb row. A short-lived tombstone and deletion sweep fence stale provisions and make cleanup recoverable; the tombstone, history, and orb row are removed together only after final absence checks.
 
 | Database state | Reconciler behavior                                                                                                                                                                                                                          |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -40,12 +42,14 @@ The database state is desired/reconciliation intent as well as user-visible stat
 | `stopping`     | Reject new live connections, close existing proxies, perform the final history-pull barrier, stop the provider host, then mark stopped. A non-retryable drain failure stops the host and marks the orb `failed` instead of retrying forever. |
 | `stopped`      | Perform no runtime work; reconcile any unexpectedly running host back to stopped.                                                                                                                                                            |
 | `failed`       | Preserve filesystem and error; wait for an explicit start request.                                                                                                                                                                           |
+| `deleting`     | Refuse all ordinary orb work; retry complete host, filesystem, Tailscale, and database cleanup as specified in `docs/orb-deletion.md`.                                                                                                        |
 
 Commands:
 
 - create inserts `creating` and wakes reconciliation;
 - start is idempotent for `creating`, `starting`, or `running`; from `stopped` or `failed` it clears `last_error`, enters `starting`, and wakes reconciliation;
 - stop is idempotent for `stopping` or `stopped`; from `creating`, `starting`, `running`, or `failed` it enters `stopping`;
+- delete is idempotent while `deleting`, may enter it from every other state, and makes start/stop/rename/history/live operations conflict;
 - start while `stopping` returns `409 conflict`; the caller retries after stopped;
 - runtime message requests are rejected once the database enters `stopping` because the control plane closes and refuses live proxy connections for that orb.
 

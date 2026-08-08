@@ -235,6 +235,18 @@ async function handleApi(
       sendJson(response, 200, orb);
       return true;
     }
+    if (method === "DELETE" && action === undefined) {
+      const deleting = updateOrb(orb, "deleting");
+      state.orbs.set(orbId, deleting);
+      sendJson(response, 202, deleting);
+      const timer = setTimeout(() => {
+        state.orbs.delete(orbId);
+        state.histories.delete(orbId);
+        state.startupTimers.delete(orbId);
+      }, 1_000);
+      state.startupTimers.set(orbId, timer);
+      return true;
+    }
     if (method === "PATCH" && action === undefined) {
       const body = await readJson(request);
       if (

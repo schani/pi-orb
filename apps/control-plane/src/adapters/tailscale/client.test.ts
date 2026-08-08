@@ -9,6 +9,7 @@ import {
 const signal = new AbortController().signal;
 
 interface Recorded {
+  method: "GET" | "POST" | "DELETE";
   url: string;
   headers: Record<string, string>;
   body: string;
@@ -24,12 +25,18 @@ class FakeTransport implements TailscaleApiTransport {
   }
 
   async request(args: {
+    method?: "GET" | "POST" | "DELETE";
     url: string;
     headers: Readonly<Record<string, string>>;
-    body: string;
+    body?: string;
     signal: AbortSignal;
   }): Promise<TailscaleHttpResponse> {
-    const recorded: Recorded = { url: args.url, headers: { ...args.headers }, body: args.body };
+    const recorded: Recorded = {
+      method: args.method ?? "POST",
+      url: args.url,
+      headers: { ...args.headers },
+      body: args.body ?? "",
+    };
     this.requests.push(recorded);
     const step = this.script.shift();
     if (step === undefined) throw new Error(`unscripted request: ${args.url}`);
@@ -80,6 +87,35 @@ describe("HttpTailscaleAuthKeyMinter", () => {
       preauthorized: true,
       tags: [TAILSCALE_ORB_TAG],
     });
+  });
+
+  it("revokes exact orb keys and removes only the exact tagged device", async () => {
+    const transport = new FakeTransport([
+      tokenOk,
+      () =>
+        json(200, [
+          { id: "key-match", description: "pi-orb orb-1" },
+          { id: "key-other", description: "pi-orb orb-10" },
+        ]),
+      () => ({ status: 204, text: "" }),
+      () =>
+        json(200, {
+          devices: [
+            { id: "device-match", hostname: "pi-orb-orb-1", tags: [TAILSCALE_ORB_TAG] },
+            { id: "device-other", hostname: "pi-orb-orb-10", tags: [TAILSCALE_ORB_TAG] },
+          ],
+        }),
+      () => ({ status: 204, text: "" }),
+    ]);
+    const result = await makeMinter(transport).cleanupOrb("orb-1", signal);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(transport.requests.map((request) => [request.method, request.url])).toEqual([
+      ["POST", "https://tailscale.test/api/v2/oauth/token"],
+      ["GET", "https://tailscale.test/api/v2/tailnet/-/keys"],
+      ["DELETE", "https://tailscale.test/api/v2/tailnet/-/keys/key-match"],
+      ["GET", "https://tailscale.test/api/v2/tailnet/-/devices"],
+      ["DELETE", "https://tailscale.test/api/v2/device/device-match"],
+    ]);
   });
 
   it("maps a 4xx on the key create to a terminal rejection", async () => {

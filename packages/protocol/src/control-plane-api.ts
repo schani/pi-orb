@@ -11,6 +11,7 @@ export const OrbStateSchema = Type.Union([
   Type.Literal("stopping"),
   Type.Literal("stopped"),
   Type.Literal("failed"),
+  Type.Literal("deleting"),
 ]);
 export type OrbState = Static<typeof OrbStateSchema>;
 
@@ -58,6 +59,14 @@ export const OrbStateDetailSchema = Type.Union([
   Type.Object(
     {
       type: Type.Literal("draining_history"),
+      retrying: Type.Boolean(),
+      message: Type.Optional(Type.String()),
+    },
+    closed,
+  ),
+  Type.Object(
+    {
+      type: Type.Literal("deleting_resources"),
       retrying: Type.Boolean(),
       message: Type.Optional(Type.String()),
     },

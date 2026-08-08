@@ -14,6 +14,7 @@ const RECONCILABLE_STATES: readonly OrbState[] = [
   "stopping",
   "stopped",
   "failed",
+  "deleting",
 ];
 
 const isTerminal = (state: OrbState): boolean => state === "stopped" || state === "failed";
@@ -94,6 +95,7 @@ function reconcileDelayMs(
         case "host_transition":
           return constants.readinessPollMs;
         case "drain_blocked":
+        case "deletion_quarantine":
           return constants.reconcileTickMs;
       }
       break;

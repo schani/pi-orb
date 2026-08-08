@@ -15,6 +15,10 @@ export interface TailscaleAuthKeyMinter {
   mintAuthKey(orbId: string, signal: AbortSignal): ResultAsync<string, TailscaleError>;
 }
 
+export interface TailscaleOrbCleaner {
+  cleanupOrb(orbId: string, signal: AbortSignal): ResultAsync<void, TailscaleError>;
+}
+
 /** Provider construction option: how orb hosts join the tailnet. */
 export interface TailscaleHostOptions {
   readonly minter: TailscaleAuthKeyMinter;
@@ -35,24 +39,26 @@ export interface TailscaleHttpResponse {
  */
 export interface TailscaleApiTransport {
   request(args: {
+    readonly method?: "GET" | "POST" | "DELETE";
     readonly url: string;
     readonly headers: Readonly<Record<string, string>>;
-    readonly body: string;
+    readonly body?: string;
     readonly signal: AbortSignal;
   }): Promise<TailscaleHttpResponse>;
 }
 
 export class FetchTailscaleApiTransport implements TailscaleApiTransport {
   async request(args: {
+    readonly method?: "GET" | "POST" | "DELETE";
     readonly url: string;
     readonly headers: Readonly<Record<string, string>>;
-    readonly body: string;
+    readonly body?: string;
     readonly signal: AbortSignal;
   }): Promise<TailscaleHttpResponse> {
     const response = await fetch(args.url, {
-      method: "POST",
+      method: args.method ?? "POST",
       headers: { ...args.headers },
-      body: args.body,
+      ...(args.body === undefined ? {} : { body: args.body }),
       signal: args.signal,
     });
     return { status: response.status, text: await response.text() };
@@ -103,7 +109,7 @@ function parseJson(what: string, text: string): Result<Record<string, unknown>, 
   return ok(parsed.value as Record<string, unknown>);
 }
 
-export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter {
+export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, TailscaleOrbCleaner {
   private readonly transport: TailscaleApiTransport;
   private readonly config: TailscaleOAuthConfig;
 
@@ -125,6 +131,21 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter {
   ): ResultAsync<TailscaleHttpResponse, TailscaleError> {
     return ResultAsync.fromPromise(
       this.transport.request({ url, headers, body, signal }),
+      (error) =>
+        unavailable(
+          `tailscale request failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+    );
+  }
+
+  private send(
+    method: "GET" | "DELETE",
+    url: string,
+    headers: Readonly<Record<string, string>>,
+    signal: AbortSignal,
+  ): ResultAsync<TailscaleHttpResponse, TailscaleError> {
+    return ResultAsync.fromPromise(
+      this.transport.request({ method, url, headers, signal }),
       (error) =>
         unavailable(
           `tailscale request failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -163,6 +184,95 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter {
    * and tagged so no admin has to approve a node and the tailnet ACLs scope
    * what `tag:pi-orb` may reach.
    */
+  cleanupOrb(orbId: string, signal: AbortSignal): ResultAsync<void, TailscaleError> {
+    const run = async (): Promise<Result<void, TailscaleError>> => {
+      const token = await this.accessToken(signal);
+      if (token.isErr()) return err(token.error);
+      const headers = { authorization: `Bearer ${token.value}` };
+      const description = `pi-orb ${orbId}`;
+      const keyList = await this.send("GET", this.url("/api/v2/tailnet/-/keys"), headers, signal);
+      if (keyList.isErr()) return err(keyList.error);
+      if (keyList.value.status < 200 || keyList.value.status >= 300) {
+        return err(statusError("tailscale key list", keyList.value.status, keyList.value.text));
+      }
+      const parsedKeys = Result.fromThrowable(
+        () => JSON.parse(keyList.value.text) as unknown,
+        () => rejected("tailscale key list returned unparseable JSON"),
+      )();
+      if (parsedKeys.isErr()) return err(parsedKeys.error);
+      const keys = Array.isArray(parsedKeys.value)
+        ? parsedKeys.value
+        : typeof parsedKeys.value === "object" &&
+            parsedKeys.value !== null &&
+            Array.isArray((parsedKeys.value as Record<string, unknown>)["keys"])
+          ? ((parsedKeys.value as Record<string, unknown>)["keys"] as unknown[])
+          : [];
+      for (const value of keys) {
+        const key = value as Record<string, unknown>;
+        if (key["description"] !== description || typeof key["id"] !== "string") continue;
+        const removed = await this.send(
+          "DELETE",
+          this.url(`/api/v2/tailnet/-/keys/${encodeURIComponent(key["id"])}`),
+          headers,
+          signal,
+        );
+        if (removed.isErr()) return err(removed.error);
+        if (
+          removed.value.status !== 404 &&
+          (removed.value.status < 200 || removed.value.status >= 300)
+        ) {
+          return err(statusError("tailscale key delete", removed.value.status, removed.value.text));
+        }
+      }
+
+      const deviceList = await this.send(
+        "GET",
+        this.url("/api/v2/tailnet/-/devices"),
+        headers,
+        signal,
+      );
+      if (deviceList.isErr()) return err(deviceList.error);
+      if (deviceList.value.status < 200 || deviceList.value.status >= 300) {
+        return err(
+          statusError("tailscale device list", deviceList.value.status, deviceList.value.text),
+        );
+      }
+      const parsedDevices = parseJson("tailscale device list", deviceList.value.text);
+      if (parsedDevices.isErr()) return err(parsedDevices.error);
+      const devices = Array.isArray(parsedDevices.value["devices"])
+        ? (parsedDevices.value["devices"] as unknown[])
+        : [];
+      const hostname = `pi-orb-${orbId}`;
+      for (const value of devices) {
+        const device = value as Record<string, unknown>;
+        const exactName =
+          device["hostname"] === hostname ||
+          (typeof device["name"] === "string" && device["name"].split(".")[0] === hostname);
+        const tags = Array.isArray(device["tags"]) ? device["tags"] : [];
+        if (!exactName || !tags.includes(TAILSCALE_ORB_TAG) || typeof device["id"] !== "string") {
+          continue;
+        }
+        const removed = await this.send(
+          "DELETE",
+          this.url(`/api/v2/device/${encodeURIComponent(device["id"])}`),
+          headers,
+          signal,
+        );
+        if (removed.isErr()) return err(removed.error);
+        if (
+          removed.value.status !== 404 &&
+          (removed.value.status < 200 || removed.value.status >= 300)
+        ) {
+          return err(
+            statusError("tailscale device delete", removed.value.status, removed.value.text),
+          );
+        }
+      }
+      return ok(undefined);
+    };
+    return new ResultAsync(run());
+  }
+
   mintAuthKey(orbId: string, signal: AbortSignal): ResultAsync<string, TailscaleError> {
     const run = async (): Promise<Result<string, TailscaleError>> => {
       const token = await this.accessToken(signal);
