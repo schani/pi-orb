@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pi-orb · New Project design directions</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f8f3e9;
+      --paper-2: #f1eadb;
+      --inset: #ebe1cd;
+      --ink: #221c12;
+      --ink-soft: #5f5544;
+      --ink-faint: #8a7e68;
+      --rule: #ddd2bc;
+      --rule-strong: #cbbda2;
+      --accent: #a03e1c;
+      --accent-soft: #f3e2d6;
+      --serif: Charter, "Bitstream Charter", "Iowan Old Style", Georgia, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font: 14px/1.5 var(--sans); }
+    button, input { font: inherit; }
+    .prototype-header {
+      position: sticky; z-index: 10; top: 0; display: flex; align-items: center; gap: 20px;
+      min-height: 58px; padding: 10px clamp(16px, 4vw, 58px);
+      background: rgb(248 243 233 / 94%); border-bottom: 1px solid var(--rule); backdrop-filter: blur(12px);
+    }
+    .brand { font: 700 17px var(--mono); letter-spacing: -.04em; }
+    .eyebrow { color: var(--accent); font: 700 10px var(--mono); letter-spacing: .18em; text-transform: uppercase; }
+    nav { display: flex; gap: 6px; margin-left: auto; }
+    nav a { min-width: 30px; padding: 3px 9px; color: var(--ink-soft); border: 1px solid var(--rule); border-radius: 999px; text-align: center; text-decoration: none; }
+    nav a:hover, nav a:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+    .intro, .direction { width: min(1080px, calc(100% - 32px)); margin-inline: auto; }
+    .intro { padding: clamp(42px, 8vw, 76px) 0 38px; }
+    .intro h1 { max-width: 780px; margin: 8px 0 13px; font: 500 clamp(34px, 6vw, 62px)/1.04 var(--serif); letter-spacing: -.025em; }
+    .intro p { max-width: 690px; margin: 0; color: var(--ink-soft); font-size: 16px; }
+    .direction { padding: 46px 0 68px; border-top: 1px solid var(--rule); scroll-margin-top: 58px; }
+    .direction-heading { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 14px; margin-bottom: 20px; }
+    .number { color: var(--accent); font: 500 28px var(--serif); }
+    h2 { margin: 0; font: 600 25px var(--serif); }
+    .rationale { max-width: 700px; margin: 3px 0 0; color: var(--ink-faint); }
+    .canvas { padding: clamp(18px, 4vw, 38px); overflow: hidden; background: var(--paper-2); border: 1px solid var(--rule); border-radius: 14px; box-shadow: 0 15px 45px rgb(83 61 24 / 6%); }
+    .context { display: flex; align-items: center; gap: 12px; margin: 0 0 24px; color: var(--ink-faint); font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .context::after { content: ""; height: 1px; flex: 1; background: var(--rule); }
+    .form-title { margin: 0; font: 600 21px var(--serif); font-variant-caps: small-caps; letter-spacing: .09em; }
+    .form-copy { margin: 5px 0 0; color: var(--ink-faint); }
+    label { display: grid; gap: 6px; color: var(--ink-faint); font: 700 9.5px var(--sans); letter-spacing: .18em; text-transform: uppercase; }
+    input { width: 100%; min-width: 0; padding: 10px 12px; color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; outline: none; }
+    input::placeholder { color: var(--ink-faint); font-style: italic; }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(160 62 28 / 10%); }
+    .button { padding: 9px 17px; color: var(--paper); background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; cursor: pointer; font: 700 12px var(--serif); font-variant-caps: small-caps; letter-spacing: .08em; }
+    .button:hover { background: #873416; }
+    .button.secondary { color: var(--ink-soft); background: transparent; border-color: var(--ink-faint); }
+    .button.secondary:hover { background: var(--inset); }
+    .hint { color: var(--ink-faint); font-size: 12px; }
+
+    /* 01 — horizontal strip */
+    .strip-form { display: grid; grid-template-columns: minmax(150px, .7fr) minmax(280px, 1.5fr) auto; align-items: end; gap: 14px; }
+    .strip-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    .strip-heading .form-copy { margin: 0; }
+    .strip-form .button { min-height: 41px; white-space: nowrap; }
+
+    /* 02 — editorial split */
+    .editorial { display: grid; grid-template-columns: minmax(220px, .75fr) minmax(320px, 1.25fr); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+    .editorial-intro { padding: clamp(24px, 4vw, 42px); background: var(--inset); border-right: 1px solid var(--rule); }
+    .editorial-intro .index { display: block; margin-bottom: 36px; color: var(--accent); font: 12px var(--mono); }
+    .editorial-intro .form-title { font-size: 27px; }
+    .editorial-intro p { color: var(--ink-soft); }
+    .editorial-form { display: grid; gap: 18px; padding: clamp(24px, 4vw, 42px); background: var(--paper); }
+    .editorial-form .button { justify-self: start; }
+
+    /* 03 — ruled manuscript */
+    .manuscript-form { max-width: 760px; margin: 0 auto; padding: 10px 0 2px; }
+    .manuscript-head { margin-bottom: 30px; text-align: center; }
+    .manuscript-head .form-title { font-size: 27px; }
+    .manuscript-fields { display: grid; grid-template-columns: .7fr 1.3fr; gap: 28px; }
+    .manuscript-fields label { gap: 2px; }
+    .manuscript-fields input { padding: 10px 2px 7px; background: transparent; border: 0; border-bottom: 1px solid var(--ink-faint); border-radius: 0; }
+    .manuscript-fields input:focus { border-color: var(--accent); box-shadow: none; }
+    .manuscript-actions { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 30px; }
+
+    /* 04 — repository first */
+    .repo-card { max-width: 820px; margin: 0 auto; background: var(--paper); border: 1px solid var(--rule); border-radius: 10px; }
+    .repo-head { display: flex; align-items: center; gap: 14px; padding: 18px 22px; border-bottom: 1px solid var(--rule); }
+    .repo-mark { display: grid; flex: 0 0 auto; width: 34px; height: 34px; place-items: center; color: var(--paper); background: var(--ink); border-radius: 50%; font: 16px var(--mono); }
+    .repo-form { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(160px, .6fr); gap: 18px; padding: 22px; }
+    .repo-url { grid-column: 1 / -1; }
+    .repo-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; grid-column: 1 / -1; padding-top: 3px; }
+
+    /* 05 — command palette */
+    .command-form { max-width: 700px; margin: 0 auto; overflow: hidden; background: var(--ink); border: 1px solid #161109; border-radius: 12px; box-shadow: 0 22px 55px rgb(34 28 18 / 18%); }
+    .command-head { display: flex; align-items: center; gap: 10px; padding: 13px 18px; color: #d8cdb9; border-bottom: 1px solid #4a4133; font: 12px var(--mono); }
+    .command-dot { width: 7px; height: 7px; background: var(--accent); border-radius: 50%; }
+    .command-body { display: grid; gap: 17px; padding: clamp(22px, 4vw, 34px); }
+    .command-body .form-title { color: var(--paper); font-size: 24px; }
+    .command-body .form-copy { color: #ad9f89; }
+    .command-body label { color: #ad9f89; }
+    .command-body input { color: var(--paper); background: #2c251b; border-color: #564b3b; }
+    .command-body input::placeholder { color: #807360; }
+    .command-body input:focus { border-color: #cf7351; box-shadow: 0 0 0 3px rgb(207 115 81 / 15%); }
+    .command-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+    .key { padding: 2px 6px; color: #ad9f89; border: 1px solid #564b3b; border-radius: 4px; font: 10px var(--mono); }
+
+    @media (max-width: 680px) {
+      .prototype-header { gap: 10px; }
+      .prototype-header .eyebrow { display: none; }
+      nav { gap: 4px; }
+      nav a { min-width: 27px; padding-inline: 7px; }
+      .direction-heading { grid-template-columns: 34px 1fr; }
+      .canvas { padding: 16px; }
+      .strip-heading { display: block; }
+      .strip-heading .form-copy { margin-top: 5px; }
+      .strip-form, .manuscript-fields, .repo-form { grid-template-columns: 1fr; }
+      .strip-form .button { width: 100%; }
+      .editorial { grid-template-columns: 1fr; }
+      .editorial-intro { border-right: 0; border-bottom: 1px solid var(--rule); }
+      .editorial-intro .index { margin-bottom: 18px; }
+      .editorial-form .button { width: 100%; }
+      .manuscript-actions { align-items: stretch; flex-direction: column-reverse; text-align: center; }
+      .repo-url, .repo-actions { grid-column: auto; }
+      .repo-actions { align-items: stretch; flex-direction: column; }
+      .repo-actions .button { width: 100%; }
+      .command-actions { align-items: stretch; flex-direction: column-reverse; }
+      .command-actions .button { width: 100%; }
+      .command-actions .hint { text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <header class="prototype-header">
+    <span class="brand">pi-orb</span>
+    <span class="eyebrow">New Project study</span>
+    <nav aria-label="Design options">
+      <a href="#one">1</a><a href="#two">2</a><a href="#three">3</a><a href="#four">4</a><a href="#five">5</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="intro">
+      <span class="eyebrow">Five responsive directions</span>
+      <h1>A better way to begin a project.</h1>
+      <p>Each direction keeps the creation form at the bottom of the dashboard, uses “New Project” consistently, and collapses cleanly for narrow screens.</p>
+    </section>
+
+    <section class="direction" id="one">
+      <div class="direction-heading"><span class="number">01</span><div><h2>Compact strip</h2><p class="rationale">Low ceremony and low vertical cost. Best when project creation is frequent and both values are already known.</p></div></div>
+      <div class="canvas">
+        <div class="context">end of project list</div>
+        <div class="strip-heading"><h3 class="form-title">New Project</h3><p class="form-copy">Connect a repository and start a fresh workspace.</p></div>
+        <form class="strip-form" onsubmit="event.preventDefault()">
+          <label>Project name<input type="text" placeholder="my project"></label>
+          <label>Repository URL<input type="url" placeholder="https://github.com/owner/repo"></label>
+          <button class="button" type="submit">Create project</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="direction" id="two">
+      <div class="direction-heading"><span class="number">02</span><div><h2>Editorial split</h2><p class="rationale">Separates explanation from action. The extra context makes the form approachable for a first-time user without cluttering the fields.</p></div></div>
+      <div class="canvas">
+        <div class="context">end of project list</div>
+        <div class="editorial">
+          <div class="editorial-intro"><span class="index">NEXT / 01</span><h3 class="form-title">New Project</h3><p>Projects group orbs around one Git repository. You can create the first orb after this step.</p></div>
+          <form class="editorial-form" onsubmit="event.preventDefault()">
+            <label>Project name<input type="text" placeholder="my project"></label>
+            <label>Repository URL<input type="url" placeholder="https://github.com/owner/repo"></label>
+            <button class="button" type="submit">Create project</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="direction" id="three">
+      <div class="direction-heading"><span class="number">03</span><div><h2>Ruled manuscript</h2><p class="rationale">The quietest direction. Underlined fields and centered composition fit the reading-room visual language without another heavy card.</p></div></div>
+      <div class="canvas">
+        <div class="context">end of project list</div>
+        <form class="manuscript-form" onsubmit="event.preventDefault()">
+          <div class="manuscript-head"><h3 class="form-title">New Project</h3><p class="form-copy">Give the work a name and a place to live.</p></div>
+          <div class="manuscript-fields">
+            <label>Project name<input type="text" placeholder="my project"></label>
+            <label>Repository URL<input type="url" placeholder="https://github.com/owner/repo"></label>
+          </div>
+          <div class="manuscript-actions"><span class="hint">Both fields are required.</span><button class="button" type="submit">Create project</button></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="direction" id="four">
+      <div class="direction-heading"><span class="number">04</span><div><h2>Repository first</h2><p class="rationale">Makes the repository the primary concept and treats the project name as its friendly label. Useful if URL entry drives future metadata previews.</p></div></div>
+      <div class="canvas">
+        <div class="context">end of project list</div>
+        <div class="repo-card">
+          <div class="repo-head"><span class="repo-mark" aria-hidden="true">↗</span><div><h3 class="form-title">New Project</h3><p class="form-copy">Connect a Git repository</p></div></div>
+          <form class="repo-form" onsubmit="event.preventDefault()">
+            <label class="repo-url">Repository URL<input type="url" placeholder="https://github.com/owner/repo"></label>
+            <label>Project name<input type="text" placeholder="my project"></label>
+            <div class="repo-actions"><span class="hint">HTTPS GitHub URLs are supported.</span><button class="button" type="submit">Create project</button></div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="direction" id="five">
+      <div class="direction-heading"><span class="number">05</span><div><h2>Command panel</h2><p class="rationale">A focused, high-contrast endpoint to the dashboard. It feels like opening a deliberate creation mode while retaining the same two-field flow.</p></div></div>
+      <div class="canvas">
+        <div class="context">end of project list</div>
+        <form class="command-form" onsubmit="event.preventDefault()">
+          <div class="command-head"><span class="command-dot"></span><span>pi-orb / create</span></div>
+          <div class="command-body">
+            <div><h3 class="form-title">New Project</h3><p class="form-copy">Start from a Git repository.</p></div>
+            <label>Project name<input type="text" placeholder="my project"></label>
+            <label>Repository URL<input type="url" placeholder="https://github.com/owner/repo"></label>
+            <div class="command-actions"><span class="hint"><span class="key">⌘</span> <span class="key">↵</span> to create</span><button class="button" type="submit">Create project</button></div>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

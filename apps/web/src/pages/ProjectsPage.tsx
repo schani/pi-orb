@@ -289,35 +289,6 @@ export function ProjectsPage() {
 
   return (
     <main className="page projects-page">
-      <section className="panel">
-        <h1>projects</h1>
-        <form className="project-form" onSubmit={onCreateProject}>
-          <label>
-            name
-            <input
-              type="text"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="my project"
-            />
-          </label>
-          <label>
-            repository URL
-            <input
-              type="text"
-              value={repositoryUrl}
-              onChange={(event) => setRepositoryUrl(event.target.value)}
-              placeholder="https://github.com/owner/repo"
-            />
-          </label>
-          <button type="submit" disabled={submitting}>
-            {submitting ? "creating…" : "create project"}
-          </button>
-          {urlError !== null && <div className="banner banner-error">{urlError}</div>}
-          {formError !== null && <div className="banner banner-error">{formError}</div>}
-        </form>
-      </section>
-
       {loadError !== null && (
         <div className="banner banner-error">
           failed to load projects: {describeApiError(loadError)}
@@ -383,6 +354,42 @@ export function ProjectsPage() {
           </section>
         );
       })}
+
+      <section className="panel new-project-panel">
+        <div className="project-form-heading">
+          <h1>New Project</h1>
+          <p>Connect a repository and start a fresh workspace.</p>
+        </div>
+        <form className="project-form" onSubmit={onCreateProject}>
+          <label>
+            name
+            <input
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="my project"
+            />
+          </label>
+          <label>
+            repository URL
+            <input
+              type="text"
+              value={repositoryUrl}
+              onChange={(event) => setRepositoryUrl(event.target.value)}
+              placeholder="https://github.com/owner/repo"
+            />
+          </label>
+          <button type="submit" disabled={submitting}>
+            {submitting ? "creating…" : "create project"}
+          </button>
+          {urlError !== null && (
+            <div className="banner banner-error project-form-error">{urlError}</div>
+          )}
+          {formError !== null && (
+            <div className="banner banner-error project-form-error">{formError}</div>
+          )}
+        </form>
+      </section>
     </main>
   );
 }

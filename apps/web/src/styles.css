@@ -240,11 +240,28 @@ textarea:focus {
 
 /* ---------- projects page ---------- */
 
-.project-form {
+.project-form-heading {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.project-form-heading h1,
+.project-form-heading p {
+  margin: 0;
+}
+
+.project-form-heading p {
+  color: var(--ink-faint);
+}
+
+.project-form {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(280px, 1.5fr) auto;
+  align-items: end;
   gap: 0.7rem;
-  max-width: 30rem;
 }
 
 .project-form label {
@@ -266,7 +283,20 @@ textarea:focus {
 }
 
 .project-form button {
-  align-self: flex-start;
+  min-height: 2.25rem;
+  color: var(--paper);
+  background: var(--accent);
+  border-color: var(--accent);
+  white-space: nowrap;
+}
+
+.project-form button:hover:not(:disabled) {
+  background: #873416;
+}
+
+.project-form-error {
+  grid-column: 1 / -1;
+  margin-top: 0;
 }
 
 .project-header {
@@ -1240,6 +1270,22 @@ button.project-orb-action.danger:hover:not(:disabled) {
 }
 
 @media (max-width: 760px) {
+  .project-form {
+    grid-template-columns: 1fr;
+  }
+
+  .project-form-heading {
+    display: block;
+  }
+
+  .project-form-heading p {
+    margin-top: 0.3rem;
+  }
+
+  .project-form button {
+    width: 100%;
+  }
+
   .project-orb-shelves {
     grid-template-columns: 1fr;
     gap: 20px;
