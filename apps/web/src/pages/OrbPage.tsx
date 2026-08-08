@@ -328,6 +328,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const [notifications, setNotifications] = useState<BrowserNotificationPermission>(() =>
     notificationPermission(),
   );
@@ -382,6 +383,10 @@ export function OrbPage({ orbId }: { orbId: string }) {
   useEffect(() => {
     orbNameRef.current = orb?.name ?? null;
   }, [orb?.name]);
+
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.focus();
+  }, [renaming]);
 
   // Database-first history load (docs/history-replication.md).
   useEffect(() => {
@@ -623,6 +628,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
               }}
             >
               <input
+                ref={renameInputRef}
                 aria-label="orb name"
                 value={renameText}
                 maxLength={80}
