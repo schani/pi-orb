@@ -21,6 +21,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Follow-ups
 
+- **Test missing-resource UI behavior** (`docs/web-ui.md`): add focused frontend tests proving an orb API `404` renders “Orb doesn't exist” with a dashboard link without changing the requested hash, and an unknown hash route renders “Page doesn't exist” rather than the dashboard. There are currently no `App`/`OrbPage` routing tests; the E2E suite verifies the backend's post-deletion `404` only.
 - **Standalone re-login action** (was open question 31): repair a mid-run credential revocation without stopping and starting the orb (`docs/credentials.md`; today recovery is stop/start).
 - **exe.dev verification spike** (prerequisite for open question 35; `docs/EXE-DEV.md`): a $20 account and a half-day — boot the runtime image with `new`, hit port 8080 through the proxy with an HTTP and a WS client using a locally minted VM token, halt the VM from inside and watch what `ls` reports, then `restart` and confirm `/workspace` survived.
 - **Tier-2 port exposure: `tailscale serve` promotion** (`docs/ports.md`): per-port opt-in HTTPS at `https://pi-orb-<orbId>.<tailnet>.ts.net` — enable tailnet HTTPS certs, run `tailscale serve` from the runtime on request, switch the control-plane URL builder to the `https` form for promoted ports. Prerequisite for embedding previews in the web UI (mixed content) and for Funnel sharing.

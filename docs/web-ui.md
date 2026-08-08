@@ -16,6 +16,10 @@ The first UI needs to display at least:
 
 Remaining UI questions include rendering unknown content blocks, large/truncated tool output, and image storage. Transient token deltas are ephemeral presentation events and are reconstructed after reconnect through ordinary live events; they are not stored in PostgreSQL.
 
+## Missing resources (decided 2026-08-08)
+
+A direct URL for a resource that does not exist stays at that URL and renders a resource-specific message (for example, “Orb doesn't exist”) with a link to the dashboard. Silently redirecting to the dashboard was rejected because it hides whether the resource was deleted, the URL is stale, or navigation failed. This behavior applies consistently to every resource type and to unknown application routes; unknown routes render “Page doesn't exist.”
+
 ## Frontend-only development (decided 2026-08-06)
 
 Two Docker-free development compositions exist and must not be confused:

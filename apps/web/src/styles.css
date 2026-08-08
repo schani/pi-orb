@@ -122,6 +122,21 @@ a {
   color: var(--accent);
 }
 
+.not-found-page {
+  align-items: flex-start;
+  padding-top: clamp(3rem, 12vh, 8rem);
+}
+
+.not-found-page h1,
+.not-found-page p {
+  margin: 0;
+}
+
+.not-found-page a {
+  font-family: var(--serif);
+  font-weight: 600;
+}
+
 /* ---------- controls ---------- */
 
 button {

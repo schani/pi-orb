@@ -33,6 +33,7 @@ import {
   requestNotificationPermission,
   showTurnNotification,
 } from "../lib/turn-notifications.ts";
+import { NotFoundPage } from "./NotFoundPage.tsx";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -325,6 +326,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [state, dispatch] = useReducer(reducer, undefined, initialState);
   const [orb, setOrb] = useState<OrbView | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);
+  const [orbNotFound, setOrbNotFound] = useState(false);
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
@@ -357,6 +359,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
 
   // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {
+    if (orbNotFound) return;
     let cancelled = false;
     const poll = async () => {
       const result = await getOrb(orbId);
@@ -364,9 +367,12 @@ export function OrbPage({ orbId }: { orbId: string }) {
       if (result.isOk()) {
         setOrb(result.value);
         setOrbError(null);
+        setOrbNotFound(false);
       } else {
         if (result.error.type === "http" && result.error.status === 404) {
-          window.location.hash = "#/";
+          setOrb(null);
+          setOrbError(null);
+          setOrbNotFound(true);
           return;
         }
         setOrbError(result.error);
@@ -378,7 +384,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [orbId]);
+  }, [orbId, orbNotFound]);
 
   useEffect(() => {
     orbNameRef.current = orb?.name ?? null;
@@ -611,6 +617,8 @@ export function OrbPage({ orbId }: { orbId: string }) {
     state.operationId !== null &&
     state.pendingRequest === null &&
     (state.welcome?.capabilities.includes(CAPABILITY_ABORT) ?? false);
+
+  if (orbNotFound) return <NotFoundPage resourceName="Orb" />;
 
   return (
     <>

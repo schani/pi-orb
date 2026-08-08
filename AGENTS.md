@@ -18,6 +18,10 @@ Whenever a conversation or implementation changes a requirement, decision, propo
 6. Incident forensics get a file in `docs/postmortems/`; the design doc keeps the resulting rule or invariant plus a link.
 7. Reference docs by path (for example `docs/credentials.md`), never by section number. When adding a doc, add it to the index in `DESIGN.md`.
 
+## Missing resources
+
+When a requested resource does not exist, preserve the requested URL and show a clear resource-specific “doesn't exist” message with a link back to the dashboard. Never silently redirect a missing resource to the dashboard. Apply this consistently to all resource types and unknown application routes.
+
 ## Error handling
 
 Do not use exceptions for expected or recoverable control flow. First-party fallible APIs return `neverthrow` `Result` or `ResultAsync` with explicit discriminated error types.

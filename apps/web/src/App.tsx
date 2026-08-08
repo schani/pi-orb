@@ -1,15 +1,17 @@
 import { useSyncExternalStore } from "react";
+import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage.tsx";
 
-type Route = { page: "projects" } | { page: "orb"; orbId: string };
+type Route = { page: "projects" } | { page: "orb"; orbId: string } | { page: "not_found" };
 
 function parseRoute(hash: string): Route {
   const path = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (path === "" || path === "/") return { page: "projects" };
   const match = /^\/orbs\/([^/]+)$/.exec(path);
   const orbId = match?.[1];
   if (orbId !== undefined) return { page: "orb", orbId };
-  return { page: "projects" };
+  return { page: "not_found" };
 }
 
 function subscribeToHash(onChange: () => void): () => void {
@@ -37,8 +39,10 @@ export function App() {
             <ProjectsPage />
           </div>
         </>
-      ) : (
+      ) : route.page === "orb" ? (
         <OrbPage key={route.orbId} orbId={route.orbId} />
+      ) : (
+        <NotFoundPage />
       )}
     </div>
   );
