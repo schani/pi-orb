@@ -29,7 +29,7 @@ Open http://localhost:5173.
 
 ### Docker-free full service: process host provider
 
-This is a real control plane plus real orb runtimes, not a frontend fixture. The embedded PGlite database and test-only process host provider let the control plane and orb-process supervisor run without Docker or an external PostgreSQL service. Run the backend and normal web server in separate terminals:
+This is a real control plane plus real orb runtimes, not a frontend fixture. The embedded PGlite database and test-only process host provider let the control plane and orb-process supervisor run without Docker or an external PostgreSQL service. Because this backend inherits host executables rather than using the runtime image, `rustup` is an additional host prerequisite; toolchains are still installed into each orb's private persistent home. Run the backend and normal web server in separate terminals:
 
 ```sh
 # Terminal 1: control plane + PGlite + unsandboxed orb-process supervisor
