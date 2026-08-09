@@ -185,6 +185,8 @@ describe("GceOrbHostProvider", () => {
     expect(script).toContain("mkfs.ext4");
     expect(script).toContain("docker run");
     expect(script).toContain("PI_ORB_CONTROL_PLANE_URL='https://runtime.example'");
+    expect(script).toContain("-e HOME=/workspace/home");
+    expect(script).toContain('-v "$MNT":/workspace');
     // The token reaches the container from metadata, never inline.
     expect(script).not.toContain(token);
     // Evidence that outlives the VM: COS ships container stdout/stderr to

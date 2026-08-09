@@ -50,6 +50,7 @@ VOLUME /workspace
 EXPOSE 8080
 
 ENV PI_ORB_WORK_DIR=/workspace
+ENV HOME=/workspace/home
 
 # Node 24 strips types natively; no build step.
 CMD ["node", "apps/orb-runtime/src/main.ts"]

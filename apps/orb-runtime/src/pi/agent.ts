@@ -27,6 +27,7 @@ import { type BrokerEnv, HttpBrokerEndpoint } from "../broker/endpoint.ts";
 import { brokerProviderConfig } from "../broker/provider.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
+import { configurePersistentHome } from "../domain/home.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import {
   buildTurnSummaryInput,
@@ -200,6 +201,14 @@ export class PiOrbAgent {
   }
 
   private async bootSteps(): Promise<Result<void, RuntimeHealth>> {
+    // 0. Home is ordinary durable orb state, not disposable container state
+    // (docs/host-provider.md). Enforce this in the runtime as well as providers
+    // so direct launches cannot inherit a shared or ephemeral host home.
+    const home = configurePersistentHome(this.options.workDir);
+    if (home.isErr()) {
+      return err(this.failed("home_init_failed", home.error.message, false));
+    }
+
     // 1. Clone (fresh temp dir + atomic rename; docs/host-provider.md).
     this.health = this.initializing("cloning");
     const repoDir = join(this.options.workDir, "repo");

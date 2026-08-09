@@ -135,8 +135,10 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       mkdirSync(this.options.stateDirectory, { recursive: true, mode: 0o700 });
       chmodSync(this.options.stateDirectory, 0o700);
       const directory = this.hostDirectory(metadata.orbId);
-      mkdirSync(join(directory, "workspace"), { recursive: true, mode: 0o700 });
+      const workspace = join(directory, "workspace");
+      mkdirSync(join(workspace, "home"), { recursive: true, mode: 0o700 });
       chmodSync(directory, 0o700);
+      chmodSync(join(workspace, "home"), 0o700);
       const path = this.metadataPath(metadata.orbId);
       const temporary = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
       writeFileSync(temporary, `${JSON.stringify(metadata)}\n`, { mode: 0o600 });
@@ -216,6 +218,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       PI_ORB_ID: metadata.orbId,
       PI_ORB_REPOSITORY_URL: metadata.repositoryUrl,
       PI_ORB_WORK_DIR: join(this.hostDirectory(metadata.orbId), "workspace"),
+      // Do not inherit the control-plane user's home: process-backed orbs must
+      // have the same per-orb durable home contract as Docker and GCE.
+      HOME: join(this.hostDirectory(metadata.orbId), "workspace", "home"),
       PI_ORB_RUNTIME_PORT: String(metadata.port),
       [RUNTIME_TOKEN_ENV]: metadata.runtimeToken,
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,

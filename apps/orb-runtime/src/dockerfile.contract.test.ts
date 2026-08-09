@@ -18,6 +18,11 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain("python-is-python3");
   });
 
+  it("declares HOME on the persistent orb volume", () => {
+    expect(dockerfile).toContain("ENV HOME=/workspace/home");
+    expect(dockerfile).toContain("VOLUME /workspace");
+  });
+
   it("copies every local runtime dependency's package metadata and source", () => {
     const workspacePaths = rootPackage.workspaces ?? [];
     const localPackages = new Map<string, string>();

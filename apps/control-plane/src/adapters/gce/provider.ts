@@ -235,7 +235,8 @@ docker run --detach --name pi-orb-runtime --restart unless-stopped \\
   -e PI_ORB_REPOSITORY_URL='${options.repositoryUrl}' \\
   -e ${RUNTIME_TOKEN_ENV}="$TOKEN" \\
   -e ${CONTROL_PLANE_URL_ENV}='${options.controlPlaneUrl}' \\
-${tailscaleEnv}${extra}  '${options.runtimeImage}'
+${tailscaleEnv}${extra}  -e HOME=/workspace/home \\
+  '${options.runtimeImage}'
 report container-started
 # The startup script ends here, but a container that crash-loops afterwards is
 # invisible to the control plane (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
