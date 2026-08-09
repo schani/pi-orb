@@ -3,7 +3,6 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import {
   type ApiError,
   archiveOrb,
-  createOrb,
   createProject,
   deleteOrb,
   deleteProject,
@@ -27,6 +26,26 @@ type OrbListState =
   | { type: "loading" }
   | { type: "loaded"; items: OrbView[] }
   | { type: "failed"; error: ApiError };
+
+interface NewOrbLinkProps {
+  projectId: string;
+  disabled: boolean;
+}
+
+function NewOrbLink({ projectId, disabled }: NewOrbLinkProps) {
+  if (disabled) {
+    return (
+      <button type="button" disabled>
+        new orb
+      </button>
+    );
+  }
+  return (
+    <a className="button-link" href={`#/projects/${projectId}/orbs/new`}>
+      new orb
+    </a>
+  );
+}
 
 interface ProjectOrbShelvesProps {
   items: OrbView[];
@@ -140,7 +159,6 @@ export function ProjectsPage() {
   const [urlError, setUrlError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [creatingOrbFor, setCreatingOrbFor] = useState<string | null>(null);
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameText, setProjectRenameText] = useState("");
@@ -306,18 +324,6 @@ export function ProjectsPage() {
     await refresh();
   };
 
-  const onCreateOrb = async (projectId: string) => {
-    setCreatingOrbFor(projectId);
-    setOrbCreateError(null);
-    const result = await createOrb(projectId, { id: generateUuid() });
-    setCreatingOrbFor(null);
-    if (result.isErr()) {
-      setOrbCreateError({ projectId, message: describeApiError(result.error) });
-      return;
-    }
-    window.location.hash = `#/orbs/${result.value.id}`;
-  };
-
   return (
     <main className="page projects-page">
       {loadError !== null && (
@@ -393,13 +399,7 @@ export function ProjectsPage() {
               <span className="muted mono">{project.repositoryUrl}</span>
               <span className={`state-badge state-${project.state}`}>{project.state}</span>
               <div className="project-header-actions">
-                <button
-                  type="button"
-                  onClick={() => onCreateOrb(project.id)}
-                  disabled={creatingOrbFor === project.id || project.state === "deleting"}
-                >
-                  {creatingOrbFor === project.id ? "creating…" : "new orb"}
-                </button>
+                <NewOrbLink projectId={project.id} disabled={project.state === "deleting"} />
                 <button
                   type="button"
                   className="danger"

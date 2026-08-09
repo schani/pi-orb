@@ -139,7 +139,10 @@ a {
 
 /* ---------- controls ---------- */
 
-button {
+button,
+a.button-link {
+  display: inline-block;
+  box-sizing: border-box;
   font-family: var(--serif);
   font-variant-caps: small-caps;
   text-transform: lowercase;
@@ -154,7 +157,12 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+a.button-link {
+  text-decoration: none;
+}
+
+button:hover:not(:disabled),
+a.button-link:hover {
   background: var(--inset);
 }
 
@@ -345,6 +353,21 @@ textarea:focus {
   align-items: center;
   gap: 0.5rem;
   margin-left: auto;
+}
+
+.create-orb-page h1,
+.create-orb-page p {
+  margin-top: 0;
+}
+
+.create-orb-page .banner p {
+  margin-bottom: 0.75rem;
+}
+
+.create-orb-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
 .project-orb-shelves {

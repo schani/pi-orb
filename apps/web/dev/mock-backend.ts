@@ -292,11 +292,30 @@ async function handleApi(
         });
         return true;
       }
+      const existing = state.orbs.get(body.id);
+      const requestedName = "name" in body && typeof body.name === "string" ? body.name : undefined;
+      if (existing !== undefined) {
+        if (
+          existing.projectId !== projectId ||
+          (requestedName !== undefined && existing.name !== requestedName)
+        ) {
+          sendJson(response, 409, {
+            error: {
+              code: "conflict",
+              message: "orb id exists with different content",
+              retryable: false,
+            },
+          });
+          return true;
+        }
+        sendJson(response, 202, existing);
+        return true;
+      }
       const createdAt = now();
       const orb: OrbView = {
         id: body.id,
         projectId,
-        name: "name" in body && typeof body.name === "string" ? body.name : null,
+        name: requestedName ?? null,
         state: "creating",
         stateVersion: 1,
         stateChangedAt: createdAt,
