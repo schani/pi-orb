@@ -7,7 +7,7 @@
 FROM node:24-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl python3 python3-venv python-is-python3 \
+  && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl python3 python3-venv python-is-python3 build-essential pkg-config \
   && mkdir -p -m 755 /etc/apt/keyrings \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -22,6 +22,23 @@ RUN apt-get update \
   && apt-get update \
   && apt-get install -y --no-install-recommends gh tailscale \
   && rm -rf /var/lib/apt/lists/*
+
+# Install only the pinned rustup multiplexer in the disposable image. The
+# runtime installs stable on first boot into the orb's persistent home, where
+# project rust-toolchain.toml overrides and Cargo caches survive image updates.
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+      amd64) rust_arch=x86_64; rustup_sha=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10 ;; \
+      arm64) rust_arch=aarch64; rustup_sha=9732d6c5e2a098d3521fca8145d826ae0aaa067ef2385ead08e6feac88fa5792 ;; \
+      *) echo "unsupported Rust architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+  && curl --proto "=https" --tlsv1.2 -fsSL \
+       "https://static.rust-lang.org/rustup/archive/1.29.0/${rust_arch}-unknown-linux-gnu/rustup-init" \
+       -o /tmp/rustup-init \
+  && echo "$rustup_sha  /tmp/rustup-init" | sha256sum --check - \
+  && install -m 755 /tmp/rustup-init /usr/local/bin/rustup \
+  && for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done \
+  && rm /tmp/rustup-init
 
 WORKDIR /app
 
@@ -51,6 +68,9 @@ EXPOSE 8080
 
 ENV PI_ORB_WORK_DIR=/workspace
 ENV HOME=/workspace/home
+ENV RUSTUP_HOME=/workspace/home/.rustup
+ENV CARGO_HOME=/workspace/home/.cargo
+ENV PATH=/workspace/home/.cargo/bin:$PATH
 
 # Node 24 strips types natively; no build step.
 CMD ["node", "apps/orb-runtime/src/main.ts"]

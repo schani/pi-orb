@@ -29,6 +29,7 @@ import { BrokerTokenClient } from "../domain/broker-client.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { AgentGateView } from "../domain/requests.ts";
+import { ensurePersistentRustToolchain } from "../domain/rust.ts";
 import {
   buildTurnSummaryInput,
   type TurnSummarizer,
@@ -41,7 +42,7 @@ import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { pickCodexModel } from "./model-select.ts";
-import { createPortExposureLoader } from "./resource-loader.ts";
+import { createOrbResourceLoader } from "./resource-loader.ts";
 import { sessionFlushed } from "./session-flush.ts";
 import { describeTurnResumeDecision, startInterruptedTurnResume } from "./turn-resume.ts";
 
@@ -208,6 +209,10 @@ export class PiOrbAgent {
     if (home.isErr()) {
       return err(this.failed("home_init_failed", home.error.message, false));
     }
+    const rust = await ensurePersistentRustToolchain(home.value);
+    if (rust.isErr()) {
+      return err(this.failed("rust_toolchain_init_failed", rust.error.message, true));
+    }
 
     // 1. Clone (fresh temp dir + atomic rename; docs/host-provider.md).
     this.health = this.initializing("cloning");
@@ -347,21 +352,16 @@ export class PiOrbAgent {
     // transport (docs/PI-CODEX-E2E.md).
     const settingsManager =
       mockOpenAi !== null ? SettingsManager.inMemory({ transport: "sse" }) : undefined;
-    // Tier-1 port exposure is only discoverable through the system prompt
-    // (docs/ports.md); a loader that fails to build is not worth failing the
-    // boot over, so the session falls back to the SDK's implicit one.
-    const previewHost = this.options.previewHost ?? null;
-    const loader =
-      previewHost === null
-        ? null
-        : await createPortExposureLoader({
-            cwd: repoDir,
-            agentDir,
-            settingsManager,
-            previewHost,
-          }).unwrapOr(null);
-    if (previewHost !== null && loader === null) {
-      console.error("tailscale: system prompt injection failed; ports stay undocumented");
+    // Runtime-tool availability is always appended to Pi's system prompt;
+    // optional tier-1 port exposure composes through the same resource loader.
+    const loaderResult = await createOrbResourceLoader({
+      cwd: repoDir,
+      agentDir,
+      settingsManager,
+      previewHost: this.options.previewHost ?? null,
+    });
+    if (loaderResult.isErr()) {
+      return err(this.failed("session_init_failed", loaderResult.error, true));
     }
     const sessionResult = await ResultAsync.fromPromise(
       createAgentSession({
@@ -371,7 +371,7 @@ export class PiOrbAgent {
         sessionManager: this.sessionManager,
         model,
         ...(settingsManager !== undefined ? { settingsManager } : {}),
-        ...(loader !== null ? { resourceLoader: loader } : {}),
+        resourceLoader: loaderResult.value,
       }),
       (error) => (error instanceof Error ? error.message : String(error)),
     );

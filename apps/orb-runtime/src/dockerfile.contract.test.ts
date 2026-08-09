@@ -18,6 +18,15 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain("python-is-python3");
   });
 
+  it("installs rustup and native build prerequisites with persistent Rust state", () => {
+    expect(dockerfile).toContain("build-essential");
+    expect(dockerfile).toContain("pkg-config");
+    expect(dockerfile).toContain("rustup/archive/1.29.0");
+    expect(dockerfile).toContain("sha256sum --check");
+    expect(dockerfile).toContain("ENV RUSTUP_HOME=/workspace/home/.rustup");
+    expect(dockerfile).toContain("ENV CARGO_HOME=/workspace/home/.cargo");
+  });
+
   it("declares HOME on the persistent orb volume", () => {
     expect(dockerfile).toContain("ENV HOME=/workspace/home");
     expect(dockerfile).toContain("VOLUME /workspace");
