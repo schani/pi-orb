@@ -26,6 +26,25 @@ describe("validateRepositoryUrl", () => {
     expectOk("https://github.com/owner/repo.git");
   });
 
+  it("accepts scp-style Git SSH input and canonicalizes it to HTTPS", () => {
+    const result = validateRepositoryUrl("git@github.com:schani/minimacs.git");
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value).toEqual({
+        url: "https://github.com/schani/minimacs.git",
+        host: "github.com",
+        pathSegments: ["schani", "minimacs.git"],
+      });
+    }
+    expectOk("git@gitlab.com:group/subgroup/repo.git");
+  });
+
+  it("applies the same host and path restrictions to scp-style input", () => {
+    expectErr("git@example.com:owner/repo.git", "host_not_allowed");
+    expectErr("root@github.com:owner/repo.git", "invalid_url");
+    expectErr("git@github.com:owner/repo/extra.git", "invalid_repository_path");
+  });
+
   it("accepts gitlab subgroup paths", () => {
     expectOk("https://gitlab.com/group/subgroup/repo");
     expectOk("https://gitlab.com/group/sub1/sub2/repo.git");

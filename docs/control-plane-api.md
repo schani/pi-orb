@@ -13,9 +13,9 @@ Starting an orb for the project performs a fresh clone into the orb filesystem. 
 
 Repository URL validation is strict allowlisting, decided as follows:
 
-- the scheme must be exactly `https`, and `GIT_ALLOW_PROTOCOL=https` is set for the clone so redirects cannot switch protocols;
+- accepted input is either an `https` URL or Git's common scp-style spelling, `git@host:owner/repo.git` (decided 2026-08-10); scp-style input is normalized to canonical `https` before persistence and cloning rather than enabling SSH transport, and `GIT_ALLOW_PROTOCOL=https` is set for the clone so redirects cannot switch protocols;
 - the hostname must be on a fixed allowlist, initially `github.com`, `gitlab.com`, `bitbucket.org`, and `codeberg.org`; extending the list is configuration, not a design change;
-- userinfo (credential-bearing URLs), explicit ports, and IP-literal hosts are rejected;
+- HTTPS userinfo (credential-bearing URLs), explicit ports, and IP-literal hosts are rejected; the only accepted scp-style user is the conventional literal `git`;
 - the path must match the host's repository shape (for example `/{owner}/{repo}` with an optional `.git`);
 - validation runs at project creation and is re-run by the runtime immediately before cloning, because the first slice's database is writable by anyone who can reach the control plane.
 

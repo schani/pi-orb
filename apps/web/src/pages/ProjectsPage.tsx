@@ -469,7 +469,7 @@ export function ProjectsPage() {
               type="text"
               value={repositoryUrl}
               onChange={(event) => setRepositoryUrl(event.target.value)}
-              placeholder="https://github.com/owner/repo"
+              placeholder="https://github.com/owner/repo or git@github.com:owner/repo.git"
             />
           </label>
           <button type="submit" disabled={submitting}>

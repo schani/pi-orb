@@ -40,6 +40,7 @@ const SUBGROUP_HOSTS: ReadonlySet<string> = new Set(["gitlab.com"]);
 
 const MAX_PATH_SEGMENTS = 10;
 const SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const SCP_STYLE_GIT_PATTERN = /^git@([^/:]+):(.+)$/;
 
 const parseUrl = Result.fromThrowable(
   (raw: string) => new URL(raw),
@@ -74,7 +75,15 @@ export function validateRepositoryUrl(
   raw: string,
   options?: RepositoryUrlOptions,
 ): Result<ValidatedRepositoryUrl, RepositoryUrlError> {
-  const parsed = parseUrl(raw);
+  // Accept Git's common scp-style SSH spelling as input, but canonicalize it
+  // to HTTPS. The runtime deliberately clones only over HTTPS so the protocol
+  // allowlist and broker-backed git credential helper remain in force.
+  const scpStyle = SCP_STYLE_GIT_PATTERN.exec(raw);
+  const scpHost = scpStyle?.[1];
+  const scpPath = scpStyle?.[2];
+  const parseable =
+    scpHost === undefined || scpPath === undefined ? raw : `https://${scpHost}/${scpPath}`;
+  const parsed = parseUrl(parseable);
   if (parsed.isErr()) return err(parsed.error);
   const url = parsed.value;
 
