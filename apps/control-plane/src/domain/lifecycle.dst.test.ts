@@ -322,6 +322,50 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
+  it("a retryable-labelled terminal clone failure fails promptly with its explanation", async () => {
+    await runDst({ name: "terminal-clone-failure", iterations: 30 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      let failedAfterMs = Number.POSITIVE_INFINITY;
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            harness.world.configureOrb(ORB, {
+              initDurationMs: 2_000,
+              initOutcome: "failed_retryable",
+            });
+            seedCreatingOrb(task, harness);
+            const createdAt = harness.store.orbSnapshot(ORB)?.stateChangedAt ?? task.wallNow();
+            await waitUntil(
+              task,
+              "orb failed on terminal clone error",
+              () => harness.store.orbSnapshot(ORB)?.state === "failed",
+              { timeoutMs: 120_000 },
+            );
+            const failed = harness.store.orbSnapshot(ORB);
+            failedAfterMs = (failed?.stateChangedAt ?? task.wallNow()) - createdAt;
+            expect(failed?.lastError).toBe("runtime_failed: clone_failed: network flake");
+            expect(failed?.checkoutCommit).toBeNull();
+            expect(failedAfterMs).toBeLessThan(TEST_CONSTANTS.createStartDeadlineMs);
+            await waitUntil(
+              task,
+              "host stopped after terminal clone error",
+              () => harness.world.hostStateOf(ORB) === "stopped",
+              { timeoutMs: 120_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(failedAfterMs).toBeLessThan(TEST_CONSTANTS.createStartDeadlineMs);
+      expect(harness.store.orbSnapshot(ORB)?.lastError).not.toContain("deadline_exceeded");
+      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+    });
+  });
+
   it("controlled stop drains every record before stopping the host", async () => {
     const capture = new LogCapture();
     await runDst({ name: "stop-drains", iterations: 30, logCapture: capture }, async (sim) => {

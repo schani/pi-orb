@@ -1,0 +1,266 @@
+#!/bin/bash
+# One-command manual release of the current main commit to GCP.
+#
+# This is the authoritative composition of the load-bearing deployment stages:
+# build + runtime boot gate + push, exact OpenTofu plan/apply, unconditional IAP
+# repair, drained-revision cleanup, and the live stop/start smoke test.
+set -euo pipefail
+umask 077
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+INFRA="$ROOT/infra"
+PROJECT=${PROJECT:-playground-dev-6ae7}
+REGION=${REGION:-us-central1}
+STATE_BUCKET=${STATE_BUCKET:-pi-orb-tfstate-$PROJECT}
+STATE_PREFIX=${STATE_PREFIX:-static-plane}
+AUTO_APPROVE=false
+LOCAL_LOCK_DIR="${TMPDIR:-/tmp}/pi-orb-release-${PROJECT}.lock"
+REMOTE_LOCK_URL="gs://$STATE_BUCKET/$STATE_PREFIX/release.lock"
+WORK_DIR=""
+LOCAL_LOCK_HELD=false
+REMOTE_LOCK_HELD=false
+REMOTE_LOCK_GENERATION=""
+APPLY_ATTEMPTED=false
+IAP_REPAIRED=false
+
+usage() {
+  cat <<'EOF'
+Usage: ./infra/release.sh [--yes]
+
+Deploys the clean, latest origin/main commit through build, push, OpenTofu,
+IAP/revision repair, and the live smoke test. The saved plan and generated
+variables live only in a mode-0700 temporary directory and are removed on exit.
+A generation-matched GCS lock serializes the complete release transaction.
+
+  --yes  Apply the reviewed plan without an interactive confirmation (for CI).
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --yes)
+      AUTO_APPROVE=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+repair_iap_after_attempt() {
+  if [ "$APPLY_ATTEMPTED" != true ] || [ "$IAP_REPAIRED" = true ]; then
+    return 0
+  fi
+  echo "release: attempting mandatory IAP repair ..." >&2
+  if "$INFRA/deploy.sh" --iap-only; then
+    IAP_REPAIRED=true
+    return 0
+  fi
+  echo "release: CRITICAL: IAP repair failed after an attempted apply" >&2
+  return 1
+}
+
+on_signal() {
+  local status=$1
+  trap - HUP INT TERM
+  echo "release: interrupted" >&2
+  repair_iap_after_attempt || true
+  exit "$status"
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT HUP INT TERM
+  if [ "$REMOTE_LOCK_HELD" = true ]; then
+    if [ -n "$REMOTE_LOCK_GENERATION" ] &&
+      gcloud storage rm "$REMOTE_LOCK_URL" \
+        --if-generation-match="$REMOTE_LOCK_GENERATION" --quiet >/dev/null 2>&1; then
+      :
+    else
+      echo "release: WARNING: could not release remote lock $REMOTE_LOCK_URL" >&2
+      echo "Verify no release is active, then remove that object before retrying." >&2
+      if [ "$status" -eq 0 ]; then status=1; fi
+    fi
+  fi
+  if [ -n "$WORK_DIR" ]; then
+    rm -rf "$WORK_DIR"
+  fi
+  if [ "$LOCAL_LOCK_HELD" = true ]; then
+    rm -rf "$LOCAL_LOCK_DIR"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+
+for command in curl docker gcloud git jq tofu; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    echo "release preflight failed: missing required command '$command'" >&2
+    exit 1
+  fi
+done
+
+cd "$ROOT"
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "release preflight failed: the working tree is not clean" >&2
+  echo "Commit the exact source and deployment files before releasing." >&2
+  exit 1
+fi
+
+branch=$(git branch --show-current)
+if [ "$branch" != "main" ]; then
+  echo "release preflight failed: current branch is '$branch', not 'main'" >&2
+  exit 1
+fi
+
+echo "release: refreshing origin/main ..."
+git fetch --quiet origin main
+head_commit=$(git rev-parse HEAD)
+origin_commit=$(git rev-parse origin/main)
+if [ "$head_commit" != "$origin_commit" ]; then
+  echo "release preflight failed: HEAD is not the latest origin/main" >&2
+  echo "  HEAD:        $head_commit" >&2
+  echo "  origin/main: $origin_commit" >&2
+  exit 1
+fi
+
+if ! mkdir "$LOCAL_LOCK_DIR" 2>/dev/null; then
+  echo "release preflight failed: another local release may be active" >&2
+  echo "  lock: $LOCAL_LOCK_DIR" >&2
+  exit 1
+fi
+LOCAL_LOCK_HELD=true
+printf '%s\n' "$$" > "$LOCAL_LOCK_DIR/pid"
+
+# Fail before locking/building if local Docker or Google credentials are unusable.
+docker info >/dev/null
+gcloud auth print-access-token >/dev/null
+
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pi-orb-release.XXXXXX")
+chmod 700 "$WORK_DIR"
+VARS="$WORK_DIR/release.tfvars"
+PLAN="$WORK_DIR/release.tfplan"
+LOCK_RECORD="$WORK_DIR/release-lock.json"
+
+jq -n \
+  --arg commit "$head_commit" \
+  --arg host "$(hostname)" \
+  --arg pid "$$" \
+  --arg startedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{commit: $commit, host: $host, pid: $pid, startedAt: $startedAt}' > "$LOCK_RECORD"
+
+echo "release: acquiring global deployment lock ..."
+if ! gcloud storage cp "$LOCK_RECORD" "$REMOTE_LOCK_URL" \
+  --if-generation-match=0 --quiet >/dev/null; then
+  echo "release preflight failed: another deployment holds $REMOTE_LOCK_URL" >&2
+  echo "If it is stale, verify no release is active before removing the object." >&2
+  exit 1
+fi
+REMOTE_LOCK_HELD=true
+REMOTE_LOCK_GENERATION=$(
+  gcloud storage objects describe "$REMOTE_LOCK_URL" --format='value(generation)'
+)
+case "$REMOTE_LOCK_GENERATION" in
+  ""|*[!0-9]*)
+    echo "release failed: could not determine the generation of the acquired lock" >&2
+    exit 1
+    ;;
+esac
+
+export PROJECT REGION
+
+echo "release: building, boot-gating, and pushing images for $head_commit ..."
+"$INFRA/build-push.sh" > "$VARS"
+chmod 600 "$VARS"
+
+# build-push.sh emits epoch seconds. Clamp them above the generation currently
+# serving in Cloud Run. The global lock keeps that generation stable through
+# this plan, apply, repair, revision cleanup, and smoke transaction.
+candidate_generation=$(awk '/^deploy_generation[[:space:]]*=/{print $3}' "$VARS")
+current_generation=$(
+  gcloud run services describe pi-orb \
+    --project "$PROJECT" \
+    --region "$REGION" \
+    --format=json |
+    jq -r '[.spec.template.spec.containers[].env[]? | select(.name == "PI_ORB_SCRIPT_GENERATION") | .value][0] // "0"'
+)
+case "$candidate_generation:$current_generation" in
+  *[!0-9:]*|:*)
+    echo "release failed: invalid deploy generation values" >&2
+    exit 1
+    ;;
+esac
+if [ "$candidate_generation" -le "$current_generation" ]; then
+  deploy_generation=$((current_generation + 1))
+else
+  deploy_generation=$candidate_generation
+fi
+awk -v generation="$deploy_generation" '
+  /^deploy_generation[[:space:]]*=/ { print "deploy_generation   = " generation; next }
+  { print }
+' "$VARS" > "$WORK_DIR/release.tfvars.new"
+mv "$WORK_DIR/release.tfvars.new" "$VARS"
+chmod 600 "$VARS"
+
+echo "release: initializing OpenTofu ..."
+tofu -chdir="$INFRA" init -input=false -lockfile=readonly
+
+echo "release: creating exact saved plan (generation $deploy_generation) ..."
+tofu -chdir="$INFRA" plan \
+  -input=false \
+  -out="$PLAN" \
+  -var-file="$VARS" \
+  -var="project=$PROJECT" \
+  -var="region=$REGION"
+chmod 600 "$PLAN"
+
+if [ "$AUTO_APPROVE" != true ]; then
+  if [ ! -t 0 ]; then
+    echo "release stopped: confirmation requires a terminal; pass --yes for non-interactive use" >&2
+    exit 1
+  fi
+  printf '\nDeploy commit %s to %s/%s? Type "deploy": ' "$head_commit" "$PROJECT" "$REGION"
+  read -r confirmation
+  if [ "$confirmation" != "deploy" ]; then
+    echo "release cancelled"
+    exit 1
+  fi
+fi
+
+echo "release: applying saved plan ..."
+APPLY_ATTEMPTED=true
+if tofu -chdir="$INFRA" apply -input=false "$PLAN"; then
+  :
+else
+  apply_status=$?
+  repair_iap_after_attempt || true
+  exit "$apply_status"
+fi
+
+echo "release: reconciling IAP and deleting drained browser revisions ..."
+"$INFRA/deploy.sh"
+IAP_REPAIRED=true
+
+echo "release: running live lifecycle smoke test ..."
+"$INFRA/smoke.sh"
+
+control_plane_image=$(awk -F'"' '/^control_plane_image/{print $2}' "$VARS")
+runtime_image=$(awk -F'"' '/^runtime_image/{print $2}' "$VARS")
+cat <<EOF
+
+RELEASE SUCCEEDED
+  commit:               $head_commit
+  control-plane image:  $control_plane_image
+  runtime image:        $runtime_image
+  deploy generation:    $deploy_generation
+EOF

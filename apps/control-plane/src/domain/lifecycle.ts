@@ -543,7 +543,6 @@ async function reconcileCreateStart(
       const status = health.value;
       if (status.status === "initializing") return waiting("readiness");
       if (status.status === "failed") {
-        if (status.error.retryable) return waiting("readiness");
         return failOrbStoppingHost(
           task,
           deps,

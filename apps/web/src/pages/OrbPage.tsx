@@ -12,6 +12,7 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react"
 import { Composer, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
+import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
 import {
   type ApiError,
@@ -822,7 +823,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
             <span className="muted"> (expires {orb.actionRequired.expiresAt})</span>
           </div>
         )}
-        {orb?.lastError !== undefined && <div className="banner banner-error">{orb.lastError}</div>}
+        <OrbFailureBanner message={orb?.lastError} />
         {orbError !== null && (
           <div className="banner banner-error">{describeApiError(orbError)}</div>
         )}

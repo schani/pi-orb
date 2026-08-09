@@ -6,22 +6,37 @@ Services: `pi-orb` (browser, IAP: @heyglide.com), `pi-orb-runtime-api`
 
 ## Deploy workflow
 
-    ./infra/build-push.sh          # builds+pushes both images, prints the
-                                   # digest vars + a fresh deploy_generation
-    cd infra && tofu apply -var control_plane_image=... -var runtime_image=... \
-      -var deploy_generation=...   # must increase every deploy: it fences
-                                   # startup-script repairs forward-only
-    ./infra/deploy.sh              # ALWAYS after apply: re-enables IAP (the
-                                   # provider version cannot manage it yet)
-    ./infra/smoke.sh               # create -> running -> stop -> start -> stop
-                                   # against the live deployment; the restart
-                                   # leg is what catches rollover repair wars
-                                   # and corrupt runtime image caches (~5 min)
+The supported manual deployment is one command from the repository root:
 
-`build-push.sh` boots the freshly built runtime image locally and requires it
-to answer `/v1/health` before anything is pushed — Cloud Run already fails a
-control-plane rollout loudly, but nothing downstream ever verifies the runtime
-artifact.
+    ./infra/release.sh
+
+It requires a clean `main` checkout exactly matching freshly fetched
+`origin/main`, shows the exact OpenTofu plan, and requires typing `deploy` before
+applying. `./infra/release.sh --yes` is the non-interactive form intended for a
+future serialized CI job. The script owns the complete transaction:
+
+1. build and push both digest-pinned images after the runtime boot gate;
+2. clamp `deploy_generation` above the generation currently serving in Cloud
+   Run, then create and apply an exact saved OpenTofu plan;
+3. repair IAP after every attempted apply (`deploy.sh --iap-only` on apply
+   failure), and after success delete drained browser revisions;
+4. run the live create → running → stop → start → stop smoke test.
+
+Generated variables and the binary plan live under `umask 077` in a mode-0700
+temporary directory and are removed on exit; they must never be retained because
+OpenTofu plans embed state secrets. A generation-matched object at
+`gs://pi-orb-tfstate-<project>/static-plane/release.lock` serializes the complete
+manual transaction across workstations and runners; a same-workstation lock
+fails even earlier. The object records only commit, host, PID, and start time.
+If a process is killed without running traps and leaves the object behind,
+verify no release is active before removing that object. The future GitHub
+workflow must use the same lock in addition to its native concurrency group.
+
+`build-push.sh`, `deploy.sh`, and `smoke.sh` remain implementation stages for
+diagnostics; they are not separate operator steps. `build-push.sh` boots the
+freshly built runtime image locally and requires it to answer `/v1/health`
+before anything is pushed — Cloud Run already fails a control-plane rollout
+loudly, but nothing downstream ever verifies the runtime artifact.
 
 ## Tooling access
 
@@ -32,8 +47,13 @@ Impersonates `pi-orb-debug@...` against the ops service — no IAP involved.
 
 ## Gotchas (each learned the hard way)
 
-- Every `tofu apply` that touches the browser service detaches IAP; run
-  `deploy.sh` immediately after.
+- Every `tofu apply` that touches the browser service detaches IAP. Use
+  `release.sh`: ordinary errors and signals after apply starts invoke
+  `deploy.sh --iap-only`, and success takes the full repair/cleanup path.
+- IAP repair is exact, not additive: it preserves unrelated IAP roles but
+  replaces every `roles/iap.httpsResourceAccessor` binding with the sole
+  `domain:heyglide.com` member and verifies the resulting policy before
+  revision cleanup or smoke.
 - During a revision rollover the draining instance's reconciler keeps running
   with the previous startup-script generation for 12+ minutes — not ~2 — and
   used to fight the new revision over orb VMs (dueling script repairs; see

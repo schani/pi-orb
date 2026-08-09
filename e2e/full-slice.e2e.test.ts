@@ -88,6 +88,7 @@ let fake: FakeSession;
 let nameFake: FakeSession;
 let controlPlane: ControlPlaneHandle;
 let orbId = "";
+let failedOrbId = "";
 let localStateDirectory = "";
 
 beforeAll(async () => {
@@ -150,9 +151,12 @@ beforeAll(async () => {
 }, 720_000);
 
 afterAll(async () => {
-  if (!PROCESS_BACKEND && orbId !== "") {
-    await docker(["rm", "-f", `pi-orb-${orbId}`]).catch(() => undefined);
-    await docker(["volume", "rm", "-f", `pi-orb-data-${orbId}`]).catch(() => undefined);
+  if (!PROCESS_BACKEND) {
+    for (const id of [orbId, failedOrbId]) {
+      if (id === "") continue;
+      await docker(["rm", "-f", `pi-orb-${id}`]).catch(() => undefined);
+      await docker(["volume", "rm", "-f", `pi-orb-data-${id}`]).catch(() => undefined);
+    }
   }
   await controlPlane?.stop();
   if (!PROCESS_BACKEND) await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
@@ -195,6 +199,56 @@ describe("full slice E2E", () => {
       throw error;
     }
   }, 720_000);
+
+  it("surfaces a real clone failure promptly and stops the failed host", async () => {
+    const base = controlPlane.baseUrl;
+    const projectId = randomUUID();
+    const missingRepository = `https://github.com/schani/pi-orb-e2e-missing-${randomUUID()}`;
+    const project = await api(base, "POST", "/api/v1/projects", {
+      id: projectId,
+      name: `e2e-clone-failure-${projectId.slice(0, 8)}`,
+      repositoryUrl: missingRepository,
+    });
+    expect(project.status, JSON.stringify(project.body)).toBe(201);
+
+    failedOrbId = randomUUID();
+    const createdAt = Date.now();
+    const created = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
+      id: failedOrbId,
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(202);
+
+    const failed = await waitFor(
+      "terminal clone failure",
+      async () => {
+        const view = await api(base, "GET", `/api/v1/orbs/${failedOrbId}`);
+        return view.body["state"] === "failed" ? view.body : null;
+      },
+      { timeoutMs: 120_000, intervalMs: 1_000 },
+    );
+    expect(Date.now() - createdAt).toBeLessThan(120_000);
+    expect(failed["lastError"]).toEqual(expect.stringContaining("runtime_failed: clone_failed:"));
+    expect(failed["lastError"]).not.toEqual(expect.stringContaining("deadline_exceeded"));
+
+    if (!PROCESS_BACKEND) {
+      await waitFor(
+        "failed runtime container stopped",
+        async () => {
+          const status = await docker([
+            "inspect",
+            `pi-orb-${failedOrbId}`,
+            "--format",
+            "{{.State.Status}}",
+          ]).catch(() => null);
+          return status?.trim() === "exited" ? true : null;
+        },
+        { timeoutMs: 60_000, intervalMs: 1_000 },
+      );
+    }
+
+    const durable = await api(base, "GET", `/api/v1/orbs/${failedOrbId}`);
+    expect(durable.body["lastError"]).toBe(failed["lastError"]);
+  }, 180_000);
 
   async function runScenario(): Promise<void> {
     const base = controlPlane.baseUrl;

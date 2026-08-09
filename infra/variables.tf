@@ -38,7 +38,7 @@ variable "tailscale_tailnet_dns_name" {
 }
 
 variable "deploy_generation" {
-  description = "Monotonic script generation for forward-only repair fencing (docs/host-provider.md); build-push.sh prints a fresh value next to the image vars. An apply that omits it runs at generation 0: such a revision never repairs a host stamped by a real deploy, so a forgotten var delays an upgrade to the next deploy instead of repairing anything backward."
+  description = "Monotonic script generation for forward-only repair fencing (docs/host-provider.md); release.sh clamps build-push.sh's candidate above the currently serving generation. An apply that omits it runs at generation 0: such a revision never repairs a host stamped by a real deploy, so a forgotten var delays an upgrade to the next deploy instead of repairing anything backward."
   type        = number
   default     = 0
 }

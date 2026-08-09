@@ -30,6 +30,25 @@ const orb: OrbRow = {
   updatedAt: 1_700_000_000_000,
 };
 
+describe("orbView failures", () => {
+  it("exposes the durable explanation without a transitional readiness detail", () => {
+    const view = orbView(
+      {
+        ...orb,
+        state: "failed",
+        checkoutCommit: null,
+        lastError: "runtime_failed: clone_failed: repository access denied",
+      },
+      new ControlState(),
+      {},
+    );
+
+    expect(view.lastError).toBe("runtime_failed: clone_failed: repository access denied");
+    expect(view.stateDetail).toBeUndefined();
+    expect(Check(OrbViewSchema, view)).toBe(true);
+  });
+});
+
 describe("orbView previewHost", () => {
   it("derives the MagicDNS host when a tailnet is configured", () => {
     const view = orbView(orb, new ControlState(), { tailnetDnsName: "tailabc123.ts.net" });
