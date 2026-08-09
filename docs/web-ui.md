@@ -37,6 +37,10 @@ This starts only Vite and needs no PostgreSQL, Docker, control plane, runtime, c
 
 The fixture is a transport-level adapter, not a mock branch in React. Production UI code still calls the same relative HTTP URLs, validates the same `@pi-orb/protocol` schemas, and runs the same WebSocket reducer. This keeps frontend-only behavior representative and makes protocol drift fail visibly. It is intentionally ephemeral and process-local: restarting Vite resets all fixture data, and it is for manual UI development rather than backend or E2E correctness. Normal `npm run dev --workspace @pi-orb/web` retains the proxy to the real control plane.
 
+## Per-orb browser-tab identity (decided and implemented 2026-08-09)
+
+Once the orb and its parent project have loaded, the orb chat route sets the HTML page title to `{project name} · {orb name}` so multiple open orb tabs are distinguishable. An orb that has not yet been auto-named uses `untitled orb` as its name. While either resource is loading, after leaving the orb route, and for missing resources, the title is the neutral `pi-orb`.
+
 ## Per-orb favicon status (decided and implemented 2026-08-07)
 
 The orb chat route makes its coarse state visible in the browser tab through a small, static set of SVG favicon variants derived entirely in the web client from state it already has; this requires no API or runtime-protocol change. The project-list route and an orb that has not loaded use the neutral pi-orb mark.

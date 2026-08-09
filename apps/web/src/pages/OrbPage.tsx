@@ -27,6 +27,7 @@ import {
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
+import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
 import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
 import {
   type BrowserNotificationPermission,
@@ -359,6 +360,11 @@ export function OrbPage({ orbId }: { orbId: string }) {
   );
   useEffect(() => setOrbFavicon(faviconStatus), [faviconStatus]);
   useEffect(() => () => setOrbFavicon("neutral"), []);
+
+  const title =
+    orb !== null && projectName !== null ? orbPageTitle(projectName, orb.name) : DEFAULT_PAGE_TITLE;
+  useEffect(() => setPageTitle(title), [title]);
+  useEffect(() => () => setPageTitle(DEFAULT_PAGE_TITLE), []);
 
   // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {
