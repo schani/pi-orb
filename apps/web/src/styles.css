@@ -307,6 +307,39 @@ textarea:focus {
   margin-bottom: 0.5rem;
 }
 
+.project-name,
+.project-rename-form {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.project-rename-button {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  color: var(--ink-faint);
+  border-color: transparent;
+}
+
+.project-rename-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.project-rename-button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+.project-rename-form input {
+  width: min(22rem, 42vw);
+  font-family: var(--serif);
+  font-weight: 600;
+}
+
 .project-header-actions {
   display: flex;
   align-items: center;

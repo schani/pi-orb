@@ -1,5 +1,5 @@
 import { type OrbView, type ProjectView, validateRepositoryUrl } from "@pi-orb/protocol";
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   type ApiError,
   archiveOrb,
@@ -10,6 +10,7 @@ import {
   describeApiError,
   listOrbs,
   listProjects,
+  updateProject,
 } from "../lib/api.ts";
 import {
   projectDeletionConfirmation,
@@ -141,6 +142,11 @@ export function ProjectsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [creatingOrbFor, setCreatingOrbFor] = useState<string | null>(null);
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
+  const [renamingProject, setRenamingProject] = useState<string | null>(null);
+  const [projectRenameText, setProjectRenameText] = useState("");
+  const [projectRenameError, setProjectRenameError] = useState<string | null>(null);
+  const [savingProjectName, setSavingProjectName] = useState(false);
+  const projectRenameInputRef = useRef<HTMLInputElement>(null);
   const [deletingOrb, setDeletingOrb] = useState<string | null>(null);
   const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
   const [orbCreateError, setOrbCreateError] = useState<{
@@ -181,6 +187,10 @@ export function ProjectsPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (renamingProject !== null) projectRenameInputRef.current?.focus();
+  }, [renamingProject]);
 
   // A deleting row remains visible through the race-fencing quarantine. Poll
   // until finalization removes it instead of requiring a manual page reload.
@@ -226,6 +236,27 @@ export function ProjectsPage() {
     setName("");
     setRepositoryUrl("");
     refresh();
+  };
+
+  const onRenameProject = async (project: ProjectView) => {
+    const trimmedName = projectRenameText.trim();
+    if (trimmedName === "") {
+      setProjectRenameError("project name is required");
+      return;
+    }
+    setSavingProjectName(true);
+    setProjectRenameError(null);
+    const result = await updateProject(project.id, { name: trimmedName });
+    setSavingProjectName(false);
+    if (result.isErr()) {
+      setProjectRenameError(describeApiError(result.error));
+      return;
+    }
+    const renamed = result.value;
+    setProjects(
+      (current) => current?.map((item) => (item.id === project.id ? renamed : item)) ?? null,
+    );
+    setRenamingProject(null);
   };
 
   const onDeleteProject = async (project: ProjectView) => {
@@ -300,7 +331,65 @@ export function ProjectsPage() {
         return (
           <section className="panel project" key={project.id}>
             <div className="project-header">
-              <h2>{project.name}</h2>
+              {renamingProject === project.id ? (
+                <form
+                  className="project-rename-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void onRenameProject(project);
+                  }}
+                >
+                  <input
+                    ref={projectRenameInputRef}
+                    aria-label="project name"
+                    value={projectRenameText}
+                    maxLength={80}
+                    onChange={(event) => setProjectRenameText(event.target.value)}
+                  />
+                  <button type="submit" disabled={savingProjectName}>
+                    {savingProjectName ? "saving…" : "save"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingProjectName}
+                    onClick={() => {
+                      setRenamingProject(null);
+                      setProjectRenameError(null);
+                    }}
+                  >
+                    cancel
+                  </button>
+                </form>
+              ) : (
+                <div className="project-name">
+                  <h2>{project.name}</h2>
+                  <button
+                    type="button"
+                    className="project-rename-button"
+                    aria-label={`Rename ${project.name}`}
+                    title="Rename project"
+                    disabled={project.state === "deleting"}
+                    onClick={() => {
+                      setProjectRenameText(project.name);
+                      setProjectRenameError(null);
+                      setRenamingProject(project.id);
+                    }}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                </div>
+              )}
               <span className="muted mono">{project.repositoryUrl}</span>
               <span className={`state-badge state-${project.state}`}>{project.state}</span>
               <div className="project-header-actions">
@@ -323,6 +412,9 @@ export function ProjectsPage() {
                 </button>
               </div>
             </div>
+            {renamingProject === project.id && projectRenameError !== null && (
+              <div className="banner banner-error">{projectRenameError}</div>
+            )}
             {project.deletionProgress !== undefined && (
               <div
                 className={project.deletionProgress.blocked > 0 ? "banner banner-error" : "muted"}
@@ -366,6 +458,7 @@ export function ProjectsPage() {
             <input
               type="text"
               value={name}
+              maxLength={80}
               onChange={(event) => setName(event.target.value)}
               placeholder="my project"
             />

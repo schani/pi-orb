@@ -10,6 +10,7 @@ import {
   type ProjectView,
   ProjectViewSchema,
   type UpdateOrbRequest,
+  type UpdateProjectRequest,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import type { Static, TSchema } from "typebox";
@@ -107,6 +108,17 @@ export function listProjects(): Promise<Result<{ items: ProjectView[] }, ApiErro
 
 export function getProject(projectId: string): Promise<Result<ProjectView, ApiError>> {
   return apiFetch(ProjectViewSchema, `/api/v1/projects/${encodeURIComponent(projectId)}`);
+}
+
+export function updateProject(
+  projectId: string,
+  request: UpdateProjectRequest,
+): Promise<Result<ProjectView, ApiError>> {
+  return apiFetch(ProjectViewSchema, `/api/v1/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: jsonHeaders,
+    body: JSON.stringify(request),
+  });
 }
 
 export function deleteProject(projectId: string): Promise<Result<ProjectView, ApiError>> {

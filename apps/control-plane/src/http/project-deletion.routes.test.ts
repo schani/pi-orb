@@ -45,6 +45,31 @@ describe("project deletion HTTP API", () => {
     expect(create.json().error.message).toContain("project");
   });
 
+  it("renames an active project and rejects invalid or deleting-project renames", async () => {
+    const renamed = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/projects/project-http",
+      payload: { name: "  cloud   smoke  " },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().name).toBe("cloud smoke");
+
+    const invalid = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/projects/project-http",
+      payload: { name: "   " },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    await app.inject({ method: "DELETE", url: "/api/v1/projects/project-http" });
+    const tooLate = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/projects/project-http",
+      payload: { name: "too late" },
+    });
+    expect(tooLate.statusCode).toBe(409);
+  });
+
   it("keeps a missing project URL missing", async () => {
     const response = await app.inject({ method: "DELETE", url: "/api/v1/projects/missing" });
     expect(response.statusCode).toBe(404);

@@ -2,7 +2,9 @@ import {
   type ControlPlaneHttpError,
   CreateOrbRequestSchema,
   CreateProjectRequestSchema,
+  PROJECT_NAME_MAX_CHARS,
   UpdateOrbRequestSchema,
+  UpdateProjectRequestSchema,
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
@@ -28,6 +30,13 @@ function httpError(
   retryable: boolean,
 ): ControlPlaneHttpError {
   return { error: { code, message, retryable } };
+}
+
+function normalizeProjectName(value: string): string | null {
+  const normalized = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  return normalized !== "" && Array.from(normalized).length <= PROJECT_NAME_MAX_CHARS
+    ? normalized
+    : null;
 }
 
 function sendCommandError(reply: FastifyReply, error: CommandError): FastifyReply {
@@ -85,6 +94,18 @@ export function registerRoutes(
     if (!Check(CreateProjectRequestSchema, body)) {
       return reply.status(400).send(httpError("invalid_request", "invalid project body", false));
     }
+    const name = normalizeProjectName(body.name);
+    if (name === null) {
+      return reply
+        .status(400)
+        .send(
+          httpError(
+            "invalid_request",
+            `project name must contain 1-${PROJECT_NAME_MAX_CHARS} characters`,
+            false,
+          ),
+        );
+    }
     const url = validateRepositoryUrl(body.repositoryUrl);
     if (url.isErr()) {
       return reply
@@ -102,7 +123,7 @@ export function registerRoutes(
           .send(httpError("conflict", "project is being permanently deleted", false));
       }
       // Client-generated IDs make retried creates idempotent (docs/control-plane-api.md).
-      if (existing.value.name === body.name && existing.value.repositoryUrl === url.value.url) {
+      if (existing.value.name === name && existing.value.repositoryUrl === url.value.url) {
         return reply.status(201).send(projectView(existing.value));
       }
       return reply
@@ -111,7 +132,7 @@ export function registerRoutes(
     }
     const row: ProjectRow = {
       id: body.id,
-      name: body.name,
+      name,
       repositoryUrl: url.value.url,
       state: "active",
       stateVersion: 0,
@@ -150,6 +171,47 @@ export function registerRoutes(
         return reply.status(503).send(httpError("unavailable", message, true));
       }
       return reply.send(projectView(project.value, progress.value));
+    },
+  );
+
+  app.patch<{ Params: { projectId: string } }>(
+    "/api/v1/projects/:projectId",
+    async (request, reply) => {
+      const body = request.body;
+      if (!Check(UpdateProjectRequestSchema, body)) {
+        return reply.status(400).send(httpError("invalid_request", "invalid project body", false));
+      }
+      const name = normalizeProjectName(body.name);
+      if (name === null) {
+        return reply
+          .status(400)
+          .send(
+            httpError(
+              "invalid_request",
+              `project name must contain 1-${PROJECT_NAME_MAX_CHARS} characters`,
+              false,
+            ),
+          );
+      }
+      const updated = await deps.store.setProjectName(task, {
+        projectId: request.params.projectId,
+        name,
+        now: task.wallNow(),
+      });
+      if (updated.isErr()) {
+        return reply.status(503).send(httpError("unavailable", updated.error.message, true));
+      }
+      if (updated.value !== null) return reply.send(projectView(updated.value));
+
+      const current = await deps.store.getProject(task, request.params.projectId);
+      if (current.isErr()) {
+        return reply.status(503).send(httpError("unavailable", current.error.message, true));
+      }
+      return current.value === null
+        ? reply.status(404).send(httpError("not_found", "project not found", false))
+        : reply
+            .status(409)
+            .send(httpError("conflict", "project is being permanently deleted", false));
     },
   );
 

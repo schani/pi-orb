@@ -89,6 +89,11 @@ export interface ControlPlaneStore {
     state: "deleting",
   ): ResultAsync<ProjectRow[], StoreError>;
   insertProject(task: SimulationTask, project: ProjectRow): ResultAsync<ProjectRow, StoreError>;
+  /** Updates only an active project, atomically fencing rename against deletion. */
+  setProjectName(
+    task: SimulationTask,
+    params: { projectId: string; name: string; now: number },
+  ): ResultAsync<ProjectRow | null, StoreError>;
   /** Atomically fences child creation and moves every child to permanent deletion. */
   requestProjectDeletion(
     task: SimulationTask,

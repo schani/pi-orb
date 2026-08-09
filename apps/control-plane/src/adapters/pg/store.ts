@@ -143,6 +143,19 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) => mapProjectRow(result.rows[0] ?? {}));
   }
 
+  setProjectName(
+    _task: SimulationTask,
+    params: { projectId: string; name: string; now: number },
+  ): ResultAsync<ProjectRow | null, StoreError> {
+    return this.db
+      .query(
+        `UPDATE projects SET name = $2, updated_at = $3
+         WHERE id = $1 AND state = 'active' RETURNING *`,
+        [params.projectId, params.name, new Date(params.now)],
+      )
+      .map((result) => (result.rows[0] === undefined ? null : mapProjectRow(result.rows[0])));
+  }
+
   requestProjectDeletion(
     _task: SimulationTask,
     params: { projectId: string; now: number; cleanupAfter: number },

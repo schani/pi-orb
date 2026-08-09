@@ -21,15 +21,22 @@ export type OrbState = Static<typeof OrbStateSchema>;
 export const StopReasonSchema = Type.Literal("idle");
 export type StopReason = Static<typeof StopReasonSchema>;
 
+export const PROJECT_NAME_MAX_CHARS = 80;
 export const CreateProjectRequestSchema = Type.Object(
   {
     id: Type.String(),
-    name: Type.String(),
+    name: Type.String({ minLength: 1, maxLength: PROJECT_NAME_MAX_CHARS }),
     repositoryUrl: Type.String(),
   },
   closed,
 );
 export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
+
+export const UpdateProjectRequestSchema = Type.Object(
+  { name: Type.String({ minLength: 1, maxLength: PROJECT_NAME_MAX_CHARS }) },
+  closed,
+);
+export type UpdateProjectRequest = Static<typeof UpdateProjectRequestSchema>;
 
 export const CreateOrbRequestSchema = Type.Object(
   {

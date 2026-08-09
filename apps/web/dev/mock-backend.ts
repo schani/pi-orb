@@ -170,6 +170,33 @@ async function handleApi(
       sendJson(response, 200, project);
       return true;
     }
+    if (method === "PATCH") {
+      if (project.state === "deleting") {
+        sendJson(response, 409, {
+          error: {
+            code: "conflict",
+            message: "project is being permanently deleted",
+            retryable: false,
+          },
+        });
+        return true;
+      }
+      const body = await readJson(request);
+      const name =
+        body !== null && typeof body === "object" && "name" in body && typeof body.name === "string"
+          ? body.name.normalize("NFKC").trim().replace(/\s+/gu, " ")
+          : "";
+      if (name === "" || Array.from(name).length > 80) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "invalid project name", retryable: false },
+        });
+        return true;
+      }
+      const updated = { ...project, name, updatedAt: now() };
+      state.projects.set(projectId, updated);
+      sendJson(response, 200, updated);
+      return true;
+    }
     if (method === "DELETE") {
       const children = [...state.orbs.values()].filter((orb) => orb.projectId === projectId);
       const deleting: ProjectView = {
@@ -208,9 +235,16 @@ async function handleApi(
       });
       return true;
     }
+    const name = body.name.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    if (name === "" || Array.from(name).length > 80) {
+      sendJson(response, 400, {
+        error: { code: "invalid_request", message: "invalid project name", retryable: false },
+      });
+      return true;
+    }
     const project: ProjectView = {
       id: body.id,
-      name: body.name,
+      name,
       repositoryUrl: body.repositoryUrl,
       state: "active",
       createdAt: now(),
