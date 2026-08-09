@@ -158,6 +158,12 @@ describe("DockerOrbHostProvider", () => {
     expect(run[publishIndex + 1]).toBe("127.0.0.1:0:8080");
   });
 
+  it("puts HOME on the persistent orb volume", async () => {
+    const run = await provisionArgv(makeProvider());
+    expect(envValue(run, "HOME")).toBe("/workspace/home");
+    expect(run).toContain("pi-orb-data-orb-1:/workspace");
+  });
+
   it("maps host.docker.internal to the host gateway and brokers through it", async () => {
     const run = await provisionArgv(makeProvider());
     expect(run).toContain("--add-host=host.docker.internal:host-gateway");

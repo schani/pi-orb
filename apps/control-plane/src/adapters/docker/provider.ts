@@ -377,6 +377,11 @@ export class DockerOrbHostProvider implements OrbHostProvider {
             "--env",
             `${key}=${value}`,
           ]),
+          // HOME is part of the durable orb filesystem contract. Keep this
+          // after extraEnv so composition cannot redirect home to the
+          // disposable container layer.
+          "--env",
+          "HOME=/workspace/home",
           this.options.image,
         ],
         context,

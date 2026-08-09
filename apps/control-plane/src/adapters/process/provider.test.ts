@@ -23,6 +23,7 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   orbId: process.env.PI_ORB_ID,
   repositoryUrl: process.env.PI_ORB_REPOSITORY_URL,
   workDir: process.env.PI_ORB_WORK_DIR,
+  home: process.env.HOME,
   controlPlaneUrl: process.env.PI_ORB_CONTROL_PLANE_URL,
   port: process.env.PI_ORB_RUNTIME_PORT,
 }));
@@ -86,7 +87,10 @@ describe("ProcessOrbHostProvider", () => {
     expect(values.orbId).toBe(request.orbId);
     expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
     expect(values.controlPlaneUrl).toBe("http://127.0.0.1:7100");
-    expect(values.workDir).toBe(join(root, "configured-state", request.orbId, "workspace"));
+    const expectedWorkDir = join(root, "configured-state", request.orbId, "workspace");
+    expect(values.workDir).toBe(expectedWorkDir);
+    expect(values.home).toBe(join(expectedWorkDir, "home"));
+    expect(existsSync(join(expectedWorkDir, "home"))).toBe(true);
     expect(Number(values.port)).toBeGreaterThan(0);
 
     const observed = await provider.observe(task, provisioned.value.ref, context);
