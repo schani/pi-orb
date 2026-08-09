@@ -20,7 +20,7 @@ RUN apt-get update \
   && echo "deb [signed-by=/etc/apt/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian bookworm main" \
        > /etc/apt/sources.list.d/tailscale.list \
   && apt-get update \
-  && apt-get install -y --no-install-recommends gh tailscale \
+  && apt-get install -y --no-install-recommends gh tailscale chromium \
   && rm -rf /var/lib/apt/lists/*
 
 # Install only the pinned rustup multiplexer in the disposable image. The
@@ -47,7 +47,8 @@ COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/orb-runtime/package.json apps/orb-runtime/
-RUN npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
+RUN npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts \
+  && ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser
 
 COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src
