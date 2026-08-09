@@ -7,3 +7,4 @@ export * from "./orb-naming.ts";
 export * from "./repository-url.ts";
 export * from "./runtime-http.ts";
 export * from "./tailscale.ts";
+export * from "./terminal.ts";

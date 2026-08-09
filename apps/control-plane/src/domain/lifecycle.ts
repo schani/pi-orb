@@ -713,8 +713,10 @@ async function reconcileStopping(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
-  // New live connections are rejected while stopping (docs/lifecycle.md).
+  // New live connections are rejected and existing agent/terminal proxies are
+  // closed while stopping (docs/lifecycle.md).
   deps.control.markStopping(orb.id);
+  deps.control.closeBrowserConnections(orb.id);
 
   if (orb.hostRef === null) {
     // Nothing was ever provisioned; nothing to drain or stop.
@@ -1351,6 +1353,7 @@ export function requestOrbStop(
           reason: "stop_requested",
         });
         deps.control.markStopping(orbId);
+        deps.control.closeBrowserConnections(orbId);
         return ok(cas.value);
       }
       if (cas.error.type === "state_conflict") continue;

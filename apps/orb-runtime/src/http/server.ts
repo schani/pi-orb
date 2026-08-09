@@ -10,6 +10,7 @@ import {
   RUNTIME_SUBPROTOCOL,
   type RuntimeHttpError,
   type ServerFrame,
+  TERMINAL_SUBPROTOCOL,
 } from "@pi-orb/protocol";
 import Fastify, { type FastifyInstance } from "fastify";
 import { Check } from "typebox/value";
@@ -18,6 +19,8 @@ import { type FrameSink, OutboundWriter } from "../domain/outbound.ts";
 import { decideRequest, RequestRegistry, type RequestResult } from "../domain/requests.ts";
 import { computeSyncFrames } from "../domain/sync.ts";
 import type { PiOrbAgent } from "../pi/agent.ts";
+import type { TerminalManager } from "../terminal/manager.ts";
+import { registerTerminalRoute } from "./terminal-route.ts";
 
 // Sized for pasted screenshots: base64 inflates ~4/3, so 6 MiB of prompt
 // admits roughly a 4.5 MiB image plus text (capability `input.image`).
@@ -39,7 +42,10 @@ function runtimeError(
  * idempotent history pulls, and the live WebSocket with synchronous hello
  * synchronization. The health server starts before slow initialization.
  */
-export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
+export function buildRuntimeServer(
+  agent: PiOrbAgent,
+  terminalManager: TerminalManager,
+): FastifyInstance {
   const app = Fastify({ logger: false });
   const registry = new RequestRegistry();
 
@@ -92,11 +98,19 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
     options: {
       maxPayload: MAX_INCOMING_FRAME_BYTES,
       handleProtocols: (protocols: Set<string>) =>
-        protocols.has(RUNTIME_SUBPROTOCOL) ? RUNTIME_SUBPROTOCOL : false,
+        protocols.has(RUNTIME_SUBPROTOCOL)
+          ? RUNTIME_SUBPROTOCOL
+          : protocols.has(TERMINAL_SUBPROTOCOL)
+            ? TERMINAL_SUBPROTOCOL
+            : false,
     },
   });
 
   void app.register(async (scope) => {
+    registerTerminalRoute(scope, {
+      isReady: () => agent.getHealth().status === "ready",
+      manager: terminalManager,
+    });
     scope.get("/v1/live", { websocket: true }, (socket) => {
       const sink: FrameSink = {
         send: (json) => socket.send(json),
@@ -314,5 +328,6 @@ export function buildRuntimeServer(agent: PiOrbAgent): FastifyInstance {
     });
   });
 
+  app.addHook("onClose", () => terminalManager.closeAll());
   return app;
 }

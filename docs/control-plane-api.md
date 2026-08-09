@@ -58,6 +58,7 @@ DELETE /api/v1/orbs/:orbId
 
 GET  /api/v1/orbs/:orbId/history
 WS   /api/v1/orbs/:orbId/live
+WS   /api/v1/orbs/:orbId/terminal
 ```
 
 `PATCH /api/v1/projects/:projectId` renames an active project. Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters; renaming a deleting project conflicts. This narrow update keeps the repository URL immutable. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.

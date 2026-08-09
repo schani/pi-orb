@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RUNTIME_SUBPROTOCOL, type ServerFrame } from "@pi-orb/protocol";
+import { RUNTIME_SUBPROTOCOL, type ServerFrame, TERMINAL_SUBPROTOCOL } from "@pi-orb/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
@@ -238,6 +238,53 @@ describe("full slice E2E", () => {
       { timeoutMs: 300_000, intervalMs: 2_000 },
     );
 
+    // A real PTY traverses browser route → control-plane binary proxy → runtime.
+    const terminalSocket = new WebSocket(
+      `ws://127.0.0.1:${CP_PORT}/api/v1/orbs/${orbId}/terminal`,
+      [TERMINAL_SUBPROTOCOL],
+    );
+    await new Promise<void>((resolve, reject) => {
+      terminalSocket.once("open", resolve);
+      terminalSocket.once("error", reject);
+    });
+    let terminalOutput = "";
+    let terminalClosedBeforeStop = false;
+    let stopRequested = false;
+    const terminalClosed = new Promise<void>((resolve) => {
+      terminalSocket.once("close", () => {
+        if (!stopRequested) terminalClosedBeforeStop = true;
+        resolve();
+      });
+    });
+    const terminalComplete = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("terminal E2E timed out")), 30_000);
+      terminalSocket.on("message", (data, isBinary) => {
+        if (isBinary) {
+          terminalOutput += data.toString();
+          if (terminalOutput.includes("TERMINAL_E2E_OK")) {
+            clearTimeout(timer);
+            resolve();
+          }
+          return;
+        }
+        const control = JSON.parse(data.toString()) as {
+          type?: string;
+          error?: { message?: string };
+        };
+        if (control.type === "terminal.ready") {
+          // Leave the shell open: the controlled stop below must close it and
+          // its socket rather than leaking a process-provider descendant.
+          terminalSocket.send(Buffer.from("printf TERMINAL_E2E_OK\\n\r"));
+        } else if (control.type === "terminal.error") {
+          clearTimeout(timer);
+          reject(new Error(control.error?.message ?? "terminal error"));
+        }
+      });
+    });
+    terminalSocket.send(JSON.stringify({ v: 1, type: "terminal.open", cols: 100, rows: 30 }));
+    await terminalComplete;
+    expect(terminalOutput).toContain("TERMINAL_E2E_OK");
+
     // Live connection through the content-agnostic proxy (docs/testing.md steps 5-6).
     const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const cursor = (history.body["cursor"] as string | null) ?? null;
@@ -442,6 +489,8 @@ describe("full slice E2E", () => {
     socket.close();
 
     // Controlled stop: drain, then host stop (docs/testing.md step 8).
+    expect(terminalClosedBeforeStop, "terminal stayed open until deliberate stop").toBe(false);
+    stopRequested = true;
     const stop = await api(base, "POST", `/api/v1/orbs/${orbId}/stop`);
     expect(stop.status).toBe(202);
     await waitFor(
@@ -452,6 +501,12 @@ describe("full slice E2E", () => {
       },
       { timeoutMs: 120_000, intervalMs: 2_000 },
     );
+    await Promise.race([
+      terminalClosed,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error("terminal socket did not close on stop")), 30_000),
+      ),
+    ]);
 
     // Stopped-orb history serves from the database alone (docs/testing.md step 9).
     const stopped = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);

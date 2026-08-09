@@ -23,5 +23,8 @@
     "@biomejs/biome": "2.5.4",
     "typescript": "7.0.2",
     "vitest": "^3.0.0"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
   }
 }

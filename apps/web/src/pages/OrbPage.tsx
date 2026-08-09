@@ -12,6 +12,7 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react"
 import { Composer, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
+import { OrbTerminal } from "../components/OrbTerminal.tsx";
 import {
   type ApiError,
   archiveOrb,
@@ -871,6 +872,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
             }
           />
         )}
+        <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
       </main>
     </>
   );

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pi-orb · floating terminal mockup</title>
+  <style>
+    :root {
+      --paper: #f8f3e9; --paper-2: #eee5d5; --paper-3: #ded1bd;
+      --ink: #221c12; --muted: #766b5c; --line: rgba(34,28,18,.2);
+      --terracotta: #a03e1c; --green: #466c50;
+      --term: #191b18; --term-2: #23251f; --term-line: #41433d;
+      --term-ink: #e8e2d4; --term-muted: #938f84; --term-green: #9cba8f; --term-gold: #d0b678;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --serif: Charter, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #d9cfbd; color: var(--ink); }
+    body { font-family: var(--serif); }
+    button { font: inherit; color: inherit; }
+    .study-bar {
+      height: 48px; padding: 0 16px; display: flex; align-items: center; gap: 14px;
+      background: #211d17; color: #f8f3e9; border-bottom: 1px solid #000;
+    }
+    .study-bar strong { font: 700 11px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    .study-bar span { color: #b8ae9e; font: 10px/1 var(--mono); }
+    .study-bar .instructions { margin-left: auto; color: #d7cdbc; }
+    .stage { height: calc(100% - 48px); padding: 12px; }
+    .browser {
+      height: 100%; max-width: 1440px; margin: auto; overflow: hidden;
+      display: flex; flex-direction: column; background: var(--paper);
+      border: 1px solid #9d907c; box-shadow: 0 15px 45px rgba(52,39,24,.2);
+    }
+    .browser-chrome { height: 28px; flex: 0 0 28px; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: #e4dacb; border-bottom: 1px solid #b8aa96; }
+    .browser-chrome i { width: 8px; height: 8px; border-radius: 50%; background: #a99b88; }
+    .address { margin-left: 8px; width: 370px; padding: 3px 9px; border-radius: 3px; background: rgba(255,255,255,.45); color: #7d705f; font: 9px/1 var(--mono); }
+    .app { position: relative; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .app-header { height: 61px; flex: 0 0 61px; padding: 0 17px; display: flex; align-items: center; gap: 15px; border-top: 4px solid var(--green); border-bottom: 1px solid var(--line); background: rgba(248,243,233,.98); z-index: 2; }
+    .brand { font: 700 12px/1 var(--mono); letter-spacing: .12em; }
+    .orb-name { font-size: 18px; }
+    .project { padding: 5px 8px; background: var(--paper-2); color: var(--muted); font: 9px/1 var(--mono); }
+    .status { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--green); font: 10px/1 var(--mono); }
+    .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    .header-action { padding: 6px 8px; border: 1px solid var(--line); background: transparent; font: 9px/1 var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+    .workspace { position: relative; min-height: 0; flex: 1; overflow: hidden; }
+    .transcript { position: absolute; inset: 0; overflow-y: auto; padding: 27px 34px 112px; }
+    .manuscript { max-width: 900px; }
+    .turn { display: grid; grid-template-columns: 35px minmax(0, 760px); gap: 11px; margin-bottom: 26px; }
+    .gutter { position: relative; display: flex; justify-content: center; }
+    .gutter::after { content: ""; position: absolute; top: 22px; bottom: -28px; width: 1px; background: linear-gradient(var(--paper-3), transparent); }
+    .mark { position: relative; z-index: 1; width: 18px; height: 18px; display: grid; place-items: center; border: 1px solid var(--ink); background: var(--paper); font: 9px/1 var(--mono); }
+    .user .mark { background: var(--terracotta); border-color: var(--terracotta); color: white; }
+    .copy { font-size: 15.5px; line-height: 1.58; }
+    .copy p { margin: 0 0 9px; }
+    .user .copy { padding: 11px 15px; background: var(--terracotta); color: #fff8ee; font-size: 17px; font-style: italic; }
+    code { padding: 2px 4px; background: var(--paper-2); font: .84em/1 var(--mono); }
+    .tool { display: inline-flex; margin: 5px 4px 0 0; padding: 6px 8px; border: 1px dashed #a99b87; color: var(--muted); font: 9px/1 var(--mono); }
+    .composer { position: absolute; left: 0; right: 0; bottom: 0; min-height: 78px; padding: 10px 18px; background: rgba(248,243,233,.97); border-top: 1px solid var(--ink); z-index: 2; }
+    .composer-row { display: flex; gap: 10px; }
+    .composer-input { flex: 1; min-height: 37px; padding: 9px; background: rgba(255,255,255,.25); border: 1px solid #aa9b86; color: #a0927e; font: italic 14px/1.2 var(--serif); }
+    .send { width: 37px; height: 37px; border: 0; border-radius: 50%; background: var(--ink); color: white; font-size: 18px; }
+    .mode { margin-top: 5px; color: var(--terracotta); font: 8px/1 var(--mono); text-transform: uppercase; letter-spacing: .12em; }
+
+    .terminal-window {
+      --terminal-width: 552px; --terminal-height: 391.4px;
+      position: absolute; right: 18px; bottom: 96px; z-index: 20;
+      width: min(var(--terminal-width), calc(100% - 36px));
+      height: min(var(--terminal-height), calc(100% - 114px));
+      min-width: 330px; min-height: 220px;
+      display: flex; flex-direction: column; overflow: visible;
+      color: var(--term-ink); background: var(--term);
+      border: 1px solid #090a08; box-shadow: 0 20px 55px rgba(30,23,14,.42), 0 0 0 1px rgba(255,255,255,.06) inset;
+      transition: opacity 130ms ease, transform 130ms ease;
+    }
+    .terminal-window.hidden { opacity: 0; transform: translate(10px, 10px) scale(.96); pointer-events: none; }
+    .resize-corner {
+      position: absolute; left: -7px; top: -7px; z-index: 3; width: 22px; height: 22px;
+      cursor: nwse-resize; touch-action: none;
+    }
+    .terminal-head { height: 38px; flex: 0 0 38px; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--term-line); background: var(--term-2); user-select: none; }
+    .term-symbol { color: var(--term-green); font: 700 12px/1 var(--mono); }
+    .term-title { font: 10px/1 var(--mono); letter-spacing: .08em; }
+    .term-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--term-muted); font: 9px/1 var(--mono); }
+    .connected { margin-left: auto; white-space: nowrap; color: var(--term-green); font: 9px/1 var(--mono); }
+    .terminal-button { width: 27px; height: 25px; display: grid; place-items: center; border: 1px solid transparent; background: transparent; color: #aaa69c; cursor: pointer; font: 14px/1 var(--mono); }
+    .terminal-button:hover { color: white; border-color: #55574f; background: #30322c; }
+    .hide-button { font-size: 17px; }
+    .terminal-screen { min-height: 0; flex: 1; padding: 13px 15px; overflow-y: auto; scrollbar-color: #55574f transparent; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.55 var(--mono); cursor: text; }
+    .terminal-output { margin: 0; white-space: pre-wrap; font: inherit; }
+    .terminal-line { display: flex; align-items: flex-start; }
+    .prompt { flex: 0 0 auto; color: var(--term-green); }
+    .path { color: var(--term-gold); }
+    .terminal-input { min-width: 1px; flex: 1; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden; background: transparent; color: var(--term-ink); caret-color: var(--term-ink); font: inherit; line-height: inherit; }
+    .terminal-launcher {
+      position: absolute; right: 18px; bottom: 96px; z-index: 19;
+      width: 30px; height: 30px; padding: 0; display: grid; place-items: center;
+      border: 0; background: transparent; color: var(--ink);
+      cursor: pointer; opacity: 0; transform: scale(.8); pointer-events: none;
+      transition: opacity 130ms ease, transform 130ms ease, color 100ms ease;
+    }
+    .terminal-launcher.visible { opacity: 1; transform: scale(1); pointer-events: auto; }
+    .terminal-launcher:hover { color: var(--terracotta); }
+    .terminal-launcher .glyph { font: 800 17px/1 var(--mono); letter-spacing: -3px; transform: translateX(-1px); }
+    .resizing-shield { display: none; position: absolute; inset: 0; z-index: 19; cursor: nwse-resize; }
+    .app.is-resizing .resizing-shield { display: block; }
+    @media (max-width: 700px) {
+      .study-bar span { display: none; }
+      .study-bar .instructions { display: block; font-size: 8px; }
+      .stage { padding: 0; }
+      .browser { border: 0; }
+      .browser-chrome, .project, .header-action { display: none; }
+      .app-header { height: 57px; flex-basis: 57px; }
+      .terminal-window { right: 8px; bottom: 86px; min-width: 280px; width: calc(100% - 16px) !important; max-width: none; }
+      .terminal-launcher { right: 10px; bottom: 88px; }
+      .resize-corner { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="study-bar"><strong>Floating field console</strong><span>working interaction mockup</span><span class="instructions">Drag the terminal’s top-left corner · use “—” to hide it</span></div>
+  <main class="stage">
+    <div class="browser">
+      <div class="browser-chrome"><i></i><i></i><i></i><div class="address">pi-orb / compiler errors · terminal session 1</div></div>
+      <div class="app" id="app">
+        <header class="app-header"><span class="brand">PI-ORB</span><span class="orb-name">compiler errors</span><span class="project">wterm integration</span><span class="status">running</span><button class="header-action">stop</button><button class="header-action">archive</button></header>
+        <div class="workspace" id="workspace">
+          <div class="transcript">
+            <div class="manuscript">
+              <div class="turn user"><div class="gutter"><span class="mark">Y</span></div><div class="copy">Please implement the terminal feature end to end.</div></div>
+              <div class="turn"><div class="gutter"><span class="mark">O</span></div><div class="copy"><p>I’ll keep the provider abstraction unchanged. The orb runtime will own the PTY, and the control plane will proxy a dedicated binary WebSocket without interpreting terminal content.</p><span class="tool">✓ read · docs/terminal.md</span><span class="tool">✓ read · runtime server</span></div></div>
+              <div class="turn"><div class="gutter"><span class="mark">O</span></div><div class="copy"><p>The <code>node-pty</code> source build passed in this environment. I’m adding lifecycle-safe cleanup and bounded output forwarding next.</p><span class="tool">● edit · terminal-manager.ts</span><span class="tool">● edit · terminal-proxy.ts</span></div></div>
+              <div class="turn user"><div class="gutter"><span class="mark">Y</span></div><div class="copy">Make sure terminal output never enters conversation history.</div></div>
+              <div class="turn"><div class="gutter"><span class="mark">O</span></div><div class="copy"><p>Yes. The terminal socket is deliberately separate from the agent protocol and history replication. Only the shared filesystem is durable.</p></div></div>
+            </div>
+          </div>
+          <div class="composer"><div class="composer-row"><div class="composer-input">Write a message while the terminal stays open…</div><button class="send">↑</button></div><div class="mode">message</div></div>
+
+          <div class="resizing-shield"></div>
+          <aside class="terminal-window" id="terminal" aria-label="Interactive terminal">
+            <div class="resize-corner" id="resizeHandle" title="Drag to resize"></div>
+            <div class="terminal-head">
+              <span class="term-symbol">&gt;_</span><span class="term-title">TERMINAL</span><span class="term-path">bash · /workspace/repo</span>
+              <span class="connected">● connected</span>
+              <button class="terminal-button" id="clearButton" title="Clear terminal">↺</button>
+              <button class="terminal-button hide-button" id="hideButton" title="Hide terminal" aria-label="Hide terminal">−</button>
+            </div>
+            <div class="terminal-screen" id="terminalScreen" tabindex="0">
+              <pre class="terminal-output" id="terminalOutput"><span style="color:var(--term-muted)">pi-orb interactive terminal · ephemeral session
+Type “help” for mock commands.</span>
+
+</pre>
+              <div class="terminal-line"><span class="prompt">orb@compiler-errors</span>:<span class="path">~/repo</span>$&nbsp;<textarea rows="1" class="terminal-input" id="terminalInput" aria-label="Terminal input" spellcheck="false"></textarea></div>
+            </div>
+          </aside>
+
+          <button class="terminal-launcher" id="terminalLauncher" aria-label="Show terminal" title="Show terminal"><span class="glyph">&gt;_</span></button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script>
+    const app = document.getElementById('app');
+    const workspace = document.getElementById('workspace');
+    const terminal = document.getElementById('terminal');
+    const resizeHandle = document.getElementById('resizeHandle');
+    const hideButton = document.getElementById('hideButton');
+    const launcher = document.getElementById('terminalLauncher');
+    const screen = document.getElementById('terminalScreen');
+    const input = document.getElementById('terminalInput');
+    const output = document.getElementById('terminalOutput');
+    const clearButton = document.getElementById('clearButton');
+
+    const CELL_WIDTH = 7.25;
+    const CELL_HEIGHT = 18.6;
+    const HORIZONTAL_CHROME = 30;
+    const VERTICAL_CHROME = 38;
+    let hidden = false;
+
+    function gridSize() {
+      return {
+        cols: Math.max(20, Math.round((terminal.clientWidth - HORIZONTAL_CHROME) / CELL_WIDTH)),
+        rows: Math.max(5, Math.round((terminal.clientHeight - VERTICAL_CHROME) / CELL_HEIGHT)),
+      };
+    }
+    function snappedPixels(raw, chrome, cell, min, max) {
+      const minCells = Math.ceil((min - chrome) / cell);
+      const maxCells = Math.max(minCells, Math.floor((max - chrome) / cell));
+      const cells = Math.max(minCells, Math.min(maxCells, Math.round((raw - chrome) / cell)));
+      return chrome + cells * cell;
+    }
+    function updateDimensions() {
+      const { cols, rows } = gridSize();
+      terminal.dataset.cols = String(cols);
+      terminal.dataset.rows = String(rows);
+      terminal.setAttribute('aria-label', `Interactive terminal, ${cols} columns by ${rows} rows`);
+    }
+    function setHidden(next) {
+      hidden = next;
+      terminal.classList.toggle('hidden', hidden);
+      launcher.classList.toggle('visible', hidden);
+      if (hidden) launcher.focus();
+      else setTimeout(() => input.focus(), 140);
+    }
+    hideButton.addEventListener('click', () => setHidden(true));
+    launcher.addEventListener('click', () => setHidden(false));
+
+    resizeHandle.addEventListener('pointerdown', event => {
+      event.preventDefault();
+      const startX = event.clientX, startY = event.clientY;
+      const startWidth = terminal.offsetWidth, startHeight = terminal.offsetHeight;
+      const bounds = workspace.getBoundingClientRect();
+      terminal.classList.add('resizing'); app.classList.add('is-resizing');
+      resizeHandle.setPointerCapture(event.pointerId);
+      const move = e => {
+        const maxWidth = bounds.width - 36, maxHeight = bounds.height - 114;
+        const rawWidth = startWidth - (e.clientX - startX);
+        const rawHeight = startHeight - (e.clientY - startY);
+        terminal.style.width = `${snappedPixels(rawWidth, HORIZONTAL_CHROME, CELL_WIDTH, 330, maxWidth)}px`;
+        terminal.style.height = `${snappedPixels(rawHeight, VERTICAL_CHROME, CELL_HEIGHT, 220, maxHeight)}px`;
+        updateDimensions();
+      };
+      const up = () => {
+        terminal.classList.remove('resizing'); app.classList.remove('is-resizing');
+        resizeHandle.removeEventListener('pointermove', move);
+        resizeHandle.removeEventListener('pointerup', up);
+        resizeHandle.removeEventListener('pointercancel', up);
+      };
+      resizeHandle.addEventListener('pointermove', move);
+      resizeHandle.addEventListener('pointerup', up);
+      resizeHandle.addEventListener('pointercancel', up);
+    });
+
+    const responses = {
+      help: 'Mock commands: help, pwd, ls, git status, npm test, clear, exit',
+      pwd: '/workspace/repo',
+      ls: 'AGENTS.md  DESIGN.md  README.md  apps  docs  packages  package.json',
+      'git status': 'On branch main\nYour branch is up to date with origin/main.\n\nChanges not staged for commit:\n  modified:   docs/terminal.md\n\nUntracked files:\n  apps/orb-runtime/src/terminal/',
+      'npm test': '\n RUN  v3.2.4 /workspace/repo\n ✓ terminal-manager.test.ts (8 tests) 94ms\n ✓ terminal-proxy.test.ts (6 tests) 71ms\n\n Test Files  2 passed (2)\n      Tests  14 passed (14)',
+      exit: '[session ended — use the hide button, then reopen to keep exploring the mockup]'
+    };
+    function append(text) {
+      output.textContent += text;
+      screen.scrollTop = screen.scrollHeight;
+    }
+    function submit() {
+      const command = input.value.trim();
+      append(`orb@compiler-errors:~/repo$ ${input.value}\n`);
+      input.value = '';
+      input.style.height = 'auto';
+      if (command === 'clear') output.textContent = '';
+      else if (command === 'date') append(`${new Date().toString()}\n`);
+      else if (command) append(`${responses[command] ?? `bash: ${command}: command not found (mockup)`}\n`);
+      screen.scrollTop = screen.scrollHeight;
+    }
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submit(); }
+    });
+    input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(72, input.scrollHeight)}px`; });
+    screen.addEventListener('click', event => { if (!window.getSelection().toString()) input.focus(); });
+    clearButton.addEventListener('click', () => { output.textContent = ''; input.focus(); });
+    new ResizeObserver(updateDimensions).observe(terminal);
+    updateDimensions();
+    input.focus();
+  </script>
+</body>
+</html>

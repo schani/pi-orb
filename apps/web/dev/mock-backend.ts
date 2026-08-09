@@ -11,6 +11,8 @@ import {
   type ProjectView,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
+  TERMINAL_SUBPROTOCOL,
+  TerminalClientControlSchema,
 } from "@pi-orb/protocol";
 import { Check } from "typebox/value";
 import type { Plugin } from "vite";
@@ -899,6 +901,47 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
   });
 }
 
+function acceptTerminalSocket(socket: WebSocket): void {
+  let ready = false;
+  socket.on("message", (data, isBinary) => {
+    if (isBinary) {
+      if (!ready) return;
+      const input = Buffer.from(data as Buffer);
+      socket.send(input, { binary: true });
+      if (input.includes(13)) {
+        socket.send(Buffer.from("\n\x1b[32morb@frontend\x1b[0m:\x1b[33m~/repo\x1b[0m$ "), {
+          binary: true,
+        });
+      }
+      return;
+    }
+    let control: unknown;
+    try {
+      control = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+    if (!Check(TerminalClientControlSchema, control)) return;
+    if (control.type === "terminal.open" && !ready) {
+      ready = true;
+      socket.send(
+        JSON.stringify({
+          v: 1,
+          type: "terminal.ready",
+          cols: control.cols,
+          rows: control.rows,
+        }),
+      );
+      socket.send(
+        Buffer.from(
+          "\x1b[90mfrontend fixture terminal\x1b[0m\r\n\x1b[32morb@frontend\x1b[0m:\x1b[33m~/repo\x1b[0m$ ",
+        ),
+        { binary: true },
+      );
+    }
+  });
+}
+
 /**
  * In-process control-plane/runtime fixture for frontend-only development.
  * It implements the real HTTP and WebSocket contracts, so production UI code
@@ -909,7 +952,11 @@ export function mockBackendPlugin(): Plugin {
   const sockets = new WebSocketServer({
     noServer: true,
     handleProtocols: (protocols) =>
-      protocols.has(RUNTIME_SUBPROTOCOL) ? RUNTIME_SUBPROTOCOL : false,
+      protocols.has(RUNTIME_SUBPROTOCOL)
+        ? RUNTIME_SUBPROTOCOL
+        : protocols.has(TERMINAL_SUBPROTOCOL)
+          ? TERMINAL_SUBPROTOCOL
+          : false,
   });
 
   return {
@@ -935,16 +982,18 @@ export function mockBackendPlugin(): Plugin {
 
       const onUpgrade = (request: IncomingMessage, socket: Socket, head: Buffer) => {
         const path = new URL(request.url ?? "/", "http://fixture.local").pathname;
-        const match = /^\/api\/v1\/orbs\/([^/]+)\/live$/.exec(path);
+        const match = /^\/api\/v1\/orbs\/([^/]+)\/(live|terminal)$/.exec(path);
         if (match === null) return;
         const orbId = decodeURIComponent(match[1] ?? "");
+        const kind = match[2];
         const orb = state.orbs.get(orbId);
         if (orb?.state !== "running") {
           socket.destroy();
           return;
         }
         sockets.handleUpgrade(request, socket, head, (webSocket) => {
-          acceptLiveSocket(state, webSocket, orbId);
+          if (kind === "terminal") acceptTerminalSocket(webSocket);
+          else acceptLiveSocket(state, webSocket, orbId);
         });
       };
       server.httpServer?.prependListener("upgrade", onUpgrade);

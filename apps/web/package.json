@@ -11,6 +11,9 @@
   },
   "dependencies": {
     "@pi-orb/protocol": "*",
+    "@wterm/dom": "^0.3.2",
+    "@wterm/ghostty": "^0.3.2",
+    "@wterm/react": "^0.3.2",
     "linkify-react": "^4.3.3",
     "linkifyjs": "^4.3.3",
     "neverthrow": "^8.2.0",

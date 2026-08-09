@@ -1,5 +1,10 @@
 import websocketPlugin from "@fastify/websocket";
-import { ClientPresenceSchema, RUNTIME_SUBPROTOCOL } from "@pi-orb/protocol";
+import {
+  ClientPresenceSchema,
+  RUNTIME_SUBPROTOCOL,
+  TERMINAL_MAX_INPUT_BYTES,
+  TERMINAL_SUBPROTOCOL,
+} from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance } from "fastify";
 import { Check } from "typebox/value";
@@ -9,6 +14,7 @@ import type { ControlPlaneDeps } from "../domain/ports.ts";
 
 const TRY_AGAIN_LATER = 1013;
 const UNSUPPORTED_DATA = 1003;
+const TERMINAL_PROXY_BUFFER_BYTES = 1024 * 1024;
 
 let connectionCounter = 0;
 
@@ -31,7 +37,11 @@ export async function registerLiveProxy(
   await app.register(websocketPlugin, {
     options: {
       handleProtocols: (protocols: Set<string>) =>
-        protocols.has(RUNTIME_SUBPROTOCOL) ? RUNTIME_SUBPROTOCOL : false,
+        protocols.has(RUNTIME_SUBPROTOCOL)
+          ? RUNTIME_SUBPROTOCOL
+          : protocols.has(TERMINAL_SUBPROTOCOL)
+            ? TERMINAL_SUBPROTOCOL
+            : false,
     },
   });
 
@@ -179,6 +189,149 @@ export async function registerLiveProxy(
       runtimeSocket.on("error", () => {
         closeBoth(TRY_AGAIN_LATER, "runtime connection failed");
       });
+    },
+  );
+
+  app.get<{ Params: { orbId: string } }>(
+    "/api/v1/orbs/:orbId/terminal",
+    { websocket: true },
+    async (browserSocket, request) => {
+      const orbId = request.params.orbId;
+      let upstream: WebSocket | null = null;
+      let upstreamOpen = false;
+      let browserClosed = false;
+      const pending: Array<{ data: Buffer; isBinary: boolean }> = [];
+      let pendingBytes = 0;
+      connectionCounter += 1;
+      const connectionId = `terminal-${connectionCounter}`;
+      const closeBoth = (code: number, reason: string): void => {
+        try {
+          browserSocket.close(code, reason);
+        } catch {
+          /* already closing */
+        }
+        try {
+          upstream?.close(code, reason);
+        } catch {
+          /* already closing */
+        }
+      };
+      deps.control.registerBrowserConnection(orbId, connectionId, () =>
+        closeBoth(TRY_AGAIN_LATER, "orb is stopping"),
+      );
+
+      browserSocket.on("message", (data: Buffer, isBinary: boolean) => {
+        const copy = Buffer.from(data);
+        if (copy.byteLength > TERMINAL_MAX_INPUT_BYTES) {
+          closeBoth(1009, "terminal frame is too large");
+          return;
+        }
+        void deps.store.touchLastBusy(task, { orbId, now: task.wallNow() });
+        if (upstreamOpen && upstream !== null) {
+          if (upstream.bufferedAmount > TERMINAL_PROXY_BUFFER_BYTES) {
+            closeBoth(TRY_AGAIN_LATER, "terminal input consumer is too slow");
+            return;
+          }
+          try {
+            upstream.send(copy, { binary: isBinary });
+          } catch {
+            closeBoth(TRY_AGAIN_LATER, "terminal input forwarding failed");
+          }
+        } else {
+          pendingBytes += copy.byteLength;
+          if (pendingBytes > TERMINAL_PROXY_BUFFER_BYTES) {
+            closeBoth(TRY_AGAIN_LATER, "terminal routing queue overflow");
+            return;
+          }
+          pending.push({ data: copy, isBinary });
+        }
+      });
+      browserSocket.on("close", () => {
+        browserClosed = true;
+        deps.control.unregisterBrowserConnection(orbId, connectionId, task.wallNow());
+        try {
+          upstream?.close();
+        } catch {
+          /* already closed */
+        }
+      });
+      browserSocket.on("error", () => {
+        deps.control.unregisterBrowserConnection(orbId, connectionId, task.wallNow());
+        try {
+          upstream?.close();
+        } catch {
+          /* already closed */
+        }
+      });
+
+      const orbResult = await deps.store.getOrb(task, orbId);
+      if (
+        orbResult.isErr() ||
+        orbResult.value === null ||
+        orbResult.value.state !== "running" ||
+        deps.control.isStopping(orbId) ||
+        orbResult.value.hostRef === null
+      ) {
+        closeBoth(TRY_AGAIN_LATER, "orb is not running");
+        return;
+      }
+      const observed = await withDeadline(
+        task,
+        deps.constants.providerOperationTimeoutMs,
+        "observe host for terminal proxy",
+        (context) =>
+          deps.hostProvider.observe(
+            task,
+            { provider: deps.hostProvider.kind, resourceId: orbResult.value?.hostRef ?? "" },
+            context,
+          ),
+      );
+      if (
+        observed.isErr() ||
+        observed.value === null ||
+        observed.value.state !== "running" ||
+        observed.value.runtimeAddress === undefined
+      ) {
+        closeBoth(TRY_AGAIN_LATER, "runtime unavailable");
+        return;
+      }
+      if (browserClosed) return;
+
+      const wsUrl = `${observed.value.runtimeAddress.baseUrl.replace(/^http/, "ws")}/v1/terminal`;
+      const runtimeSocket = new WebSocket(wsUrl, [TERMINAL_SUBPROTOCOL]);
+      upstream = runtimeSocket;
+      runtimeSocket.on("open", () => {
+        upstreamOpen = true;
+        try {
+          for (const frame of pending) runtimeSocket.send(frame.data, { binary: frame.isBinary });
+        } catch {
+          closeBoth(TRY_AGAIN_LATER, "terminal input forwarding failed");
+        }
+        pending.length = 0;
+        pendingBytes = 0;
+      });
+      runtimeSocket.on("message", (data, isBinary) => {
+        if (browserSocket.bufferedAmount > TERMINAL_PROXY_BUFFER_BYTES) {
+          closeBoth(TRY_AGAIN_LATER, "terminal output consumer is too slow");
+          return;
+        }
+        try {
+          browserSocket.send(data, { binary: isBinary });
+        } catch {
+          closeBoth(TRY_AGAIN_LATER, "terminal output forwarding failed");
+        }
+      });
+      runtimeSocket.on("close", (code, reason) => {
+        try {
+          browserSocket.close(
+            code >= 1000 && code < 5000 ? code : TRY_AGAIN_LATER,
+            reason.toString(),
+          );
+        } catch {
+          /* already closed */
+        }
+      });
+      runtimeSocket.on("error", () => closeBoth(TRY_AGAIN_LATER, "runtime connection failed"));
     },
   );
 }

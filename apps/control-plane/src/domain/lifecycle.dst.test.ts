@@ -336,8 +336,13 @@ describe("orb lifecycle (DST)", () => {
             seedRunningOrb(task, harness, ORB);
             for (let i = 0; i < 6; i++) harness.world.appendMessage(ORB);
             harness.world.setActivity(ORB, "busy"); // stop does not wait for idle
+            let proxyCloseCalls = 0;
+            harness.deps.control.registerBrowserConnection(ORB, "terminal-1", () => {
+              proxyCloseCalls += 1;
+            });
             const stopResult = await requestOrbStop(task, harness.deps, ORB);
             expect(stopResult.isOk()).toBe(true);
+            expect(proxyCloseCalls).toBe(1);
             await waitUntil(
               task,
               "orb stopped",
@@ -700,6 +705,11 @@ describe("orb lifecycle (DST)", () => {
             name: "driver",
             f: async (task) => {
               seedRunningOrb(task, harness, ORB);
+              // Keep setup's unrelated idle timer out until the first busy
+              // pull is durable; adversarial late timers may otherwise let the
+              // reaper beat the poll that establishes this scenario's premise.
+              harness.deps.control.registerBrowserConnection(ORB, "setup-tab");
+              harness.deps.control.setBrowserVisibility(ORB, "setup-tab", true, task.wallNow());
               // A turn in flight: its user message is flushed and the runtime
               // is busy working on it.
               harness.world.beginTurn(ORB);
@@ -710,6 +720,7 @@ describe("orb lifecycle (DST)", () => {
                   harness.store.replicaRecords(ORB).length === 1 &&
                   harness.store.orbSnapshot(ORB)?.lastBusyAt !== null,
               );
+              harness.deps.control.unregisterBrowserConnection(ORB, "setup-tab", task.wallNow());
               const busyBeforePreemption = harness.store.orbSnapshot(ORB)?.lastBusyAt ?? 0;
               const stopsBefore = harness.world.hostStopCountOf(ORB);
               // The Spot preemption, mid-turn.
@@ -818,12 +829,15 @@ describe("orb lifecycle (DST)", () => {
             name: "driver",
             f: async (task) => {
               seedRunningOrb(task, harness, ORB);
+              harness.deps.control.registerBrowserConnection(ORB, "setup-tab");
+              harness.deps.control.setBrowserVisibility(ORB, "setup-tab", true, task.wallNow());
               harness.world.beginTurn(ORB);
               await waitUntil(
                 task,
                 "the turn is replicated",
                 () => harness.store.replicaRecords(ORB).length === 1,
               );
+              harness.deps.control.unregisterBrowserConnection(ORB, "setup-tab", task.wallNow());
               const stopsBefore = harness.world.hostStopCountOf(ORB);
               harness.world.preemptHost(task, ORB);
               await waitUntil(
@@ -1375,6 +1389,8 @@ describe("idle auto-stop (DST)", () => {
           name: "driver-1",
           f: async (task) => {
             seedRunningOrb(task, before, ORB);
+            before.deps.control.registerBrowserConnection(ORB, "setup-tab");
+            before.deps.control.setBrowserVisibility(ORB, "setup-tab", true, task.wallNow());
             before.world.setActivity(ORB, "busy");
             await waitUntil(
               task,
@@ -1382,6 +1398,7 @@ describe("idle auto-stop (DST)", () => {
               () => before.store.orbSnapshot(ORB)?.lastBusyAt !== null,
               { timeoutMs: 60_000 },
             );
+            before.deps.control.unregisterBrowserConnection(ORB, "setup-tab", task.wallNow());
             before.world.setActivity(ORB, "idle");
             crashWall = task.wallNow();
             stopBefore.abort();

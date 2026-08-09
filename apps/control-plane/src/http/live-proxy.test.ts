@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
-import { RUNTIME_SUBPROTOCOL } from "@pi-orb/protocol";
+import { RUNTIME_SUBPROTOCOL, TERMINAL_SUBPROTOCOL } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { ResultAsync } from "neverthrow";
@@ -94,6 +94,65 @@ describe("live proxy", () => {
 
     const [data] = await reply;
     expect(data.toString()).toBe("echo:client.hello");
+  });
+
+  it("preserves binary terminal traffic in both directions", async () => {
+    const runtime = new WebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      handleProtocols: (protocols) =>
+        protocols.has(TERMINAL_SUBPROTOCOL) ? TERMINAL_SUBPROTOCOL : false,
+    });
+    openServers.push({ close: () => closeWebSocketServer(runtime) });
+    await once(runtime, "listening");
+    const runtimeAddress = runtime.address() as AddressInfo;
+    runtime.on("connection", (socket) => {
+      socket.on("message", (data, isBinary) => socket.send(data, { binary: isBinary }));
+    });
+
+    const harness = makeHarness();
+    const orbId = "orb-terminal-proxy";
+    harness.store.seedOrb(makeOrbRow(orbId, "project-a", "running", { hostRef: "host-terminal" }));
+    const delegate = harness.deps.hostProvider;
+    const hostProvider: OrbHostProvider = {
+      kind: delegate.kind,
+      provision: (task, request, context) => delegate.provision(task, request, context),
+      start: (task, ref, context) => delegate.start(task, ref, context),
+      stop: (task, ref, context) => delegate.stop(task, ref, context),
+      destroy: (task, id, context) => delegate.destroy(task, id, context),
+      listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
+      observe: (_task, ref) =>
+        ResultAsync.fromSafePromise(Promise.resolve()).map(() => ({
+          ref,
+          orbId,
+          state: "running" as const,
+          runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
+        })),
+    };
+    const app = Fastify({ logger: false });
+    openServers.push({ close: () => app.close() });
+    await registerLiveProxy(app, new NoSimulationTask("terminal proxy test", false), {
+      ...harness.deps,
+      hostProvider,
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const proxyAddress = app.server.address() as AddressInfo;
+    const browser = new WebSocket(
+      `ws://127.0.0.1:${proxyAddress.port}/api/v1/orbs/${orbId}/terminal`,
+      TERMINAL_SUBPROTOCOL,
+    );
+    openServers.push({ close: async () => browser.terminate() });
+    await once(browser, "open");
+
+    const echoed = once(browser, "message");
+    browser.send(Buffer.from([0, 1, 2, 255]));
+    const [data, isBinary] = await echoed;
+    expect(isBinary).toBe(true);
+    expect([...Buffer.from(data as Buffer)]).toEqual([0, 1, 2, 255]);
+
+    const closed = once(browser, "close");
+    harness.deps.control.closeBrowserConnections(orbId);
+    await closed;
   });
 
   it("consumes presence frames, tracks visibility, and touches last_busy_at on requests", async () => {

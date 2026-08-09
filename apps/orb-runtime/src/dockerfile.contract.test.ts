@@ -35,6 +35,12 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain("ENV CARGO_HOME=/workspace/home/.cargo");
   });
 
+  it("builds the node-pty Linux addon while keeping other lifecycle scripts disabled", () => {
+    expect(dockerfile).toContain("--ignore-scripts");
+    expect(dockerfile).toContain("rm -rf node_modules/node-pty/prebuilds");
+    expect(dockerfile).toContain("npm rebuild node-pty");
+  });
+
   it("declares HOME on the persistent orb volume", () => {
     expect(dockerfile).toContain("ENV HOME=/workspace/home");
     expect(dockerfile).toContain("VOLUME /workspace");

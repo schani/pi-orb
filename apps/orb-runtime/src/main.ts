@@ -1,9 +1,11 @@
+import { join } from "node:path";
 import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import { readBrokerEnv } from "./broker/endpoint.ts";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
 import { startTailscale } from "./tailscale/daemon.ts";
 import { readTailscaleEnv } from "./tailscale/env.ts";
+import { TerminalManager } from "./terminal/manager.ts";
 
 const env = (name: string, fallback?: string): string => {
   const value = process.env[name];
@@ -31,24 +33,32 @@ async function main(): Promise<void> {
   });
 
   // The health server starts before slow initialization (docs/host-provider.md).
-  const app = buildRuntimeServer(agent);
+  // PTYs are admitted only after the checkout is ready, but their manager is
+  // installed now so Fastify owns cleanup on every shutdown path.
+  const terminalManager = new TerminalManager({ cwd: join(workDir, "repo") });
+  const app = buildRuntimeServer(agent, terminalManager);
   const configuredPort = Number(env("PI_ORB_RUNTIME_PORT", "8080"));
   if (!Number.isInteger(configuredPort) || configuredPort < 1 || configuredPort > 65_535) {
     console.error("PI_ORB_RUNTIME_PORT must be an integer from 1 through 65535");
     process.exit(1);
   }
-  // Process-backed test hosts keep an IPC channel to the control plane. A
-  // disconnect means the in-process supervisor disappeared, so this runtime
-  // must not survive as an unmanaged orphan.
-  process.on("disconnect", () => {
+  // Closing Fastify also closes every terminal PTY. Process-backed test hosts
+  // use IPC disconnect; Docker/GCE and explicit local stops use TERM/INT.
+  let shuttingDown = false;
+  const shutdown = (reason: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     void app.close().then(
       () => process.exit(0),
       (error: unknown) => {
-        console.error("shutdown after supervisor disconnect failed:", error);
+        console.error(`shutdown after ${reason} failed:`, error);
         process.exit(1);
       },
     );
-  });
+  };
+  process.on("disconnect", () => shutdown("supervisor disconnect"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
   const listening = await app.listen({ port: configuredPort, host: "0.0.0.0" }).then(
     (address) => address,
     (error: unknown) => {

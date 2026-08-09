@@ -230,6 +230,10 @@ Live shell output uses `output_patch` with `blockType: "shell"`. The block is pr
 
 A shell action never carries image input. The browser prevents such submission, and the runtime schema/action handler rejects malformed attempts defensively. Command input uses the existing incoming-frame/prompt-size safety envelope.
 
+## Separate interactive-terminal socket (decided and implemented 2026-08-09)
+
+The interactive orb terminal is intentionally not part of this agent frame union. The browser opens `/api/v1/orbs/{orbId}/terminal` with subprotocol `pi-orb.terminal.v1`; the control plane observes the same runtime address and proxies it to private runtime endpoint `/v1/terminal`. JSON text controls open/resize the PTY and report ready/exit/typed errors, while binary frames carry UTF-8 input/output. It has no agent hello, history cursor, request identity, persistence, replay, or model-context semantics. See `docs/terminal.md` for the complete contract and rationale.
+
 ## Multiple connections
 
 Naturally support multiple simultaneous WebSocket connections to one orb. Each connection performs its own cursor-based synchronization and has its own bounded outbound writer. Complete history, runtime events, and status are broadcast; `request.result` is sent only to the requester.

@@ -33,6 +33,12 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   background: var(--paper);
@@ -42,10 +48,27 @@ body {
   line-height: 1.5;
 }
 
+#root {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+
+/* App is the root's sole child. It must carry the viewport flex height down to
+   route content; otherwise an orb page shrink-wraps a sparse transcript and a
+   sticky composer has no space in which to reach the viewport bottom. */
+.app {
+  display: flex;
+  flex: 1;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+
 /* ---------- app shell: full-bleed header, fluid width ---------- */
 
 .app-header {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 12px;
   padding: 10px var(--page-pad);
@@ -69,6 +92,7 @@ body {
 
 /* The sticky composer provides its own bottom spacing on the orb page. */
 .orb-page {
+  flex: 1;
   padding-bottom: 0;
 }
 
@@ -738,6 +762,13 @@ button.project-orb-action.danger:hover:not(:disabled) {
   padding-top: 4px;
 }
 
+/* Sparse conversations still reserve the whole remaining viewport, putting
+   the composer at the bottom; long transcripts continue to grow and scroll
+   in normal document flow. */
+.orb-page > .history {
+  flex: 1 0 auto;
+}
+
 /* Each turn: gutter column (mark + rail) beside full-width content. */
 .turn {
   display: grid;
@@ -1219,6 +1250,216 @@ button.project-orb-action.danger:hover:not(:disabled) {
   color: var(--ink-faint);
   font-size: 13px;
   padding-left: calc(var(--gutter) + 14px);
+}
+
+/* ---------- floating orb terminal ---------- */
+
+.orb-terminal-window {
+  position: fixed;
+  right: 18px;
+  z-index: 32;
+  display: flex;
+  min-width: 330px;
+  flex-direction: column;
+  min-height: 220px;
+  overflow: visible;
+  color: #e8e2d4;
+  background: #191b18;
+  border: 1px solid #090a08;
+  box-shadow:
+    0 20px 55px rgb(30 23 14 / 42%),
+    0 0 0 1px rgb(255 255 255 / 6%) inset;
+  transition:
+    opacity 130ms ease,
+    transform 130ms ease;
+}
+
+.orb-terminal-window.orb-terminal-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(10px, 10px) scale(0.96);
+}
+
+.orb-terminal-resize {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.orb-terminal-header {
+  display: flex;
+  flex: 0 0 38px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px 0 14px;
+  color: #e8e2d4;
+  background: #23251f;
+  border-bottom: 1px solid #41433d;
+  user-select: none;
+}
+
+.orb-terminal-symbol {
+  color: #9cba8f;
+  font: 700 12px / 1 var(--mono);
+}
+
+.orb-terminal-title,
+.orb-terminal-path,
+.orb-terminal-status {
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.orb-terminal-title {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.orb-terminal-path {
+  min-width: 0;
+  overflow: hidden;
+  color: #938f84;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orb-terminal-status {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.orb-terminal-status-connected {
+  color: #9cba8f;
+}
+.orb-terminal-status-connecting {
+  color: #d0b678;
+}
+.orb-terminal-status-ended {
+  color: #c9826b;
+}
+
+.orb-terminal-header button {
+  display: grid;
+  flex: 0 0 27px;
+  width: 27px;
+  height: 25px;
+  place-items: center;
+  padding: 0;
+  color: #aaa69c;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-variant-caps: normal;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.orb-terminal-header button:hover:not(:disabled) {
+  color: white;
+  background: #30322c;
+  border-color: #55574f;
+}
+
+.orb-terminal-header .orb-terminal-hide {
+  font-size: 17px;
+}
+
+.orb-terminal-error {
+  padding: 6px 12px;
+  color: #f1b19c;
+  background: #3b211c;
+  border-bottom: 1px solid #684137;
+  font: 10px / 1.35 var(--mono);
+}
+
+.orb-terminal-loading {
+  flex: 1;
+  padding: 13px 15px;
+  color: #938f84;
+  font: 12px / 18.6px var(--mono);
+}
+
+.orb-terminal-window .orb-terminal-emulator {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 13px 15px;
+  overflow: auto;
+  color: #e8e2d4;
+  background: #191b18;
+  border-radius: 0;
+  box-shadow: none;
+  --term-fg: #e8e2d4;
+  --term-bg: #191b18;
+  --term-cursor: #e8e2d4;
+  --term-font-family: var(--mono);
+  --term-font-size: 12px;
+  --term-line-height: 1.55;
+  --term-row-height: 18.6px;
+  --term-color-2: #9cba8f;
+  --term-color-3: #d0b678;
+}
+
+.orb-terminal-launcher {
+  position: fixed;
+  right: 18px;
+  z-index: 31;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  opacity: 1;
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 800;
+  font-variant-caps: normal;
+  letter-spacing: -3px;
+  text-transform: none;
+  transition:
+    color 100ms ease,
+    opacity 130ms ease,
+    transform 130ms ease;
+}
+
+.orb-terminal-window + .orb-terminal-launcher:not(.orb-terminal-launcher-visible) {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.8);
+}
+
+.orb-terminal-launcher:hover:not(:disabled) {
+  color: var(--accent);
+  background: transparent;
+}
+
+@media (max-width: 700px) {
+  .orb-terminal-window {
+    right: 8px;
+    max-width: calc(100% - 16px);
+    min-width: 280px;
+  }
+
+  .orb-terminal-resize {
+    display: none;
+  }
+  .orb-terminal-launcher {
+    right: 10px;
+  }
 }
 
 /* ---------- composer ---------- */
