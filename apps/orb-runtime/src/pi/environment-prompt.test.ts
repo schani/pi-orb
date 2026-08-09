@@ -10,4 +10,11 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("rust-toolchain.toml");
     expect(environmentPrompt).toContain("persist");
   });
+
+  it("documents the installed browser automation tool", () => {
+    expect(environmentPrompt).toContain("agent-browser");
+    expect(environmentPrompt).toContain("Chromium");
+    expect(environmentPrompt).toContain("agent-browser open <url>");
+    expect(environmentPrompt).toContain("agent-browser snapshot");
+  });
 });

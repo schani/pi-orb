@@ -18,6 +18,14 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain("python-is-python3");
   });
 
+  it("installs agent-browser with a system Chromium executable", () => {
+    expect(runtimePackage.dependencies?.["agent-browser"]).toBe("0.33.2");
+    expect(dockerfile).toContain("gh tailscale chromium");
+    expect(dockerfile).toContain(
+      "ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser",
+    );
+  });
+
   it("installs rustup and native build prerequisites with persistent Rust state", () => {
     expect(dockerfile).toContain("build-essential");
     expect(dockerfile).toContain("pkg-config");
