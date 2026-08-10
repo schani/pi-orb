@@ -12,6 +12,8 @@ Orb states, reconciliation rules, idle auto-stop, and the orphan-host sweep. The
 - Pi's `agent_settled` lifecycle state is a useful agent-idle signal because it means no retry, compaction retry, or queued continuation remains.
 - Pi SDK 0.83.0 does not expose a Claude Code-style shell registry or a reliable “agent-started processes remain” query. `AgentSession.isBashRunning` covers only currently awaited user `!`/`executeBash()` commands; model-invoked bash is observable only while its generic tool lifecycle is active. Pi internally tracks each built-in local shell PID while that invocation is awaited so it can kill the process group on abort/shutdown, but exposes neither the PID set nor a status getter and stops tracking when the shell invocation returns. Arbitrary detached descendants and processes spawned by extension/custom tools are therefore invisible to Pi after their launching tool returns. Whether OS process/cgroup inspection can provide a reliable idle signal remains unresolved.
 
+**Decided and implemented — message-driven startup (2026-08-10):** the durable send-anytime inbox in `docs/runtime-protocol.md` reuses `starting` rather than adding a queued/waking lifecycle state. Inbox insertion and wake intent are transactional. From `stopped` or recoverable `failed`, send enters the ordinary start path; during `creating`/`starting`/`running` it only wakes reconciliation/dispatch; during `stopping` it records restart-after-stop and never bypasses the drain. An explicit stop ordered after the send clears the message wake but preserves the queued content, while a send ordered after stop sets the wake. A terminal boot failure leaves both the existing orb failure and the queued message visible rather than retrying forever. Accepted message insertion refreshes `last_busy_at`, so idle auto-stop cannot win immediately after user work arrives. Autonomous transitions use reasons `queued_message`/`queued_message_after_stop` and edge logs include the message ID without content.
+
 **Decided — idle auto-stop and orphan-host sweep (proposed 2026-08-01, decided and implemented 2026-08-03 with the visible-tab refinement):**
 
 Idle auto-stop reuses existing machinery rather than adding a new lifecycle path:
@@ -60,7 +62,7 @@ Commands:
 - delete is idempotent while `deleting`, may enter it from every other state, and makes start/stop/rename/history/live operations conflict;
 - archive is idempotent in `archiving`/`archived`, preserves history reads, and permanently conflicts with start; delete may upgrade an in-progress archive or remove an archived orb (`docs/orb-archival.md`);
 - start while `stopping` returns `409 conflict`; the caller retries after stopped;
-- runtime message requests are rejected once the database enters `stopping` because the control plane closes and refuses live proxy connections for that orb.
+- currently implemented live runtime message requests are rejected once the database enters `stopping` because the control plane closes and refuses live proxy connections for that orb; under the send-anytime API, message inbox admission remains available in `stopping` and requests restart only after its drain completes.
 
 Reconciliation rules:
 

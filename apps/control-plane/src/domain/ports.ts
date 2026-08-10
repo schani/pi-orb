@@ -1,6 +1,7 @@
 import type {
   HarnessSessionMetadata,
   HistoryRecord,
+  MessageInputBlock,
   OrbState,
   PullHistoryResponse,
   RuntimeHealth,
@@ -18,7 +19,13 @@ import type {
   StateConflict,
   StoreError,
 } from "./errors.ts";
-import type { OrbDeletionRow, OrbRow, ProjectDeletionProgress, ProjectRow } from "./orb.ts";
+import type {
+  OrbDeletionRow,
+  OrbMessageRow,
+  OrbRow,
+  ProjectDeletionProgress,
+  ProjectRow,
+} from "./orb.ts";
 
 /** In-process adapter context; never serialized on the wire. */
 export interface OperationContext {
@@ -135,6 +142,44 @@ export interface ControlPlaneStore {
   failOrbAutoName(
     task: SimulationTask,
     params: { orbId: string; now: number; nextAttemptAt: number },
+  ): ResultAsync<void, StoreError>;
+
+  /** Durable send-anytime FIFO admission, including stopped/failed startup. */
+  enqueueOrbMessage(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      messageId: string;
+      content: readonly MessageInputBlock[];
+      now: number;
+    },
+  ): ResultAsync<
+    { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
+    StoreError | StateConflict
+  >;
+  listOrbMessages(task: SimulationTask, orbId: string): ResultAsync<OrbMessageRow[], StoreError>;
+  getNextOrbMessage(
+    task: SimulationTask,
+    orbId: string,
+  ): ResultAsync<OrbMessageRow | null, StoreError>;
+  /** Atomically freezes all currently queued messages into the next FIFO delivery batch. */
+  claimNextOrbMessageBatch(
+    task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<OrbMessageRow[], StoreError>;
+  noteOrbMessageDelivery(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      messageIds: readonly string[];
+      delivery: "turn" | "steer";
+      operationId: string;
+      now: number;
+    },
+  ): ResultAsync<void, StoreError>;
+  clearOrbMessageAutoStart(
+    task: SimulationTask,
+    params: { orbId: string; now: number },
   ): ResultAsync<void, StoreError>;
 
   /** Atomically enter archiving and create its durable cleanup intent. */
@@ -327,6 +372,13 @@ export interface OrbHostProvider {
 // ---------------------------------------------------------------------------
 // Runtime client (docs/runtime-protocol.md)
 
+export interface DeliverMessageClientRequest {
+  readonly baseUrl: string;
+  readonly messageId: string;
+  readonly messageIds: readonly string[];
+  readonly content: readonly MessageInputBlock[];
+}
+
 export interface PullHistoryClientRequest {
   readonly baseUrl: string;
   readonly after: string | null;
@@ -334,6 +386,11 @@ export interface PullHistoryClientRequest {
 }
 
 export interface OrbRuntimeClient {
+  deliverMessage(
+    task: SimulationTask,
+    request: DeliverMessageClientRequest,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").DeliverOrbMessageResponse, RuntimeClientError>;
   health(
     task: SimulationTask,
     baseUrl: string,

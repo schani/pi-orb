@@ -2,9 +2,13 @@ import {
   ControlPlaneHttpErrorSchema,
   type CreateOrbRequest,
   type CreateProjectRequest,
+  type EnqueueOrbMessageRequest,
   ListResponseSchema,
   type OrbHistoryView,
   OrbHistoryViewSchema,
+  OrbMessageListViewSchema,
+  type OrbMessageView,
+  OrbMessageViewSchema,
   type OrbView,
   OrbViewSchema,
   type ProjectView,
@@ -189,6 +193,22 @@ export function stopOrb(orbId: string): Promise<Result<OrbView, ApiError>> {
   return apiFetch(OrbViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/stop`, {
     method: "POST",
   });
+}
+
+export function enqueueOrbMessage(
+  orbId: string,
+  messageId: string,
+  request: EnqueueOrbMessageRequest,
+): Promise<Result<OrbMessageView, ApiError>> {
+  return apiFetch(
+    OrbMessageViewSchema,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/messages/${encodeURIComponent(messageId)}`,
+    { method: "PUT", headers: jsonHeaders, body: JSON.stringify(request) },
+  );
+}
+
+export function listOrbMessages(orbId: string) {
+  return apiFetch(OrbMessageListViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/messages`);
 }
 
 export function getOrbHistory(orbId: string): Promise<Result<OrbHistoryView, ApiError>> {

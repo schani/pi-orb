@@ -47,6 +47,49 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain(">Orb<");
   });
 
+  it("renders an outstanding queued message once as a gray user turn", () => {
+    const queued = {
+      id: "00000000-0000-4000-8000-000000000123",
+      orbId: "orb-1",
+      content: [{ type: "text" as const, text: "queued while starting" }],
+      status: "queued" as const,
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:00.000Z",
+    };
+    const queuedHtml = renderToStaticMarkup(
+      <HistoryView
+        records={[]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+        queuedMessages={[queued]}
+      />,
+    );
+    expect(queuedHtml).toContain("turn-user turn-queued");
+    expect(queuedHtml).toContain("You · queued");
+    expect(queuedHtml).toContain("queued while starting");
+
+    const committed = message("record-1", "user", "queued while starting");
+    committed.overflow = {
+      native: {
+        type: "custom_message",
+        customType: "pi-orb.user-message",
+        details: { messageIds: [queued.id] },
+      },
+    };
+    const committedHtml = renderToStaticMarkup(
+      <HistoryView
+        records={[committed]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+        queuedMessages={[queued]}
+      />,
+    );
+    expect(committedHtml).not.toContain("turn-queued");
+    expect(committedHtml.match(/queued while starting/g)).toHaveLength(1);
+  });
+
   it("renders compaction as a full-width divider outside the gutter turns", () => {
     const records: HistoryRecord[] = [
       message("u1", "user", "hello"),

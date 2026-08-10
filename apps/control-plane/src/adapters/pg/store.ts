@@ -9,7 +9,7 @@ import type {
   StoreError,
 } from "../../domain/errors.ts";
 import { jsonEqual } from "../../domain/json-equal.ts";
-import type { OrbDeletionRow, OrbRow, ProjectRow } from "../../domain/orb.ts";
+import type { OrbDeletionRow, OrbMessageRow, OrbRow, ProjectRow } from "../../domain/orb.ts";
 import type {
   CasTransitionParams,
   CasUpdateFieldsParams,
@@ -57,6 +57,23 @@ function mapOrbRow(row: PgRow): OrbRow {
   };
 }
 
+function mapMessageRow(row: PgRow): OrbMessageRow {
+  return {
+    orbId: String(row["orb_id"]),
+    messageId: String(row["message_id"]),
+    ordinal: Number(row["ordinal"]),
+    content: row["content"] as OrbMessageRow["content"],
+    status: String(row["status"]) as OrbMessageRow["status"],
+    delivery: row["delivery"] == null ? null : (String(row["delivery"]) as "turn" | "steer"),
+    operationId: row["operation_id"] == null ? null : String(row["operation_id"]),
+    deliveryBatchId: row["delivery_batch_id"] == null ? null : String(row["delivery_batch_id"]),
+    autoStart: row["auto_start"] === true,
+    lastError: row["last_error"] == null ? null : String(row["last_error"]),
+    createdAt: toMs(row["created_at"]),
+    updatedAt: toMs(row["updated_at"]),
+  };
+}
+
 function mapDeletionRow(row: PgRow): OrbDeletionRow {
   return {
     orbId: String(row["orb_id"]),
@@ -86,6 +103,20 @@ function mapProjectRow(row: PgRow): ProjectRow {
     createdAt: toMs(row["created_at"]),
     updatedAt: toMs(row["updated_at"]),
   };
+}
+
+function inboxMessageIds(record: HistoryRecord): string[] {
+  const native = record.overflow["native"];
+  if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
+  if (native["type"] !== "custom_message" || native["customType"] !== "pi-orb.user-message") {
+    return [];
+  }
+  const details = native["details"];
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
+  if (Array.isArray(details["messageIds"])) {
+    return details["messageIds"].filter((id): id is string => typeof id === "string");
+  }
+  return typeof details["messageId"] === "string" ? [details["messageId"]] : [];
 }
 
 const stateConflict = (currentState?: OrbState): StateConflict => ({
@@ -441,6 +472,166 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            updated_at = $3 WHERE id = $1 AND name IS NULL
              AND state NOT IN ('deleting', 'archiving', 'archived')`,
         [params.orbId, new Date(params.nextAttemptAt), new Date(params.now)],
+      )
+      .map(() => undefined);
+  }
+
+  enqueueOrbMessage(
+    _task: SimulationTask,
+    params: {
+      orbId: string;
+      messageId: string;
+      content: OrbMessageRow["content"];
+      now: number;
+    },
+  ): ResultAsync<
+    { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
+    StoreError | StateConflict
+  > {
+    return this.db.transaction<
+      { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
+      StoreError | StateConflict
+    >(async (query) => {
+      const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
+      if (locked.isErr()) return err(locked.error);
+      let orbRow = locked.value.rows[0];
+      if (orbRow === undefined) return err(stateConflict());
+      const state = String(orbRow["state"]) as OrbState;
+      if (state === "deleting" || state === "archiving" || state === "archived") {
+        return err(stateConflict(state));
+      }
+      const existing = await query(
+        "SELECT * FROM orb_messages WHERE orb_id = $1 AND message_id = $2",
+        [params.orbId, params.messageId],
+      );
+      if (existing.isErr()) return err(existing.error);
+      const existingRow = existing.value.rows[0];
+      if (existingRow !== undefined) {
+        if (!jsonEqual(existingRow["content"], params.content)) return err(stateConflict(state));
+        return ok({ message: mapMessageRow(existingRow), orb: mapOrbRow(orbRow), duplicate: true });
+      }
+      const autoStart = state === "stopping";
+      const inserted = await query(
+        `INSERT INTO orb_messages
+           (orb_id, message_id, content, status, auto_start, created_at, updated_at)
+         VALUES ($1,$2,$3,'queued',$4,$5,$5) RETURNING *`,
+        [params.orbId, params.messageId, params.content, autoStart, new Date(params.now)],
+      );
+      if (inserted.isErr()) return err(inserted.error);
+      if (state === "stopped" || state === "failed") {
+        const started = await query(
+          `UPDATE orbs SET state = 'starting', state_version = state_version + 1,
+             state_changed_at = $2, updated_at = $2, last_error = NULL,
+             stop_reason = NULL, last_busy_at = $2 WHERE id = $1 RETURNING *`,
+          [params.orbId, new Date(params.now)],
+        );
+        if (started.isErr()) return err(started.error);
+        orbRow = started.value.rows[0] ?? orbRow;
+      } else {
+        const touched = await query(
+          `UPDATE orbs SET last_busy_at = CASE WHEN last_busy_at IS NULL OR last_busy_at < $2
+             THEN $2 ELSE last_busy_at END, updated_at = $2 WHERE id = $1 RETURNING *`,
+          [params.orbId, new Date(params.now)],
+        );
+        if (touched.isErr()) return err(touched.error);
+        orbRow = touched.value.rows[0] ?? orbRow;
+      }
+      return ok({
+        message: mapMessageRow(inserted.value.rows[0] ?? {}),
+        orb: mapOrbRow(orbRow),
+        duplicate: false,
+      });
+    });
+  }
+
+  listOrbMessages(_task: SimulationTask, orbId: string): ResultAsync<OrbMessageRow[], StoreError> {
+    return this.db
+      .query("SELECT * FROM orb_messages WHERE orb_id = $1 ORDER BY ordinal", [orbId])
+      .map((result) => result.rows.map(mapMessageRow));
+  }
+
+  getNextOrbMessage(
+    _task: SimulationTask,
+    orbId: string,
+  ): ResultAsync<OrbMessageRow | null, StoreError> {
+    return this.db
+      .query(
+        `SELECT * FROM orb_messages WHERE orb_id = $1
+           AND status IN ('queued', 'delivering') ORDER BY ordinal LIMIT 1`,
+        [orbId],
+      )
+      .map((result) => (result.rows[0] === undefined ? null : mapMessageRow(result.rows[0])));
+  }
+
+  claimNextOrbMessageBatch(
+    _task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<OrbMessageRow[], StoreError> {
+    return this.db.transaction<OrbMessageRow[], StoreError>(async (query) => {
+      const outstanding = await query(
+        `SELECT * FROM orb_messages WHERE orb_id = $1
+           AND status IN ('queued', 'delivering') ORDER BY ordinal FOR UPDATE`,
+        [params.orbId],
+      );
+      if (outstanding.isErr()) return err(outstanding.error);
+      const first = outstanding.value.rows[0];
+      if (first === undefined) return ok([]);
+      const existingBatch = first["delivery_batch_id"];
+      if (existingBatch !== null) {
+        return ok(
+          outstanding.value.rows
+            .filter((row) => row["delivery_batch_id"] === existingBatch)
+            .map(mapMessageRow),
+        );
+      }
+      const batchId = String(first["message_id"]);
+      const claimed = await query(
+        `UPDATE orb_messages SET delivery_batch_id = $2, status = 'delivering', updated_at = $3
+         WHERE orb_id = $1 AND status = 'queued' AND delivery_batch_id IS NULL
+         RETURNING *`,
+        [params.orbId, batchId, new Date(params.now)],
+      );
+      if (claimed.isErr()) return err(claimed.error);
+      return ok(claimed.value.rows.map(mapMessageRow).sort((a, b) => a.ordinal - b.ordinal));
+    });
+  }
+
+  noteOrbMessageDelivery(
+    _task: SimulationTask,
+    params: {
+      orbId: string;
+      messageIds: readonly string[];
+      delivery: "turn" | "steer";
+      operationId: string;
+      now: number;
+    },
+  ): ResultAsync<void, StoreError> {
+    return this.db
+      .query(
+        `UPDATE orb_messages SET status = 'delivering', delivery = $3,
+           operation_id = $4, auto_start = false, updated_at = $5
+         WHERE orb_id = $1 AND message_id = ANY($2::uuid[])
+           AND status IN ('queued', 'delivering')`,
+        [
+          params.orbId,
+          params.messageIds,
+          params.delivery,
+          params.operationId,
+          new Date(params.now),
+        ],
+      )
+      .map(() => undefined);
+  }
+
+  clearOrbMessageAutoStart(
+    _task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<void, StoreError> {
+    return this.db
+      .query(
+        `UPDATE orb_messages SET auto_start = false, updated_at = $2
+         WHERE orb_id = $1 AND auto_start = true AND status IN ('queued', 'delivering')`,
+        [params.orbId, new Date(params.now)],
       )
       .map(() => undefined);
   }
@@ -838,6 +1029,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
               });
             }
           }
+        }
+        const deliveredMessageIds = params.records.flatMap(inboxMessageIds);
+        for (const messageId of deliveredMessageIds) {
+          const delivered = await query(
+            `UPDATE orb_messages SET status = 'delivered', auto_start = false,
+               last_error = NULL, updated_at = now()
+             WHERE orb_id = $1 AND message_id = $2`,
+            [params.orbId, messageId],
+          );
+          if (delivered.isErr()) return err(delivered.error);
         }
         const sessionSets = initializeSession
           ? ", harness_session_id = $4, harness_session_header = $5"

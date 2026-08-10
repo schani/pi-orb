@@ -136,6 +136,86 @@ export function storeContractTests(name: string, open: () => Promise<ControlPlan
       expect(generated.isOk() && generated.value).toBeNull();
     });
 
+    it("durably queues a stopped-orb message, starts it, and completes from replicated identity", async () => {
+      await seed();
+      const stopped = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        toState: "stopped",
+        now: 2_000,
+      });
+      expect(stopped.isOk()).toBe(true);
+      const messageId = "00000000-0000-4000-8000-000000000099";
+      const content = [{ type: "text" as const, text: "please continue" }];
+      const queued = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId,
+        content,
+        now: 3_000,
+      });
+      expect(queued.isOk() && queued.value.orb.state).toBe("starting");
+      expect(queued.isOk() && queued.value.message.status).toBe("queued");
+      const duplicate = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId,
+        content,
+        now: 4_000,
+      });
+      expect(duplicate.isOk() && duplicate.value.duplicate).toBe(true);
+      const secondMessageId = "00000000-0000-4000-8000-000000000100";
+      expect(
+        (
+          await store.enqueueOrbMessage(task, {
+            orbId: orb.id,
+            messageId: secondMessageId,
+            content: [{ type: "text", text: "and run tests" }],
+            now: 4_500,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const batch = await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 5_000 });
+      expect(batch.isOk() && batch.value.map((message) => message.messageId)).toEqual([
+        messageId,
+        secondMessageId,
+      ]);
+      expect(batch.isOk() && batch.value[0]?.deliveryBatchId).toBe(messageId);
+
+      const nativeRecord: HistoryRecord = {
+        id: "inbox-record",
+        parentId: null,
+        timestamp: "2026-08-10T00:00:00.000Z",
+        type: "message",
+        role: "user",
+        content,
+        overflow: {
+          native: {
+            type: "custom_message",
+            customType: "pi-orb.user-message",
+            details: {
+              messageIds: [messageId, secondMessageId],
+              delivery: "turn",
+              operationId: "op-1",
+            },
+          },
+        },
+      };
+      const committed = await store.commitPullBatch(task, {
+        orbId: orb.id,
+        expectedCursor: null,
+        session,
+        records: [nativeRecord],
+        nextCursor: nativeRecord.id,
+        nextHeadId: nativeRecord.id,
+      });
+      expect(committed.isOk()).toBe(true);
+      const messages = await store.listOrbMessages(task, orb.id);
+      expect(messages.isOk() && messages.value.map((message) => message.status)).toEqual([
+        "delivered",
+        "delivered",
+      ]);
+      expect((await store.getNextOrbMessage(task, orb.id))._unsafeUnwrap()).toBeNull();
+    });
+
     it("atomically commits idempotent history and reconstructs its linear chain", async () => {
       await seed();
       const committed = await store.commitPullBatch(task, {

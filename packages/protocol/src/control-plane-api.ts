@@ -1,4 +1,5 @@
 import { type Static, type TSchema, Type } from "typebox";
+import { MessageInputBlockSchema } from "./frames.ts";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
 import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
 
@@ -178,6 +179,42 @@ export const OrbHistoryViewSchema = Type.Object(
   closed,
 );
 export type OrbHistoryView = Static<typeof OrbHistoryViewSchema>;
+
+export const EnqueueOrbMessageRequestSchema = Type.Object(
+  { content: Type.Array(MessageInputBlockSchema, { minItems: 1 }) },
+  closed,
+);
+export type EnqueueOrbMessageRequest = Static<typeof EnqueueOrbMessageRequestSchema>;
+
+export const OrbMessageStatusSchema = Type.Union([
+  Type.Literal("queued"),
+  Type.Literal("delivering"),
+  Type.Literal("delivered"),
+  Type.Literal("failed"),
+]);
+export type OrbMessageStatus = Static<typeof OrbMessageStatusSchema>;
+
+export const OrbMessageViewSchema = Type.Object(
+  {
+    id: Type.String(),
+    orbId: Type.String(),
+    content: Type.Array(MessageInputBlockSchema),
+    status: OrbMessageStatusSchema,
+    delivery: Type.Optional(Type.Union([Type.Literal("turn"), Type.Literal("steer")])),
+    operationId: Type.Optional(Type.String()),
+    error: Type.Optional(Type.String()),
+    createdAt: Type.String(),
+    updatedAt: Type.String(),
+  },
+  closed,
+);
+export type OrbMessageView = Static<typeof OrbMessageViewSchema>;
+
+export const OrbMessageListViewSchema = Type.Object(
+  { items: Type.Array(OrbMessageViewSchema) },
+  closed,
+);
+export type OrbMessageListView = Static<typeof OrbMessageListViewSchema>;
 
 export const ControlPlaneHttpErrorSchema = Type.Object(
   {

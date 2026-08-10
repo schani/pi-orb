@@ -4,6 +4,7 @@ import type {
   EventRecord,
   HistoryRecord,
   MessageRecord,
+  OrbMessageView,
 } from "@pi-orb/protocol";
 import type { ReactNode } from "react";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
@@ -30,6 +31,7 @@ interface HistoryViewProps {
   liveBlocks: readonly LiveBlock[];
   tools: readonly ToolChip[];
   busy: boolean;
+  queuedMessages?: readonly OrbMessageView[];
 }
 
 const TOOL_ARGS_LIMIT = 200;
@@ -299,13 +301,56 @@ function toolChipClass(state: ToolChip["state"]): string {
   return `tool-chip tool-chip-${state}`;
 }
 
-export function HistoryView({ records, liveBlocks, tools, busy }: HistoryViewProps) {
+function inboxMessageIds(record: HistoryRecord): string[] {
+  const native = record.overflow["native"];
+  if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
+  if (native["customType"] !== "pi-orb.user-message") return [];
+  const details = native["details"];
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
+  if (Array.isArray(details["messageIds"])) {
+    return details["messageIds"].filter((id): id is string => typeof id === "string");
+  }
+  return typeof details["messageId"] === "string" ? [details["messageId"]] : [];
+}
+
+export function HistoryView({
+  records,
+  liveBlocks,
+  tools,
+  busy,
+  queuedMessages = [],
+}: HistoryViewProps) {
+  const representedMessageIds = new Set(records.flatMap(inboxMessageIds));
+  const pendingMessages = queuedMessages.filter(
+    (message) => !representedMessageIds.has(message.id),
+  );
   const shellBlocks = liveBlocks.filter((block) => block.blockType === "shell");
   const agentBlocks = liveBlocks.filter((block) => block.blockType !== "shell");
   const hasAgentLive = agentBlocks.length > 0 || tools.length > 0;
   return (
     <div className="history">
       {groupTurns(records).map(renderTurn)}
+      {pendingMessages.map((message) => {
+        const record: MessageRecord = {
+          id: `queued:${message.id}`,
+          parentId: null,
+          timestamp: message.createdAt,
+          type: "message",
+          role: "user",
+          content: message.content,
+          overflow: {},
+        };
+        const status = message.delivery === "steer" ? "steering" : message.status;
+        return (
+          <article className="turn turn-user turn-queued" key={message.id}>
+            <Gutter mark="Y" />
+            <div className="turn-body">
+              <span className="turn-label">You · {status}</span>
+              {renderMessageBlocks(record)}
+            </div>
+          </article>
+        );
+      })}
       {shellBlocks.map((block) => (
         <article className="turn turn-shell turn-live" key={block.blockId}>
           <Gutter mark="Y" />

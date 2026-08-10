@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
+  type DeliverOrbMessageResponse,
   type MessageInputBlock,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
@@ -139,6 +140,10 @@ export class PiOrbAgent {
   private readonly liveBlocks = new Map<string, LiveBlock>();
   private readonly liveTools = new Map<string, LiveTool>();
   private readonly listeners = new Set<FrameListener>();
+  private readonly pendingInboxMessages = new Map<
+    string,
+    { delivery: "turn" | "steer"; operationId: string }
+  >();
   private autoNameTriggered = false;
 
   constructor(options: PiOrbAgentOptions) {
@@ -398,6 +403,21 @@ export class PiOrbAgent {
     });
     const manager = this.sessionManager;
     this.liveHistory = new LiveHistoryPublisher(manager, (record) => {
+      const native = record.overflow["native"];
+      if (typeof native === "object" && native !== null && !Array.isArray(native)) {
+        const details = native["details"];
+        if (
+          native["type"] === "custom_message" &&
+          native["customType"] === "pi-orb.user-message" &&
+          typeof details === "object" &&
+          details !== null &&
+          !Array.isArray(details)
+        ) {
+          const messageIds = details["messageIds"];
+          const batchId = Array.isArray(messageIds) ? messageIds[0] : details["messageId"];
+          if (typeof batchId === "string") this.pendingInboxMessages.delete(batchId);
+        }
+      }
       this.broadcast({
         v: 1,
         type: "history.record",
@@ -716,6 +736,102 @@ export class PiOrbAgent {
       });
       if (sent.isErr()) console.error(`orb naming unavailable: ${sent.error.message}`);
     });
+  }
+
+  deliverInboxMessage(
+    messageId: string,
+    messageIds: readonly string[],
+    content: readonly MessageInputBlock[],
+  ): ResultAsync<DeliverOrbMessageResponse, { message: string; retryable: boolean }> {
+    const session = this.session;
+    const manager = this.sessionManager;
+    if (session === null || manager === null || this.health.status !== "ready") {
+      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
+        err({ message: "session is not ready", retryable: true }),
+      );
+    }
+    for (const entry of manager.getEntries()) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const native = entry as { type?: string; customType?: string; details?: unknown };
+      if (native.type !== "custom_message" || native.customType !== "pi-orb.user-message") continue;
+      const details = native.details;
+      if (typeof details !== "object" || details === null) continue;
+      const typed = details as {
+        messageId?: unknown;
+        messageIds?: unknown;
+        delivery?: unknown;
+        operationId?: unknown;
+      };
+      const persistedIds = Array.isArray(typed.messageIds) ? typed.messageIds : [typed.messageId];
+      if (persistedIds[0] !== messageId) continue;
+      return ResultAsync.fromSafePromise(
+        Promise.resolve({
+          v: 1 as const,
+          messageId,
+          status: "persisted" as const,
+          delivery: typed.delivery === "steer" ? ("steer" as const) : ("turn" as const),
+          operationId: typeof typed.operationId === "string" ? typed.operationId : "unknown",
+          duplicate: true,
+        }),
+      );
+    }
+    const pending = this.pendingInboxMessages.get(messageId);
+    if (pending !== undefined) {
+      return ResultAsync.fromSafePromise(
+        Promise.resolve({
+          v: 1 as const,
+          messageId,
+          status: "queued" as const,
+          ...pending,
+          duplicate: true,
+        }),
+      );
+    }
+    if (this.operationKind === "shell") {
+      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
+        err({ message: "a foreground shell command is running", retryable: true }),
+      );
+    }
+    const delivery: "turn" | "steer" = this.activity === "busy" ? "steer" : "turn";
+    const operationId = delivery === "steer" ? (this.operationId ?? randomUUID()) : randomUUID();
+    this.pendingInboxMessages.set(messageId, { delivery, operationId });
+    if (delivery === "turn") {
+      this.pendingOperationId = operationId;
+      this.summaryStartIndex = manager.getEntries().length;
+    }
+    const piContent = content.map((block) =>
+      block.type === "text"
+        ? { type: "text" as const, text: block.text }
+        : { type: "image" as const, data: block.data, mimeType: block.mediaType },
+    );
+    this.triggerAutoName(content);
+    return ResultAsync.fromPromise(
+      session.sendCustomMessage(
+        {
+          customType: "pi-orb.user-message",
+          content: piContent,
+          display: true,
+          details: { messageIds, delivery, operationId },
+        },
+        { triggerTurn: true, ...(delivery === "steer" ? { deliverAs: "steer" as const } : {}) },
+      ),
+      (error) => ({
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      }),
+    )
+      .map(() => ({
+        v: 1 as const,
+        messageId,
+        status: "queued" as const,
+        delivery,
+        operationId,
+        duplicate: false,
+      }))
+      .mapErr((error) => {
+        this.pendingInboxMessages.delete(messageId);
+        return error;
+      });
   }
 
   /**

@@ -9,7 +9,7 @@ import type {
   StoreError,
 } from "../domain/errors.ts";
 import { jsonEqual } from "../domain/json-equal.ts";
-import type { OrbDeletionRow, OrbRow, ProjectRow } from "../domain/orb.ts";
+import type { OrbDeletionRow, OrbMessageRow, OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
   CasTransitionParams,
   CasUpdateFieldsParams,
@@ -42,6 +42,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly orbs = new Map<string, OrbRow>();
   private readonly replicas = new Map<string, OrbReplica>();
   private readonly deletions = new Map<string, OrbDeletionRow>();
+  private readonly messages = new Map<string, OrbMessageRow[]>();
+  private nextMessageOrdinal = 1;
 
   private readonly maxLatencyMs: number;
 
@@ -69,6 +71,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
 
   deletionSnapshot(orbId: string): OrbDeletionRow | null {
     return this.deletions.get(orbId) ?? null;
+  }
+
+  messageSnapshots(orbId: string): OrbMessageRow[] {
+    return [...(this.messages.get(orbId) ?? [])];
   }
 
   replicaRecords(orbId: string): HistoryRecord[] {
@@ -394,6 +400,170 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           updatedAt: params.now,
         });
       }
+    });
+  }
+
+  enqueueOrbMessage(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      messageId: string;
+      content: OrbMessageRow["content"];
+      now: number;
+    },
+  ): ResultAsync<
+    { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
+    StoreError | StateConflict
+  > {
+    return this.access(task, FAILPOINTS.storeWrite, "enqueue orb message", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined) return { conflict: true as const };
+      if (["deleting", "archiving", "archived"].includes(orb.state)) {
+        return { conflict: true as const };
+      }
+      const rows = this.messages.get(params.orbId) ?? [];
+      const existing = rows.find((row) => row.messageId === params.messageId);
+      if (existing !== undefined) {
+        if (!jsonEqual(existing.content, params.content)) return { conflict: true as const };
+        return { conflict: false as const, message: existing, orb, duplicate: true };
+      }
+      const message: OrbMessageRow = {
+        orbId: params.orbId,
+        messageId: params.messageId,
+        ordinal: this.nextMessageOrdinal++,
+        content: params.content,
+        status: "queued",
+        delivery: null,
+        operationId: null,
+        deliveryBatchId: null,
+        autoStart: orb.state === "stopping",
+        lastError: null,
+        createdAt: params.now,
+        updatedAt: params.now,
+      };
+      rows.push(message);
+      this.messages.set(params.orbId, rows);
+      const updated: OrbRow =
+        orb.state === "stopped" || orb.state === "failed"
+          ? {
+              ...orb,
+              state: "starting",
+              stateVersion: orb.stateVersion + 1,
+              stateChangedAt: params.now,
+              updatedAt: params.now,
+              lastError: null,
+              stopReason: null,
+              lastBusyAt: params.now,
+            }
+          : { ...orb, lastBusyAt: params.now, updatedAt: params.now };
+      this.orbs.set(orb.id, updated);
+      return { conflict: false as const, message, orb: updated, duplicate: false };
+    }).andThen((outcome) =>
+      outcome.conflict
+        ? errAsync({ type: "state_conflict" as const })
+        : okAsync({ message: outcome.message, orb: outcome.orb, duplicate: outcome.duplicate }),
+    );
+  }
+
+  listOrbMessages(task: SimulationTask, orbId: string): ResultAsync<OrbMessageRow[], StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "list orb messages", () => [
+      ...(this.messages.get(orbId) ?? []),
+    ]);
+  }
+
+  getNextOrbMessage(
+    task: SimulationTask,
+    orbId: string,
+  ): ResultAsync<OrbMessageRow | null, StoreError> {
+    return this.access(
+      task,
+      FAILPOINTS.storeRead,
+      "get next orb message",
+      () =>
+        (this.messages.get(orbId) ?? []).find(
+          (row) => row.status === "queued" || row.status === "delivering",
+        ) ?? null,
+    );
+  }
+
+  claimNextOrbMessageBatch(
+    task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<OrbMessageRow[], StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "claim orb message batch", () => {
+      const rows = this.messages.get(params.orbId) ?? [];
+      const outstanding = rows.filter(
+        (row) => row.status === "queued" || row.status === "delivering",
+      );
+      const first = outstanding[0];
+      if (first === undefined) return [];
+      if (first.deliveryBatchId !== null) {
+        return outstanding.filter((row) => row.deliveryBatchId === first.deliveryBatchId);
+      }
+      const batchId = first.messageId;
+      const claimedIds = new Set(
+        outstanding.filter((row) => row.status === "queued").map((row) => row.messageId),
+      );
+      const updated = rows.map((row) =>
+        claimedIds.has(row.messageId)
+          ? {
+              ...row,
+              status: "delivering" as const,
+              deliveryBatchId: batchId,
+              updatedAt: params.now,
+            }
+          : row,
+      );
+      this.messages.set(params.orbId, updated);
+      return updated.filter((row) => row.deliveryBatchId === batchId);
+    });
+  }
+
+  noteOrbMessageDelivery(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      messageIds: readonly string[];
+      delivery: "turn" | "steer";
+      operationId: string;
+      now: number;
+    },
+  ): ResultAsync<void, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "note orb message delivery", () => {
+      const rows = this.messages.get(params.orbId) ?? [];
+      const messageIds = new Set(params.messageIds);
+      for (let index = 0; index < rows.length; index++) {
+        const current = rows[index];
+        if (
+          current !== undefined &&
+          messageIds.has(current.messageId) &&
+          (current.status === "queued" || current.status === "delivering")
+        ) {
+          rows[index] = {
+            ...current,
+            status: "delivering",
+            delivery: params.delivery,
+            operationId: params.operationId,
+            autoStart: false,
+            updatedAt: params.now,
+          };
+        }
+      }
+    });
+  }
+
+  clearOrbMessageAutoStart(
+    task: SimulationTask,
+    params: { orbId: string; now: number },
+  ): ResultAsync<void, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "clear orb message auto start", () => {
+      const rows = this.messages.get(params.orbId) ?? [];
+      this.messages.set(
+        params.orbId,
+        rows.map((row) =>
+          row.autoStart ? { ...row, autoStart: false, updatedAt: params.now } : row,
+        ),
+      );
     });
   }
 
@@ -854,6 +1024,31 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       for (const record of staged) {
         replica.records.set(record.id, record);
         replica.order.push(record.id);
+      }
+      const deliveredIds = new Set(
+        staged.flatMap((record) => {
+          const native = record.overflow["native"];
+          if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
+          if (native["type"] !== "custom_message" || native["customType"] !== "pi-orb.user-message")
+            return [];
+          const details = native["details"];
+          if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
+          if (Array.isArray(details["messageIds"])) {
+            return details["messageIds"].filter((id): id is string => typeof id === "string");
+          }
+          return typeof details["messageId"] === "string" ? [details["messageId"]] : [];
+        }),
+      );
+      if (deliveredIds.size > 0) {
+        const rows = this.messages.get(params.orbId) ?? [];
+        this.messages.set(
+          params.orbId,
+          rows.map((message) =>
+            deliveredIds.has(message.messageId)
+              ? { ...message, status: "delivered", autoStart: false }
+              : message,
+          ),
+        );
       }
       const updated: OrbRow = {
         ...orb,

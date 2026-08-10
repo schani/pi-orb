@@ -248,6 +248,14 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
     case "custom":
       return ok({ ...identity, type: "event", eventType: "pi.custom" });
     case "custom_message":
+      if (entry["customType"] === "pi-orb.user-message") {
+        return ok({
+          ...identity,
+          type: "message",
+          role: "user",
+          content: mapUserContent(entry["content"]),
+        });
+      }
       return ok({
         ...identity,
         type: "event",

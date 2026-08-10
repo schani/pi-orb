@@ -407,6 +407,149 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
+  it("a message queued on a stopped orb starts it and is replicated exactly once", async () => {
+    await runDst({ name: "stopped-message-starts", iterations: 15 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000123";
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const stopped = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopped.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "initial stop completes",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 300_000 },
+            );
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "continue from offline" }],
+              now: task.wallNow(),
+            });
+            expect(queued.isOk() && queued.value.orb.state).toBe("starting");
+            await waitUntil(
+              task,
+              "queued message reaches the runtime session",
+              () =>
+                harness.store.messageSnapshots(ORB)[0]?.status === "delivered" &&
+                harness.store.replicaRecords(ORB).some((record) => {
+                  const native = record.overflow["native"];
+                  if (typeof native !== "object" || native === null || Array.isArray(native)) {
+                    return false;
+                  }
+                  const details = native["details"];
+                  return (
+                    typeof details === "object" &&
+                    details !== null &&
+                    !Array.isArray(details) &&
+                    Array.isArray(details["messageIds"]) &&
+                    details["messageIds"].includes(messageId)
+                  );
+                }),
+              { timeoutMs: 300_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const records = harness.store.replicaRecords(ORB);
+      expect(
+        records.filter((record) => {
+          const native = record.overflow["native"];
+          if (typeof native !== "object" || native === null || Array.isArray(native)) return false;
+          const details = native["details"];
+          return (
+            typeof details === "object" &&
+            details !== null &&
+            !Array.isArray(details) &&
+            Array.isArray(details["messageIds"]) &&
+            details["messageIds"].includes(messageId)
+          );
+        }),
+      ).toHaveLength(1);
+    });
+  });
+
+  it("a message queued while busy is delivered as steering", async () => {
+    await runDst({ name: "busy-message-steers", iterations: 15 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000124";
+      const secondMessageId = "00000000-0000-4000-8000-000000000125";
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            harness.world.setActivity(ORB, "busy");
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "change direction" }],
+              now: task.wallNow(),
+            });
+            expect(queued.isOk()).toBe(true);
+            const secondQueued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: secondMessageId,
+              content: [{ type: "text", text: "and also check tests" }],
+              now: task.wallNow(),
+            });
+            expect(secondQueued.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "busy message is accepted as steering",
+              () => {
+                const messages = harness.store.messageSnapshots(ORB);
+                const message = messages[0];
+                return (
+                  message?.delivery === "steer" &&
+                  message.status === "delivered" &&
+                  messages[1]?.status === "delivered" &&
+                  harness.store.replicaRecords(ORB).some((record) => {
+                    const native = record.overflow["native"];
+                    if (typeof native !== "object" || native === null || Array.isArray(native)) {
+                      return false;
+                    }
+                    const details = native["details"];
+                    return (
+                      typeof details === "object" &&
+                      details !== null &&
+                      !Array.isArray(details) &&
+                      Array.isArray(details["messageIds"]) &&
+                      details["messageIds"].includes(messageId) &&
+                      details["messageIds"].includes(secondMessageId) &&
+                      record.type === "message" &&
+                      record.content.some(
+                        (block) =>
+                          block.type === "text" &&
+                          block.text === "change direction\n\nand also check tests",
+                      )
+                    );
+                  })
+                );
+              },
+              { timeoutMs: 60_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.messageSnapshots(ORB)[0]?.delivery).toBe("steer");
+    });
+  });
+
   it("a retryably failing drain never stops the host until it succeeds", async () => {
     const capture = new LogCapture();
     await runDst(

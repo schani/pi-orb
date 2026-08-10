@@ -1,4 +1,11 @@
-import type { HarnessSessionMetadata, OrbState, ProjectState, StopReason } from "@pi-orb/protocol";
+import type {
+  HarnessSessionMetadata,
+  MessageInputBlock,
+  OrbMessageStatus,
+  OrbState,
+  ProjectState,
+  StopReason,
+} from "@pi-orb/protocol";
 
 /**
  * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
@@ -36,6 +43,21 @@ export interface OrbRow {
   readonly stopReason: StopReason | null;
   readonly stateChangedAt: number;
   readonly archivedAt?: number | null;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export interface OrbMessageRow {
+  readonly orbId: string;
+  readonly messageId: string;
+  readonly ordinal: number;
+  readonly content: readonly MessageInputBlock[];
+  readonly status: OrbMessageStatus;
+  readonly delivery: "turn" | "steer" | null;
+  readonly operationId: string | null;
+  readonly deliveryBatchId: string | null;
+  readonly autoStart: boolean;
+  readonly lastError: string | null;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

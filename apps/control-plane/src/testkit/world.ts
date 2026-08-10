@@ -9,6 +9,7 @@ import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError, RuntimeClientError } from "../domain/errors.ts";
 import type {
+  DeliverMessageClientRequest,
   OperationContext,
   OrbHostObservation,
   OrbHostProvider,
@@ -275,6 +276,40 @@ export class FakeWorld {
         text ?? `message ${seq}`,
       ),
     );
+  }
+
+  appendInboxMessage(orbId: string, messageIds: readonly string[], text: string): HistoryRecord {
+    const messageId = messageIds[0] ?? "";
+    const state = this.orbState(orbId);
+    const existing = state.filesystem.entries.find((record) => {
+      const native = record.overflow["native"];
+      if (typeof native !== "object" || native === null || Array.isArray(native)) return false;
+      const details = native["details"];
+      return (
+        native["customType"] === "pi-orb.user-message" &&
+        typeof details === "object" &&
+        details !== null &&
+        !Array.isArray(details) &&
+        Array.isArray(details["messageIds"]) &&
+        details["messageIds"][0] === messageId
+      );
+    });
+    if (existing !== undefined) return existing;
+    return this.flushRecord(orbId, state.filesystem, (seq, parentId) => ({
+      id: `${orbId}-rec-${seq}`,
+      parentId,
+      timestamp: `t${seq}`,
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text }],
+      overflow: {
+        native: {
+          type: "custom_message",
+          customType: "pi-orb.user-message",
+          details: { messageIds: [...messageIds] },
+        },
+      },
+    }));
   }
 
   /**
@@ -1037,6 +1072,35 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
       }
       return clientError("cancelled", `${reason}: cancelled`, true);
     }).andThen(f);
+  }
+
+  deliverMessage(
+    task: SimulationTask,
+    request: DeliverMessageClientRequest,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").DeliverOrbMessageResponse, RuntimeClientError> {
+    return this.req(task, FAILPOINTS.runtimeHealth, "deliver message", context, () => {
+      const state = this.world.resolveRuntime(request.baseUrl, task);
+      if (state === null) return errAsync(clientError("unreachable", "no runtime", true));
+      const delivery =
+        state.host?.runtime?.activity === "busy" ? ("steer" as const) : ("turn" as const);
+      const text = request.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      this.world.appendInboxMessage(state.host?.orbId ?? "", request.messageIds, text);
+      if (state.host?.runtime !== null && state.host?.runtime !== undefined) {
+        state.host.runtime.activity = "busy";
+      }
+      return okAsync({
+        v: 1 as const,
+        messageId: request.messageId,
+        status: "persisted" as const,
+        delivery,
+        operationId: `message-${request.messageId}`,
+        duplicate: false,
+      });
+    });
   }
 
   health(

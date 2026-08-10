@@ -88,7 +88,8 @@ For every entry, preserve `entry.id`, `entry.parentId`, and `entry.timestamp` ex
 | `compaction`               | `CompactionRecord`; summary as a text block, with first-kept ID/token/details retained natively.                                |
 | `branch_summary`           | `EventRecord`, `eventType: "pi.branch_summary"`, with summary text content.                                                     |
 | `custom`                   | `EventRecord`, `eventType: "pi.custom"`.                                                                                        |
-| `custom_message`           | `EventRecord`, `eventType: "pi.custom_message"`, with text/image content; retain `customType`, `display`, and details natively. |
+| `custom_message` / `pi-orb.user-message` (send-anytime envelope) | `MessageRecord`, role `user`; text/image blocks, with every durable client message ID in the squashed delivery batch retained natively. |
+| other `custom_message`     | `EventRecord`, `eventType: "pi.custom_message"`, with text/image content; retain `customType`, `display`, and details natively. |
 | `label`                    | `EventRecord`, `eventType: "pi.label"`.                                                                                         |
 | `session_info`             | `EventRecord`, `eventType: "pi.session_info"`.                                                                                  |
 | unknown future entry       | `EventRecord`, `eventType: "pi.<native-type>"`.                                                                                 |
@@ -109,6 +110,8 @@ An unknown message role maps to a generic event rather than inventing a shared r
 `SessionManager.getEntries()` is the sole Pi replication source. Pi appends user/tool/assistant messages on awaited `message_end`; streaming `message_update` state is not present there and is never synthesized into persistence. Pi's `AgentSession` notifies SDK subscribers of `message_end` immediately before it appends the ordinary message entry, and its `entry_appended` event covers extension-created custom entries rather than ordinary messages. The adapter therefore schedules a session-entry scan after each `message_end`, deduplicates by native entry ID, and performs a final synchronous scan at `agent_settled` before emitting `operation_finished` and clearing transient output. Adapter tests reproduce this exact notify-then-append ordering; mapping-only tests are insufficient to verify live-history delivery.
 
 Every returned persisted entry maps one-to-one to exactly one record and advances the native-ID cursor exactly once. This includes labels and hidden custom entries. Unknown future types still become generic events, preserving cursor continuity across Pi upgrades.
+
+The `pi-orb.user-message` special case is intentionally semantic rather than a presentation-only exception. Pi converts custom messages to user-role model input, so one native custom entry can carry the durable identities of a squashed FIFO batch while remaining the actual user message. Using a hidden marker followed by an ordinary user entry was rejected because it doubles records and creates a crash gap between the marker and message. Existing ordinary Pi user records remain mapped unchanged.
 
 ### Initial UI visibility
 

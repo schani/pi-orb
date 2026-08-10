@@ -79,7 +79,7 @@ This provides reconnect without retaining a token-delta replay log. The resume c
 
 ## Frame union
 
-Keep the top-level union small. The browser sends only a hello or a request. Steering and queued follow-ups are deferred beyond the first slice; when added, they become new delivery variants inside the message action, guarded by capability values.
+Keep the top-level union small. The currently implemented browser protocol sends a hello or a request. Its `message` action is running-runtime-only. The send-anytime design below moves browser user messages out of this live mutation path rather than adding `steer` and `follow_up` wire variants; shell and abort remain live-only requests.
 
 ```ts
 type ClientFrame = ClientHello | ClientRequest;
@@ -127,7 +127,7 @@ type ServerFrame =
   | ServerErrorFrame;
 ```
 
-`expectedHeadId` prevents a stale tab from silently starting a turn or shell command against a different conversation head. Requiring an operation ID prevents a delayed abort from affecting a later operation. An operation is one continuous busy period from an accepted new message or shell command until the runtime returns to idle. When steering and follow-ups are added in a later slice, they will join the operation they target rather than starting new ones.
+`expectedHeadId` prevents a stale tab from silently starting a turn or shell command against a different conversation head. Requiring an operation ID prevents a delayed abort from affecting a later operation. An operation is one continuous busy period from an accepted new message or shell command until the runtime returns to idle. Under the send-anytime design, a message delivered while busy steers and joins the active operation; a message delivered while idle starts a new operation.
 
 A request receives exactly one requester-only result:
 
@@ -212,13 +212,57 @@ Request identity is in-memory and scoped to one runtime process. The runtime kee
 
 A runtime restart empties that map, and `server.welcome.runtimeInstanceId` tells the browser so. After reconnecting, the browser may automatically resend an unacknowledged request only when `runtimeInstanceId` matches the instance that received it. When the instance has changed, the browser relies on synchronization instead: the Pi adapter uses `AgentSession.sendUserMessage`, and Pi appends an accepted user message to the session on its awaited `message_end`, before model streaming begins, so a delivered message always appears in the replayed history. If it appears, the request was delivered; if it does not, it never reached the model, and the user decides whether to send it again as a new request.
 
-There is deliberately no durable request inbox. An earlier proposal appended a `pi-orb.request` custom marker entry to Pi's session ledger before each mutating action so that unacknowledged requests could be resumed exactly-once across runtime restarts. It was rejected as disproportionate: the shutdown model already accepts losing an in-flight turn, the markers doubled the persisted records per send and moved the conversation head onto hidden entries, and the residual risk — a blind resend across a runtime restart — is prevented by the instance-ID rule above. A future harness adapter therefore needs no durable request marker or correlation mechanism; it only needs a stable per-process runtime instance ID.
+There is deliberately no durable inbox for the currently implemented live-only shell and abort requests. The earlier generic `pi-orb.request` marker proposal remains rejected: it doubled every mutation with a hidden record and was unnecessary for live-only delivery.
+
+The send-anytime inbox changes the premise for **user messages only**. A stopped runtime cannot own a queue, and accepting a message before startup requires durable control-plane state plus restart-stable delivery identity. The design therefore uses one Pi custom-message record as the delivered user message itself—not a marker plus a second record. Its native details carry every control-plane message ID in that delivery batch, it is mapped and rendered as an ordinary user message, and its content is ordinary model context. This gives one durable record per delivered batch and lets a restarted runtime recognize delivery without duplicating it.
 
 Under outbound pressure, transient output and tool-state events may be coalesced to their newest equivalent state. Welcome, synchronization boundaries, request results, complete history records, operation transitions, and errors are never intentionally dropped. If critical queued data exceeds the configured budget, the runtime closes the connection and the browser reconstructs state through a new handshake.
 
-Harness capabilities differ. `server.welcome.capabilities` initially advertises values such as `abort` and `input.image`; later slices can add `steer` and `follow_up` behind new capability values without a wire-version change. User-shell execution is mandatory in the current Pi runtime contract rather than capability-gated; if a second harness without an equivalent operation is introduced, revisit that contract from concrete adapter evidence. Unsupported actions are rejected explicitly.
+Harness capabilities differ. `server.welcome.capabilities` initially advertises values such as `abort` and `input.image`. In the send-anytime design, steering is an internal delivery choice behind the control-plane message API rather than a browser-selected live capability; a future product that exposes an explicit steer/follow-up choice could still add capabilities without a wire-version change. User-shell execution is mandatory in the current Pi runtime contract rather than capability-gated; if a second harness without an equivalent operation is introduced, revisit that contract from concrete adapter evidence. Unsupported actions are rejected explicitly.
 
 `input.image` is implemented end to end (2026-08-01): the browser composer accepts pasted images and sends them as `image` input blocks, the runtime forwards them to Pi's `sendUserMessage` as native image content (`mediaType` → Pi's `mimeType`), and they replicate losslessly through the ordinary history path like any other Pi-persisted content. To accommodate base64 payloads, the runtime's limits are 8 MiB per incoming frame and 6 MiB per prompt (`server.welcome.limits` remains authoritative for clients; the browser enforces the limit at paste time).
+
+## Send-anytime message inbox (decided and implemented 2026-08-10)
+
+### One ingress path
+
+Every agent **message**, whether the orb is busy, idle, starting, or stopped, should enter through one idempotent control-plane HTTP command. The browser must not choose between “send”, “steer”, and “queue”, and must not race an HTTP offline path against the live WebSocket path. Shell and abort remain live-only because a shell command requires an idle checkout and abort names a current operation.
+
+The browser generates a message UUID and uses `PUT /api/v1/orbs/{orbId}/messages/{messageId}`. A successful `202` means the message is durably accepted in PostgreSQL, not that Pi has consumed it. Repeating the same ID and identical body returns the same resource; different content conflicts. The live WebSocket remains the ordered history/transient-output channel and no longer carries new message actions once this proposal is implemented.
+
+This is a deliberate narrowing of the content-agnostic proxy, not a second message path: message content terminates at the finite control-plane command endpoint, while the long-lived live proxy still does not inspect runtime→browser agent frames. Stretching `/live` so it remains open while no runtime exists was rejected: the control plane would have to impersonate the runtime handshake, retain frames, switch ownership during startup, and recover socket-local acceptance after process death.
+
+### Durable FIFO and lifecycle wake
+
+The control plane stores a per-orb FIFO inbox row containing the client message ID, validated content blocks, insertion order, status, and a sanitized delivery error. Inbox insertion and any lifecycle wake intent commit atomically. `creating`, `starting`, and `running` need no extra lifecycle transition. A stopped or failed orb enters the ordinary `starting` path; a message accepted during `stopping` records a restart-after-stop wake, and the normal stop drain completes before startup. An explicit stop linearized after a message clears that wake and leaves undelivered messages queued; a later message sets it again. Thus an explicit stop is not defeated by an immediate automatic bounce, while a send linearized after stop still starts the orb.
+
+Delivery is strict FIFO with batching (decided 2026-08-10). When dispatch becomes possible, the store atomically freezes every message currently queued behind the head into one batch identified by the first message ID. Their content is squashed into one user message in FIFO order with one empty line (`\n\n`) between submissions; text and image blocks otherwise remain lossless. Messages admitted after the batch claim form the next batch and can never alter an in-flight retry's payload. Head-of-line blocking is intentional: it provides one obvious conversation order and avoids overtaking an ambiguous transport outcome. Terminal startup or delivery failure remains visible on every constituent message resource and does not silently discard a row.
+
+### Atomic runtime delivery choice
+
+The existing per-orb reconciler is the dispatcher: inbox commit wakes it immediately, and later ordinary scans recover work after process death. No broker, queue service, or fourth background loop is added. When the orb is running it calls an authenticated, idempotent runtime HTTP operation keyed by the durable batch ID and carrying all constituent message IDs. The runtime serializes it through the same mutation executor as live shell and abort requests, then chooses from its authoritative activity at that instant:
+
+- busy agent operation → call Pi with `deliverAs: "steer"` and associate the message with the existing operation;
+- idle runtime → trigger an ordinary new agent turn and allocate a new operation ID;
+- active shell operation → keep the message pending until the shell is idle; steering a shell has no defined meaning.
+
+The choice is state-derived, not browser-selected and not based on the control plane's lagging ~10-second activity observation. Consequently the API has one message shape and no `delivery` input enum. The result/status may report the observed delivery mode for explanation.
+
+`expectedHeadId` is intentionally absent from this command. A durable FIFO is append intent: concurrent tabs are ordered by database admission, and messages queued behind another message cannot all validly name the same eventual Pi head. Checking the replica head would also be unsound because live history may be ahead of PostgreSQL. The stale-head gate remains useful for live shell commands, whose effect must apply to the checkout at a specifically observed idle head.
+
+### Exactly-once logical message without a second marker
+
+PostgreSQL is authoritative before delivery; Pi's session file is authoritative after delivery. A finite HTTP acknowledgement cannot atomically commit both stores, so request IDs held only in runtime memory are insufficient: a crash after Pi appends but before the control plane marks delivery would otherwise duplicate the message.
+
+For Pi, deliver the squashed batch as one `custom_message` with `customType: "pi-orb.user-message"`, `display: true`, the combined text/image content, and `details.messageIds`. `triggerTurn: true` plus `deliverAs: "steer"` implements the busy case; idle delivery triggers a normal turn. The Pi adapter maps this particular custom type to normalized `MessageRecord { role: "user" }` rather than to a generic event. It therefore looks and behaves like today's user message, enters model context as a user message, and costs no extra history record.
+
+The runtime checks both persisted session entries and its in-memory pending-batch-ID set before enqueueing. A retry finds one of three states: persisted means the whole frozen batch was delivered; pending in this runtime means still queued; absent means safe to enqueue (including after a restart that lost Pi's in-memory steering queue). The control plane marks every constituent inbox item delivered when the corresponding history record is replicated, in the same transaction as that record. This closes acknowledgement-loss and runtime-restart races without pretending to provide a cross-database transaction.
+
+Other harness adapters must provide the same durable client-message identity in their native record or a sidecar ledger on the authoritative orb filesystem. If a harness cannot do that, its capability must reject durable offline acceptance rather than silently weakening to duplicate-prone delivery.
+
+### Observability and deterministic tests
+
+Queued messages are user-visible resources: `GET .../messages` restores their durable statuses after reload, and the UI shows each outstanding item once as a muted user turn with queued/steering state while delivery is pending, then removes those provisional turns when the runtime record carrying their message IDs arrives; several gray turns may therefore collapse into one committed squashed user turn. Autonomous wake and dispatch decisions produce edge-only `lifecycle:` records containing orb ID and message ID but never message content. Required deterministic schedules include send-versus-stop, idle-stop-versus-send, two control-plane dispatchers, crash before Pi enqueue, crash after enqueue but before persistence, crash after persistence but before acknowledgement, and FIFO delivery across boot. The runtime protocol/browser E2E must cover stopped submission → startup → delivered history and busy submission → steer.
 
 ## User shell operations
 

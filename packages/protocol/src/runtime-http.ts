@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { MessageInputBlockSchema } from "./frames.ts";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
 
 const closed = { additionalProperties: false } as const;
@@ -102,6 +103,30 @@ export const PullHistoryResponseSchema = Type.Object(
 );
 export type PullHistoryResponse = Static<typeof PullHistoryResponseSchema>;
 
+export const DeliverOrbMessageRequestSchema = Type.Object(
+  {
+    v: Type.Literal(1),
+    messageId: Type.String(),
+    messageIds: Type.Array(Type.String(), { minItems: 1 }),
+    content: Type.Array(MessageInputBlockSchema, { minItems: 1 }),
+  },
+  closed,
+);
+export type DeliverOrbMessageRequest = Static<typeof DeliverOrbMessageRequestSchema>;
+
+export const DeliverOrbMessageResponseSchema = Type.Object(
+  {
+    v: Type.Literal(1),
+    messageId: Type.String(),
+    status: Type.Union([Type.Literal("queued"), Type.Literal("persisted")]),
+    delivery: Type.Union([Type.Literal("turn"), Type.Literal("steer")]),
+    operationId: Type.String(),
+    duplicate: Type.Boolean(),
+  },
+  closed,
+);
+export type DeliverOrbMessageResponse = Static<typeof DeliverOrbMessageResponseSchema>;
+
 export const RuntimeHttpErrorSchema = Type.Object(
   {
     v: Type.Literal(1),
@@ -111,6 +136,7 @@ export const RuntimeHttpErrorSchema = Type.Object(
           Type.Literal("invalid_request"),
           Type.Literal("cursor_not_found"),
           Type.Literal("history_unavailable"),
+          Type.Literal("message_unavailable"),
         ]),
         message: Type.String(),
         retryable: Type.Boolean(),

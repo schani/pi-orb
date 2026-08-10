@@ -187,6 +187,22 @@ describe("Pi entry mapping", () => {
     });
   });
 
+  it("maps the durable inbox custom message as an ordinary user message", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "pi-orb.user-message",
+      content: [{ type: "text", text: "steer here" }],
+      display: true,
+      details: { messageId: "message-1" },
+    });
+    expect(record.type).toBe("message");
+    if (record.type !== "message") return;
+    expect(record.role).toBe("user");
+    expect(record.content).toEqual([{ type: "text", text: "steer here" }]);
+    expect(record.overflow.native).toMatchObject({ details: { messageId: "message-1" } });
+  });
+
   it("maps custom_message with text content", () => {
     const record = expectMapped({
       ...base,

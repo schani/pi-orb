@@ -20,7 +20,7 @@ The first target is deliberately narrow:
 - Embed Pi through its TypeScript SDK.
 - Provide a web UI; no terminal TUI and no tmux-based interaction.
 - Run exactly one Pi session/conversation per orb.
-- Support a linear conversation and compaction. Do not expose branching, session switching, cloning, or forking initially. Steering a running operation and queueing follow-up messages while the agent is busy are also deferred beyond the first slice.
+- Support a linear conversation and compaction. Do not expose branching, session switching, cloning, or forking initially. Durable send-anytime input is implemented: a message steers when delivered to a busy agent and otherwise starts a turn, while submission to a stopped or failed orb durably queues the message and requests startup (`docs/runtime-protocol.md`).
 - Persist the orb itself only through its filesystem.
 - Replicate the complete conversation history to the control plane database.
 - Make stopped-orb history viewable immediately from the database without starting the orb.
@@ -44,7 +44,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - There is one agent/conversation per orb in the first version.
 - Pi compaction is supported; Pi tree navigation and multiple sessions are not exposed initially.
 - The composer supports foreground Pi user-shell commands through explicit `message`, `shell`, and `excluded shell` modes. `!` and `!!` at input offset zero enter the shell modes without leaving a visible prefix; both persist to history, while excluded shell alone is omitted from later model context. Shell submission requires an idle runtime and no image attachments (decided 2026-08-05).
-- Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes mutations and broadcasts state.
+- Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes live mutations and broadcasts state. The send-anytime message inbox serializes messages durably at the control plane before runtime delivery.
 - Multiplayer product features such as presence, attribution, and per-user permissions are out of scope for the first slice.
 
 ## High-level architecture

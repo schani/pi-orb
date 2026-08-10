@@ -1,4 +1,4 @@
-import type { OrbState, StopReason } from "@pi-orb/protocol";
+import type { MessageInputBlock, OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { LivenessEntry } from "./control-state.ts";
@@ -604,6 +604,29 @@ function livenessGraceMs(deps: ControlPlaneDeps, liveness: LivenessEntry): numbe
   return liveness.restartGraceMs ?? deps.constants.unreachableGraceMs;
 }
 
+function squashMessageBatch(
+  messages: readonly { content: readonly MessageInputBlock[] }[],
+): MessageInputBlock[] {
+  const content: MessageInputBlock[] = [];
+  for (const [messageIndex, message] of messages.entries()) {
+    if (messageIndex > 0) {
+      const last = content.at(-1);
+      if (last?.type === "text")
+        content[content.length - 1] = { ...last, text: `${last.text}\n\n` };
+      else content.push({ type: "text", text: "\n\n" });
+    }
+    for (const block of message.content) {
+      const last = content.at(-1);
+      if (block.type === "text" && last?.type === "text") {
+        content[content.length - 1] = { ...last, text: last.text + block.text };
+      } else {
+        content.push(block);
+      }
+    }
+  }
+  return content;
+}
+
 async function reconcileRunning(
   task: SimulationTask,
   deps: ControlPlaneDeps,
@@ -629,6 +652,54 @@ async function reconcileRunning(
   if (observation.state === "starting" || observation.state === "stopping") {
     return waiting("host_transition");
   }
+  // Freeze every currently queued item into one durable FIFO batch. The
+  // runtime sees one user message with blank-line separators and one stable
+  // batch ID; later arrivals form the next batch rather than changing an
+  // in-flight retry's payload.
+  const pendingBatch = await deps.store.claimNextOrbMessageBatch(task, {
+    orbId: orb.id,
+    now: task.wallNow(),
+  });
+  if (pendingBatch.isErr()) return retryable(pendingBatch.error.message);
+  if (pendingBatch.value.length > 0) {
+    if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
+    const messageIds = pendingBatch.value.map((message) => message.messageId);
+    const batchId = pendingBatch.value[0]?.deliveryBatchId ?? messageIds[0] ?? "";
+    const delivered = await withDeadline(
+      task,
+      deps.constants.runtimeRequestTimeoutMs,
+      "deliver queued message batch",
+      (context) =>
+        deps.runtimeClient.deliverMessage(
+          task,
+          {
+            baseUrl: observation.runtimeAddress?.baseUrl ?? "",
+            messageId: batchId,
+            messageIds,
+            content: squashMessageBatch(pendingBatch.value),
+          },
+          context,
+        ),
+    );
+    if (delivered.isErr()) return retryable(delivered.error.message);
+    const noted = await deps.store.noteOrbMessageDelivery(task, {
+      orbId: orb.id,
+      messageIds,
+      delivery: delivered.value.delivery,
+      operationId: delivered.value.operationId,
+      now: task.wallNow(),
+    });
+    if (noted.isErr()) return retryable(noted.error.message);
+    if (!delivered.value.duplicate) {
+      logOrbEvent(task, orb.id, "message-batch-dispatched", {
+        batch_id: batchId,
+        message_count: messageIds.length,
+        delivery: delivered.value.delivery,
+      });
+    }
+    return { type: "noop" };
+  }
+
   // Host running: derive runtime liveness from the history pull.
   const liveness = deps.control.getLiveness(orb.id);
   if (liveness === null) {
@@ -1043,6 +1114,23 @@ async function reconcileTerminalBackstop(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
+  const pending = await deps.store.getNextOrbMessage(task, orb.id);
+  if (pending.isErr()) return retryable(pending.error.message);
+  if (pending.value?.autoStart === true) {
+    const transitioned = await transitionTo(task, deps, orb, "starting", {
+      lastError: null,
+      stopReason: null,
+      reason: "queued_message_after_stop",
+    });
+    if (transitioned.type === "transitioned") {
+      const cleared = await deps.store.clearOrbMessageAutoStart(task, {
+        orbId: orb.id,
+        now: task.wallNow(),
+      });
+      if (cleared.isErr()) return retryable(cleared.error.message);
+    }
+    return transitioned;
+  }
   if (orb.hostRef === null) return { type: "noop" };
   const observed = await observeHost(task, deps, orb.hostRef);
   if (observed.isErr()) return retryable(observed.error.message);
@@ -1330,7 +1418,15 @@ export function requestOrbStop(
       if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
-      if (orb.state === "stopping" || orb.state === "stopped") return ok(orb);
+      if (orb.state === "stopping" || orb.state === "stopped") {
+        const cleared = await deps.store.clearOrbMessageAutoStart(task, {
+          orbId,
+          now: task.wallNow(),
+        });
+        return cleared.isErr()
+          ? err(commandError("unavailable", cleared.error.message, true))
+          : ok(orb);
+      }
       if (orb.state === "deleting") {
         return err(commandError("conflict", "orb is being permanently deleted", false));
       }
