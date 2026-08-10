@@ -64,7 +64,10 @@ for arg in "$@"; do
     -out=*)
       plan="\${arg#-out=}"
       touch "$plan"
-      mode=$(stat -f %Lp "$plan" 2>/dev/null || stat -c %a "$plan")
+      case "$(uname -s)" in
+        Darwin) mode=$(stat -f %Lp "$plan") ;;
+        *) mode=$(stat -c %a "$plan") ;;
+      esac
       echo "plan-mode:$mode" >> "$CALL_LOG"
       ;;
   esac
