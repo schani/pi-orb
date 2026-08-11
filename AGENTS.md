@@ -34,7 +34,9 @@ Deterministic simulation testing with the `determined` package is a first-class 
 
 Run `npm run test:e2e` before deploying any change that touches the runtime protocol, the runtime HTTP/WebSocket server, or the agent harness — the unit suite does not exercise the browser↔runtime handshake end to end (learned 2026-08-04: a partially-scoped snapshot gate rejected every first message with `stale_head`; only the E2E path covers that flow). The E2E runs on macOS Docker Desktop as well as Linux/OrbStack (fixed 2026-08-06 — loopback port publishing plus `host.docker.internal`; docs/host-provider.md).
 
-DST tests must never be flaky. A DST failure that does not reproduce on every run is not noise — it is a schedule the scenario cannot survive, and it must be root-caused before any fix: replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`), understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never "fix" DST flakiness by rerunning, loosening assertions blindly, or deleting the trace.
+No test may be flaky. A failure that does not reproduce on every run is evidence of an uncontrolled schedule, resource collision, or environmental assumption — never noise. It blocks deployment until it is root-caused; a passing rerun does not clear it. Never rerun merely to obtain green, weaken an assertion blindly, or hide the failure with a larger timeout. Preserve the first failure evidence, identify whether the defect is in the product, test synchronization, or harness isolation, and fix that cause with explicit deterministic synchronization or resource ownership wherever possible.
+
+For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
 
 ## Observability
 

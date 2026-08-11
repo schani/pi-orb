@@ -58,10 +58,14 @@ Impersonates `pi-orb-debug@...` against the ops service — no IAP involved.
   with the previous startup-script generation for 12+ minutes — not ~2 — and
   used to fight the new revision over orb VMs (dueling script repairs; see
   docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md). Two
-  defenses now: an apply carrying a larger `deploy_generation` fences repairs
-  forward-only, so the old revision can no longer repair backward, and
-  `deploy.sh` deletes drained revisions of the browser service. Forgetting the
-  var is safe but degrading: that revision deploys at generation 0 and never
+  defenses now: an apply carrying a larger `deploy_generation` fences script
+  repairs forward-only, and `deploy.sh` deletes drained revisions of the browser
+  service. Neither is a complete lifecycle-authority fence: on 2026-08-11 a
+  deleted revision continued reconciling for 7m42s, and although it could not
+  repair backward, it could still start the host and fail durable orb state
+  (`docs/postmortems/2026-08-11-release-smoke-restart-registry-timeout.md`).
+  Revision deletion is cleanup, not proof that old machinery has stopped.
+  Forgetting the var is safe but degrading: that revision deploys at generation 0 and never
   repairs hosts stamped by earlier deploys — hosts keep booting the old script
   until the next apply that does pass a generation.
 - Workspace session policy expires gcloud user credentials roughly daily:

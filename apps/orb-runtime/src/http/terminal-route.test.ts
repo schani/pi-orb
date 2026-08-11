@@ -18,6 +18,10 @@ class FakeProcess implements PtyProcess {
   writes: string[] = [];
   resizes: Array<[number, number]> = [];
   killed = false;
+  private resolveKilled: () => void = () => undefined;
+  readonly killedPromise = new Promise<void>((resolve) => {
+    this.resolveKilled = resolve;
+  });
   dataListener: (data: string) => void = () => undefined;
   exitListener: (exit: TerminalProcessExit) => void = () => undefined;
   write(data: string): void {
@@ -28,6 +32,7 @@ class FakeProcess implements PtyProcess {
   }
   kill(): void {
     this.killed = true;
+    this.resolveKilled();
   }
   onData(listener: (data: string) => void): () => void {
     this.dataListener = listener;
@@ -93,8 +98,10 @@ describe("runtime terminal route", () => {
     socket.send(JSON.stringify({ v: 1, type: "terminal.resize", cols: 132, rows: 41 }));
     await until(() => process.resizes.length === 1);
     expect(process.resizes).toEqual([[132, 41]]);
+    const clientClosed = once(socket, "close");
+    const processKilled = process.killedPromise;
     socket.close();
-    await once(socket, "close");
+    await Promise.all([clientClosed, processKilled]);
     expect(process.killed).toBe(true);
   });
 
