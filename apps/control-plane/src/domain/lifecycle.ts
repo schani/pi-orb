@@ -11,7 +11,7 @@ import {
   type StoreError,
 } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
-import { hasNeverBeenReady, type OrbRow } from "./orb.ts";
+import { hasNeverBeenReady, type OrbMessageRow, type OrbRow } from "./orb.ts";
 import type {
   ControlPlaneDeps,
   OrbHostObservation,
@@ -652,55 +652,10 @@ async function reconcileRunning(
   if (observation.state === "starting" || observation.state === "stopping") {
     return waiting("host_transition");
   }
-  // Freeze every currently queued item into one durable FIFO batch. The
-  // runtime sees one user message with blank-line separators and one stable
-  // batch ID; later arrivals form the next batch rather than changing an
-  // in-flight retry's payload.
-  const pendingBatch = await deps.store.claimNextOrbMessageBatch(task, {
-    orbId: orb.id,
-    now: task.wallNow(),
-  });
-  if (pendingBatch.isErr()) return retryable(pendingBatch.error.message);
-  if (pendingBatch.value.length > 0) {
-    if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
-    const messageIds = pendingBatch.value.map((message) => message.messageId);
-    const batchId = pendingBatch.value[0]?.deliveryBatchId ?? messageIds[0] ?? "";
-    const delivered = await withDeadline(
-      task,
-      deps.constants.runtimeRequestTimeoutMs,
-      "deliver queued message batch",
-      (context) =>
-        deps.runtimeClient.deliverMessage(
-          task,
-          {
-            baseUrl: observation.runtimeAddress?.baseUrl ?? "",
-            messageId: batchId,
-            messageIds,
-            content: squashMessageBatch(pendingBatch.value),
-          },
-          context,
-        ),
-    );
-    if (delivered.isErr()) return retryable(delivered.error.message);
-    const noted = await deps.store.noteOrbMessageDelivery(task, {
-      orbId: orb.id,
-      messageIds,
-      delivery: delivered.value.delivery,
-      operationId: delivered.value.operationId,
-      now: task.wallNow(),
-    });
-    if (noted.isErr()) return retryable(noted.error.message);
-    if (!delivered.value.duplicate) {
-      logOrbEvent(task, orb.id, "message-batch-dispatched", {
-        batch_id: batchId,
-        message_count: messageIds.length,
-        delivery: delivered.value.delivery,
-      });
-    }
-    return { type: "noop" };
-  }
-
-  // Host running: derive runtime liveness from the history pull.
+  // Host running: derive runtime liveness from the history pull. Liveness is
+  // judged on every `running` pass, ahead of any inbox work: a delivery that
+  // hangs against a dead runtime must not be able to preempt the restart that
+  // revives it (docs/lifecycle.md, 2026-08-10).
   const liveness = deps.control.getLiveness(orb.id);
   if (liveness === null) {
     // Fresh process (control-plane restart): seed the baseline now.
@@ -742,6 +697,88 @@ async function reconcileRunning(
       deps.constants.postRestartGraceMs,
     );
     return transitionTo(task, deps, orb, "starting", { reason: "unreachable_restart" });
+  }
+
+  // Freeze every currently queued item into one durable FIFO batch. The
+  // runtime sees one user message with blank-line separators and one stable
+  // batch ID; later arrivals form the next batch rather than changing an
+  // in-flight retry's payload.
+  const pendingBatch = await deps.store.claimNextOrbMessageBatch(task, {
+    orbId: orb.id,
+    now: task.wallNow(),
+  });
+  if (pendingBatch.isErr()) return retryable(pendingBatch.error.message);
+  if (pendingBatch.value.length > 0) {
+    if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
+    const messageIds = pendingBatch.value.map((message) => message.messageId);
+    const batchId = pendingBatch.value[0]?.deliveryBatchId ?? messageIds[0] ?? "";
+    const delivered = await withDeadline(
+      task,
+      deps.constants.runtimeRequestTimeoutMs,
+      "deliver queued message batch",
+      (context) =>
+        deps.runtimeClient.deliverMessage(
+          task,
+          {
+            baseUrl: observation.runtimeAddress?.baseUrl ?? "",
+            messageId: batchId,
+            messageIds,
+            content: squashMessageBatch(pendingBatch.value),
+          },
+          context,
+        ),
+    );
+    if (delivered.isErr()) {
+      if (delivered.error.retryable) return retryable(delivered.error.message);
+      // A rejection the runtime will repeat for the same payload (an oversized
+      // or malformed message) is terminal for this batch: redelivering it
+      // forever would wedge every later message behind it. The rows leave the
+      // outstanding set carrying the runtime's reason, which the message
+      // resource and the UI show as a failed message (docs/runtime-protocol.md).
+      const failed = await deps.store.failOrbMessageBatch(task, {
+        orbId: orb.id,
+        messageIds,
+        lastError: delivered.error.message,
+        now: task.wallNow(),
+      });
+      if (failed.isErr()) return retryable(failed.error.message);
+      logOrbEvent(task, orb.id, "message-batch-failed", {
+        batch_id: batchId,
+        message_count: messageIds.length,
+        code: delivered.error.code,
+        error: delivered.error.message,
+      });
+      return { type: "progressed" };
+    }
+    // The runtime just answered an authenticated request, which is exactly
+    // what liveness measures; without this, an orb whose pulls are lagging can
+    // be restarted in the same second its runtime served a delivery.
+    deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+    // The idle anchor is when the user's work reached the runtime, not when it
+    // was admitted: a batch can sit in the queue for longer than the whole
+    // idle window (a stopped orb, an unreachable runtime), and then the first
+    // pass after it leaves the outstanding set would idle-stop an orb whose
+    // turn had just begun. Advisory and monotone, like every other
+    // `last_busy_at` write (docs/lifecycle.md).
+    await deps.store.touchLastBusy(task, { orbId: orb.id, now: task.wallNow() });
+    const noted = await deps.store.noteOrbMessageDelivery(task, {
+      orbId: orb.id,
+      messageIds,
+      delivery: delivered.value.delivery,
+      operationId: delivered.value.operationId,
+      now: task.wallNow(),
+    });
+    if (noted.isErr()) return retryable(noted.error.message);
+    if (!delivered.value.duplicate) {
+      logOrbEvent(task, orb.id, "message-batch-dispatched", {
+        batch_id: batchId,
+        message_count: messageIds.length,
+        delivery: delivered.value.delivery,
+      });
+    }
+    // An undelivered message is user work in flight, so the idle countdown
+    // below is deliberately not reached while a batch is outstanding.
+    return { type: "noop" };
   }
 
   // Idle auto-stop (docs/lifecycle.md). Only a tab that affirmatively reports
@@ -1114,22 +1151,40 @@ async function reconcileTerminalBackstop(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
-  const pending = await deps.store.getNextOrbMessage(task, orb.id);
-  if (pending.isErr()) return retryable(pending.error.message);
-  if (pending.value?.autoStart === true) {
-    const transitioned = await transitionTo(task, deps, orb, "starting", {
-      lastError: null,
-      stopReason: null,
-      reason: "queued_message_after_stop",
+  // This is the *only* message-driven lifecycle transition: admission records
+  // the message and its wake intent, and the transition happens here, for
+  // every caller, with its own edge log (docs/lifecycle.md, 2026-08-11).
+  //
+  // Any outstanding message's wake intent starts a `stopped` orb, not only the
+  // oldest one's: FIFO decides delivery order, never whether the orb comes up.
+  // The decision and the transition are one store transaction, so an explicit
+  // stop that clears the intent can never be raced by a stale read; the intent
+  // itself is left standing until the message is delivered, failed, or
+  // explicitly stopped, which is what makes the wake retryable without a
+  // second write to strand.
+  //
+  // A `failed` orb wakes only for an intent admitted against its current
+  // `state_version`, i.e. a send the user made after seeing this failure. The
+  // transition bumps that version, so the retry is one-shot: a boot that fails
+  // again is never retried by the same intent, and "terminal boot failure is
+  // not retried forever" survives while a new send still starts a failed orb.
+  const woken = await deps.store.casStartOrbForQueuedMessage(task, {
+    orbId: orb.id,
+    expectedStateVersion: orb.stateVersion,
+    now: task.wallNow(),
+  });
+  if (woken.isErr()) {
+    return woken.error.type === "state_conflict"
+      ? { type: "conflict" }
+      : retryable(woken.error.message);
+  }
+  if (woken.value !== null) {
+    logOrbEvent(task, orb.id, "transition", {
+      from: orb.state,
+      to: "starting",
+      reason: "queued_message",
     });
-    if (transitioned.type === "transitioned") {
-      const cleared = await deps.store.clearOrbMessageAutoStart(task, {
-        orbId: orb.id,
-        now: task.wallNow(),
-      });
-      if (cleared.isErr()) return retryable(cleared.error.message);
-    }
-    return transitioned;
+    return { type: "transitioned", toState: "starting" };
   }
   if (orb.hostRef === null) return { type: "noop" };
   const observed = await observeHost(task, deps, orb.hostRef);
@@ -1407,31 +1462,61 @@ export function requestOrbDeletion(
   return new ResultAsync(run());
 }
 
+/**
+ * An explicit stop outranks every message wake intent recorded before it
+ * (docs/lifecycle.md), so the clear runs on every path — including the
+ * already-stopping/stopped one, where there is no transition to carry it.
+ */
 export function requestOrbStop(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orbId: string,
 ): ResultAsync<OrbRow, CommandError> {
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
+    let lastClearError: StoreError | null = null;
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
       const orbResult = await deps.store.getOrb(task, orbId);
       if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
       if (orb.state === "stopping" || orb.state === "stopped") {
+        // A stop with nothing left to transition is a no-op the UI issues
+        // freely; its answer must not depend on a bookkeeping write, so the
+        // clear is retried and then reported as an edge rather than turned
+        // into a 503 the user cannot act on.
         const cleared = await deps.store.clearOrbMessageAutoStart(task, {
           orbId,
           now: task.wallNow(),
         });
-        return cleared.isErr()
-          ? err(commandError("unavailable", cleared.error.message, true))
-          : ok(orb);
+        if (cleared.isOk()) return ok(orb);
+        lastClearError = cleared.error;
+        if (cleared.error.retryable && attempt < CAS_ATTEMPTS - 1) continue;
+        logOrbEvent(task, orbId, "stop-wake-clear-failed", {
+          state: orb.state,
+          error: cleared.error.message,
+          outcome: "stop_reported_ok",
+        });
+        return ok(orb);
       }
       if (orb.state === "deleting") {
         return err(commandError("conflict", "orb is being permanently deleted", false));
       }
       if (orb.state === "archiving" || orb.state === "archived") {
         return err(commandError("conflict", "archived orbs cannot be stopped or restarted", false));
+      }
+      // Clear before the transition: a stop that cannot cancel the wake
+      // intents recorded before it never happens at all, so the orb can never
+      // land in `stopped` with an intent that outlived the stop.
+      const clearedForStop = await deps.store.clearOrbMessageAutoStart(task, {
+        orbId,
+        now: task.wallNow(),
+      });
+      if (clearedForStop.isErr()) {
+        lastClearError = clearedForStop.error;
+        if (clearedForStop.error.retryable && attempt < CAS_ATTEMPTS - 1) continue;
+        return err(
+          commandError("unavailable", clearedForStop.error.message, clearedForStop.error.retryable),
+        );
       }
       const cas = await deps.store.casTransition(task, {
         orbId,
@@ -1454,7 +1539,62 @@ export function requestOrbStop(
       if (cas.error.type === "state_conflict") continue;
       return err(mapCasError(cas.error));
     }
-    return err(commandError("conflict", "concurrent state changes; retry", true));
+    return err(
+      lastClearError === null
+        ? commandError("conflict", "concurrent state changes; retry", true)
+        : commandError("unavailable", lastClearError.message, true),
+    );
+  };
+  return new ResultAsync(run());
+}
+
+/**
+ * Durable send-anytime admission (docs/runtime-protocol.md), for every caller.
+ * The command records the message and — when the orb cannot take delivery now
+ * — its wake intent, then nudges the per-orb reconciler, which owns the single
+ * message-driven lifecycle transition and its `transition` edge log. Admission
+ * itself never changes orb state (docs/lifecycle.md, 2026-08-11).
+ */
+export function enqueueOrbMessage(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  params: { orbId: string; messageId: string; content: readonly MessageInputBlock[] },
+): ResultAsync<{ message: OrbMessageRow; duplicate: boolean }, CommandError> {
+  const run = async (): Promise<
+    Result<{ message: OrbMessageRow; duplicate: boolean }, CommandError>
+  > => {
+    const orbResult = await deps.store.getOrb(task, params.orbId);
+    if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
+    const orb = orbResult.value;
+    if (orb === null) return err(commandError("not_found", `orb ${params.orbId} not found`, false));
+    if (orb.state === "deleting") {
+      return err(commandError("conflict", "orb is being permanently deleted", false));
+    }
+    if (orb.state === "archiving" || orb.state === "archived") {
+      return err(commandError("conflict", "archived orbs cannot accept messages", false));
+    }
+    const enqueued = await deps.store.enqueueOrbMessage(task, {
+      orbId: params.orbId,
+      messageId: params.messageId,
+      content: params.content,
+      now: task.wallNow(),
+    });
+    if (enqueued.isErr()) {
+      return enqueued.error.type === "store_error"
+        ? err(commandError("unavailable", enqueued.error.message, enqueued.error.retryable))
+        : err(commandError("conflict", "message id exists with different content", false));
+    }
+    // Wake latency is the reconciler tick, not the terminal backstop interval:
+    // the orb is due now, so a stopped orb starts on the next scan.
+    deps.control.setNextAttemptAt(`reconcile:${params.orbId}`, 0);
+    if (!enqueued.value.duplicate) {
+      logOrbEvent(task, params.orbId, "message-queued", {
+        message_id: params.messageId,
+        orb_state: enqueued.value.orb.state,
+        ...(enqueued.value.message.autoStart ? { wake: "requested" } : {}),
+      });
+    }
+    return ok({ message: enqueued.value.message, duplicate: enqueued.value.duplicate });
   };
   return new ResultAsync(run());
 }

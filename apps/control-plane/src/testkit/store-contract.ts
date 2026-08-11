@@ -136,7 +136,7 @@ export function storeContractTests(name: string, open: () => Promise<ControlPlan
       expect(generated.isOk() && generated.value).toBeNull();
     });
 
-    it("durably queues a stopped-orb message, starts it, and completes from replicated identity", async () => {
+    it("durably queues a stopped-orb message, wakes it, and completes from replicated identity", async () => {
       await seed();
       const stopped = await store.casTransition(task, {
         orbId: orb.id,
@@ -153,8 +153,18 @@ export function storeContractTests(name: string, open: () => Promise<ControlPlan
         content,
         now: 3_000,
       });
-      expect(queued.isOk() && queued.value.orb.state).toBe("starting");
+      // Admission records the message and its wake intent; the transition is
+      // the reconciler's, through `casStartOrbForQueuedMessage`.
+      expect(queued.isOk() && queued.value.orb.state).toBe("stopped");
       expect(queued.isOk() && queued.value.message.status).toBe("queued");
+      expect(queued.isOk() && queued.value.message.autoStart).toBe(true);
+      expect(queued.isOk() && queued.value.orb.lastBusyAt).toBe(3_000);
+      const woken = await store.casStartOrbForQueuedMessage(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        now: 3_100,
+      });
+      expect(woken.isOk() && woken.value?.state).toBe("starting");
       const duplicate = await store.enqueueOrbMessage(task, {
         orbId: orb.id,
         messageId,
@@ -213,7 +223,244 @@ export function storeContractTests(name: string, open: () => Promise<ControlPlan
         "delivered",
         "delivered",
       ]);
-      expect((await store.getNextOrbMessage(task, orb.id))._unsafeUnwrap()).toBeNull();
+    });
+
+    it("fails a rejected batch terminally and keeps the queue moving", async () => {
+      await seed();
+      const rejectedId = "00000000-0000-4000-8000-000000000101";
+      const followUpId = "00000000-0000-4000-8000-000000000102";
+      expect(
+        (
+          await store.enqueueOrbMessage(task, {
+            orbId: orb.id,
+            messageId: rejectedId,
+            content: [{ type: "text", text: "a payload the runtime refuses" }],
+            now: 2_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const batch = await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 2_500 });
+      expect(batch.isOk() && batch.value).toHaveLength(1);
+      expect(
+        (
+          await store.failOrbMessageBatch(task, {
+            orbId: orb.id,
+            messageIds: [rejectedId],
+            lastError: "400 invalid_request: message payload too large",
+            now: 3_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const failed = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap()[0];
+      expect(failed?.status).toBe("failed");
+      expect(failed?.lastError).toContain("invalid_request");
+      expect(failed?.autoStart).toBe(false);
+      // A failed row leaves the outstanding set: the next message is claimable.
+      expect(
+        (
+          await store.enqueueOrbMessage(task, {
+            orbId: orb.id,
+            messageId: followUpId,
+            content: [{ type: "text", text: "try this instead" }],
+            now: 3_500,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const next = await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 4_000 });
+      expect(next.isOk() && next.value.map((message) => message.messageId)).toEqual([followUpId]);
+    });
+
+    it("wakes a stopped orb for any outstanding wake intent, not only the oldest message", async () => {
+      await seed();
+      const running = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        toState: "running",
+        now: 2_000,
+      });
+      expect(running.isOk()).toBe(true);
+      const olderId = "00000000-0000-4000-8000-000000000103";
+      const wakeId = "00000000-0000-4000-8000-000000000104";
+      const older = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId: olderId,
+        content: [{ type: "text", text: "look at the failing test" }],
+        now: 2_100,
+      });
+      expect(older.isOk() && older.value.message.autoStart).toBe(false);
+      const stopping = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        toState: "stopping",
+        now: 2_200,
+      });
+      expect(stopping.isOk()).toBe(true);
+      const wake = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId: wakeId,
+        content: [{ type: "text", text: "and then open a PR" }],
+        now: 2_300,
+      });
+      expect(wake.isOk() && wake.value.message.autoStart).toBe(true);
+      const stopped = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        toState: "stopped",
+        now: 2_400,
+      });
+      expect(stopped.isOk() && stopped.value.stateVersion).toBe(3);
+
+      const woken = await store.casStartOrbForQueuedMessage(task, {
+        orbId: orb.id,
+        expectedStateVersion: 3,
+        now: 2_500,
+      });
+      expect(woken.isOk() && woken.value?.state).toBe("starting");
+      // The intent stands until the message is delivered, failed, or an
+      // explicit stop clears it: the wake has no second write to strand.
+      const afterWake = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
+      expect(afterWake.map((message) => message.autoStart)).toEqual([false, true]);
+
+      const backToStopped = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 4,
+        toState: "stopped",
+        now: 2_600,
+      });
+      expect(backToStopped.isOk()).toBe(true);
+      expect(
+        (await store.clearOrbMessageAutoStart(task, { orbId: orb.id, now: 2_700 })).isOk(),
+      ).toBe(true);
+      const notWoken = await store.casStartOrbForQueuedMessage(task, {
+        orbId: orb.id,
+        expectedStateVersion: 5,
+        now: 2_800,
+      });
+      expect(notWoken.isOk() && notWoken.value).toBeNull();
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.state).toBe("stopped");
+    });
+
+    it("wakes a failed orb once for a new send and never for a stranded intent", async () => {
+      await seed();
+      const failed = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        toState: "failed",
+        now: 2_000,
+        lastError: "provider_failed: boom",
+      });
+      expect(failed.isOk() && failed.value.stateVersion).toBe(1);
+      const messageId = "00000000-0000-4000-8000-000000000106";
+      const queued = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId,
+        content: [{ type: "text", text: "try again please" }],
+        now: 2_100,
+      });
+      // A send made against *this* failure carries the version it saw.
+      expect(queued.isOk() && queued.value.message.autoStart).toBe(true);
+      expect(queued.isOk() && queued.value.message.wakeStateVersion).toBe(1);
+      const woken = await store.casStartOrbForQueuedMessage(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        now: 2_200,
+      });
+      expect(woken.isOk() && woken.value?.state).toBe("starting");
+      expect(woken.isOk() && woken.value?.lastError).toBeNull();
+
+      // The boot fails again. The same intent is now stranded: it names a
+      // failure two versions old, so it must not provision forever.
+      const failedAgain = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        toState: "failed",
+        now: 2_300,
+        lastError: "provider_failed: boom again",
+      });
+      expect(failedAgain.isOk() && failedAgain.value.stateVersion).toBe(3);
+      const notWoken = await store.casStartOrbForQueuedMessage(task, {
+        orbId: orb.id,
+        expectedStateVersion: 3,
+        now: 2_400,
+      });
+      expect(notWoken.isOk() && notWoken.value).toBeNull();
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.state).toBe("failed");
+
+      // A new send against the new failure buys exactly one more attempt.
+      const retried = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId: "00000000-0000-4000-8000-000000000107",
+        content: [{ type: "text", text: "once more" }],
+        now: 2_500,
+      });
+      expect(retried.isOk() && retried.value.message.wakeStateVersion).toBe(3);
+      const wokenAgain = await store.casStartOrbForQueuedMessage(task, {
+        orbId: orb.id,
+        expectedStateVersion: 3,
+        now: 2_600,
+      });
+      expect(wokenAgain.isOk() && wokenAgain.value?.state).toBe("starting");
+    });
+
+    it("records a delivery note that replication already marked delivered", async () => {
+      await seed();
+      const messageId = "00000000-0000-4000-8000-000000000105";
+      const content = [{ type: "text" as const, text: "how was this delivered?" }];
+      expect(
+        (
+          await store.enqueueOrbMessage(task, { orbId: orb.id, messageId, content, now: 2_000 })
+        ).isOk(),
+      ).toBe(true);
+      expect(
+        (await store.claimNextOrbMessageBatch(task, { orbId: orb.id, now: 2_100 })).isOk(),
+      ).toBe(true);
+      const record: HistoryRecord = {
+        id: "inbox-record-late-note",
+        parentId: null,
+        timestamp: "2026-08-10T00:00:00.000Z",
+        type: "message",
+        role: "user",
+        content,
+        overflow: {
+          native: {
+            type: "custom_message",
+            customType: "pi-orb.user-message",
+            details: { messageIds: [messageId] },
+          },
+        },
+      };
+      expect(
+        (
+          await store.commitPullBatch(task, {
+            orbId: orb.id,
+            expectedCursor: null,
+            session,
+            records: [record],
+            nextCursor: record.id,
+            nextHeadId: record.id,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()[0]?.status).toBe(
+        "delivered",
+      );
+      // The note lands last and must still record how the message was
+      // admitted, without undoing the delivered status.
+      expect(
+        (
+          await store.noteOrbMessageDelivery(task, {
+            orbId: orb.id,
+            messageIds: [messageId],
+            delivery: "steer",
+            operationId: "op-late",
+            now: 2_500,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const noted = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap()[0];
+      expect(noted?.status).toBe("delivered");
+      expect(noted?.delivery).toBe("steer");
+      expect(noted?.operationId).toBe("op-late");
     });
 
     it("atomically commits idempotent history and reconstructs its linear chain", async () => {

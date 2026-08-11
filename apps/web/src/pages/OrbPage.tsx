@@ -32,6 +32,11 @@ import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
+import {
+  createMutationEpoch,
+  undeliveredMessages,
+  withQueuedMessage,
+} from "../lib/queued-messages.ts";
 import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
 import {
   type BrowserNotificationPermission,
@@ -356,6 +361,9 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [projectName, setProjectName] = useState<string | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);
   const [queuedMessages, setQueuedMessages] = useState<OrbMessageView[]>([]);
+  // Invalidates queued-message reads that were already in flight when a
+  // message mutation committed (see lib/queued-messages.ts).
+  const [messageEpoch] = useState(createMutationEpoch);
   const [orbNotFound, setOrbNotFound] = useState(false);
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -424,10 +432,12 @@ export function OrbPage({ orbId }: { orbId: string }) {
   useEffect(() => {
     let cancelled = false;
     const poll = () => {
+      const token = messageEpoch.begin();
       void listOrbMessages(orbId).then((result) => {
-        if (!cancelled && result.isOk()) {
-          setQueuedMessages(result.value.items.filter((message) => message.status !== "delivered"));
-        }
+        // Discard a snapshot taken before a message mutation committed: it
+        // would clobber the optimistic append with a list that predates it.
+        if (cancelled || messageEpoch.isStale(token) || result.isErr()) return;
+        setQueuedMessages(undeliveredMessages(result.value.items));
       });
     };
     poll();
@@ -436,7 +446,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [orbId]);
+  }, [orbId, messageEpoch]);
 
   useEffect(() => {
     orbNameRef.current = orb?.name ?? null;
@@ -618,10 +628,11 @@ export function OrbPage({ orbId }: { orbId: string }) {
     dispatch({ type: "request_sent", requestId, kind: "message" });
     void enqueueOrbMessage(orbId, requestId, { content }).then((result) => {
       if (result.isOk()) {
-        setQueuedMessages((current) => [
-          ...current.filter((message) => message.id !== result.value.id),
-          result.value,
-        ]);
+        const enqueued = result.value;
+        // Commit before the append so any list request already in flight is
+        // discarded rather than replacing the queue without this message.
+        messageEpoch.commit();
+        setQueuedMessages((current) => withQueuedMessage(current, enqueued));
         dispatch({ type: "message_enqueued", requestId });
       } else {
         dispatch({ type: "message_enqueue_failed", requestId, error: result.error });

@@ -877,6 +877,19 @@ button.project-orb-action.danger:hover:not(:disabled) {
   color: var(--ink-faint);
 }
 
+/* A message the runtime refused for good: terminal, and it says why. */
+.turn-user.turn-failed .turn-label {
+  color: var(--accent);
+}
+
+.turn-user.turn-failed .turn-error {
+  margin-top: 6px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
 /* agent turns: article flow beside the gutter */
 .turn-agent .turn-body {
   display: flex;

@@ -44,6 +44,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly deletions = new Map<string, OrbDeletionRow>();
   private readonly messages = new Map<string, OrbMessageRow[]>();
   private nextMessageOrdinal = 1;
+  /** Remaining scripted failures of `clearOrbMessageAutoStart`. */
+  private clearAutoStartFailures = 0;
+  /** Gate the next `noteOrbMessageDelivery` until this predicate holds. */
+  private noteDeliveryHold: (() => boolean) | null = null;
 
   private readonly maxLatencyMs: number;
 
@@ -77,6 +81,24 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return [...(this.messages.get(orbId) ?? [])];
   }
 
+  /**
+   * Fail the next `count` calls to `clearOrbMessageAutoStart` with a retryable
+   * store error — the store blip that can strand a message's wake intent.
+   */
+  failNextClearOrbMessageAutoStart(count: number): void {
+    this.clearAutoStartFailures = count;
+  }
+
+  /**
+   * Hold the next `noteOrbMessageDelivery` until `until` holds — the schedule
+   * where replication commits the inbox record (marking the rows `delivered`)
+   * before the delivery note lands, which no probability can be relied on to
+   * produce.
+   */
+  holdNextNoteOrbMessageDelivery(until: () => boolean): void {
+    this.noteDeliveryHold = until;
+  }
+
   replicaRecords(orbId: string): HistoryRecord[] {
     const replica = this.replicas.get(orbId);
     if (replica === undefined) return [];
@@ -104,6 +126,23 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       if (error instanceof ApplicationFailure) return unavailable(`${reason}: ${error.message}`);
       return task.abortSimulation(error);
     });
+  }
+
+  /** Deterministic gate for a scripted hold; a no-op when nothing is held. */
+  private holdUntil(
+    task: SimulationTask,
+    until: (() => boolean) | null,
+    reason: string,
+  ): ResultAsync<void, StoreError> {
+    if (until === null) return okAsync(undefined);
+    const run = async (): Promise<void> => {
+      // Bounded so a predicate the scenario never satisfies fails the
+      // assertion it was written for instead of spinning forever.
+      for (let attempt = 0; attempt < 2_000 && !until(); attempt++) {
+        await task.sleep(10, reason);
+      }
+    };
+    return ResultAsync.fromPromise(run(), (error) => task.abortSimulation(error));
   }
 
   private replicaOf(orbId: string): OrbReplica {
@@ -427,6 +466,11 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         if (!jsonEqual(existing.content, params.content)) return { conflict: true as const };
         return { conflict: false as const, message: existing, orb, duplicate: true };
       }
+      // Admission is durable content plus, for an orb that cannot take
+      // delivery now, a wake intent — never a lifecycle transition; the
+      // reconciler's backstop owns that (docs/lifecycle.md, 2026-08-11).
+      const autoStart =
+        orb.state === "stopping" || orb.state === "stopped" || orb.state === "failed";
       const message: OrbMessageRow = {
         orbId: params.orbId,
         messageId: params.messageId,
@@ -436,26 +480,19 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         delivery: null,
         operationId: null,
         deliveryBatchId: null,
-        autoStart: orb.state === "stopping",
+        autoStart,
+        wakeStateVersion: autoStart ? orb.stateVersion : null,
         lastError: null,
         createdAt: params.now,
         updatedAt: params.now,
       };
       rows.push(message);
       this.messages.set(params.orbId, rows);
-      const updated: OrbRow =
-        orb.state === "stopped" || orb.state === "failed"
-          ? {
-              ...orb,
-              state: "starting",
-              stateVersion: orb.stateVersion + 1,
-              stateChangedAt: params.now,
-              updatedAt: params.now,
-              lastError: null,
-              stopReason: null,
-              lastBusyAt: params.now,
-            }
-          : { ...orb, lastBusyAt: params.now, updatedAt: params.now };
+      const updated: OrbRow = {
+        ...orb,
+        lastBusyAt: Math.max(orb.lastBusyAt ?? 0, params.now),
+        updatedAt: params.now,
+      };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, message, orb: updated, duplicate: false };
     }).andThen((outcome) =>
@@ -469,21 +506,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return this.access(task, FAILPOINTS.storeRead, "list orb messages", () => [
       ...(this.messages.get(orbId) ?? []),
     ]);
-  }
-
-  getNextOrbMessage(
-    task: SimulationTask,
-    orbId: string,
-  ): ResultAsync<OrbMessageRow | null, StoreError> {
-    return this.access(
-      task,
-      FAILPOINTS.storeRead,
-      "get next orb message",
-      () =>
-        (this.messages.get(orbId) ?? []).find(
-          (row) => row.status === "queued" || row.status === "delivering",
-        ) ?? null,
-    );
   }
 
   claimNextOrbMessageBatch(
@@ -529,26 +551,58 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       now: number;
     },
   ): ResultAsync<void, StoreError> {
-    return this.access(task, FAILPOINTS.storeWrite, "note orb message delivery", () => {
-      const rows = this.messages.get(params.orbId) ?? [];
-      const messageIds = new Set(params.messageIds);
-      for (let index = 0; index < rows.length; index++) {
-        const current = rows[index];
-        if (
-          current !== undefined &&
-          messageIds.has(current.messageId) &&
-          (current.status === "queued" || current.status === "delivering")
-        ) {
-          rows[index] = {
-            ...current,
-            status: "delivering",
-            delivery: params.delivery,
-            operationId: params.operationId,
-            autoStart: false,
-            updatedAt: params.now,
-          };
+    const hold = this.noteDeliveryHold;
+    this.noteDeliveryHold = null;
+    return this.holdUntil(task, hold, "note orb message delivery hold").andThen(() =>
+      this.access(task, FAILPOINTS.storeWrite, "note orb message delivery", () => {
+        const rows = this.messages.get(params.orbId) ?? [];
+        const messageIds = new Set(params.messageIds);
+        for (let index = 0; index < rows.length; index++) {
+          const current = rows[index];
+          if (
+            current !== undefined &&
+            messageIds.has(current.messageId) &&
+            (current.status === "queued" ||
+              current.status === "delivering" ||
+              current.status === "delivered")
+          ) {
+            rows[index] = {
+              ...current,
+              // Replication may already have committed the inbox record; the
+              // note adds its classification without undoing that.
+              status: current.status === "delivered" ? "delivered" : "delivering",
+              delivery: params.delivery,
+              operationId: params.operationId,
+              autoStart: false,
+              updatedAt: params.now,
+            };
+          }
         }
-      }
+      }),
+    );
+  }
+
+  failOrbMessageBatch(
+    task: SimulationTask,
+    params: { orbId: string; messageIds: readonly string[]; lastError: string; now: number },
+  ): ResultAsync<void, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "fail orb message batch", () => {
+      const messageIds = new Set(params.messageIds);
+      const rows = this.messages.get(params.orbId) ?? [];
+      this.messages.set(
+        params.orbId,
+        rows.map((row) =>
+          messageIds.has(row.messageId) && (row.status === "queued" || row.status === "delivering")
+            ? {
+                ...row,
+                status: "failed" as const,
+                lastError: params.lastError,
+                autoStart: false,
+                updatedAt: params.now,
+              }
+            : row,
+        ),
+      );
     });
   }
 
@@ -556,13 +610,74 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: { orbId: string; now: number },
   ): ResultAsync<void, StoreError> {
-    return this.access(task, FAILPOINTS.storeWrite, "clear orb message auto start", () => {
-      const rows = this.messages.get(params.orbId) ?? [];
-      this.messages.set(
-        params.orbId,
-        rows.map((row) =>
-          row.autoStart ? { ...row, autoStart: false, updatedAt: params.now } : row,
-        ),
+    return this.access(
+      task,
+      FAILPOINTS.storeClearMessageAutoStart,
+      "clear orb message auto start",
+      () => {
+        // A scripted blip is a *specific* call failing, which is what scenarios
+        // about a stranded wake intent need; the failpoint above is the
+        // probabilistic form of the same outage.
+        if (this.clearAutoStartFailures > 0) {
+          this.clearAutoStartFailures -= 1;
+          return { failed: true as const };
+        }
+        const rows = this.messages.get(params.orbId) ?? [];
+        this.messages.set(
+          params.orbId,
+          rows.map((row) =>
+            row.autoStart ? { ...row, autoStart: false, updatedAt: params.now } : row,
+          ),
+        );
+        return { failed: false as const };
+      },
+    ).andThen((outcome) =>
+      outcome.failed
+        ? errAsync(unavailable("clear orb message auto start: scripted store failure"))
+        : okAsync(undefined),
+    );
+  }
+
+  casStartOrbForQueuedMessage(
+    task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<OrbRow | null, StoreError | StateConflict> {
+    return this.access(task, FAILPOINTS.storeWrite, "start orb for queued message", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (
+        orb === undefined ||
+        (orb.state !== "stopped" && orb.state !== "failed") ||
+        orb.stateVersion !== params.expectedStateVersion
+      ) {
+        return { outcome: "conflict" as const };
+      }
+      // A `stopped` orb wakes for any outstanding intent; a `failed` orb only
+      // for an intent admitted against this very failure, and the version bump
+      // below retires that privilege (docs/lifecycle.md).
+      const wanted = (this.messages.get(params.orbId) ?? []).some(
+        (row) =>
+          row.autoStart &&
+          (row.status === "queued" || row.status === "delivering") &&
+          (orb.state === "stopped" || row.wakeStateVersion === orb.stateVersion),
+      );
+      if (!wanted) return { outcome: "no_intent" as const };
+      const updated: OrbRow = {
+        ...orb,
+        state: "starting",
+        stateVersion: orb.stateVersion + 1,
+        stateChangedAt: params.now,
+        updatedAt: params.now,
+        lastError: null,
+        stopReason: null,
+      };
+      this.orbs.set(orb.id, updated);
+      return { outcome: "started" as const, orb: updated };
+    }).andThen((result) => {
+      if (result.outcome === "conflict") {
+        return errAsync<OrbRow | null, StateConflict>({ type: "state_conflict" as const });
+      }
+      return okAsync<OrbRow | null, StateConflict>(
+        result.outcome === "started" ? result.orb : null,
       );
     });
   }

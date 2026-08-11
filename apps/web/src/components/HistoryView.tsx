@@ -340,13 +340,28 @@ export function HistoryView({
           content: message.content,
           overflow: {},
         };
-        const status = message.delivery === "steer" ? "steering" : message.status;
+        const status =
+          message.status === "failed"
+            ? "failed"
+            : message.delivery === "steer"
+              ? "steering"
+              : message.status;
+        // A message the runtime refused for good is terminal: say so where the
+        // message is, with the reason, rather than leaving it looking pending
+        // forever (docs/runtime-protocol.md).
+        const failed = message.status === "failed";
         return (
-          <article className="turn turn-user turn-queued" key={message.id}>
+          <article
+            className={`turn turn-user turn-queued${failed ? " turn-failed" : ""}`}
+            key={message.id}
+          >
             <Gutter mark="Y" />
             <div className="turn-body">
               <span className="turn-label">You · {status}</span>
               {renderMessageBlocks(record)}
+              {failed && message.error !== undefined && (
+                <div className="turn-error">{message.error}</div>
+              )}
             </div>
           </article>
         );

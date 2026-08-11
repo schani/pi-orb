@@ -1,4 +1,5 @@
 import type {
+  DeliverOrbMessageResponse,
   HarnessSessionMetadata,
   HistoryRecord,
   PullHistoryResponse,
@@ -23,6 +24,59 @@ import type {
 import { FAILPOINTS } from "./failpoints.ts";
 
 export type InitOutcome = "ready" | "failed_nonretryable" | "failed_retryable" | "never_ready";
+
+/** Step of a scripted non-answer; see the `hang` branch of `deliverMessage`. */
+const HANG_STEP_MS = 250;
+
+/**
+ * How the runtime answers `POST /messages` for one orb (docs/runtime-protocol.md).
+ * `ok` is the ordinary path; the other two are the answers a queued message can
+ * meet that no retry can improve on, and that therefore decide whether the
+ * inbox drains or wedges:
+ *
+ * - `reject` — the runtime refuses the payload with a typed error. A
+ *   `retryable: false` rejection (a 400 `invalid_request`, an oversized
+ *   payload) is terminal for that batch: redelivering it produces the same
+ *   answer forever.
+ * - `hang` — the request is accepted and never answered, so the caller's own
+ *   deadline ends the call while the host still observes `running`. Applied
+ *   before the runtime is resolved, so it also models a delivery hanging
+ *   against a runtime that has already gone dark.
+ */
+/**
+ * The three partial-delivery kinds below are the crash windows of
+ * `docs/runtime-protocol.md`'s exactly-once rule. PostgreSQL is authoritative
+ * before delivery and the session file after it, so every window is defined by
+ * how far the runtime got between the two:
+ *
+ * - `crash_before_enqueue` — the request reached the runtime, which died
+ *   before touching Pi. Nothing is pending, nothing is persisted, the answer
+ *   is lost: the batch must be redelivered. One-shot by construction — the
+ *   crash consumes both the incarnation and the script.
+ * - `enqueue_without_persist` — the batch is accepted into Pi and into this
+ *   incarnation's in-memory pending set, and answered, but the session file
+ *   has not been written. A retry finds it *pending* and must not enqueue it a
+ *   second time; a crash before the flush loses it entirely and the control
+ *   plane must redeliver. Sticky: the scenario decides whether the runtime
+ *   flushes (`flushPendingInboxBatches`) or dies.
+ * - `persist_without_ack` — the record is durably in the session and the
+ *   *answer* is lost. The control plane never learns the classification, keeps
+ *   retrying, and must not produce a second record: dedup comes from the
+ *   persisted record, and the rows are marked delivered by replication.
+ *   Sticky, so every retry loses its answer too.
+ */
+export type DeliverMessageScript =
+  | { readonly kind: "ok" }
+  | {
+      readonly kind: "reject";
+      readonly code: RuntimeClientError["code"];
+      readonly message: string;
+      readonly retryable: boolean;
+    }
+  | { readonly kind: "hang"; readonly durationMs: number }
+  | { readonly kind: "crash_before_enqueue" }
+  | { readonly kind: "enqueue_without_persist" }
+  | { readonly kind: "persist_without_ack" };
 
 export interface FakeOrbConfig {
   /** Time from runtime start until the runtime becomes ready. */
@@ -82,6 +136,23 @@ interface FakeRuntimeInstance {
    * ordinary boot (docs/lifecycle.md: edges, not levels).
    */
   turnResume: RuntimeTurnResume | null;
+  /**
+   * Inbox batches this incarnation has handed to Pi but whose record is not on
+   * disk yet, keyed by durable batch ID — the runtime's in-memory
+   * pending-batch set (`AgentRuntime.pendingInboxMessages`,
+   * docs/runtime-protocol.md). It is consulted before enqueueing, so a retry
+   * against the same incarnation never delivers twice, and it dies with the
+   * process, so a crash before the flush loses the batch entirely.
+   */
+  pendingBatches: Map<string, PendingInboxBatch>;
+}
+
+/** One accepted-but-unflushed batch: content plus the classification promised for it. */
+interface PendingInboxBatch {
+  messageIds: readonly string[];
+  text: string;
+  delivery: "turn" | "steer";
+  operationId: string;
 }
 
 interface FakeHost {
@@ -127,6 +198,8 @@ interface OrbWorldState {
   runtimeUnreachableUntil: number;
   /** When set, pull responses carry this orbId (host-routing mistake test). */
   reportOrbId: string | null;
+  /** How the runtime answers inbox deliveries. */
+  deliverMessageScript: DeliverMessageScript;
   /** Provider stop/start operations applied to this orb's host. */
   hostStopCount: number;
   hostStartCount: number;
@@ -214,6 +287,7 @@ export class FakeWorld {
       pullOutageUntil: 0,
       runtimeUnreachableUntil: 0,
       reportOrbId: null,
+      deliverMessageScript: { kind: "ok" },
       hostStopCount: 0,
       hostStartCount: 0,
       scriptRepairs: [],
@@ -278,10 +352,9 @@ export class FakeWorld {
     );
   }
 
-  appendInboxMessage(orbId: string, messageIds: readonly string[], text: string): HistoryRecord {
-    const messageId = messageIds[0] ?? "";
-    const state = this.orbState(orbId);
-    const existing = state.filesystem.entries.find((record) => {
+  /** The persisted inbox record of `batchId`, or undefined while none exists. */
+  private findInboxRecord(fs: FakeFilesystem, batchId: string): HistoryRecord | undefined {
+    return fs.entries.find((record) => {
       const native = record.overflow["native"];
       if (typeof native !== "object" || native === null || Array.isArray(native)) return false;
       const details = native["details"];
@@ -291,11 +364,29 @@ export class FakeWorld {
         details !== null &&
         !Array.isArray(details) &&
         Array.isArray(details["messageIds"]) &&
-        details["messageIds"][0] === messageId
+        details["messageIds"][0] === batchId
       );
     });
+  }
+
+  /**
+   * Flush one accepted batch to the persistent session as the Pi
+   * `pi-orb.user-message` custom message: from here on the record replicates,
+   * survives the process, and is what makes redelivery a no-op. A delivered
+   * user message triggers a turn, so the flushed tail is a user message with
+   * no reply yet — exactly the dangling shape a later boot resumes from.
+   */
+  appendInboxMessage(
+    orbId: string,
+    messageIds: readonly string[],
+    text: string,
+    classification?: { delivery: "turn" | "steer"; operationId: string },
+  ): HistoryRecord {
+    const batchId = messageIds[0] ?? "";
+    const state = this.orbState(orbId);
+    const existing = this.findInboxRecord(state.filesystem, batchId);
     if (existing !== undefined) return existing;
-    return this.flushRecord(orbId, state.filesystem, (seq, parentId) => ({
+    const record = this.flushRecord(orbId, state.filesystem, (seq, parentId) => ({
       id: `${orbId}-rec-${seq}`,
       parentId,
       timestamp: `t${seq}`,
@@ -306,10 +397,113 @@ export class FakeWorld {
         native: {
           type: "custom_message",
           customType: "pi-orb.user-message",
-          details: { messageIds: [...messageIds] },
+          details: {
+            messageIds: [...messageIds],
+            ...(classification === undefined
+              ? {}
+              : { delivery: classification.delivery, operationId: classification.operationId }),
+          },
         },
       },
     }));
+    state.filesystem.turnInFlight = true;
+    state.host?.runtime?.pendingBatches.delete(batchId);
+    return record;
+  }
+
+  /**
+   * The runtime's side of one idempotent batch delivery
+   * (`AgentRuntime.deliverInboxMessage`, docs/runtime-protocol.md): consult the
+   * persisted session, then this incarnation's pending set, and only then
+   * enqueue. `flush` says whether the session write lands within this call or
+   * whether the batch stays in memory, where a crash can still lose it.
+   */
+  deliverInboxBatch(
+    orbId: string,
+    request: { batchId: string; messageIds: readonly string[]; text: string },
+    options: { flush: boolean },
+  ): DeliverOrbMessageResponse {
+    const state = this.orbState(orbId);
+    const runtime = state.host?.runtime;
+    if (runtime === undefined || runtime === null) throw new Error("deliver on dead runtime");
+    const persisted = this.findInboxRecord(state.filesystem, request.batchId);
+    if (persisted !== undefined) {
+      const native = persisted.overflow["native"];
+      const details =
+        typeof native === "object" && native !== null && !Array.isArray(native)
+          ? native["details"]
+          : undefined;
+      const read =
+        typeof details === "object" && details !== null && !Array.isArray(details) ? details : {};
+      return {
+        v: 1,
+        messageId: request.batchId,
+        status: "persisted",
+        delivery: read["delivery"] === "steer" ? "steer" : "turn",
+        operationId: typeof read["operationId"] === "string" ? read["operationId"] : "unknown",
+        duplicate: true,
+      };
+    }
+    const pending = runtime.pendingBatches.get(request.batchId);
+    if (pending !== undefined) {
+      return {
+        v: 1,
+        messageId: request.batchId,
+        status: "queued",
+        delivery: pending.delivery,
+        operationId: pending.operationId,
+        duplicate: true,
+      };
+    }
+    const delivery = runtime.activity === "busy" ? ("steer" as const) : ("turn" as const);
+    const operationId = `message-${request.batchId}`;
+    runtime.pendingBatches.set(request.batchId, {
+      messageIds: request.messageIds,
+      text: request.text,
+      delivery,
+      operationId,
+    });
+    runtime.activity = "busy";
+    if (options.flush) {
+      this.appendInboxMessage(orbId, request.messageIds, request.text, { delivery, operationId });
+    }
+    return {
+      v: 1,
+      messageId: request.batchId,
+      status: "queued",
+      delivery,
+      operationId,
+      duplicate: false,
+    };
+  }
+
+  /** Batch IDs the live runtime holds accepted but unflushed, in insertion order. */
+  pendingInboxBatchesOf(orbId: string): readonly string[] {
+    return [...(this.orbState(orbId).host?.runtime?.pendingBatches.keys() ?? [])];
+  }
+
+  /** The runtime's flush gate runs: every pending batch reaches the session file. */
+  flushPendingInboxBatches(orbId: string): void {
+    const runtime = this.orbState(orbId).host?.runtime;
+    if (runtime === null || runtime === undefined) return;
+    for (const [, pending] of [...runtime.pendingBatches]) {
+      this.appendInboxMessage(orbId, pending.messageIds, pending.text, {
+        delivery: pending.delivery,
+        operationId: pending.operationId,
+      });
+    }
+  }
+
+  /**
+   * The `crash_before_enqueue` window: the incarnation handling a delivery dies
+   * before it touches Pi and its supervisor restarts it in place. Everything
+   * in memory — the pending batch set above — dies with it. The script is
+   * consumed along with the incarnation: a crash window is one-shot by
+   * construction, and a scenario that wants a second one scripts it again.
+   */
+  crashRuntimeBeforeEnqueue(task: SimulationTask, orbId: string): void {
+    this.restartRuntimeProcess(task, orbId);
+    this.orbState(orbId).deliverMessageScript = { kind: "ok" };
   }
 
   /**
@@ -419,6 +613,7 @@ export class FakeWorld {
       activity: "idle",
       sessionLoaded: false,
       turnResume: null,
+      pendingBatches: new Map(),
     };
   }
 
@@ -453,6 +648,27 @@ export class FakeWorld {
     if (runtime !== null && runtime !== undefined) {
       runtime.startedAtMonotonic = task.monotonicNow();
     }
+  }
+
+  /** How the orb's runtime answers inbox deliveries from now on. */
+  scriptDeliverMessage(orbId: string, script: DeliverMessageScript): void {
+    this.orbState(orbId).deliverMessageScript = script;
+  }
+
+  /**
+   * The delivery script of the orb whose host answers `baseUrl`. Deliberately
+   * not routed through `resolveRuntime`: a scripted rejection or hang is the
+   * answer the *host* gives, and must apply even while the runtime process
+   * behind it is dark.
+   */
+  deliverMessageScriptOf(baseUrl: string): DeliverMessageScript | null {
+    for (const state of this.orbs.values()) {
+      const host = state.host;
+      if (host !== null && `http://${host.ref.resourceId}:8080` === baseUrl) {
+        return state.deliverMessageScript;
+      }
+    }
+    return null;
   }
 
   setPullOutage(task: SimulationTask, orbId: string, durationMs: number): void {
@@ -662,6 +878,7 @@ export class FakeWorld {
       activity: "idle",
       sessionLoaded: false,
       turnResume: null,
+      pendingBatches: new Map(),
     };
   }
 
@@ -1079,27 +1296,62 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
     request: DeliverMessageClientRequest,
     context: OperationContext,
   ): ResultAsync<import("@pi-orb/protocol").DeliverOrbMessageResponse, RuntimeClientError> {
-    return this.req(task, FAILPOINTS.runtimeHealth, "deliver message", context, () => {
+    return this.req(task, FAILPOINTS.runtimeDeliverMessage, "deliver message", context, () => {
+      const script = this.world.deliverMessageScriptOf(request.baseUrl) ?? { kind: "ok" };
+      if (script.kind === "reject") {
+        return errAsync(clientError(script.code, script.message, script.retryable));
+      }
+      if (script.kind === "hang") {
+        // Accepted and never answered: the caller's deadline aborts the wait
+        // and the request comes back cancelled, exactly as a timed-out HTTP
+        // call does. A hang that outlives its own script is the same non-answer.
+        //
+        // The wait is deliberately chunked rather than one long timer. The
+        // scheduler explores late timer firings (`pickTimerBiasedEarliest`),
+        // and a single timer minutes beyond the scenario's own horizon lets
+        // that exploration teleport virtual time past *every* deadline in the
+        // simulation at once — a jump no stalled HTTP call can cause, which
+        // failed `pending-message-blocks-liveness` in ~1 schedule in 10 with
+        // the restart correctly issued, only 10 modeled minutes too late
+        // (2026-08-10). Short steps keep the non-answer and drop the jump.
+        const wait = async (): Promise<void> => {
+          const until = task.monotonicNow() + script.durationMs;
+          while (task.monotonicNow() < until) {
+            const remaining = until - task.monotonicNow();
+            await task.sleep(Math.min(remaining, HANG_STEP_MS), "scripted delivery hang", {
+              signal: context.signal,
+            });
+          }
+        };
+        return ResultAsync.fromPromise(wait(), () =>
+          clientError("cancelled", "deliver message: cancelled", true),
+        ).andThen(() => errAsync(clientError("cancelled", "deliver message: no answer", true)));
+      }
       const state = this.world.resolveRuntime(request.baseUrl, task);
       if (state === null) return errAsync(clientError("unreachable", "no runtime", true));
-      const delivery =
-        state.host?.runtime?.activity === "busy" ? ("steer" as const) : ("turn" as const);
+      const orbId = state.host?.orbId ?? "";
+      if (script.kind === "crash_before_enqueue") {
+        // The request reached the runtime; nothing of it survives.
+        this.world.crashRuntimeBeforeEnqueue(task, orbId);
+        return errAsync(
+          clientError("unreachable", "deliver message: runtime died before enqueue", true),
+        );
+      }
       const text = request.content
         .filter((block) => block.type === "text")
         .map((block) => block.text)
         .join("\n");
-      this.world.appendInboxMessage(state.host?.orbId ?? "", request.messageIds, text);
-      if (state.host?.runtime !== null && state.host?.runtime !== undefined) {
-        state.host.runtime.activity = "busy";
+      const response = this.world.deliverInboxBatch(
+        orbId,
+        { batchId: request.messageId, messageIds: request.messageIds, text },
+        { flush: script.kind !== "enqueue_without_persist" },
+      );
+      if (script.kind === "persist_without_ack") {
+        // Durable in the session, and the answer never arrives: the control
+        // plane must learn about this delivery from replication alone.
+        return errAsync(clientError("cancelled", "deliver message: answer lost", true));
       }
-      return okAsync({
-        v: 1 as const,
-        messageId: request.messageId,
-        status: "persisted" as const,
-        delivery,
-        operationId: `message-${request.messageId}`,
-        duplicate: false,
-      });
+      return okAsync(response);
     });
   }
 

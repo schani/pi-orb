@@ -144,7 +144,14 @@ export interface ControlPlaneStore {
     params: { orbId: string; now: number; nextAttemptAt: number },
   ): ResultAsync<void, StoreError>;
 
-  /** Durable send-anytime FIFO admission, including stopped/failed startup. */
+  /**
+   * Durable send-anytime FIFO admission: inserts the message, records the wake
+   * intent when the orb cannot take delivery now (`stopping`/`stopped`/
+   * `failed`) together with the orb `state_version` it was admitted against,
+   * and refreshes `last_busy_at`. It deliberately performs no lifecycle
+   * transition — the reconciler's terminal backstop owns the single
+   * message-driven transition (docs/lifecycle.md).
+   */
   enqueueOrbMessage(
     task: SimulationTask,
     params: {
@@ -158,15 +165,17 @@ export interface ControlPlaneStore {
     StoreError | StateConflict
   >;
   listOrbMessages(task: SimulationTask, orbId: string): ResultAsync<OrbMessageRow[], StoreError>;
-  getNextOrbMessage(
-    task: SimulationTask,
-    orbId: string,
-  ): ResultAsync<OrbMessageRow | null, StoreError>;
   /** Atomically freezes all currently queued messages into the next FIFO delivery batch. */
   claimNextOrbMessageBatch(
     task: SimulationTask,
     params: { orbId: string; now: number },
   ): ResultAsync<OrbMessageRow[], StoreError>;
+  /**
+   * Record how the runtime admitted a batch. Replication may already have
+   * marked the same rows `delivered` (the inbox record can be pulled before
+   * this call lands), so the note applies its metadata to delivered rows too
+   * and never downgrades their status (docs/runtime-protocol.md).
+   */
   noteOrbMessageDelivery(
     task: SimulationTask,
     params: {
@@ -177,10 +186,39 @@ export interface ControlPlaneStore {
       now: number;
     },
   ): ResultAsync<void, StoreError>;
+  /**
+   * Terminal failure of one delivery batch: a runtime rejection no retry can
+   * improve on. The rows leave the outstanding set, so later messages are
+   * claimable, and keep the sanitized reason for the user.
+   */
+  failOrbMessageBatch(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      messageIds: readonly string[];
+      lastError: string;
+      now: number;
+    },
+  ): ResultAsync<void, StoreError>;
   clearOrbMessageAutoStart(
     task: SimulationTask,
     params: { orbId: string; now: number },
   ): ResultAsync<void, StoreError>;
+  /**
+   * The one message-driven lifecycle transition, in one transaction: enters
+   * `starting` if — and only if — some outstanding message still carries a
+   * wake intent that authorizes it in the orb's current state. From `stopped`
+   * any outstanding intent wakes, whatever its position in the FIFO; from
+   * `failed` only an intent admitted against the current `state_version` does,
+   * so a new send retries a failed boot once while a stranded intent never
+   * does. Returns null when no such intent is outstanding, so an explicit stop
+   * linearized after the intent cannot be undone by a stale read
+   * (docs/lifecycle.md).
+   */
+  casStartOrbForQueuedMessage(
+    task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<OrbRow | null, StoreError | StateConflict>;
 
   /** Atomically enter archiving and create its durable cleanup intent. */
   requestOrbArchive(

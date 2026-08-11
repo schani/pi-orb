@@ -90,6 +90,31 @@ describe("HistoryView turn structure", () => {
     expect(committedHtml.match(/queued while starting/g)).toHaveLength(1);
   });
 
+  it("shows a message the runtime rejected as failed, with its reason", () => {
+    const failed = {
+      id: "00000000-0000-4000-8000-000000000126",
+      orbId: "orb-1",
+      content: [{ type: "text" as const, text: "a payload the runtime refuses" }],
+      status: "failed" as const,
+      error: "400 invalid_request: message payload too large",
+      createdAt: "2026-08-10T00:00:00.000Z",
+      updatedAt: "2026-08-10T00:00:01.000Z",
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+        queuedMessages={[failed]}
+      />,
+    );
+    expect(html).toContain("You · failed");
+    expect(html).toContain("turn-failed");
+    expect(html).toContain("400 invalid_request: message payload too large");
+    expect(html).toContain("a payload the runtime refuses");
+  });
+
   it("renders compaction as a full-width divider outside the gutter turns", () => {
     const records: HistoryRecord[] = [
       message("u1", "user", "hello"),

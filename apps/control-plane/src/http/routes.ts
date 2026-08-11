@@ -14,12 +14,12 @@ import { Check } from "typebox/value";
 import {
   type CommandError,
   createOrb,
+  enqueueOrbMessage,
   requestOrbArchive,
   requestOrbDeletion,
   requestOrbStart,
   requestOrbStop,
 } from "../domain/lifecycle.ts";
-import { logOrbEvent } from "../domain/log.ts";
 import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
@@ -390,48 +390,15 @@ export function registerRoutes(
       if (JSON.stringify(request.body.content).length > 6 * 1024 * 1024) {
         return reply.status(400).send(httpError("invalid_request", "message is too large", false));
       }
-      const current = await deps.store.getOrb(task, request.params.orbId);
-      if (current.isErr()) {
-        return reply.status(503).send(httpError("unavailable", current.error.message, true));
-      }
-      if (current.value === null) {
-        return reply.status(404).send(httpError("not_found", "orb not found", false));
-      }
-      if (["deleting", "archiving", "archived"].includes(current.value.state)) {
-        return reply.status(409).send(httpError("conflict", "orb is read-only", false));
-      }
-      const enqueued = await deps.store.enqueueOrbMessage(task, {
+      // Admission and the reconciler nudge live in the domain command; the
+      // lifecycle transition a queued message may cause belongs to the
+      // reconciler, not to this caller (docs/lifecycle.md).
+      const enqueued = await enqueueOrbMessage(task, deps, {
         orbId: request.params.orbId,
         messageId: request.params.messageId,
         content: request.body.content,
-        now: task.wallNow(),
       });
-      if (enqueued.isErr()) {
-        const unavailable = enqueued.error.type === "store_error";
-        return reply
-          .status(unavailable ? 503 : 409)
-          .send(
-            httpError(
-              unavailable ? "unavailable" : "conflict",
-              unavailable ? enqueued.error.message : "message id exists with different content",
-              unavailable,
-            ),
-          );
-      }
-      deps.control.setNextAttemptAt(`reconcile:${request.params.orbId}`, 0);
-      if (!enqueued.value.duplicate) {
-        logOrbEvent(task, request.params.orbId, "message-queued", {
-          message_id: request.params.messageId,
-          previous_state: current.value.state,
-        });
-        if (enqueued.value.orb.state !== current.value.state) {
-          logOrbEvent(task, request.params.orbId, "transition", {
-            from: current.value.state,
-            to: enqueued.value.orb.state,
-            reason: "queued_message",
-          });
-        }
-      }
+      if (enqueued.isErr()) return sendCommandError(reply, enqueued.error);
       return reply.status(202).send(messageView(enqueued.value.message));
     },
   );

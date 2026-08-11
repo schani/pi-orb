@@ -57,6 +57,12 @@ export interface OrbMessageRow {
   readonly operationId: string | null;
   readonly deliveryBatchId: string | null;
   readonly autoStart: boolean;
+  /**
+   * The orb `state_version` this wake intent was admitted against, or null
+   * when the message carries no intent. A `failed` orb wakes only for an
+   * intent naming its current version (docs/lifecycle.md).
+   */
+  readonly wakeStateVersion: number | null;
   readonly lastError: string | null;
   readonly createdAt: number;
   readonly updatedAt: number;
