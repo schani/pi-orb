@@ -11,6 +11,7 @@ import {
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { Check } from "typebox/value";
+import type { StoreError } from "../domain/errors.ts";
 import {
   type CommandError,
   createOrb,
@@ -23,7 +24,7 @@ import {
 import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
-import { requestProjectDeletion } from "../domain/project-deletion.ts";
+import { type ProjectCommandError, requestProjectDeletion } from "../domain/project-deletion.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
 function httpError(
@@ -55,14 +56,39 @@ function messageView(row: OrbMessageRow) {
   };
 }
 
-function sendCommandError(reply: FastifyReply, error: CommandError): FastifyReply {
-  const status = error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 503;
+/**
+ * A store failure as an HTTP answer. A `StoreError` with code `invariant` is a
+ * deterministic bug of ours — a bad parameter encoding, a column the schema
+ * does not have — so it answers a non-retryable 500 instead of the 503 that
+ * would tell every client to keep trying
+ * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
+ */
+function sendStoreError(reply: FastifyReply, error: StoreError): FastifyReply {
+  return error.code === "invariant"
+    ? reply.status(500).send(httpError("internal", error.message, false))
+    : reply.status(503).send(httpError("unavailable", error.message, true));
+}
+
+function sendCommandError(
+  reply: FastifyReply,
+  error: CommandError | ProjectCommandError,
+): FastifyReply {
+  const status =
+    error.code === "not_found"
+      ? 404
+      : error.code === "conflict"
+        ? 409
+        : error.code === "internal"
+          ? 500
+          : 503;
   const code =
     error.code === "not_found"
       ? "not_found"
       : error.code === "conflict"
         ? "conflict"
-        : "unavailable";
+        : error.code === "internal"
+          ? "internal"
+          : "unavailable";
   return reply.status(status).send(httpError(code, error.message, error.retryable));
 }
 
@@ -80,7 +106,7 @@ export function registerRoutes(
   app.get("/api/v1/projects", async (_request, reply) => {
     const projects = await deps.store.listProjects(task);
     if (projects.isErr()) {
-      return reply.status(503).send(httpError("unavailable", projects.error.message, true));
+      return sendStoreError(reply, projects.error);
     }
     const items = [];
     for (const project of projects.value) {
@@ -94,11 +120,11 @@ export function registerRoutes(
         if (progress.error.type === "project_conflict" && progress.error.reason === "not_found") {
           continue;
         }
-        const message =
-          progress.error.type === "store_error"
-            ? progress.error.message
-            : "project deletion progress unavailable";
-        return reply.status(503).send(httpError("unavailable", message, true));
+        return progress.error.type === "store_error"
+          ? sendStoreError(reply, progress.error)
+          : reply
+              .status(503)
+              .send(httpError("unavailable", "project deletion progress unavailable", true));
       }
       items.push(projectView(project, progress.value));
     }
@@ -130,7 +156,7 @@ export function registerRoutes(
     }
     const existing = await deps.store.getProject(task, body.id);
     if (existing.isErr()) {
-      return reply.status(503).send(httpError("unavailable", existing.error.message, true));
+      return sendStoreError(reply, existing.error);
     }
     if (existing.value !== null) {
       if (existing.value.state === "deleting") {
@@ -159,7 +185,7 @@ export function registerRoutes(
     };
     const inserted = await deps.store.insertProject(task, row);
     if (inserted.isErr()) {
-      return reply.status(503).send(httpError("unavailable", inserted.error.message, true));
+      return sendStoreError(reply, inserted.error);
     }
     return reply.status(201).send(projectView(inserted.value));
   });
@@ -169,7 +195,7 @@ export function registerRoutes(
     async (request, reply) => {
       const project = await deps.store.getProject(task, request.params.projectId);
       if (project.isErr()) {
-        return reply.status(503).send(httpError("unavailable", project.error.message, true));
+        return sendStoreError(reply, project.error);
       }
       if (project.value === null) {
         return reply.status(404).send(httpError("not_found", "project not found", false));
@@ -180,11 +206,11 @@ export function registerRoutes(
         if (progress.error.type === "project_conflict" && progress.error.reason === "not_found") {
           return reply.status(404).send(httpError("not_found", "project not found", false));
         }
-        const message =
-          progress.error.type === "store_error"
-            ? progress.error.message
-            : "project deletion progress unavailable";
-        return reply.status(503).send(httpError("unavailable", message, true));
+        return progress.error.type === "store_error"
+          ? sendStoreError(reply, progress.error)
+          : reply
+              .status(503)
+              .send(httpError("unavailable", "project deletion progress unavailable", true));
       }
       return reply.send(projectView(project.value, progress.value));
     },
@@ -215,13 +241,13 @@ export function registerRoutes(
         now: task.wallNow(),
       });
       if (updated.isErr()) {
-        return reply.status(503).send(httpError("unavailable", updated.error.message, true));
+        return sendStoreError(reply, updated.error);
       }
       if (updated.value !== null) return reply.send(projectView(updated.value));
 
       const current = await deps.store.getProject(task, request.params.projectId);
       if (current.isErr()) {
-        return reply.status(503).send(httpError("unavailable", current.error.message, true));
+        return sendStoreError(reply, current.error);
       }
       return current.value === null
         ? reply.status(404).send(httpError("not_found", "project not found", false))
@@ -249,11 +275,11 @@ export function registerRoutes(
             }),
           );
         }
-        const message =
-          progress.error.type === "store_error"
-            ? progress.error.message
-            : "project deletion progress unavailable";
-        return reply.status(503).send(httpError("unavailable", message, true));
+        return progress.error.type === "store_error"
+          ? sendStoreError(reply, progress.error)
+          : reply
+              .status(503)
+              .send(httpError("unavailable", "project deletion progress unavailable", true));
       }
       return reply.status(202).send(projectView(deleted.value, progress.value));
     },
@@ -264,14 +290,14 @@ export function registerRoutes(
     async (request, reply) => {
       const project = await deps.store.getProject(task, request.params.projectId);
       if (project.isErr()) {
-        return reply.status(503).send(httpError("unavailable", project.error.message, true));
+        return sendStoreError(reply, project.error);
       }
       if (project.value === null) {
         return reply.status(404).send(httpError("not_found", "project not found", false));
       }
       const orbs = await deps.store.listOrbsByProject(task, request.params.projectId);
       if (orbs.isErr()) {
-        return reply.status(503).send(httpError("unavailable", orbs.error.message, true));
+        return sendStoreError(reply, orbs.error);
       }
       return reply.send({ items: orbs.value.map((orb) => orbView(orb, deps.control, config)) });
     },
@@ -304,7 +330,7 @@ export function registerRoutes(
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId", async (request, reply) => {
     const orb = await deps.store.getOrb(task, request.params.orbId);
     if (orb.isErr()) {
-      return reply.status(503).send(httpError("unavailable", orb.error.message, true));
+      return sendStoreError(reply, orb.error);
     }
     if (orb.value === null) {
       return reply.status(404).send(httpError("not_found", "orb not found", false));
@@ -331,7 +357,9 @@ export function registerRoutes(
             ? 409
             : updated.error.code === "invalid_name"
               ? 400
-              : 503;
+              : updated.error.code === "invariant"
+                ? 500
+                : 503;
       const code =
         updated.error.code === "not_found"
           ? "not_found"
@@ -339,7 +367,9 @@ export function registerRoutes(
             ? "conflict"
             : updated.error.code === "invalid_name"
               ? "invalid_request"
-              : "unavailable";
+              : updated.error.code === "invariant"
+                ? "internal"
+                : "unavailable";
       return reply
         .status(status)
         .send(httpError(code, updated.error.message, updated.error.retryable));
@@ -405,20 +435,19 @@ export function registerRoutes(
 
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/messages", async (request, reply) => {
     const orb = await deps.store.getOrb(task, request.params.orbId);
-    if (orb.isErr())
-      return reply.status(503).send(httpError("unavailable", orb.error.message, true));
+    if (orb.isErr()) return sendStoreError(reply, orb.error);
     if (orb.value === null)
       return reply.status(404).send(httpError("not_found", "orb not found", false));
     const messages = await deps.store.listOrbMessages(task, request.params.orbId);
     return messages.isErr()
-      ? reply.status(503).send(httpError("unavailable", messages.error.message, true))
+      ? sendStoreError(reply, messages.error)
       : reply.send({ items: messages.value.map(messageView) });
   });
 
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/history", async (request, reply) => {
     const orb = await deps.store.getOrb(task, request.params.orbId);
     if (orb.isErr()) {
-      return reply.status(503).send(httpError("unavailable", orb.error.message, true));
+      return sendStoreError(reply, orb.error);
     }
     if (orb.value === null) {
       return reply.status(404).send(httpError("not_found", "orb not found", false));
@@ -430,7 +459,7 @@ export function registerRoutes(
     }
     const snapshot = await deps.store.readHistorySnapshot(task, request.params.orbId);
     if (snapshot.isErr()) {
-      return reply.status(503).send(httpError("unavailable", snapshot.error.message, true));
+      return sendStoreError(reply, snapshot.error);
     }
     return reply.send({ orbId: request.params.orbId, ...snapshot.value });
   });

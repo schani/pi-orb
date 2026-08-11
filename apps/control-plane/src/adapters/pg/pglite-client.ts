@@ -1,9 +1,20 @@
 import { PGlite, type Transaction } from "@electric-sql/pglite";
 import { err, type Result, ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
-import { mapPgError, type PgQueryResult, type PostgreSQLClient } from "./client.ts";
+import {
+  mapPgError,
+  type PgQueryResult,
+  type PostgreSQLClient,
+  withPreparedParams,
+} from "./client.ts";
 
-/** Embedded PostgreSQL client for local development and adapter tests. */
+/**
+ * Embedded PostgreSQL client for local development and adapter tests.
+ *
+ * PGlite serializes parameters by the placeholder's OID, so a `jsonParam`
+ * value is handed over raw — pre-stringifying it, as the node-postgres client
+ * must, would double-encode it (see the parameter-intent note in client.ts).
+ */
 export class PGliteClient implements PostgreSQLClient {
   private readonly database: PGlite;
 
@@ -12,10 +23,12 @@ export class PGliteClient implements PostgreSQLClient {
   }
 
   query(text: string, values: unknown[] = []): ResultAsync<PgQueryResult, StoreError> {
-    return ResultAsync.fromPromise(this.database.query(text, values), mapPgError).map((result) => ({
-      rows: result.rows as Record<string, unknown>[],
-      rowCount: result.affectedRows ?? 0,
-    }));
+    return withPreparedParams(values, "pglite", (prepared) =>
+      ResultAsync.fromPromise(this.database.query(text, prepared), mapPgError).map((result) => ({
+        rows: result.rows as Record<string, unknown>[],
+        rowCount: result.affectedRows ?? 0,
+      })),
+    );
   }
 
   transaction<T, E>(
@@ -44,9 +57,11 @@ export class PGliteClient implements PostgreSQLClient {
     transaction: Transaction,
   ): (text: string, values?: unknown[]) => ResultAsync<PgQueryResult, StoreError> {
     return (text: string, values: unknown[] = []) =>
-      ResultAsync.fromPromise(transaction.query(text, values), mapPgError).map((result) => ({
-        rows: result.rows as Record<string, unknown>[],
-        rowCount: result.affectedRows ?? 0,
-      }));
+      withPreparedParams(values, "pglite", (prepared) =>
+        ResultAsync.fromPromise(transaction.query(text, prepared), mapPgError).map((result) => ({
+          rows: result.rows as Record<string, unknown>[],
+          rowCount: result.affectedRows ?? 0,
+        })),
+      );
   }
 }

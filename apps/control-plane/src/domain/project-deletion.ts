@@ -1,12 +1,14 @@
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
+import type { StoreError } from "./errors.ts";
 import { logProjectEvent } from "./log.ts";
 import type { ProjectRow } from "./orb.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
 
 export interface ProjectCommandError {
   readonly type: "command_error";
-  readonly code: "not_found" | "conflict" | "unavailable";
+  /** `internal` is a deterministic store bug (`StoreError` code `invariant`): never retryable. */
+  readonly code: "not_found" | "conflict" | "unavailable" | "internal";
   readonly message: string;
   readonly retryable: boolean;
 }
@@ -16,6 +18,11 @@ const commandError = (
   message: string,
   retryable: boolean,
 ): ProjectCommandError => ({ type: "command_error", code, message, retryable });
+
+const storeCommandError = (error: StoreError): ProjectCommandError =>
+  error.code === "invariant"
+    ? commandError("internal", error.message, false)
+    : commandError("unavailable", error.message, error.retryable);
 
 /**
  * Atomically fence child creation and fan permanent deletion out to every
@@ -40,7 +47,7 @@ export function requestProjectDeletion(
           ? err(commandError("not_found", `project ${projectId} not found`, false))
           : err(commandError("conflict", "project deletion conflicted", true));
       }
-      return err(commandError("unavailable", requested.error.message, requested.error.retryable));
+      return err(storeCommandError(requested.error));
     }
     for (const orb of requested.value.orbs) {
       deps.control.markStopping(orb.id);
@@ -64,8 +71,19 @@ export function requestProjectDeletion(
 export type ProjectDeletionOutcome =
   | { readonly type: "noop" }
   | { readonly type: "waiting" }
-  | { readonly type: "retryable"; readonly message: string }
+  | {
+      readonly type: "retryable";
+      readonly message: string;
+      /** No retry can clear this one: a `StoreError` with code `invariant`. */
+      readonly invariant?: boolean;
+    }
   | { readonly type: "finalized" };
+
+/** Classify a store failure into the retry channel, preserving `invariant`. */
+const storeRetry = (error: StoreError): ProjectDeletionOutcome =>
+  error.code === "invariant"
+    ? { type: "retryable", message: error.message, invariant: true }
+    : { type: "retryable", message: error.message };
 
 /** One recoverable project-finalization pass. Child cleanup stays orb-owned. */
 export async function reconcileProjectDeletionOnce(
@@ -83,13 +101,12 @@ export async function reconcileProjectDeletionOnce(
     if (repaired.error.type === "project_conflict" && repaired.error.reason === "not_found") {
       return { type: "noop" };
     }
-    return {
-      type: "retryable",
-      message:
-        repaired.error.type === "store_error"
-          ? repaired.error.message
-          : `project deletion repair conflict: ${repaired.error.reason}`,
-    };
+    return repaired.error.type === "store_error"
+      ? storeRetry(repaired.error)
+      : {
+          type: "retryable",
+          message: `project deletion repair conflict: ${repaired.error.reason}`,
+        };
   }
   if (!repaired.value.newlyRequested && repaired.value.repaired > 0) {
     logProjectEvent(task, projectId, "deletion-fanout-repaired", {
@@ -103,13 +120,9 @@ export async function reconcileProjectDeletionOnce(
   }
   const progress = await deps.store.getProjectDeletionProgress(task, projectId);
   if (progress.isErr()) {
-    return {
-      type: "retryable",
-      message:
-        progress.error.type === "store_error"
-          ? progress.error.message
-          : `project progress conflict: ${progress.error.reason}`,
-    };
+    return progress.error.type === "store_error"
+      ? storeRetry(progress.error)
+      : { type: "retryable", message: `project progress conflict: ${progress.error.reason}` };
   }
   const blockerKey = `project-delete-blocked:${projectId}`;
   if (deps.control.noteCondition(blockerKey, progress.value.blocked > 0)) {
@@ -132,13 +145,9 @@ export async function reconcileProjectDeletionOnce(
     ) {
       return { type: "waiting" };
     }
-    return {
-      type: "retryable",
-      message:
-        finalized.error.type === "store_error"
-          ? finalized.error.message
-          : `project finalization conflict: ${finalized.error.reason}`,
-    };
+    return finalized.error.type === "store_error"
+      ? storeRetry(finalized.error)
+      : { type: "retryable", message: `project finalization conflict: ${finalized.error.reason}` };
   }
   logProjectEvent(task, projectId, "deleted", { outcome: "all_children_resources_removed" });
   return { type: "finalized" };

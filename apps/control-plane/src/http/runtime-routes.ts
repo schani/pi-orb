@@ -172,7 +172,10 @@ export function registerRuntimeRoutes(
         ? 503
         : generated.error.code === "not_found"
           ? 404
-          : 400;
+          : // A deterministic store bug is ours, not a bad request.
+            generated.error.code === "invariant"
+            ? 500
+            : 400;
       return reply
         .status(status)
         .send({ error: generated.error.code, message: generated.error.message });

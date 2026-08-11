@@ -20,7 +20,8 @@ export type DatabaseOptions =
   | { readonly kind: "postgresql"; readonly connectionString: string }
   | { readonly kind: "pglite"; readonly path?: string };
 
-function compose(client: PostgreSQLClient): ControlPlaneDatabase {
+/** Compose the stores over an already-built client (also the test seam for a raw client). */
+export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPlaneDatabase {
   return {
     store: new PostgreSQLControlPlaneStore(client),
     pointers: new PostgreSQLCredentialPointerStore(client),
@@ -33,10 +34,11 @@ export function openControlPlaneDatabase(
   options: DatabaseOptions,
 ): Result<ControlPlaneDatabase, StoreError> {
   try {
-    if (options.kind === "postgresql") return ok(compose(new PgClient(options.connectionString)));
+    if (options.kind === "postgresql")
+      return ok(composeControlPlaneDatabase(new PgClient(options.connectionString)));
     if (options.path !== undefined)
       mkdirSync(dirname(options.path), { recursive: true, mode: 0o700 });
-    return ok(compose(new PGliteClient(options.path)));
+    return ok(composeControlPlaneDatabase(new PGliteClient(options.path)));
   } catch (error) {
     return err({
       type: "store_error",

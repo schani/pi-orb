@@ -1,7 +1,10 @@
 import type { HarnessSessionMetadata, HistoryRecord } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
+import { err, ok } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ControlPlaneDatabase } from "../adapters/database.ts";
+import type { PostgreSQLClient } from "../adapters/pg/client.ts";
+import type { StoreError } from "../domain/errors.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type { ControlPlaneStore, CredentialPointerStore } from "../domain/ports.ts";
 
@@ -61,14 +64,28 @@ const second: HistoryRecord = {
   overflow: {},
 };
 
-export function storeContractTests(name: string, open: () => Promise<ControlPlaneDatabase>): void {
+/**
+ * The store contract, run against every PostgreSQL client. The raw `client` is
+ * part of the contract: PGlite and node-postgres bind parameters differently,
+ * so the parameter guard has to hold on both (see the parameter-intent note in
+ * `adapters/pg/client.ts`).
+ */
+export interface StoreContractSubject {
+  readonly database: ControlPlaneDatabase;
+  readonly client: PostgreSQLClient;
+}
+
+export function storeContractTests(name: string, open: () => Promise<StoreContractSubject>): void {
   describe(`${name} store contract`, () => {
     let database: ControlPlaneDatabase;
+    let client: PostgreSQLClient;
     let store: ControlPlaneStore;
     let pointers: CredentialPointerStore;
 
     beforeEach(async () => {
-      database = await open();
+      const subject = await open();
+      database = subject.database;
+      client = subject.client;
       const migrated = await database.migrate();
       expect(migrated.isOk()).toBe(true);
       store = database.store;
@@ -693,6 +710,71 @@ export function storeContractTests(name: string, open: () => Promise<ControlPlan
         first,
         second,
       ]);
+    });
+
+    // The regression from
+    // docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md: the
+    // message content array must survive the round trip through the `jsonb`
+    // column on *this* driver, and any structured parameter that forgot to
+    // declare its intent must fail as an `invariant` before the driver sees it.
+    it("round-trips structured jsonb parameters and refuses undeclared ones", async () => {
+      await seed();
+      const messageId = "00000000-0000-4000-8000-0000000000aa";
+      const content = [
+        { type: "text" as const, text: 'first block, with "quotes" and ünïcode' },
+        { type: "text" as const, text: "second block" },
+      ];
+      const queued = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId,
+        content,
+        now: 2_000,
+      });
+      expect(queued.isOk()).toBe(true);
+      expect(queued.isOk() && queued.value.message.content).toEqual(content);
+      const listed = await store.listOrbMessages(task, orb.id);
+      expect(listed.isOk() && listed.value[0]?.content).toEqual(content);
+      // The duplicate check compares the stored value against the raw JS one.
+      const duplicate = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId,
+        content,
+        now: 2_500,
+      });
+      expect(duplicate.isOk() && duplicate.value.duplicate).toBe(true);
+      // A stored session header is an object-shaped jsonb parameter.
+      expect(
+        (
+          await store.initOrVerifySession(task, orb.id, {
+            id: "session-jsonb",
+            overflow: { nested: { list: [1, 2, 3] } },
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.harnessSessionHeader).toEqual({
+        id: "session-jsonb",
+        overflow: { nested: { list: [1, 2, 3] } },
+      });
+
+      const bareArray = await client.query("SELECT $1::jsonb AS value", [[{ type: "text" }]]);
+      expect(bareArray.isErr() && bareArray.error.code).toBe("invariant");
+      expect(bareArray.isErr() && bareArray.error.retryable).toBe(false);
+      expect(bareArray.isErr() && bareArray.error.message).toContain("$1");
+      const bareObject = await client.query("SELECT $1::text, $2::jsonb AS value", [
+        "x",
+        { type: "text" },
+      ]);
+      expect(bareObject.isErr() && bareObject.error.code).toBe("invariant");
+      expect(bareObject.isErr() && bareObject.error.message).toContain("$2");
+      // The guard also holds inside a transaction-scoped query.
+      const inTransaction = await client.transaction<void, StoreError>(async (query) => {
+        const guarded = await query("SELECT $1::jsonb AS value", [[1, 2]]);
+        return guarded.isErr() ? err(guarded.error) : ok(undefined);
+      });
+      expect(inTransaction.isErr() && inTransaction.error.code).toBe("invariant");
+      // A genuine SQL/schema mistake classifies the same way.
+      const missingColumn = await client.query("SELECT no_such_column FROM orbs");
+      expect(missingColumn.isErr() && missingColumn.error.code).toBe("invariant");
     });
 
     it("implements credential pointer CAS", async () => {

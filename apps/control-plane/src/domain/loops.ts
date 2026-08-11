@@ -25,6 +25,16 @@ export type ReconcileOne = (
   orbId: string,
 ) => Promise<ReconcileOutcome>;
 
+/**
+ * A failure that no retry can clear (a `StoreError` with code `invariant`:
+ * wrong SQL, wrong parameter encoding) parks its subject instead of being
+ * re-attempted until someone deploys a fix. The park lives in this process's
+ * scheduling state, so a restart with corrected code resumes normally; the
+ * decision itself is on the durable `lifecycle:` log as an edge, once
+ * (docs/lifecycle.md, docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
+ */
+const PARKED_FOREVER = Number.POSITIVE_INFINITY;
+
 const POLLABLE_STATES: readonly OrbState[] = ["running"];
 const RECONCILABLE_STATES: readonly OrbState[] = [
   "creating",
@@ -65,14 +75,23 @@ export async function pollAllOnce(task: SimulationTask, deps: ControlPlaneDeps):
     // repeats are not, and a success closes the episode silently.
     if (outcome.type === "retryable") {
       if (deps.control.bumpRetryAttempts(key) === 1) {
-        logOrbEvent(task, orb.id, "pull-failed", { message: outcome.message });
+        logOrbEvent(task, orb.id, "pull-failed", {
+          message: outcome.message,
+          ...(outcome.invariant === true ? { invariant: true } : {}),
+        });
       }
     } else {
       deps.control.clearRetryAttempts(key);
     }
     // Retryable failures retry at the ordinary polling cadence (docs/history-replication.md); an
-    // integrity failure removed the orb from the pollable set.
-    deps.control.setNextAttemptAt(key, task.monotonicNow() + deps.constants.historyPullIntervalMs);
+    // integrity failure removed the orb from the pollable set, and an invariant
+    // failure parks this orb's pulls until the fix is deployed.
+    deps.control.setNextAttemptAt(
+      key,
+      outcome.type === "retryable" && outcome.invariant === true
+        ? PARKED_FOREVER
+        : task.monotonicNow() + deps.constants.historyPullIntervalMs,
+    );
   }
 }
 
@@ -102,8 +121,13 @@ function reconcileDelayMs(
       const attempts = deps.control.bumpRetryAttempts(retryKey);
       // Edge only: backoff retries this every few seconds until it clears.
       if (attempts === 1) {
-        logOrbEvent(task, orbId, "reconcile-retry", { state, message: outcome.message });
+        logOrbEvent(task, orbId, "reconcile-retry", {
+          state,
+          message: outcome.message,
+          ...(outcome.invariant === true ? { invariant: true } : {}),
+        });
       }
+      if (outcome.invariant === true) return PARKED_FOREVER;
       return Math.min(
         constants.retryBackoffCapMs,
         constants.retryBackoffBaseMs * 2 ** (attempts - 1),
@@ -315,13 +339,22 @@ export async function projectDeletionAllOnce(
   if (deps.control.noteCondition("project-deletion-loop:list", false)) {
     logEvent(task, "project-deletion-loop-recovered");
   }
+  const now = task.monotonicNow();
   for (const project of projects.value) {
+    const key = `project-deletion:${project.id}`;
+    // Only an invariant failure ever parks a project, so the ordinary sweep is
+    // unchanged: every deleting project is visited on every tick.
+    if (deps.control.getNextAttemptAt(key) > now) continue;
     const outcome = await reconcileProjectDeletionOnce(task, deps, project.id);
     const condition = `project-deletion-retry:${project.id}`;
     if (outcome.type === "retryable") {
       if (deps.control.noteCondition(condition, true)) {
-        logProjectEvent(task, project.id, "deletion-retry", { message: outcome.message });
+        logProjectEvent(task, project.id, "deletion-retry", {
+          message: outcome.message,
+          ...(outcome.invariant === true ? { invariant: true } : {}),
+        });
       }
+      if (outcome.invariant === true) deps.control.setNextAttemptAt(key, PARKED_FOREVER);
     } else if (deps.control.noteCondition(condition, false)) {
       logProjectEvent(task, project.id, "deletion-retry-recovered");
     }

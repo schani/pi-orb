@@ -1,9 +1,16 @@
 import type { OrbState } from "@pi-orb/protocol";
 
-/** Storage failure. `retryable` distinguishes outages from corruption. */
+/**
+ * Storage failure. `retryable` distinguishes outages from corruption.
+ *
+ * `invariant` is a deterministic bug — a bad parameter encoding, a missing
+ * column, malformed SQL — that no retry can fix. It must never be advertised
+ * as retryable to a client and no loop may keep re-attempting it
+ * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
+ */
 export interface StoreError {
   readonly type: "store_error";
-  readonly code: "unavailable" | "corruption";
+  readonly code: "unavailable" | "corruption" | "invariant";
   readonly message: string;
   readonly retryable: boolean;
 }

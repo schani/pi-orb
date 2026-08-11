@@ -198,3 +198,5 @@ interface ControlPlaneHttpError {
 ```
 
 Fastify handlers validate TypeBox schemas, call Result-returning services, and fold each result into an explicit response. They never use exceptions for normal HTTP control flow.
+
+`retryable` is a promise to the client, so a deterministic server-side bug must never claim it (decided 2026-08-11, from `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`): a store failure classified `invariant` — wrong SQL, a parameter the driver cannot encode (`docs/stack.md`) — answers `500` with code `internal` and `retryable: false`, never the `503`/`unavailable`/`retryable: true` reserved for real outages. The UI surfaces the message, so the user sees a failed action instead of an operation that silently retries forever.

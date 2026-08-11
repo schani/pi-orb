@@ -33,10 +33,30 @@ export type ReconcileOutcome =
     }
   | { readonly type: "progressed" }
   | { readonly type: "transitioned"; readonly toState: OrbState }
-  | { readonly type: "retryable"; readonly message: string }
+  | {
+      readonly type: "retryable";
+      readonly message: string;
+      /**
+       * The failure reached the retry channel but no retry can clear it: a
+       * `StoreError` with code `invariant`, i.e. our own SQL or parameter
+       * encoding is wrong (docs/lifecycle.md). The loops log it once and stop
+       * re-attempting this orb instead of spinning until someone deploys a fix.
+       */
+      readonly invariant?: boolean;
+    }
   | { readonly type: "conflict" };
 
-const retryable = (message: string): ReconcileOutcome => ({ type: "retryable", message });
+/** Failure carried by the retry channel; `invariant` propagates from a `StoreError`. */
+type RetryableSource =
+  | string
+  | { readonly message: string; readonly code?: string; readonly invariant?: boolean };
+
+const retryable = (source: RetryableSource): ReconcileOutcome => {
+  if (typeof source === "string") return { type: "retryable", message: source };
+  return source.code === "invariant" || source.invariant === true
+    ? { type: "retryable", message: source.message, invariant: true }
+    : { type: "retryable", message: source.message };
+};
 const waiting = (
   reason: "auth" | "readiness" | "host_transition" | "drain_blocked" | "deletion_quarantine",
 ) => ({ type: "waiting", reason }) as const;
@@ -215,9 +235,7 @@ async function failOrb(
     lastError: formatOrbFailure(code, message),
   });
   if (cas.isErr()) {
-    return cas.error.type === "state_conflict"
-      ? { type: "conflict" }
-      : retryable(cas.error.message);
+    return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
   }
   logOrbEvent(task, orb.id, "transition", {
     from: orb.state,
@@ -264,9 +282,7 @@ async function transitionTo(
     ...(extra?.stopReason !== undefined ? { stopReason: extra.stopReason } : {}),
   });
   if (cas.isErr()) {
-    return cas.error.type === "state_conflict"
-      ? { type: "conflict" }
-      : retryable(cas.error.message);
+    return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
   }
   logOrbEvent(task, orb.id, "transition", {
     from: orb.state,
@@ -290,7 +306,7 @@ async function reconcileCreateStart(
 
   // 1. Codex auth is a prerequisite for host work (docs/credentials.md).
   const auth = await deps.authGate.ensureAuth(task);
-  if (auth.isErr()) return retryable(auth.error.message);
+  if (auth.isErr()) return retryable(auth.error);
   const resolution = auth.value;
   if (resolution.status === "pending") {
     // Edge only: the readiness poll re-enters this branch every few seconds
@@ -332,7 +348,7 @@ async function reconcileCreateStart(
     if (reentered.isErr()) {
       return reentered.error.type === "state_conflict"
         ? { type: "conflict" }
-        : retryable(reentered.error.message);
+        : retryable(reentered.error);
     }
     deps.control.clearAuthBlocked(orb.id);
     logOrbEvent(task, orb.id, "auth-resolved", { reason: "state_reentered" });
@@ -358,7 +374,7 @@ async function reconcileCreateStart(
   let hostResourceId = orb.hostRef;
   if (hostResourceId === null) {
     const projectResult = await deps.store.getProject(task, orb.projectId);
-    if (projectResult.isErr()) return retryable(projectResult.error.message);
+    if (projectResult.isErr()) return retryable(projectResult.error);
     const project = projectResult.value;
     if (project === null) {
       return failOrb(task, deps, orb, "provider_failed", `project ${orb.projectId} not found`);
@@ -366,7 +382,7 @@ async function reconcileCreateStart(
     const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "no_host_ref");
     if (provisioned.isErr()) {
       return provisioned.error.retryable
-        ? retryable(provisioned.error.message)
+        ? retryable(provisioned.error)
         : failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
     }
     const updated = await deps.store.casUpdateFields(task, {
@@ -379,7 +395,7 @@ async function reconcileCreateStart(
     if (updated.isErr()) {
       return updated.error.type === "state_conflict"
         ? { type: "conflict" }
-        : retryable(updated.error.message);
+        : retryable(updated.error);
     }
     orb = updated.value;
     hostResourceId = provisioned.value.ref.resourceId;
@@ -389,7 +405,7 @@ async function reconcileCreateStart(
   const observed = await observeHost(task, deps, hostResourceId);
   if (observed.isErr()) {
     return observed.error.retryable
-      ? retryable(observed.error.message)
+      ? retryable(observed.error)
       : failOrb(task, deps, orb, "provider_failed", observed.error.message);
   }
   const observation = observed.value;
@@ -404,7 +420,7 @@ async function reconcileCreateStart(
     });
     // Definitive absence: idempotent provision restores the host (docs/lifecycle.md).
     const projectResult = await deps.store.getProject(task, orb.projectId);
-    if (projectResult.isErr()) return retryable(projectResult.error.message);
+    if (projectResult.isErr()) return retryable(projectResult.error);
     const project = projectResult.value;
     if (project === null) {
       return failOrb(task, deps, orb, "provider_failed", `project ${orb.projectId} not found`);
@@ -412,7 +428,7 @@ async function reconcileCreateStart(
     const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "host_absent");
     if (provisioned.isErr()) {
       return provisioned.error.retryable
-        ? retryable(provisioned.error.message)
+        ? retryable(provisioned.error)
         : failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
     }
     if (
@@ -432,7 +448,7 @@ async function reconcileCreateStart(
       if (updated.isErr()) {
         return updated.error.type === "state_conflict"
           ? { type: "conflict" }
-          : retryable(updated.error.message);
+          : retryable(updated.error);
       }
     }
     return { type: "progressed" };
@@ -472,7 +488,7 @@ async function reconcileCreateStart(
       );
       if (started.isErr()) {
         return started.error.retryable
-          ? retryable(started.error.message)
+          ? retryable(started.error)
           : failOrb(task, deps, orb, "provider_failed", started.error.message);
       }
       return { type: "progressed" };
@@ -571,7 +587,7 @@ async function reconcileCreateStart(
       if (updated.isErr()) {
         return updated.error.type === "state_conflict"
           ? { type: "conflict" }
-          : retryable(updated.error.message);
+          : retryable(updated.error);
       }
       deps.control.clearBootProbe(orb.id);
       const transitioned = await transitionTo(task, deps, updated.value, "running", {
@@ -638,7 +654,7 @@ async function reconcileRunning(
   const observed = await observeHost(task, deps, orb.hostRef);
   if (observed.isErr()) {
     return observed.error.retryable
-      ? retryable(observed.error.message)
+      ? retryable(observed.error)
       : failOrb(task, deps, orb, "provider_failed", observed.error.message);
   }
   const observation = observed.value;
@@ -676,13 +692,13 @@ async function reconcileRunning(
     const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
     if (stopped.isErr()) {
       return stopped.error.retryable
-        ? retryable(stopped.error.message)
+        ? retryable(stopped.error)
         : failOrb(task, deps, orb, "provider_failed", stopped.error.message);
     }
     const started = await startHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
     if (started.isErr()) {
       return started.error.retryable
-        ? retryable(started.error.message)
+        ? retryable(started.error)
         : failOrb(task, deps, orb, "provider_failed", started.error.message);
     }
     deps.control.clearRestartPending(orb.id);
@@ -707,7 +723,7 @@ async function reconcileRunning(
     orbId: orb.id,
     now: task.wallNow(),
   });
-  if (pendingBatch.isErr()) return retryable(pendingBatch.error.message);
+  if (pendingBatch.isErr()) return retryable(pendingBatch.error);
   if (pendingBatch.value.length > 0) {
     if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
     const messageIds = pendingBatch.value.map((message) => message.messageId);
@@ -729,7 +745,7 @@ async function reconcileRunning(
         ),
     );
     if (delivered.isErr()) {
-      if (delivered.error.retryable) return retryable(delivered.error.message);
+      if (delivered.error.retryable) return retryable(delivered.error);
       // A rejection the runtime will repeat for the same payload (an oversized
       // or malformed message) is terminal for this batch: redelivering it
       // forever would wedge every later message behind it. The rows leave the
@@ -741,7 +757,7 @@ async function reconcileRunning(
         lastError: delivered.error.message,
         now: task.wallNow(),
       });
-      if (failed.isErr()) return retryable(failed.error.message);
+      if (failed.isErr()) return retryable(failed.error);
       logOrbEvent(task, orb.id, "message-batch-failed", {
         batch_id: batchId,
         message_count: messageIds.length,
@@ -768,7 +784,7 @@ async function reconcileRunning(
       operationId: delivered.value.operationId,
       now: task.wallNow(),
     });
-    if (noted.isErr()) return retryable(noted.error.message);
+    if (noted.isErr()) return retryable(noted.error);
     if (!delivered.value.duplicate) {
       logOrbEvent(task, orb.id, "message-batch-dispatched", {
         batch_id: batchId,
@@ -832,7 +848,7 @@ async function reconcileStopping(
   const observed = await observeHost(task, deps, orb.hostRef);
   if (observed.isErr()) {
     return observed.error.retryable
-      ? retryable(observed.error.message)
+      ? retryable(observed.error)
       : failOrb(task, deps, orb, "provider_failed", observed.error.message);
   }
   const observation = observed.value;
@@ -841,7 +857,7 @@ async function reconcileStopping(
     // is not "already stopped": complete the restart so the drain can finish.
     if (observation !== null && deps.control.isRestartPending(orb.id)) {
       const started = await startHost(task, deps, orb.id, orb.hostRef, "complete_pending_restart");
-      if (started.isErr()) return retryable(started.error.message);
+      if (started.isErr()) return retryable(started.error);
       deps.control.clearRestartPending(orb.id);
       deps.control.resetLivenessBaseline(
         orb.id,
@@ -871,7 +887,7 @@ async function reconcileStopping(
     const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "drain_skipped");
     if (stopped.isErr()) {
       return stopped.error.retryable
-        ? retryable(stopped.error.message)
+        ? retryable(stopped.error)
         : failOrb(task, deps, orb, "provider_failed", stopped.error.message);
     }
     return transitionTo(task, deps, orb, "stopped", { reason: "drain_skipped" });
@@ -925,9 +941,9 @@ async function reconcileStopping(
     });
     deps.control.markRestartPending(orb.id);
     const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
-    if (stopped.isErr()) return retryable(stopped.error.message);
+    if (stopped.isErr()) return retryable(stopped.error);
     const started = await startHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
-    if (started.isErr()) return retryable(started.error.message);
+    if (started.isErr()) return retryable(started.error);
     deps.control.clearRestartPending(orb.id);
     deps.control.resetLivenessBaseline(
       orb.id,
@@ -949,7 +965,7 @@ async function reconcileStopping(
       const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "drain_complete");
       if (stopped.isErr()) {
         return stopped.error.retryable
-          ? retryable(stopped.error.message)
+          ? retryable(stopped.error)
           : failOrb(task, deps, orb, "provider_failed", stopped.error.message);
       }
       return transitionTo(task, deps, orb, "stopped", { reason: "drain_complete" });
@@ -992,7 +1008,7 @@ async function reconcileResourceDisposal(
       message: `resource cleanup: ${cleaned.error.message}`,
       now: task.wallNow(),
     });
-    return retryable(cleaned.error.message);
+    return retryable(cleaned.error);
   }
 
   const destroyed = await destroyHost(task, deps, orb.id);
@@ -1002,11 +1018,11 @@ async function reconcileResourceDisposal(
       message: `resource cleanup: ${destroyed.error.message}`,
       now: task.wallNow(),
     });
-    return retryable(destroyed.error.message);
+    return retryable(destroyed.error);
   }
 
   const intent = await deps.store.getOrbDeletion(task, orb.id);
-  if (intent.isErr()) return retryable(intent.error.message);
+  if (intent.isErr()) return retryable(intent.error);
   if (intent.value === null) return retryable(`${orb.state} orb has no cleanup intent`);
   if (intent.value.lastError !== null || orb.lastError !== null) {
     const cleared = await deps.store.recordOrbDeletionError(task, {
@@ -1014,7 +1030,7 @@ async function reconcileResourceDisposal(
       message: null,
       now: task.wallNow(),
     });
-    if (cleared.isErr()) return retryable(cleared.error.message);
+    if (cleared.isErr()) return retryable(cleared.error);
   }
   if (task.wallNow() < intent.value.cleanupAfter) return waiting("deletion_quarantine");
   return null;
@@ -1028,7 +1044,7 @@ async function reconcileDeleting(
   deps.control.markStopping(orb.id);
   deps.control.closeBrowserConnections(orb.id);
   const intent = await deps.store.getOrbDeletion(task, orb.id);
-  if (intent.isErr()) return retryable(intent.error.message);
+  if (intent.isErr()) return retryable(intent.error);
   if (intent.value === null || intent.value.kind !== "delete") {
     return retryable("deleting orb has no deletion cleanup intent");
   }
@@ -1041,7 +1057,7 @@ async function reconcileDeleting(
   if (finalized.isErr()) {
     return finalized.error.type === "state_conflict"
       ? { type: "conflict" }
-      : retryable(finalized.error.message);
+      : retryable(finalized.error);
   }
   deps.control.clearOrb(orb.id);
   logOrbEvent(task, orb.id, "deleted", { outcome: "all_resources_removed" });
@@ -1056,7 +1072,7 @@ async function reconcileArchiving(
   deps.control.markStopping(orb.id);
   deps.control.closeBrowserConnections(orb.id);
   const intent = await deps.store.getOrbDeletion(task, orb.id);
-  if (intent.isErr()) return retryable(intent.error.message);
+  if (intent.isErr()) return retryable(intent.error);
   if (intent.value === null || intent.value.kind !== "archive") {
     return retryable("archiving orb has no archive cleanup intent");
   }
@@ -1073,7 +1089,7 @@ async function reconcileArchiving(
         return retryable(message);
       }
       const observed = await observeHost(task, deps, orb.hostRef);
-      if (observed.isErr()) return retryable(observed.error.message);
+      if (observed.isErr()) return retryable(observed.error);
       if (observed.value === null) {
         const message = "archive cannot restore the authoritative runtime: host is absent";
         await deps.store.recordOrbDeletionError(task, {
@@ -1085,13 +1101,13 @@ async function reconcileArchiving(
       }
       if (observed.value.state === "stopped" || observed.value.state === "failed") {
         const started = await startHost(task, deps, orb.id, orb.hostRef, "archive_history_seal");
-        return started.isErr() ? retryable(started.error.message) : { type: "progressed" };
+        return started.isErr() ? retryable(started.error) : { type: "progressed" };
       }
       if (observed.value.state !== "running" || observed.value.runtimeAddress === undefined) {
         return waiting("readiness");
       }
       const pulled = await pollOrbUntilCaughtUp(task, deps, orb.id);
-      if (pulled.type === "retryable") return retryable(pulled.message);
+      if (pulled.type === "retryable") return retryable(pulled);
       if (pulled.type === "integrity") {
         const message = `archive blocked by replication integrity: ${pulled.reason}`;
         await deps.store.recordOrbDeletionError(task, {
@@ -1107,7 +1123,7 @@ async function reconcileArchiving(
       }
     }
     const current = await deps.store.getOrb(task, orb.id);
-    if (current.isErr()) return retryable(current.error.message);
+    if (current.isErr()) return retryable(current.error);
     if (current.value === null || current.value.state !== "archiving") return { type: "conflict" };
     const sealed = await deps.store.sealOrbArchive(task, {
       orbId: orb.id,
@@ -1119,7 +1135,7 @@ async function reconcileArchiving(
     if (sealed.isErr())
       return sealed.error.type === "state_conflict"
         ? { type: "conflict" }
-        : retryable(sealed.error.message);
+        : retryable(sealed.error);
     logOrbEvent(task, orb.id, "archive-history-sealed", {
       cursor: current.value.replicationCursor,
       head: current.value.replicatedHeadId,
@@ -1137,7 +1153,7 @@ async function reconcileArchiving(
   if (finalized.isErr())
     return finalized.error.type === "state_conflict"
       ? { type: "conflict" }
-      : retryable(finalized.error.message);
+      : retryable(finalized.error);
   deps.control.clearOrb(orb.id);
   logOrbEvent(task, orb.id, "archived", { outcome: "transcript_retained_resources_removed" });
   return { type: "transitioned", toState: "archived" };
@@ -1174,9 +1190,7 @@ async function reconcileTerminalBackstop(
     now: task.wallNow(),
   });
   if (woken.isErr()) {
-    return woken.error.type === "state_conflict"
-      ? { type: "conflict" }
-      : retryable(woken.error.message);
+    return woken.error.type === "state_conflict" ? { type: "conflict" } : retryable(woken.error);
   }
   if (woken.value !== null) {
     logOrbEvent(task, orb.id, "transition", {
@@ -1188,12 +1202,12 @@ async function reconcileTerminalBackstop(
   }
   if (orb.hostRef === null) return { type: "noop" };
   const observed = await observeHost(task, deps, orb.hostRef);
-  if (observed.isErr()) return retryable(observed.error.message);
+  if (observed.isErr()) return retryable(observed.error);
   const observation = observed.value;
   if (observation === null || observation.state === "stopped") return { type: "noop" };
   if (observation.state === "stopping") return waiting("host_transition");
   const stopped = await stopHost(task, deps, orb.id, orb.hostRef, `terminal_backstop:${orb.state}`);
-  if (stopped.isErr()) return retryable(stopped.error.message);
+  if (stopped.isErr()) return retryable(stopped.error);
   return { type: "progressed" };
 }
 
@@ -1205,7 +1219,7 @@ export async function reconcileOrbOnce(
   orbId: string,
 ): Promise<ReconcileOutcome> {
   const orbResult = await deps.store.getOrb(task, orbId);
-  if (orbResult.isErr()) return retryable(orbResult.error.message);
+  if (orbResult.isErr()) return retryable(orbResult.error);
   const orb = orbResult.value;
   if (orb === null) return { type: "noop" };
   // Everything this process remembers is scoped to the orb's current visit to
@@ -1237,7 +1251,13 @@ export async function reconcileOrbOnce(
 
 export interface CommandError {
   readonly type: "command_error";
-  readonly code: "not_found" | "conflict" | "unavailable";
+  /**
+   * `internal` is a deterministic store bug (`StoreError` code `invariant`):
+   * the caller must not retry it, so it answers 500 with `retryable: false`
+   * rather than a 503 that invites a retry loop
+   * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
+   */
+  readonly code: "not_found" | "conflict" | "unavailable" | "internal";
   readonly message: string;
   readonly retryable: boolean;
 }
@@ -1252,10 +1272,17 @@ function commandError(
   return { type: "command_error", code, message, retryable: retryable_ };
 }
 
+/** A store failure as a command failure: `invariant` is internal, never retryable. */
+function mapStoreError(error: StoreError): CommandError {
+  return error.code === "invariant"
+    ? commandError("internal", error.message, false)
+    : commandError("unavailable", error.message, error.retryable);
+}
+
 function mapCasError(error: StoreError | StateConflict): CommandError {
   return error.type === "state_conflict"
     ? commandError("conflict", "concurrent state change", true)
-    : commandError("unavailable", error.message, error.retryable);
+    : mapStoreError(error);
 }
 
 /** Create inserts `creating` (docs/control-plane-api.md: creation also requests start). */
@@ -1267,7 +1294,7 @@ export function createOrb(
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     const projectResult = await deps.store.getProject(task, params.projectId);
     if (projectResult.isErr()) {
-      return err(commandError("unavailable", projectResult.error.message, true));
+      return err(mapStoreError(projectResult.error));
     }
     if (projectResult.value === null) {
       return err(commandError("not_found", `project ${params.projectId} not found`, false));
@@ -1276,7 +1303,7 @@ export function createOrb(
       return err(commandError("conflict", "project is being permanently deleted", false));
     }
     const existing = await deps.store.getOrb(task, params.orbId);
-    if (existing.isErr()) return err(commandError("unavailable", existing.error.message, true));
+    if (existing.isErr()) return err(mapStoreError(existing.error));
     if (existing.value !== null) {
       if (existing.value.state === "deleting") {
         return err(commandError("conflict", "orb is being permanently deleted", false));
@@ -1321,7 +1348,7 @@ export function createOrb(
           ? err(commandError("not_found", `project ${params.projectId} not found`, false))
           : err(commandError("conflict", "project is being permanently deleted", false));
       }
-      return err(commandError("unavailable", inserted.error.message, true));
+      return err(mapStoreError(inserted.error));
     }
     logOrbEvent(task, params.orbId, "created", { project: params.projectId });
     return ok(inserted.value);
@@ -1341,7 +1368,7 @@ export function requestOrbStart(
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
       const orbResult = await deps.store.getOrb(task, orbId);
-      if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
+      if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
       switch (orb.state) {
@@ -1393,7 +1420,7 @@ export function requestOrbArchive(
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
       const orbResult = await deps.store.getOrb(task, orbId);
-      if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
+      if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
       if (orb.state === "archiving" || orb.state === "archived") return ok(orb);
@@ -1433,7 +1460,7 @@ export function requestOrbDeletion(
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
       const orbResult = await deps.store.getOrb(task, orbId);
-      if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
+      if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
       if (orb.state === "deleting") return ok(orb);
@@ -1476,7 +1503,7 @@ export function requestOrbStop(
     let lastClearError: StoreError | null = null;
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
       const orbResult = await deps.store.getOrb(task, orbId);
-      if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
+      if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
       if (orb.state === "stopping" || orb.state === "stopped") {
@@ -1514,9 +1541,7 @@ export function requestOrbStop(
       if (clearedForStop.isErr()) {
         lastClearError = clearedForStop.error;
         if (clearedForStop.error.retryable && attempt < CAS_ATTEMPTS - 1) continue;
-        return err(
-          commandError("unavailable", clearedForStop.error.message, clearedForStop.error.retryable),
-        );
+        return err(mapStoreError(clearedForStop.error));
       }
       const cas = await deps.store.casTransition(task, {
         orbId,
@@ -1542,7 +1567,7 @@ export function requestOrbStop(
     return err(
       lastClearError === null
         ? commandError("conflict", "concurrent state changes; retry", true)
-        : commandError("unavailable", lastClearError.message, true),
+        : mapStoreError(lastClearError),
     );
   };
   return new ResultAsync(run());
@@ -1564,7 +1589,7 @@ export function enqueueOrbMessage(
     Result<{ message: OrbMessageRow; duplicate: boolean }, CommandError>
   > => {
     const orbResult = await deps.store.getOrb(task, params.orbId);
-    if (orbResult.isErr()) return err(commandError("unavailable", orbResult.error.message, true));
+    if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
     const orb = orbResult.value;
     if (orb === null) return err(commandError("not_found", `orb ${params.orbId} not found`, false));
     if (orb.state === "deleting") {
@@ -1581,7 +1606,7 @@ export function enqueueOrbMessage(
     });
     if (enqueued.isErr()) {
       return enqueued.error.type === "store_error"
-        ? err(commandError("unavailable", enqueued.error.message, enqueued.error.retryable))
+        ? err(mapStoreError(enqueued.error))
         : err(commandError("conflict", "message id exists with different content", false));
     }
     // Wake latency is the reconciler tick, not the terminal backstop interval:

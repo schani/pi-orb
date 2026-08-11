@@ -1,7 +1,7 @@
 import type { PullHistoryResponse } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { sleepResult, withDeadline } from "./dst.ts";
-import { formatOrbFailure, type ReplicationIntegrityError } from "./errors.ts";
+import { formatOrbFailure, type ReplicationIntegrityError, type StoreError } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
 import { generateOrbName } from "./orb-naming.ts";
 import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
@@ -14,9 +14,20 @@ import type { ControlPlaneDeps, OrbHostRef } from "./ports.ts";
  */
 export type PollOutcome =
   | { readonly type: "caught_up"; readonly committedRecords: number }
-  | { readonly type: "retryable"; readonly message: string }
+  | {
+      readonly type: "retryable";
+      readonly message: string;
+      /** No retry can clear this one: a `StoreError` with code `invariant` (docs/history-replication.md). */
+      readonly invariant?: boolean;
+    }
   | { readonly type: "integrity"; readonly reason: ReplicationIntegrityError["reason"] }
   | { readonly type: "orb_gone" };
+
+/** Classify a store failure into the retry channel, preserving `invariant`. */
+const retryableStore = (error: StoreError): PollOutcome =>
+  error.code === "invariant"
+    ? { type: "retryable", message: error.message, invariant: true }
+    : { type: "retryable", message: error.message };
 
 function validatePullResponse(
   orbId: string,
@@ -172,7 +183,7 @@ export async function pollOrbUntilCaughtUp(
   let committedRecords = 0;
   for (;;) {
     const orbResult = await deps.store.getOrb(task, orbId);
-    if (orbResult.isErr()) return { type: "retryable", message: orbResult.error.message };
+    if (orbResult.isErr()) return retryableStore(orbResult.error);
     const orb = orbResult.value;
     if (
       orb === null ||
@@ -280,7 +291,7 @@ export async function pollOrbUntilCaughtUp(
           await failOrbForIntegrity(task, deps, orbId, error);
           return { type: "integrity", reason: error.reason };
         }
-        return { type: "retryable", message: error.message };
+        return retryableStore(error);
       }
       await reconcileOrbName(task, deps, orbId);
       return { type: "caught_up", committedRecords };
@@ -307,7 +318,7 @@ export async function pollOrbUntilCaughtUp(
         await failOrbForIntegrity(task, deps, orbId, error);
         return { type: "integrity", reason: error.reason };
       }
-      return { type: "retryable", message: error.message };
+      return retryableStore(error);
     }
     committedRecords += response.records.length;
     await task.checkpoint("committed pull batch");

@@ -1,9 +1,8 @@
-import { expect } from "vitest";
 import { storeContractTests } from "../../testkit/store-contract.ts";
-import { openControlPlaneDatabase } from "../database.ts";
+import { composeControlPlaneDatabase } from "../database.ts";
+import { PGliteClient } from "./pglite-client.ts";
 
 storeContractTests("PGlite", async () => {
-  const opened = openControlPlaneDatabase({ kind: "pglite" });
-  expect(opened.isOk()).toBe(true);
-  return opened._unsafeUnwrap();
+  const client = new PGliteClient();
+  return { database: composeControlPlaneDatabase(client), client };
 });

@@ -18,7 +18,7 @@ import type {
   RequestOrbArchiveParams,
   RequestOrbDeletionParams,
 } from "../../domain/ports.ts";
-import type { PgRow, PostgreSQLClient } from "./client.ts";
+import { arrayParam, jsonParam, type PgRow, type PostgreSQLClient } from "./client.ts";
 
 function toMs(value: unknown): number {
   if (value instanceof Date) return value.getTime();
@@ -359,7 +359,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     states: readonly OrbState[],
   ): ResultAsync<OrbRow[], StoreError> {
     return this.db
-      .query("SELECT * FROM orbs WHERE state = ANY($1) ORDER BY created_at", [[...states]])
+      .query("SELECT * FROM orbs WHERE state = ANY($1) ORDER BY created_at", [arrayParam(states)])
       .map((result) => result.rows.map(mapOrbRow));
   }
 
@@ -382,7 +382,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, state_changed_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING *`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+         RETURNING *`,
         [
           orb.id,
           orb.projectId,
@@ -396,7 +397,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.hostRef,
           orb.checkoutCommit,
           orb.harnessSessionId,
-          orb.harnessSessionHeader,
+          jsonParam(orb.harnessSessionHeader),
           orb.lastError,
           orb.runtimeTokenHash,
           orb.replicationCursor,
@@ -523,11 +524,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         `INSERT INTO orb_messages
            (orb_id, message_id, content, status, auto_start, wake_state_version,
             created_at, updated_at)
-         VALUES ($1,$2,$3,'queued',$4,$5,$6,$6) RETURNING *`,
+         VALUES ($1,$2,$3::jsonb,'queued',$4,$5,$6,$6) RETURNING *`,
         [
           params.orbId,
           params.messageId,
-          params.content,
+          jsonParam(params.content),
           autoStart,
           autoStart ? Number(orbRow["state_version"]) : null,
           new Date(params.now),
@@ -612,7 +613,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            AND status IN ('queued', 'delivering', 'delivered')`,
         [
           params.orbId,
-          params.messageIds,
+          arrayParam(params.messageIds),
           params.delivery,
           params.operationId,
           new Date(params.now),
@@ -631,7 +632,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            auto_start = false, updated_at = $4
          WHERE orb_id = $1 AND message_id = ANY($2::uuid[])
            AND status IN ('queued', 'delivering')`,
-        [params.orbId, params.messageIds, params.lastError, new Date(params.now)],
+        [params.orbId, arrayParam(params.messageIds), params.lastError, new Date(params.now)],
       )
       .map(() => undefined);
   }
@@ -1064,10 +1065,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         for (const record of params.records) {
           const inserted = await query(
             `INSERT INTO history_records (orb_id, record_id, parent_id, record)
-             VALUES ($1, $2, $3, $4)
+             VALUES ($1, $2, $3, $4::jsonb)
              ON CONFLICT (orb_id, record_id) DO NOTHING
              RETURNING record_id`,
-            [params.orbId, record.id, record.parentId, record],
+            [params.orbId, record.id, record.parentId, jsonParam(record)],
           );
           if (inserted.isErr()) return err(inserted.error);
           if (inserted.value.rowCount === 0) {
@@ -1099,10 +1100,10 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           if (delivered.isErr()) return err(delivered.error);
         }
         const sessionSets = initializeSession
-          ? ", harness_session_id = $4, harness_session_header = $5"
+          ? ", harness_session_id = $4, harness_session_header = $5::jsonb"
           : "";
         const values: unknown[] = [params.orbId, params.nextCursor, params.nextHeadId];
-        if (initializeSession) values.push(params.session.id, params.session);
+        if (initializeSession) values.push(params.session.id, jsonParam(params.session));
         const updated = await query(
           `UPDATE orbs SET replication_cursor = $2, replicated_head_id = $3,
              updated_at = now()${sessionSets}
@@ -1159,8 +1160,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           (storedSessionId !== session.id || !jsonEqual(row["harness_session_header"], session)))
       ) {
         const updated = await query(
-          "UPDATE orbs SET harness_session_id = $2, harness_session_header = $3 WHERE id = $1",
-          [orbId, session.id, session],
+          "UPDATE orbs SET harness_session_id = $2, harness_session_header = $3::jsonb WHERE id = $1",
+          [orbId, session.id, jsonParam(session)],
         );
         if (updated.isErr()) return err(updated.error);
         return ok(undefined);

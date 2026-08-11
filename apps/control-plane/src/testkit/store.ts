@@ -20,6 +20,9 @@ import type {
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 
+/** Store operations that can be scripted to fail deterministically. */
+export type InvariantOperation = "getOrb" | "enqueueOrbMessage";
+
 interface OrbReplica {
   records: Map<string, HistoryRecord>;
   order: string[];
@@ -30,6 +33,19 @@ const unavailable = (message: string): StoreError => ({
   code: "unavailable",
   message,
   retryable: true,
+});
+
+/**
+ * A deterministic store bug: bad SQL or a parameter the driver cannot encode
+ * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md). Scripted,
+ * not injectable through a failpoint, because it is not an outage: nothing
+ * about the schedule makes it appear or clear.
+ */
+const invariant = (message: string): StoreError => ({
+  type: "store_error",
+  code: "invariant",
+  message,
+  retryable: false,
 });
 
 /**
@@ -46,6 +62,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private nextMessageOrdinal = 1;
   /** Remaining scripted failures of `clearOrbMessageAutoStart`. */
   private clearAutoStartFailures = 0;
+  /** Operations scripted to fail with a deterministic `invariant` store error. */
+  private readonly invariantOperations = new Set<InvariantOperation>();
   /** Gate the next `noteOrbMessageDelivery` until this predicate holds. */
   private noteDeliveryHold: (() => boolean) | null = null;
 
@@ -90,6 +108,14 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   /**
+   * Make `operation` fail with an `invariant` store error until cleared: the
+   * shape of a wrong-SQL/wrong-parameter bug, which no retry can survive.
+   */
+  failWithInvariant(operation: InvariantOperation): void {
+    this.invariantOperations.add(operation);
+  }
+
+  /**
    * Hold the next `noteOrbMessageDelivery` until `until` holds — the schedule
    * where replication commits the inbox record (marking the rows `delivered`)
    * before the delivery note lands, which no probability can be relied on to
@@ -110,6 +136,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   // -- plumbing -------------------------------------------------------------
+
+  private scriptedInvariant(operation: InvariantOperation): StoreError | null {
+    return this.invariantOperations.has(operation)
+      ? invariant(`${operation}: parameter $3 is a bare JavaScript array`)
+      : null;
+  }
 
   private access<T>(
     task: SimulationTask,
@@ -322,6 +354,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   getOrb(task: SimulationTask, orbId: string): ResultAsync<OrbRow | null, StoreError> {
+    const scripted = this.scriptedInvariant("getOrb");
+    if (scripted !== null) return errAsync(scripted);
     return this.access(task, FAILPOINTS.storeRead, "get orb", () => this.orbs.get(orbId) ?? null);
   }
 
@@ -454,6 +488,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
     StoreError | StateConflict
   > {
+    const scripted = this.scriptedInvariant("enqueueOrbMessage");
+    if (scripted !== null) return errAsync(scripted);
     return this.access(task, FAILPOINTS.storeWrite, "enqueue orb message", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined) return { conflict: true as const };

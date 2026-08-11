@@ -19,7 +19,8 @@ export interface OrbNamingDeps {
 
 export interface OrbNamingError {
   readonly type: "orb_naming_error";
-  readonly code: "not_found" | "conflict" | "invalid_name" | "store" | "generation";
+  /** `invariant` is a deterministic store bug (`StoreError` code `invariant`): never retryable. */
+  readonly code: "not_found" | "conflict" | "invalid_name" | "store" | "invariant" | "generation";
   readonly message: string;
   readonly retryable: boolean;
 }
@@ -41,7 +42,7 @@ export function normalizeOrbName(value: string): Result<string, OrbNamingError> 
 
 const storeError = (error: StoreError): OrbNamingError => ({
   type: "orb_naming_error",
-  code: "store",
+  code: error.code === "invariant" ? "invariant" : "store",
   message: error.message,
   retryable: error.retryable,
 });
