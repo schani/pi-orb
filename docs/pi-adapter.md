@@ -30,6 +30,20 @@ Abort dispatch depends on the active operation kind: agent work calls `session.a
 
 `executeBash` appends its history entry directly and does not produce the prompt path's ordinary `message_end`/`agent_settled` persistence boundaries. After it resolves, the adapter must explicitly scan/publish the newly appended entry before broadcasting `operation_finished`. A cancelled result follows the same persistence ordering. If the SDK call rejects before producing a `BashResult`, the adapter reports a failed operation and must not invent a history record.
 
+## Operation identity across concurrent submitters (decided and implemented 2026-08-11)
+
+Two ingress paths can hand Pi a new turn: the live WebSocket `message` action and the control plane's inbox delivery (`docs/runtime-protocol.md`). Each is answered with an operation ID before the turn exists, and everything afterwards — `operation_started`/`status`/`operation_finished`, the browser's abort, the Luna turn notification, and the delivery note the control plane persists for the batch — is correlated by that ID. The contract is therefore: **the operation ID promised to a submitter is the ID the turn its message started actually runs under, and a message that joins a running turn is answered with that turn's ID.**
+
+The first implementation broke that contract because it deferred the claim: each submitter wrote its ID into one `pendingOperationId` slot and Pi's `agent_start` consumed whatever was there. Both submitters gate on `activity`, which only became `busy` in that same `agent_start` handler, so during the window between accepting a submission and Pi announcing its turn the runtime still reported itself idle and a second submitter was admitted. Whichever wrote last won the slot, and the loser's promised ID named no operation at all — its abort was rejected as `stale_operation`, its status frames referred to somebody else's turn, and the control plane recorded an operation ID for the batch that nothing ever ran under.
+
+The fix is to claim the operation synchronously with acceptance, exactly as a shell submission already did: `submitMessage` and a `turn`-classified delivery set the operation ID, kind, summary start index, and `busy` activity, and broadcast `operation_started` before returning to their caller. `agent_start` no longer allocates for a claimed operation — it only confirms it. That also stops Pi's in-run continuations (auto-retry, auto-compaction re-enter `runAgentLoop` and re-emit `agent_start`) from silently re-broadcasting a *new* random operation ID mid-turn. Only a turn nobody submitted — the boot interrupted-turn resume (`docs/lifecycle.md`) — allocates an ID in the event handler.
+
+Claiming eagerly opens the mirror-image window, and it must be closed too: the runtime is `busy` from acceptance, but Pi marks itself streaming only when it begins the turn. `AgentSession.sendUserMessage` reaches `_runAgentPrompt` behind an async prologue (`prompt()` runs extension `input` hooks, the auth check and the compaction check first), while `sendCustomMessage` has no prologue and flips streaming synchronously. A delivery classified `steer` inside that window would be handed to a Pi that still looks idle to itself, which starts a second, competing turn and makes Pi refuse the loser with "Agent is already processing" — an accepted submission silently lost. Deliveries therefore wait for the in-flight submission to reach `agent_start` (or fail) before sampling activity. The live path needs no such wait: its gate is synchronous and rejects the second submitter with `busy`.
+
+A submission Pi refuses releases the operation it claimed and reports `operation_finished` with outcome `failed`, so a rejected turn cannot leave the runtime wedged in `busy` and is visible to the browser instead of silent.
+
+`apps/orb-runtime/src/pi/operation-correlation.dst.test.ts` pins all of this under `determined` schedules in both submission orders, driving a fake `AgentSession` that reproduces the SDK ordering above (`PiSession`/`PiSessionManager` narrow the SDK objects to the calls the adapter makes so it can be substituted). Reverting the claim to the deferred slot fails both scenarios at the first iteration.
+
 ## Pi history behavior
 
 Pi session files are append-only JSONL trees. Each entry has an `id` and `parentId`; the session header is separate.
@@ -88,7 +102,8 @@ For every entry, preserve `entry.id`, `entry.parentId`, and `entry.timestamp` ex
 | `compaction`               | `CompactionRecord`; summary as a text block, with first-kept ID/token/details retained natively.                                |
 | `branch_summary`           | `EventRecord`, `eventType: "pi.branch_summary"`, with summary text content.                                                     |
 | `custom`                   | `EventRecord`, `eventType: "pi.custom"`.                                                                                        |
-| `custom_message`           | `EventRecord`, `eventType: "pi.custom_message"`, with text/image content; retain `customType`, `display`, and details natively. |
+| `custom_message` / `pi-orb.user-message` (send-anytime envelope) | `MessageRecord`, role `user`; text/image blocks, with every durable client message ID in the squashed delivery batch retained natively. |
+| other `custom_message`     | `EventRecord`, `eventType: "pi.custom_message"`, with text/image content; retain `customType`, `display`, and details natively. |
 | `label`                    | `EventRecord`, `eventType: "pi.label"`.                                                                                         |
 | `session_info`             | `EventRecord`, `eventType: "pi.session_info"`.                                                                                  |
 | unknown future entry       | `EventRecord`, `eventType: "pi.<native-type>"`.                                                                                 |
@@ -109,6 +124,8 @@ An unknown message role maps to a generic event rather than inventing a shared r
 `SessionManager.getEntries()` is the sole Pi replication source. Pi appends user/tool/assistant messages on awaited `message_end`; streaming `message_update` state is not present there and is never synthesized into persistence. Pi's `AgentSession` notifies SDK subscribers of `message_end` immediately before it appends the ordinary message entry, and its `entry_appended` event covers extension-created custom entries rather than ordinary messages. The adapter therefore schedules a session-entry scan after each `message_end`, deduplicates by native entry ID, and performs a final synchronous scan at `agent_settled` before emitting `operation_finished` and clearing transient output. Adapter tests reproduce this exact notify-then-append ordering; mapping-only tests are insufficient to verify live-history delivery.
 
 Every returned persisted entry maps one-to-one to exactly one record and advances the native-ID cursor exactly once. This includes labels and hidden custom entries. Unknown future types still become generic events, preserving cursor continuity across Pi upgrades.
+
+The `pi-orb.user-message` special case is intentionally semantic rather than a presentation-only exception. Pi converts custom messages to user-role model input, so one native custom entry can carry the durable identities of a squashed FIFO batch while remaining the actual user message. Using a hidden marker followed by an ordinary user entry was rejected because it doubles records and creates a crash gap between the marker and message. Existing ordinary Pi user records remain mapped unchanged.
 
 ### Initial UI visibility
 

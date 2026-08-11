@@ -1,4 +1,11 @@
-import type { HarnessSessionMetadata, OrbState, ProjectState, StopReason } from "@pi-orb/protocol";
+import type {
+  HarnessSessionMetadata,
+  MessageInputBlock,
+  OrbMessageStatus,
+  OrbState,
+  ProjectState,
+  StopReason,
+} from "@pi-orb/protocol";
 
 /**
  * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
@@ -36,6 +43,27 @@ export interface OrbRow {
   readonly stopReason: StopReason | null;
   readonly stateChangedAt: number;
   readonly archivedAt?: number | null;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export interface OrbMessageRow {
+  readonly orbId: string;
+  readonly messageId: string;
+  readonly ordinal: number;
+  readonly content: readonly MessageInputBlock[];
+  readonly status: OrbMessageStatus;
+  readonly delivery: "turn" | "steer" | null;
+  readonly operationId: string | null;
+  readonly deliveryBatchId: string | null;
+  readonly autoStart: boolean;
+  /**
+   * The orb `state_version` this wake intent was admitted against, or null
+   * when the message carries no intent. A `failed` orb wakes only for an
+   * intent naming its current version (docs/lifecycle.md).
+   */
+  readonly wakeStateVersion: number | null;
+  readonly lastError: string | null;
   readonly createdAt: number;
   readonly updatedAt: number;
 }

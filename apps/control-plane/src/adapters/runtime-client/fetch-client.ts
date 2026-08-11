@@ -1,4 +1,5 @@
 import {
+  DeliverOrbMessageResponseSchema,
   type PullHistoryResponse,
   PullHistoryResponseSchema,
   type RuntimeHealth,
@@ -10,6 +11,7 @@ import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import type { RuntimeClientError } from "../../domain/errors.ts";
 import type {
+  DeliverMessageClientRequest,
   OperationContext,
   OrbRuntimeClient,
   PullHistoryClientRequest,
@@ -65,12 +67,13 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
   private request(
     url: string,
     context: OperationContext,
+    init?: Omit<RequestInit, "signal">,
   ): ResultAsync<{ status: number; body: unknown }, RuntimeClientError> {
     const run = async (): Promise<
       Result<{ status: number; body: unknown }, RuntimeClientError>
     > => {
       const response = await ResultAsync.fromPromise(
-        fetch(url, { signal: context.signal }),
+        fetch(url, { ...init, signal: context.signal }),
         (error) => {
           const message = describeFetchError(error);
           if (context.signal.aborted) return clientError("cancelled", message, true);
@@ -98,6 +101,35 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
       return clientError(code, body.error.message, body.error.retryable);
     }
     return clientError("http_error", `runtime returned HTTP ${status}`, status >= 500);
+  }
+
+  deliverMessage(
+    _task: SimulationTask,
+    request: DeliverMessageClientRequest,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").DeliverOrbMessageResponse, RuntimeClientError> {
+    return this.request(
+      `${request.baseUrl}/v1/messages/${encodeURIComponent(request.messageId)}`,
+      context,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          v: 1,
+          messageId: request.messageId,
+          messageIds: request.messageIds,
+          content: request.content,
+        }),
+      },
+    ).andThen(({ status, body }) => {
+      if (status !== 200 && status !== 202) return err(this.mapErrorResponse(status, body));
+      if (!Check(DeliverOrbMessageResponseSchema, body)) {
+        return err(
+          clientError("invalid_response", "message response failed schema validation", false),
+        );
+      }
+      return ok(body);
+    });
   }
 
   health(

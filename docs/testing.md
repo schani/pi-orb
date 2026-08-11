@@ -32,7 +32,10 @@ The architecture should keep side effects behind adapters and put concurrency/st
 - repeated provider operations and control-plane recovery after partial failure;
 - concurrent orb starts sharing one OAuth device flow, OAuth completion/failure, and restart while login is pending;
 - multiple reconcilers observing and acting on the same orb;
-- two reconcilers at different configuration/script generations acting on the same orb, as a deploy rollover briefly does (`mixed-generation.dst.test.ts`).
+- two reconcilers at different configuration/script generations acting on the same orb, as a deploy rollover briefly does (`mixed-generation.dst.test.ts`);
+- the runtime's two message ingress paths submitting a turn concurrently, with the harness's own turn start scheduled between them (`apps/orb-runtime/src/pi/operation-correlation.dst.test.ts`).
+
+Runtime-internal state is a simulation target too, and the Pi adapter is reachable through a deliberate seam rather than a boot: `PiSession`/`PiSessionManager` narrow the SDK objects to the calls the adapter actually makes, and `PiOrbAgent.attachSession` is boot's final wiring step called directly. A scenario can then substitute a fake `AgentSession` whose accept/announce steps are scheduled, which is what makes the operation-ID correlation contract in `docs/pi-adapter.md` testable at all — it was previously reachable only through the E2E, where the interleaving cannot be forced.
 
 Simulation tests should:
 

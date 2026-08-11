@@ -5,6 +5,7 @@ import {
   CAPABILITY_INPUT_IMAGE,
   ClientFrameSchema,
   type ClientRequest,
+  DeliverOrbMessageRequestSchema,
   HISTORY_PULL_DEFAULT_LIMIT,
   type RequestResultFrame,
   RUNTIME_SUBPROTOCOL,
@@ -91,6 +92,47 @@ export function buildRuntimeServer(
           );
       }
       return reply.status(200).send(response.value);
+    },
+  );
+
+  app.put<{ Params: { messageId: string } }>(
+    "/v1/messages/:messageId",
+    { bodyLimit: MAX_INCOMING_FRAME_BYTES },
+    async (request, reply) => {
+      if (!Check(DeliverOrbMessageRequestSchema, request.body)) {
+        return reply
+          .status(400)
+          .send(runtimeError("invalid_request", "invalid message body", false));
+      }
+      if (request.body.messageId !== request.params.messageId) {
+        return reply
+          .status(400)
+          .send(runtimeError("invalid_request", "message id does not match path", false));
+      }
+      if (JSON.stringify(request.body.content).length > MAX_PROMPT_BYTES) {
+        return reply.status(400).send(runtimeError("invalid_request", "input too large", false));
+      }
+      if (request.body.messageIds[0] !== request.body.messageId) {
+        return reply
+          .status(400)
+          .send(runtimeError("invalid_request", "batch id must be its first message id", false));
+      }
+      const delivered = await agent.deliverInboxMessage(
+        request.body.messageId,
+        request.body.messageIds,
+        request.body.content,
+      );
+      return delivered.isErr()
+        ? reply
+            .status(503)
+            .send(
+              runtimeError(
+                "message_unavailable",
+                delivered.error.message,
+                delivered.error.retryable,
+              ),
+            )
+        : reply.status(202).send(delivered.value);
     },
   );
 

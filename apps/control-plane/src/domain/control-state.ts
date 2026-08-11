@@ -91,6 +91,20 @@ export class ControlState {
   }
 
   /**
+   * The runtime answered a non-pull control-plane request — currently an inbox
+   * delivery. That is the same evidence a successful pull carries, so it
+   * refreshes the baseline: the reconciler must never declare a runtime
+   * unreachable in the same second it is demonstrably serving us
+   * (docs/lifecycle.md). Only an existing entry is refreshed; the baseline is
+   * seeded by entering `running`, by a restart, or by a pull.
+   */
+  noteRuntimeAnswered(orbId: string, at: number): void {
+    const existing = this.liveness.get(orbId);
+    if (existing === undefined) return;
+    this.liveness.set(orbId, { ...existing, lastSuccessAt: at, restartGraceMs: null });
+  }
+
+  /**
    * Seed/reset the liveness baseline (orb became running, or host restarted).
    * `restartGraceMs` is passed only by a restart, which must outlast a boot.
    */

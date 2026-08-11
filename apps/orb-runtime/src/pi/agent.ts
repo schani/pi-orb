@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
+  type DeliverOrbMessageResponse,
   type MessageInputBlock,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
@@ -69,6 +70,28 @@ export interface SnapshotError {
   readonly message: string;
 }
 
+/**
+ * The Pi session surface the adapter drives. Narrowing the SDK object to the
+ * calls actually made is what lets deterministic tests stand in for Pi and
+ * schedule its event delivery (docs/testing.md, docs/pi-adapter.md);
+ * production always passes a real `AgentSession`.
+ */
+export type PiSession = Pick<
+  AgentSession,
+  "subscribe" | "sendUserMessage" | "sendCustomMessage" | "executeBash" | "abort" | "abortBash"
+>;
+
+/** The `SessionManager` surface the adapter reads, narrowed for the same reason. */
+export type PiSessionManager = Pick<
+  SessionManager,
+  | "getEntries"
+  | "getLeafId"
+  | "getHeader"
+  | "getSessionId"
+  | "getSessionFile"
+  | "buildContextEntries"
+>;
+
 type FrameListener = (frame: ServerFrame) => void;
 
 interface LiveBlock {
@@ -120,8 +143,8 @@ export class PiOrbAgent {
   readonly runtimeInstanceId = randomUUID();
   private readonly options: PiOrbAgentOptions;
   private health: RuntimeHealth;
-  private sessionManager: SessionManager | null = null;
-  private session: AgentSession | null = null;
+  private sessionManager: PiSessionManager | null = null;
+  private session: PiSession | null = null;
   private liveHistory: LiveHistoryPublisher | null = null;
   private checkoutCommit = "";
   private activity: "idle" | "busy" = "idle";
@@ -129,8 +152,17 @@ export class PiOrbAgent {
   private turnResume: RuntimeTurnResume | null = null;
   private operationId: string | null = null;
   private operationKind: "agent" | "shell" | null = null;
-  /** Operation ID promised to the requester before Pi emits agent_start. */
-  private pendingOperationId: string | null = null;
+  /**
+   * Set while an accepted agent submission is waiting for Pi to begin its
+   * turn; resolves at `agent_start` or when the submission fails. Pi only
+   * marks itself streaming when it begins the turn, which is later than the
+   * runtime's own acceptance — handing Pi a second submission inside that
+   * window makes it start a competing turn and refuse the loser ("Agent is
+   * already processing"), so a delivery waits the window out before reading
+   * activity (docs/pi-adapter.md).
+   */
+  private turnStart: { readonly promise: Promise<void>; readonly resolve: () => void } | null =
+    null;
   private summaryStartIndex: number | null = null;
   private summaryCoordinator: TurnSummaryCoordinator | null = null;
   private shellCommand = "";
@@ -139,6 +171,10 @@ export class PiOrbAgent {
   private readonly liveBlocks = new Map<string, LiveBlock>();
   private readonly liveTools = new Map<string, LiveTool>();
   private readonly listeners = new Set<FrameListener>();
+  private readonly pendingInboxMessages = new Map<
+    string,
+    { delivery: "turn" | "steer"; operationId: string }
+  >();
   private autoNameTriggered = false;
 
   constructor(options: PiOrbAgentOptions) {
@@ -271,7 +307,8 @@ export class PiOrbAgent {
       // grounds for creating a fresh session.
       return err(this.failed("session_load_failed", managerResult.error, false));
     }
-    this.sessionManager = managerResult.value;
+    const sessionManager = managerResult.value;
+    this.sessionManager = sessionManager;
 
     // 3. Codex credential resolves through the control-plane broker
     // (docs/credentials.md) — the only credential path on every provider.
@@ -368,7 +405,7 @@ export class PiOrbAgent {
         cwd: repoDir,
         agentDir,
         modelRuntime,
-        sessionManager: this.sessionManager,
+        sessionManager,
         model,
         ...(settingsManager !== undefined ? { settingsManager } : {}),
         resourceLoader: loaderResult.value,
@@ -378,8 +415,21 @@ export class PiOrbAgent {
     if (sessionResult.isErr()) {
       return err(this.failed("session_init_failed", sessionResult.error, true));
     }
-    this.session = sessionResult.value.session;
     const summarizer = this.options.turnSummarizer ?? new LunaTurnSummarizer(modelRuntime, model);
+    this.attachSession(sessionResult.value.session, sessionManager, summarizer);
+    return ok(undefined);
+  }
+
+  /**
+   * Boot's final step, separated as the harness seam (docs/testing.md): wire
+   * the live publisher, the summary coordinator, and the Pi event
+   * subscription around a created session, report ready, and run the
+   * interrupted-turn hook. Deterministic tests drive this directly with a
+   * scheduled fake session instead of booting a model runtime.
+   */
+  attachSession(session: PiSession, manager: PiSessionManager, summarizer: TurnSummarizer): void {
+    this.session = session;
+    this.sessionManager = manager;
     this.summaryCoordinator = new TurnSummaryCoordinator({
       task: new NoSimulationTask(`turn-summary-${this.options.orbId}`, false),
       summarizer,
@@ -396,8 +446,22 @@ export class PiOrbAgent {
         console.error(`Luna summary failed for operation ${operationId}: ${error.message}`);
       },
     });
-    const manager = this.sessionManager;
     this.liveHistory = new LiveHistoryPublisher(manager, (record) => {
+      const native = record.overflow["native"];
+      if (typeof native === "object" && native !== null && !Array.isArray(native)) {
+        const details = native["details"];
+        if (
+          native["type"] === "custom_message" &&
+          native["customType"] === "pi-orb.user-message" &&
+          typeof details === "object" &&
+          details !== null &&
+          !Array.isArray(details)
+        ) {
+          const messageIds = details["messageIds"];
+          const batchId = Array.isArray(messageIds) ? messageIds[0] : details["messageId"];
+          if (typeof batchId === "string") this.pendingInboxMessages.delete(batchId);
+        }
+      }
       this.broadcast({
         v: 1,
         type: "history.record",
@@ -406,7 +470,7 @@ export class PiOrbAgent {
         headId: record.id,
       });
     });
-    this.session.subscribe((event) => this.onAgentEvent(event));
+    session.subscribe((event) => this.onAgentEvent(event));
 
     this.health = {
       v: 1,
@@ -435,8 +499,7 @@ export class PiOrbAgent {
     // 5. Resume a turn a host restart interrupted (docs/lifecycle.md). The
     // runtime is already ready here: the resumed turn is never awaited, and it
     // surfaces as ordinary `busy` activity through Pi's agent_start.
-    this.resumeInterruptedTurn(manager, this.session);
-    return ok(undefined);
+    this.resumeInterruptedTurn(manager, session);
   }
 
   /**
@@ -447,7 +510,7 @@ export class PiOrbAgent {
    * decision is kept for `RuntimeHealth`, where the control plane's readiness
    * path turns it into one log line (docs/lifecycle.md).
    */
-  private resumeInterruptedTurn(manager: SessionManager, session: AgentSession): void {
+  private resumeInterruptedTurn(manager: PiSessionManager, session: PiSession): void {
     // The LiveHistoryPublisher already seeded the restored entries as known,
     // so the record appended below publishes and replicates normally.
     const attempt = startInterruptedTurnResume(manager.buildContextEntries(), session);
@@ -477,14 +540,13 @@ export class PiOrbAgent {
 
     switch (event.type) {
       case "agent_start": {
-        this.operationId = this.pendingOperationId ?? randomUUID();
-        this.operationKind = "agent";
-        this.pendingOperationId = null;
-        this.activity = "busy";
-        this.liveBlocks.clear();
-        this.liveTools.clear();
-        this.broadcastEvent({ type: "operation_started", operationId: this.operationId });
-        this.broadcastEvent({ type: "status", activity: "busy", operationId: this.operationId });
+        // A submitted turn claimed its operation synchronously at acceptance,
+        // and Pi re-emits agent_start for continuations inside the same run
+        // (auto-retry, auto-compaction): neither may restart the operation or
+        // change its ID. Only a turn nobody submitted — the boot
+        // interrupted-turn resume (docs/lifecycle.md) — allocates here.
+        if (this.operationKind === null) this.startAgentOperation(randomUUID(), null);
+        this.settleTurnStart();
         break;
       }
       case "message_update": {
@@ -559,19 +621,7 @@ export class PiOrbAgent {
         if (this.operationKind !== "agent") break;
         const operationId = this.operationId;
         const summaryInput = this.captureTurnSummaryInput();
-        this.operationId = null;
-        this.operationKind = null;
-        this.activity = "idle";
-        this.liveBlocks.clear();
-        this.liveTools.clear();
-        if (operationId !== null) {
-          this.broadcastEvent({
-            type: "operation_finished",
-            operationId,
-            outcome: "completed",
-          });
-        }
-        this.broadcastEvent({ type: "status", activity: "idle" });
+        this.finishAgentOperation(operationId, "completed");
         if (operationId !== null && summaryInput !== null) {
           // Agent completion is already visible and the runtime is idle. Luna runs strictly
           // best-effort in the background and cannot change this operation's outcome.
@@ -589,6 +639,79 @@ export class PiOrbAgent {
       default:
         break;
     }
+  }
+
+  /**
+   * Claim the runtime for an agent operation at the instant its submission is
+   * accepted, exactly as a shell submission does (docs/runtime-protocol.md).
+   * Activity is what both ingress paths gate on, so it must not lag
+   * acceptance: a second submitter reading `idle` during the window before
+   * Pi's `agent_start` would be promised an operation ID for a turn that
+   * never becomes its own.
+   */
+  private startAgentOperation(operationId: string, summaryStartIndex: number | null): void {
+    this.operationId = operationId;
+    this.operationKind = "agent";
+    this.activity = "busy";
+    this.summaryStartIndex = summaryStartIndex;
+    this.liveBlocks.clear();
+    this.liveTools.clear();
+    this.broadcastEvent({ type: "operation_started", operationId });
+    this.broadcastEvent({ type: "status", activity: "busy", operationId });
+  }
+
+  private finishAgentOperation(
+    operationId: string | null,
+    outcome: "completed" | "failed",
+    message?: string,
+  ): void {
+    this.operationId = null;
+    this.operationKind = null;
+    this.activity = "idle";
+    this.liveBlocks.clear();
+    this.liveTools.clear();
+    // A turn that ends without ever starting still releases its waiters.
+    this.settleTurnStart();
+    if (operationId !== null) {
+      this.broadcastEvent({
+        type: "operation_finished",
+        operationId,
+        outcome,
+        ...(message !== undefined ? { message } : {}),
+      });
+    }
+    this.broadcastEvent({ type: "status", activity: "idle" });
+  }
+
+  /**
+   * A submission Pi refused releases the operation it claimed, so the runtime
+   * cannot be left busy on a turn that will never run — and the failure is
+   * visible to the browser as a finished operation instead of silence.
+   */
+  private abandonAgentOperation(operationId: string, message: string): void {
+    if (this.operationId !== operationId || this.operationKind !== "agent") return;
+    this.summaryStartIndex = null;
+    this.finishAgentOperation(operationId, "failed", message);
+  }
+
+  /** Resolves once no accepted submission is still waiting for `agent_start`. */
+  private awaitTurnStart(): Promise<void> {
+    return this.turnStart?.promise ?? Promise.resolve();
+  }
+
+  private beginTurnStart(): void {
+    if (this.turnStart !== null) return;
+    let resolve = (): void => {};
+    const promise = new Promise<void>((settle) => {
+      resolve = settle;
+    });
+    this.turnStart = { promise, resolve };
+  }
+
+  private settleTurnStart(): void {
+    const pending = this.turnStart;
+    this.turnStart = null;
+    pending?.resolve();
   }
 
   private captureTurnSummaryInput() {
@@ -719,8 +842,125 @@ export class PiOrbAgent {
   }
 
   /**
+   * Deliver one frozen inbox batch (docs/runtime-protocol.md). The delivery
+   * classification is derived from the runtime's activity at the instant of
+   * the call, so the call first waits out any accepted submission that has
+   * not reached `agent_start` yet: inside that window Pi still looks idle to
+   * itself, and a message the runtime classified as a steer would start a
+   * second, competing turn.
+   */
+  deliverInboxMessage(
+    messageId: string,
+    messageIds: readonly string[],
+    content: readonly MessageInputBlock[],
+  ): ResultAsync<DeliverOrbMessageResponse, { message: string; retryable: boolean }> {
+    return ResultAsync.fromSafePromise(this.awaitTurnStart()).andThen(() =>
+      this.deliverSettledInboxMessage(messageId, messageIds, content),
+    );
+  }
+
+  private deliverSettledInboxMessage(
+    messageId: string,
+    messageIds: readonly string[],
+    content: readonly MessageInputBlock[],
+  ): ResultAsync<DeliverOrbMessageResponse, { message: string; retryable: boolean }> {
+    const session = this.session;
+    const manager = this.sessionManager;
+    if (session === null || manager === null || this.health.status !== "ready") {
+      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
+        err({ message: "session is not ready", retryable: true }),
+      );
+    }
+    for (const entry of manager.getEntries()) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const native = entry as { type?: string; customType?: string; details?: unknown };
+      if (native.type !== "custom_message" || native.customType !== "pi-orb.user-message") continue;
+      const details = native.details;
+      if (typeof details !== "object" || details === null) continue;
+      const typed = details as {
+        messageId?: unknown;
+        messageIds?: unknown;
+        delivery?: unknown;
+        operationId?: unknown;
+      };
+      const persistedIds = Array.isArray(typed.messageIds) ? typed.messageIds : [typed.messageId];
+      if (persistedIds[0] !== messageId) continue;
+      return ResultAsync.fromSafePromise(
+        Promise.resolve({
+          v: 1 as const,
+          messageId,
+          status: "persisted" as const,
+          delivery: typed.delivery === "steer" ? ("steer" as const) : ("turn" as const),
+          operationId: typeof typed.operationId === "string" ? typed.operationId : "unknown",
+          duplicate: true,
+        }),
+      );
+    }
+    const pending = this.pendingInboxMessages.get(messageId);
+    if (pending !== undefined) {
+      return ResultAsync.fromSafePromise(
+        Promise.resolve({
+          v: 1 as const,
+          messageId,
+          status: "queued" as const,
+          ...pending,
+          duplicate: true,
+        }),
+      );
+    }
+    if (this.operationKind === "shell") {
+      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
+        err({ message: "a foreground shell command is running", retryable: true }),
+      );
+    }
+    const delivery: "turn" | "steer" = this.activity === "busy" ? "steer" : "turn";
+    const operationId = delivery === "steer" ? (this.operationId ?? randomUUID()) : randomUUID();
+    this.pendingInboxMessages.set(messageId, { delivery, operationId });
+    if (delivery === "turn") {
+      this.startAgentOperation(operationId, manager.getEntries().length);
+      this.beginTurnStart();
+    }
+    const piContent = content.map((block) =>
+      block.type === "text"
+        ? { type: "text" as const, text: block.text }
+        : { type: "image" as const, data: block.data, mimeType: block.mediaType },
+    );
+    this.triggerAutoName(content);
+    return ResultAsync.fromPromise(
+      session.sendCustomMessage(
+        {
+          customType: "pi-orb.user-message",
+          content: piContent,
+          display: true,
+          details: { messageIds, delivery, operationId },
+        },
+        { triggerTurn: true, ...(delivery === "steer" ? { deliverAs: "steer" as const } : {}) },
+      ),
+      (error) => ({
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      }),
+    )
+      .map(() => ({
+        v: 1 as const,
+        messageId,
+        status: "queued" as const,
+        delivery,
+        operationId,
+        duplicate: false,
+      }))
+      .mapErr((error) => {
+        this.pendingInboxMessages.delete(messageId);
+        if (delivery === "turn") this.abandonAgentOperation(operationId, error.message);
+        return error;
+      });
+  }
+
+  /**
    * Submit a user message under the operation ID already promised to the
-   * requester; resolves once Pi has accepted/persisted it.
+   * requester; resolves once Pi has accepted/persisted it. The operation is
+   * claimed here, synchronously with acceptance, so no concurrent submitter
+   * can be handed the same turn.
    */
   submitMessage(
     content: readonly MessageInputBlock[],
@@ -732,8 +972,8 @@ export class PiOrbAgent {
         err({ message: "session is not ready" }),
       );
     }
-    this.pendingOperationId = operationId;
-    this.summaryStartIndex = this.sessionManager?.getEntries().length ?? null;
+    this.startAgentOperation(operationId, this.sessionManager?.getEntries().length ?? null);
+    this.beginTurnStart();
     const piContent = content.map((block) =>
       block.type === "text"
         ? { type: "text" as const, text: block.text }
@@ -744,7 +984,12 @@ export class PiOrbAgent {
       (error) => ({
         message: error instanceof Error ? error.message : String(error),
       }),
-    ).map(() => undefined);
+    )
+      .map(() => undefined)
+      .mapErr((error) => {
+        this.abandonAgentOperation(operationId, error.message);
+        return error;
+      });
   }
 
   submitShell(

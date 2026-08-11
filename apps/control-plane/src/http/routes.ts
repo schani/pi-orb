@@ -2,6 +2,7 @@ import {
   type ControlPlaneHttpError,
   CreateOrbRequestSchema,
   CreateProjectRequestSchema,
+  EnqueueOrbMessageRequestSchema,
   PROJECT_NAME_MAX_CHARS,
   UpdateOrbRequestSchema,
   UpdateProjectRequestSchema,
@@ -13,12 +14,13 @@ import { Check } from "typebox/value";
 import {
   type CommandError,
   createOrb,
+  enqueueOrbMessage,
   requestOrbArchive,
   requestOrbDeletion,
   requestOrbStart,
   requestOrbStop,
 } from "../domain/lifecycle.ts";
-import type { ProjectRow } from "../domain/orb.ts";
+import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
 import { requestProjectDeletion } from "../domain/project-deletion.ts";
@@ -37,6 +39,20 @@ function normalizeProjectName(value: string): string | null {
   return normalized !== "" && Array.from(normalized).length <= PROJECT_NAME_MAX_CHARS
     ? normalized
     : null;
+}
+
+function messageView(row: OrbMessageRow) {
+  return {
+    id: row.messageId,
+    orbId: row.orbId,
+    content: row.content,
+    status: row.status,
+    ...(row.delivery !== null ? { delivery: row.delivery } : {}),
+    ...(row.operationId !== null ? { operationId: row.operationId } : {}),
+    ...(row.lastError !== null ? { error: row.lastError } : {}),
+    createdAt: new Date(row.createdAt).toISOString(),
+    updatedAt: new Date(row.updatedAt).toISOString(),
+  };
 }
 
 function sendCommandError(reply: FastifyReply, error: CommandError): FastifyReply {
@@ -353,6 +369,50 @@ export function registerRoutes(
     const deleted = await requestOrbDeletion(task, deps, request.params.orbId);
     if (deleted.isErr()) return sendCommandError(reply, deleted.error);
     return reply.status(202).send(orbView(deleted.value, deps.control, config));
+  });
+
+  app.put<{ Params: { orbId: string; messageId: string } }>(
+    "/api/v1/orbs/:orbId/messages/:messageId",
+    { bodyLimit: 8 * 1024 * 1024 },
+    async (request, reply) => {
+      if (!Check(EnqueueOrbMessageRequestSchema, request.body)) {
+        return reply.status(400).send(httpError("invalid_request", "invalid message body", false));
+      }
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+          request.params.messageId,
+        )
+      ) {
+        return reply
+          .status(400)
+          .send(httpError("invalid_request", "message id must be a UUID", false));
+      }
+      if (JSON.stringify(request.body.content).length > 6 * 1024 * 1024) {
+        return reply.status(400).send(httpError("invalid_request", "message is too large", false));
+      }
+      // Admission and the reconciler nudge live in the domain command; the
+      // lifecycle transition a queued message may cause belongs to the
+      // reconciler, not to this caller (docs/lifecycle.md).
+      const enqueued = await enqueueOrbMessage(task, deps, {
+        orbId: request.params.orbId,
+        messageId: request.params.messageId,
+        content: request.body.content,
+      });
+      if (enqueued.isErr()) return sendCommandError(reply, enqueued.error);
+      return reply.status(202).send(messageView(enqueued.value.message));
+    },
+  );
+
+  app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/messages", async (request, reply) => {
+    const orb = await deps.store.getOrb(task, request.params.orbId);
+    if (orb.isErr())
+      return reply.status(503).send(httpError("unavailable", orb.error.message, true));
+    if (orb.value === null)
+      return reply.status(404).send(httpError("not_found", "orb not found", false));
+    const messages = await deps.store.listOrbMessages(task, request.params.orbId);
+    return messages.isErr()
+      ? reply.status(503).send(httpError("unavailable", messages.error.message, true))
+      : reply.send({ items: messages.value.map(messageView) });
   });
 
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/history", async (request, reply) => {

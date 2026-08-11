@@ -57,13 +57,15 @@ POST /api/v1/orbs/:orbId/archive
 DELETE /api/v1/orbs/:orbId
 
 GET  /api/v1/orbs/:orbId/history
+PUT  /api/v1/orbs/:orbId/messages/:messageId
+GET  /api/v1/orbs/:orbId/messages
 WS   /api/v1/orbs/:orbId/live
 WS   /api/v1/orbs/:orbId/terminal
 ```
 
 `PATCH /api/v1/projects/:projectId` renames an active project. Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters; renaming a deleting project conflicts. This narrow update keeps the repository URL immutable. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
 
-The browser generates project and orb UUIDs with `crypto.randomUUID()` and includes them in create requests:
+The browser generates project, orb, and queued-message UUIDs with the shared `generateUuid()` helper and includes them in create requests. The helper uses `crypto.randomUUID()` when available and falls back to `crypto.getRandomValues()` because plain-HTTP tailnet origins are not secure contexts and may not expose `randomUUID`; browser code must not call `crypto.randomUUID()` directly (`docs/postmortems/2026-08-10-send-anytime-plain-http-randomuuid.md`).
 
 ```ts
 interface CreateProjectRequest {
@@ -136,6 +138,16 @@ interface OrbHistoryView {
   records: HistoryRecord[];
 }
 ```
+
+### Send-anytime messages (decided and implemented 2026-08-10)
+
+All user messages use the idempotent message resource, including messages sent while the runtime is live. This is one ingress path, not an offline fallback beside WebSocket sending. The request body contains the same validated text/image block union as the current live `message` action and deliberately has no caller-selected steer/follow-up mode or `expectedHeadId`.
+
+`PUT` returns `202` after the inbox row and lifecycle wake intent are durable. A client-generated UUID makes retries idempotent under the same identical-body/conflicting-body rule as project/orb creation. The response identifies `queued | delivering | delivered | failed`, may report `turn | steer` after runtime admission, and exposes only a sanitized failure. `failed` is written when the runtime rejects a delivery non-retryably (`docs/runtime-protocol.md`), and the sanitized reason is returned as `error`; retryable delivery failures never change the status, they are simply retried. `GET .../messages` restores outstanding and recent delivery state after reload; it is not conversation history. Actual user transcript records still enter `OrbHistoryView` only through runtime history replication.
+
+The command is accepted for `creating`, `starting`, `running`, `stopping`, `stopped`, and recoverable `failed` orbs. It conflicts for `archiving`, `archived`, or `deleting` orbs. Acceptance requests ordinary startup when needed, but **acceptance itself never transitions the orb** (2026-08-11): the `202` means the message and its wake intent are durable, and the reconciler — nudged to run immediately by the same command — performs the one message-driven `stopped`/`failed` → `starting` transition a tick later (`docs/lifecycle.md`). A client that wants to display "starting" therefore reads the orb resource or its live updates rather than the message response. Explicit stop/message ordering and the durable wake rule are specified in `docs/lifecycle.md`. Payload limits must be enforceable before the runtime exists, so the control-plane limit is fixed at or below every enabled harness/runtime limit rather than learned only from `server.welcome`.
+
+See `docs/runtime-protocol.md` for FIFO delivery, runtime-derived steering, durable identity, and why the live socket is not used as the queue.
 
 ### Orb names and first-message auto-naming (decided and implemented)
 

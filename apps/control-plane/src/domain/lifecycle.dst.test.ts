@@ -1,3 +1,4 @@
+import type { HistoryRecord } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
@@ -12,8 +13,10 @@ import {
 import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
 import { LogCapture, makeRecordingSimulation, runDst, waitUntil } from "../testkit/sim.ts";
 import { isDeclineMarker, isResumeMarker } from "../testkit/world.ts";
+import { ControlState } from "./control-state.ts";
 import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
 import { pollAllOnce, pollLoop, reconcileLoop } from "./loops.ts";
+import type { ControlPlaneDeps } from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
 
 const ORB = "orb-a";
@@ -25,6 +28,92 @@ const PROJECT = "project-a";
  * recovery (docs/postmortems/2026-08-05-unreachable-restart-livelock.md).
  */
 const MAX_STOPS_PER_RECOVERY = 3;
+
+/**
+ * The queue message IDs carried by a replicated inbox record (the runtime's
+ * `pi-orb.user-message` custom message), empty for every other record.
+ */
+function inboxMessageIdsOf(record: HistoryRecord): readonly string[] {
+  const native = record.overflow["native"];
+  if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
+  const details = native["details"];
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
+  const ids = details["messageIds"];
+  if (!Array.isArray(ids)) return [];
+  return ids.filter((id): id is string => typeof id === "string");
+}
+
+/** The replicated inbox records carrying `messageId`, in replica order. */
+function inboxRecordsFor(records: readonly HistoryRecord[], messageId: string): HistoryRecord[] {
+  return records.filter((record) => inboxMessageIdsOf(record).includes(messageId));
+}
+
+/**
+ * The exactly-once invariant of the send-anytime inbox, checked on both sides
+ * of the delivery boundary: every message ID is marked `delivered` in
+ * PostgreSQL, appears in exactly one replicated record, and — the part the
+ * replica alone cannot prove — appears in exactly one record of the runtime's
+ * own session, so a redelivery that started a second agent turn is caught even
+ * when replication has not observed it yet.
+ */
+function assertInboxDeliveredExactlyOnce(
+  harness: ReturnType<typeof makeHarness>,
+  orbId: string,
+  messageIds: readonly string[],
+): void {
+  const snapshots = harness.store.messageSnapshots(orbId);
+  const replicated = harness.store.replicaRecords(orbId);
+  const session = harness.world.entriesOf(orbId).flatMap(inboxMessageIdsOf);
+  for (const messageId of messageIds) {
+    expect(
+      snapshots.find((message) => message.messageId === messageId)?.status,
+      `${messageId} delivered`,
+    ).toBe("delivered");
+    expect(
+      inboxRecordsFor(replicated, messageId),
+      `one replicated record for ${messageId}`,
+    ).toHaveLength(1);
+    expect(
+      session.filter((id) => id === messageId),
+      `one session record for ${messageId}`,
+    ).toHaveLength(1);
+  }
+  // No message ID appears in two runtime records at all, whether or not the
+  // scenario named it.
+  expect(new Set(session).size, "no message delivered twice").toBe(session.length);
+}
+
+/** FIFO: the replicated records carrying `messageIds` are in that order. */
+function assertInboxFifo(
+  harness: ReturnType<typeof makeHarness>,
+  orbId: string,
+  messageIds: readonly string[],
+): void {
+  const records = harness.store.replicaRecords(orbId);
+  const positions = messageIds.map((messageId) =>
+    records.findIndex((record) => inboxMessageIdsOf(record).includes(messageId)),
+  );
+  for (const position of positions) expect(position).toBeGreaterThanOrEqual(0);
+  // Squashed batches share one record, so equal positions are FIFO too.
+  for (let index = 1; index < positions.length; index++) {
+    expect(positions[index - 1] ?? -1).toBeLessThanOrEqual(positions[index] ?? -1);
+  }
+}
+
+/**
+ * Wait `totalMs` in short steps. One long timer is not a long wait to this
+ * scheduler: its late-firing exploration may pick that timer and teleport
+ * virtual time past every other deadline in the simulation at once — here it
+ * starved the history poller for a full minute and produced an
+ * `unreachable-restart` no stalled caller could have caused (2026-08-11; the
+ * same reasoning as `HANG_STEP_MS` in testkit/world.ts).
+ */
+async function sleepInSteps(task: SimulationTask, totalMs: number, reason: string): Promise<void> {
+  const until = task.monotonicNow() + totalMs;
+  while (task.monotonicNow() < until) {
+    await task.sleep(Math.min(until - task.monotonicNow(), 500), reason);
+  }
+}
 
 function seedCreatingOrb(
   task: SimulationTask,
@@ -405,6 +494,1190 @@ describe("orb lifecycle (DST)", () => {
       expect(capture.matching("to=stopped").length).toBe(1);
       expect(capture.matching("to=stopping reason=stop_requested").length).toBe(1);
     });
+  });
+
+  it("a message queued on a stopped orb starts it and is replicated exactly once", async () => {
+    await runDst({ name: "stopped-message-starts", iterations: 15 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000123";
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const stopped = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopped.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "initial stop completes",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 300_000 },
+            );
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "continue from offline" }],
+              now: task.wallNow(),
+            });
+            // Admission records the wake intent only; the reconciler's
+            // backstop performs the one message-driven transition.
+            expect(queued.isOk() && queued.value.orb.state).toBe("stopped");
+            expect(queued.isOk() && queued.value.message.autoStart).toBe(true);
+            await waitUntil(
+              task,
+              "the wake intent starts the orb",
+              () => harness.store.orbSnapshot(ORB)?.state !== "stopped",
+              { timeoutMs: 60_000 },
+            );
+            await waitUntil(
+              task,
+              "queued message reaches the runtime session",
+              () =>
+                harness.store.messageSnapshots(ORB)[0]?.status === "delivered" &&
+                harness.store.replicaRecords(ORB).some((record) => {
+                  const native = record.overflow["native"];
+                  if (typeof native !== "object" || native === null || Array.isArray(native)) {
+                    return false;
+                  }
+                  const details = native["details"];
+                  return (
+                    typeof details === "object" &&
+                    details !== null &&
+                    !Array.isArray(details) &&
+                    Array.isArray(details["messageIds"]) &&
+                    details["messageIds"].includes(messageId)
+                  );
+                }),
+              { timeoutMs: 300_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const records = harness.store.replicaRecords(ORB);
+      expect(
+        records.filter((record) => {
+          const native = record.overflow["native"];
+          if (typeof native !== "object" || native === null || Array.isArray(native)) return false;
+          const details = native["details"];
+          return (
+            typeof details === "object" &&
+            details !== null &&
+            !Array.isArray(details) &&
+            Array.isArray(details["messageIds"]) &&
+            details["messageIds"].includes(messageId)
+          );
+        }),
+      ).toHaveLength(1);
+    });
+  });
+
+  // Two forced interleavings, because this scenario asserts two things the
+  // design does not otherwise order:
+  //
+  // 1. The batch boundary is decided by *when the reconciler claims*, and
+  //    nothing guarantees two separately awaited enqueues land in the same
+  //    claim: free-running, ~1 schedule in 200 claims the first message alone
+  //    and delivers two batches (reproduced 2026-08-10 at iteration 197 of
+  //    400 — both messages arrive, FIFO and content intact, as two records).
+  //    The reconciler is therefore held until both messages are durable, which
+  //    makes a single claim the only possible outcome.
+  // 2. `delivery` ("steer" vs "turn") is written by the delivery note, which
+  //    replication can overtake: a pull that commits the inbox record first
+  //    marks the rows `delivered`, and the note — which only touches
+  //    queued/delivering rows — then matches nothing, so the classification is
+  //    lost for good (~1 schedule in 20 000, found here 2026-08-10; the defect
+  //    itself is in TODO.md). The poller is held until the note is durable so
+  //    this scenario measures batching, not that race.
+  it("two messages queued while busy are delivered as one squashed steering message", async () => {
+    await runDst({ name: "busy-message-steers", iterations: 15 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000124";
+      const secondMessageId = "00000000-0000-4000-8000-000000000125";
+      let bothQueued = false;
+      const result = await sim.runTasks([
+        {
+          name: "reconciler",
+          f: async (task) => {
+            await waitUntil(task, "both messages queued", () => bothQueued);
+            await reconcileLoop(task, harness.deps, stop.signal);
+          },
+        },
+        {
+          name: "poller",
+          f: async (task) => {
+            await waitUntil(task, "the delivery note is durable", () => {
+              const first = harness.store.messageSnapshots(ORB)[0];
+              return first !== undefined && first.delivery !== null;
+            });
+            await pollLoop(task, harness.deps, stop.signal);
+          },
+        },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            harness.world.setActivity(ORB, "busy");
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "change direction" }],
+              now: task.wallNow(),
+            });
+            expect(queued.isOk()).toBe(true);
+            const secondQueued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: secondMessageId,
+              content: [{ type: "text", text: "and also check tests" }],
+              now: task.wallNow(),
+            });
+            expect(secondQueued.isOk()).toBe(true);
+            bothQueued = true;
+            await waitUntil(
+              task,
+              "both busy messages are accepted as one steering message",
+              () => {
+                const messages = harness.store.messageSnapshots(ORB);
+                const message = messages[0];
+                return (
+                  message?.delivery === "steer" &&
+                  message.status === "delivered" &&
+                  messages[1]?.status === "delivered" &&
+                  harness.store.replicaRecords(ORB).some((record) => {
+                    const ids = inboxMessageIdsOf(record);
+                    return (
+                      ids.includes(messageId) &&
+                      ids.includes(secondMessageId) &&
+                      record.type === "message" &&
+                      record.content.some(
+                        (block) =>
+                          block.type === "text" &&
+                          block.text === "change direction\n\nand also check tests",
+                      )
+                    );
+                  })
+                );
+              },
+              { timeoutMs: 60_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.messageSnapshots(ORB)[0]?.delivery).toBe("steer");
+      // One claim, one delivery: each message reached the runtime exactly once.
+      const records = harness.store.replicaRecords(ORB);
+      expect(inboxRecordsFor(records, messageId)).toHaveLength(1);
+      expect(inboxRecordsFor(records, secondMessageId)).toHaveLength(1);
+    });
+  });
+
+  // --------------------------------------------------------------------
+  // The durable message inbox, as the per-orb reconciler owns it
+  // (docs/control-plane-api.md, docs/lifecycle.md). Each scenario below pins
+  // one contract the queue must keep no matter what the runtime or the store
+  // answers, and forces its interleaving (a held reconciler, a scripted
+  // one-shot store blip) instead of hoping for one.
+
+  it("a message the runtime rejects for good fails and never wedges the queue", async () => {
+    // Idle auto-stop is out of scope: the orb is deliberately kept in `running`
+    // with an undeliverable message, and an idle stop mid-scenario would end
+    // the very loop under test for an unrelated and correct reason.
+    await runDst({ name: "message-rejected-non-retryable", iterations: 10 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const rejectedId = "00000000-0000-4000-8000-000000000126";
+      const followUpId = "00000000-0000-4000-8000-000000000127";
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            // A 400 the runtime will give again for the same payload: no
+            // number of redeliveries can turn this batch into a delivery.
+            harness.world.scriptDeliverMessage(ORB, {
+              kind: "reject",
+              code: "http_error",
+              message: "400 invalid_request: message payload too large",
+              retryable: false,
+            });
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: rejectedId,
+              content: [{ type: "text", text: "a payload the runtime refuses" }],
+              now: task.wallNow(),
+            });
+            expect(queued.isOk()).toBe(true);
+            // The queue's terminal state exists in the schema for exactly this:
+            // the message is failed with the runtime's reason, so the user is
+            // told rather than left watching a message that never arrives.
+            await waitUntil(
+              task,
+              "the rejected message is marked failed with the runtime's error",
+              () => {
+                const message = harness.store.messageSnapshots(ORB)[0];
+                return message?.status === "failed" && message.lastError !== null;
+              },
+              { timeoutMs: 120_000 },
+            );
+            // And the inbox is not wedged behind the doomed batch: the next
+            // message the user sends still reaches the runtime.
+            harness.world.scriptDeliverMessage(ORB, { kind: "ok" });
+            const followUp = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: followUpId,
+              content: [{ type: "text", text: "try this instead" }],
+              now: task.wallNow(),
+            });
+            expect(followUp.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "the follow-up message is delivered",
+              () =>
+                harness.store
+                  .messageSnapshots(ORB)
+                  .find((message) => message.messageId === followUpId)?.status === "delivered",
+              { timeoutMs: 120_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const rejected = harness.store.messageSnapshots(ORB)[0];
+      expect(rejected?.status).toBe("failed");
+      expect(rejected?.lastError).toContain("invalid_request");
+      // The doomed payload never reached the session, the follow-up did.
+      const records = harness.store.replicaRecords(ORB);
+      expect(inboxRecordsFor(records, rejectedId)).toHaveLength(0);
+      expect(inboxRecordsFor(records, followUpId)).toHaveLength(1);
+    });
+  });
+
+  it("a queued message never starves the unreachable-runtime restart", async () => {
+    // Idle auto-stop is out of scope for the same reason as in the neighbouring
+    // restart scenarios: recovery costs a full modeled boot.
+    await runDst({ name: "pending-message-blocks-liveness", iterations: 10 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000128";
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "please continue" }],
+              now: task.wallNow(),
+            });
+            expect(queued.isOk()).toBe(true);
+            const firstInstance = harness.world.runtimeInstanceIdOf(ORB);
+            // The runtime stops answering while the message is queued: the
+            // delivery hangs until its own deadline and the history pulls go
+            // silent, while the host keeps observing `running` — the exact
+            // shape `unreachable-restart` recovers from with an empty queue.
+            harness.world.scriptDeliverMessage(ORB, { kind: "hang", durationMs: 10 * 60_000 });
+            harness.world.killRuntimeProcess(ORB);
+            await waitUntil(
+              task,
+              "the unreachable runtime is restarted despite the queued message",
+              () => {
+                const instance = harness.world.runtimeInstanceIdOf(ORB);
+                return instance !== null && instance !== firstInstance;
+              },
+              { timeoutMs: 300_000 },
+            );
+            // Recovery is not a state label: the message the user sent is
+            // delivered once the restarted runtime answers again.
+            harness.world.scriptDeliverMessage(ORB, { kind: "ok" });
+            await waitUntil(
+              task,
+              "the queued message is delivered after the restart",
+              () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+              { timeoutMs: 300_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.messageSnapshots(ORB)[0]?.status).toBe("delivered");
+      expect(inboxRecordsFor(harness.store.replicaRecords(ORB), messageId)).toHaveLength(1);
+    });
+  });
+
+  it("a wake message queued behind an older one still starts the stopped orb", async () => {
+    await runDst({ name: "backstop-honors-any-wake-message", iterations: 10 }, async (sim) => {
+      // Idle auto-stop is out of scope: the restarted orb pays a full modeled
+      // boot before it can deliver, which the test idle window predates.
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const olderId = "00000000-0000-4000-8000-000000000129";
+      const wakeId = "00000000-0000-4000-8000-000000000130";
+      let queuedBoth = false;
+      const result = await sim.runTasks([
+        {
+          name: "reconciler",
+          f: async (task) => {
+            // Held until both messages are durable and the orb is already
+            // `stopping`: the older message can then never be claimed while
+            // running, so the backstop's decision is a fact of the scenario
+            // rather than a race.
+            await waitUntil(task, "both messages queued", () => queuedBoth);
+            await reconcileLoop(task, harness.deps, stop.signal);
+          },
+        },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            // Queued while running: no wake intent, the orb is already up.
+            const older = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: olderId,
+              content: [{ type: "text", text: "look at the failing test" }],
+              now: task.wallNow(),
+            });
+            expect(older.isOk() && older.value.message.autoStart).toBe(false);
+            const stopped = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopped.isOk()).toBe(true);
+            // Queued while stopping: this one *is* a wake request, and it is
+            // not the oldest outstanding message.
+            const wake = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: wakeId,
+              content: [{ type: "text", text: "and then open a PR" }],
+              now: task.wallNow(),
+            });
+            expect(wake.isOk() && wake.value.message.autoStart).toBe(true);
+            queuedBoth = true;
+            await waitUntil(
+              task,
+              "the stop completes",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 300_000 },
+            );
+            await waitUntil(
+              task,
+              "the wake message starts the orb again",
+              () => harness.store.orbSnapshot(ORB)?.state === "running",
+              { timeoutMs: 600_000 },
+            );
+            await waitUntil(
+              task,
+              "both queued messages are delivered in FIFO order",
+              () => {
+                const messages = harness.store.messageSnapshots(ORB);
+                return messages[0]?.status === "delivered" && messages[1]?.status === "delivered";
+              },
+              { timeoutMs: 300_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const records = harness.store.replicaRecords(ORB);
+      expect(inboxRecordsFor(records, olderId)).toHaveLength(1);
+      expect(inboxRecordsFor(records, wakeId)).toHaveLength(1);
+      // FIFO: the older message is never delivered after the newer one.
+      const olderIndex = records.findIndex((record) => inboxMessageIdsOf(record).includes(olderId));
+      const wakeIndex = records.findIndex((record) => inboxMessageIdsOf(record).includes(wakeId));
+      expect(olderIndex).toBeLessThanOrEqual(wakeIndex);
+    });
+  });
+
+  it("a message sent to a failed orb starts it and is delivered", async () => {
+    // The product contract the raw-SQL transition in `enqueueOrbMessage` used
+    // to carry (removed 2026-08-11): a user who sends into a failed orb is
+    // asking for it back, and the wake now runs through the same backstop CAS
+    // as every other message-driven start.
+    await runDst({ name: "failed-orb-send-wakes", iterations: 10 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000140";
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            harness.world.configureOrb(ORB, { initDurationMs: 0 });
+            harness.store.seedProject(makeProjectRow(PROJECT));
+            harness.store.seedOrb(
+              makeOrbRow(ORB, PROJECT, "failed", {
+                lastError: "provider_failed: the host never booted",
+                stateChangedAt: task.wallNow(),
+              }),
+            );
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "please try again" }],
+              now: task.wallNow(),
+            });
+            // The intent names the failure the user saw; admission itself
+            // leaves the orb failed.
+            expect(queued.isOk() && queued.value.orb.state).toBe("failed");
+            expect(queued.isOk() && queued.value.message.autoStart).toBe(true);
+            expect(queued.isOk() && queued.value.message.wakeStateVersion).toBe(
+              queued.isOk() ? queued.value.orb.stateVersion : -1,
+            );
+            await waitUntil(
+              task,
+              "the failed orb is started by the queued message",
+              () => harness.store.orbSnapshot(ORB)?.state === "running",
+              { timeoutMs: 600_000 },
+            );
+            await waitUntil(
+              task,
+              "the queued message is delivered",
+              () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+              { timeoutMs: 300_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const orb = harness.store.orbSnapshot(ORB);
+      expect(orb?.state).toBe("running");
+      // The start cleared the failure the user was looking at.
+      expect(orb?.lastError).toBeNull();
+      expect(inboxRecordsFor(harness.store.replicaRecords(ORB), messageId)).toHaveLength(1);
+    });
+  });
+
+  it("a boot that fails again is never retried by the intent that woke it", async () => {
+    // The other half of the same rule: the wake is one-shot per failure, so a
+    // permanent boot failure plus a standing intent cannot become an unbounded
+    // provision loop. Only a *new* send buys another attempt.
+    const capture = new LogCapture();
+    await runDst(
+      { name: "failed-orb-wake-is-one-shot", iterations: 8, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const stop = new AbortController();
+        const firstId = "00000000-0000-4000-8000-000000000141";
+        const secondId = "00000000-0000-4000-8000-000000000142";
+        const wakes = (): number => capture.matching("to=starting reason=queued_message").length;
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              // A host whose runtime always reports a terminal failure: every
+              // start attempt ends in `failed` again.
+              harness.world.configureOrb(ORB, {
+                initDurationMs: 0,
+                initOutcome: "failed_nonretryable",
+              });
+              harness.store.seedProject(makeProjectRow(PROJECT));
+              harness.store.seedOrb(
+                makeOrbRow(ORB, PROJECT, "failed", {
+                  lastError: "runtime_failed: session corrupt",
+                  stateChangedAt: task.wallNow(),
+                }),
+              );
+              const first = await harness.store.enqueueOrbMessage(task, {
+                orbId: ORB,
+                messageId: firstId,
+                content: [{ type: "text", text: "come back please" }],
+                now: task.wallNow(),
+              });
+              expect(first.isOk() && first.value.message.autoStart).toBe(true);
+              await waitUntil(task, "the send wakes the failed orb once", () => wakes() === 1, {
+                timeoutMs: 600_000,
+              });
+              await waitUntil(
+                task,
+                "the retried boot fails again",
+                () => harness.store.orbSnapshot(ORB)?.state === "failed",
+                { timeoutMs: 600_000 },
+              );
+              // The intent is still outstanding and still carries `auto_start`;
+              // what retires it is the version bump the wake performed.
+              expect(harness.store.messageSnapshots(ORB)[0]?.autoStart).toBe(true);
+              expect(harness.store.messageSnapshots(ORB)[0]?.status).toBe("queued");
+              for (let round = 0; round < 10; round++) {
+                await task.sleep(
+                  TEST_CONSTANTS.hostBackstopIntervalMs,
+                  "watching the terminally failed orb",
+                );
+                expect(harness.store.orbSnapshot(ORB)?.state).toBe("failed");
+                expect(wakes()).toBe(1);
+              }
+              // A new send is new user intent against the failure now on
+              // screen, and gets exactly one further attempt.
+              const second = await harness.store.enqueueOrbMessage(task, {
+                orbId: ORB,
+                messageId: secondId,
+                content: [{ type: "text", text: "one more time" }],
+                now: task.wallNow(),
+              });
+              expect(second.isOk() && second.value.message.autoStart).toBe(true);
+              await waitUntil(task, "the new send wakes the orb again", () => wakes() === 2, {
+                timeoutMs: 600_000,
+              });
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(wakes()).toBe(2);
+      },
+    );
+  });
+
+  it("an explicit stop is final even when a message's wake intent was stranded", async () => {
+    await runDst({ name: "stale-wake-intent-resurrection", iterations: 8 }, async (sim) => {
+      // Idle auto-stop is out of scope: the scenario drives every stop itself,
+      // and the assertion is about the absence of a *self*-restart.
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000131";
+      // The store blip that strands the wake intent: the backstop's clear
+      // fails once, after it has already moved the orb out of `stopped`.
+      harness.store.failNextClearOrbMessageAutoStart(1);
+      let queued = false;
+      const result = await sim.runTasks([
+        {
+          name: "reconciler",
+          f: async (task) => {
+            await waitUntil(task, "wake message queued", () => queued);
+            await reconcileLoop(task, harness.deps, stop.signal);
+          },
+        },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            // Delivery never completes — a legitimate retryable condition —
+            // so nothing else clears the wake intent along the way.
+            harness.world.scriptDeliverMessage(ORB, { kind: "hang", durationMs: 10 * 60_000 });
+            const stopped = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopped.isOk()).toBe(true);
+            const wake = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "wake up and continue" }],
+              now: task.wallNow(),
+            });
+            expect(wake.isOk() && wake.value.message.autoStart).toBe(true);
+            queued = true;
+            await waitUntil(
+              task,
+              "the wake message starts the orb again",
+              () => harness.store.orbSnapshot(ORB)?.state === "running",
+              { timeoutMs: 600_000 },
+            );
+            expect(harness.store.messageSnapshots(ORB)[0]?.autoStart).toBe(true);
+            // The user changes their mind and stops the orb explicitly. An
+            // explicit stop is the strongest intent the product has: it must
+            // outrank a wake intent recorded before it, however that intent
+            // came to survive.
+            const requested = await requestOrbStop(task, harness.deps, ORB);
+            expect(requested.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "the explicit stop completes",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 600_000 },
+            );
+            // ...and stays stopped: several backstop passes with no restart.
+            for (let round = 0; round < 10; round++) {
+              await task.sleep(
+                TEST_CONSTANTS.hostBackstopIntervalMs,
+                "watching the explicitly stopped orb",
+              );
+              expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
+            }
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
+      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+    });
+  });
+
+  it("stopping an already-stopped orb succeeds while the wake-intent clear fails", async () => {
+    await runDst(
+      {
+        name: "stop-idempotent-under-store-blip",
+        iterations: 10,
+        failpointProbabilities: { [FAILPOINTS.storeClearMessageAutoStart]: 1 },
+      },
+      async (sim) => {
+        const harness = makeHarness();
+        const result = await sim.runTasks([
+          {
+            name: "driver",
+            f: async (task) => {
+              harness.store.seedProject(makeProjectRow(PROJECT));
+              harness.store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped"));
+              // Stopping a stopped orb is a no-op the UI issues freely; a
+              // bookkeeping write that fails underneath it must not turn that
+              // no-op into a 503.
+              const requested = await requestOrbStop(task, harness.deps, ORB);
+              expect(
+                requested.isOk(),
+                requested.isErr()
+                  ? `${requested.error.code}: ${requested.error.message}`
+                  : "stop succeeded",
+              ).toBe(true);
+              expect(requested.isOk() && requested.value.state).toBe("stopped");
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
+      },
+    );
+  });
+
+  it("a delivery note that loses the race to replication still records the delivery", async () => {
+    // Replication overtaking the note is a real schedule (~1 in 20 000 free
+    // running, found 2026-08-10): the pull commits the inbox record and marks
+    // the rows delivered while the note is still in flight. Probability is no
+    // way to test it, so the note is held until the record is committed — the
+    // exact losing order, every run.
+    await runDst({ name: "note-after-replication-commit", iterations: 10 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000132";
+      let deliveredBeforeNote = false;
+      harness.store.holdNextNoteOrbMessageDelivery(() => {
+        const replicated = inboxRecordsFor(harness.store.replicaRecords(ORB), messageId).length > 0;
+        if (replicated) {
+          deliveredBeforeNote = harness.store.messageSnapshots(ORB)[0]?.status === "delivered";
+        }
+        return replicated;
+      });
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "how was this delivered?" }],
+              now: task.wallNow(),
+            });
+            expect(queued.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "the delivery classification lands on the already-delivered message",
+              () => {
+                const message = harness.store.messageSnapshots(ORB)[0];
+                return message?.status === "delivered" && message.delivery !== null;
+              },
+              { timeoutMs: 300_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      // The note really did arrive second, and its metadata still stuck.
+      expect(deliveredBeforeNote).toBe(true);
+      const message = harness.store.messageSnapshots(ORB)[0];
+      expect(message?.status).toBe("delivered");
+      expect(message?.delivery).toBe("turn");
+      expect(message?.operationId).not.toBeNull();
+      expect(inboxRecordsFor(harness.store.replicaRecords(ORB), messageId)).toHaveLength(1);
+    });
+  });
+
+  // ------------------------------------------------------------------
+  // The exactly-once crash windows of docs/runtime-protocol.md. PostgreSQL is
+  // authoritative before delivery and the session file after it, and no finite
+  // acknowledgement can commit both; each scenario below forces one of the
+  // windows between them deterministically (a scripted partial delivery, a
+  // held reconciler) and asserts the same invariants: exactly one replicated
+  // record per delivered batch, every message ID marked delivered exactly
+  // once, nothing lost, FIFO preserved, and no second turn started.
+
+  it("a runtime that dies before enqueueing the batch redelivers it exactly once", async () => {
+    await runDst({ name: "delivery-crash-before-pi-enqueue", iterations: 10 }, async (sim) => {
+      // Idle auto-stop is out of scope: the scenario is about redelivery, and
+      // an idle stop mid-flight would end the loop under test.
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const messageId = "00000000-0000-4000-8000-000000000143";
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const firstInstance = harness.world.runtimeInstanceIdOf(ORB);
+            // Scripted before the message exists, so the *first* delivery
+            // attempt is the one that dies: the window is a fact of the
+            // scenario rather than something to hope for.
+            harness.world.scriptDeliverMessage(ORB, { kind: "crash_before_enqueue" });
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId,
+              content: [{ type: "text", text: "did this survive?" }],
+              now: task.wallNow(),
+            });
+            expect(queued.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "the incarnation that took the delivery is gone",
+              () => {
+                const instance = harness.world.runtimeInstanceIdOf(ORB);
+                return instance !== null && instance !== firstInstance;
+              },
+              { timeoutMs: 120_000 },
+            );
+            // Nothing of the batch survived the crash: not in memory, not on
+            // disk. Redelivery is therefore the only way the user's message
+            // can arrive at all.
+            expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([]);
+            expect(
+              harness.world.entriesOf(ORB).filter((record) => inboxMessageIdsOf(record).length > 0),
+            ).toHaveLength(0);
+            await waitUntil(
+              task,
+              "the lost batch is redelivered and replicated",
+              () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+              { timeoutMs: 300_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      assertInboxDeliveredExactlyOnce(harness, ORB, [messageId]);
+    });
+  });
+
+  it("a batch lost before the session write is redelivered, and a retry before it is not", async () => {
+    await runDst(
+      { name: "delivery-crash-after-enqueue-before-persist", iterations: 10 },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const stop = new AbortController();
+        const messageId = "00000000-0000-4000-8000-000000000144";
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              // Accepted into Pi and answered, but not written to the session:
+              // the window in which the runtime's in-memory pending set is the
+              // only thing that knows about this batch.
+              harness.world.scriptDeliverMessage(ORB, { kind: "enqueue_without_persist" });
+              const queued = await harness.store.enqueueOrbMessage(task, {
+                orbId: ORB,
+                messageId,
+                content: [{ type: "text", text: "half-delivered" }],
+                now: task.wallNow(),
+              });
+              expect(queued.isOk()).toBe(true);
+              await waitUntil(
+                task,
+                "the runtime holds the batch pending",
+                () => harness.world.pendingInboxBatchesOf(ORB).includes(messageId),
+                { timeoutMs: 120_000 },
+              );
+              // The batch stays claimed, so the reconciler redelivers it every
+              // pass. Those retries must find it pending and do nothing —
+              // otherwise one queued message becomes several agent turns.
+              await task.sleep(
+                6 * TEST_CONSTANTS.reconcileTickMs,
+                "let the control plane retry the still-claimed batch",
+              );
+              expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([messageId]);
+              expect(harness.store.messageSnapshots(ORB)[0]?.status).toBe("delivering");
+              // Now the process dies with the batch still only in memory.
+              harness.world.restartRuntimeProcess(task, ORB);
+              expect(harness.world.pendingInboxBatchesOf(ORB)).toEqual([]);
+              harness.world.scriptDeliverMessage(ORB, { kind: "ok" });
+              await waitUntil(
+                task,
+                "the lost batch is redelivered and replicated",
+                () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+                { timeoutMs: 300_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        assertInboxDeliveredExactlyOnce(harness, ORB, [messageId]);
+      },
+    );
+  });
+
+  it("a persisted batch whose acknowledgement is lost is never delivered twice", async () => {
+    await runDst(
+      { name: "delivery-crash-after-persist-before-ack", iterations: 10 },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const stop = new AbortController();
+        const messageId = "00000000-0000-4000-8000-000000000145";
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              // Durable in the session, and every answer lost: the control
+              // plane can only learn of this delivery through replication.
+              harness.world.scriptDeliverMessage(ORB, { kind: "persist_without_ack" });
+              const queued = await harness.store.enqueueOrbMessage(task, {
+                orbId: ORB,
+                messageId,
+                content: [{ type: "text", text: "the ack will be lost" }],
+                now: task.wallNow(),
+              });
+              expect(queued.isOk()).toBe(true);
+              await waitUntil(
+                task,
+                "replication marks the message delivered without any acknowledgement",
+                () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+                { timeoutMs: 300_000 },
+              );
+              // ...and the retries the control plane made in the meantime,
+              // every one of them answered with a lost ack, produced no second
+              // record and no second turn.
+              await task.sleep(
+                6 * TEST_CONSTANTS.reconcileTickMs,
+                "watch for a redelivery after the record is durable",
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        assertInboxDeliveredExactlyOnce(harness, ORB, [messageId]);
+        // The classification is the acknowledgement's payload alone, so a
+        // permanently lost ack loses it: the message is still delivered, it
+        // just cannot say how (docs/runtime-protocol.md).
+        const message = harness.store.messageSnapshots(ORB)[0];
+        expect(message?.delivery).toBeNull();
+      },
+    );
+  });
+
+  it("two control-plane dispatchers deliver one batch exactly once", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "two-dispatchers-one-delivery", iterations: 15, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        // A second control-plane process: same database and same fleet, its own
+        // in-process memory (docs/testing.md — version skew and rollovers put
+        // two of these on the same orb routinely).
+        const second: ControlPlaneDeps = { ...harness.deps, control: new ControlState() };
+        const stop = new AbortController();
+        const firstId = "00000000-0000-4000-8000-000000000146";
+        const secondId = "00000000-0000-4000-8000-000000000147";
+        let bothQueued = false;
+        const result = await sim.runTasks([
+          {
+            name: "dispatcher-1",
+            f: async (task) => {
+              await waitUntil(task, "both messages queued", () => bothQueued);
+              await reconcileLoop(task, harness.deps, stop.signal);
+            },
+          },
+          {
+            name: "dispatcher-2",
+            f: async (task) => {
+              await waitUntil(task, "both messages queued", () => bothQueued);
+              await reconcileLoop(task, second, stop.signal);
+            },
+          },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              for (const messageId of [firstId, secondId]) {
+                const queued = await harness.store.enqueueOrbMessage(task, {
+                  orbId: ORB,
+                  messageId,
+                  content: [{ type: "text", text: `work item ${messageId.slice(-3)}` }],
+                  now: task.wallNow(),
+                });
+                expect(queued.isOk()).toBe(true);
+              }
+              bothQueued = true;
+              await waitUntil(
+                task,
+                "both messages are delivered",
+                () =>
+                  harness.store
+                    .messageSnapshots(ORB)
+                    .every((message) => message.status === "delivered"),
+                { timeoutMs: 300_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        assertInboxDeliveredExactlyOnce(harness, ORB, [firstId, secondId]);
+        // Both dispatchers may call the runtime; exactly one call can be the
+        // one that enqueues, and only that one logs a dispatch.
+        expect(capture.matching("message-batch-dispatched")).toHaveLength(1);
+      },
+    );
+  });
+
+  it("an explicit stop outranks a queued message, and a later send starts the orb", async () => {
+    await runDst({ name: "send-versus-stop", iterations: 10 }, async (sim) => {
+      // Idle auto-stop is out of scope: every stop here is explicit and the
+      // restart pays a full modeled boot.
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const beforeStopId = "00000000-0000-4000-8000-000000000148";
+      const afterStopId = "00000000-0000-4000-8000-000000000149";
+      let stopRequested = false;
+      const result = await sim.runTasks([
+        {
+          name: "reconciler",
+          f: async (task) => {
+            // Held until the stop is durable, so the message can never be
+            // delivered before it: this scenario is about the ordering, not
+            // about which side of the race won.
+            await waitUntil(task, "the stop is requested", () => stopRequested);
+            await reconcileLoop(task, harness.deps, stop.signal);
+          },
+        },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const queued = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: beforeStopId,
+              content: [{ type: "text", text: "queued while running" }],
+              now: task.wallNow(),
+            });
+            // Admitted while running: the orb is up, so no wake is recorded.
+            expect(queued.isOk() && queued.value.message.autoStart).toBe(false);
+            const stopped = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopped.isOk()).toBe(true);
+            stopRequested = true;
+            await waitUntil(
+              task,
+              "the stop completes",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 300_000 },
+            );
+            // The message is neither delivered nor discarded, and it does not
+            // resurrect the orb the user just stopped.
+            expect(harness.store.messageSnapshots(ORB)[0]?.status).toBe("queued");
+            expect(harness.store.messageSnapshots(ORB)[0]?.autoStart).toBe(false);
+            for (let round = 0; round < 6; round++) {
+              await task.sleep(
+                TEST_CONSTANTS.hostBackstopIntervalMs,
+                "watching the explicitly stopped orb",
+              );
+              expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
+            }
+            // A send linearized after the stop is new intent: it starts the
+            // orb, and the message that was waiting goes first.
+            const wake = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: afterStopId,
+              content: [{ type: "text", text: "queued after the stop" }],
+              now: task.wallNow(),
+            });
+            expect(wake.isOk() && wake.value.message.autoStart).toBe(true);
+            await waitUntil(
+              task,
+              "both messages are delivered after the wake",
+              () =>
+                harness.store
+                  .messageSnapshots(ORB)
+                  .every((message) => message.status === "delivered"),
+              { timeoutMs: 600_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      assertInboxDeliveredExactlyOnce(harness, ORB, [beforeStopId, afterStopId]);
+      assertInboxFifo(harness, ORB, [beforeStopId, afterStopId]);
+    });
+  });
+
+  it("messages queued across a runtime boot are delivered once, in FIFO order", async () => {
+    await runDst({ name: "fifo-across-runtime-boot", iterations: 10 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const stop = new AbortController();
+      const beforeBootId = "00000000-0000-4000-8000-000000000150";
+      const afterBootId = "00000000-0000-4000-8000-000000000151";
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const first = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: beforeBootId,
+              content: [{ type: "text", text: "before the boot" }],
+              now: task.wallNow(),
+            });
+            expect(first.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "the first message is delivered and replicated",
+              () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+              { timeoutMs: 300_000 },
+            );
+            // The agent finishes that turn, so the session tail is settled and
+            // the boot below has nothing to resume.
+            harness.world.finishTurn(ORB);
+            const stopped = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopped.isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "the orb stops",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 300_000 },
+            );
+            const second = await harness.store.enqueueOrbMessage(task, {
+              orbId: ORB,
+              messageId: afterBootId,
+              content: [{ type: "text", text: "after the boot" }],
+              now: task.wallNow(),
+            });
+            expect(second.isOk() && second.value.message.autoStart).toBe(true);
+            await waitUntil(
+              task,
+              "the second message is delivered on the rebooted runtime",
+              () =>
+                harness.store.messageSnapshots(ORB).find((m) => m.messageId === afterBootId)
+                  ?.status === "delivered",
+              { timeoutMs: 600_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      // The already-delivered message is not re-sent to the rebooted runtime,
+      // and the new one lands behind it.
+      assertInboxDeliveredExactlyOnce(harness, ORB, [beforeBootId, afterBootId]);
+      assertInboxFifo(harness, ORB, [beforeBootId, afterBootId]);
+      // A settled tail is not an interrupted turn: the boot resumed nothing,
+      // so the delivered message started exactly one turn.
+      expect(harness.world.resumeMarkersOf(ORB)).toHaveLength(0);
+      assertReplicaComplete(harness.world, harness.store, ORB);
+    });
+  });
+
+  it("an outstanding message blocks the idle stop until it is delivered", async () => {
+    // The invariant is about the *idle* stop specifically, so it is asserted
+    // on the idle transition itself rather than on host stops: an unreachable
+    // restart is a legitimate, differently-motivated stop that the scheduler
+    // can provoke at any time by starving the poller, and forbidding it here
+    // would make this scenario flaky for a reason it does not test.
+    const capture = new LogCapture();
+    await runDst(
+      { name: "idle-stop-versus-send", iterations: 10, logCapture: capture },
+      async (sim) => {
+        // The default (test) idle window, deliberately: this scenario is about
+        // the idle deadline actually expiring under an undelivered message.
+        const harness = makeHarness();
+        const stop = new AbortController();
+        const messageId = "00000000-0000-4000-8000-000000000152";
+        const idleStops = (): number => capture.matching("stop_reason=idle").length;
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              // One flushed record so the long idle stretch cannot evaporate the
+              // session identity (docs/history-replication.md).
+              harness.world.appendMessage(ORB);
+              // The delivery never answers, so the batch stays outstanding for
+              // as long as the scenario wants: the idle deadline is guaranteed
+              // to expire while user work is in flight.
+              harness.world.scriptDeliverMessage(ORB, {
+                kind: "hang",
+                durationMs: 10 * TEST_CONSTANTS.idleStopAfterMs,
+              });
+              const queued = await harness.store.enqueueOrbMessage(task, {
+                orbId: ORB,
+                messageId,
+                content: [{ type: "text", text: "work the user is waiting for" }],
+                now: task.wallNow(),
+              });
+              expect(queued.isOk()).toBe(true);
+              await sleepInSteps(
+                task,
+                2 * TEST_CONSTANTS.idleStopAfterMs,
+                "let the idle deadline expire under an undelivered message",
+              );
+              // An undelivered message is user work in flight: the reconciler
+              // returns before the idle check while a batch is outstanding, so
+              // the expired deadline above must not have stopped anything.
+              expect(idleStops()).toBe(0);
+              harness.world.scriptDeliverMessage(ORB, { kind: "ok" });
+              await waitUntil(
+                task,
+                "the message is delivered once the runtime answers",
+                () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+                { timeoutMs: 600_000 },
+              );
+              // Still nothing idle-stopped while the user's work was in flight.
+              expect(idleStops()).toBe(0);
+              // The agent finishes the turn the message started; the countdown
+              // resumes from the delivery and the block converges rather than
+              // pinning the host up forever.
+              harness.world.finishTurn(ORB);
+              await waitUntil(
+                task,
+                "the orb idle-stops once the work is done",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+                { timeoutMs: 600_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.store.orbSnapshot(ORB)?.stopReason).toBe("idle");
+        assertInboxDeliveredExactlyOnce(harness, ORB, [messageId]);
+        assertReplicaComplete(harness.world, harness.store, ORB);
+      },
+    );
   });
 
   it("a retryably failing drain never stops the host until it succeeds", async () => {

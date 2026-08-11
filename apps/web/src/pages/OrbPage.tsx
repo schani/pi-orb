@@ -1,9 +1,9 @@
 import {
   CAPABILITY_ABORT,
-  CAPABILITY_INPUT_IMAGE,
   type HistoryRecord,
   type MessageInputBlock,
   type OrbHistoryView,
+  type OrbMessageView,
   type OrbView,
   type RuntimeEvent,
   type ServerFrame,
@@ -19,9 +19,11 @@ import {
   archiveOrb,
   deleteOrb,
   describeApiError,
+  enqueueOrbMessage,
   getOrb,
   getOrbHistory,
   getProject,
+  listOrbMessages,
   startOrb,
   stopOrb,
   updateOrb,
@@ -30,6 +32,11 @@ import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
+import {
+  createMutationEpoch,
+  undeliveredMessages,
+  withQueuedMessage,
+} from "../lib/queued-messages.ts";
 import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
 import {
   type BrowserNotificationPermission,
@@ -38,6 +45,7 @@ import {
   requestNotificationPermission,
   showTurnNotification,
 } from "../lib/turn-notifications.ts";
+import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
 const POLL_INTERVAL_MS = 2000;
@@ -87,6 +95,8 @@ type OrbPageAction =
   | { type: "notice"; message: string }
   | { type: "request_sent"; requestId: string; kind: "message" | "shell" | "abort" }
   | { type: "request_lost"; requestId: string }
+  | { type: "message_enqueued"; requestId: string }
+  | { type: "message_enqueue_failed"; requestId: string; error: ApiError }
   | { type: "send_unavailable" };
 
 function initialState(): OrbPageState {
@@ -300,6 +310,24 @@ function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
           "If your message appears in the history it was delivered — otherwise send it again.",
       };
     }
+    case "message_enqueued":
+      if (state.pendingRequest?.requestId !== action.requestId) return state;
+      return {
+        ...state,
+        pendingRequest: null,
+        requestError: null,
+        composerText: "",
+        composerMode: "message",
+        composerImages: [],
+        notice: null,
+      };
+    case "message_enqueue_failed":
+      if (state.pendingRequest?.requestId !== action.requestId) return state;
+      return {
+        ...state,
+        pendingRequest: null,
+        requestError: { code: "enqueue_failed", message: describeApiError(action.error) },
+      };
     case "send_unavailable":
       return { ...state, notice: "Not connected — the request was not sent." };
   }
@@ -332,6 +360,10 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [orb, setOrb] = useState<OrbView | null>(null);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);
+  const [queuedMessages, setQueuedMessages] = useState<OrbMessageView[]>([]);
+  // Invalidates queued-message reads that were already in flight when a
+  // message mutation committed (see lib/queued-messages.ts).
+  const [messageEpoch] = useState(createMutationEpoch);
   const [orbNotFound, setOrbNotFound] = useState(false);
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -396,6 +428,25 @@ export function OrbPage({ orbId }: { orbId: string }) {
       window.clearInterval(timer);
     };
   }, [orbId, orbNotFound]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => {
+      const token = messageEpoch.begin();
+      void listOrbMessages(orbId).then((result) => {
+        // Discard a snapshot taken before a message mutation committed: it
+        // would clobber the optimistic append with a list that predates it.
+        if (cancelled || messageEpoch.isStale(token) || result.isErr()) return;
+        setQueuedMessages(undeliveredMessages(result.value.items));
+      });
+    };
+    poll();
+    const timer = window.setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [orbId, messageEpoch]);
 
   useEffect(() => {
     orbNameRef.current = orb?.name ?? null;
@@ -533,16 +584,16 @@ export function OrbPage({ orbId }: { orbId: string }) {
       });
       return;
     }
-    dispatch({ type: "image_added", image: { id: crypto.randomUUID(), mediaType, data } });
+    dispatch({ type: "image_added", image: { id: generateUuid(), mediaType, data } });
   };
 
   const sendComposer = () => {
     const connection = liveRef.current;
     const text = state.composerText.trim();
     const images = state.composerImages;
-    if (connection === null) return;
 
     if (state.composerMode !== "message") {
+      if (connection === null) return;
       if (images.length > 0) {
         dispatch({
           type: "notice",
@@ -563,13 +614,6 @@ export function OrbPage({ orbId }: { orbId: string }) {
     }
 
     if (text === "" && images.length === 0) return;
-    if (
-      images.length > 0 &&
-      !(state.welcome?.capabilities.includes(CAPABILITY_INPUT_IMAGE) ?? false)
-    ) {
-      dispatch({ type: "notice", message: "This runtime does not accept image input." });
-      return;
-    }
     const content: MessageInputBlock[] = [
       ...images.map(
         (image): MessageInputBlock => ({
@@ -580,13 +624,20 @@ export function OrbPage({ orbId }: { orbId: string }) {
       ),
       ...(text !== "" ? [{ type: "text", text } satisfies MessageInputBlock] : []),
     ];
-    const requestId = connection.sendRequest({
-      type: "message",
-      expectedHeadId: state.headId,
-      content,
+    const requestId = generateUuid();
+    dispatch({ type: "request_sent", requestId, kind: "message" });
+    void enqueueOrbMessage(orbId, requestId, { content }).then((result) => {
+      if (result.isOk()) {
+        const enqueued = result.value;
+        // Commit before the append so any list request already in flight is
+        // discarded rather than replacing the queue without this message.
+        messageEpoch.commit();
+        setQueuedMessages((current) => withQueuedMessage(current, enqueued));
+        dispatch({ type: "message_enqueued", requestId });
+      } else {
+        dispatch({ type: "message_enqueue_failed", requestId, error: result.error });
+      }
     });
-    if (requestId === null) dispatch({ type: "send_unavailable" });
-    else dispatch({ type: "request_sent", requestId, kind: "message" });
   };
 
   const sendAbort = () => {
@@ -658,8 +709,15 @@ export function OrbPage({ orbId }: { orbId: string }) {
     orb !== null &&
     (orb.state === "creating" || orb.state === "starting" || orb.state === "running");
   const connected = state.connection === "open";
+  const messageAccepting =
+    orb !== null &&
+    !["deleting", "archiving", "archived"].includes(orb.state) &&
+    state.historyLoaded;
   const canSend =
-    connected && state.activity === "idle" && state.pendingRequest === null && state.historyLoaded;
+    state.pendingRequest === null &&
+    (state.composerMode === "message"
+      ? messageAccepting
+      : connected && state.activity === "idle" && state.historyLoaded);
   const canAbort =
     connected &&
     state.activity === "busy" &&
@@ -850,6 +908,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
           liveBlocks={[...state.liveBlocks.values()]}
           tools={[...state.tools.values()]}
           busy={state.activity === "busy"}
+          queuedMessages={queuedMessages}
         />
 
         {orb?.state !== "archived" && orb?.state !== "archiving" && (

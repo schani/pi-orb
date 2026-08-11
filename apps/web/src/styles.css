@@ -855,6 +855,41 @@ button.project-orb-action.danger:hover:not(:disabled) {
   color: var(--accent);
 }
 
+.turn-user.turn-queued {
+  color: var(--ink-faint);
+  opacity: 0.82;
+}
+
+.turn-user.turn-queued .turn-body {
+  background: var(--paper-2);
+  border-left-color: var(--rule);
+}
+
+.turn-user.turn-queued .turn-mark {
+  background: var(--ink-faint);
+}
+
+.turn-user.turn-queued .turn-rail {
+  background: linear-gradient(var(--ink-faint) 0%, rgba(138, 126, 104, 0.12) 100%);
+}
+
+.turn-user.turn-queued .turn-label {
+  color: var(--ink-faint);
+}
+
+/* A message the runtime refused for good: terminal, and it says why. */
+.turn-user.turn-failed .turn-label {
+  color: var(--accent);
+}
+
+.turn-user.turn-failed .turn-error {
+  margin-top: 6px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
 /* agent turns: article flow beside the gutter */
 .turn-agent .turn-body {
   display: flex;
