@@ -227,8 +227,27 @@ ${tailscaleFetch}# COS mounts / read-only; docker config must live on the statef
 export DOCKER_CONFIG=/var/lib/pi-orb-docker
 mkdir -p "$DOCKER_CONFIG"
 docker-credential-gcr configure-docker --registries=$(echo '${options.runtimeImage}' | cut -d/ -f1)
+# Never destroy the runnable container before the replacement image is local.
+# Stop it first so an old runtime/protocol cannot answer readiness during the
+# pull, but retain it as durable evidence/recovery material if every pull fails.
+RUNTIME_IMAGE='${options.runtimeImage}'
+PULL_ATTEMPTS=3
+PULL_BACKOFF_SECONDS=5
+docker stop pi-orb-runtime >/dev/null 2>&1 || true
+for ((attempt = 1; attempt <= PULL_ATTEMPTS; attempt++)); do
+  report "image-pull-attempt $attempt/$PULL_ATTEMPTS"
+  if docker pull "$RUNTIME_IMAGE"; then
+    report image-pulled
+    break
+  fi
+  if (( attempt == PULL_ATTEMPTS )); then
+    report "image-pull-failed attempts=$PULL_ATTEMPTS"
+    exit 1
+  fi
+  sleep $((PULL_BACKOFF_SECONDS * attempt))
+done
 docker rm -f pi-orb-runtime >/dev/null 2>&1 || true
-docker run --detach --name pi-orb-runtime --restart unless-stopped \\
+docker run --pull=never --detach --name pi-orb-runtime --restart unless-stopped \\
   --network host \\
   -v "$MNT":/workspace \\
   -e PI_ORB_ID='${options.orbId}' \\
@@ -236,8 +255,10 @@ docker run --detach --name pi-orb-runtime --restart unless-stopped \\
   -e ${RUNTIME_TOKEN_ENV}="$TOKEN" \\
   -e ${CONTROL_PLANE_URL_ENV}='${options.controlPlaneUrl}' \\
 ${tailscaleEnv}${extra}  -e HOME=/workspace/home \\
-  '${options.runtimeImage}'
-report container-started
+  "$RUNTIME_IMAGE"
+# Keep successful retry recovery reconstructable after the per-attempt markers
+# above have been overwritten in the single startup guest attribute.
+report "container-started imagePullAttempts=$attempt"
 # The startup script ends here, but a container that crash-loops afterwards is
 # invisible to the control plane (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
 # Keep publishing its state for as long as the VM lives.

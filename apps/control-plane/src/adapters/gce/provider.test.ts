@@ -90,6 +90,35 @@ function bashSyntaxError(script: string): string | null {
   return result.status === 0 ? null : result.stderr || `bash -n exited ${String(result.status)}`;
 }
 
+/** Execute only the generated image-replacement block against shell fakes. */
+function runImageReplacement(script: string, failedPulls: number) {
+  const start = script.indexOf("RUNTIME_IMAGE=");
+  const end = script.indexOf('report "container-started');
+  if (start < 0 || end < start) throw new Error("image-replacement block not found");
+  const block = script.slice(start, end);
+  return spawnSync("bash", [], {
+    encoding: "utf8",
+    input: `set -euo pipefail
+exec 3>&1
+pull_count=0
+docker() {
+  printf 'docker' >&3
+  printf ' %s' "$@" >&3
+  printf '\\n' >&3
+  if [[ "$1" == pull ]]; then
+    pull_count=$((pull_count + 1))
+    if (( pull_count <= ${failedPulls} )); then return 1; fi
+  fi
+  return 0
+}
+sleep() { printf 'sleep %s\\n' "$1" >&3; }
+report() { printf 'report %s\\n' "$1" >&3; }
+MNT=/workspace
+TOKEN=token
+${block}`,
+  });
+}
+
 const ok200 = (body: Record<string, unknown>): GceResponse => ({ status: 200, body });
 const notFound: GceResponse = { status: 404, body: {} };
 const done: GceResponse = { status: 200, body: { status: "DONE" } };
@@ -597,9 +626,54 @@ describe("GceOrbHostProvider", () => {
       const script = buildStartupScript({ ...base, extraEnv });
       // No blank line may interrupt a backslash continuation.
       expect(script).not.toMatch(/\\\n\s*\n/);
-      // The image is the final argument of the same docker run command.
-      expect(script).toMatch(/\\\n {2}'img'\n/);
+      // The exact image variable is the final argument of the same docker run command.
+      expect(script).toMatch(/\\\n {2}"\$RUNTIME_IMAGE"\n/);
     }
+  });
+
+  it("retries the exact image pull before replacing the stopped container", () => {
+    const image = "registry.example/runtime@sha256:abc";
+    const script = buildStartupScript({
+      runtimeImage: image,
+      orbId: "o",
+      repositoryUrl: "https://x",
+      controlPlaneUrl: "https://cp",
+      extraEnv: {},
+    });
+    const result = runImageReplacement(script, 2);
+    expect(result.status, result.stderr).toBe(0);
+    const lines = result.stdout.trim().split("\n");
+    const pulls = lines.filter((line) => line === `docker pull ${image}`);
+    expect(pulls).toHaveLength(3);
+    expect(lines).toContain("sleep 5");
+    expect(lines).toContain("sleep 10");
+    const stopAt = lines.indexOf("docker stop pi-orb-runtime");
+    const removeAt = lines.indexOf("docker rm -f pi-orb-runtime");
+    const runAt = lines.findIndex((line) => line.startsWith("docker run "));
+    expect(stopAt).toBeGreaterThanOrEqual(0);
+    expect(removeAt).toBeGreaterThan(lines.lastIndexOf(`docker pull ${image}`));
+    expect(runAt).toBeGreaterThan(removeAt);
+    expect(lines[runAt]).toContain("--pull=never");
+    expect(lines[runAt]?.endsWith(` ${image}`)).toBe(true);
+    expect(script).toContain('report "container-started imagePullAttempts=$attempt"');
+  });
+
+  it("retains the stopped container when image-pull retries are exhausted", () => {
+    const image = "registry.example/runtime@sha256:abc";
+    const script = buildStartupScript({
+      runtimeImage: image,
+      orbId: "o",
+      repositoryUrl: "https://x",
+      controlPlaneUrl: "https://cp",
+      extraEnv: {},
+    });
+    const result = runImageReplacement(script, 3);
+    expect(result.status).toBe(1);
+    const lines = result.stdout.trim().split("\n");
+    expect(lines.filter((line) => line === `docker pull ${image}`)).toHaveLength(3);
+    expect(lines).toContain("report image-pull-failed attempts=3");
+    expect(lines).not.toContain("docker rm -f pi-orb-runtime");
+    expect(lines.some((line) => line.startsWith("docker run "))).toBe(false);
   });
 
   it("reads startup diagnostics from guest attributes", async () => {
@@ -688,7 +762,7 @@ describe("GceOrbHostProvider", () => {
     expect(script).toContain("trap 'report \"failed: line $LINENO");
     expect(script).toContain("report disk-mounted");
     expect(script).toContain("iptables -w -A INPUT -p tcp --dport 8080 -j ACCEPT");
-    expect(script).toContain("report container-started");
+    expect(script).toContain('report "container-started imagePullAttempts=$attempt"');
     expect(script).toContain("guest-attributes/pi-orb/startup");
   });
 
@@ -921,7 +995,7 @@ describe("GceOrbHostProvider", () => {
     expect(script).not.toContain("TS_AUTHKEY");
     expect(script).not.toContain("PI_ORB_PREVIEW_HOST");
     expect(script).not.toMatch(/\\\n\s*\n/);
-    expect(script).toMatch(/\\\n {2}'img'\n/);
+    expect(script).toMatch(/\\\n {2}"\$RUNTIME_IMAGE"\n/);
   });
 
   it("keeps the tailscale docker run well-formed with extra env", () => {
@@ -934,7 +1008,7 @@ describe("GceOrbHostProvider", () => {
       tailscale: { hostname: "pi-orb-o", previewHost: "pi-orb-o.tailnet.ts.net" },
     });
     expect(script).not.toMatch(/\\\n\s*\n/);
-    expect(script).toMatch(/\\\n {2}'img'\n/);
+    expect(script).toMatch(/\\\n {2}"\$RUNTIME_IMAGE"\n/);
   });
 
   it("reads metadata attributes defensively", () => {

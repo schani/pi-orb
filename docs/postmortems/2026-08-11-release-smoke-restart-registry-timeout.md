@@ -1,6 +1,6 @@
 # 2026-08-11 release smoke restart failed after stale-revision overlap and registry timeout
 
-Status: root-caused from durable lifecycle events, Cloud Run revision labels, GCE guest attributes, and COS Cloud Logging. Remediation is not yet implemented; actionable work is in `TODO.md`.
+Status: root-caused from durable lifecycle events, Cloud Run revision labels, GCE guest attributes, and COS Cloud Logging. The Docker replacement remediation was implemented with contract coverage on 2026-08-11 and awaits the mandatory live release smoke; reconciler fencing and the other actionable work remain in `TODO.md`.
 
 ## Impact
 
@@ -39,7 +39,7 @@ This was a compound failure, not a flaky smoke assertion:
 Tracked in `TODO.md`:
 
 - enforce a durable active deployment/reconciler generation before every autonomous lifecycle mutation and terminal decision, rather than relying on Cloud Run revision deletion or only fencing startup-script writes;
-- make startup image replacement non-destructive and retryable: pull the exact digest with bounded retry/backoff before removing the existing container, then run with pulling disabled;
+- **implemented 2026-08-11; awaiting live release smoke:** make startup image replacement non-destructive and retryable — stop but retain the old container, pull the exact target image up to three times with bounded backoff, remove the old container only after success, and run with `--pull=never`; successful recovery and exhausted retries have shell-backed contract tests and durable guest-attribute outcomes;
 - correlate startup/container evidence to the same boot attempt so stale reporter data cannot describe the current failure;
 - prevent or compensate provider operations that complete after their durable state episode has ended, with DST coverage for the stale-revision and late-side-effect schedules.
 
