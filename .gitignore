@@ -5,3 +5,5 @@ test-failures/
 *.tsbuildinfo
 .vite/
 .env*
+.amp/gcp-external-account.json
+.amp/gcp-env

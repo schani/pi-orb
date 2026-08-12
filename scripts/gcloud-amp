@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Google requires an explicit opt-in before an external-account credential may
+# execute its reviewed token helper. Non-interactive agent shells do not source
+# /etc/profile.d, so keep that opt-in attached to gcloud itself in project orbs.
+export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
+exec /usr/bin/gcloud "$@"

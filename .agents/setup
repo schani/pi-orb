@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v gcloud >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y ca-certificates curl gnupg
+  curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+    | gpg --dearmor \
+    | sudo tee /usr/share/keyrings/cloud.google.gpg >/dev/null
+  echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+    | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
+  sudo apt-get update
+  sudo apt-get install -y google-cloud-cli
+fi
+
+if [ "${AMP_ORB:-}" = "1" ]; then
+  export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
+fi
+gcloud config set project playground-dev-6ae7 --quiet
+
+if [ "${AMP_ORB:-}" = "1" ]; then
+  root=$(pwd)
+  credentials="$root/.amp/gcp-external-account.json"
+  env_file="$root/.amp/gcp-env"
+  mkdir -p "$root/.amp"
+  chmod 700 "$root/.amp"
+  sudo install -m 0755 "$root/scripts/gcloud-amp" /usr/local/bin/gcloud
+  hash -r
+
+  gcloud iam workload-identity-pools create-cred-config \
+    projects/1077475695242/locations/global/workloadIdentityPools/amp-orbs/providers/amp-oidc \
+    --service-account=pi-orb-amp-deployer@playground-dev-6ae7.iam.gserviceaccount.com \
+    --executable-command="$root/scripts/amp-gcp-identity" \
+    --subject-token-type=urn:ietf:params:oauth:token-type:id_token \
+    --output-file="$credentials"
+  chmod 600 "$credentials"
+
+  cat > "$env_file" <<EOF
+export AMP_GCP_AUDIENCE='urn:amp:gcp:playground-dev-6ae7'
+export GOOGLE_APPLICATION_CREDENTIALS='$credentials'
+export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
+EOF
+  chmod 600 "$env_file"
+  sudo install -m 0644 "$env_file" /etc/profile.d/pi-orb-gcp.sh
+
+  # Register the external account with gcloud. The credential file contains no
+  # secret; its executable mints a fresh, short-lived Amp token on demand.
+  set -a
+  # shellcheck disable=SC1090
+  source "$env_file"
+  set +a
+  gcloud auth login --cred-file="$credentials" --quiet
+  gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+fi
