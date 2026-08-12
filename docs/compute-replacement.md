@@ -198,6 +198,7 @@ Disposal deliberately trades away post-hoc host forensics. The 2026-08-06 root c
 2. **Provider contract**
    - Add incarnation fields to provision/start/discard requests, results/observations, labels/metadata, and compute names; observations report actual incarnation-specific names.
    - Implement idempotent `discardCompute` for GCE, Docker, and process providers; the process provider persists the launch process-group ID so absence is verifiable after a control-plane restart.
+   - Add the stateful deterministic GCE model behind `GceApiTransport` (below) and compose the real GCE adapter into DST worlds for the discard/fence scenarios.
    - Keep `destroy` deletion-grade, but update it to enumerate and remove every exact-orb incarnation — including legacy unstamped names — before deleting authoritative storage.
    - Verify GCE discard deletes the instance/auto-delete boot disk but never the persistent data disk.
 3. **Lifecycle integration**
@@ -241,6 +242,8 @@ compute-replacement.replacement-committed
 
 Add one-shot failpoints for provider discard, evidence persistence, discard finalization, replacement provision, replacement commit, and Tailscale key revocation. DST failures retain their first `determined` trace under `test-failures/` and must be replayed with `DST_REPLAY` before changes; never rerun merely to obtain green.
 
+**Deterministic GCE model.** The incarnation fence and exact-ownership checks are enforced *inside* each provider adapter, so DST scenarios that assert them must execute the real adapter, not a fake’s reimplementation of the rule. The generic `FakeOrbHostProvider` world remains the default for lifecycle scenarios, but the discard/fence scenarios additionally compose the real `GceOrbHostProvider` over a stateful deterministic GCE model implementing the existing `GceApiTransport` seam. Both enablers already exist: the adapter runs on `SimulationTask` (its `waitOperation` polling sleeps through the simulated clock) and all HTTP passes through that one transport interface. The model keeps instances and disks with labels/metadata, completes zone operations asynchronously across later polls, returns 409 on duplicate insert, filters list by label, and exposes injectable faults — preemption mid-operation, an operation completing after its caller’s process died, and delayed deletion visibility. The modeled surface is deliberately small: instance get/insert/delete/start/stop, disk get/insert/delete, operation wait, guest attributes, label-filtered list. The existing scripted-response transport tests remain only for exact wire-shape assertions; real API behavior drift stays the live GCE validation’s job, which is why that leg is mandatory.
+
 Required DST scenarios:
 
 - failure commits discard intent and clears token authorization before any provider deletion;
@@ -260,9 +263,10 @@ Required DST scenarios:
 - repeated deterministic runtime failure creates at most one incarnation per user-authorized start, never an autonomous loop;
 - old runtime authorization stays rejected throughout replacement and the new token works only after commit;
 - Tailscale key revocation failure is bounded/retryable and at most one unconsumed exact-orb key exists;
-- invariants: workspace identity never changes, at most one live compute incarnation exists, and no incarnation at or below a cleared discard fence remains.
+- invariants: workspace identity never changes, at most one live compute incarnation exists, and no incarnation at or below a cleared discard fence remains;
+- the discard/fence scenarios above run additionally with the real GCE adapter composed over the deterministic GCE model, including a zone operation that completes after a control-plane crash and a delete whose absence becomes visible only on a later poll.
 
-Provider tests:
+Provider tests (the GCE ones run against the deterministic model wherever state or interleaving matters; scripted transports cover wire shapes only):
 
 - GCE deletes all exact-match instances through the fence — including the legacy un-suffixed name — waits for operations, preserves the labeled data disk, rejects ownership mismatch, and treats absence/repetition as success;
 - GCE ignores a higher-incarnation instance even if another field/name is similar;
