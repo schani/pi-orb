@@ -4,7 +4,7 @@ import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, type TestHarness } from "../testkit/fixtures.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
 import { fakeTokenHash } from "../testkit/world.ts";
-import { requestOrbStart, requestOrbStop } from "./lifecycle.ts";
+import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
 import { reconcileLoop } from "./loops.ts";
 
 const ORB = "orb-a";
@@ -113,6 +113,51 @@ describe("runtime-token provisioning (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(secondToken).not.toBe(firstToken);
+    });
+  });
+
+  it("adopts one replacement after provision succeeds but its store commit fails", async () => {
+    await runDst({ name: "replacement-provision-commit-failure", iterations: 30 }, async (sim) => {
+      const harness = makeHarness();
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            harness.world.configureOrb(ORB, { initDurationMs: 0 });
+            harness.store.seedProject(makeProjectRow(PROJECT));
+            harness.store.seedOrb(
+              makeOrbRow(ORB, PROJECT, "starting", {
+                hostIncarnation: 1,
+                stateChangedAt: task.wallNow(),
+              }),
+            );
+            harness.store.failNextHostReplacementCommits(1);
+
+            let sawUncommittedCompute = false;
+            for (let attempt = 0; attempt < 2_000; attempt++) {
+              await reconcileOrbOnce(task, harness.deps, ORB);
+              const row = harness.store.orbSnapshot(ORB);
+              if (harness.world.hostCount(ORB) === 1 && row?.hostRef === null) {
+                sawUncommittedCompute = true;
+                expect(row.runtimeTokenHash).toBeNull();
+                expect(row.hostIncarnation).toBe(1);
+              }
+              if (row?.state === "running") break;
+              await task.sleep(100, "retry replacement commit");
+            }
+            expect(sawUncommittedCompute).toBe(true);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const row = harness.store.orbSnapshot(ORB);
+      expect(row).toMatchObject({ state: "running", hostIncarnation: 1 });
+      expect(row?.hostRef).toBe(harness.world.hostRefOf(ORB)?.resourceId);
+      expect(row?.runtimeTokenHash).toBe(
+        fakeTokenHash(harness.world.hostTokenOf(ORB) ?? "missing"),
+      );
+      expect(harness.world.hostCount(ORB)).toBe(1);
+      expect(harness.world.hostStartCountOf(ORB)).toBe(1);
     });
   });
 

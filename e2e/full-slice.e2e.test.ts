@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RUNTIME_SUBPROTOCOL, type ServerFrame, TERMINAL_SUBPROTOCOL } from "@pi-orb/protocol";
@@ -14,6 +14,8 @@ import {
   type FakeSession,
   FatalProbeError,
   fakeControl,
+  orbContainerNames,
+  removeOrbContainers,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
@@ -91,6 +93,138 @@ let orbId = "";
 let failedOrbId = "";
 let localStateDirectory = "";
 
+function processHostDirectory(id: string): string {
+  return join(localStateDirectory, "process-hosts", id);
+}
+
+/**
+ * Compute is gone while the durable workspace remains. Docker backend: no
+ * container labeled for the orb, any incarnation. Process backend: host
+ * metadata gone while the workspace (optionally a specific surviving file)
+ * is still on disk.
+ */
+async function computeAbsent(id: string, workspaceFile?: string): Promise<boolean> {
+  if (PROCESS_BACKEND) {
+    const hostDirectory = processHostDirectory(id);
+    const witness =
+      workspaceFile === undefined
+        ? join(hostDirectory, "workspace")
+        : join(hostDirectory, "workspace", workspaceFile);
+    return !existsSync(join(hostDirectory, "host.json")) && existsSync(witness);
+  }
+  return (await orbContainerNames(id)).length === 0;
+}
+
+/**
+ * The discard fence has completed: views synthesize the
+ * `discarding_failed_compute` state detail only while the orb row still
+ * carries a non-null discard fence, so its disappearance from the API proves
+ * the fence cleared (views.ts).
+ */
+async function waitForDiscardFenceCleared(id: string): Promise<void> {
+  await waitFor(
+    "discard fence cleared",
+    async () => {
+      const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${id}`);
+      const detail = view.body["stateDetail"] as { type?: string } | undefined;
+      return detail?.type === "discarding_failed_compute" ? null : true;
+    },
+    { timeoutMs: 60_000, intervalMs: 1_000 },
+  );
+}
+
+/**
+ * Each failure test has exactly one deliberate 65-second negative-observation
+ * window: observe more than two terminal-backstop intervals and fail
+ * immediately if compute reappears without explicit Start/message intent.
+ */
+async function observeNoAutonomousReplacement(id: string, workspaceFile?: string): Promise<void> {
+  const negativeDeadline = Date.now() + 65_000;
+  while (Date.now() < negativeDeadline) {
+    expect(await computeAbsent(id, workspaceFile)).toBe(true);
+    expect((await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${id}`)).body["state"]).toBe(
+      "failed",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}
+
+/** Write files into the orb's live workspace through the current incarnation. */
+async function writeWorkspaceFiles(
+  id: string,
+  incarnation: number,
+  files: Record<string, string>,
+): Promise<void> {
+  if (PROCESS_BACKEND) {
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(join(processHostDirectory(id), "workspace", name), content);
+    }
+    return;
+  }
+  await docker([
+    "exec",
+    `pi-orb-${id}-i${incarnation}`,
+    "node",
+    "-e",
+    "const files=JSON.parse(process.argv[1]);" +
+      "for(const [name,content] of Object.entries(files))" +
+      "require('fs').writeFileSync('/workspace/'+name,content)",
+    JSON.stringify(files),
+  ]);
+}
+
+/** Read one workspace file back through the given incarnation. */
+async function readWorkspaceFile(id: string, incarnation: number, name: string): Promise<string> {
+  if (PROCESS_BACKEND) {
+    return readFileSync(join(processHostDirectory(id), "workspace", name), "utf8");
+  }
+  return await docker([
+    "exec",
+    `pi-orb-${id}-i${incarnation}`,
+    "node",
+    "-e",
+    "process.stdout.write(require('fs').readFileSync('/workspace/'+process.argv[1],'utf8'))",
+    name,
+  ]);
+}
+
+/**
+ * First-timeout diagnostics shared by every test: the current orb API view,
+ * the provider inventory for the orb, and the control-plane log tail captured
+ * by the harness.
+ */
+async function dumpOrbDiagnostics(id: string): Promise<void> {
+  if (id !== "") {
+    const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${id}`).catch(() => null);
+    console.error("=== orb view ===", JSON.stringify(view?.body));
+    if (PROCESS_BACKEND) {
+      const hostDirectory = processHostDirectory(id);
+      const entries = existsSync(hostDirectory) ? readdirSync(hostDirectory) : [];
+      console.error(
+        "=== process host inventory ===",
+        JSON.stringify({ hostDirectory, entries, hostMetadata: entries.includes("host.json") }),
+      );
+    } else {
+      const names = await orbContainerNames(id).catch((error: unknown) => [
+        `unavailable: ${String(error)}`,
+      ]);
+      console.error("=== docker inventory ===", JSON.stringify(names));
+    }
+  }
+  console.error("=== control-plane logs (tail) ===");
+  console.error(controlPlane.logs.join("").split("\n").slice(-40).join("\n"));
+}
+
+/** Run a test body and dump the shared diagnostics on any failure. */
+async function withOrbDiagnostics(id: () => string, body: () => Promise<void>): Promise<void> {
+  try {
+    await body();
+  } catch (error) {
+    await dumpOrbDiagnostics(id()).catch(() => undefined);
+    throw error;
+  }
+}
+
 beforeAll(async () => {
   fake = await createFakeSession(`pi-orb-e2e-${Date.now()}`, SCENARIO);
   nameFake = await createFakeSession(`pi-orb-name-e2e-${Date.now()}`, NAME_SCENARIO);
@@ -103,17 +237,15 @@ beforeAll(async () => {
       port: CP_PORT,
       fake,
       nameFake,
+      launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
     });
     return;
   }
 
   await docker(["network", "create", NETWORK]).catch(() => undefined);
-  const hasImage = await docker(["image", "inspect", RUNTIME_IMAGE, "--format", "ok"]).catch(
-    () => null,
-  );
-  if (hasImage === null) {
-    await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
-  }
+  // Always rebuild: a build-if-absent gate silently runs stale runtime code.
+  // With a warm layer cache this takes seconds.
+  await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
 
   await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
   await docker([
@@ -147,6 +279,7 @@ beforeAll(async () => {
     nameFake,
     dockerNetwork: NETWORK,
     runtimeImage: RUNTIME_IMAGE,
+    launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
   });
 }, 720_000);
 
@@ -154,7 +287,7 @@ afterAll(async () => {
   if (!PROCESS_BACKEND) {
     for (const id of [orbId, failedOrbId]) {
       if (id === "") continue;
-      await docker(["rm", "-f", `pi-orb-${id}`]).catch(() => undefined);
+      await removeOrbContainers(id);
       await docker(["volume", "rm", "-f", `pi-orb-data-${id}`]).catch(() => undefined);
     }
   }
@@ -171,84 +304,235 @@ describe("full slice E2E", () => {
       await runScenario();
     } catch (error) {
       // Dump every diagnostic surface before failing.
-      console.error("=== control-plane logs (tail) ===");
-      console.error(controlPlane.logs.join("").split("\n").slice(-40).join("\n"));
+      await dumpOrbDiagnostics(orbId).catch(() => undefined);
       const requests = await fakeControl(fake.sessionKey, "/requests").catch(() => null);
       console.error("=== fake inference requests ===", JSON.stringify(requests));
       if (orbId !== "") {
-        const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${orbId}`).catch(
-          () => null,
-        );
-        console.error("=== orb view ===", JSON.stringify(view?.body));
         const logs = PROCESS_BACKEND
           ? (() => {
               try {
-                return readFileSync(
-                  join(localStateDirectory, "process-hosts", orbId, "runtime.err.log"),
-                  "utf8",
-                );
+                return readFileSync(join(processHostDirectory(orbId), "runtime.err.log"), "utf8");
               } catch (error) {
                 return `unavailable: ${String(error)}`;
               }
             })()
-          : await docker(["logs", "--tail", "40", `pi-orb-${orbId}`]).catch(
-              (error: unknown) => `unavailable: ${String(error)}`,
-            );
+          : await orbContainerNames(orbId)
+              .then((names) => {
+                const [name] = names;
+                return name === undefined
+                  ? "no containers labeled for orb"
+                  : docker(["logs", "--tail", "40", name]);
+              })
+              .catch((error: unknown) => `unavailable: ${String(error)}`);
         console.error("=== orb runtime logs ===\n", logs);
       }
       throw error;
     }
   }, 720_000);
 
-  it("surfaces a real clone failure promptly and stops the failed host", async () => {
+  it("replaces one deliberately failed incarnation only after explicit Start", async () => {
+    const base = controlPlane.baseUrl;
+    const projectId = randomUUID();
+    const replacementOrbId = randomUUID();
+    await withOrbDiagnostics(
+      () => replacementOrbId,
+      async () => {
+        const project = await api(base, "POST", "/api/v1/projects", {
+          id: projectId,
+          name: `e2e-compute-replacement-${projectId.slice(0, 8)}`,
+          repositoryUrl: REPOSITORY_URL,
+        });
+        expect(project.status, JSON.stringify(project.body)).toBe(201);
+        const created = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
+          id: replacementOrbId,
+        });
+        expect(created.status, JSON.stringify(created.body)).toBe(202);
+        await waitFor(
+          "replacement fixture running",
+          async () => {
+            const view = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`);
+            if (view.body["state"] === "failed") {
+              throw new FatalProbeError(
+                `replacement fixture failed: ${String(view.body["lastError"])}`,
+              );
+            }
+            return view.body["state"] === "running" ? true : null;
+          },
+          { timeoutMs: 300_000, intervalMs: 1_000 },
+        );
+
+        const sentinel = `replacement-sentinel-${randomUUID()}`;
+        await writeWorkspaceFiles(replacementOrbId, 0, {
+          "replacement-sentinel": sentinel,
+          ".pi-orb-e2e-launch-failure.json": JSON.stringify({
+            orbId: replacementOrbId,
+            incarnation: 0,
+          }),
+        });
+        const readToken = async (incarnation: number): Promise<string> => {
+          if (PROCESS_BACKEND) {
+            const metadata = JSON.parse(
+              readFileSync(join(processHostDirectory(replacementOrbId), "host.json"), "utf8"),
+            ) as { runtimeToken: string };
+            return metadata.runtimeToken;
+          }
+          const environment = JSON.parse(
+            await docker([
+              "inspect",
+              `pi-orb-${replacementOrbId}-i${incarnation}`,
+              "--format",
+              "{{json .Config.Env}}",
+            ]),
+          ) as string[];
+          const entry = environment.find((value) => value.startsWith("PI_ORB_RUNTIME_TOKEN="));
+          if (entry === undefined) {
+            throw new Error("replacement runtime token missing from inspect");
+          }
+          return entry.slice("PI_ORB_RUNTIME_TOKEN=".length);
+        };
+        const oldToken = await readToken(0);
+        const historyBefore = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
+        expect(historyBefore.status).toBe(200);
+
+        expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/stop`)).status).toBe(202);
+        await waitFor(
+          "replacement fixture stopped",
+          async () =>
+            (await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`)).body["state"] === "stopped"
+              ? true
+              : null,
+          { timeoutMs: 120_000, intervalMs: 1_000 },
+        );
+        expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/start`)).status).toBe(
+          202,
+        );
+
+        const failed = await waitFor(
+          "injected incarnation failed",
+          async () => {
+            const view = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`);
+            return view.body["state"] === "failed" ? view.body : null;
+          },
+          { timeoutMs: 300_000, intervalMs: 1_000 },
+        );
+        expect(failed["lastError"]).toEqual(expect.stringContaining("e2e_launch_failure"));
+        await waitFor(
+          "injected compute disposed",
+          async () =>
+            (await computeAbsent(replacementOrbId, "replacement-sentinel")) ? true : null,
+          { timeoutMs: 120_000, intervalMs: 1_000 },
+        );
+        await waitForDiscardFenceCleared(replacementOrbId);
+        const unauthorized = await fetch(`${base}/runtime/v1/tokens/model`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${oldToken}`, "content-type": "application/json" },
+          body: JSON.stringify({ reason: "startup" }),
+        });
+        expect(unauthorized.status).toBe(401);
+
+        await observeNoAutonomousReplacement(replacementOrbId, "replacement-sentinel");
+
+        expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/start`)).status).toBe(
+          202,
+        );
+        await waitFor(
+          "clean replacement running",
+          async () => {
+            const view = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`);
+            if (view.body["state"] === "failed") {
+              throw new FatalProbeError(
+                `clean replacement failed: ${String(view.body["lastError"])}`,
+              );
+            }
+            return view.body["state"] === "running" ? true : null;
+          },
+          { timeoutMs: 300_000, intervalMs: 1_000 },
+        );
+        expect(await readToken(1)).not.toBe(oldToken);
+        expect(await readWorkspaceFile(replacementOrbId, 1, "replacement-sentinel")).toBe(sentinel);
+        // Exactly one compute identity exists for the orb, and it is the
+        // replacement incarnation 1 — never the discarded incarnation 0 or a
+        // duplicate.
+        if (PROCESS_BACKEND) {
+          const metadata = JSON.parse(
+            readFileSync(join(processHostDirectory(replacementOrbId), "host.json"), "utf8"),
+          ) as { incarnation?: number };
+          expect(metadata.incarnation).toBe(1);
+        } else {
+          expect(await orbContainerNames(replacementOrbId)).toEqual([
+            `pi-orb-${replacementOrbId}-i1`,
+          ]);
+        }
+        const historyAfter = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
+        expect(historyAfter.status).toBe(200);
+        expect(historyAfter.body["records"]).toEqual(historyBefore.body["records"]);
+        expect(historyAfter.body["session"]).not.toBeNull();
+
+        expect((await api(base, "DELETE", `/api/v1/projects/${projectId}`)).status).toBe(202);
+        await waitFor(
+          "replacement fixture deleted",
+          async () =>
+            (await api(base, "GET", `/api/v1/projects/${projectId}`)).status === 404 ? true : null,
+          { timeoutMs: 240_000, intervalMs: 1_000 },
+        );
+      },
+    );
+  }, 600_000);
+
+  it("surfaces a real clone failure, disposes compute, and never autonomously replaces it", async () => {
     const base = controlPlane.baseUrl;
     const projectId = randomUUID();
     const missingRepository = `https://github.com/schani/pi-orb-e2e-missing-${randomUUID()}`;
-    const project = await api(base, "POST", "/api/v1/projects", {
-      id: projectId,
-      name: `e2e-clone-failure-${projectId.slice(0, 8)}`,
-      repositoryUrl: missingRepository,
-    });
-    expect(project.status, JSON.stringify(project.body)).toBe(201);
-
-    failedOrbId = randomUUID();
-    const createdAt = Date.now();
-    const created = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
-      id: failedOrbId,
-    });
-    expect(created.status, JSON.stringify(created.body)).toBe(202);
-
-    const failed = await waitFor(
-      "terminal clone failure",
+    await withOrbDiagnostics(
+      () => failedOrbId,
       async () => {
-        const view = await api(base, "GET", `/api/v1/orbs/${failedOrbId}`);
-        return view.body["state"] === "failed" ? view.body : null;
+        const project = await api(base, "POST", "/api/v1/projects", {
+          id: projectId,
+          name: `e2e-clone-failure-${projectId.slice(0, 8)}`,
+          repositoryUrl: missingRepository,
+        });
+        expect(project.status, JSON.stringify(project.body)).toBe(201);
+
+        failedOrbId = randomUUID();
+        const createdAt = Date.now();
+        const created = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
+          id: failedOrbId,
+        });
+        expect(created.status, JSON.stringify(created.body)).toBe(202);
+
+        const failed = await waitFor(
+          "terminal clone failure",
+          async () => {
+            const view = await api(base, "GET", `/api/v1/orbs/${failedOrbId}`);
+            return view.body["state"] === "failed" ? view.body : null;
+          },
+          { timeoutMs: 120_000, intervalMs: 1_000 },
+        );
+        expect(Date.now() - createdAt).toBeLessThan(120_000);
+        expect(failed["lastError"]).toEqual(
+          expect.stringContaining("runtime_failed: clone_failed:"),
+        );
+        expect(failed["lastError"]).not.toEqual(expect.stringContaining("deadline_exceeded"));
+
+        await waitFor(
+          "failed compute absent",
+          async () => ((await computeAbsent(failedOrbId)) ? true : null),
+          { timeoutMs: 60_000, intervalMs: 1_000 },
+        );
+        await waitForDiscardFenceCleared(failedOrbId);
+        if (!PROCESS_BACKEND) {
+          await expect(
+            docker(["volume", "inspect", `pi-orb-data-${failedOrbId}`]),
+          ).resolves.toContain(failedOrbId);
+        }
+
+        await observeNoAutonomousReplacement(failedOrbId);
+
+        const durable = await api(base, "GET", `/api/v1/orbs/${failedOrbId}`);
+        expect(durable.body["lastError"]).toBe(failed["lastError"]);
       },
-      { timeoutMs: 120_000, intervalMs: 1_000 },
     );
-    expect(Date.now() - createdAt).toBeLessThan(120_000);
-    expect(failed["lastError"]).toEqual(expect.stringContaining("runtime_failed: clone_failed:"));
-    expect(failed["lastError"]).not.toEqual(expect.stringContaining("deadline_exceeded"));
-
-    if (!PROCESS_BACKEND) {
-      await waitFor(
-        "failed runtime container stopped",
-        async () => {
-          const status = await docker([
-            "inspect",
-            `pi-orb-${failedOrbId}`,
-            "--format",
-            "{{.State.Status}}",
-          ]).catch(() => null);
-          return status?.trim() === "exited" ? true : null;
-        },
-        { timeoutMs: 60_000, intervalMs: 1_000 },
-      );
-    }
-
-    const durable = await api(base, "GET", `/api/v1/orbs/${failedOrbId}`);
-    expect(durable.body["lastError"]).toBe(failed["lastError"]);
-  }, 180_000);
+  }, 260_000);
 
   async function runScenario(): Promise<void> {
     const base = controlPlane.baseUrl;
@@ -621,7 +905,7 @@ describe("full slice E2E", () => {
           ),
         ).toThrow();
       } else {
-        await expect(docker(["inspect", `pi-orb-${deletedOrbId}`])).rejects.toThrow();
+        expect(await orbContainerNames(deletedOrbId)).toEqual([]);
         await expect(
           docker(["volume", "inspect", `pi-orb-data-${deletedOrbId}`]),
         ).rejects.toThrow();

@@ -71,6 +71,8 @@ destroy(
 
 `destroy` is idempotent, removes all provider resources owned by the orb, and resolves only when they are definitively absent at that observation. Docker force-removes the container before the volume. GCE deletes the instance, waits for completion, then explicitly deletes and waits for the data disk (also tolerating an already-auto-deleted boot disk). Process mode marks the child intentional, terminates its process group, waits for exit, and recursively removes the host directory without following symlinks outside it.
 
+**Immutable-compute extension (decided 2026-08-12; implementation planned in `docs/compute-replacement.md`):** compute names become incarnation-specific. `destroy` remains deletion-grade but must enumerate and remove every exact-orb incarnation before deleting the fixed workspace volume/directory/data disk; it may no longer assume one legacy deterministic compute name. The separate `discardCompute` operation in that plan is intentionally narrower and never substitutes for deletion because it preserves authoritative storage and tailnet identity.
+
 Tailscale cleanup is a separate provider-agnostic port because tailnet identity exists independently of Docker/GCE/process host state. Its adapter uses OAuth scopes to list/delete auth keys and devices, matches exact pi-orb identities rather than substring names, and returns typed `ResultAsync` errors.
 
 ## Persistence changes

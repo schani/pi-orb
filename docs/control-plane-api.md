@@ -115,11 +115,23 @@ interface OrbView {
   activity?: "idle" | "busy";
   checkoutCommit?: string;
   lastError?: string;
-  stateDetail?: {
-    type: "draining_history";
-    retrying: boolean;
-    message?: string;
-  };
+  stateDetail?:
+    | { type: "discarding_failed_compute"; retrying: boolean; message?: string }
+    | { type: "draining_history"; retrying: boolean; message?: string }
+    | { type: "deleting_resources"; retrying: boolean; message?: string }
+    | {
+        type: "archiving_orb";
+        phase: "waiting_for_idle" | "sealing_history" | "deleting_resources";
+        retrying: boolean;
+        message?: string;
+      }
+    | {
+        type: "waiting_for_runtime";
+        hostState: string | null;
+        secondsSinceHostRunning: number | null;
+        probeAttempts: number;
+        lastProbeError?: string;
+      };
   stateChangedAt: string;
   actionRequired?: {
     type: "openai_codex_device_login";
@@ -168,7 +180,7 @@ The browser shows the name as the primary identity in project orb lists and the 
 
 Implementation: PostgreSQL migration `005_orb_names.sql` (also exercised by the local PGlite backend); protocol schemas in `packages/protocol/src/orb-naming.ts` and `control-plane-api.ts`; lease/race domain logic in `domain/orb-naming.ts`; naming adapter `adapters/pi-name-generator.ts` over the shared `packages/luna` inference adapter; runtime trigger and replicated-history fallback in `http/runtime-routes.ts`, `orb-runtime/src/pi/agent.ts`, and `domain/replication.ts`. The user-wins and concurrent-trigger schedules are covered by `orb-naming.dst.test.ts`; the full-slice E2E asserts the generated name.
 
-Do not expose `host_ref`, model credentials, harness session ID, or internal replication fields in `OrbView`. `actionRequired` is synthesized from the current in-memory device flow and can contain only its public challenge; it is not stored in the orb row. `stateDetail` is synthesized the same way from in-memory reconciler state: while `stopping` it reports the history-drain blocker — for example a retrying database outage — so a long stop is explained rather than an unlabeled spinner, and new detail variants can be added later without schema changes. For a running orb, optional `activity` is the latest `idle | busy` value observed by that control-plane process in a successful history pull; it is omitted when no observation is available and for every non-running lifecycle state. It is an advisory snapshot for ordinary resource reads, not a durable field or push subscription (decided 2026-08-13). The dedicated history response exposes only the cursor/head needed for live handoff.
+Do not expose `host_ref`, model credentials, harness session ID, or internal replication fields in `OrbView`. `actionRequired` is synthesized from the current in-memory device flow and can contain only its public challenge; it is not stored in the orb row. `stateDetail` combines in-memory reconciler state with sanitized durable status: while `stopping` it reports the history-drain blocker — for example a retrying database outage — and while an incarnation-bounded discard intent exists it reports failed-compute disposal plus its persisted provider error. A control-plane restart therefore cannot erase the user-visible reason cleanup is blocked, and new detail variants can be added later without schema changes. For a running orb, optional `activity` is the latest `idle | busy` value observed by that control-plane process in a successful history pull; it is omitted when no observation is available and for every non-running lifecycle state. It is an advisory snapshot for ordinary resource reads, not a durable field or push subscription (decided 2026-08-13). The dedicated history response exposes only the cursor/head needed for live handoff.
 
 Status behavior:
 
@@ -181,7 +193,7 @@ Status behavior:
 - delete returns `202` with `state: "deleting"`, conflicts with every other orb mutation once accepted, and eventually makes the orb and history endpoints return `404` (`docs/orb-deletion.md`);
 - archive returns `202` with `state: "archiving"`; history stays readable, completion yields terminal `archived`, start is permanently rejected, and later delete remains available (`docs/orb-archival.md`);
 - lifecycle work is asynchronous and recoverable from `orbs.state`; the browser polls `GET /api/v1/orbs/:orbId`;
-- while an orb is `stopping`, the orb resource includes `stateDetail` so the requester sees drain progress and retryable blockers instead of an unexplained wait;
+- while an orb is `stopping`, or failed-compute disposal is pending, the orb resource includes `stateDetail` so the requester sees drain/cleanup progress and retryable blockers instead of an unexplained wait;
 - a process restart finds `creating`, `starting`, `stopping`, and `deleting` rows and resumes reconciliation, including restarting a required OAuth flow or destructive cleanup, so no transient job is authoritative;
 - history is returned as one complete database snapshot without pagination in the first slice;
 - the live upgrade is accepted only for a running orb; otherwise it fails with `409`/`1013` as appropriate.

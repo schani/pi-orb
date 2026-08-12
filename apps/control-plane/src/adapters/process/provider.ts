@@ -22,7 +22,7 @@ import {
   TAILSCALE_HOSTNAME_ENV,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { err, ok, Result, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError } from "../../domain/errors.ts";
 import type {
   OperationContext,
@@ -31,6 +31,7 @@ import type {
   OrbHostRef,
   ProvisionedOrbHost,
   ProvisionOrbHostRequest,
+  StartOrbHostRequest,
 } from "../../domain/ports.ts";
 
 export interface ProcessOrbHostProviderOptions {
@@ -40,14 +41,28 @@ export interface ProcessOrbHostProviderOptions {
   readonly nodeExecutable?: string;
   readonly extraEnv?: Readonly<Record<string, string>>;
   readonly restartDelayMs?: number;
+  /**
+   * Grace between SIGTERM and SIGKILL, and after SIGKILL before disposal
+   * reports uncertainty instead of absence. Defaults to 2s.
+   */
+  readonly terminateGraceMs?: number;
+  /**
+   * Test-composition-only seam: awaited when a crash-relaunch timer fires,
+   * before the relaunch takes the per-orb lock. Lets tests order a discard
+   * against an in-flight relaunch deterministically.
+   */
+  readonly onCrashRelaunch?: (orbId: string) => Promise<void>;
 }
 
 interface HostMetadata {
   readonly v: 1;
   readonly orbId: string;
+  readonly incarnation: number;
   readonly repositoryUrl: string;
   readonly runtimeToken: string;
   readonly port: number;
+  /** Process-group leader PID, persisted so disposal survives provider restart. */
+  readonly processGroupId: number | null;
   readonly desiredState: "running" | "stopped";
 }
 
@@ -104,12 +119,21 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       const path = this.metadataPath(orbId);
       if (!existsSync(path)) return ok(null);
       const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<HostMetadata>;
+      // Pre-incarnation process metadata is the one legacy internal resource
+      // shape retained by the replacement contract: unstamped means 0, and no
+      // persisted process group means there is nothing restart-verifiable to kill.
+      const incarnation = parsed.incarnation ?? 0;
+      const processGroupId = parsed.processGroupId ?? null;
       if (
         parsed.v !== 1 ||
         parsed.orbId !== orbId ||
+        !Number.isSafeInteger(incarnation) ||
+        incarnation < 0 ||
         typeof parsed.repositoryUrl !== "string" ||
         typeof parsed.runtimeToken !== "string" ||
         typeof parsed.port !== "number" ||
+        (processGroupId !== null &&
+          (!Number.isSafeInteger(processGroupId) || processGroupId <= 0)) ||
         (parsed.desiredState !== "running" && parsed.desiredState !== "stopped")
       ) {
         return err(
@@ -121,7 +145,16 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           ),
         );
       }
-      return ok(parsed as HostMetadata);
+      return ok({
+        v: 1,
+        orbId,
+        incarnation,
+        repositoryUrl: parsed.repositoryUrl,
+        runtimeToken: parsed.runtimeToken,
+        port: parsed.port,
+        processGroupId,
+        desiredState: parsed.desiredState,
+      });
     } catch (error) {
       return err(hostError(operation, "unavailable", String(error), true));
     }
@@ -217,6 +250,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     Object.assign(environment, this.options.extraEnv ?? {}, {
       PI_ORB_ID: metadata.orbId,
       PI_ORB_REPOSITORY_URL: metadata.repositoryUrl,
+      PI_ORB_HOST_INCARNATION: String(metadata.incarnation),
       PI_ORB_WORK_DIR: join(this.hostDirectory(metadata.orbId), "workspace"),
       // Do not inherit the control-plane user's home: process-backed orbs must
       // have the same per-orb durable home contract as Docker and GCE.
@@ -263,16 +297,64 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       child.once("exit", () => {
         if (this.children.get(metadata.orbId) !== managed) return;
         this.children.delete(metadata.orbId);
+        const latest = this.readMetadata("start", metadata.orbId);
+        if (latest.isOk() && latest.value !== null && latest.value.processGroupId === child.pid) {
+          this.writeMetadata("start", { ...latest.value, processGroupId: null });
+        }
         if (managed.intentional || this.closing) return;
         setTimeout(() => {
-          const latest = this.readMetadata("start", metadata.orbId);
-          if (latest.isOk() && latest.value?.desiredState === "running" && !this.closing) {
-            void this.launch("start", latest.value);
-          }
+          void (async (): Promise<void> => {
+            await this.options.onCrashRelaunch?.(metadata.orbId);
+            // The relaunch runs under the same per-orb lock as provision,
+            // start, stop, and discard, and re-reads the metadata inside it:
+            // a discard that won the race removed the file, so the relaunch
+            // aborts instead of resurrecting a fenced incarnation.
+            await this.withLock(metadata.orbId, async () => {
+              const current = this.readMetadata("start", metadata.orbId);
+              if (current.isErr()) return err(current.error);
+              if (
+                current.value === null ||
+                current.value.desiredState !== "running" ||
+                this.closing
+              ) {
+                return ok(undefined);
+              }
+              return this.launch("start", current.value);
+            });
+          })();
         }, this.options.restartDelayMs ?? 250);
       });
       return new Promise((resolve) => {
-        child.once("spawn", () => resolve(ok(undefined)));
+        child.once("spawn", () => {
+          if (child.pid === undefined) {
+            resolve(err(hostError(operation, "operation_failed", "child has no pid", true)));
+            return;
+          }
+          // Every launch runs under the per-orb lock, so a discard cannot
+          // interleave here — but if the metadata is gone anyway, rewriting
+          // it would resurrect a fenced incarnation. Detect, kill what was
+          // just spawned, and report the lost race instead.
+          if (!existsSync(this.metadataPath(metadata.orbId))) {
+            managed.intentional = true;
+            if (this.children.get(metadata.orbId) === managed) {
+              this.children.delete(metadata.orbId);
+            }
+            const kill = Result.fromThrowable(
+              (pid: number) => process.kill(pid, "SIGKILL"),
+              (error) => error as NodeJS.ErrnoException,
+            );
+            kill(process.platform === "win32" ? child.pid : -child.pid);
+            resolve(
+              err(hostError(operation, "conflict", "host metadata removed during launch", true)),
+            );
+            return;
+          }
+          const written = this.writeMetadata(operation, {
+            ...metadata,
+            processGroupId: child.pid,
+          });
+          resolve(written.isErr() ? err(written.error) : ok(undefined));
+        });
         child.once("error", (error) => {
           if (this.children.get(metadata.orbId) === managed) this.children.delete(metadata.orbId);
           resolve(err(hostError(operation, "unavailable", String(error), true)));
@@ -283,8 +365,27 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     }
   }
 
-  private ref(orbId: string): OrbHostRef {
-    return { provider: "process", resourceId: orbId };
+  private ref(orbId: string, incarnation: number): OrbHostRef {
+    return {
+      provider: "process",
+      resourceId: `${encodeURIComponent(orbId)}-i${incarnation}`,
+    };
+  }
+
+  private identityFromRef(ref: OrbHostRef): { orbId: string; incarnation: number } | null {
+    const match = /^(.*)-i(\d+)$/.exec(ref.resourceId);
+    if (match?.[1] === undefined || match[2] === undefined) return null;
+    const incarnation = Number(match[2]);
+    if (!Number.isSafeInteger(incarnation)) return null;
+    return { orbId: decodeURIComponent(match[1]), incarnation };
+  }
+
+  /** POC policy: refs without an incarnation suffix (legacy) are unsupported. */
+  private invalidRefError(
+    operation: OrbHostProviderError["operation"],
+    resourceId: string,
+  ): OrbHostProviderError {
+    return hostError(operation, "conflict", `invalid process host ref ${resourceId}`, false);
   }
 
   provision(
@@ -304,14 +405,25 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         metadata = {
           v: 1,
           orbId: request.orbId,
+          incarnation: request.incarnation,
           repositoryUrl: request.bootstrap.repositoryUrl,
           runtimeToken: randomBytes(32).toString("hex"),
           port: port.value,
+          processGroupId: null,
           desiredState: "running",
         };
         const written = this.writeMetadata("provision", metadata);
         if (written.isErr()) return err(written.error);
         task.log(`provisioned process host ${request.orbId}`);
+      } else if (metadata.incarnation !== request.incarnation) {
+        return err(
+          hostError(
+            "provision",
+            "conflict",
+            `process host carries incarnation ${metadata.incarnation}, expected ${request.incarnation}`,
+            false,
+          ),
+        );
       } else if (metadata.desiredState === "stopped") {
         metadata = { ...metadata, desiredState: "running" };
         const written = this.writeMetadata("provision", metadata);
@@ -319,31 +431,47 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       }
       const launched = await this.launch("provision", metadata);
       if (launched.isErr()) return err(launched.error);
-      return ok({ ref: this.ref(request.orbId), runtimeTokenHash: sha256(metadata.runtimeToken) });
+      return ok({
+        ref: this.ref(request.orbId, metadata.incarnation),
+        incarnation: metadata.incarnation,
+        runtimeTokenHash: sha256(metadata.runtimeToken),
+      });
     });
     return new ResultAsync(run);
   }
 
   start(
     _task: SimulationTask,
-    ref: OrbHostRef,
+    request: StartOrbHostRequest,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
+    const identity = this.identityFromRef(request.ref);
+    if (identity === null) {
+      return new ResultAsync(
+        Promise.resolve(err(this.invalidRefError("start", request.ref.resourceId))),
+      );
+    }
     return new ResultAsync(
-      this.withLock(ref.resourceId, async () => {
+      this.withLock(identity.orbId, async () => {
         if (context.signal.aborted)
           return err(hostError("start", "cancelled", "start cancelled", true));
-        const found = this.readMetadata("start", ref.resourceId);
+        const found = this.readMetadata("start", identity.orbId);
         if (found.isErr()) return err(found.error);
         if (found.value === null)
           return err(
             hostError(
               "start",
               "invalid_state",
-              `process host ${ref.resourceId} does not exist`,
+              `process host ${request.ref.resourceId} does not exist`,
               false,
             ),
           );
+        if (
+          found.value.incarnation !== request.expectedIncarnation ||
+          identity.incarnation !== request.expectedIncarnation
+        ) {
+          return err(hostError("start", "conflict", "process incarnation mismatch", false));
+        }
         const metadata = { ...found.value, desiredState: "running" as const };
         const written = this.writeMetadata("start", metadata);
         if (written.isErr()) return err(written.error);
@@ -352,36 +480,90 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     );
   }
 
-  private terminate(orbId: string): Promise<void> {
-    const managed = this.children.get(orbId);
-    if (managed === undefined) return Promise.resolve();
-    managed.intentional = true;
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = (): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(force);
-        resolve();
-      };
-      managed.child.once("exit", finish);
-      const force = setTimeout(() => {
-        try {
-          if (managed.child.pid !== undefined && process.platform !== "win32")
-            process.kill(-managed.child.pid, "SIGKILL");
-          else managed.child.kill("SIGKILL");
-        } catch {
-          finish();
+  /**
+   * The one SIGTERM → bounded group wait → SIGKILL → bounded group wait
+   * ladder every termination path shares. Absence of the *whole group* is
+   * the only success: probing the leader alone would report absence while a
+   * group member survives, and returning before the post-SIGKILL probe would
+   * report absence on hope. Uncertainty is a retryable error
+   * (docs/compute-replacement.md).
+   */
+  private async killProcessGroup(
+    operation: OrbHostProviderError["operation"],
+    processGroupId: number,
+  ): Promise<Result<void, OrbHostProviderError>> {
+    const kill = Result.fromThrowable(
+      (pid: number, signal: NodeJS.Signals | 0) => process.kill(pid, signal),
+      (error) => error as NodeJS.ErrnoException,
+    );
+    // On POSIX the negative pid addresses the whole group for signals and
+    // for the signal-0 existence probe alike: ESRCH means every member is
+    // gone (an exited-but-unreaped leader still counts as present until
+    // libuv reaps it, which is exactly the conservative direction).
+    const target = process.platform === "win32" ? processGroupId : -processGroupId;
+    const grace = this.options.terminateGraceMs ?? 2_000;
+    const groupGone = async (): Promise<Result<boolean, OrbHostProviderError>> => {
+      const deadline = Date.now() + grace;
+      for (;;) {
+        const exists = kill(target, 0);
+        if (exists.isErr()) {
+          return exists.error.code === "ESRCH"
+            ? ok(true)
+            : err(hostError(operation, "unavailable", String(exists.error), true));
         }
-      }, 2_000);
-      try {
-        if (managed.child.pid !== undefined && process.platform !== "win32")
-          process.kill(-managed.child.pid, "SIGTERM");
-        else managed.child.kill("SIGTERM");
-      } catch {
-        finish();
+        if (Date.now() >= deadline) return ok(false);
+        await new Promise((resolve) => setTimeout(resolve, 20));
       }
-    });
+    };
+    const terminated = kill(target, "SIGTERM");
+    if (terminated.isErr()) {
+      return terminated.error.code === "ESRCH"
+        ? ok(undefined)
+        : err(hostError(operation, "unavailable", String(terminated.error), true));
+    }
+    const goneAfterTerm = await groupGone();
+    if (goneAfterTerm.isErr()) return err(goneAfterTerm.error);
+    if (goneAfterTerm.value) return ok(undefined);
+    const killed = kill(target, "SIGKILL");
+    if (killed.isErr() && killed.error.code !== "ESRCH") {
+      return err(hostError(operation, "unavailable", String(killed.error), true));
+    }
+    const goneAfterKill = await groupGone();
+    if (goneAfterKill.isErr()) return err(goneAfterKill.error);
+    return goneAfterKill.value
+      ? ok(undefined)
+      : err(
+          hostError(
+            operation,
+            "unavailable",
+            `process group ${processGroupId} still exists after SIGKILL`,
+            true,
+          ),
+        );
+  }
+
+  /**
+   * Terminate every process this provider can know about for the orb: the
+   * persisted process-group leader (which survives a provider restart) and
+   * any live managed child — the latter matters when the persisted group is
+   * null or stale, e.g. around a crash restart that has not committed its
+   * new group yet. Resolves ok only once every addressed group is absent.
+   */
+  private async terminateOrbProcesses(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    recordedProcessGroupId: number | null,
+  ): Promise<Result<void, OrbHostProviderError>> {
+    const managed = this.children.get(orbId);
+    if (managed !== undefined) managed.intentional = true;
+    const groups = new Set<number>();
+    if (recordedProcessGroupId !== null) groups.add(recordedProcessGroupId);
+    if (managed?.child.pid !== undefined) groups.add(managed.child.pid);
+    for (const group of groups) {
+      const killed = await this.killProcessGroup(operation, group);
+      if (killed.isErr()) return killed;
+    }
+    return ok(undefined);
   }
 
   stop(
@@ -389,17 +571,55 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     ref: OrbHostRef,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
+    const identity = this.identityFromRef(ref);
+    if (identity === null) {
+      return new ResultAsync(Promise.resolve(err(this.invalidRefError("stop", ref.resourceId))));
+    }
     return new ResultAsync(
-      this.withLock(ref.resourceId, async () => {
+      this.withLock(identity.orbId, async () => {
         if (context.signal.aborted)
           return err(hostError("stop", "cancelled", "stop cancelled", true));
-        const found = this.readMetadata("stop", ref.resourceId);
+        const found = this.readMetadata("stop", identity.orbId);
         if (found.isErr()) return err(found.error);
-        if (found.value === null) return ok(undefined);
+        if (found.value === null || found.value.incarnation !== identity.incarnation) {
+          return ok(undefined);
+        }
         const written = this.writeMetadata("stop", { ...found.value, desiredState: "stopped" });
         if (written.isErr()) return err(written.error);
-        await this.terminate(ref.resourceId);
-        return ok(undefined);
+        return this.terminateOrbProcesses("stop", identity.orbId, found.value.processGroupId);
+      }),
+    );
+  }
+
+  discardCompute(
+    _task: SimulationTask,
+    request: { orbId: string; throughIncarnation: number },
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError> {
+    return new ResultAsync(
+      this.withLock(request.orbId, async () => {
+        if (context.signal.aborted) {
+          return err(hostError("discard", "cancelled", "discard cancelled", true));
+        }
+        const found = this.readMetadata("discard", request.orbId);
+        if (found.isErr()) return err(found.error);
+        if (found.value === null || found.value.incarnation > request.throughIncarnation) {
+          return ok(undefined);
+        }
+        const terminated = await this.terminateOrbProcesses(
+          "discard",
+          request.orbId,
+          found.value.processGroupId,
+        );
+        if (terminated.isErr()) return err(terminated.error);
+        try {
+          rmSync(this.metadataPath(request.orbId), { force: true });
+          rmSync(join(this.hostDirectory(request.orbId), "runtime.log"), { force: true });
+          rmSync(join(this.hostDirectory(request.orbId), "runtime.err.log"), { force: true });
+          return ok(undefined);
+        } catch (error) {
+          return err(hostError("discard", "unavailable", String(error), true));
+        }
       }),
     );
   }
@@ -415,14 +635,12 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           return err(hostError("destroy", "cancelled", "destroy cancelled", true));
         const found = this.readMetadata("destroy", orbId);
         if (found.isErr()) return err(found.error);
-        if (found.value !== null) {
-          const written = this.writeMetadata("destroy", {
-            ...found.value,
-            desiredState: "stopped",
-          });
-          if (written.isErr()) return err(written.error);
-        }
-        await this.terminate(orbId);
+        const terminated = await this.terminateOrbProcesses(
+          "destroy",
+          orbId,
+          found.value?.processGroupId ?? null,
+        );
+        if (terminated.isErr()) return err(terminated.error);
         try {
           rmSync(this.hostDirectory(orbId), { recursive: true, force: true });
           return ok(undefined);
@@ -438,17 +656,24 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     ref: OrbHostRef,
     _context: OperationContext,
   ): ResultAsync<OrbHostObservation | null, OrbHostProviderError> {
-    const found = this.readMetadata("observe", ref.resourceId);
+    const identity = this.identityFromRef(ref);
+    if (identity === null) {
+      return new ResultAsync(Promise.resolve(err(this.invalidRefError("observe", ref.resourceId))));
+    }
+    const found = this.readMetadata("observe", identity.orbId);
     if (found.isErr()) return new ResultAsync(Promise.resolve(err(found.error)));
-    if (found.value === null) return new ResultAsync(Promise.resolve(ok(null)));
-    const managed = this.children.get(ref.resourceId);
+    if (found.value === null || found.value.incarnation !== identity.incarnation) {
+      return new ResultAsync(Promise.resolve(ok(null)));
+    }
+    const managed = this.children.get(identity.orbId);
     const running =
       managed !== undefined && managed.child.exitCode === null && managed.child.signalCode === null;
     return new ResultAsync(
       Promise.resolve(
         ok({
-          ref: this.ref(found.value.orbId),
+          ref: this.ref(found.value.orbId, found.value.incarnation),
           orbId: found.value.orbId,
+          incarnation: found.value.incarnation,
           state: running ? "running" : "stopped",
           ...(running
             ? { runtimeAddress: { baseUrl: `http://127.0.0.1:${found.value.port}` } }
@@ -473,7 +698,14 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         const observations: OrbHostObservation[] = [];
         for (const directory of directories) {
           const orbId = decodeURIComponent(directory.name);
-          const observed = await this.observe(task, this.ref(orbId), context);
+          const metadata = this.readMetadata("list", orbId);
+          if (metadata.isErr()) return err(metadata.error);
+          if (metadata.value === null) continue;
+          const observed = await this.observe(
+            task,
+            this.ref(orbId, metadata.value.incarnation),
+            context,
+          );
           if (observed.isErr()) return err(observed.error);
           if (observed.value !== null) observations.push(observed.value);
         }
@@ -489,6 +721,10 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
 
   async close(): Promise<void> {
     this.closing = true;
-    await Promise.all([...this.children.keys()].map((orbId) => this.terminate(orbId)));
+    // Best-effort at shutdown: the ladder's verified-absence errors are moot
+    // once the provider is gone.
+    await Promise.all(
+      [...this.children.keys()].map((orbId) => this.terminateOrbProcesses("stop", orbId, null)),
+    );
   }
 }

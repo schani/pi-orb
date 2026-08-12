@@ -54,7 +54,7 @@ export interface RuntimeClientError {
 export interface OrbHostProviderError {
   readonly type: "orb_host_provider_error";
   readonly provider: string;
-  readonly operation: "provision" | "start" | "stop" | "destroy" | "observe" | "list";
+  readonly operation: "provision" | "start" | "stop" | "discard" | "destroy" | "observe" | "list";
   readonly code: "unavailable" | "conflict" | "invalid_state" | "operation_failed" | "cancelled";
   readonly message: string;
   readonly retryable: boolean;

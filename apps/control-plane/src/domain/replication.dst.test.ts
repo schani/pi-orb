@@ -127,14 +127,13 @@ describe("history replication (DST)", () => {
     });
   });
 
-  it("a session-header mismatch fails the orb and stops the host, replica intact", async () => {
+  it("a session-header mismatch fails the orb and discards compute, replica intact", async () => {
     await runDst({ name: "session-mismatch", iterations: 25 }, async (sim) => {
       const harness = makeHarness();
       const stop = new AbortController();
       const result = await sim.runTasks([
         { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
-        // The reconciler is the backstop that stops the host if the
-        // integrity path's own stop attempt was cancelled.
+        // Shared reconciliation consumes the durable discard intent.
         { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
         {
           name: "driver",
@@ -156,8 +155,10 @@ describe("history replication (DST)", () => {
             );
             await waitUntil(
               task,
-              "host stopped",
-              () => harness.world.hostStateOf(ORB) === "stopped",
+              "failed compute discarded",
+              () =>
+                harness.world.hostStateOf(ORB) === null &&
+                harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null,
               { timeoutMs: 120_000 },
             );
             stop.abort();
@@ -168,6 +169,8 @@ describe("history replication (DST)", () => {
       const orb = harness.store.orbSnapshot(ORB);
       expect(orb?.state).toBe("failed");
       expect(orb?.lastError).toContain("replication_integrity");
+      expect(orb?.hostIncarnation).toBe(1);
+      expect(harness.world.hostStateOf(ORB)).toBeNull();
       // The replica retains what was committed before the corruption.
       expect(harness.store.replicaRecords(ORB).length).toBe(1);
     });

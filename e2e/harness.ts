@@ -59,6 +59,34 @@ export function docker(args: string[], timeoutMs = 120_000): Promise<string> {
   });
 }
 
+/**
+ * Every container of one orb, any incarnation, by the Docker provider's orb
+ * label (container names carry an `-i<incarnation>` suffix, so name-based
+ * lookups go stale across compute replacement).
+ */
+export async function orbContainerNames(orbId: string): Promise<string[]> {
+  const names = await docker([
+    "ps",
+    "--all",
+    "--filter",
+    `label=pi-orb.orb-id=${orbId}`,
+    "--format",
+    "{{.Names}}",
+  ]);
+  return names
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+/** Best-effort cleanup of one orb's containers across all incarnations. */
+export async function removeOrbContainers(orbId: string): Promise<void> {
+  const names = await orbContainerNames(orbId).catch(() => [] as string[]);
+  for (const name of names) {
+    await docker(["rm", "-f", name]).catch(() => undefined);
+  }
+}
+
 /** Thrown by a probe to abort a waitFor immediately instead of retrying. */
 export class FatalProbeError extends Error {}
 
@@ -99,6 +127,7 @@ export async function startControlPlane(options: {
   nameFake?: FakeSession;
   dockerNetwork?: string;
   runtimeImage?: string;
+  launchFailureMarker?: string;
 }): Promise<ControlPlaneHandle> {
   const authDir = mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const logs: string[] = [];
@@ -118,6 +147,7 @@ export async function startControlPlane(options: {
       PI_ORB_AUTH_DIR: authDir,
       PI_ORB_RUNTIME_IMAGE: options.runtimeImage,
       PI_ORB_DOCKER_NETWORK: options.dockerNetwork,
+      PI_ORB_E2E_LAUNCH_FAILURE_MARKER: options.launchFailureMarker,
       PI_ORB_FAKE_OPENAI_OAUTH_URL: options.fake.oauthBaseUrl,
       PI_ORB_FAKE_OPENAI_INFERENCE_URL: options.fake.inferenceBaseUrl,
       ...(options.nameFake === undefined

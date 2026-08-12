@@ -56,7 +56,11 @@ vi.mock("node:child_process", () => ({
 
 const task = new NoSimulationTask("docker test", false);
 const context = { signal: new AbortController().signal };
-const request = { orbId: "orb-1", bootstrap: { repositoryUrl: "https://github.com/o/r" } };
+const request = {
+  orbId: "orb-1",
+  incarnation: 0,
+  bootstrap: { repositoryUrl: "https://github.com/o/r" },
+};
 
 interface ProviderOverrides {
   readonly controlPlaneUrl?: string;
@@ -151,6 +155,15 @@ describe("DockerOrbHostProvider", () => {
     dockerFake.reset();
   });
 
+  it("uses incarnation-specific compute identity when creating", async () => {
+    const run = await provisionArgv(makeProvider());
+    expect(run.slice(run.indexOf("--name"), run.indexOf("--name") + 2)).toEqual([
+      "--name",
+      "pi-orb-orb-1-i0",
+    ]);
+    expect(run).toContain("pi-orb.host-incarnation=0");
+  });
+
   it("publishes the runtime port on an ephemeral loopback port when creating", async () => {
     const run = await provisionArgv(makeProvider());
     const publishIndex = run.indexOf("--publish");
@@ -220,8 +233,63 @@ describe("DockerOrbHostProvider", () => {
     const provider = makeProvider();
     const observed = await provider.observe(task, ref, context);
     expect(observed.isOk() && observed.value?.runtimeAddress?.baseUrl).toBe(
-      "http://pi-orb-orb-1:8080",
+      "http://pi-orb-orb-1-i0:8080",
     );
+  });
+
+  it("provision never starts an existing container carrying a different incarnation", async () => {
+    dockerFake.install((args) => {
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-incarnation": "1",
+                },
+                Env: [`${RUNTIME_TOKEN_ENV}=tok`],
+              },
+              State: { Status: "exited" },
+              NetworkSettings: {},
+            },
+          ]),
+        };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().provision(task, request, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    // The stamp is checked before any state change: no `docker start`.
+    expect(dockerFake.calls.some((args) => args[0] === "start")).toBe(false);
+  });
+
+  it("start refuses a container carrying a different incarnation", async () => {
+    dockerFake.install(() => ({
+      stdout: JSON.stringify([
+        {
+          Name: "/pi-orb-orb-1-i1",
+          Config: {
+            Labels: {
+              "pi-orb.orb-id": "orb-1",
+              "pi-orb.host-incarnation": "1",
+            },
+          },
+          State: { Status: "stopped" },
+        },
+      ]),
+    }));
+    const result = await makeProvider().start(
+      task,
+      {
+        ref: { provider: "docker", resourceId: "pi-orb-orb-1-i1" },
+        expectedIncarnation: 0,
+      },
+      context,
+    );
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(dockerFake.calls).toHaveLength(1);
   });
 
   it("applies the same address derivation when listing managed hosts", async () => {
@@ -239,6 +307,28 @@ describe("DockerOrbHostProvider", () => {
       expect(listed.value[0]?.runtimeAddress?.baseUrl).toBe("http://127.0.0.1:55000");
       expect(listed.value[1]?.runtimeAddress?.baseUrl).toBe("http://172.20.0.5:8080");
     }
+  });
+
+  it("captures bounded container status, restart count, and exit code before discard", async () => {
+    dockerFake.install(() => ({
+      stdout: JSON.stringify([
+        {
+          Name: "/pi-orb-orb-1-i0",
+          Config: {
+            Labels: {
+              "pi-orb.orb-id": "orb-1",
+              "pi-orb.host-incarnation": "0",
+            },
+          },
+          State: { Status: "restarting", RestartCount: 7, ExitCode: 42 },
+          RestartCount: 7,
+        },
+      ]),
+    }));
+    const diagnosis = await makeProvider().diagnose(task, ref, context);
+    expect(diagnosis.isOk() && diagnosis.value).toBe(
+      "container_status=restarting restart_count=7 exit_code=42",
+    );
   });
 
   it("reads the published port defensively", () => {
@@ -261,11 +351,65 @@ describe("DockerOrbHostProvider", () => {
 describe("DockerOrbHostProvider deletion", () => {
   beforeEach(() => dockerFake.reset());
 
+  it("discards only exact-orb containers through the incarnation fence", async () => {
+    const payload = (orbId: string, incarnation?: number): string =>
+      JSON.stringify([
+        {
+          Name: `/pi-orb-${orbId}${incarnation === undefined ? "" : `-i${incarnation}`}`,
+          Config: {
+            Labels: {
+              "pi-orb.orb-id": orbId,
+              ...(incarnation === undefined
+                ? {}
+                : { "pi-orb.host-incarnation": String(incarnation) }),
+            },
+          },
+          State: { Status: "stopped" },
+        },
+      ]);
+    dockerFake.install((args) => {
+      if (args[0] === "ps") {
+        return {
+          stdout: "pi-orb-orb-1\npi-orb-orb-1-i0\npi-orb-orb-1-i1\npi-orb-orb-1-i2\n",
+        };
+      }
+      if (args[0] === "inspect") {
+        const name = args[3];
+        if (name === "pi-orb-orb-1") return { stdout: payload("orb-1") };
+        const incarnation = Number(name?.slice("pi-orb-orb-1-i".length));
+        return { stdout: payload("orb-1", incarnation) };
+      }
+      if (args[0] === "rm") return { stdout: "" };
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().discardCompute(
+      task,
+      { orbId: "orb-1", throughIncarnation: 1 },
+      context,
+    );
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    const removed = dockerFake.calls.filter((args) => args[0] === "rm").map((args) => args[2]);
+    expect(removed).toEqual(["pi-orb-orb-1", "pi-orb-orb-1-i0", "pi-orb-orb-1-i1"]);
+    expect(removed).not.toContain("pi-orb-orb-1-i2");
+    expect(dockerFake.calls.some((args) => args[0] === "volume")).toBe(false);
+  });
+
   it("force-removes the container before its persistent volume and is idempotent", async () => {
     dockerFake.install((args) => {
+      if (args[0] === "ps") return { stdout: "pi-orb-orb-1-i0\n" };
       if (args[0] === "inspect") {
         return {
-          stdout: JSON.stringify([{ Config: { Labels: { "pi-orb.orb-id": "orb-1" } } }]),
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-incarnation": "0",
+                },
+              },
+            },
+          ]),
         };
       }
       if (args[0] === "volume" && args[1] === "inspect") {
@@ -279,21 +423,90 @@ describe("DockerOrbHostProvider deletion", () => {
     const result = await makeProvider().destroy(task, "orb-1", context);
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
     expect(dockerFake.calls).toEqual([
-      ["inspect", "--type", "container", "pi-orb-orb-1"],
-      ["rm", "--force", "pi-orb-orb-1"],
+      ["ps", "--all", "--filter", "label=pi-orb.orb-id=orb-1", "--format", "{{.Names}}"],
+      ["inspect", "--type", "container", "pi-orb-orb-1-i0"],
+      ["rm", "--force", "pi-orb-orb-1-i0"],
       ["volume", "inspect", "pi-orb-data-orb-1"],
       ["volume", "rm", "--force", "pi-orb-data-orb-1"],
     ]);
   });
-  it("refuses to delete a deterministic-name container without the orb label", async () => {
-    dockerFake.install((args) =>
-      args[0] === "inspect"
-        ? { stdout: JSON.stringify([{ Config: { Labels: {} } }]) }
-        : { error: `unexpected docker ${args.join(" ")}` },
+  it("destroy removes a container despite an unparseable incarnation label", async () => {
+    // Ownership alone authorizes deletion-grade destroy: a mangled
+    // incarnation label must not leave the orb permanently undeletable.
+    dockerFake.install((args) => {
+      if (args[0] === "ps") return { stdout: "pi-orb-orb-1-i0\n" };
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-incarnation": "not-a-number",
+                },
+              },
+            },
+          ]),
+        };
+      }
+      if (args[0] === "volume" && args[1] === "inspect") {
+        return { stdout: JSON.stringify([{ Labels: { "pi-orb.orb-id": "orb-1" } }]) };
+      }
+      if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) {
+        return { stdout: "" };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().destroy(task, "orb-1", context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(dockerFake.calls).toContainEqual(["rm", "--force", "pi-orb-orb-1-i0"]);
+    expect(dockerFake.calls).toContainEqual(["volume", "rm", "--force", "pi-orb-data-orb-1"]);
+  });
+
+  it("discard still refuses an unparseable incarnation label", async () => {
+    // The fence needs valid incarnations; guessing could delete newer compute.
+    dockerFake.install((args) => {
+      if (args[0] === "ps") return { stdout: "pi-orb-orb-1-i0\n" };
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-incarnation": "not-a-number",
+                },
+              },
+            },
+          ]),
+        };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().discardCompute(
+      task,
+      { orbId: "orb-1", throughIncarnation: 5 },
+      context,
     );
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(dockerFake.calls.some((args) => args[0] === "rm")).toBe(false);
+  });
+
+  it("refuses to delete a deterministic-name container without the orb label", async () => {
+    dockerFake.install((args) => {
+      if (args[0] === "ps") return { stdout: "pi-orb-orb-1-i0\n" };
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([{ Name: "/pi-orb-orb-1-i0", Config: { Labels: {} } }]),
+        };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
     const result = await makeProvider().destroy(task, "orb-1", context);
     expect(result.isErr() && result.error.code).toBe("conflict");
-    expect(dockerFake.calls).toHaveLength(1);
+    expect(dockerFake.calls).toHaveLength(2);
   });
 });
 

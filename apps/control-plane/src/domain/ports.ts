@@ -56,6 +56,35 @@ export interface CasUpdateFieldsParams {
   readonly checkoutCommit?: string | null;
   readonly lastError?: string | null;
   readonly runtimeTokenHash?: string | null;
+  /**
+   * Clear-only: retained discard evidence is dropped when a replacement
+   * commits, so it cannot shadow a later incident (docs/compute-replacement.md).
+   */
+  readonly hostDiscardEvidence?: null;
+}
+
+export interface RecordHostDiscardStatusParams {
+  readonly orbId: string;
+  readonly throughIncarnation: number;
+  readonly now: number;
+  readonly evidence?: string | null;
+  readonly error?: string | null;
+}
+
+export interface FailOrbAndRequestComputeDiscardParams {
+  readonly orbId: string;
+  readonly expectedStateVersion: number;
+  readonly now: number;
+  readonly lastError: string;
+  /** Sanitized, size-bounded host evidence already available at the terminal decision. */
+  readonly evidence?: string | null;
+}
+
+export interface FinalizeHostDiscardParams {
+  readonly orbId: string;
+  readonly expectedStateVersion: number;
+  readonly throughIncarnation: number;
+  readonly now: number;
 }
 
 export interface RequestOrbDeletionParams {
@@ -259,6 +288,27 @@ export interface ControlPlaneStore {
     params: { orbId: string; expectedStateVersion: number },
   ): ResultAsync<void, StoreError | StateConflict>;
 
+  /**
+   * Atomically enters `failed`, revokes runtime authorization, and creates the
+   * incarnation-bounded compute-discard intent (docs/compute-replacement.md).
+   */
+  failOrbAndRequestComputeDiscard(
+    task: SimulationTask,
+    params: FailOrbAndRequestComputeDiscardParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+
+  /** Persists bounded diagnosis/error only while the named discard intent is current. */
+  recordHostDiscardStatus(
+    task: SimulationTask,
+    params: RecordHostDiscardStatusParams,
+  ): ResultAsync<void, StoreError>;
+
+  /** Clears a verified discard intent and advances compute identity above its fence. */
+  finalizeHostDiscard(
+    task: SimulationTask,
+    params: FinalizeHostDiscardParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+
   /** State transition: bumps `state_version`, sets `state_changed_at` to `now`. */
   casTransition(
     task: SimulationTask,
@@ -337,6 +387,8 @@ export interface OrbHostRef {
 export interface OrbHostObservation {
   readonly ref: OrbHostRef;
   readonly orbId: string;
+  /** Incarnation stamped on the observed resource; legacy unstamped compute is 0. */
+  readonly incarnation: number;
   readonly state: OrbHostState;
   /** Ephemeral observation; never authoritative persisted state. */
   readonly runtimeAddress?: { baseUrl: string };
@@ -345,7 +397,13 @@ export interface OrbHostObservation {
 
 export interface ProvisionOrbHostRequest {
   readonly orbId: string;
+  readonly incarnation: number;
   readonly bootstrap: { repositoryUrl: string };
+}
+
+export interface StartOrbHostRequest {
+  readonly ref: OrbHostRef;
+  readonly expectedIncarnation: number;
 }
 
 /**
@@ -357,6 +415,7 @@ export interface ProvisionOrbHostRequest {
  */
 export interface ProvisionedOrbHost {
   readonly ref: OrbHostRef;
+  readonly incarnation: number;
   readonly runtimeTokenHash: string;
 }
 
@@ -371,13 +430,22 @@ export interface OrbHostProvider {
   /** Idempotent. */
   start(
     task: SimulationTask,
-    ref: OrbHostRef,
+    request: StartOrbHostRequest,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError>;
   /** Gracefully stops compute while retaining its filesystem. Idempotent. */
   stop(
     task: SimulationTask,
     ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError>;
+  /**
+   * Removes disposable compute through an incarnation fence while preserving
+   * authoritative workspace and tailnet identity. Absence is success.
+   */
+  discardCompute(
+    task: SimulationTask,
+    request: { orbId: string; throughIncarnation: number },
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError>;
   /** Permanently removes compute and authoritative storage by orb identity. Idempotent. */

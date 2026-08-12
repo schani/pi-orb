@@ -42,6 +42,64 @@ describe("orb archival (DST)", () => {
     });
   });
 
+  it("disposes failed compute, provisions a clean incarnation, then seals history", async () => {
+    await runDst({ name: "archive-failed-compute", iterations: 30 }, async (sim) => {
+      const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });
+      const stop = new AbortController();
+      let archiveRequested = false;
+      const expected: string[] = [];
+      const result = await sim.runTasks([
+        {
+          name: "reconciler",
+          f: async (task) => {
+            while (!archiveRequested) await task.sleep(1, "wait for failed archive request");
+            await reconcileLoop(task, harness.deps, stop.signal);
+          },
+        },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            expected.push(harness.world.appendMessage(ORB, "retain across failed compute").id);
+            const running = harness.store.orbSnapshot(ORB);
+            expect(running).not.toBeNull();
+            if (running === null) return;
+            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+              orbId: ORB,
+              expectedStateVersion: running.stateVersion,
+              now: task.wallNow(),
+              lastError: "runtime_failed: test failure",
+            });
+            expect(failed.isOk()).toBe(true);
+            const requested = await requestOrbArchive(task, harness.deps, ORB);
+            expect(requested.isOk() && requested.value).toMatchObject({
+              state: "archiving",
+              hostDiscardThroughIncarnation: 0,
+            });
+            archiveRequested = true;
+
+            await waitUntil(
+              task,
+              "failed orb archived through clean compute",
+              () => harness.store.orbSnapshot(ORB)?.state === "archived",
+              { timeoutMs: 600_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.replicaRecords(ORB).map((record) => record.id)).toEqual(expected);
+      expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+        state: "archived",
+        hostIncarnation: 1,
+        hostRef: null,
+        runtimeTokenHash: null,
+      });
+      expect(harness.world.filesystemExists(ORB)).toBe(false);
+    });
+  });
+
   it("can be upgraded to permanent deletion while archiving", async () => {
     await runDst({ name: "archive-upgrade-delete", iterations: 10 }, async (sim) => {
       const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });

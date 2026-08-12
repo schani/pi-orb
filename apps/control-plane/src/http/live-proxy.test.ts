@@ -54,6 +54,7 @@ describe("live proxy", () => {
       provision: (task, request, context) => delegate.provision(task, request, context),
       start: (task, ref, context) => delegate.start(task, ref, context),
       stop: (task, ref, context) => delegate.stop(task, ref, context),
+      discardCompute: (task, request, context) => delegate.discardCompute(task, request, context),
       destroy: (task, id, context) => delegate.destroy(task, id, context),
       listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
       observe: (_task, ref) => {
@@ -61,6 +62,7 @@ describe("live proxy", () => {
         return ResultAsync.fromSafePromise(observeGate).map(() => ({
           ref,
           orbId,
+          incarnation: 0,
           state: "running" as const,
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         }));
@@ -119,12 +121,14 @@ describe("live proxy", () => {
       provision: (task, request, context) => delegate.provision(task, request, context),
       start: (task, ref, context) => delegate.start(task, ref, context),
       stop: (task, ref, context) => delegate.stop(task, ref, context),
+      discardCompute: (task, request, context) => delegate.discardCompute(task, request, context),
       destroy: (task, id, context) => delegate.destroy(task, id, context),
       listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
       observe: (_task, ref) =>
         ResultAsync.fromSafePromise(Promise.resolve()).map(() => ({
           ref,
           orbId,
+          incarnation: 0,
           state: "running" as const,
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         })),
@@ -179,12 +183,14 @@ describe("live proxy", () => {
       provision: (task, request, context) => delegate.provision(task, request, context),
       start: (task, ref, context) => delegate.start(task, ref, context),
       stop: (task, ref, context) => delegate.stop(task, ref, context),
+      discardCompute: (task, request, context) => delegate.discardCompute(task, request, context),
       destroy: (task, id, context) => delegate.destroy(task, id, context),
       listManagedHosts: (task, context) => delegate.listManagedHosts(task, context),
       observe: (_task, ref) =>
         ResultAsync.fromSafePromise(Promise.resolve()).map(() => ({
           ref,
           orbId,
+          incarnation: 0,
           state: "running" as const,
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         })),

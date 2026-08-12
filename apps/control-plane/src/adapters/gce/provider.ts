@@ -19,6 +19,7 @@ import type {
   OrbHostState,
   ProvisionedOrbHost,
   ProvisionOrbHostRequest,
+  StartOrbHostRequest,
 } from "../../domain/ports.ts";
 import type { TailscaleHostOptions } from "../tailscale/client.ts";
 import type { GceApiTransport, GceResponse } from "./api.ts";
@@ -57,6 +58,7 @@ export interface GceOrbHostProviderOptions {
 }
 
 const ORB_LABEL = "pi-orb-orb-id";
+const INCARNATION_LABEL = "pi-orb-host-incarnation";
 const TOKEN_METADATA_KEY = "pi-orb-runtime-token";
 const SCRIPT_HASH_METADATA_KEY = "pi-orb-script-sha256";
 /**
@@ -117,7 +119,18 @@ export function stampedGeneration(instance: Record<string, unknown>): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-const instanceName = (orbId: string): string => `pi-orb-${orbId}`;
+const legacyInstanceName = (orbId: string): string => `pi-orb-${orbId}`;
+const instanceName = (orbId: string, incarnation: number): string =>
+  `${legacyInstanceName(orbId)}-i${incarnation}`;
+
+function instanceIncarnation(instance: Record<string, unknown>): number | null {
+  const labels = (instance["labels"] ?? {}) as Record<string, unknown>;
+  const raw = labels[INCARNATION_LABEL];
+  if (raw === undefined || raw === null) return 0;
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
+}
 const diskName = (orbId: string): string => `pi-orb-data-${orbId}`;
 
 function sha256Hex(value: string): string {
@@ -174,6 +187,7 @@ export function metadataValue(instance: Record<string, unknown>, key: string): s
 export function buildStartupScript(options: {
   readonly runtimeImage: string;
   readonly orbId: string;
+  readonly incarnation?: number;
   readonly repositoryUrl: string;
   readonly controlPlaneUrl: string;
   readonly extraEnv: Readonly<Record<string, string>>;
@@ -251,6 +265,7 @@ docker run --pull=never --detach --name pi-orb-runtime --restart unless-stopped 
   --network host \\
   -v "$MNT":/workspace \\
   -e PI_ORB_ID='${options.orbId}' \\
+  -e PI_ORB_HOST_INCARNATION='${options.incarnation ?? 0}' \\
   -e PI_ORB_REPOSITORY_URL='${options.repositoryUrl}' \\
   -e ${RUNTIME_TOKEN_ENV}="$TOKEN" \\
   -e ${CONTROL_PLANE_URL_ENV}='${options.controlPlaneUrl}' \\
@@ -388,11 +403,12 @@ export class GceOrbHostProvider implements OrbHostProvider {
    * and `start()`'s re-derivation all go through it, so the three can never
    * disagree about what the current script is.
    */
-  private expectedScript(orbId: string, repositoryUrl: string): string {
+  private expectedScript(orbId: string, incarnation: number, repositoryUrl: string): string {
     const tailscale = this.options.tailscale;
     return buildStartupScript({
       runtimeImage: this.options.runtimeImage,
       orbId,
+      incarnation,
       repositoryUrl,
       controlPlaneUrl: this.options.controlPlaneUrl,
       extraEnv: this.options.extraEnv ?? {},
@@ -415,11 +431,12 @@ export class GceOrbHostProvider implements OrbHostProvider {
   private async mintTailscaleKey(
     operation: OrbHostProviderError["operation"],
     orbId: string,
+    incarnation: number,
     context: OperationContext,
   ): Promise<Result<string | null, OrbHostProviderError>> {
     const tailscale = this.options.tailscale;
     if (tailscale === undefined) return ok(null);
-    const key = await tailscale.minter.mintAuthKey(orbId, context.signal);
+    const key = await tailscale.minter.mintAuthKey(orbId, incarnation, context.signal);
     if (key.isErr()) {
       return err(
         providerError(
@@ -462,7 +479,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): Promise<Result<"current" | "repaired", OrbHostProviderError>> {
     const name = String(instance["name"] ?? "");
-    const script = this.expectedScript(orbId, repositoryUrl);
+    const script = this.expectedScript(orbId, instanceIncarnation(instance) ?? 0, repositoryUrl);
     const expectedHash = sha256Hex(script);
     if (metadataValue(instance, SCRIPT_HASH_METADATA_KEY) === expectedHash) return ok("current");
     const generation = this.options.scriptGeneration ?? 0;
@@ -552,7 +569,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
     // same setMetadata call.
     const adopted =
       metadataValue(current, TAILSCALE_KEY_METADATA_KEY) === null
-        ? await this.mintTailscaleKey(operation, orbId, context)
+        ? await this.mintTailscaleKey(operation, orbId, instanceIncarnation(current) ?? 0, context)
         : ok<string | null, OrbHostProviderError>(null);
     if (adopted.isErr()) return err(adopted.error);
     const updated = await this.request(
@@ -608,6 +625,8 @@ export class GceOrbHostProvider implements OrbHostProvider {
     const labels = (instance["labels"] ?? {}) as Record<string, unknown>;
     const orbId = labels[ORB_LABEL];
     if (typeof orbId !== "string") return null;
+    const incarnation = instanceIncarnation(instance);
+    if (incarnation === null) return null;
     const status = String(instance["status"] ?? "");
     const state = mapInstanceStatus(status);
     const interfaces = instance["networkInterfaces"];
@@ -619,6 +638,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
     return {
       ref: { provider: "gce", resourceId: String(instance["name"] ?? "") },
       orbId,
+      incarnation,
       state,
       ...(state === "running" && internalIp !== ""
         ? { runtimeAddress: { baseUrl: `http://${internalIp}:8080` } }
@@ -635,7 +655,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError> {
     const run = async (): Promise<Result<ProvisionedOrbHost, OrbHostProviderError>> => {
-      const name = instanceName(request.orbId);
+      const name = instanceName(request.orbId, request.incarnation);
       const ref: OrbHostRef = { provider: "gce", resourceId: name };
 
       const existing = await this.request(
@@ -654,6 +674,17 @@ export class GceOrbHostProvider implements OrbHostProvider {
               "provision",
               "conflict",
               `instance ${name} is not labeled for this orb`,
+              false,
+            ),
+          );
+        }
+        const incarnation = instanceIncarnation(instance);
+        if (incarnation !== request.incarnation) {
+          return err(
+            providerError(
+              "provision",
+              "conflict",
+              `instance ${name} carries incarnation ${String(incarnation)}, expected ${request.incarnation}`,
               false,
             ),
           );
@@ -686,7 +717,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
           if (started.isErr()) return err(started.error);
         }
         task.log(`gce host ${name} reused (read-back token)`);
-        return ok({ ref, runtimeTokenHash: sha256Hex(token) });
+        return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(token) });
       }
       if (existing.value.status !== 404) {
         return err(
@@ -738,9 +769,18 @@ export class GceOrbHostProvider implements OrbHostProvider {
       const runtimeToken = randomBytes(32).toString("hex");
       // Minted only for an instance actually about to be inserted; a reused
       // one keeps the key it was created with (read-back model).
-      const tailscaleKey = await this.mintTailscaleKey("provision", request.orbId, context);
+      const tailscaleKey = await this.mintTailscaleKey(
+        "provision",
+        request.orbId,
+        request.incarnation,
+        context,
+      );
       if (tailscaleKey.isErr()) return err(tailscaleKey.error);
-      const startupScript = this.expectedScript(request.orbId, request.bootstrap.repositoryUrl);
+      const startupScript = this.expectedScript(
+        request.orbId,
+        request.incarnation,
+        request.bootstrap.repositoryUrl,
+      );
       const inserted = await this.request(
         "provision",
         "POST",
@@ -749,7 +789,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
         {
           name,
           machineType: this.zonePath(`machineTypes/${this.options.machineType}`),
-          labels: { [ORB_LABEL]: request.orbId },
+          labels: {
+            [ORB_LABEL]: request.orbId,
+            [INCARNATION_LABEL]: String(request.incarnation),
+          },
           scheduling: {
             provisioningModel: "SPOT",
             instanceTerminationAction: "STOP",
@@ -819,7 +862,11 @@ export class GceOrbHostProvider implements OrbHostProvider {
         if (token === null) {
           return err(providerError("provision", "conflict", "racing instance has no token", true));
         }
-        return ok({ ref, runtimeTokenHash: sha256Hex(token) });
+        const incarnation = instanceIncarnation(winner.value.body);
+        if (incarnation !== request.incarnation) {
+          return err(providerError("provision", "conflict", "racing incarnation mismatch", false));
+        }
+        return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(token) });
       }
       if (inserted.value.status !== 200) {
         return err(
@@ -839,7 +886,11 @@ export class GceOrbHostProvider implements OrbHostProvider {
       );
       if (waited.isErr()) return err(waited.error);
       task.log(`provisioned gce host ${name}`);
-      return ok({ ref, runtimeTokenHash: sha256Hex(runtimeToken) });
+      return ok({
+        ref,
+        incarnation: request.incarnation,
+        runtimeTokenHash: sha256Hex(runtimeToken),
+      });
     };
     return new ResultAsync(run());
   }
@@ -866,7 +917,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
 
   start(
     task: SimulationTask,
-    ref: OrbHostRef,
+    request: StartOrbHostRequest,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
@@ -875,7 +926,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       const got = await this.request(
         "start",
         "GET",
-        this.zonePath(`instances/${ref.resourceId}`),
+        this.zonePath(`instances/${request.ref.resourceId}`),
         context,
       );
       if (got.isErr()) return err(got.error);
@@ -887,6 +938,9 @@ export class GceOrbHostProvider implements OrbHostProvider {
         );
       }
       const instance = got.value.body;
+      if (instanceIncarnation(instance) !== request.expectedIncarnation) {
+        return err(providerError("start", "conflict", "instance incarnation mismatch", false));
+      }
       const labels = (instance["labels"] ?? {}) as Record<string, unknown>;
       const orbId = labels[ORB_LABEL];
       if (typeof orbId !== "string") {
@@ -894,7 +948,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
           providerError(
             "start",
             "conflict",
-            `instance ${ref.resourceId} is not a pi-orb host`,
+            `instance ${request.ref.resourceId} is not a pi-orb host`,
             false,
           ),
         );
@@ -911,7 +965,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
           providerError(
             "start",
             "operation_failed",
-            `instance ${ref.resourceId} carries no repository URL`,
+            `instance ${request.ref.resourceId} carries no repository URL`,
             false,
           ),
         );
@@ -927,7 +981,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       if (freshness.isErr()) return err(freshness.error);
       // A repair already started the instance.
       if (freshness.value === "repaired") return ok(undefined);
-      return this.startByName(task, ref.resourceId, context);
+      return this.startByName(task, request.ref.resourceId, context);
     };
     return new ResultAsync(run());
   }
@@ -957,68 +1011,163 @@ export class GceOrbHostProvider implements OrbHostProvider {
     return new ResultAsync(run());
   }
 
+  /**
+   * Enumerate this orb's instances by exact ownership label, validating name
+   * and ownership for every entry. The incarnation stamp is parsed but left
+   * nullable: deletion-grade `destroy` is authorized by ownership alone, so a
+   * mangled stamp must not leave the orb permanently undeletable. Fence
+   * decisions go through the strict `listFencedOrbInstances` variant instead.
+   */
+  private async listExactOrbInstances(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    context: OperationContext,
+  ): Promise<Result<{ name: string; incarnation: number | null }[], OrbHostProviderError>> {
+    const instances: { name: string; incarnation: number | null }[] = [];
+    let pageToken: string | undefined;
+    do {
+      const query = new URLSearchParams({ filter: `labels.${ORB_LABEL}=${orbId}` });
+      if (pageToken !== undefined) query.set("pageToken", pageToken);
+      const page = await this.request(
+        operation,
+        "GET",
+        this.zonePath(`instances?${query.toString()}`),
+        context,
+      );
+      if (page.isErr()) return err(page.error);
+      if (page.value.status !== 200) {
+        return err(
+          providerError(operation, "unavailable", `instance list HTTP ${page.value.status}`, true),
+        );
+      }
+      const items = page.value.body["items"];
+      if (Array.isArray(items)) {
+        for (const item of items) {
+          const instance = item as Record<string, unknown>;
+          const labels = (instance["labels"] ?? {}) as Record<string, unknown>;
+          if (labels[ORB_LABEL] !== orbId) {
+            return err(
+              providerError(
+                operation,
+                "conflict",
+                `filtered instance is not labeled for orb ${orbId}`,
+                false,
+              ),
+            );
+          }
+          const name = instance["name"];
+          if (typeof name !== "string" || name === "") {
+            return err(
+              providerError(
+                operation,
+                "conflict",
+                `filtered instance for orb ${orbId} has no name`,
+                false,
+              ),
+            );
+          }
+          instances.push({ name, incarnation: instanceIncarnation(instance) });
+        }
+      }
+      const next = page.value.body["nextPageToken"];
+      pageToken = typeof next === "string" ? next : undefined;
+    } while (pageToken !== undefined);
+    return ok(instances);
+  }
+
+  /**
+   * Strict variant for the discard fence: every instance must carry a valid
+   * incarnation stamp, because guessing could delete a newer incarnation.
+   */
+  private async listFencedOrbInstances(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    context: OperationContext,
+  ): Promise<Result<{ name: string; incarnation: number }[], OrbHostProviderError>> {
+    const listed = await this.listExactOrbInstances(operation, orbId, context);
+    if (listed.isErr()) return err(listed.error);
+    const instances: { name: string; incarnation: number }[] = [];
+    for (const instance of listed.value) {
+      if (instance.incarnation === null) {
+        return err(
+          providerError(
+            operation,
+            "conflict",
+            `instance ${instance.name} has an invalid incarnation label`,
+            false,
+          ),
+        );
+      }
+      instances.push({ name: instance.name, incarnation: instance.incarnation });
+    }
+    return ok(instances);
+  }
+
+  private async deleteInstance(
+    task: SimulationTask,
+    operation: "discard" | "destroy",
+    name: string,
+    context: OperationContext,
+  ): Promise<Result<void, OrbHostProviderError>> {
+    const removed = await this.request(
+      operation,
+      "DELETE",
+      this.zonePath(`instances/${name}`),
+      context,
+    );
+    if (removed.isErr()) return err(removed.error);
+    if (removed.value.status === 404) return ok(undefined);
+    if (removed.value.status !== 200) {
+      return err(
+        providerError(
+          operation,
+          "operation_failed",
+          `instance delete HTTP ${removed.value.status}`,
+          true,
+        ),
+      );
+    }
+    return this.waitOperation(task, operation, String(removed.value.body["name"] ?? ""), context);
+  }
+
+  discardCompute(
+    task: SimulationTask,
+    request: { orbId: string; throughIncarnation: number },
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError> {
+    const run = async (): Promise<Result<void, OrbHostProviderError>> => {
+      const listed = await this.listFencedOrbInstances("discard", request.orbId, context);
+      if (listed.isErr()) return err(listed.error);
+      for (const instance of listed.value) {
+        if (instance.incarnation > request.throughIncarnation) continue;
+        const removed = await this.deleteInstance(task, "discard", instance.name, context);
+        if (removed.isErr()) return err(removed.error);
+      }
+      const verified = await this.listFencedOrbInstances("discard", request.orbId, context);
+      if (verified.isErr()) return err(verified.error);
+      if (verified.value.some((instance) => instance.incarnation <= request.throughIncarnation)) {
+        return err(
+          providerError("discard", "unavailable", "discarded instance is still visible", true),
+        );
+      }
+      return ok(undefined);
+    };
+    return new ResultAsync(run());
+  }
+
   destroy(
     task: SimulationTask,
     orbId: string,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
-      const name = instanceName(orbId);
-      const gotInstance = await this.request(
-        "destroy",
-        "GET",
-        this.zonePath(`instances/${name}`),
-        context,
-      );
-      if (gotInstance.isErr()) return err(gotInstance.error);
-      if (gotInstance.value.status !== 404) {
-        if (gotInstance.value.status !== 200) {
-          return err(
-            providerError(
-              "destroy",
-              "unavailable",
-              `instance get HTTP ${gotInstance.value.status}`,
-              true,
-            ),
-          );
-        }
-        const labels = (gotInstance.value.body["labels"] ?? {}) as Record<string, unknown>;
-        if (labels[ORB_LABEL] !== orbId) {
-          return err(
-            providerError(
-              "destroy",
-              "conflict",
-              `instance ${name} is not labeled for orb ${orbId}`,
-              false,
-            ),
-          );
-        }
-        const instance = await this.request(
-          "destroy",
-          "DELETE",
-          this.zonePath(`instances/${name}`),
-          context,
-        );
-        if (instance.isErr()) return err(instance.error);
-        if (instance.value.status !== 404) {
-          if (instance.value.status !== 200) {
-            return err(
-              providerError(
-                "destroy",
-                "operation_failed",
-                `instance delete HTTP ${instance.value.status}`,
-                true,
-              ),
-            );
-          }
-          const waited = await this.waitOperation(
-            task,
-            "destroy",
-            String(instance.value.body["name"] ?? ""),
-            context,
-          );
-          if (waited.isErr()) return err(waited.error);
-        }
+      // Deletion-grade: exact ownership authorizes removal; the incarnation
+      // stamp — valid or mangled — is irrelevant to destroying everything.
+      const instances = await this.listExactOrbInstances("destroy", orbId, context);
+      if (instances.isErr()) return err(instances.error);
+      for (const instance of instances.value) {
+        const removed = await this.deleteInstance(task, "destroy", instance.name, context);
+        if (removed.isErr()) return err(removed.error);
       }
 
       const dataDiskName = diskName(orbId);

@@ -15,6 +15,9 @@ import type {
   CasUpdateFieldsParams,
   CommitPullBatchParams,
   ControlPlaneStore,
+  FailOrbAndRequestComputeDiscardParams,
+  FinalizeHostDiscardParams,
+  RecordHostDiscardStatusParams,
   RequestOrbArchiveParams,
   RequestOrbDeletionParams,
 } from "../../domain/ports.ts";
@@ -40,6 +43,24 @@ function mapOrbRow(row: PgRow): OrbRow {
     stateVersion: Number(row["state_version"]),
     hostKind: String(row["host_kind"]),
     hostRef: row["host_ref"] === null ? null : String(row["host_ref"]),
+    hostIncarnation: Number(row["host_incarnation"]),
+    hostSpecFingerprint:
+      row["host_spec_fingerprint"] === null ? null : String(row["host_spec_fingerprint"]),
+    hostSpecGeneration:
+      row["host_spec_generation"] === null ? null : Number(row["host_spec_generation"]),
+    hostDiscardThroughIncarnation:
+      row["host_discard_through_incarnation"] === null
+        ? null
+        : Number(row["host_discard_through_incarnation"]),
+    hostDiscardReason:
+      row["host_discard_reason"] === null
+        ? null
+        : (String(row["host_discard_reason"]) as OrbRow["hostDiscardReason"]),
+    hostDiscardError: row["host_discard_error"] === null ? null : String(row["host_discard_error"]),
+    hostDiscardEvidence:
+      row["host_discard_evidence"] === null ? null : String(row["host_discard_evidence"]),
+    hostDiscardRequestedAt:
+      row["host_discard_requested_at"] === null ? null : toMs(row["host_discard_requested_at"]),
     checkoutCommit: row["checkout_commit"] === null ? null : String(row["checkout_commit"]),
     harnessSessionId: row["harness_session_id"] === null ? null : String(row["harness_session_id"]),
     harnessSessionHeader: (row["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
@@ -379,10 +400,13 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const inserted = await query(
         `INSERT INTO orbs (id, project_id, name, auto_name_lease_until, auto_name_attempts,
            auto_name_next_attempt_at, state, state_version, host_kind, host_ref,
+           host_incarnation, host_spec_fingerprint, host_spec_generation,
+           host_discard_through_incarnation, host_discard_reason, host_discard_error,
+           host_discard_evidence, host_discard_requested_at,
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, state_changed_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30)
          RETURNING *`,
         [
           orb.id,
@@ -395,6 +419,14 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.stateVersion,
           orb.hostKind,
           orb.hostRef,
+          orb.hostIncarnation,
+          orb.hostSpecFingerprint,
+          orb.hostSpecGeneration,
+          orb.hostDiscardThroughIncarnation,
+          orb.hostDiscardReason,
+          orb.hostDiscardError,
+          orb.hostDiscardEvidence,
+          orb.hostDiscardRequestedAt === null ? null : new Date(orb.hostDiscardRequestedAt),
           orb.checkoutCommit,
           orb.harnessSessionId,
           jsonParam(orb.harnessSessionHeader),
@@ -899,14 +931,89 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  failOrbAndRequestComputeDiscard(
+    _task: SimulationTask,
+    params: FailOrbAndRequestComputeDiscardParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.casUpdate(
+      params.orbId,
+      params.expectedStateVersion,
+      [
+        "state = 'failed'",
+        "state_version = state_version + 1",
+        "state_changed_at = $3",
+        "updated_at = $3",
+        "last_error = $4",
+        "runtime_token_hash = NULL",
+        "host_discard_through_incarnation = host_incarnation",
+        "host_discard_reason = 'failed'",
+        "host_discard_error = NULL",
+        "host_discard_evidence = $5",
+        "host_discard_requested_at = $3",
+      ],
+      [new Date(params.now), params.lastError, params.evidence ?? null],
+    );
+  }
+
+  recordHostDiscardStatus(
+    _task: SimulationTask,
+    params: RecordHostDiscardStatusParams,
+  ): ResultAsync<void, StoreError> {
+    const sets = ["updated_at = $3"];
+    const values: unknown[] = [params.orbId, params.throughIncarnation, new Date(params.now)];
+    if (params.evidence !== undefined) {
+      sets.push(`host_discard_evidence = $${values.length + 1}`);
+      values.push(params.evidence);
+    }
+    if (params.error !== undefined) {
+      sets.push(`host_discard_error = $${values.length + 1}`);
+      values.push(params.error);
+    }
+    return this.db
+      .query(
+        `UPDATE orbs SET ${sets.join(", ")}
+         WHERE id = $1 AND host_discard_through_incarnation = $2`,
+        values,
+      )
+      .map(() => undefined);
+  }
+
+  finalizeHostDiscard(
+    _task: SimulationTask,
+    params: FinalizeHostDiscardParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.casUpdate(
+      params.orbId,
+      params.expectedStateVersion,
+      [
+        // Disposal preparation does not end the lifecycle episode. In
+        // particular, it must not retire a queued wake admitted against the
+        // current failed state_version; failed -> starting consumes that one shot.
+        "updated_at = $3",
+        "host_ref = NULL",
+        "runtime_token_hash = NULL",
+        "host_spec_fingerprint = NULL",
+        "host_spec_generation = NULL",
+        "host_discard_through_incarnation = NULL",
+        "host_discard_reason = NULL",
+        "host_discard_error = NULL",
+        "host_discard_requested_at = NULL",
+        "host_incarnation = $4 + 1",
+      ],
+      [new Date(params.now), params.throughIncarnation],
+      "host_discard_through_incarnation = $4 AND host_incarnation <= $4",
+    );
+  }
+
   private casUpdate(
     orbId: string,
     expectedStateVersion: number,
     sets: string[],
     values: unknown[],
+    additionalWhere?: string,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
     const sql = `UPDATE orbs SET ${sets.join(", ")}
-       WHERE id = $1 AND state_version = $2 RETURNING *`;
+       WHERE id = $1 AND state_version = $2${additionalWhere === undefined ? "" : ` AND ${additionalWhere}`} RETURNING *`;
     const run = async (): Promise<Result<OrbRow, StoreError | StateConflict>> => {
       const result = await this.db.query(sql, [orbId, expectedStateVersion, ...values]);
       if (result.isErr()) return err(result.error);
@@ -981,6 +1088,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       sets.push(`runtime_token_hash = $${index}`);
       values.push(params.runtimeTokenHash);
       index += 1;
+    }
+    if (params.hostDiscardEvidence !== undefined) {
+      sets.push("host_discard_evidence = NULL");
     }
     return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values);
   }

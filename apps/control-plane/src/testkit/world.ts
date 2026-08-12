@@ -158,6 +158,7 @@ interface PendingInboxBatch {
 interface FakeHost {
   ref: OrbHostRef;
   orbId: string;
+  incarnation: number;
   state: OrbHostState;
   runtime: FakeRuntimeInstance | null;
   /**
@@ -270,6 +271,7 @@ const DEFAULT_CONFIG: Required<FakeOrbConfig> = {
 export class FakeWorld {
   private readonly orbs = new Map<string, OrbWorldState>();
   private refCounter = 0;
+  private computeDiscardFailuresRemaining = 0;
 
   configureOrb(orbId: string, config: FakeOrbConfig = {}): void {
     this.orbs.set(orbId, {
@@ -301,6 +303,16 @@ export class FakeWorld {
   }
 
   // -- test drivers ---------------------------------------------------------
+
+  failNextComputeDiscards(count: number): void {
+    this.computeDiscardFailuresRemaining = count;
+  }
+
+  consumeComputeDiscardFailure(): boolean {
+    if (this.computeDiscardFailuresRemaining <= 0) return false;
+    this.computeDiscardFailuresRemaining -= 1;
+    return true;
+  }
 
   /**
    * Flush one record to the orb's persistent session, as the runtime's flush
@@ -710,6 +722,14 @@ export class FakeWorld {
     return this.orbs.has(orbId);
   }
 
+  discardCompute(orbId: string, throughIncarnation: number): void {
+    const state = this.orbs.get(orbId);
+    if (state === undefined || state.host === null || state.host.incarnation > throughIncarnation) {
+      return;
+    }
+    state.host = null;
+  }
+
   destroyOrb(orbId: string): void {
     this.orbs.delete(orbId);
   }
@@ -730,10 +750,20 @@ export class FakeWorld {
   provisionHost(
     task: SimulationTask,
     orbId: string,
+    incarnation: number,
     scriptGeneration: number = 0,
   ): ProvisionedOrbHost {
     const state = this.orbState(orbId);
     if (state.host !== null) {
+      if (state.host.incarnation !== incarnation) {
+        // A provision that meets live compute of another incarnation means the
+        // caller skipped required disposal; adopting it silently would mask
+        // exactly the bug class the discard fence exists to prevent.
+        throw new Error(
+          `fake provision invariant: orb ${orbId} requested incarnation ${incarnation} ` +
+            `while incarnation ${state.host.incarnation} still exists`,
+        );
+      }
       // Idempotent: return the existing host (starting it if stopped) and
       // read its token back — never re-mint for an existing incarnation. A
       // reused host keeps the generation it was stamped with; only a repair
@@ -741,14 +771,22 @@ export class FakeWorld {
       if (state.host.state === "stopped" || state.host.state === "failed") {
         this.startHost(task, state.host.ref);
       }
-      return { ref: state.host.ref, runtimeTokenHash: fakeTokenHash(state.host.runtimeToken) };
+      return {
+        ref: state.host.ref,
+        incarnation: state.host.incarnation,
+        runtimeTokenHash: fakeTokenHash(state.host.runtimeToken),
+      };
     }
     this.refCounter += 1;
-    const ref: OrbHostRef = { provider: "fake", resourceId: `host-${orbId}-${this.refCounter}` };
+    const ref: OrbHostRef = {
+      provider: "fake",
+      resourceId: `host-${orbId}-i${incarnation}-${this.refCounter}`,
+    };
     const runtimeToken = `token-${orbId}-${this.refCounter}`;
     state.host = {
       ref,
       orbId,
+      incarnation,
       state: "running",
       runtime: null,
       runtimeToken,
@@ -758,7 +796,7 @@ export class FakeWorld {
     };
     state.hostStartCount += 1;
     this.bootRuntime(task, orbId);
-    return { ref, runtimeTokenHash: fakeTokenHash(runtimeToken) };
+    return { ref, incarnation, runtimeTokenHash: fakeTokenHash(runtimeToken) };
   }
 
   /** The orb's host reference, or null when it has none. */
@@ -996,6 +1034,7 @@ export class FakeWorld {
     const observation: OrbHostObservation = {
       ref: state.host.ref,
       orbId: state.host.orbId,
+      incarnation: state.host.incarnation,
       state: state.host.state,
       ...(state.host.state === "running"
         ? { runtimeAddress: { baseUrl: `http://${state.host.ref.resourceId}:8080` } }
@@ -1187,19 +1226,28 @@ export class FakeOrbHostProvider implements OrbHostProvider {
       // the start below finds an already-running host.
       const existing = this.world.hostRefOf(request.orbId);
       if (existing !== null) await this.repairScriptIfNeeded(task, existing, context);
-      return this.world.provisionHost(task, request.orbId, this.scriptGeneration);
+      return this.world.provisionHost(
+        task,
+        request.orbId,
+        request.incarnation,
+        this.scriptGeneration,
+      );
     });
   }
 
   start(
     task: SimulationTask,
-    ref: OrbHostRef,
+    request: { ref: OrbHostRef; expectedIncarnation: number },
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     return this.op(task, "start", FAILPOINTS.providerStart, context, async () => {
+      const state = this.world.findByRef(request.ref);
+      if (state?.host?.incarnation !== request.expectedIncarnation) {
+        throw new ApplicationFailure("host incarnation mismatch");
+      }
       // A repair has already started the host (GceOrbHostProvider.start).
-      if (await this.repairScriptIfNeeded(task, ref, context)) return;
-      this.world.startHost(task, ref);
+      if (await this.repairScriptIfNeeded(task, request.ref, context)) return;
+      this.world.startHost(task, request.ref);
     });
   }
 
@@ -1209,6 +1257,19 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     return this.op(task, "stop", FAILPOINTS.providerStop, context, () => this.world.stopHost(ref));
+  }
+
+  discardCompute(
+    task: SimulationTask,
+    request: { orbId: string; throughIncarnation: number },
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError> {
+    return this.op(task, "discard", FAILPOINTS.providerDiscard, context, () => {
+      if (this.world.consumeComputeDiscardFailure()) {
+        throw new ApplicationFailure("scripted compute discard failure");
+      }
+      this.world.discardCompute(request.orbId, request.throughIncarnation);
+    });
   }
 
   destroy(

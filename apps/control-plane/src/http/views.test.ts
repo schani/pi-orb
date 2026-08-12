@@ -16,6 +16,14 @@ const orb: OrbRow = {
   stateVersion: 3,
   hostKind: "gce",
   hostRef: "pi-orb-orb-1",
+  hostIncarnation: 0,
+  hostSpecFingerprint: null,
+  hostSpecGeneration: null,
+  hostDiscardThroughIncarnation: null,
+  hostDiscardReason: null,
+  hostDiscardError: null,
+  hostDiscardEvidence: null,
+  hostDiscardRequestedAt: null,
   checkoutCommit: "abc123",
   harnessSessionId: null,
   harnessSessionHeader: null,
@@ -68,6 +76,32 @@ describe("orbView activity", () => {
     const stopped = orbView({ ...orb, state: "stopped" }, control, {});
     expect(stopped.activity).toBeUndefined();
     expect("activity" in stopped).toBe(false);
+  });
+});
+
+describe("orbView compute discard", () => {
+  it("shows durable cleanup progress without replacing the original failure", () => {
+    const view = orbView(
+      {
+        ...orb,
+        state: "failed",
+        lastError: "runtime_failed: process exited",
+        hostDiscardThroughIncarnation: 0,
+        hostDiscardReason: "failed",
+        hostDiscardError: "provider temporarily unavailable",
+        hostDiscardRequestedAt: 1_700_000_001_000,
+      },
+      new ControlState(),
+      {},
+    );
+
+    expect(view.lastError).toBe("runtime_failed: process exited");
+    expect(view.stateDetail).toEqual({
+      type: "discarding_failed_compute",
+      retrying: true,
+      message: "provider temporarily unavailable",
+    });
+    expect(Check(OrbViewSchema, view)).toBe(true);
   });
 });
 

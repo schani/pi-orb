@@ -109,6 +109,14 @@ export function makeOrbRow(
     stateVersion: 0,
     hostKind: "fake",
     hostRef: null,
+    hostIncarnation: 0,
+    hostSpecFingerprint: null,
+    hostSpecGeneration: null,
+    hostDiscardThroughIncarnation: null,
+    hostDiscardReason: null,
+    hostDiscardError: null,
+    hostDiscardEvidence: null,
+    hostDiscardRequestedAt: null,
     checkoutCommit: null,
     harnessSessionId: null,
     harnessSessionHeader: null,
@@ -140,7 +148,7 @@ export function seedRunningOrb(
   const projectId = `project-of-${orbId}`;
   harness.store.seedProject(makeProjectRow(projectId));
   harness.world.configureOrb(orbId, { initDurationMs: 0, ...config });
-  const provisioned = harness.world.provisionHost(task, orbId);
+  const provisioned = harness.world.provisionHost(task, orbId, 0);
   harness.world.finishBoot(task, orbId);
   harness.world.ensureSessionExists(orbId);
   harness.store.seedOrb(
@@ -152,4 +160,38 @@ export function seedRunningOrb(
     }),
   );
   harness.deps.control.resetLivenessBaseline(orbId, task.monotonicNow());
+}
+
+/**
+ * Seed a running orb, then atomically fail it with an incarnation-bounded
+ * discard fence — the common preamble of every failed-compute disposal
+ * scenario (docs/compute-replacement.md).
+ */
+export async function seedFailedOrbWithDiscardIntent(
+  task: SimulationTask,
+  harness: TestHarness,
+  orbId: string,
+  options?: { lastError?: string; evidence?: string },
+): Promise<OrbRow> {
+  seedRunningOrb(task, harness, orbId);
+  const running = harness.store.orbSnapshot(orbId);
+  if (running === null) throw new Error(`seeded orb ${orbId} missing`);
+  const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+    orbId,
+    expectedStateVersion: running.stateVersion,
+    now: task.wallNow(),
+    lastError: options?.lastError ?? "runtime_failed: original failure",
+    ...(options?.evidence !== undefined ? { evidence: options.evidence } : {}),
+  });
+  return failed._unsafeUnwrap();
+}
+
+/** True once the discard fence cleared and no compute remains for the orb. */
+export function discardFinalized(harness: TestHarness, orbId: string): boolean {
+  const row = harness.store.orbSnapshot(orbId);
+  return (
+    row !== null &&
+    row.hostDiscardThroughIncarnation === null &&
+    harness.world.hostCount(orbId) === 0
+  );
 }

@@ -29,6 +29,58 @@ export function projectView(
   };
 }
 
+/** First matching detail wins; the order is the user-facing priority order. */
+function stateDetailOf(
+  orb: OrbRow,
+  control: ControlState,
+  drain: ReturnType<ControlState["getDrainStatus"]>,
+  bootProbe: ReturnType<ControlState["getBootProbe"]>,
+): OrbView["stateDetail"] {
+  if (orb.state === "deleting") {
+    return {
+      type: "deleting_resources",
+      retrying: orb.lastError !== null,
+      ...(orb.lastError !== null ? { message: orb.lastError } : {}),
+    };
+  }
+  if (orb.hostDiscardThroughIncarnation !== null) {
+    return {
+      type: "discarding_failed_compute",
+      retrying: orb.hostDiscardError !== null,
+      ...(orb.hostDiscardError !== null ? { message: orb.hostDiscardError } : {}),
+    };
+  }
+  if (orb.state === "archiving") {
+    return {
+      type: "archiving_orb",
+      phase:
+        control.getLiveness(orb.id)?.activity === "busy" ? "waiting_for_idle" : "sealing_history",
+      retrying: orb.lastError !== null,
+      ...(orb.lastError !== null ? { message: orb.lastError } : {}),
+    };
+  }
+  if (drain !== null) {
+    return {
+      type: "draining_history",
+      retrying: drain.retrying,
+      ...(drain.message !== undefined ? { message: drain.message } : {}),
+    };
+  }
+  if (bootProbe !== null) {
+    return {
+      type: "waiting_for_runtime",
+      hostState: bootProbe.hostState,
+      secondsSinceHostRunning:
+        bootProbe.hostRunningSinceWall === null
+          ? null
+          : Math.max(0, Math.round((Date.now() - bootProbe.hostRunningSinceWall) / 1000)),
+      probeAttempts: bootProbe.attempts,
+      ...(bootProbe.lastError !== undefined ? { lastProbeError: bootProbe.lastError } : {}),
+    };
+  }
+  return undefined;
+}
+
 /**
  * Fold an orb row plus in-memory reconciler state into the browser view
  * (docs/control-plane-api.md). `actionRequired` and `stateDetail` are synthesized, never
@@ -47,6 +99,7 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
     (orb.state === "creating" || orb.state === "starting") && !showChallenge
       ? control.getBootProbe(orb.id)
       : null;
+  const stateDetail = stateDetailOf(orb, control, drain, bootProbe);
   return {
     id: orb.id,
     projectId: orb.projectId,
@@ -56,53 +109,7 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
     ...(liveness !== null ? { activity: liveness.activity } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
-    ...(orb.state === "deleting"
-      ? {
-          stateDetail: {
-            type: "deleting_resources" as const,
-            retrying: orb.lastError !== null,
-            ...(orb.lastError !== null ? { message: orb.lastError } : {}),
-          },
-        }
-      : orb.state === "archiving"
-        ? {
-            stateDetail: {
-              type: "archiving_orb" as const,
-              phase:
-                control.getLiveness(orb.id)?.activity === "busy"
-                  ? ("waiting_for_idle" as const)
-                  : ("sealing_history" as const),
-              retrying: orb.lastError !== null,
-              ...(orb.lastError !== null ? { message: orb.lastError } : {}),
-            },
-          }
-        : drain !== null
-          ? {
-              stateDetail: {
-                type: "draining_history" as const,
-                retrying: drain.retrying,
-                ...(drain.message !== undefined ? { message: drain.message } : {}),
-              },
-            }
-          : bootProbe !== null
-            ? {
-                stateDetail: {
-                  type: "waiting_for_runtime" as const,
-                  hostState: bootProbe.hostState,
-                  secondsSinceHostRunning:
-                    bootProbe.hostRunningSinceWall === null
-                      ? null
-                      : Math.max(
-                          0,
-                          Math.round((Date.now() - bootProbe.hostRunningSinceWall) / 1000),
-                        ),
-                  probeAttempts: bootProbe.attempts,
-                  ...(bootProbe.lastError !== undefined
-                    ? { lastProbeError: bootProbe.lastError }
-                    : {}),
-                },
-              }
-            : {}),
+    ...(stateDetail !== undefined ? { stateDetail } : {}),
     ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),
     stateChangedAt: iso(orb.stateChangedAt),
     ...(orb.archivedAt != null ? { archivedAt: iso(orb.archivedAt) } : {}),

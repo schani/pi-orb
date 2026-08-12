@@ -24,7 +24,7 @@ function seed(
   harness.store.seedProject(makeProjectRow(PROJECT));
   for (const orbId of ORBS.slice(0, 2)) {
     harness.world.configureOrb(orbId, { initDurationMs: 0 });
-    const provisioned = harness.world.provisionHost(task, orbId);
+    const provisioned = harness.world.provisionHost(task, orbId, 0);
     harness.world.finishBoot(task, orbId);
     harness.world.ensureSessionExists(orbId);
     if (orbId === ORBS[1]) harness.world.stopHost(provisioned.ref);

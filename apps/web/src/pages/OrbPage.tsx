@@ -870,6 +870,13 @@ export function OrbPage({ orbId }: { orbId: string }) {
       </header>
 
       <main className="app-main page orb-page">
+        {orb?.stateDetail?.type === "discarding_failed_compute" && (
+          <div className="banner banner-info">
+            Discarding failed compute while preserving the workspace…
+            {orb.stateDetail.retrying && " (retrying)"}
+            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+          </div>
+        )}
         {orb?.stateDetail?.type === "deleting_resources" && (
           <div className="banner banner-info">
             Permanently deleting orb resources…

@@ -125,6 +125,7 @@ const done: GceResponse = { status: 200, body: { status: "DONE" } };
 
 const provisionRequest = {
   orbId: "orb-1",
+  incarnation: 0,
   bootstrap: { repositoryUrl: "https://github.com/o/r" },
 };
 
@@ -155,9 +156,71 @@ const existingInstance = (overrides: Record<string, unknown> = {}): Record<strin
 });
 
 describe("GceOrbHostProvider", () => {
+  it("discards exact-orb instances through the fence and preserves newer compute/data", async () => {
+    const transport = new FakeTransport([
+      () =>
+        ok200({
+          items: [
+            { name: "pi-orb-orb-1", labels: { "pi-orb-orb-id": "orb-1" } },
+            {
+              name: "pi-orb-orb-1-i0",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "0" },
+            },
+            {
+              name: "pi-orb-orb-1-i1",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "1" },
+            },
+            {
+              name: "pi-orb-orb-1-i2",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "2" },
+            },
+          ],
+        }),
+      () => ok200({ name: "discard-legacy-op" }),
+      () => done,
+      () => ok200({ name: "discard-i0-op" }),
+      () => done,
+      () => ok200({ name: "discard-i1-op" }),
+      () => done,
+      () =>
+        ok200({
+          items: [
+            {
+              name: "pi-orb-orb-1-i2",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "2" },
+            },
+          ],
+        }),
+    ]);
+    const result = await makeProvider(transport).discardCompute(
+      task,
+      { orbId: "orb-1", throughIncarnation: 1 },
+      context,
+    );
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    const deleted = transport.requests
+      .filter((request) => request.method === "DELETE")
+      .map((request) => request.path);
+    expect(deleted).toEqual([
+      "projects/proj/zones/us-central1-a/instances/pi-orb-orb-1",
+      "projects/proj/zones/us-central1-a/instances/pi-orb-orb-1-i0",
+      "projects/proj/zones/us-central1-a/instances/pi-orb-orb-1-i1",
+    ]);
+    expect(deleted.some((path) => path.includes("i2"))).toBe(false);
+    expect(transport.requests.some((request) => request.path.includes("/disks/"))).toBe(false);
+  });
+
   it("deletes the instance before the retained data disk and waits for both", async () => {
     const transport = new FakeTransport([
-      () => ok200({ labels: { "pi-orb-orb-id": "orb-1" } }),
+      () =>
+        ok200({
+          items: [
+            {
+              name: "pi-orb-orb-1-i0",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "0" },
+            },
+          ],
+        }),
       () => ok200({ name: "delete-instance-op" }),
       () => done,
       () => ok200({ labels: { "pi-orb-orb-id": "orb-1" } }),
@@ -167,8 +230,8 @@ describe("GceOrbHostProvider", () => {
     const result = await makeProvider(transport).destroy(task, "orb-1", context);
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
     expect(transport.requests.map((request) => [request.method, request.path])).toEqual([
-      ["GET", "projects/proj/zones/us-central1-a/instances/pi-orb-orb-1"],
-      ["DELETE", "projects/proj/zones/us-central1-a/instances/pi-orb-orb-1"],
+      ["GET", "projects/proj/zones/us-central1-a/instances?filter=labels.pi-orb-orb-id%3Dorb-1"],
+      ["DELETE", "projects/proj/zones/us-central1-a/instances/pi-orb-orb-1-i0"],
       ["POST", "projects/proj/zones/us-central1-a/operations/delete-instance-op/wait"],
       ["GET", "projects/proj/zones/us-central1-a/disks/pi-orb-data-orb-1"],
       ["DELETE", "projects/proj/zones/us-central1-a/disks/pi-orb-data-orb-1"],
@@ -176,8 +239,59 @@ describe("GceOrbHostProvider", () => {
     ]);
   });
 
-  it("refuses to delete a deterministic-name instance without the orb label", async () => {
-    const transport = new FakeTransport([() => ok200({ labels: {} })]);
+  it("destroy removes an instance despite an unparseable incarnation label", async () => {
+    // Ownership alone authorizes deletion-grade destroy: a mangled
+    // incarnation label must not leave the orb permanently undeletable.
+    const transport = new FakeTransport([
+      () =>
+        ok200({
+          items: [
+            {
+              name: "pi-orb-orb-1-i0",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "bogus" },
+            },
+          ],
+        }),
+      () => ok200({ name: "delete-instance-op" }),
+      () => done,
+      () => notFound, // data disk already gone
+    ]);
+    const result = await makeProvider(transport).destroy(task, "orb-1", context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(
+      transport.requests.some(
+        (request) =>
+          request.method === "DELETE" && request.path.endsWith("/instances/pi-orb-orb-1-i0"),
+      ),
+    ).toBe(true);
+  });
+
+  it("discard refuses an instance with an unparseable incarnation label", async () => {
+    // The fence needs valid incarnations; guessing could delete newer compute.
+    const transport = new FakeTransport([
+      () =>
+        ok200({
+          items: [
+            {
+              name: "pi-orb-orb-1-i0",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "bogus" },
+            },
+          ],
+        }),
+    ]);
+    const result = await makeProvider(transport).discardCompute(
+      task,
+      { orbId: "orb-1", throughIncarnation: 5 },
+      context,
+    );
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(transport.requests.some((request) => request.method === "DELETE")).toBe(false);
+  });
+
+  it("refuses a filtered instance without exact orb ownership", async () => {
+    const transport = new FakeTransport([
+      () => ok200({ items: [{ name: "pi-orb-orb-1-i0", labels: {} }] }),
+    ]);
     const result = await makeProvider(transport).destroy(task, "orb-1", context);
     expect(result.isErr() && result.error.code).toBe("conflict");
     expect(transport.requests).toHaveLength(1);
@@ -200,6 +314,9 @@ describe("GceOrbHostProvider", () => {
     );
     expect(insert).toBeDefined();
     const body = insert?.body ?? {};
+    expect(body["name"]).toBe("pi-orb-orb-1-i0");
+    expect((body["labels"] as Record<string, unknown>)["pi-orb-host-incarnation"]).toBe("0");
+    expect(result.isOk() && result.value.incarnation).toBe(0);
     expect((body["scheduling"] as Record<string, unknown>)["provisioningModel"]).toBe("SPOT");
     expect((body["scheduling"] as Record<string, unknown>)["instanceTerminationAction"]).toBe(
       "STOP",
@@ -249,7 +366,7 @@ describe("GceOrbHostProvider", () => {
     const provider = makeProvider(transport);
     const result = await provider.provision(task, provisionRequest, context);
     expect(result.isOk()).toBe(true);
-    expect(transport.requests[1]?.path).toContain("/instances/pi-orb-orb-1/start");
+    expect(transport.requests[1]?.path).toContain("/instances/pi-orb-orb-1-i0/start");
   });
 
   it("repairs a stale startup script on a reused running instance", async () => {
@@ -446,12 +563,40 @@ describe("GceOrbHostProvider", () => {
     const provider = makeProvider(transport, undefined, 2);
     const result = await provider.start(
       task,
-      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
+        expectedIncarnation: 0,
+      },
       context,
     );
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
     expect(transport.requests.some((request) => request.path.endsWith("/setMetadata"))).toBe(false);
     expect(transport.requests[1]?.path).toContain("/instances/pi-orb-orb-1/start");
+  });
+
+  it("start refuses a resource carrying a different incarnation", async () => {
+    const transport = new FakeTransport([
+      () =>
+        ok200(
+          existingInstance({
+            name: "pi-orb-orb-1-i1",
+            labels: {
+              "pi-orb-orb-id": "orb-1",
+              "pi-orb-host-incarnation": "1",
+            },
+          }),
+        ),
+    ]);
+    const result = await makeProvider(transport).start(
+      task,
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1-i1" },
+        expectedIncarnation: 0,
+      },
+      context,
+    );
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(transport.requests).toHaveLength(1);
   });
 
   it("start() repairs a pre-stamp TERMINATED instance, recovering the repo URL", async () => {
@@ -478,7 +623,10 @@ describe("GceOrbHostProvider", () => {
     const provider = makeProvider(transport);
     const result = await provider.start(
       task,
-      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
+        expectedIncarnation: 0,
+      },
       context,
     );
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
@@ -501,7 +649,10 @@ describe("GceOrbHostProvider", () => {
     const provider = makeProvider(transport);
     const result = await provider.start(
       task,
-      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
+        expectedIncarnation: 0,
+      },
       context,
     );
     expect(result.isOk()).toBe(true);
@@ -623,7 +774,8 @@ describe("GceOrbHostProvider", () => {
       controlPlaneUrl: "https://cp",
     };
     for (const extraEnv of [{}, { A: "1", B: "2" }]) {
-      const script = buildStartupScript({ ...base, extraEnv });
+      const script = buildStartupScript({ ...base, incarnation: 7, extraEnv });
+      expect(script).toContain("-e PI_ORB_HOST_INCARNATION='7'");
       // No blank line may interrupt a backslash continuation.
       expect(script).not.toMatch(/\\\n\s*\n/);
       // The exact image variable is the final argument of the same docker run command.
@@ -923,7 +1075,10 @@ describe("GceOrbHostProvider", () => {
     const provider = makeProvider(transport, tailscaleOptions(minter));
     const result = await provider.start(
       task,
-      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
+        expectedIncarnation: 0,
+      },
       context,
     );
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
@@ -976,7 +1131,10 @@ describe("GceOrbHostProvider", () => {
     const provider = makeProvider(transport, tailscaleOptions(minter));
     const result = await provider.start(
       task,
-      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
+        expectedIncarnation: 0,
+      },
       context,
     );
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
