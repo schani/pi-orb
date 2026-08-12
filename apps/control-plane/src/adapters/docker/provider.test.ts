@@ -237,6 +237,34 @@ describe("DockerOrbHostProvider", () => {
     );
   });
 
+  it("provision never starts an existing container carrying a different incarnation", async () => {
+    dockerFake.install((args) => {
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-incarnation": "1",
+                },
+                Env: [`${RUNTIME_TOKEN_ENV}=tok`],
+              },
+              State: { Status: "exited" },
+              NetworkSettings: {},
+            },
+          ]),
+        };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().provision(task, request, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    // The stamp is checked before any state change: no `docker start`.
+    expect(dockerFake.calls.some((args) => args[0] === "start")).toBe(false);
+  });
+
   it("start refuses a container carrying a different incarnation", async () => {
     dockerFake.install(() => ({
       stdout: JSON.stringify([
@@ -402,6 +430,70 @@ describe("DockerOrbHostProvider deletion", () => {
       ["volume", "rm", "--force", "pi-orb-data-orb-1"],
     ]);
   });
+  it("destroy removes a container despite an unparseable incarnation label", async () => {
+    // Ownership alone authorizes deletion-grade destroy: a mangled
+    // incarnation label must not leave the orb permanently undeletable.
+    dockerFake.install((args) => {
+      if (args[0] === "ps") return { stdout: "pi-orb-orb-1-i0\n" };
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-incarnation": "not-a-number",
+                },
+              },
+            },
+          ]),
+        };
+      }
+      if (args[0] === "volume" && args[1] === "inspect") {
+        return { stdout: JSON.stringify([{ Labels: { "pi-orb.orb-id": "orb-1" } }]) };
+      }
+      if (args[0] === "rm" || (args[0] === "volume" && args[1] === "rm")) {
+        return { stdout: "" };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().destroy(task, "orb-1", context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(dockerFake.calls).toContainEqual(["rm", "--force", "pi-orb-orb-1-i0"]);
+    expect(dockerFake.calls).toContainEqual(["volume", "rm", "--force", "pi-orb-data-orb-1"]);
+  });
+
+  it("discard still refuses an unparseable incarnation label", async () => {
+    // The fence needs valid incarnations; guessing could delete newer compute.
+    dockerFake.install((args) => {
+      if (args[0] === "ps") return { stdout: "pi-orb-orb-1-i0\n" };
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-incarnation": "not-a-number",
+                },
+              },
+            },
+          ]),
+        };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().discardCompute(
+      task,
+      { orbId: "orb-1", throughIncarnation: 5 },
+      context,
+    );
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(dockerFake.calls.some((args) => args[0] === "rm")).toBe(false);
+  });
+
   it("refuses to delete a deterministic-name container without the orb label", async () => {
     dockerFake.install((args) => {
       if (args[0] === "ps") return { stdout: "pi-orb-orb-1-i0\n" };

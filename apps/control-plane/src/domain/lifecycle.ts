@@ -243,6 +243,33 @@ function boundedDiscardText(value: string): string {
   return value.replace(/[\r\n\t]+/g, " ").slice(0, 2_000);
 }
 
+/**
+ * Bounded best-effort host diagnosis for terminal/discard evidence. Diagnosis
+ * failure is itself durable evidence, never a reason to preserve suspect
+ * compute or defer a terminal decision.
+ */
+async function collectDiscardEvidence(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  hostRef: string | null,
+  reason: string,
+): Promise<string> {
+  if (hostRef === null) return "diagnosis unavailable: no compute reference";
+  const diagnose = deps.hostProvider.diagnose?.bind(deps.hostProvider);
+  if (diagnose === undefined) return "diagnosis unavailable: provider does not support diagnosis";
+  const diagnosed = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    reason,
+    (context) => diagnose(task, hostRefOf(deps, hostRef), context),
+  );
+  return diagnosed.isOk()
+    ? diagnosed.value === null || diagnosed.value === ""
+      ? "diagnosis unavailable: provider returned no evidence"
+      : boundedDiscardText(diagnosed.value)
+    : `diagnosis unavailable: ${boundedDiscardText(diagnosed.error.message)}`;
+}
+
 /** CAS the orb to `failed` and atomically invalidate its compute incarnation. */
 async function failOrb(
   task: SimulationTask,
@@ -254,30 +281,10 @@ async function failOrb(
 ): Promise<ReconcileOutcome> {
   // Terminal diagnosis must precede the failure/discard transaction: after it
   // commits, another reconciler is entitled to delete the compute immediately.
-  // Diagnosis is bounded and best-effort; its failure is durable evidence, not
-  // a reason to preserve suspect compute or defer the terminal decision.
-  let terminalEvidence = evidence;
-  if (terminalEvidence === undefined) {
-    if (orb.hostRef === null) {
-      terminalEvidence = "diagnosis unavailable: no compute reference";
-    } else if (deps.hostProvider.diagnose === undefined) {
-      terminalEvidence = "diagnosis unavailable: provider does not support diagnosis";
-    } else {
-      const diagnosed = await withDeadline(
-        task,
-        deps.constants.providerOperationTimeoutMs,
-        "diagnose terminal failure",
-        (context) =>
-          deps.hostProvider.diagnose?.(task, hostRefOf(deps, orb.hostRef ?? ""), context) ??
-          ResultAsync.fromSafePromise(Promise.resolve(null)),
-      );
-      terminalEvidence = diagnosed.isOk()
-        ? diagnosed.value === null || diagnosed.value === ""
-          ? "diagnosis unavailable: provider returned no evidence"
-          : boundedDiscardText(diagnosed.value)
-        : `diagnosis unavailable: ${boundedDiscardText(diagnosed.error.message)}`;
-    }
-  }
+  const terminalEvidence =
+    evidence !== undefined
+      ? evidence
+      : await collectDiscardEvidence(task, deps, orb.hostRef, "diagnose terminal failure");
   const boundedEvidence = boundedDiscardText(
     terminalEvidence ?? "diagnosis unavailable: no evidence supplied",
   );
@@ -334,18 +341,6 @@ async function failOnObservationMismatch(
   );
 }
 
-/** Commit failure first; shared reconciliation exclusively owns disposal. */
-async function failOrbStoppingHost(
-  task: SimulationTask,
-  deps: ControlPlaneDeps,
-  orb: OrbRow,
-  code: OrbFailureCode,
-  message: string,
-  evidence?: string | null,
-): Promise<ReconcileOutcome> {
-  return failOrb(task, deps, orb, code, message, evidence);
-}
-
 /**
  * Reconcile one durable compute-discard intent before any state-specific host
  * work. Provider absence is not enough: finalization advances the incarnation
@@ -361,19 +356,12 @@ async function reconcileHostDiscard(
 
   let evidence = orb.hostDiscardEvidence;
   if (evidence === null && orb.hostRef !== null && deps.hostProvider.diagnose !== undefined) {
-    const diagnosed = await withDeadline(
+    evidence = await collectDiscardEvidence(
       task,
-      deps.constants.providerOperationTimeoutMs,
+      deps,
+      orb.hostRef,
       "diagnose before compute discard",
-      (context) =>
-        deps.hostProvider.diagnose?.(task, hostRefOf(deps, orb.hostRef ?? ""), context) ??
-        ResultAsync.fromSafePromise(Promise.resolve(null)),
     );
-    evidence = diagnosed.isOk()
-      ? diagnosed.value === null
-        ? "diagnosis unavailable: provider returned no evidence"
-        : boundedDiscardText(diagnosed.value)
-      : `diagnosis unavailable: ${boundedDiscardText(diagnosed.error.message)}`;
     const recorded = await deps.store.recordHostDiscardStatus(task, {
       orbId: orb.id,
       throughIncarnation: through,
@@ -396,7 +384,6 @@ async function reconcileHostDiscard(
       ),
   );
   await task.checkpoint("compute-replacement.discard-after-provider");
-  const condition = `compute-discard:${orb.id}:${through}`;
   if (discarded.isErr()) {
     const message = boundedDiscardText(discarded.error.message);
     const recorded = await deps.store.recordHostDiscardStatus(task, {
@@ -406,10 +393,9 @@ async function reconcileHostDiscard(
       error: message,
     });
     if (recorded.isErr()) return retryable(recorded.error);
-    const enteredInMemory = deps.control.noteCondition(condition, true);
-    // The durable error is the edge authority across process restarts. Do not
-    // re-log the same persisting condition merely because ControlState is new.
-    if (orb.hostDiscardError !== message || (orb.hostDiscardError === null && enteredInMemory)) {
+    // The durable error column is the edge authority: it survives process
+    // restarts and never re-logs the same persisting condition per pass.
+    if (orb.hostDiscardError !== message) {
       logOrbEvent(task, orb.id, "compute-discard", {
         host: orb.hostRef,
         through_incarnation: through,
@@ -421,12 +407,6 @@ async function reconcileHostDiscard(
     return retryable(discarded.error);
   }
 
-  const recoveredInMemory = deps.control.noteCondition(condition, false);
-  if (orb.hostDiscardError !== null || recoveredInMemory) {
-    logOrbEvent(task, orb.id, "compute-discard-recovered", {
-      through_incarnation: through,
-    });
-  }
   await task.checkpoint("compute-replacement.discard-before-finalize");
   const finalized = await deps.store.finalizeHostDiscard(task, {
     orbId: orb.id,
@@ -440,6 +420,14 @@ async function reconcileHostDiscard(
       : retryable(finalized.error);
   }
   await task.checkpoint("compute-replacement.discard-finalized");
+  // Recovery is an edge only once: finalization clears the durable error, so
+  // no later pass can observe it again. Logging recovery before finalization
+  // repeated the edge on every finalize retry after a successful discard.
+  if (orb.hostDiscardError !== null) {
+    logOrbEvent(task, orb.id, "compute-discard-recovered", {
+      through_incarnation: through,
+    });
+  }
   logOrbEvent(task, orb.id, "compute-discard", {
     host: orb.hostRef,
     through_incarnation: through,
@@ -545,7 +533,7 @@ async function reconcileCreateStart(
 
   // 2. Create/start deadline (docs/lifecycle.md deadline_exceeded rule).
   if (task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs) {
-    return failOrbStoppingHost(
+    return failOrb(
       task,
       deps,
       orb,
@@ -587,6 +575,9 @@ async function reconcileCreateStart(
       now: task.wallNow(),
       hostRef: provisioned.value.ref.resourceId,
       runtimeTokenHash: provisioned.value.runtimeTokenHash,
+      // Replacement succeeded: the retained discard evidence has served its
+      // purpose and must not shadow a later, unrelated incident.
+      hostDiscardEvidence: null,
     });
     if (updated.isErr()) {
       return updated.error.type === "state_conflict"
@@ -749,7 +740,7 @@ async function reconcileCreateStart(
             last_error: health.error.message,
             diagnostics: evidence,
           });
-          return failOrbStoppingHost(
+          return failOrb(
             task,
             deps,
             orb,
@@ -766,7 +757,7 @@ async function reconcileCreateStart(
       const status = health.value;
       if (status.status === "initializing") return waiting("readiness");
       if (status.status === "failed") {
-        return failOrbStoppingHost(
+        return failOrb(
           task,
           deps,
           orb,
@@ -775,7 +766,7 @@ async function reconcileCreateStart(
         );
       }
       if (status.orbId !== orb.id) {
-        return failOrbStoppingHost(
+        return failOrb(
           task,
           deps,
           orb,
@@ -1121,7 +1112,7 @@ async function reconcileStopping(
   // A drain stuck longer than the create/start deadline cannot be completed
   // by waiting: the runtime cannot be restored to ready (docs/lifecycle.md).
   if (task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs) {
-    return failOrbStoppingHost(
+    return failOrb(
       task,
       deps,
       orb,
@@ -1149,7 +1140,7 @@ async function reconcileStopping(
         silent_ms: silentMs,
         decision: "fail_drain",
       });
-      return failOrbStoppingHost(
+      return failOrb(
         task,
         deps,
         orb,
@@ -1352,6 +1343,7 @@ async function reconcileArchiving(
           now: task.wallNow(),
           hostRef: provisioned.value.ref.resourceId,
           runtimeTokenHash: provisioned.value.runtimeTokenHash,
+          hostDiscardEvidence: null,
         });
         if (committed.isErr()) {
           return committed.error.type === "state_conflict"
@@ -1373,6 +1365,8 @@ async function reconcileArchiving(
       }
       const observed = await observeHost(task, deps, orb.hostRef);
       if (observed.isErr()) return retryable(observed.error);
+      const mismatch = await failOnObservationMismatch(task, deps, orb, observed.value);
+      if (mismatch !== null) return mismatch;
       if (observed.value === null) {
         const message = "archive cannot restore the authoritative runtime: host is absent";
         await deps.store.recordOrbDeletionError(task, {

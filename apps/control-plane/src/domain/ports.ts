@@ -56,6 +56,19 @@ export interface CasUpdateFieldsParams {
   readonly checkoutCommit?: string | null;
   readonly lastError?: string | null;
   readonly runtimeTokenHash?: string | null;
+  /**
+   * Clear-only: retained discard evidence is dropped when a replacement
+   * commits, so it cannot shadow a later incident (docs/compute-replacement.md).
+   */
+  readonly hostDiscardEvidence?: null;
+}
+
+export interface RecordHostDiscardStatusParams {
+  readonly orbId: string;
+  readonly throughIncarnation: number;
+  readonly now: number;
+  readonly evidence?: string | null;
+  readonly error?: string | null;
 }
 
 export interface FailOrbAndRequestComputeDiscardParams {
@@ -287,13 +300,7 @@ export interface ControlPlaneStore {
   /** Persists bounded diagnosis/error only while the named discard intent is current. */
   recordHostDiscardStatus(
     task: SimulationTask,
-    params: {
-      orbId: string;
-      throughIncarnation: number;
-      now: number;
-      evidence?: string | null;
-      error?: string | null;
-    },
+    params: RecordHostDiscardStatusParams,
   ): ResultAsync<void, StoreError>;
 
   /** Clears a verified discard intent and advances compute identity above its fence. */

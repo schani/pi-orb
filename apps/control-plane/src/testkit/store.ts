@@ -17,6 +17,7 @@ import type {
   ControlPlaneStore,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  RecordHostDiscardStatusParams,
   RequestOrbArchiveParams,
   RequestOrbDeletionParams,
 } from "../domain/ports.ts";
@@ -1003,13 +1004,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
 
   recordHostDiscardStatus(
     task: SimulationTask,
-    params: {
-      orbId: string;
-      throughIncarnation: number;
-      now: number;
-      evidence?: string | null;
-      error?: string | null;
-    },
+    params: RecordHostDiscardStatusParams,
   ): ResultAsync<void, StoreError> {
     return this.access(task, FAILPOINTS.storeDiscardStatus, "record host discard status", () => {
       const orb = this.orbs.get(params.orbId);
@@ -1029,11 +1024,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: FinalizeHostDiscardParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    if (this.hostDiscardFinalizeFailures > 0) {
-      this.hostDiscardFinalizeFailures -= 1;
-      return errAsync(unavailable("finalize host discard: scripted store failure"));
-    }
+    // The scripted counter runs inside `access`, after its failpoint, so a
+    // probability-armed storeDiscardFinalize failpoint is never shadowed.
     return this.access(task, FAILPOINTS.storeDiscardFinalize, "finalize host discard", () => {
+      if (this.hostDiscardFinalizeFailures > 0) {
+        this.hostDiscardFinalizeFailures -= 1;
+        return { scripted: true as const };
+      }
       const orb = this.orbs.get(params.orbId);
       if (
         orb === undefined ||
@@ -1060,14 +1057,19 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };
-    }).andThen((outcome) =>
-      outcome.conflict
+    }).andThen((outcome) => {
+      if ("scripted" in outcome) {
+        return errAsync<OrbRow, StoreError | StateConflict>(
+          unavailable("finalize host discard: scripted store failure"),
+        );
+      }
+      return outcome.conflict
         ? errAsync<OrbRow, StateConflict>({
             type: "state_conflict",
             ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
           })
-        : okAsync(outcome.row),
-    );
+        : okAsync(outcome.row);
+    });
   }
 
   casTransition(
@@ -1103,18 +1105,28 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  casUpdateFields(
-    task: SimulationTask,
-    params: CasUpdateFieldsParams,
-  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+  /**
+   * The lifecycle's replacement commit is the only `casUpdateFields` call that
+   * installs a host ref and runtime token on a row whose previous ref was
+   * cleared by an advanced-incarnation discard finalize. Scripted commit
+   * failures (`failNextHostReplacementCommits`) key on exactly that shape; if
+   * the commit ever gains an explicit discriminant, replace this predicate.
+   */
+  private isReplacementCommit(params: CasUpdateFieldsParams): boolean {
     const current = this.orbs.get(params.orbId);
-    if (
-      this.hostReplacementCommitFailures > 0 &&
+    return (
       current?.hostRef === null &&
       current.hostIncarnation > 0 &&
       params.hostRef != null &&
       params.runtimeTokenHash != null
-    ) {
+    );
+  }
+
+  casUpdateFields(
+    task: SimulationTask,
+    params: CasUpdateFieldsParams,
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    if (this.hostReplacementCommitFailures > 0 && this.isReplacementCommit(params)) {
       this.hostReplacementCommitFailures -= 1;
       return errAsync(unavailable("replacement host commit: scripted store failure"));
     }
@@ -1133,6 +1145,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.runtimeTokenHash !== undefined
           ? { runtimeTokenHash: params.runtimeTokenHash }
           : {}),
+        ...(params.hostDiscardEvidence !== undefined ? { hostDiscardEvidence: null } : {}),
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };

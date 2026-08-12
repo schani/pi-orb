@@ -239,6 +239,55 @@ describe("GceOrbHostProvider", () => {
     ]);
   });
 
+  it("destroy removes an instance despite an unparseable incarnation label", async () => {
+    // Ownership alone authorizes deletion-grade destroy: a mangled
+    // incarnation label must not leave the orb permanently undeletable.
+    const transport = new FakeTransport([
+      () =>
+        ok200({
+          items: [
+            {
+              name: "pi-orb-orb-1-i0",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "bogus" },
+            },
+          ],
+        }),
+      () => ok200({ name: "delete-instance-op" }),
+      () => done,
+      () => notFound, // data disk already gone
+    ]);
+    const result = await makeProvider(transport).destroy(task, "orb-1", context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(
+      transport.requests.some(
+        (request) =>
+          request.method === "DELETE" && request.path.endsWith("/instances/pi-orb-orb-1-i0"),
+      ),
+    ).toBe(true);
+  });
+
+  it("discard refuses an instance with an unparseable incarnation label", async () => {
+    // The fence needs valid incarnations; guessing could delete newer compute.
+    const transport = new FakeTransport([
+      () =>
+        ok200({
+          items: [
+            {
+              name: "pi-orb-orb-1-i0",
+              labels: { "pi-orb-orb-id": "orb-1", "pi-orb-host-incarnation": "bogus" },
+            },
+          ],
+        }),
+    ]);
+    const result = await makeProvider(transport).discardCompute(
+      task,
+      { orbId: "orb-1", throughIncarnation: 5 },
+      context,
+    );
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(transport.requests.some((request) => request.method === "DELETE")).toBe(false);
+  });
+
   it("refuses a filtered instance without exact orb ownership", async () => {
     const transport = new FakeTransport([
       () => ok200({ items: [{ name: "pi-orb-orb-1-i0", labels: {} }] }),

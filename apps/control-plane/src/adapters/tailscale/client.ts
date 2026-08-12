@@ -226,13 +226,34 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
     const incarnationPrefix = `${legacyDescription} i`;
     for (const value of keys) {
       const key = value as Record<string, unknown>;
-      const description = key["description"];
+      if (typeof key["id"] !== "string") continue;
+      let description: unknown = key["description"];
+      if (typeof description !== "string") {
+        // Some API responses omit descriptions from the list; deciding
+        // "no match" on that omission would silently break revoke-before-mint.
+        // Fetch the key detail before deciding.
+        const detail = await this.send(
+          "GET",
+          this.url(`/api/v2/tailnet/-/keys/${encodeURIComponent(key["id"])}`),
+          headers,
+          signal,
+        );
+        if (detail.isErr()) return err(detail.error);
+        // Gone between list and get: nothing left to revoke.
+        if (detail.value.status === 404) continue;
+        if (detail.value.status < 200 || detail.value.status >= 300) {
+          return err(statusError("tailscale key get", detail.value.status, detail.value.text));
+        }
+        const parsedDetail = parseJson("tailscale key get", detail.value.text);
+        if (parsedDetail.isErr()) return err(parsedDetail.error);
+        description = parsedDetail.value["description"];
+      }
       const exact =
         description === legacyDescription ||
         (typeof description === "string" &&
           description.startsWith(incarnationPrefix) &&
           /^\d+$/.test(description.slice(incarnationPrefix.length)));
-      if (!exact || typeof key["id"] !== "string") continue;
+      if (!exact) continue;
       const removed = await this.send(
         "DELETE",
         this.url(`/api/v2/tailnet/-/keys/${encodeURIComponent(key["id"])}`),
@@ -251,13 +272,16 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
   }
 
   /**
-   * Non-ephemeral device state persists on the orb's data volume. Auth keys
-   * are incarnation-scoped and non-reusable; revoke-before-mint bounds the
-   * tailnet to at most one unconsumed exact-orb key.
-   * volume, so the same key is replayed after a restart and the device record
-   * must survive the offline stretches a stopped orb spends. Preauthorized
-   * and tagged so no admin has to approve a node and the tailnet ACLs scope
-   * what `tag:pi-orb` may reach.
+   * Auth keys are non-reusable and incarnation-scoped: each newly provisioned
+   * compute incarnation gets a fresh key, and revoke-before-mint bounds the
+   * tailnet to at most one unconsumed exact-orb key. Device identity is
+   * separate from the keys: tailscaled state lives on the orb's retained
+   * workspace, so a restart or compute replacement resumes the same device
+   * without consuming a key, and the non-ephemeral device record survives the
+   * offline stretches a stopped orb spends. Keys are preauthorized and tagged
+   * so no admin has to approve a node and the tailnet ACLs scope what
+   * `tag:pi-orb` may reach. `cleanupOrb` is deletion-grade (archive/delete):
+   * it removes every exact-orb key and the orb's tagged device record.
    */
   cleanupOrb(orbId: string, signal: AbortSignal): ResultAsync<void, TailscaleError> {
     const run = async (): Promise<Result<void, TailscaleError>> => {

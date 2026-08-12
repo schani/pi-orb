@@ -17,6 +17,7 @@ import type {
   ControlPlaneStore,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  RecordHostDiscardStatusParams,
   RequestOrbArchiveParams,
   RequestOrbDeletionParams,
 } from "../../domain/ports.ts";
@@ -956,13 +957,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
 
   recordHostDiscardStatus(
     _task: SimulationTask,
-    params: {
-      orbId: string;
-      throughIncarnation: number;
-      now: number;
-      evidence?: string | null;
-      error?: string | null;
-    },
+    params: RecordHostDiscardStatusParams,
   ): ResultAsync<void, StoreError> {
     const sets = ["updated_at = $3"];
     const values: unknown[] = [params.orbId, params.throughIncarnation, new Date(params.now)];
@@ -1093,6 +1088,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       sets.push(`runtime_token_hash = $${index}`);
       values.push(params.runtimeTokenHash);
       index += 1;
+    }
+    if (params.hostDiscardEvidence !== undefined) {
+      sets.push("host_discard_evidence = NULL");
     }
     return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values);
   }

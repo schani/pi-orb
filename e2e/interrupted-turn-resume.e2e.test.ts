@@ -11,6 +11,7 @@ import {
   type FakeSession,
   FatalProbeError,
   fakeControl,
+  removeOrbContainers,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
@@ -149,12 +150,9 @@ beforeAll(async () => {
   nameFake = await createFakeSession(`pi-orb-name-e2e-resume-${Date.now()}`, NAME_SCENARIO);
 
   await docker(["network", "create", NETWORK]).catch(() => undefined);
-  const hasImage = await docker(["image", "inspect", RUNTIME_IMAGE, "--format", "ok"]).catch(
-    () => null,
-  );
-  if (hasImage === null) {
-    await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
-  }
+  // Always rebuild: a build-if-absent gate silently runs stale runtime code.
+  // With a warm layer cache this takes seconds.
+  await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
 
   await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
   await docker([
@@ -194,7 +192,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (PROCESS_BACKEND) return;
   if (orbId !== "") {
-    await docker(["rm", "-f", `pi-orb-${orbId}`]).catch(() => undefined);
+    await removeOrbContainers(orbId);
     await docker(["volume", "rm", "-f", `pi-orb-data-${orbId}`]).catch(() => undefined);
   }
   await controlPlane?.stop();
@@ -226,7 +224,7 @@ describe("interrupted-turn resume E2E", () => {
             "=== replicated history ===",
             JSON.stringify(history?.body).slice(0, 20_000),
           );
-          const logs = await docker(["logs", "--tail", "80", `pi-orb-${orbId}`]).catch(
+          const logs = await docker(["logs", "--tail", "80", `pi-orb-${orbId}-i0`]).catch(
             (e: unknown) => `unavailable: ${String(e)}`,
           );
           console.error("=== orb container logs ===\n", logs);
@@ -250,7 +248,9 @@ describe("interrupted-turn resume E2E", () => {
     });
     expect(project.status, JSON.stringify(project.body)).toBe(201);
     orbId = randomUUID();
-    const container = `pi-orb-${orbId}`;
+    // Fresh orbs launch as incarnation 0, and this test never replaces
+    // compute, so the container name is stable for the whole scenario.
+    const container = `pi-orb-${orbId}-i0`;
     const orb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, { id: orbId });
     expect(orb.status, JSON.stringify(orb.body)).toBe(202);
 

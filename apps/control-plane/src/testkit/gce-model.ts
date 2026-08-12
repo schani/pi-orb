@@ -122,8 +122,23 @@ export class DeterministicGceApiModel implements GceApiTransport {
     return { status: 200, body: { items } };
   }
 
-  private get(resources: Map<string, ModeledResource>, name: string): GceResponse {
+  /**
+   * A resource that is live from the API's perspective. Real Compute Engine
+   * makes the single-resource GET (and every instance-targeted operation)
+   * 404 promptly once its delete operation is DONE; only LIST snapshots may
+   * trail. A completed deletion therefore hides the resource here
+   * immediately, while `materializeVisibility` keeps the configurable
+   * list-lag knob.
+   */
+  private live(resources: Map<string, ModeledResource>, name: string): ModeledResource | undefined {
     const resource = resources.get(name);
+    return resource === undefined || resource.deletionVisibilityRemaining !== null
+      ? undefined
+      : resource;
+  }
+
+  private get(resources: Map<string, ModeledResource>, name: string): GceResponse {
+    const resource = this.live(resources, name);
     return resource === undefined
       ? { status: 404, body: {} }
       : { status: 200, body: structuredClone(resource.body) };
@@ -168,7 +183,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
       return this.get(this.instances, instance[1]);
     }
     if (args.method === "DELETE" && instance?.[1] !== undefined) {
-      const resource = this.instances.get(instance[1]);
+      const resource = this.live(this.instances, instance[1]);
       if (resource === undefined) return { status: 404, body: {} };
       return this.operation(() => {
         resource.deletionVisibilityRemaining = this.options.deletionVisibilityPolls;
@@ -177,7 +192,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
     if (args.method === "POST" && relative === "instances") {
       const name = args.body?.["name"];
       if (typeof name !== "string") return { status: 400, body: {} };
-      if (this.instances.has(name)) return { status: 409, body: {} };
+      if (this.live(this.instances, name) !== undefined) return { status: 409, body: {} };
       return this.operation(() => {
         this.instances.set(name, {
           body: {
@@ -193,7 +208,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
 
     const startStop = /^instances\/([^/]+)\/(start|stop)$/.exec(relative);
     if (args.method === "POST" && startStop?.[1] !== undefined && startStop[2] !== undefined) {
-      const resource = this.instances.get(startStop[1]);
+      const resource = this.live(this.instances, startStop[1]);
       if (resource === undefined) return { status: 404, body: {} };
       const status = startStop[2] === "start" ? "RUNNING" : "TERMINATED";
       return this.operation(() => {
@@ -203,7 +218,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
 
     const metadata = /^instances\/([^/]+)\/setMetadata$/.exec(relative);
     if (args.method === "POST" && metadata?.[1] !== undefined) {
-      const resource = this.instances.get(metadata[1]);
+      const resource = this.live(this.instances, metadata[1]);
       if (resource === undefined) return { status: 404, body: {} };
       return this.operation(() => {
         resource.body["metadata"] = {
@@ -216,7 +231,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
     const disk = /^disks\/([^/?]+)$/.exec(relative);
     if (args.method === "GET" && disk?.[1] !== undefined) return this.get(this.disks, disk[1]);
     if (args.method === "DELETE" && disk?.[1] !== undefined) {
-      const resource = this.disks.get(disk[1]);
+      const resource = this.live(this.disks, disk[1]);
       if (resource === undefined) return { status: 404, body: {} };
       return this.operation(() => {
         resource.deletionVisibilityRemaining = this.options.deletionVisibilityPolls;
@@ -225,7 +240,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
     if (args.method === "POST" && relative === "disks") {
       const name = args.body?.["name"];
       if (typeof name !== "string") return { status: 400, body: {} };
-      if (this.disks.has(name)) return { status: 409, body: {} };
+      if (this.live(this.disks, name) !== undefined) return { status: 409, body: {} };
       return this.operation(() => {
         this.disks.set(name, {
           body: { ...(args.body ?? {}), name },

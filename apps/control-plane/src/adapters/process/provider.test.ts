@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NoSimulationTask } from "determined";
 import { afterEach, describe, expect, it } from "vitest";
-import { ProcessOrbHostProvider } from "./provider.ts";
+import { ProcessOrbHostProvider, type ProcessOrbHostProviderOptions } from "./provider.ts";
 
 const task = new NoSimulationTask("process provider test", false);
 const context = { signal: new AbortController().signal };
@@ -21,8 +21,18 @@ function fixture(root: string): string {
     path,
     `import { createServer } from "node:http";
 import { writeFileSync, existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 const crash = process.env.CRASH_ONCE_FILE;
 if (crash && !existsSync(crash)) { writeFileSync(crash, "crashed"); process.exit(23); }
+if (process.env.GROUP_MEMBER_PID_FILE) {
+  // A group member that outlives the leader: it ignores SIGTERM and writes
+  // its own pid only after the handler is installed, so the pid file's
+  // existence proves the member is immune to the first ladder rung.
+  spawn(process.execPath, [
+    "-e",
+    "process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(process.env.GROUP_MEMBER_PID_FILE, String(process.pid)); setInterval(() => {}, 1000);",
+  ], { stdio: "ignore", env: process.env });
+}
 writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   orbId: process.env.PI_ORB_ID,
   repositoryUrl: process.env.PI_ORB_REPOSITORY_URL,
@@ -43,7 +53,10 @@ process.on("disconnect", stop);
   return path;
 }
 
-function makeProvider(extraEnv: Record<string, string> = {}): {
+function makeProvider(
+  extraEnv: Record<string, string> = {},
+  options: Partial<ProcessOrbHostProviderOptions> = {},
+): {
   provider: ProcessOrbHostProvider;
   root: string;
 } {
@@ -55,6 +68,7 @@ function makeProvider(extraEnv: Record<string, string> = {}): {
     controlPlaneUrl: "http://127.0.0.1:7100",
     restartDelayMs: 10,
     extraEnv,
+    ...options,
   });
   providers.push(provider);
   return { provider, root };
@@ -347,5 +361,135 @@ describe("ProcessOrbHostProvider", () => {
     expect(listed.isOk() && listed.value[0]?.state).toBe("running");
     rmSync(observedEnv, { force: true });
     rmSync(crashFile, { force: true });
+  });
+
+  it("a discard racing the crash relaunch cannot resurrect fenced metadata", async () => {
+    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+    const crashFile = join(tmpdir(), `pi-orb-crash-${crypto.randomUUID()}`);
+    let signalRelaunch: () => void = () => undefined;
+    const relaunchFired = new Promise<void>((resolve) => {
+      signalRelaunch = resolve;
+    });
+    let releaseRelaunch: () => void = () => undefined;
+    const relaunchGate = new Promise<void>((resolve) => {
+      releaseRelaunch = resolve;
+    });
+    const { provider, root } = makeProvider(
+      { OBSERVED_ENV_FILE: observedEnv, CRASH_ONCE_FILE: crashFile },
+      {
+        restartDelayMs: 1,
+        onCrashRelaunch: () => {
+          signalRelaunch();
+          return relaunchGate;
+        },
+      },
+    );
+    const provisioned = await provider.provision(task, request, context);
+    expect(provisioned.isOk()).toBe(true);
+
+    // The child crashes once; hold the relaunch in flight at its timer.
+    await relaunchFired;
+    // The discard runs to completion inside the forced interleaving window.
+    const discarded = await provider.discardCompute(
+      task,
+      { orbId: request.orbId, throughIncarnation: 0 },
+      context,
+    );
+    expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
+    const hostDirectory = join(root, "configured-state", request.orbId);
+    expect(existsSync(join(hostDirectory, "host.json"))).toBe(false);
+
+    // Release the relaunch and let its lock section register before queueing
+    // another lock user behind it (microtasks drain before immediates).
+    releaseRelaunch();
+    await new Promise((resolve) => setImmediate(resolve));
+    // Idempotent discard queues behind the relaunch: once it returns, the
+    // relaunch body has run and must have aborted against the removed file.
+    const again = await provider.discardCompute(
+      task,
+      { orbId: request.orbId, throughIncarnation: 0 },
+      context,
+    );
+    expect(again.isOk()).toBe(true);
+    expect(existsSync(join(hostDirectory, "host.json"))).toBe(false);
+    expect(existsSync(join(hostDirectory, "runtime.log"))).toBe(false);
+    rmSync(observedEnv, { force: true });
+    rmSync(crashFile, { force: true });
+  });
+
+  it("discard kills a live managed child even when no process group is recorded", async () => {
+    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+    const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
+    const provisioned = await provider.provision(task, request, context);
+    expect(provisioned.isOk()).toBe(true);
+    const values = await eventually(() => {
+      try {
+        return JSON.parse(readFileSync(observedEnv, "utf8")) as { pid: number };
+      } catch {
+        return null;
+      }
+    });
+    expect(processExists(values.pid)).toBe(true);
+
+    // Simulate metadata that lost its process group (e.g. written around a
+    // crash window): absence verification must fall back to the live child.
+    const metadataPath = join(root, "configured-state", request.orbId, "host.json");
+    const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(metadataPath, `${JSON.stringify({ ...metadata, processGroupId: null })}\n`);
+
+    const discarded = await provider.discardCompute(
+      task,
+      { orbId: request.orbId, throughIncarnation: 0 },
+      context,
+    );
+    expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
+    expect(processExists(values.pid)).toBe(false);
+    expect(existsSync(metadataPath)).toBe(false);
+    rmSync(observedEnv, { force: true });
+  });
+
+  it("discard kills group members that outlive the leader", async () => {
+    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+    const memberPidFile = join(tmpdir(), `pi-orb-member-${crypto.randomUUID()}`);
+    const { provider, root } = makeProvider(
+      { OBSERVED_ENV_FILE: observedEnv, GROUP_MEMBER_PID_FILE: memberPidFile },
+      { terminateGraceMs: 150 },
+    );
+    let memberPid: number | null = null;
+    try {
+      const provisioned = await provider.provision(task, request, context);
+      expect(provisioned.isOk()).toBe(true);
+      memberPid = await eventually(() => {
+        try {
+          const pid = Number(readFileSync(memberPidFile, "utf8"));
+          return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+        } catch {
+          return null;
+        }
+      });
+      expect(processExists(memberPid)).toBe(true);
+
+      // The leader dies on SIGTERM; the member ignores it. Discard may only
+      // report absence once the whole group is gone, which requires the
+      // SIGKILL rung and the post-SIGKILL group probe.
+      const discarded = await provider.discardCompute(
+        task,
+        { orbId: request.orbId, throughIncarnation: 0 },
+        context,
+      );
+      expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
+      expect(processExists(memberPid)).toBe(false);
+      expect(existsSync(join(root, "configured-state", request.orbId, "host.json"))).toBe(false);
+    } finally {
+      if (memberPid !== null && processExists(memberPid)) {
+        try {
+          process.kill(memberPid, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      }
+      rmSync(observedEnv, { force: true });
+      rmSync(memberPidFile, { force: true });
+    }
   });
 });

@@ -750,11 +750,20 @@ export class FakeWorld {
   provisionHost(
     task: SimulationTask,
     orbId: string,
-    incarnation: number = 0,
+    incarnation: number,
     scriptGeneration: number = 0,
   ): ProvisionedOrbHost {
     const state = this.orbState(orbId);
     if (state.host !== null) {
+      if (state.host.incarnation !== incarnation) {
+        // A provision that meets live compute of another incarnation means the
+        // caller skipped required disposal; adopting it silently would mask
+        // exactly the bug class the discard fence exists to prevent.
+        throw new Error(
+          `fake provision invariant: orb ${orbId} requested incarnation ${incarnation} ` +
+            `while incarnation ${state.host.incarnation} still exists`,
+        );
+      }
       // Idempotent: return the existing host (starting it if stopped) and
       // read its token back — never re-mint for an existing incarnation. A
       // reused host keeps the generation it was stamped with; only a repair

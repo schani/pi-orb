@@ -213,6 +213,105 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       });
     });
 
+    it("guards discard finalization and clears retained evidence on replacement commit", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+      });
+      expect(hosted.isOk()).toBe(true);
+      const failed = await store.failOrbAndRequestComputeDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        now: 3_000,
+        lastError: "runtime_never_answered: no response",
+        evidence: "first evidence",
+      });
+      expect(failed.isOk()).toBe(true);
+
+      // A finalize naming a fence other than the durable one is a conflict and
+      // must change nothing — this WHERE clause is what makes a stale
+      // finalize harmless (docs/compute-replacement.md).
+      const wrongFence = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        throughIncarnation: 1,
+        now: 4_000,
+      });
+      expect(wrongFence.isErr() && wrongFence.error.type).toBe("state_conflict");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        hostDiscardThroughIncarnation: 0,
+        hostIncarnation: 0,
+      });
+
+      const finalized = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        throughIncarnation: 0,
+        now: 5_000,
+      });
+      expect(finalized.isOk()).toBe(true);
+
+      // A repeated finalize for the already-cleared fence conflicts instead of
+      // advancing the incarnation twice.
+      const repeated = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        throughIncarnation: 0,
+        now: 5_500,
+      });
+      expect(repeated.isErr() && repeated.error.type).toBe("state_conflict");
+
+      // Status writes naming the cleared fence are silently inert.
+      const late = await store.recordHostDiscardStatus(task, {
+        orbId: orb.id,
+        throughIncarnation: 0,
+        now: 6_000,
+        error: "late provider error",
+      });
+      expect(late.isOk()).toBe(true);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        hostDiscardError: null,
+        hostDiscardEvidence: "first evidence",
+        hostIncarnation: 1,
+      });
+
+      // Replacement commit drops the retained evidence so it cannot shadow a
+      // later incident; a later failure records fresh evidence.
+      const started = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        toState: "starting",
+        lastError: null,
+        now: 7_000,
+      });
+      expect(started.isOk()).toBe(true);
+      const committed = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 3,
+        now: 8_000,
+        hostRef: "pi-orb-orb-1-i1",
+        runtimeTokenHash: "new-token-hash",
+        hostDiscardEvidence: null,
+      });
+      expect(committed.isOk() && committed.value.hostDiscardEvidence).toBeNull();
+      const failedAgain = await store.failOrbAndRequestComputeDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 4,
+        now: 9_000,
+        lastError: "runtime_failed: second failure",
+        evidence: "second evidence",
+      });
+      expect(failedAgain.isOk() && failedAgain.value).toMatchObject({
+        hostDiscardThroughIncarnation: 1,
+        hostDiscardError: null,
+        hostDiscardEvidence: "second evidence",
+      });
+    });
+
     it("coordinates auto-naming and preserves a manual name", async () => {
       await seed();
       const claimed = await store.claimOrbAutoName(task, {

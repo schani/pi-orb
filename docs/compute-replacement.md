@@ -166,7 +166,7 @@ Tailscale daemon state lives on the retained workspace, so a replacement resumes
 
 Deliberately out of scope: detecting and deleting the duplicate device record left behind when a state-loss re-registration creates a second exact-hostname node. Doing that safely needs the runtime to report its stable node ID — a protocol extension guarding a rare corner — so both devices simply remain until permanent archive/delete. Tracked in `TODO.md`.
 
-Adapter and live validation must assert bounded keys and one surviving device/MagicDNS identity across replacement, including replacement failure before readiness.
+Adapter tests must assert bounded keys and an untouched device record across replacement — including a replacement that fails before readiness, whose unconsumed key the next mint revokes. Live tailnet validation remains with the deletion live smoke in `TODO.md`.
 
 ## Observability
 
@@ -240,7 +240,7 @@ compute-replacement.replacement-before-commit
 compute-replacement.replacement-committed
 ```
 
-Add one-shot failpoints for provider discard, evidence persistence, discard finalization, replacement provision, replacement commit, and Tailscale key revocation. DST failures retain their first `determined` trace under `test-failures/` and must be replayed with `DST_REPLAY` before changes; never rerun merely to obtain green.
+Add one-shot failpoints for provider discard, evidence persistence, discard finalization, replacement provision, and replacement commit. Tailscale is outside the DST world, so key-revocation failure is covered at the adapter layer instead: scripted-transport tests assert that a failed revoke aborts the mint and stays retryable. Process death at a checkpoint is exercised by driving the machine to the durable state that crash leaves behind and restarting the control plane there; adjacent checkpoints that share a durable state share one crash window. DST failures retain their first `determined` trace under `test-failures/` and must be replayed with `DST_REPLAY` before changes; never rerun merely to obtain green.
 
 **Deterministic GCE model (initial implementation landed 2026-08-12).** The incarnation fence and exact-ownership checks are enforced *inside* each provider adapter, so DST scenarios that assert them execute the real adapter, not a fake’s reimplementation of the rule. The generic `FakeOrbHostProvider` world remains the default for lifecycle scenarios, but the discard/fence scenarios additionally compose the real `GceOrbHostProvider` over a stateful deterministic GCE model implementing the existing `GceApiTransport` seam. Both enablers already exist: the adapter runs on `SimulationTask` (its `waitOperation` polling sleeps through the simulated clock) and all HTTP passes through that one transport interface. The model keeps instances and disks with labels/metadata, completes zone operations asynchronously across later polls, returns 409 on duplicate insert, filters list by label, and models an operation completing after its caller’s process died plus delayed deletion visibility. Injectable preemption/fault controls beyond those first scenarios remain to be added with the rest of the matrix. The modeled surface is deliberately small: instance get/insert/delete/start/stop, disk get/insert/delete, operation wait, guest attributes, label-filtered list. The existing scripted-response transport tests remain only for exact wire-shape assertions; real API behavior drift stays the live GCE validation’s job, which is why that leg is mandatory.
 
@@ -278,7 +278,7 @@ Provider tests (the GCE ones run against the deterministic model wherever state 
 
 ### Local E2E
 
-The test-only runtime launch seam is enabled solely by the E2E composition environment, not a production route or API. A workspace marker selects one exact orb/incarnation, exposes a typed terminal runtime failure, and durably records the injected event; the marker remains armed for that incarnation so process/container restart cannot heal suspect compute in place, while later incarnations launch normally. Tests wait on API state, durable store fields, and provider inventory; the documented 65-second negative observation is the only deliberate elapsed-time wait.
+The test-only runtime launch seam is enabled solely by the E2E composition environment, not a production route or API. A workspace marker selects one exact orb/incarnation, exposes a typed terminal runtime failure, and durably records the injected event; the marker remains armed for that incarnation so process/container restart cannot heal suspect compute in place, while later incarnations launch normally. Tests wait on API state, durable store fields, and provider inventory; the documented 65-second negative observation is the only deliberate elapsed-time wait. The composition always rebuilds `pi-orb-runtime:dev` before running (a warm cache makes it seconds), so the suite can never silently exercise a stale runtime image.
 
 Run both real backends:
 
@@ -301,15 +301,15 @@ Every bounded wait prints current orb row, provider inventory, and lifecycle edg
 
 ### Live GCE validation
 
-Add `infra/smoke-compute-replacement.sh`, owning one disposable project/orb and cleaning it through the normal delete API on every exit. It uses product behavior rather than a production failpoint:
+`infra/smoke-compute-replacement.sh` owns one disposable project/orb and cleans it through the normal delete API on every exit. It arms the same test-composition-only launch-failure marker the E2E uses, delivered onto the retained `/workspace` disk over `gcloud compute ssh` with base64-encoded contents so no shell-quoting layer can corrupt the sentinel or the marker JSON. The validation deployment must therefore run with `PI_ORB_E2E_LAUNCH_FAILURE_MARKER` configured; the seam stays inert in deployments without it.
 
-1. Create a healthy disposable orb, write a sentinel, and record instance ID, boot-disk ID, persistent data-disk ID, incarnation, runtime-token hash fingerprint, Tailscale device ID, and exact-orb auth keys (device and keys via the Tailscale admin API).
-2. Through the orb terminal, install a test-only Pi extension plus marker on `/workspace`: on its next load it atomically removes the marker and exits PID 1 with code 42; later loads are harmless. Stop/start the orb normally.
-3. Wait on the typed failed state, `compute-discard` success edge, and exact GCE inventory absence. Assert the original instance/boot disk are absent, the persistent disk remains, the old runtime token is unauthorized, and no replacement appears during the explicit 65-second negative-observation window.
-4. Explicitly Start. Because the marker was consumed, the extension no longer exits. Wait for ready and assert a different instance/boot disk, higher incarnation, same persistent disk/sentinel/session, fresh token, same Tailscale device/MagicDNS identity, and at most one unconsumed exact-orb key.
-5. Deploy or inject a different desired host-spec fingerprint under a higher deploy generation in the test-owned release fixture, verify the running orb remains untouched, then stop/start and prove a second replacement with no `setMetadata` repair event.
+1. Create a healthy disposable orb, assert its instance is `pi-orb-<orbId>-i0`, write a workspace sentinel, and record the instance ID, boot-disk name, persistent data-disk name, and the incarnation-0 runtime token from instance metadata.
+2. Arm the incarnation-0 marker on `/workspace` and stop/start the orb normally.
+3. Wait, predicate-based, for the typed failed state and exact GCE inventory absence: original instance and boot disk absent, persistent disk still present, and the old runtime token answered 401 by the broker. Observe the explicit 65-second negative window with no replacement instance and the orb still failed.
+4. Explicitly Start. Wait for ready and assert `pi-orb-<orbId>-i1` with a different instance ID and boot disk, the same attached persistent disk, the intact sentinel, a different runtime token, exactly one instance, and the old instance still absent.
+5. (Stage 2) Deploy a different desired host-spec fingerprint under a higher deploy generation, verify the running orb remains untouched, then stop/start and prove a second replacement with no repair event.
 
-All waits are predicate-based with one documented outer deadline derived from provider-operation plus boot deadlines; the 65-second negative window is the only deliberate elapsed-time assertion. The script preserves first-failure logs and exits nonzero without retrying. Success requires different compute/boot-disk identities, identical workspace-disk identity and sentinel, no old incarnation, no in-place metadata mutation, and no automatic replacement before user intent.
+Per-step deadlines are named variables derived from one documented outer budget; the 65-second negative window is the only deliberate elapsed-time assertion. The script preserves first-failure logs under `test-failures/` and exits nonzero without retrying. Bounded Tailscale keys and device survival across replacement are asserted by the adapter tests; live tailnet validation remains with the deletion live smoke in `TODO.md`.
 
 ## Rejected alternatives
 

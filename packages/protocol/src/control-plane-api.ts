@@ -41,7 +41,11 @@ export type UpdateProjectRequest = Static<typeof UpdateProjectRequestSchema>;
 
 export const CreateOrbRequestSchema = Type.Object(
   {
-    id: Type.String(),
+    // Orb IDs become provider resource names (`pi-orb-<id>-i<n>`), MagicDNS
+    // labels, and Tailscale key descriptions (`pi-orb <id> i<n>`), so they are
+    // restricted to a DNS-safe alphabet with no spaces: an unconstrained ID
+    // could make one orb's exact-match cleanup reach another's resources.
+    id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,63}$" }),
     name: Type.Optional(Type.String({ maxLength: ORB_NAME_MAX_CHARS })),
   },
   closed,

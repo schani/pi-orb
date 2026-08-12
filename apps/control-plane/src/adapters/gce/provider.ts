@@ -1011,12 +1011,19 @@ export class GceOrbHostProvider implements OrbHostProvider {
     return new ResultAsync(run());
   }
 
+  /**
+   * Enumerate this orb's instances by exact ownership label, validating name
+   * and ownership for every entry. The incarnation stamp is parsed but left
+   * nullable: deletion-grade `destroy` is authorized by ownership alone, so a
+   * mangled stamp must not leave the orb permanently undeletable. Fence
+   * decisions go through the strict `listFencedOrbInstances` variant instead.
+   */
   private async listExactOrbInstances(
     operation: OrbHostProviderError["operation"],
     orbId: string,
     context: OperationContext,
-  ): Promise<Result<Record<string, unknown>[], OrbHostProviderError>> {
-    const instances: Record<string, unknown>[] = [];
+  ): Promise<Result<{ name: string; incarnation: number | null }[], OrbHostProviderError>> {
+    const instances: { name: string; incarnation: number | null }[] = [];
     let pageToken: string | undefined;
     do {
       const query = new URLSearchParams({ filter: `labels.${ORB_LABEL}=${orbId}` });
@@ -1048,12 +1055,51 @@ export class GceOrbHostProvider implements OrbHostProvider {
               ),
             );
           }
-          instances.push(instance);
+          const name = instance["name"];
+          if (typeof name !== "string" || name === "") {
+            return err(
+              providerError(
+                operation,
+                "conflict",
+                `filtered instance for orb ${orbId} has no name`,
+                false,
+              ),
+            );
+          }
+          instances.push({ name, incarnation: instanceIncarnation(instance) });
         }
       }
       const next = page.value.body["nextPageToken"];
       pageToken = typeof next === "string" ? next : undefined;
     } while (pageToken !== undefined);
+    return ok(instances);
+  }
+
+  /**
+   * Strict variant for the discard fence: every instance must carry a valid
+   * incarnation stamp, because guessing could delete a newer incarnation.
+   */
+  private async listFencedOrbInstances(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    context: OperationContext,
+  ): Promise<Result<{ name: string; incarnation: number }[], OrbHostProviderError>> {
+    const listed = await this.listExactOrbInstances(operation, orbId, context);
+    if (listed.isErr()) return err(listed.error);
+    const instances: { name: string; incarnation: number }[] = [];
+    for (const instance of listed.value) {
+      if (instance.incarnation === null) {
+        return err(
+          providerError(
+            operation,
+            "conflict",
+            `instance ${instance.name} has an invalid incarnation label`,
+            false,
+          ),
+        );
+      }
+      instances.push({ name: instance.name, incarnation: instance.incarnation });
+    }
     return ok(instances);
   }
 
@@ -1090,26 +1136,16 @@ export class GceOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
-      const listed = await this.listExactOrbInstances("discard", request.orbId, context);
+      const listed = await this.listFencedOrbInstances("discard", request.orbId, context);
       if (listed.isErr()) return err(listed.error);
       for (const instance of listed.value) {
-        const incarnation = instanceIncarnation(instance);
-        const name = instance["name"];
-        if (incarnation === null || typeof name !== "string") {
-          return err(providerError("discard", "conflict", "invalid instance identity", false));
-        }
-        if (incarnation > request.throughIncarnation) continue;
-        const removed = await this.deleteInstance(task, "discard", name, context);
+        if (instance.incarnation > request.throughIncarnation) continue;
+        const removed = await this.deleteInstance(task, "discard", instance.name, context);
         if (removed.isErr()) return err(removed.error);
       }
-      const verified = await this.listExactOrbInstances("discard", request.orbId, context);
+      const verified = await this.listFencedOrbInstances("discard", request.orbId, context);
       if (verified.isErr()) return err(verified.error);
-      if (
-        verified.value.some((instance) => {
-          const incarnation = instanceIncarnation(instance);
-          return incarnation !== null && incarnation <= request.throughIncarnation;
-        })
-      ) {
+      if (verified.value.some((instance) => instance.incarnation <= request.throughIncarnation)) {
         return err(
           providerError("discard", "unavailable", "discarded instance is still visible", true),
         );
@@ -1125,14 +1161,12 @@ export class GceOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
+      // Deletion-grade: exact ownership authorizes removal; the incarnation
+      // stamp — valid or mangled — is irrelevant to destroying everything.
       const instances = await this.listExactOrbInstances("destroy", orbId, context);
       if (instances.isErr()) return err(instances.error);
       for (const instance of instances.value) {
-        const name = instance["name"];
-        if (typeof name !== "string" || instanceIncarnation(instance) === null) {
-          return err(providerError("destroy", "conflict", "invalid instance identity", false));
-        }
-        const removed = await this.deleteInstance(task, "destroy", name, context);
+        const removed = await this.deleteInstance(task, "destroy", instance.name, context);
         if (removed.isErr()) return err(removed.error);
       }
 

@@ -3,12 +3,15 @@ import type { SimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import {
+  discardFinalized,
   makeHarness,
   makeOrbRow,
   makeProjectRow,
   restartControlPlane,
+  seedFailedOrbWithDiscardIntent,
   seedRunningOrb,
   TEST_CONSTANTS,
+  type TestHarness,
 } from "../testkit/fixtures.ts";
 import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
 import { LogCapture, makeRecordingSimulation, runDst, waitUntil } from "../testkit/sim.ts";
@@ -423,7 +426,7 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
-  it("a non-retryable runtime failure fails the orb and stops the host", async () => {
+  it("a non-retryable runtime failure fails the orb and discards its compute", async () => {
     await runDst({ name: "runtime-failed", iterations: 20 }, async (sim) => {
       const harness = makeHarness();
       const stop = new AbortController();
@@ -1036,18 +1039,8 @@ describe("orb lifecycle (DST)", () => {
           {
             name: "driver",
             f: async (task) => {
-              seedRunningOrb(task, harness, ORB);
-              const running = harness.store.orbSnapshot(ORB);
-              expect(running).not.toBeNull();
-              if (running === null) return;
               harness.world.failNextComputeDiscards(1);
-              const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
-                orbId: ORB,
-                expectedStateVersion: running.stateVersion,
-                now: task.wallNow(),
-                lastError: "runtime_failed: original failure",
-              });
-              expect(failed.isOk()).toBe(true);
+              await seedFailedOrbWithDiscardIntent(task, harness, ORB);
               await waitUntil(
                 task,
                 "discard error persisted",
@@ -1091,17 +1084,7 @@ describe("orb lifecycle (DST)", () => {
         {
           name: "driver",
           f: async (task) => {
-            seedRunningOrb(task, harness, ORB);
-            const running = harness.store.orbSnapshot(ORB);
-            expect(running).not.toBeNull();
-            if (running === null) return;
-            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
-              orbId: ORB,
-              expectedStateVersion: running.stateVersion,
-              now: task.wallNow(),
-              lastError: "runtime_failed: original failure",
-            });
-            expect(failed.isOk()).toBe(true);
+            await seedFailedOrbWithDiscardIntent(task, harness, ORB);
             harness.store.failNextHostDiscardFinalizations(1);
 
             let sawAbsentPendingFinalize = false;
@@ -1139,6 +1122,184 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
+  it("process death at every named checkpoint window resumes from durable state", async () => {
+    // Crash windows are modeled the way this harness models process death:
+    // drive the machine to the durable state a crash at each named
+    // compute-replacement checkpoint leaves behind, restart the control plane
+    // there, and require convergence to a ready replacement. Adjacent
+    // checkpoints that share a durable state share a window.
+    const drive = async (
+      task: SimulationTask,
+      harness: TestHarness,
+      reason: string,
+      predicate: () => boolean,
+      // Convergence to `running` crosses the modeled 65 s host boot
+      // (docs/testing.md), so those calls need a far larger pass budget than
+      // reaching a pre-boot crash window does.
+      attempts = 200,
+    ): Promise<void> => {
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        await reconcileOrbOnce(task, harness.deps, ORB);
+        if (predicate()) return;
+        await task.sleep(100, reason);
+      }
+      expect.fail(`crash window never reached: ${reason}`);
+    };
+    const finalize = (task: SimulationTask, harness: TestHarness) =>
+      drive(task, harness, "drive to finalized window", () => discardFinalized(harness, ORB));
+    const start = async (task: SimulationTask, harness: TestHarness): Promise<void> => {
+      expect((await requestOrbStart(task, harness.deps, ORB)).isOk()).toBe(true);
+    };
+    const windows: ReadonlyArray<{
+      name: string;
+      arrange: (task: SimulationTask, harness: TestHarness) => Promise<void>;
+    }> = [
+      // failure-intent-committed / discard-before-provider: fence durable,
+      // failed compute still present.
+      { name: "before-provider", arrange: async () => {} },
+      // discard-after-provider / discard-before-finalize: compute verified
+      // absent, fence still durable because finalization never landed.
+      {
+        name: "before-finalize",
+        arrange: async (task, harness) => {
+          harness.store.failNextHostDiscardFinalizations(1);
+          await drive(
+            task,
+            harness,
+            "drive to unfinalized-absence window",
+            () =>
+              harness.world.hostCount(ORB) === 0 &&
+              harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === 0,
+          );
+        },
+      },
+      // discard-finalized: fence cleared, incarnation advanced, orb failed.
+      { name: "finalized", arrange: finalize },
+      // replacement-before-provision: Start admitted, no compute yet.
+      {
+        name: "before-provision",
+        arrange: async (task, harness) => {
+          await finalize(task, harness);
+          await start(task, harness);
+        },
+      },
+      // replacement-after-provision / replacement-before-commit: replacement
+      // compute exists but its ref/token were never committed.
+      {
+        name: "before-commit",
+        arrange: async (task, harness) => {
+          await finalize(task, harness);
+          await start(task, harness);
+          harness.store.failNextHostReplacementCommits(1);
+          await drive(
+            task,
+            harness,
+            "drive to uncommitted-replacement window",
+            () =>
+              harness.world.hostCount(ORB) === 1 &&
+              harness.store.orbSnapshot(ORB)?.hostRef === null,
+          );
+        },
+      },
+      // replacement-committed: ref/token durable, readiness not yet reached.
+      {
+        name: "committed",
+        arrange: async (task, harness) => {
+          await finalize(task, harness);
+          await start(task, harness);
+          await drive(
+            task,
+            harness,
+            "drive to committed-replacement window",
+            () => harness.store.orbSnapshot(ORB)?.hostRef !== null,
+          );
+        },
+      },
+    ];
+    for (const window of windows) {
+      await runDst({ name: `checkpoint-crash-${window.name}`, iterations: 10 }, async (sim) => {
+        let harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const result = await sim.runTasks([
+          {
+            name: "driver",
+            f: async (task) => {
+              await seedFailedOrbWithDiscardIntent(task, harness, ORB);
+              await window.arrange(task, harness);
+              harness = restartControlPlane(harness);
+              if (harness.store.orbSnapshot(ORB)?.state === "failed") {
+                // Durable intent alone must finish disposal before any Start
+                // can provision; a failed orb never restarts autonomously.
+                await drive(task, harness, "resume discard after process death", () =>
+                  discardFinalized(harness, ORB),
+                );
+                expect(harness.store.orbSnapshot(ORB)?.state).toBe("failed");
+                await start(task, harness);
+              }
+              await drive(
+                task,
+                harness,
+                "converge to ready replacement after process death",
+                () => harness.store.orbSnapshot(ORB)?.state === "running",
+                2_000,
+              );
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+          state: "running",
+          hostIncarnation: 1,
+          hostDiscardThroughIncarnation: null,
+        });
+        expect(harness.store.orbSnapshot(ORB)?.runtimeTokenHash).not.toBeNull();
+        expect(harness.world.hostCount(ORB)).toBe(1);
+        expect(harness.world.filesystemExists(ORB)).toBe(true);
+      });
+    }
+  });
+
+  it("evidence and error persistence outages retry without losing the fence or the original error", async () => {
+    await runDst(
+      {
+        name: "discard-status-persistence-outage",
+        iterations: 30,
+        failpointProbabilities: {
+          [FAILPOINTS.providerDiscard]: 0.3,
+          [FAILPOINTS.storeDiscardStatus]: 0.3,
+        },
+      },
+      async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              await seedFailedOrbWithDiscardIntent(task, harness, ORB);
+              await waitUntil(
+                task,
+                "discard finalized despite persistence outages",
+                () => discardFinalized(harness, ORB),
+                { timeoutMs: 600_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+          state: "failed",
+          lastError: "runtime_failed: original failure",
+          hostIncarnation: 1,
+          hostDiscardThroughIncarnation: null,
+        });
+        expect(harness.world.hostCount(ORB)).toBe(0);
+        expect(harness.world.filesystemExists(ORB)).toBe(true);
+      },
+    );
+  });
+
   it("two reconcilers dispose idempotently without provisioning replacement", async () => {
     await runDst({ name: "concurrent-failed-disposal", iterations: 50 }, async (sim) => {
       const harness = makeHarness();
@@ -1146,17 +1307,9 @@ describe("orb lifecycle (DST)", () => {
         {
           name: "seed",
           f: async (task) => {
-            seedRunningOrb(task, harness, ORB);
-            const running = harness.store.orbSnapshot(ORB);
-            expect(running).not.toBeNull();
-            if (running === null) return;
-            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
-              orbId: ORB,
-              expectedStateVersion: running.stateVersion,
-              now: task.wallNow(),
+            await seedFailedOrbWithDiscardIntent(task, harness, ORB, {
               lastError: "runtime_failed: test failure",
             });
-            expect(failed.isOk()).toBe(true);
           },
         },
       ]);
@@ -1203,17 +1356,9 @@ describe("orb lifecycle (DST)", () => {
         {
           name: "driver",
           f: async (task) => {
-            seedRunningOrb(task, harness, ORB);
-            const running = harness.store.orbSnapshot(ORB);
-            expect(running).not.toBeNull();
-            if (running === null) return;
-            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
-              orbId: ORB,
-              expectedStateVersion: running.stateVersion,
-              now: task.wallNow(),
+            await seedFailedOrbWithDiscardIntent(task, harness, ORB, {
               lastError: "runtime_failed: test failure",
             });
-            expect(failed.isOk()).toBe(true);
             const stopped = await requestOrbStop(task, harness.deps, ORB);
             expect(stopped.isOk() && stopped.value).toMatchObject({
               state: "stopping",
@@ -1248,18 +1393,10 @@ describe("orb lifecycle (DST)", () => {
         {
           name: "driver",
           f: async (task) => {
-            seedRunningOrb(task, harness, ORB, { initDurationMs: 0 });
-            const running = harness.store.orbSnapshot(ORB);
-            expect(running).not.toBeNull();
-            if (running === null) return;
-            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
-              orbId: ORB,
-              expectedStateVersion: running.stateVersion,
-              now: task.wallNow(),
+            await seedFailedOrbWithDiscardIntent(task, harness, ORB, {
               lastError: "runtime_failed: test failure",
               evidence: "container_status=exited exit_code=42",
             });
-            expect(failed.isOk()).toBe(true);
 
             const started = await requestOrbStart(task, harness.deps, ORB);
             expect(started.isOk()).toBe(true);
@@ -1330,17 +1467,10 @@ describe("orb lifecycle (DST)", () => {
           {
             name: "driver",
             f: async (task) => {
-              seedRunningOrb(task, harness, ORB, { initDurationMs: 0 });
-              const running = harness.store.orbSnapshot(ORB);
-              expect(running).not.toBeNull();
-              if (running === null) return;
-              const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
-                orbId: ORB,
-                expectedStateVersion: running.stateVersion,
-                now: task.wallNow(),
+              const failed = await seedFailedOrbWithDiscardIntent(task, harness, ORB, {
                 lastError: "runtime_failed: test failure",
               });
-              expect(failed.isOk() && failed.value.hostDiscardThroughIncarnation).toBe(0);
+              expect(failed.hostDiscardThroughIncarnation).toBe(0);
               const queued = await harness.store.enqueueOrbMessage(task, {
                 orbId: ORB,
                 messageId,
@@ -1348,7 +1478,7 @@ describe("orb lifecycle (DST)", () => {
                 now: task.wallNow(),
               });
               expect(queued.isOk() && queued.value.message.wakeStateVersion).toBe(
-                failed.isOk() ? failed.value.stateVersion : -1,
+                failed.stateVersion,
               );
               intentReady = true;
 
@@ -2894,7 +3024,7 @@ describe("orb lifecycle (DST)", () => {
           f: async (task) => {
             harness.store.seedProject(makeProjectRow(PROJECT));
             harness.world.configureOrb(ORB, { initDurationMs: 0 });
-            const provisioned = harness.world.provisionHost(task, ORB); // stray host
+            const provisioned = harness.world.provisionHost(task, ORB, 0); // stray host
             harness.store.seedOrb(
               makeOrbRow(ORB, PROJECT, "stopped", { hostRef: provisioned.ref.resourceId }),
             );

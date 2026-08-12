@@ -327,23 +327,27 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     ]);
   }
 
+  /**
+   * Enumerate this orb's containers by exact ownership label. Incarnation
+   * strictness differs by caller: the discard fence needs a valid stamp on
+   * every container (`"required"` — an unparseable stamp is an error, never a
+   * guess), while deletion-grade destroy is authorized by ownership alone
+   * (`"optional"` — a mangled incarnation label must not leave the orb
+   * permanently undeletable).
+   */
   private async listOrbContainers(
     operation: OrbHostProviderError["operation"],
     orbId: string,
     context: OperationContext,
-  ): Promise<
-    Result<
-      { name: string; info: Record<string, unknown>; incarnation: number }[],
-      OrbHostProviderError
-    >
-  > {
+    incarnations: "required" | "optional",
+  ): Promise<Result<{ name: string; incarnation: number | null }[], OrbHostProviderError>> {
     const listed = await this.exec(
       operation,
       ["ps", "--all", "--filter", `label=${ORB_LABEL}=${orbId}`, "--format", "{{.Names}}"],
       context,
     );
     if (listed.isErr()) return err(listed.error);
-    const result: { name: string; info: Record<string, unknown>; incarnation: number }[] = [];
+    const result: { name: string; incarnation: number | null }[] = [];
     for (const name of listed.value.stdout.split("\n").filter((entry) => entry !== "")) {
       const inspected = await this.inspect(operation, name, context);
       if (inspected.isErr()) return err(inspected.error);
@@ -362,12 +366,12 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         );
       }
       const incarnation = incarnationFromInspect(inspected.value);
-      if (incarnation === null) {
+      if (incarnation === null && incarnations === "required") {
         return err(
           providerError(operation, "conflict", `container ${name} has invalid incarnation`, false),
         );
       }
-      result.push({ name, info: inspected.value, incarnation });
+      result.push({ name, incarnation });
     }
     return ok(result);
   }
@@ -386,12 +390,9 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         const existingToken = tokenFromInspect(existing.value);
         if (existingToken !== null) {
           // Idempotent: reuse the container (starting it if needed) and read
-          // its token back — an existing incarnation is never re-minted.
-          const observation = this.toObservation(existing.value);
-          if (observation !== null && observation.state !== "running") {
-            const started = await this.exec("provision", ["start", name], context);
-            if (started.isErr()) return err(started.error);
-          }
+          // its token back — an existing incarnation is never re-minted. The
+          // incarnation check comes first: a wrong-incarnation container must
+          // never be started.
           const incarnation = incarnationFromInspect(existing.value);
           if (incarnation !== request.incarnation) {
             return err(
@@ -402,6 +403,11 @@ export class DockerOrbHostProvider implements OrbHostProvider {
                 false,
               ),
             );
+          }
+          const observation = this.toObservation(existing.value);
+          if (observation !== null && observation.state !== "running") {
+            const started = await this.exec("provision", ["start", name], context);
+            if (started.isErr()) return err(started.error);
           }
           return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(existingToken) });
         }
@@ -552,10 +558,12 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
-      const listed = await this.listOrbContainers("discard", request.orbId, context);
+      const listed = await this.listOrbContainers("discard", request.orbId, context, "required");
       if (listed.isErr()) return err(listed.error);
       for (const container of listed.value) {
-        if (container.incarnation > request.throughIncarnation) continue;
+        if (container.incarnation === null || container.incarnation > request.throughIncarnation) {
+          continue;
+        }
         const removed = await this.exec("discard", ["rm", "--force", container.name], context);
         if (removed.isErr() && !/no such (object|container)/i.test(removed.error.message)) {
           return err(removed.error);
@@ -572,7 +580,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
-      const listed = await this.listOrbContainers("destroy", orbId, context);
+      const listed = await this.listOrbContainers("destroy", orbId, context, "optional");
       if (listed.isErr()) return err(listed.error);
       for (const container of listed.value) {
         const removed = await this.exec("destroy", ["rm", "--force", container.name], context);

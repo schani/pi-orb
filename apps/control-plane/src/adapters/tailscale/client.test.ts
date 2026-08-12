@@ -51,6 +51,8 @@ const json = (status: number, body: unknown): TailscaleHttpResponse => ({
 
 const tokenOk = (): TailscaleHttpResponse => json(200, { access_token: "at-1" });
 
+const notFoundKey = (): TailscaleHttpResponse => ({ status: 404, text: "key not found" });
+
 function makeMinter(transport: TailscaleApiTransport): HttpTailscaleAuthKeyMinter {
   return new HttpTailscaleAuthKeyMinter(transport, {
     clientId: "cid",
@@ -133,6 +135,31 @@ describe("HttpTailscaleAuthKeyMinter", () => {
       ["DELETE", "https://tailscale.test/api/v2/tailnet/-/keys/key-incarnation"],
       ["GET", "https://tailscale.test/api/v2/tailnet/-/devices"],
       ["DELETE", "https://tailscale.test/api/v2/device/device-match"],
+    ]);
+  });
+
+  it("fetches key details when the list response omits descriptions", async () => {
+    // Some API responses omit `description` from the key list; matching on
+    // the omission would silently revoke nothing before minting.
+    const transport = new FakeTransport([
+      tokenOk,
+      () => json(200, [{ id: "k1" }, { id: "k2" }, { id: "k3" }]),
+      () => json(200, { id: "k1", description: "pi-orb orb-1 i0" }), // detail k1: match
+      () => ({ status: 204, text: "" }), // delete k1
+      () => json(200, { id: "k2", description: "pi-orb orb-2 i0" }), // detail k2: other orb
+      () => notFoundKey(), // detail k3: gone between list and get
+      () => json(200, { key: "tskey-auth-new" }),
+    ]);
+    const result = await makeMinter(transport).mintAuthKey("orb-1", 1, signal);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(transport.requests.map((request) => [request.method, request.url])).toEqual([
+      ["POST", "https://tailscale.test/api/v2/oauth/token"],
+      ["GET", "https://tailscale.test/api/v2/tailnet/-/keys"],
+      ["GET", "https://tailscale.test/api/v2/tailnet/-/keys/k1"],
+      ["DELETE", "https://tailscale.test/api/v2/tailnet/-/keys/k1"],
+      ["GET", "https://tailscale.test/api/v2/tailnet/-/keys/k2"],
+      ["GET", "https://tailscale.test/api/v2/tailnet/-/keys/k3"],
+      ["POST", "https://tailscale.test/api/v2/tailnet/-/keys"],
     ]);
   });
 
