@@ -1,5 +1,5 @@
 # Orb runtime image (DESIGN.md §3.3, §17.7): Debian-based Node 24 with git,
-# Python 3, the GitHub CLI (§15.3), and Tailscale for tier-1 port exposure
+# Python 3, zip/unzip, the GitHub CLI (§15.3), and Tailscale for tier-1 port exposure
 # (docs/ports.md). No systemd unit is enabled — the runtime process spawns
 # tailscaled itself, in userspace-networking mode, so the container needs
 # neither a TUN device nor NET_ADMIN. Build from the repository root:
@@ -7,7 +7,7 @@
 FROM node:24-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl python3 python3-venv python-is-python3 build-essential pkg-config \
+  && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl zip unzip python3 python3-venv python-is-python3 build-essential pkg-config \
   && mkdir -p -m 755 /etc/apt/keyrings \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \

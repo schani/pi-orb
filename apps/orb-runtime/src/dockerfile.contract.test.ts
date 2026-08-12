@@ -18,6 +18,10 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain("python-is-python3");
   });
 
+  it("installs zip archive tools", () => {
+    expect(dockerfile).toMatch(/apt-get install[^\n]*\bzip\b[^\n]*\bunzip\b/);
+  });
+
   it("installs agent-browser with a system Chromium executable", () => {
     expect(runtimePackage.dependencies?.["agent-browser"]).toBe("0.33.2");
     expect(dockerfile).toContain("gh tailscale chromium");
