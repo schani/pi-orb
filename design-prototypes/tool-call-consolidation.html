@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pi-orb · consolidated tool activity directions</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f8f3e9;
+      --paper-2: #f2eadb;
+      --inset: #ebe1cd;
+      --ink: #221c12;
+      --ink-soft: #5f5544;
+      --ink-faint: #8a7e68;
+      --rule: #ddd2bc;
+      --rule-strong: #c5b697;
+      --accent: #a03e1c;
+      --accent-soft: #f3e2d6;
+      --green: #287a50;
+      --green-soft: #e0eee4;
+      --green-rule: #a8c9b2;
+      --serif: Charter, "Bitstream Charter", "Iowan Old Style", Georgia, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font: 14px/1.5 var(--sans); }
+    button { font: inherit; }
+    .study-header {
+      position: sticky; z-index: 20; top: 0; min-height: 58px; display: flex; align-items: center;
+      gap: 18px; padding: 10px clamp(16px, 4vw, 58px); border-bottom: 1px solid var(--rule);
+      background: rgb(248 243 233 / 94%); backdrop-filter: blur(12px);
+    }
+    .brand { font: 700 16px var(--mono); letter-spacing: -.04em; }
+    .study-title { color: var(--ink-faint); font: 11px var(--mono); }
+    nav { display: flex; gap: 5px; margin-left: auto; }
+    nav a { min-width: 29px; padding: 3px 9px; border: 1px solid var(--rule); border-radius: 999px; color: var(--ink-soft); text-align: center; text-decoration: none; }
+    nav a:hover { color: var(--accent); border-color: var(--accent); }
+    .toggle-all { padding: 5px 10px; color: var(--ink-soft); background: transparent; border: 1px solid var(--rule); border-radius: 5px; cursor: pointer; font: 10px var(--mono); }
+    .toggle-all:hover { border-color: var(--ink-soft); }
+    .intro, .direction { width: min(1120px, calc(100% - 32px)); margin-inline: auto; }
+    .intro { padding: 54px 0 38px; }
+    .eyebrow { color: var(--accent); font: 700 10px var(--mono); letter-spacing: .18em; text-transform: uppercase; }
+    h1 { max-width: 780px; margin: 8px 0 13px; font: 500 clamp(34px, 5vw, 58px)/1.03 var(--serif); }
+    .intro p { max-width: 740px; margin: 0; color: var(--ink-soft); font-size: 16px; }
+    .principles { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+    .principles span { padding: 5px 9px; color: var(--ink-faint); border: 1px solid var(--rule); border-radius: 999px; font: 10px var(--mono); }
+    .direction { padding: 44px 0 64px; border-top: 1px solid var(--rule); scroll-margin-top: 58px; }
+    .direction-heading { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 14px; margin-bottom: 20px; }
+    .number { color: var(--accent); font: 500 29px var(--serif); }
+    h2 { margin: 0; font: 600 26px var(--serif); }
+    .rationale { max-width: 780px; margin: 3px 0 0; color: var(--ink-faint); }
+    .canvas { overflow: hidden; border: 1px solid var(--rule); border-radius: 14px; background: var(--paper-2); box-shadow: 0 15px 45px rgb(83 61 24 / 6%); }
+    .appbar { min-height: 43px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--rule); background: var(--paper); }
+    .orb { font: 600 13px var(--serif); }
+    .project { padding: 3px 6px; color: var(--ink-faint); background: var(--paper-2); font: 9px var(--mono); }
+    .status { margin-left: auto; color: var(--green); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
+    .transcript { padding: clamp(22px, 4vw, 40px); }
+    .turn { display: grid; grid-template-columns: 27px minmax(0, 780px); gap: 12px; }
+    .gutter { position: relative; }
+    .gutter::after { content: ""; position: absolute; top: 20px; bottom: -28px; left: 9px; width: 1px; background: linear-gradient(var(--rule-strong), transparent); }
+    .mark { width: 19px; height: 19px; display: grid; place-items: center; color: var(--ink); border: 1px solid var(--ink); background: var(--paper-2); font: 9px var(--mono); }
+    .turn-label { display: block; margin: 1px 0 10px; color: var(--ink-faint); font: 700 9px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .prose { max-width: 720px; margin: 0 0 16px; font: 16px/1.65 var(--serif); }
+    details summary { list-style: none; }
+    details summary::-webkit-details-marker { display: none; }
+    .chev::before { content: "›"; display: inline-block; margin-right: 7px; color: var(--ink-faint); transition: transform 120ms; }
+    details[open] > summary .chev::before, details[open] > summary.chev::before { transform: rotate(90deg); }
+    .add { color: var(--green); }
+    .del, .failed { color: #c4473f; }
+    .detail-list { margin: 7px 0 10px; padding: 7px 0 5px; border-top: 1px solid var(--rule); }
+    .detail-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 5px 8px; color: var(--ink-soft); font: 11px/1.4 var(--mono); }
+    .detail-row .icon { color: var(--ink-faint); }
+    .detail-row.error { color: var(--accent); }
+    .detail-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .detail-row .metric { color: var(--ink-faint); white-space: nowrap; }
+    .command-detail > summary { cursor: pointer; }
+    .command-detail > summary:hover code { text-decoration: underline; text-underline-offset: 3px; }
+    .command-detail > summary .icon::before { content: "›"; display: inline-block; transition: transform 120ms; }
+    .command-detail[open] > summary .icon::before { transform: rotate(90deg); }
+    .command-output { max-height: 190px; margin: 0 8px 9px 34px; padding: 9px 11px; overflow: auto; color: var(--ink-soft); border: 1px solid var(--rule); border-radius: 4px; background: var(--inset); white-space: pre-wrap; font: 10.5px/1.55 var(--mono); }
+    .command-output.error { color: var(--accent); border-color: #d5a28f; background: var(--accent-soft); }
+
+    /* 01 — quiet ledger */
+    .quiet-stack { width: min(560px, 100%); }
+    .quiet-row { border-bottom: 1px solid transparent; }
+    .quiet-row > summary { width: fit-content; padding: 8px 4px; cursor: pointer; color: #4d4d49; font: 22px/1.25 var(--sans); letter-spacing: -.025em; }
+    .quiet-row > summary:hover { color: var(--ink); }
+    .quiet-row[open] { border-bottom-color: var(--rule); }
+    .quiet-row .detail-list { margin-left: 25px; }
+
+    /* 02 — field report */
+    .report { width: min(660px, 100%); overflow: hidden; border: 1px solid var(--rule); border-radius: 7px; background: var(--paper); }
+    .report-head { display: flex; align-items: center; padding: 9px 13px; color: var(--ink-faint); border-bottom: 1px solid var(--rule); font: 700 9px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .report-head span:last-child { margin-left: auto; font-weight: 400; letter-spacing: 0; text-transform: none; }
+    .report-row + .report-row { border-top: 1px solid var(--rule); }
+    .report-row > summary { display: grid; grid-template-columns: 27px minmax(0, 1fr) auto; gap: 8px; align-items: center; min-height: 45px; padding: 0 13px; cursor: pointer; }
+    .report-icon { width: 23px; height: 23px; display: grid; place-items: center; color: var(--ink-soft); border: 1px solid var(--rule-strong); border-radius: 50%; font: 10px var(--mono); }
+    .report-title { font: 600 14px var(--serif); }
+    .report-metric { color: var(--ink-faint); font: 11px var(--mono); }
+    .report-row[open] > summary { background: var(--paper-2); }
+    .report-row .detail-list { margin: 0; padding-inline: 31px 10px; background: var(--paper); }
+
+    /* 03 — manuscript sentence */
+    .sentence-block { width: min(720px, 100%); padding: 14px 17px; border-left: 2px solid var(--rule-strong); background: rgb(248 243 233 / 58%); }
+    .sentence-intro { margin-bottom: 9px; color: var(--ink-faint); font: italic 13px var(--serif); }
+    .sentence-row { display: inline; }
+    .sentence-row > summary { display: inline; cursor: pointer; font: 16px/2 var(--serif); }
+    .sentence-row > summary::after { content: " · "; color: var(--rule-strong); }
+    .sentence-row:last-of-type > summary::after { content: ""; }
+    .sentence-row > summary:hover { text-decoration: underline; text-decoration-color: var(--rule-strong); text-underline-offset: 3px; }
+    .sentence-row[open] { display: block; }
+    .sentence-row[open] > summary { display: block; width: fit-content; }
+    .sentence-row[open] > summary::after { content: ""; }
+    .sentence-row .detail-list { margin-left: 5px; }
+    .verb { font-style: italic; }
+
+    /* 04 — activity rail: markers sit directly on the Orb turn's gutter rail */
+    .rail-stack { width: min(650px, calc(100% + 39px)); position: relative; margin-left: -39px; padding-left: 39px; }
+    .rail-row { position: relative; margin-bottom: 3px; border-bottom: 1px solid var(--rule); background: transparent; }
+    .rail-row::before {
+      content: "";
+      position: absolute;
+      z-index: 2;
+      top: 15px;
+      /* The row begins 39px after the gutter; its 1px rail is centered at 9.5px. */
+      left: calc(-39px + 9.5px);
+      width: 9px;
+      height: 9px;
+      border: 2px solid var(--paper-2);
+      border-radius: 50%;
+      background: var(--ink-faint);
+      transform: translateX(-50%);
+    }
+    .rail-row.error::before { background: var(--accent); }
+    .rail-row > summary { display: flex; align-items: baseline; gap: 9px; padding: 9px 5px; cursor: pointer; font: 12px var(--mono); }
+    .rail-row .category { min-width: 66px; color: var(--ink-faint); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+    .rail-row .headline { color: var(--ink-soft); }
+    .rail-row .right { margin-left: auto; white-space: nowrap; }
+    .rail-row .detail-list { margin: 0 0 8px 75px; }
+    .pulse { width: 7px; height: 7px; display: inline-block; margin-right: 5px; border-radius: 50%; background: var(--green); animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .25; } }
+
+    /* 05 — compact chips */
+    .chip-intro { color: var(--ink-faint); font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .chips { width: min(760px, 100%); display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+    .chip { position: relative; }
+    .chip > summary { padding: 7px 11px; color: var(--ink-soft); border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--paper); cursor: pointer; font: 11px var(--mono); }
+    .chip > summary:hover, .chip[open] > summary { color: var(--ink); border-color: var(--ink-faint); }
+    .chip.error > summary { color: var(--accent); border-color: #d5a28f; background: var(--accent-soft); }
+    .chip[open] { flex-basis: 100%; }
+    .chip[open] > summary { width: fit-content; }
+    .chip-panel { width: min(620px, 100%); margin: 5px 0 2px; padding: 5px 8px; border: 1px solid var(--rule); border-radius: 7px; background: var(--paper); }
+    .chip-panel .detail-list { margin: 0; border: 0; }
+
+    .recommendation { display: inline-block; margin-left: 8px; padding: 3px 7px; vertical-align: 3px; color: var(--green); border: 1px solid var(--green-rule); border-radius: 999px; background: var(--green-soft); font: 700 8px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .footer-note { width: min(1120px, calc(100% - 32px)); margin: -22px auto 60px; padding-top: 22px; color: var(--ink-faint); border-top: 1px solid var(--rule); font: 12px var(--mono); }
+    @media (max-width: 620px) {
+      .study-title, .toggle-all { display: none; }
+      .intro { padding-top: 38px; }
+      .transcript { padding: 22px 15px; }
+      .turn { grid-template-columns: 23px minmax(0, 1fr); gap: 8px; }
+      .quiet-row > summary { font-size: 17px; }
+      .report-metric { font-size: 9px; }
+      .rail-row > summary { flex-wrap: wrap; }
+      .rail-row .right { margin-left: 75px; }
+      .rail-row .detail-list { margin-left: 12px; }
+      .detail-row { grid-template-columns: 16px minmax(0, 1fr); }
+      .detail-row .metric { grid-column: 2; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .pulse { animation: none; } }
+  </style>
+</head>
+<body>
+  <header class="study-header">
+    <span class="brand">pi-orb</span>
+    <span class="study-title">tool activity study</span>
+    <nav aria-label="Directions">
+      <a href="#one">1</a><a href="#two">2</a><a href="#three">3</a><a href="#four">4</a><a href="#five">5</a>
+    </nav>
+    <button class="toggle-all" id="toggleAll" type="button">expand all</button>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div class="eyebrow">Five visual directions</div>
+      <h1>One quiet account of all the work underneath.</h1>
+      <p>Each direction consolidates the same uninterrupted tool sequence: four changed files, two failed commands, and three reads. Open a category to inspect calls, then open a command to inspect its output.</p>
+      <div class="principles"><span>collapsed by default</span><span>unique file counts</span><span>failures stay visible</span><span>parallel is invisible</span><span>full detail on demand</span></div>
+    </section>
+
+    <section class="direction" id="one">
+      <div class="direction-heading"><span class="number">01</span><div><h2>Quiet Ledger <span class="recommendation">recommended</span></h2><p class="rationale">Closest to the reference: generous type, no container chrome, and metrics embedded directly in each sentence.</p></div></div>
+      <div class="canvas"><div class="appbar"><span class="orb">tool activity</span><span class="project">pi-orb</span><span class="status">idle</span></div><div class="transcript"><div class="turn"><div class="gutter"><span class="mark">O</span></div><div><span class="turn-label">Orb</span><p class="prose">I’ve finished the implementation and checked the affected paths.</p><div class="quiet-stack">
+        <details class="quiet-row"><summary><span class="chev">Edited 4 files</span> <span class="add">+29</span> <span class="del">−14</span></summary><div class="detail-list"><div class="detail-row"><span class="icon">M</span><code>apps/web/src/components/HistoryView.tsx</code><span class="metric"><span class="add">+16</span> <span class="del">−7</span></span></div><div class="detail-row"><span class="icon">M</span><code>apps/web/src/styles.css</code><span class="metric"><span class="add">+9</span> <span class="del">−5</span></span></div><div class="detail-row"><span class="icon">M</span><code>apps/web/src/components/HistoryView.test.tsx</code><span class="metric"><span class="add">+4</span> <span class="del">−2</span></span></div><div class="detail-row"><span class="icon">M</span><code>docs/web-ui.md</code><span class="metric">text</span></div></div></details>
+        <details class="quiet-row"><summary><span class="chev">Ran 2 commands, <span class="failed">2 failed</span></span></summary><div class="detail-list"><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm test</code><span class="metric">exit 1</span></summary><pre class="command-output error">FAIL  HistoryView.test.tsx
+  × consolidates adjacent tool calls
+    Expected 3 groups, received 4
+
+Tests  1 failed · 47 passed</pre></details><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm run typecheck</code><span class="metric">exit 2</span></summary><pre class="command-output error">HistoryView.tsx(214,18): error TS2322:
+Type 'ToolGroup | undefined' is not assignable to type 'ToolGroup'.</pre></details></div></details>
+        <details class="quiet-row"><summary><span class="chev">Read 3 files</span></summary><div class="detail-list"><div class="detail-row"><span class="icon">↗</span><code>HistoryView.tsx</code><span class="metric">412 lines</span></div><div class="detail-row"><span class="icon">↗</span><code>history.ts</code><span class="metric">164 lines</span></div><div class="detail-row"><span class="icon">↗</span><code>docs/web-ui.md</code><span class="metric">75 lines</span></div></div></details>
+      </div></div></div></div></div>
+    </section>
+
+    <section class="direction" id="two">
+      <div class="direction-heading"><span class="number">02</span><div><h2>Field Report</h2><p class="rationale">A contained activity card gives the sequence a clear boundary and makes scan alignment especially strong.</p></div></div>
+      <div class="canvas"><div class="appbar"><span class="orb">tool activity</span><span class="project">pi-orb</span><span class="status">idle</span></div><div class="transcript"><div class="turn"><div class="gutter"><span class="mark">O</span></div><div><span class="turn-label">Orb</span><p class="prose">The implementation is complete. Here’s the work performed.</p><div class="report"><div class="report-head"><span>Activity report</span><span>9 calls · 3 categories</span></div>
+        <details class="report-row"><summary><span class="report-icon">±</span><span class="report-title">Edited 4 files</span><span class="report-metric"><span class="add">+29</span> <span class="del">−14</span></span></summary><div class="detail-list"><div class="detail-row"><span class="icon">M</span><code>HistoryView.tsx</code><span class="metric"><span class="add">+16</span> <span class="del">−7</span></span></div><div class="detail-row"><span class="icon">M</span><code>styles.css</code><span class="metric"><span class="add">+9</span> <span class="del">−5</span></span></div></div></details>
+        <details class="report-row"><summary><span class="report-icon failed">!</span><span class="report-title">Ran 2 commands</span><span class="report-metric failed">2 failed</span></summary><div class="detail-list"><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm test</code><span class="metric">exit 1</span></summary><pre class="command-output error">FAIL  HistoryView.test.tsx
+Expected 3 groups, received 4
+Tests  1 failed · 47 passed</pre></details><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm run typecheck</code><span class="metric">exit 2</span></summary><pre class="command-output error">HistoryView.tsx(214,18): error TS2322
+Type 'undefined' is not assignable to type 'ToolGroup'.</pre></details></div></details>
+        <details class="report-row"><summary><span class="report-icon">R</span><span class="report-title">Read 3 files</span><span class="report-metric">3 complete</span></summary><div class="detail-list"><div class="detail-row"><span class="icon">↗</span><code>HistoryView.tsx</code><span class="metric">412 lines</span></div></div></details>
+      </div></div></div></div></div>
+    </section>
+
+    <section class="direction" id="three">
+      <div class="direction-heading"><span class="number">03</span><div><h2>Manuscript Sentence</h2><p class="rationale">Treats activity as prose rather than interface. It best matches the Reading Room voice, but metrics are less column-scannable.</p></div></div>
+      <div class="canvas"><div class="appbar"><span class="orb">tool activity</span><span class="project">pi-orb</span><span class="status">idle</span></div><div class="transcript"><div class="turn"><div class="gutter"><span class="mark">O</span></div><div><span class="turn-label">Orb</span><p class="prose">The consolidated renderer is now in place, with persisted and live states sharing the same visual language.</p><div class="sentence-block"><div class="sentence-intro">In this passage, the orb</div>
+        <details class="sentence-row"><summary><span class="verb">edited</span> 4 files <span class="add">+29</span> <span class="del">−14</span></summary><div class="detail-list"><div class="detail-row"><span class="icon">M</span><code>HistoryView.tsx and 3 more</code><span class="metric"><span class="add">+29</span> <span class="del">−14</span></span></div></div></details>
+        <details class="sentence-row"><summary><span class="verb">ran</span> 2 commands, <span class="failed">both failed</span></summary><div class="detail-list"><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm test</code><span class="metric">exit 1</span></summary><pre class="command-output error">FAIL  HistoryView.test.tsx
+Expected 3 groups, received 4</pre></details><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm run typecheck</code><span class="metric">exit 2</span></summary><pre class="command-output error">HistoryView.tsx(214,18): error TS2322
+Type 'undefined' is not assignable to type 'ToolGroup'.</pre></details></div></details>
+        <details class="sentence-row"><summary>and <span class="verb">read</span> 3 files</summary><div class="detail-list"><div class="detail-row"><span class="icon">↗</span><code>HistoryView.tsx, history.ts, web-ui.md</code><span class="metric">651 lines</span></div></div></details>.
+      </div></div></div></div></div>
+    </section>
+
+    <section class="direction" id="four">
+      <div class="direction-heading"><span class="number">04</span><div><h2>Activity Rail</h2><p class="rationale">A chronological operations trace whose category markers sit directly on the Orb turn’s existing gutter rail—no nested rail.</p></div></div>
+      <div class="canvas"><div class="appbar"><span class="orb">tool activity</span><span class="project">pi-orb</span><span class="status"><span class="pulse"></span>working</span></div><div class="transcript"><div class="turn"><div class="gutter"><span class="mark">O</span></div><div><span class="turn-label">Orb</span><p class="prose">I’ve made the core changes. The final verification is still running.</p><div class="rail-stack">
+        <details class="rail-row"><summary><span class="category">Edit</span><span class="headline">4 files changed</span><span class="right"><span class="add">+29</span> <span class="del">−14</span></span></summary><div class="detail-list"><div class="detail-row"><span class="icon">M</span><code>HistoryView.tsx and 3 more</code><span class="metric">complete</span></div></div></details>
+        <details class="rail-row error" open><summary><span class="category">Command</span><span class="headline">2 commands ran</span><span class="right failed">2 failed</span></summary><div class="detail-list"><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm test</code><span class="metric">exit 1</span></summary><pre class="command-output error">FAIL  HistoryView.test.tsx
+Expected 3 groups, received 4</pre></details><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm run typecheck</code><span class="metric">exit 2</span></summary><pre class="command-output error">HistoryView.tsx(214,18): error TS2322
+Type 'undefined' is not assignable to type 'ToolGroup'.</pre></details></div></details>
+        <details class="rail-row"><summary><span class="category">Read</span><span class="headline">3 files inspected</span><span class="right"><span class="pulse"></span>reading</span></summary><div class="detail-list"><div class="detail-row"><span class="icon">↗</span><code>HistoryView.tsx and 2 more</code><span class="metric">running</span></div></div></details>
+      </div></div></div></div></div>
+    </section>
+
+    <section class="direction" id="five">
+      <div class="direction-heading"><span class="number">05</span><div><h2>Margin Chips</h2><p class="rationale">The smallest footprint. Best when tool work should stay secondary to prose, while failures remain immediately prominent.</p></div></div>
+      <div class="canvas"><div class="appbar"><span class="orb">tool activity</span><span class="project">pi-orb</span><span class="status">idle</span></div><div class="transcript"><div class="turn"><div class="gutter"><span class="mark">O</span></div><div><span class="turn-label">Orb</span><p class="prose">The feature is implemented. Two pre-existing verification failures remain and are shown below.</p><div class="chip-intro">9 tool calls consolidated</div><div class="chips">
+        <details class="chip"><summary>Edited 4 files&nbsp; <span class="add">+29</span> <span class="del">−14</span></summary><div class="chip-panel"><div class="detail-list"><div class="detail-row"><span class="icon">M</span><code>HistoryView.tsx and 3 more</code><span class="metric"><span class="add">+29</span> <span class="del">−14</span></span></div></div></div></details>
+        <details class="chip error"><summary>Ran 2 commands · 2 failed</summary><div class="chip-panel"><div class="detail-list"><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm test</code><span class="metric">exit 1</span></summary><pre class="command-output error">FAIL  HistoryView.test.tsx
+Expected 3 groups, received 4</pre></details><details class="command-detail"><summary class="detail-row error"><span class="icon"></span><code>npm run typecheck</code><span class="metric">exit 2</span></summary><pre class="command-output error">HistoryView.tsx(214,18): error TS2322
+Type 'undefined' is not assignable to type 'ToolGroup'.</pre></details></div></div></details>
+        <details class="chip"><summary>Read 3 files</summary><div class="chip-panel"><div class="detail-list"><div class="detail-row"><span class="icon">↗</span><code>HistoryView.tsx and 2 more</code><span class="metric">complete</span></div></div></div></details>
+      </div></div></div></div></div>
+    </section>
+  </main>
+
+  <div class="footer-note">Interaction note: rows use native disclosures. “Expand all” is provided only for comparing the prototype; production would keep groups collapsed by default.</div>
+  <script>
+    const button = document.getElementById("toggleAll");
+    button.addEventListener("click", () => {
+      const details = [...document.querySelectorAll("details")];
+      const shouldOpen = details.some((item) => !item.open);
+      details.forEach((item) => { item.open = shouldOpen; });
+      button.textContent = shouldOpen ? "collapse all" : "expand all";
+    });
+  </script>
+</body>
+</html>

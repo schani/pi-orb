@@ -7,8 +7,15 @@ import type {
   OrbMessageView,
 } from "@pi-orb/protocol";
 import type { ReactNode } from "react";
+import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
+import {
+  type PersistedToolCall,
+  ToolActivity,
+  type ToolCallBlock,
+  type ToolResultBlock,
+} from "./ToolActivity.tsx";
 
 /** Streaming output block accumulated from `output_patch` events. */
 export interface LiveBlock {
@@ -86,6 +93,21 @@ function renderImageBlock(block: ContentBlock & { type: "image" }, key: number):
   );
 }
 
+function renderReasoningRail(text: string, key: string | number, live = false): ReactNode {
+  return (
+    <ActivityRailRow
+      className="reasoning"
+      key={key}
+      label="reasoning"
+      state={live ? "running" : "neutral"}
+    >
+      <p className="reasoning-body">
+        <PlainChatText>{text}</PlainChatText>
+      </p>
+    </ActivityRailRow>
+  );
+}
+
 function renderMessageBlocks(record: MessageRecord): ReactNode[] {
   const nodes: ReactNode[] = [];
   record.content.forEach((block, index) => {
@@ -94,14 +116,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
         nodes.push(<ChatMarkdown key={index}>{block.text}</ChatMarkdown>);
         break;
       case "reasoning":
-        nodes.push(
-          <details className="reasoning" key={index}>
-            <summary>reasoning</summary>
-            <p className="reasoning-body">
-              <PlainChatText>{block.text}</PlainChatText>
-            </p>
-          </details>,
-        );
+        nodes.push(renderReasoningRail(block.text, index));
         break;
       case "tool_call":
         nodes.push(renderToolCall(block));
@@ -131,7 +146,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
  */
 type Turn =
   | { kind: "user"; record: MessageRecord }
-  | { kind: "agent"; key: string; parts: ReactNode[] }
+  | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "shell"; record: EventRecord }
   | { kind: "compaction"; record: CompactionRecord };
 
@@ -174,26 +189,64 @@ function isDisplayedCustomMessage(record: EventRecord): boolean {
   return native["display"] === true;
 }
 
-function renderAgentPart(record: MessageRecord | EventRecord): ReactNode {
-  if (record.type === "event") {
-    return (
-      <div className="record-custom" key={record.id}>
-        <p className="msg-text">
-          <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
-        </p>
-      </div>
-    );
+function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let runIndex = 0;
+  let currentCalls: PersistedToolCall[] = [];
+  let currentById = new Map<string, PersistedToolCall>();
+
+  const flushTools = () => {
+    if (currentCalls.length === 0) return;
+    nodes.push(<ToolActivity persisted={currentCalls} key={`tools-${runIndex}`} />);
+    runIndex += 1;
+    currentCalls = [];
+    currentById = new Map();
+  };
+
+  for (const record of records) {
+    if (record.type === "event") {
+      flushTools();
+      nodes.push(
+        <div className="record-custom" key={record.id}>
+          <p className="msg-text">
+            <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
+          </p>
+        </div>,
+      );
+      continue;
+    }
+
+    for (const [index, block] of record.content.entries()) {
+      if (block.type === "tool_call") {
+        const item: PersistedToolCall = { call: block as ToolCallBlock };
+        currentCalls.push(item);
+        currentById.set(block.callId, item);
+        continue;
+      }
+      if (block.type === "tool_result") {
+        const item = currentById.get(block.callId);
+        if (item !== undefined) {
+          item.result = block as ToolResultBlock;
+          item.resultRecord = record;
+        } else {
+          flushTools();
+          nodes.push(renderToolResult(block, `${record.id}-${index}`));
+        }
+        continue;
+      }
+
+      // Visible prose/reasoning/media is a boundary between maximal tool runs.
+      flushTools();
+      const singleBlockRecord: MessageRecord = { ...record, content: [block] };
+      const rendered = renderMessageBlocks(singleBlockRecord);
+      // Reasoning must be a direct child of the turn body so its rail row can
+      // collapse the body's prose gap against adjacent activity rows.
+      if (block.type === "reasoning") nodes.push(...rendered);
+      else nodes.push(<div key={`${record.id}-${index}`}>{rendered}</div>);
+    }
   }
-  if (record.role === "tool") {
-    return (
-      <div className="agent-tool-results" key={record.id}>
-        {record.content
-          .filter((block) => block.type === "tool_result")
-          .map((block, index) => renderToolResult(block, `${record.id}-${index}`))}
-      </div>
-    );
-  }
-  return <div key={record.id}>{renderMessageBlocks(record)}</div>;
+  flushTools();
+  return nodes;
 }
 
 function groupTurns(records: readonly HistoryRecord[]): Turn[] {
@@ -201,9 +254,9 @@ function groupTurns(records: readonly HistoryRecord[]): Turn[] {
   const appendAgentPart = (record: MessageRecord | EventRecord) => {
     const last = turns[turns.length - 1];
     if (last !== undefined && last.kind === "agent") {
-      last.parts.push(renderAgentPart(record));
+      last.records.push(record);
     } else {
-      turns.push({ kind: "agent", key: record.id, parts: [renderAgentPart(record)] });
+      turns.push({ kind: "agent", key: record.id, records: [record] });
     }
   };
   for (const record of records) {
@@ -236,7 +289,27 @@ function Gutter({ mark }: { mark: "Y" | "O" }) {
   );
 }
 
-function renderTurn(turn: Turn): ReactNode {
+interface LiveAgentContent {
+  blocks: readonly LiveBlock[];
+  tools: readonly ToolChip[];
+}
+
+function renderLiveAgentContent(live: LiveAgentContent): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  if (live.tools.length > 0) nodes.push(<ToolActivity live={live.tools} key="live-tools" />);
+  for (const block of live.blocks) {
+    nodes.push(
+      block.blockType === "reasoning" ? (
+        renderReasoningRail(block.text, block.blockId, true)
+      ) : (
+        <ChatMarkdown key={block.blockId}>{block.text}</ChatMarkdown>
+      ),
+    );
+  }
+  return nodes;
+}
+
+function renderTurn(turn: Turn, live?: LiveAgentContent): ReactNode {
   switch (turn.kind) {
     case "user":
       return (
@@ -250,11 +323,15 @@ function renderTurn(turn: Turn): ReactNode {
       );
     case "agent":
       return (
-        <article className="turn turn-agent" key={turn.key}>
+        <article
+          className={`turn turn-agent${live === undefined ? "" : " turn-live"}`}
+          key={turn.key}
+        >
           <Gutter mark="O" />
           <div className="turn-body">
             <span className="turn-label">Orb</span>
-            {turn.parts}
+            {renderAgentRecords(turn.records)}
+            {live !== undefined && renderLiveAgentContent(live)}
           </div>
         </article>
       );
@@ -297,8 +374,27 @@ function renderTurn(turn: Turn): ReactNode {
   }
 }
 
-function toolChipClass(state: ToolChip["state"]): string {
-  return `tool-chip tool-chip-${state}`;
+function liveBlockAlreadyPersisted(block: LiveBlock, records: readonly HistoryRecord[]): boolean {
+  const persistedType = block.blockType === "reasoning" ? "reasoning" : "text";
+  return records.some(
+    (record) =>
+      record.type === "message" &&
+      record.role === "assistant" &&
+      record.content.some(
+        (content) => content.type === persistedType && content.text === block.text,
+      ),
+  );
+}
+
+function persistedToolCallIds(records: readonly HistoryRecord[]): Set<string> {
+  const ids = new Set<string>();
+  for (const record of records) {
+    if (record.type !== "message") continue;
+    for (const block of record.content) {
+      if (block.type === "tool_call") ids.add(block.callId);
+    }
+  }
+  return ids;
 }
 
 function inboxMessageIds(record: HistoryRecord): string[] {
@@ -325,11 +421,27 @@ export function HistoryView({
     (message) => !representedMessageIds.has(message.id),
   );
   const shellBlocks = liveBlocks.filter((block) => block.blockType === "shell");
-  const agentBlocks = liveBlocks.filter((block) => block.blockType !== "shell");
-  const hasAgentLive = agentBlocks.length > 0 || tools.length > 0;
+  const turns = groupTurns(records);
+  const finalTurn = turns[turns.length - 1];
+  const finalAgentRecords = finalTurn?.kind === "agent" ? finalTurn.records : [];
+  const agentBlocks = liveBlocks
+    .filter((block) => block.blockType !== "shell")
+    .filter((block) => !liveBlockAlreadyPersisted(block, finalAgentRecords));
+  const committedToolCallIds = persistedToolCallIds(records);
+  const uncommittedTools = tools.filter((tool) => !committedToolCallIds.has(tool.callId));
+  const hasAgentLive = agentBlocks.length > 0 || uncommittedTools.length > 0;
+  const mergeLiveIntoFinalTurn =
+    hasAgentLive &&
+    finalTurn?.kind === "agent" &&
+    pendingMessages.length === 0 &&
+    shellBlocks.length === 0;
+  const mergedTurnIndex = mergeLiveIntoFinalTurn ? turns.length - 1 : -1;
+  const liveAgentContent: LiveAgentContent = { blocks: agentBlocks, tools: uncommittedTools };
   return (
     <div className="history">
-      {groupTurns(records).map(renderTurn)}
+      {turns.map((turn, index) =>
+        renderTurn(turn, index === mergedTurnIndex ? liveAgentContent : undefined),
+      )}
       {pendingMessages.map((message) => {
         const record: MessageRecord = {
           id: `queued:${message.id}`,
@@ -375,33 +487,12 @@ export function HistoryView({
           </div>
         </article>
       ))}
-      {hasAgentLive && (
+      {hasAgentLive && !mergeLiveIntoFinalTurn && (
         <article className="turn turn-agent turn-live">
           <Gutter mark="O" />
           <div className="turn-body">
             <span className="turn-label">Orb</span>
-            {tools.length > 0 && (
-              <div className="tool-chips">
-                {tools.map((tool) => (
-                  <span className={toolChipClass(tool.state)} key={tool.callId}>
-                    {tool.state === "running" && <span className="tool-chip-dot" />}
-                    {tool.name} · {tool.state}
-                  </span>
-                ))}
-              </div>
-            )}
-            {agentBlocks.map((block) =>
-              block.blockType === "reasoning" ? (
-                <details className="reasoning" key={block.blockId}>
-                  <summary>reasoning</summary>
-                  <p className="reasoning-body">
-                    <PlainChatText>{block.text}</PlainChatText>
-                  </p>
-                </details>
-              ) : (
-                <ChatMarkdown key={block.blockId}>{block.text}</ChatMarkdown>
-              ),
-            )}
+            {renderLiveAgentContent(liveAgentContent)}
           </div>
         </article>
       )}

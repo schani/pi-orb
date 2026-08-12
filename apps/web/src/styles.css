@@ -1068,62 +1068,122 @@ button.project-orb-action.danger:hover:not(:disabled) {
   font-style: normal;
 }
 
-/* ---------- reasoning aside ---------- */
+/* ---------- shared agent activity rail ---------- */
 
-.reasoning {
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--r);
-  background: var(--paper-2);
-  width: fit-content;
-  min-width: 220px;
-  max-width: 100%;
+.activity-rail-row {
+  width: calc(100% + var(--gutter) + 14px);
+  margin: -11px 0 0 calc(0px - var(--gutter) - 14px);
 }
 
-.reasoning summary {
+.activity-rail-row > summary {
+  display: grid;
+  grid-template-columns: var(--gutter) 14px minmax(0, 1fr);
+  align-items: center;
+  min-height: 34px;
   list-style: none;
   cursor: pointer;
-  padding: 5px 12px;
-  font-family: var(--serif);
-  font-variant-caps: small-caps;
-  text-transform: lowercase;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  color: var(--ink-faint);
   user-select: none;
 }
 
-.reasoning summary::-webkit-details-marker {
+.activity-rail-row > summary::-webkit-details-marker {
   display: none;
 }
 
-.reasoning summary::before {
-  content: "\203A";
-  display: inline-block;
-  margin-right: 7px;
-  color: var(--ink-faint);
-  transition: transform 0.15s ease;
+.activity-rail-marker {
+  z-index: 1;
+  grid-column: 1;
+  justify-self: center;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--ink-faint);
 }
 
-.reasoning[open] summary::before {
-  transform: rotate(90deg);
+.activity-rail-row-failed .activity-rail-marker {
+  background: var(--accent);
+}
+
+.activity-rail-row-completed .activity-rail-marker {
+  background: var(--green);
+}
+
+.activity-rail-row-running .activity-rail-marker {
+  background: var(--green);
+  animation: tool-activity-pulse 1.2s ease-in-out infinite;
+}
+
+.activity-rail-summary {
+  grid-column: 3;
+  display: grid;
+  /* The bounded label column is independent of both viewport width and the
+     metric's width. Headlines align without wasting a third of wide screens. */
+  grid-template-columns: clamp(96px, 10vw, 150px) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 10px;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+}
+
+.activity-rail-label {
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.activity-rail-row-failed .activity-rail-label {
+  color: var(--accent);
+}
+
+.activity-rail-row-completed .activity-rail-label {
+  color: var(--green);
+}
+
+.activity-rail-row-running .activity-rail-label {
+  color: var(--green);
+}
+
+.activity-rail-headline {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-rail-metric {
+  color: var(--ink-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.activity-rail-row[open] > summary .activity-rail-summary {
+  border-bottom-color: transparent;
 }
 
 .reasoning-body {
-  margin: 0;
-  padding: 0 12px 8px 29px;
+  margin: 0 0 0 calc(var(--gutter) + 14px);
+  padding: 10px;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--rule-soft);
   font-family: var(--serif);
   font-style: italic;
   font-size: 14px;
   line-height: 1.6;
-  color: var(--ink-soft);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .reasoning summary::before {
-    transition: none;
+  .activity-rail-row-running .activity-rail-marker {
+    animation: none;
   }
 }
 
@@ -1167,6 +1227,134 @@ button.project-orb-action.danger:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* Tool groups are only a sequencing wrapper. ActivityRailRow owns all rail
+   geometry shared with reasoning, including the fixed headline column. */
+.tool-activity {
+  display: contents;
+}
+
+.tool-activity-call > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-activity-failed,
+.tool-call-failed,
+.tool-diff-removed {
+  color: var(--accent);
+}
+
+.tool-activity-running,
+.tool-call-running,
+.tool-diff-added {
+  color: var(--green);
+}
+
+.tool-activity-calls {
+  margin-left: calc(var(--gutter) + 14px);
+  padding: 5px 10px 9px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.tool-activity-call,
+.tool-activity-call > summary {
+  min-width: 0;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.tool-activity-call:not(details),
+.tool-activity-call > summary {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+}
+
+.tool-activity-call > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.tool-activity-call > summary:hover code {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.tool-activity-call code {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-chevron {
+  color: var(--ink-faint);
+  transition: transform 0.15s ease;
+}
+
+.tool-activity-call[open] > summary .tool-call-chevron {
+  transform: rotate(90deg);
+}
+
+.tool-call-status {
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.tool-call-output {
+  max-height: 20rem;
+  margin: 0 8px 8px 34px;
+  padding: 9px 11px;
+  overflow: auto;
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  background: var(--inset);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 11px / 1.6 var(--mono);
+}
+
+.tool-call-output-error {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+@keyframes tool-activity-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (max-width: 560px) {
+  .activity-rail-summary {
+    grid-template-columns: minmax(62px, 30%) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .activity-rail-metric {
+    grid-column: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-rail-row-running .activity-rail-marker,
+  .tool-call-chevron {
+    animation: none;
+    transition: none;
+  }
 }
 
 /* ---------- compaction divider: spans the full width, crossing the gutter */
@@ -1217,67 +1405,6 @@ button.project-orb-action.danger:hover:not(:disabled) {
 }
 
 /* ---------- live streaming ---------- */
-
-.tool-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.tool-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.01em;
-  color: var(--ink-faint);
-  background: var(--inset);
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  padding: 3px 11px;
-}
-
-.tool-chip-running {
-  color: var(--ink-soft);
-  border-color: #cdbf9f;
-}
-
-.tool-chip-completed {
-  color: var(--green);
-  border-color: var(--green-rule);
-}
-
-.tool-chip-failed {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.tool-chip-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: chip-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes chip-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.85);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tool-chip-dot {
-    animation: none;
-  }
-}
 
 .busy-indicator {
   font-family: var(--serif);
@@ -1502,11 +1629,12 @@ button.project-orb-action.danger:hover:not(:disabled) {
 /* The composer stays pinned to the viewport bottom while the chat scrolls
    in the normal document flow; it bleeds to the window edges. */
 .composer {
+  position: sticky;
+  z-index: 30;
+  bottom: 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  position: sticky;
-  bottom: 0;
   margin: 0 calc(-1 * var(--page-pad));
   /* Swallow the page flex gap so records don't peek through above it. */
   margin-top: -1rem;

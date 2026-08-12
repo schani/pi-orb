@@ -82,6 +82,14 @@ function initialState(): MockState {
     updatedAt: createdAt,
   };
   const welcomeId = randomUUID();
+  const activityUserId = randomUUID();
+  const activityCallsId = randomUUID();
+  const editResultId = randomUUID();
+  const testResultId = randomUUID();
+  const typecheckResultId = randomUUID();
+  const firstReadResultId = randomUUID();
+  const secondReadResultId = randomUUID();
+  const activityAnswerId = randomUUID();
   const records: HistoryRecord[] = [
     {
       id: welcomeId,
@@ -95,6 +103,158 @@ function initialState(): MockState {
           text: "# Frontend playground\n\nThis conversation is supplied by the in-process fixture backend. Send a message and I will echo it with simulated streaming.",
         },
       ],
+      overflow: {},
+    },
+    {
+      id: activityUserId,
+      parentId: welcomeId,
+      timestamp: createdAt,
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: "Show me the consolidated tool activity design." }],
+      overflow: {},
+    },
+    {
+      id: activityCallsId,
+      parentId: activityUserId,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [
+        {
+          type: "reasoning",
+          text: "The activity should share the Orb gutter instead of introducing another visual rail.",
+        },
+        { type: "text", text: "I’ll update the renderer and verify the result." },
+        {
+          type: "tool_call",
+          callId: "fixture-edit",
+          name: "edit",
+          arguments: {
+            path: "apps/web/src/components/HistoryView.tsx",
+            edits: [{ oldText: "tool chips", newText: "consolidated activity rail" }],
+          },
+        },
+        {
+          type: "tool_call",
+          callId: "fixture-test",
+          name: "bash",
+          arguments: { command: "npm test -- HistoryView.test.tsx" },
+        },
+        {
+          type: "tool_call",
+          callId: "fixture-typecheck",
+          name: "bash",
+          arguments: { command: "npm run typecheck --workspace @pi-orb/web" },
+        },
+        {
+          type: "tool_call",
+          callId: "fixture-read-one",
+          name: "read",
+          arguments: { path: "apps/web/src/components/HistoryView.tsx" },
+        },
+        {
+          type: "tool_call",
+          callId: "fixture-read-two",
+          name: "read",
+          arguments: { path: "docs/web-ui.md" },
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: editResultId,
+      parentId: activityCallsId,
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "fixture-edit",
+          content: [{ type: "text", text: "Updated HistoryView.tsx" }],
+        },
+      ],
+      overflow: {
+        native: {
+          type: "message",
+          message: {
+            role: "toolResult",
+            details: {
+              patch:
+                "--- a/apps/web/src/components/HistoryView.tsx\n+++ b/apps/web/src/components/HistoryView.tsx\n@@ -1,2 +1,4 @@\n-tool chips\n+consolidated activity rail\n+category summaries\n+expandable command output",
+            },
+          },
+        },
+      },
+    },
+    {
+      id: testResultId,
+      parentId: editResultId,
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "fixture-test",
+          content: [{ type: "text", text: "PASS HistoryView.test.tsx\nTests 12 passed" }],
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: typecheckResultId,
+      parentId: testResultId,
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "fixture-typecheck",
+          content: [{ type: "text", text: "TypeScript found 0 errors." }],
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: firstReadResultId,
+      parentId: typecheckResultId,
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "fixture-read-one",
+          content: [{ type: "text", text: "HistoryView source (412 lines)" }],
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: secondReadResultId,
+      parentId: firstReadResultId,
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "fixture-read-two",
+          content: [{ type: "text", text: "Web UI design decisions" }],
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: activityAnswerId,
+      parentId: secondReadResultId,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "The activity rail is implemented and verified." }],
       overflow: {},
     },
   ];

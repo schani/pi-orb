@@ -115,6 +115,72 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain("a payload the runtime refuses");
   });
 
+  it("places persisted and live reasoning disclosures on the Orb rail", () => {
+    const reasoningRecord: HistoryRecord = {
+      id: "reasoning-record",
+      parentId: null,
+      timestamp: "time-reasoning",
+      type: "message",
+      role: "assistant",
+      content: [{ type: "reasoning", text: "considering persisted evidence" }],
+      overflow: {},
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[reasoningRecord]}
+        liveBlocks={[
+          {
+            blockId: "live-reasoning",
+            blockType: "reasoning",
+            text: "considering live evidence",
+            revision: 1,
+          },
+        ]}
+        tools={[]}
+        busy
+      />,
+    );
+
+    expect(html.match(/class="turn turn-agent/g)).toHaveLength(1);
+    expect(html).toContain("turn turn-agent turn-live");
+    expect(html.match(/class="turn-mark">O/g)).toHaveLength(1);
+    expect(html.match(/class="activity-rail-row [^"]* reasoning"/g)).toHaveLength(2);
+    expect(html.match(/class="activity-rail-marker"/g)).toHaveLength(2);
+    expect(html).toContain("considering persisted evidence");
+    expect(html).toContain("considering live evidence");
+  });
+
+  it("does not duplicate a live block that has already become persisted", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[
+          {
+            id: "persisted-reasoning",
+            parentId: null,
+            timestamp: "time-reasoning",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "reasoning", text: "same reasoning" }],
+            overflow: {},
+          },
+        ]}
+        liveBlocks={[
+          {
+            blockId: "live-reasoning",
+            blockType: "reasoning",
+            text: "same reasoning",
+            revision: 1,
+          },
+        ]}
+        tools={[]}
+        busy
+      />,
+    );
+
+    expect(html.match(/same reasoning/g)).toHaveLength(1);
+    expect(html.match(/class="turn turn-agent/g)).toHaveLength(1);
+  });
+
   it("renders compaction as a full-width divider outside the gutter turns", () => {
     const records: HistoryRecord[] = [
       message("u1", "user", "hello"),
@@ -197,7 +263,8 @@ describe("HistoryView turn structure", () => {
     expect(html.match(/turn-agent/g)).toHaveLength(1);
     expect(html.match(/turn-mark">O</g)).toHaveLength(1);
     expect(html).toContain("streaming now");
-    expect(html).toContain("tool-chip-running");
+    expect(html).toContain("activity-rail-row-running tool-activity-category");
+    expect(html).toContain("1 command ran");
   });
 });
 
@@ -303,7 +370,7 @@ describe("HistoryView", () => {
     expect(html).toContain("[image]");
   });
 
-  it("collapses persisted tool inputs and outputs and omits live tool messages by default", () => {
+  it("consolidates persisted tool calls and nests command output disclosures", () => {
     const records: HistoryRecord[] = [
       {
         id: "assistant-tool-call",
@@ -354,9 +421,213 @@ describe("HistoryView", () => {
       />,
     );
 
-    expect(html).toContain("<summary>→ bash</summary>");
-    expect(html).toContain("<summary>tool output</summary>");
+    expect(html).toContain("activity-rail-row-completed tool-activity-category");
+    expect(html).toContain("Command");
+    expect(html).toContain('class="activity-rail-headline" title="echo tool-input"');
+    expect(html).not.toContain("1 command ran");
+    expect(html).toContain("echo tool-input");
+    expect(html).toContain("tool-output");
     expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
     expect(html).not.toContain("live-tool-secret");
+  });
+
+  it("shows a singleton read's path instead of a count", () => {
+    const records: HistoryRecord[] = [
+      {
+        id: "read-call-record",
+        parentId: null,
+        timestamp: "time-read-call",
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "tool_call",
+            callId: "single-read",
+            name: "read",
+            arguments: { path: "a/very/long/path/to/HistoryView.tsx" },
+          },
+        ],
+        overflow: {},
+      },
+      {
+        id: "read-result-record",
+        parentId: "read-call-record",
+        timestamp: "time-read-result",
+        type: "message",
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            callId: "single-read",
+            content: [{ type: "text", text: "source" }],
+          },
+        ],
+        overflow: {},
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).toContain(
+      'class="activity-rail-headline" title="a/very/long/path/to/HistoryView.tsx"',
+    );
+    expect(html).not.toContain("1 file read");
+  });
+
+  it("distinguishes repeated reads of different ranges in the same file", () => {
+    const records: HistoryRecord[] = [
+      {
+        id: "read-calls",
+        parentId: null,
+        timestamp: "time-read-calls",
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "tool_call",
+            callId: "read-start",
+            name: "read",
+            arguments: { path: "provider.ts", offset: 1, limit: 180 },
+          },
+          {
+            type: "tool_call",
+            callId: "read-tail",
+            name: "read",
+            arguments: { path: "provider.ts", offset: 180, limit: 150 },
+          },
+        ],
+        overflow: {},
+      },
+      {
+        id: "read-start-result",
+        parentId: "read-calls",
+        timestamp: "time-read-start-result",
+        type: "message",
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            callId: "read-start",
+            content: [{ type: "text", text: "first range" }],
+          },
+        ],
+        overflow: {},
+      },
+      {
+        id: "read-tail-result",
+        parentId: "read-start-result",
+        timestamp: "time-read-tail-result",
+        type: "message",
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            callId: "read-tail",
+            content: [{ type: "text", text: "second range" }],
+          },
+        ],
+        overflow: {},
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).toContain('class="activity-rail-headline" title="provider.ts"');
+    expect(html).not.toContain(">1 file</span>");
+    expect(html).not.toContain("2 reads");
+    expect(html).toContain("provider.ts:1–180");
+    expect(html).toContain("provider.ts:180–329");
+    expect(html).not.toContain("1 file read");
+  });
+
+  it("groups edit, command, and read calls on one activity rail with diff and failure totals", () => {
+    const callRecord: HistoryRecord = {
+      id: "calls",
+      parentId: null,
+      timestamp: "time-calls",
+      type: "message",
+      role: "assistant",
+      content: [
+        {
+          type: "tool_call",
+          callId: "edit-1",
+          name: "edit",
+          arguments: { path: "src/a.ts", edits: [{ oldText: "old", newText: "new" }] },
+        },
+        {
+          type: "tool_call",
+          callId: "bash-1",
+          name: "bash",
+          arguments: { command: "npm test" },
+        },
+        {
+          type: "tool_call",
+          callId: "bash-2",
+          name: "bash",
+          arguments: { command: "npm run typecheck" },
+        },
+        {
+          type: "tool_call",
+          callId: "read-1",
+          name: "read",
+          arguments: { path: "src/a.ts" },
+        },
+        {
+          type: "tool_call",
+          callId: "read-2",
+          name: "read",
+          arguments: { path: "src/b.ts" },
+        },
+      ],
+      overflow: {},
+    };
+    const toolResult = (
+      id: string,
+      callId: string,
+      text: string,
+      isError = false,
+      overflow: HistoryRecord["overflow"] = {},
+    ): HistoryRecord => ({
+      id,
+      parentId: "calls",
+      timestamp: `time-${id}`,
+      type: "message",
+      role: "tool",
+      content: [{ type: "tool_result", callId, content: [{ type: "text", text }], isError }],
+      overflow,
+    });
+    const records = [
+      callRecord,
+      toolResult("edit-result", "edit-1", "updated", false, {
+        native: {
+          message: {
+            details: {
+              patch: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@\n-old\n+new\n+extra",
+            },
+          },
+        },
+      }),
+      toolResult("bash-result-1", "bash-1", "one test failed", true),
+      toolResult("bash-result-2", "bash-2", "typecheck passed"),
+      toolResult("read-result-1", "read-1", "a source"),
+      toolResult("read-result-2", "read-2", "b source"),
+    ];
+
+    const html = renderToStaticMarkup(
+      <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html.match(/class="activity-rail-row [^"]* tool-activity-category"/g)).toHaveLength(3);
+    expect(html).toContain('class="activity-rail-headline" title="src/a.ts"');
+    expect(html).not.toContain("1 file changed");
+    expect(html).toContain("+2");
+    expect(html).toContain("−1");
+    expect(html).toContain("2 commands ran");
+    expect(html).toContain("1 failed");
+    expect(html).toContain("2 files read");
+    expect(html).toContain("<code>src/b.ts</code></summary>");
+    expect(html).not.toContain("Search");
+    expect(html).toContain("one test failed");
   });
 });
