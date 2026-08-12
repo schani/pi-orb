@@ -16,6 +16,13 @@ export interface TerminalGridSize {
   readonly rows: number;
 }
 
+export interface TerminalGridMetrics {
+  readonly cellWidth: number;
+  readonly cellHeight: number;
+  readonly horizontalChrome: number;
+  readonly verticalChrome: number;
+}
+
 const MIN_WIDTH = 330;
 const MIN_HEIGHT = 220;
 
@@ -24,6 +31,17 @@ function snapAxis(raw: number, max: number, chrome: number, cell: number, minimu
   const maxCells = Math.max(minCells, Math.floor((max - chrome) / cell));
   const cells = Math.max(minCells, Math.min(maxCells, Math.round((raw - chrome) / cell)));
   return { pixels: chrome + cells * cell, cells };
+}
+
+/** Derives an outer panel whose content viewport contains exactly the requested grid. */
+export function terminalPanelSize(
+  grid: Pick<TerminalGridSize, "cols" | "rows">,
+  metrics: TerminalGridMetrics,
+): Pick<TerminalGridSize, "width" | "height"> {
+  return {
+    width: metrics.horizontalChrome + grid.cols * metrics.cellWidth,
+    height: metrics.verticalChrome + grid.rows * metrics.cellHeight,
+  };
 }
 
 /** Keeps the fixed bottom-right anchor stable while the top-left handle moves by whole cells. */

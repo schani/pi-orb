@@ -10,7 +10,11 @@ import { Terminal, useTerminal } from "@wterm/react";
 import { ResultAsync } from "neverthrow";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check } from "typebox/value";
-import { snapTerminalSize } from "../lib/terminal-layout.ts";
+import {
+  snapTerminalSize,
+  type TerminalGridMetrics,
+  terminalPanelSize,
+} from "../lib/terminal-layout.ts";
 
 const INITIAL_WIDTH = 552;
 const INITIAL_HEIGHT = 391;
@@ -20,19 +24,12 @@ const HEADER_HEIGHT = 38;
 const TERMINAL_HORIZONTAL_PADDING = 30;
 const TERMINAL_VERTICAL_PADDING = 26;
 
-interface GridMetrics {
-  cellWidth: number;
-  cellHeight: number;
-  horizontalChrome: number;
-  verticalChrome: number;
-}
-
 function terminalUrl(orbId: string): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/api/v1/orbs/${encodeURIComponent(orbId)}/terminal`;
 }
 
-function measureGrid(wt: WTerm): GridMetrics {
+function measureGrid(wt: WTerm): TerminalGridMetrics {
   const probe = document.createElement("span");
   probe.textContent = "0000000000";
   probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font:inherit";
@@ -49,7 +46,7 @@ function measureGrid(wt: WTerm): GridMetrics {
   };
 }
 
-function visibleGrid(wt: WTerm, metrics: GridMetrics): { cols: number; rows: number } {
+function visibleGrid(wt: WTerm, metrics: TerminalGridMetrics): { cols: number; rows: number } {
   const styles = getComputedStyle(wt.element);
   const horizontalPadding =
     Number.parseFloat(styles.paddingLeft) + Number.parseFloat(styles.paddingRight);
@@ -77,7 +74,7 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
   const { ref, write, resize, focus } = useTerminal();
   const socketRef = useRef<WebSocket | null>(null);
   const readyRef = useRef(false);
-  const metricsRef = useRef<GridMetrics>({
+  const metricsRef = useRef<TerminalGridMetrics>({
     cellWidth: 8,
     cellHeight: 18.6,
     horizontalChrome: TERMINAL_HORIZONTAL_PADDING + 2,
@@ -143,6 +140,11 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
       wt.resize(initialGrid.cols, initialGrid.rows);
       gridRef.current = initialGrid;
       setGrid(initialGrid);
+      // The flex layout may have stretched the prototype-sized panel by a
+      // fractional row. Snap the outer box to the measured grid as well: wterm
+      // can only preserve its follow-tail invariant when the viewport contains
+      // a whole number of rows.
+      setSize(terminalPanelSize(initialGrid, metricsRef.current));
       const socket = new WebSocket(terminalUrl(orbId), TERMINAL_SUBPROTOCOL);
       socket.binaryType = "arraybuffer";
       socketRef.current = socket;
