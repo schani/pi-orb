@@ -507,6 +507,19 @@ describe("control-plane API schemas", () => {
       }),
     ).toBe(true);
     expect(
+      Check(OrbViewSchema, {
+        id: "o2",
+        projectId: "p1",
+        name: "Busy orb",
+        state: "running",
+        stateVersion: 2,
+        activity: "busy",
+        stateChangedAt: "2026-07-20T10:00:00.000Z",
+        createdAt: "2026-07-20T09:00:00.000Z",
+        updatedAt: "2026-07-20T10:00:00.000Z",
+      }),
+    ).toBe(true);
+    expect(
       Check(OrbHistoryViewSchema, {
         orbId: "o1",
         session: sessionMetadata,

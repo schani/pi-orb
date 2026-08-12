@@ -19,9 +19,11 @@ const orb = (id: string, state: OrbState): OrbView => ({
 });
 
 describe("project orb presentation", () => {
-  it("uses the shipped favicon variants without lifecycle state bubbles", () => {
+  it("uses current activity for running orbs and lifecycle state otherwise", () => {
+    expect(projectOrbFaviconStatus("running", "busy")).toBe("busy");
+    expect(projectOrbFaviconStatus("running", "idle")).toBe("running");
     expect(projectOrbFaviconStatus("running")).toBe("running");
-    expect(projectOrbFaviconStatus("stopped")).toBe("stopped");
+    expect(projectOrbFaviconStatus("stopped", "busy")).toBe("stopped");
     expect(projectOrbFaviconStatus("archived")).toBe("stopped");
     expect(projectOrbFaviconStatus("failed")).toBe("failed");
     expect(projectOrbFaviconStatus("archiving")).toBe("transitional");

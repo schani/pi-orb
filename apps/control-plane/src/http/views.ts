@@ -42,6 +42,7 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
     control.isAuthBlocked(orb.id) &&
     challenge.verificationUri !== "";
   const drain = orb.state === "stopping" ? control.getDrainStatus(orb.id) : null;
+  const liveness = orb.state === "running" ? control.getLiveness(orb.id) : null;
   const bootProbe =
     (orb.state === "creating" || orb.state === "starting") && !showChallenge
       ? control.getBootProbe(orb.id)
@@ -52,6 +53,7 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
     name: orb.name,
     state: orb.state,
     stateVersion: orb.stateVersion,
+    ...(liveness !== null ? { activity: liveness.activity } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
     ...(orb.state === "deleting"

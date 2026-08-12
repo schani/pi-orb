@@ -3,9 +3,12 @@ import type { OrbFaviconStatus } from "./favicon.ts";
 
 export type ProjectOrbShelf = "working" | "archive";
 
-/** Project rows use the same coarse glyph mapping as the browser-tab favicon. */
-export function projectOrbFaviconStatus(state: OrbState): OrbFaviconStatus {
-  if (state === "running") return "running";
+/** Project rows add the latest API activity observation to the lifecycle glyph mapping. */
+export function projectOrbFaviconStatus(
+  state: OrbState,
+  activity?: OrbView["activity"],
+): OrbFaviconStatus {
+  if (state === "running") return activity === "busy" ? "busy" : "running";
   if (state === "stopped" || state === "archived") return "stopped";
   if (state === "failed") return "failed";
   return "transitional";

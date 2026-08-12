@@ -63,7 +63,8 @@ function ProjectOrbRow({
   onDelete,
 }: Omit<ProjectOrbShelvesProps, "items"> & { orb: OrbView }) {
   const actions = projectOrbActions(orb.state);
-  const favicon = projectOrbFaviconStatus(orb.state);
+  const favicon = projectOrbFaviconStatus(orb.state, orb.activity);
+  const displayedState = orb.state === "running" && orb.activity === "busy" ? "busy" : orb.state;
   const blocker =
     orb.state === "deleting" &&
     orb.stateDetail?.type === "deleting_resources" &&
@@ -78,12 +79,12 @@ function ProjectOrbRow({
           <span
             className="project-orb-state"
             role="img"
-            aria-label={`State: ${orb.state}`}
-            title={orb.state}
+            aria-label={`State: ${displayedState}`}
+            title={displayedState}
           >
             <img src={`/favicons/${favicon}.svg`} alt="" />
             <span className="project-orb-state-tooltip" role="tooltip">
-              {orb.state}
+              {displayedState}
             </span>
           </span>
           <span className="project-orb-name">

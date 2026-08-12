@@ -112,6 +112,7 @@ interface OrbView {
   state: "creating" | "starting" | "running" | "stopping" | "stopped" | "failed" | "deleting"
     | "archiving" | "archived";
   stateVersion: number;
+  activity?: "idle" | "busy";
   checkoutCommit?: string;
   lastError?: string;
   stateDetail?: {
@@ -167,7 +168,7 @@ The browser shows the name as the primary identity in project orb lists and the 
 
 Implementation: PostgreSQL migration `005_orb_names.sql` (also exercised by the local PGlite backend); protocol schemas in `packages/protocol/src/orb-naming.ts` and `control-plane-api.ts`; lease/race domain logic in `domain/orb-naming.ts`; naming adapter `adapters/pi-name-generator.ts` over the shared `packages/luna` inference adapter; runtime trigger and replicated-history fallback in `http/runtime-routes.ts`, `orb-runtime/src/pi/agent.ts`, and `domain/replication.ts`. The user-wins and concurrent-trigger schedules are covered by `orb-naming.dst.test.ts`; the full-slice E2E asserts the generated name.
 
-Do not expose `host_ref`, model credentials, harness session ID, or internal replication fields in `OrbView`. `actionRequired` is synthesized from the current in-memory device flow and can contain only its public challenge; it is not stored in the orb row. `stateDetail` is synthesized the same way from in-memory reconciler state: while `stopping` it reports the history-drain blocker — for example a retrying database outage — so a long stop is explained rather than an unlabeled spinner, and new detail variants can be added later without schema changes. The dedicated history response exposes only the cursor/head needed for live handoff.
+Do not expose `host_ref`, model credentials, harness session ID, or internal replication fields in `OrbView`. `actionRequired` is synthesized from the current in-memory device flow and can contain only its public challenge; it is not stored in the orb row. `stateDetail` is synthesized the same way from in-memory reconciler state: while `stopping` it reports the history-drain blocker — for example a retrying database outage — so a long stop is explained rather than an unlabeled spinner, and new detail variants can be added later without schema changes. For a running orb, optional `activity` is the latest `idle | busy` value observed by that control-plane process in a successful history pull; it is omitted when no observation is available and for every non-running lifecycle state. It is an advisory snapshot for ordinary resource reads, not a durable field or push subscription (decided 2026-08-13). The dedicated history response exposes only the cursor/head needed for live handoff.
 
 Status behavior:
 

@@ -49,6 +49,28 @@ describe("orbView failures", () => {
   });
 });
 
+describe("orbView activity", () => {
+  it("exposes the latest observed activity for a running orb", () => {
+    const control = new ControlState();
+    control.recordPullSuccess(orb.id, 123, "busy", "runtime-1");
+
+    const view = orbView(orb, control, {});
+
+    expect(view.activity).toBe("busy");
+    expect(Check(OrbViewSchema, view)).toBe(true);
+  });
+
+  it("omits activity when it is unknown or the orb is not running", () => {
+    const control = new ControlState();
+    expect(orbView(orb, control, {}).activity).toBeUndefined();
+
+    control.recordPullSuccess(orb.id, 123, "busy", "runtime-1");
+    const stopped = orbView({ ...orb, state: "stopped" }, control, {});
+    expect(stopped.activity).toBeUndefined();
+    expect("activity" in stopped).toBe(false);
+  });
+});
+
 describe("orbView previewHost", () => {
   it("derives the MagicDNS host when a tailnet is configured", () => {
     const view = orbView(orb, new ControlState(), { tailnetDnsName: "tailabc123.ts.net" });

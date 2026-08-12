@@ -145,6 +145,8 @@ export const OrbViewSchema = Type.Object(
     name: Type.Union([Type.String(), Type.Null()]),
     state: OrbStateSchema,
     stateVersion: Type.Number(),
+    /** Latest activity observed by the control plane; present only when known for a running orb. */
+    activity: Type.Optional(Type.Union([Type.Literal("idle"), Type.Literal("busy")])),
     checkoutCommit: Type.Optional(Type.String()),
     lastError: Type.Optional(Type.String()),
     /** Synthesized from in-memory reconciler state; never stored. */
