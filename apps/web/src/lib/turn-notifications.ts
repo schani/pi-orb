@@ -79,18 +79,3 @@ export function showTurnNotification(options: {
     };
   }
 }
-
-export function describeTurnNotificationResult(result: TurnNotificationResult): string {
-  if (result.type === "shown") return "Desktop notification sent for this turn.";
-  if (result.type === "failed") return `Desktop notification failed: ${result.message}`;
-  switch (result.reason) {
-    case "unsupported":
-      return "Desktop notification unavailable: this page is not in a secure browser context.";
-    case "permission_default":
-      return "Desktop notification not sent: enable notifications in the orb header.";
-    case "permission_denied":
-      return "Desktop notification not sent: notifications are blocked in browser settings.";
-    case "duplicate":
-      return "Desktop notification already handled for this turn.";
-  }
-}

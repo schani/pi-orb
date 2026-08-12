@@ -5,8 +5,10 @@ import {
   CAPABILITY_ABORT,
   type ClientAction,
   ClientFrameSchema,
+  EnqueueOrbMessageRequestSchema,
   type HistoryRecord,
   type OrbHistoryView,
+  type OrbMessageView,
   type OrbView,
   type ProjectView,
   RUNTIME_SUBPROTOCOL,
@@ -29,6 +31,8 @@ interface MockState {
   projects: Map<string, ProjectView>;
   orbs: Map<string, OrbView>;
   histories: Map<string, HistoryRecord[]>;
+  messages: Map<string, OrbMessageView[]>;
+  liveSessions: Map<string, Set<LiveSession>>;
   startupTimers: Map<string, NodeJS.Timeout>;
 }
 
@@ -270,6 +274,12 @@ function initialState(): MockState {
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),
+    messages: new Map([
+      [orb.id, []],
+      [authOrb.id, []],
+      [archivedOrb.id, []],
+    ]),
+    liveSessions: new Map(),
     startupTimers: new Map(),
   };
 }
@@ -373,6 +383,7 @@ async function handleApi(
         for (const orb of children) {
           state.orbs.delete(orb.id);
           state.histories.delete(orb.id);
+          state.messages.delete(orb.id);
         }
         state.projects.delete(projectId);
       }, 1_000);
@@ -486,6 +497,7 @@ async function handleApi(
       };
       state.orbs.set(orb.id, orb);
       state.histories.set(orb.id, []);
+      state.messages.set(orb.id, []);
       const timer = setTimeout(() => {
         state.startupTimers.delete(orb.id);
         const current = state.orbs.get(orb.id);
@@ -495,6 +507,50 @@ async function handleApi(
       }, NEW_ORB_STARTUP_DELAY_MS);
       state.startupTimers.set(orb.id, timer);
       sendJson(response, 202, orb);
+      return true;
+    }
+  }
+
+  const messageRoute = /^\/api\/v1\/orbs\/([^/]+)\/messages(?:\/([^/]+))?$/.exec(path);
+  if (messageRoute !== null) {
+    const orbId = decodeURIComponent(messageRoute[1] ?? "");
+    const messageId =
+      messageRoute[2] === undefined ? undefined : decodeURIComponent(messageRoute[2]);
+    if (!state.orbs.has(orbId)) {
+      notFound(response);
+      return true;
+    }
+    if (method === "GET" && messageId === undefined) {
+      sendJson(response, 200, { items: state.messages.get(orbId) ?? [] });
+      return true;
+    }
+    if (method === "PUT" && messageId !== undefined) {
+      const body = await readJson(request);
+      if (!Check(EnqueueOrbMessageRequestSchema, body)) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "invalid message body", retryable: false },
+        });
+        return true;
+      }
+      const messages = state.messages.get(orbId) ?? [];
+      const existing = messages.find((message) => message.id === messageId);
+      if (existing !== undefined) {
+        sendJson(response, 202, existing);
+        return true;
+      }
+      const createdAt = now();
+      const message: OrbMessageView = {
+        id: messageId,
+        orbId,
+        content: body.content,
+        status: "queued",
+        createdAt,
+        updatedAt: createdAt,
+      };
+      messages.push(message);
+      state.messages.set(orbId, messages);
+      sendJson(response, 202, message);
+      setTimeout(() => deliverPendingMessage(state, orbId, messageId), 0);
       return true;
     }
   }
@@ -519,6 +575,7 @@ async function handleApi(
       const timer = setTimeout(() => {
         state.orbs.delete(orbId);
         state.histories.delete(orbId);
+        state.messages.delete(orbId);
         state.startupTimers.delete(orbId);
       }, 1_000);
       state.startupTimers.set(orbId, timer);
@@ -675,6 +732,10 @@ function completeEcho(
     );
   }, 100);
   session.operation = null;
+  const next = (state.messages.get(session.orbId) ?? []).find(
+    (message) => message.status === "queued",
+  );
+  if (next !== undefined) setTimeout(() => deliverPendingMessage(state, session.orbId, next.id), 0);
 }
 
 function completeShell(
@@ -743,6 +804,10 @@ function completeShell(
     }),
   );
   session.operation = null;
+  const next = (state.messages.get(session.orbId) ?? []).find(
+    (message) => message.status === "queued",
+  );
+  if (next !== undefined) setTimeout(() => deliverPendingMessage(state, session.orbId, next.id), 0);
 }
 
 function handleAction(
@@ -750,6 +815,7 @@ function handleAction(
   session: LiveSession,
   requestId: string,
   action: ClientAction,
+  inboxMessageIds: readonly string[] = [],
 ) {
   if (action.type === "abort") {
     if (session.operation === null || session.operation.id !== action.operationId) {
@@ -914,8 +980,28 @@ function handleAction(
     type: "message",
     role: "user",
     content: action.content,
-    overflow: {},
+    overflow:
+      inboxMessageIds.length === 0
+        ? {}
+        : {
+            native: {
+              type: "custom_message",
+              customType: "pi-orb.user-message",
+              details: { messageIds: [...inboxMessageIds], delivery: "turn", operationId },
+            },
+          },
   };
+  if (inboxMessageIds.length > 0) {
+    const ids = new Set(inboxMessageIds);
+    state.messages.set(
+      session.orbId,
+      (state.messages.get(session.orbId) ?? []).map((message) =>
+        ids.has(message.id)
+          ? { ...message, status: "delivered", delivery: "turn", operationId, updatedAt: now() }
+          : message,
+      ),
+    );
+  }
   appendRecord(state, session.orbId, userRecord);
   const unnamedOrb = state.orbs.get(session.orbId);
   if (unnamedOrb?.name === null) {
@@ -994,8 +1080,29 @@ function handleAction(
   session.operation = { id: operationId, timer };
 }
 
+function deliverPendingMessage(state: MockState, orbId: string, messageId: string): void {
+  const message = (state.messages.get(orbId) ?? []).find(
+    (candidate) => candidate.id === messageId && candidate.status === "queued",
+  );
+  const session = [...(state.liveSessions.get(orbId) ?? [])].find(
+    (candidate) => candidate.socket.readyState === WebSocket.OPEN && candidate.operation === null,
+  );
+  if (message === undefined || session === undefined) return;
+  const records = state.histories.get(orbId) ?? [];
+  handleAction(
+    state,
+    session,
+    messageId,
+    { type: "message", content: message.content, expectedHeadId: records.at(-1)?.id ?? null },
+    [messageId],
+  );
+}
+
 function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): void {
   const session: LiveSession = { socket, orbId, operation: null };
+  const sessions = state.liveSessions.get(orbId) ?? new Set<LiveSession>();
+  sessions.add(session);
+  state.liveSessions.set(orbId, sessions);
   socket.on("message", (data, isBinary) => {
     if (isBinary) return;
     let parsed: unknown;
@@ -1055,9 +1162,16 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
         event: { type: "status", activity: "idle" },
       }),
     );
+    for (const message of state.messages.get(orbId) ?? []) {
+      if (message.status === "queued")
+        setTimeout(() => deliverPendingMessage(state, orbId, message.id), 0);
+    }
   });
   socket.on("close", () => {
     if (session.operation !== null) clearTimeout(session.operation.timer);
+    const current = state.liveSessions.get(orbId);
+    current?.delete(session);
+    if (current?.size === 0) state.liveSessions.delete(orbId);
   });
 }
 

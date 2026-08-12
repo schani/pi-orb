@@ -42,7 +42,6 @@ import {
 import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
 import {
   type BrowserNotificationPermission,
-  describeTurnNotificationResult,
   notificationPermission,
   requestNotificationPermission,
   showTurnNotification,
@@ -597,7 +596,6 @@ export function OrbPage({ orbId }: { orbId: string }) {
               summary: event.summary,
             });
             console.info("turn notification", { operationId: event.operationId, result });
-            dispatch({ type: "notice", message: describeTurnNotificationResult(result) });
           });
         }
         dispatch({ type: "frame", frame });
