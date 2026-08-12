@@ -12,7 +12,11 @@ import type { TailscaleError } from "../../domain/errors.ts";
 
 /** What the host providers need from this adapter. */
 export interface TailscaleAuthKeyMinter {
-  mintAuthKey(orbId: string, signal: AbortSignal): ResultAsync<string, TailscaleError>;
+  mintAuthKey(
+    orbId: string,
+    incarnation: number,
+    signal: AbortSignal,
+  ): ResultAsync<string, TailscaleError>;
 }
 
 export interface TailscaleOrbCleaner {
@@ -112,6 +116,8 @@ function parseJson(what: string, text: string): Result<Record<string, unknown>, 
 export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, TailscaleOrbCleaner {
   private readonly transport: TailscaleApiTransport;
   private readonly config: TailscaleOAuthConfig;
+  /** Serialize revoke-before-mint/cleanup for one orb in this adapter process. */
+  private readonly orbLocks = new Map<string, Promise<void>>();
 
   constructor(transport: TailscaleApiTransport, config: TailscaleOAuthConfig) {
     this.transport = transport;
@@ -120,6 +126,23 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
 
   private url(path: string): string {
     return `${this.config.baseUrl ?? REAL_API_BASE_URL}${path}`;
+  }
+
+  private async withOrbLock<T>(orbId: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.orbLocks.get(orbId) ?? Promise.resolve();
+    let release = (): void => undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => current);
+    this.orbLocks.set(orbId, tail);
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+      if (this.orbLocks.get(orbId) === tail) this.orbLocks.delete(orbId);
+    }
   }
 
   /** The single exception boundary of this adapter. */
@@ -177,8 +200,60 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
     return ok(token);
   }
 
+  private async revokeOrbKeys(
+    orbId: string,
+    headers: Readonly<Record<string, string>>,
+    signal: AbortSignal,
+  ): Promise<Result<void, TailscaleError>> {
+    const keyList = await this.send("GET", this.url("/api/v2/tailnet/-/keys"), headers, signal);
+    if (keyList.isErr()) return err(keyList.error);
+    if (keyList.value.status < 200 || keyList.value.status >= 300) {
+      return err(statusError("tailscale key list", keyList.value.status, keyList.value.text));
+    }
+    const parsed = Result.fromThrowable(
+      () => JSON.parse(keyList.value.text) as unknown,
+      () => rejected("tailscale key list returned unparseable JSON"),
+    )();
+    if (parsed.isErr()) return err(parsed.error);
+    const keys = Array.isArray(parsed.value)
+      ? parsed.value
+      : typeof parsed.value === "object" &&
+          parsed.value !== null &&
+          Array.isArray((parsed.value as Record<string, unknown>)["keys"])
+        ? ((parsed.value as Record<string, unknown>)["keys"] as unknown[])
+        : [];
+    const legacyDescription = `pi-orb ${orbId}`;
+    const incarnationPrefix = `${legacyDescription} i`;
+    for (const value of keys) {
+      const key = value as Record<string, unknown>;
+      const description = key["description"];
+      const exact =
+        description === legacyDescription ||
+        (typeof description === "string" &&
+          description.startsWith(incarnationPrefix) &&
+          /^\d+$/.test(description.slice(incarnationPrefix.length)));
+      if (!exact || typeof key["id"] !== "string") continue;
+      const removed = await this.send(
+        "DELETE",
+        this.url(`/api/v2/tailnet/-/keys/${encodeURIComponent(key["id"])}`),
+        headers,
+        signal,
+      );
+      if (removed.isErr()) return err(removed.error);
+      if (
+        removed.value.status !== 404 &&
+        (removed.value.status < 200 || removed.value.status >= 300)
+      ) {
+        return err(statusError("tailscale key delete", removed.value.status, removed.value.text));
+      }
+    }
+    return ok(undefined);
+  }
+
   /**
-   * Reusable and non-ephemeral: tailscaled's state persists on the orb's data
+   * Non-ephemeral device state persists on the orb's data volume. Auth keys
+   * are incarnation-scoped and non-reusable; revoke-before-mint bounds the
+   * tailnet to at most one unconsumed exact-orb key.
    * volume, so the same key is replayed after a restart and the device record
    * must survive the offline stretches a stopped orb spends. Preauthorized
    * and tagged so no admin has to approve a node and the tailnet ACLs scope
@@ -189,41 +264,8 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
       const token = await this.accessToken(signal);
       if (token.isErr()) return err(token.error);
       const headers = { authorization: `Bearer ${token.value}` };
-      const description = `pi-orb ${orbId}`;
-      const keyList = await this.send("GET", this.url("/api/v2/tailnet/-/keys"), headers, signal);
-      if (keyList.isErr()) return err(keyList.error);
-      if (keyList.value.status < 200 || keyList.value.status >= 300) {
-        return err(statusError("tailscale key list", keyList.value.status, keyList.value.text));
-      }
-      const parsedKeys = Result.fromThrowable(
-        () => JSON.parse(keyList.value.text) as unknown,
-        () => rejected("tailscale key list returned unparseable JSON"),
-      )();
-      if (parsedKeys.isErr()) return err(parsedKeys.error);
-      const keys = Array.isArray(parsedKeys.value)
-        ? parsedKeys.value
-        : typeof parsedKeys.value === "object" &&
-            parsedKeys.value !== null &&
-            Array.isArray((parsedKeys.value as Record<string, unknown>)["keys"])
-          ? ((parsedKeys.value as Record<string, unknown>)["keys"] as unknown[])
-          : [];
-      for (const value of keys) {
-        const key = value as Record<string, unknown>;
-        if (key["description"] !== description || typeof key["id"] !== "string") continue;
-        const removed = await this.send(
-          "DELETE",
-          this.url(`/api/v2/tailnet/-/keys/${encodeURIComponent(key["id"])}`),
-          headers,
-          signal,
-        );
-        if (removed.isErr()) return err(removed.error);
-        if (
-          removed.value.status !== 404 &&
-          (removed.value.status < 200 || removed.value.status >= 300)
-        ) {
-          return err(statusError("tailscale key delete", removed.value.status, removed.value.text));
-        }
-      }
+      const revoked = await this.revokeOrbKeys(orbId, headers, signal);
+      if (revoked.isErr()) return err(revoked.error);
 
       const deviceList = await this.send(
         "GET",
@@ -270,26 +312,33 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
       }
       return ok(undefined);
     };
-    return new ResultAsync(run());
+    return new ResultAsync(this.withOrbLock(orbId, run));
   }
 
-  mintAuthKey(orbId: string, signal: AbortSignal): ResultAsync<string, TailscaleError> {
+  mintAuthKey(
+    orbId: string,
+    incarnation: number,
+    signal: AbortSignal,
+  ): ResultAsync<string, TailscaleError> {
     const run = async (): Promise<Result<string, TailscaleError>> => {
       const token = await this.accessToken(signal);
       if (token.isErr()) return err(token.error);
+      const headers = {
+        authorization: `Bearer ${token.value}`,
+        "content-type": "application/json",
+      };
+      const revoked = await this.revokeOrbKeys(orbId, headers, signal);
+      if (revoked.isErr()) return err(revoked.error);
       const response = await this.post(
         this.url("/api/v2/tailnet/-/keys"),
-        {
-          authorization: `Bearer ${token.value}`,
-          "content-type": "application/json",
-        },
+        headers,
         JSON.stringify({
-          description: `pi-orb ${orbId}`,
+          description: `pi-orb ${orbId} i${incarnation}`,
           expirySeconds: KEY_EXPIRY_SECONDS,
           capabilities: {
             devices: {
               create: {
-                reusable: true,
+                reusable: false,
                 ephemeral: false,
                 preauthorized: true,
                 tags: [TAILSCALE_ORB_TAG],
@@ -311,6 +360,6 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
       }
       return ok(key);
     };
-    return new ResultAsync(run());
+    return new ResultAsync(this.withOrbLock(orbId, run));
   }
 }

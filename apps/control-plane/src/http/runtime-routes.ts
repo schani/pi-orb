@@ -67,6 +67,7 @@ export function registerRuntimeRoutes(
     if (
       orb === null ||
       orb.runtimeTokenHash === null ||
+      orb.hostDiscardThroughIncarnation !== null ||
       !hashesEqual(orb.runtimeTokenHash, tokenHash) ||
       !RUNTIME_TOKEN_STATES.includes(orb.state)
     )
@@ -98,6 +99,7 @@ export function registerRuntimeRoutes(
       if (
         orb === null ||
         orb.runtimeTokenHash === null ||
+        orb.hostDiscardThroughIncarnation !== null ||
         !hashesEqual(orb.runtimeTokenHash, tokenHash) ||
         !RUNTIME_TOKEN_STATES.includes(orb.state)
       ) {

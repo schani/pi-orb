@@ -34,6 +34,7 @@ interface OrbHostRef {
 
 interface ProvisionOrbHostRequest {
   orbId: string;
+  incarnation: number;
   bootstrap: {
     repositoryUrl: string;
   };
@@ -42,6 +43,7 @@ interface ProvisionOrbHostRequest {
 interface OrbHostObservation {
   ref: OrbHostRef;
   orbId: string;
+  incarnation: number; // unstamped legacy compute is incarnation 0
   state: OrbHostState;
 
   // Ephemeral observation; never authoritative persisted state.
@@ -66,13 +68,25 @@ interface OrbHostProvider {
   provision(
     request: ProvisionOrbHostRequest,
     context: OperationContext,
-  ): ResultAsync<OrbHostRef, OrbHostProviderError>;
+  ): ResultAsync<
+    { ref: OrbHostRef; incarnation: number; runtimeTokenHash: string },
+    OrbHostProviderError
+  >;
 
-  /** Idempotent. */
-  start(ref: OrbHostRef, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
+  /** Idempotent; refuses a resource carrying a different incarnation. */
+  start(
+    request: { ref: OrbHostRef; expectedIncarnation: number },
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError>;
 
   /** Gracefully stops compute while retaining its filesystem. Idempotent. */
   stop(ref: OrbHostRef, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
+
+  /** Removes fenced compute while preserving authoritative workspace/tailnet state. */
+  discardCompute(
+    request: { orbId: string; throughIncarnation: number },
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError>;
 
   /** Permanently removes every provider resource owned by orbId. Idempotent. */
   destroy(orbId: string, context: OperationContext): ResultAsync<void, OrbHostProviderError>;
@@ -96,6 +110,8 @@ interface OrbHostProvider {
 Every finite provider call receives an `OperationContext`. The provider passes its signal to the underlying HTTP/process API and returns a typed `cancelled` error after cancellation is observed. Cancellation does not promise rollback of an external side effect: an ambiguous provision/start/stop is resolved by later idempotent `observe` and reconciliation.
 
 **Deletion extension implemented 2026-08-08.** `docs/orb-deletion.md` adds an idempotent `destroy(orbId, context)` operation and `destroy` operation discriminant. Unlike `stop`, it removes compute and the authoritative persistent filesystem; it addresses resources by deterministic orb identity so cleanup still works when `host_ref` was lost. The durable `deleting` lifecycle and tombstone sweep own retries and stale-provision races.
+
+**Failed-compute disposal foundation implemented 2026-08-12.** Provision/start/results/observations now carry the compute incarnation. Docker containers, GCE instances, process refs, and provider stamps use incarnation-specific identity; legacy unstamped compute reads as incarnation 0. `discardCompute` enumerates exact-orb compute and removes only resources at or below its durable fence while preserving the workspace. Full `destroy` enumerates every incarnation before deleting storage. The process adapter persists the launched process-group leader so a replacement control-plane process can verify and terminate compute it did not launch. Lifecycle observation mismatches fail closed and create the ordinary discard intent. The deterministic stateful GCE model and the remaining crash/failpoint matrix are still implementation work in `docs/compute-replacement.md`.
 
 There is intentionally no `unknown` host state. Failure to determine state is an error, not a durable state. There is also no `missing` state; definitive absence is represented by `observe()` returning `null`.
 

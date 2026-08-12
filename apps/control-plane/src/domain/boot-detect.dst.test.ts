@@ -36,11 +36,12 @@ describe("boot-failure detection (DST)", () => {
               { timeoutMs: 220_000 },
             );
             failedAtMono = task.monotonicNow() - startedAt;
-            // A cancelled best-effort stop is repaired by the backstop sweep.
             await waitUntil(
               task,
-              "host stopped",
-              () => harness.world.hostStateOf(ORB) === "stopped",
+              "failed compute discarded",
+              () =>
+                harness.world.hostStateOf(ORB) === null &&
+                harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null,
               { timeoutMs: 30_000 },
             );
             stop.abort();
@@ -52,8 +53,10 @@ describe("boot-failure detection (DST)", () => {
       expect(orb?.lastError).toContain("runtime_never_answered");
       // The provider's host-side evidence reaches the terminal error.
       expect(orb?.lastError).toContain("startup-script failed at: docker run");
+      expect(orb?.hostDiscardEvidence).toContain("startup-script failed at: docker run");
+      expect(orb?.hostIncarnation).toBe(1);
       expect(failedAtMono).toBeLessThan(220_000);
-      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+      expect(harness.world.hostStateOf(ORB)).toBeNull();
     });
   });
 

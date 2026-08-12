@@ -11,6 +11,8 @@ import type {
  * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
  * milliseconds; adapters convert to/from `timestamptz`.
  */
+export type HostDiscardReason = "failed" | "host_spec_changed";
+
 export interface OrbRow {
   readonly id: string;
   readonly projectId: string;
@@ -22,6 +24,17 @@ export interface OrbRow {
   readonly stateVersion: number;
   readonly hostKind: string;
   readonly hostRef: string | null;
+  /** Monotone identity of disposable compute; workspace identity is not incarnation-scoped. */
+  readonly hostIncarnation: number;
+  /** Immutable launch specification committed for the current compute incarnation. */
+  readonly hostSpecFingerprint: string | null;
+  readonly hostSpecGeneration: number | null;
+  /** Durable authority to discard compute at or below this incarnation. */
+  readonly hostDiscardThroughIncarnation: number | null;
+  readonly hostDiscardReason: HostDiscardReason | null;
+  readonly hostDiscardError: string | null;
+  readonly hostDiscardEvidence: string | null;
+  readonly hostDiscardRequestedAt: number | null;
   /** Persisted when the runtime first reports ready; doubles as the "has ever been ready" marker. */
   readonly checkoutCommit: string | null;
   readonly harnessSessionId: string | null;

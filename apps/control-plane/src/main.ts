@@ -172,16 +172,21 @@ async function main(): Promise<void> {
     },
     constants: DEFAULT_BROKER_CONSTANTS,
   };
-  const mockExtraEnv =
-    mockOpenAi !== null
-      ? {
-          extraEnv: {
-            [MOCK_OPENAI_OAUTH_URL_ENV]: mockOpenAi.oauthBaseUrl,
-            [MOCK_OPENAI_INFERENCE_URL_ENV]: mockOpenAi.inferenceBaseUrl,
-            PI_OFFLINE: "1",
-          },
-        }
-      : {};
+  const e2eLaunchFailureMarker = env("PI_ORB_E2E_LAUNCH_FAILURE_MARKER", "");
+  const runtimeExtraEnv = {
+    ...(mockOpenAi === null
+      ? {}
+      : {
+          [MOCK_OPENAI_OAUTH_URL_ENV]: mockOpenAi.oauthBaseUrl,
+          [MOCK_OPENAI_INFERENCE_URL_ENV]: mockOpenAi.inferenceBaseUrl,
+          PI_OFFLINE: "1",
+        }),
+    ...(e2eLaunchFailureMarker === ""
+      ? {}
+      : { PI_ORB_E2E_LAUNCH_FAILURE_MARKER: e2eLaunchFailureMarker }),
+  };
+  const extraEnvOption =
+    Object.keys(runtimeExtraEnv).length === 0 ? {} : { extraEnv: runtimeExtraEnv };
   // Tailscale tier-1 port exposure (docs/ports.md). All three settings or
   // none: without the OAuth client there is no key to mint, and without the
   // tailnet DNS name there is no host to publish. Unset means orbs are
@@ -235,7 +240,7 @@ async function main(): Promise<void> {
           runtimeImage,
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
           scriptGeneration: Number.isFinite(scriptGeneration) ? scriptGeneration : 0,
-          ...mockExtraEnv,
+          ...extraEnvOption,
           ...tailscaleOption,
         })
       : providerKind === "process"
@@ -248,7 +253,7 @@ async function main(): Promise<void> {
               new URL("../../orb-runtime/src/main.ts", import.meta.url),
             ),
             controlPlaneUrl: env("PI_ORB_BROKER_URL", `http://127.0.0.1:${port}`),
-            ...mockExtraEnv,
+            ...extraEnvOption,
           })
         : new DockerOrbHostProvider({
             image: runtimeImage,
@@ -258,7 +263,7 @@ async function main(): Promise<void> {
             process.env["PI_ORB_BROKER_URL"] !== ""
               ? { controlPlaneUrl: process.env["PI_ORB_BROKER_URL"] }
               : {}),
-            ...mockExtraEnv,
+            ...extraEnvOption,
             ...tailscaleOption,
           });
   const nameInferenceUrl = env("PI_ORB_NAME_INFERENCE_URL", mockOpenAi?.inferenceBaseUrl ?? "");

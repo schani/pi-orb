@@ -6,6 +6,7 @@ import { PiOrbAgent } from "./pi/agent.ts";
 import { startTailscale } from "./tailscale/daemon.ts";
 import { readTailscaleEnv } from "./tailscale/env.ts";
 import { TerminalManager } from "./terminal/manager.ts";
+import { checkTestLaunchFailure } from "./test-launch-failure.ts";
 
 const env = (name: string, fallback?: string): string => {
   const value = process.env[name];
@@ -22,6 +23,13 @@ const unreachableRejection = (error: unknown): void => {
 
 async function main(): Promise<void> {
   const workDir = env("PI_ORB_WORK_DIR", "/workspace");
+  const launchFailure = checkTestLaunchFailure(process.env, workDir);
+  if (launchFailure.error !== undefined) console.error(launchFailure.error);
+  if (launchFailure.inject) {
+    console.error(
+      `test launch failure injected for orb=${env("PI_ORB_ID")} incarnation=${env("PI_ORB_HOST_INCARNATION")}`,
+    );
+  }
   const tailscale = readTailscaleEnv(process.env);
   const agent = new PiOrbAgent({
     orbId: env("PI_ORB_ID"),
@@ -30,6 +38,7 @@ async function main(): Promise<void> {
     broker: readBrokerEnv(process.env),
     mockOpenAi: readMockOpenAiEnv(process.env),
     previewHost: tailscale?.previewHost ?? null,
+    testLaunchFailure: launchFailure.inject,
   });
 
   // The health server starts before slow initialization (docs/host-provider.md).

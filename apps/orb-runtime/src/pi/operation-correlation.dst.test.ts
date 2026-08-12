@@ -234,13 +234,25 @@ function assertCorrelation(h: Harness): void {
  * Drives Pi's two deferred steps as its own task so the scheduler decides
  * where the other submitter lands relative to them.
  */
-async function piTask(task: SimulationTask, h: Harness): Promise<void> {
-  for (let step = 0; step < 6; step++) {
+async function piTask(task: SimulationTask, h: Harness, expectedLandings: number): Promise<void> {
+  // Do not finish merely because the submitters' native-Promise continuations
+  // have not run yet. That left the inbox awaiting an unmanaged promise with
+  // no simulated task available to complete Pi's prologue. The modeled Pi
+  // task owns this gate until every expected submission has actually landed.
+  for (let step = 0; step < 20; step++) {
     await task.checkpoint(`pi step ${step}`);
     if (h.pi.hasPendingPrologue()) h.pi.completePrologue();
     await task.checkpoint(`pi announce ${step}`);
     if (h.pi.hasUnannouncedTurn()) h.pi.announceStart();
+    if (
+      h.pi.landings.length >= expectedLandings &&
+      !h.pi.hasPendingPrologue() &&
+      !h.pi.hasUnannouncedTurn()
+    ) {
+      return;
+    }
   }
+  throw new Error(`Pi did not receive ${expectedLandings} expected submissions`);
 }
 
 describe("operation-id correlation across submitters DST", () => {
@@ -277,7 +289,7 @@ describe("operation-id correlation across submitters DST", () => {
             });
           },
         },
-        { name: "pi", f: async (task) => piTask(task, h) },
+        { name: "pi", f: async (task) => piTask(task, h, 2) },
       ]);
       if (run.isErr()) throw run.error;
       assertCorrelation(h);
@@ -326,7 +338,7 @@ describe("operation-id correlation across submitters DST", () => {
             expect(browserSubmit(h, "operation-browser")).toBe("busy");
           },
         },
-        { name: "pi", f: async (task) => piTask(task, h) },
+        { name: "pi", f: async (task) => piTask(task, h, 1) },
       ]);
       if (run.isErr()) throw run.error;
       assertCorrelation(h);

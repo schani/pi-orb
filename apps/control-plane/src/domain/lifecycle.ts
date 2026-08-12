@@ -161,13 +161,19 @@ async function startHost(
   deps: ControlPlaneDeps,
   orbId: string,
   resourceId: string,
+  expectedIncarnation: number,
   reason: string,
 ): Promise<Result<void, OrbHostProviderError>> {
   const result = await withDeadline(
     task,
     deps.constants.providerOperationTimeoutMs,
     "start host",
-    (context) => deps.hostProvider.start(task, hostRefOf(deps, resourceId), context),
+    (context) =>
+      deps.hostProvider.start(
+        task,
+        { ref: hostRefOf(deps, resourceId), expectedIncarnation },
+        context,
+      ),
   );
   logOrbEvent(task, orbId, "host-start", {
     host: resourceId,
@@ -197,7 +203,11 @@ async function provisionHost(
     deps.constants.providerOperationTimeoutMs,
     "provision host",
     (context) =>
-      deps.hostProvider.provision(task, { orbId: orb.id, bootstrap: { repositoryUrl } }, context),
+      deps.hostProvider.provision(
+        task,
+        { orbId: orb.id, incarnation: orb.hostIncarnation, bootstrap: { repositoryUrl } },
+        context,
+      ),
   );
   if (result.isErr()) {
     logOrbEvent(task, orb.id, "provision", {
@@ -206,6 +216,16 @@ async function provisionHost(
       retryable: result.error.retryable,
     });
     return result;
+  }
+  if (result.value.incarnation !== orb.hostIncarnation) {
+    return err({
+      type: "orb_host_provider_error",
+      provider: deps.hostProvider.kind,
+      operation: "provision",
+      code: "conflict",
+      message: `provider returned incarnation ${result.value.incarnation}, expected ${orb.hostIncarnation}`,
+      retryable: false,
+    });
   }
   const resourceId = result.value.ref.resourceId;
   logOrbEvent(task, orb.id, "provision", {
@@ -219,46 +239,214 @@ async function provisionHost(
   return result;
 }
 
-/** CAS the orb to `failed` with a typed error. */
+function boundedDiscardText(value: string): string {
+  return value.replace(/[\r\n\t]+/g, " ").slice(0, 2_000);
+}
+
+/** CAS the orb to `failed` and atomically invalidate its compute incarnation. */
 async function failOrb(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orb: OrbRow,
   code: OrbFailureCode,
   message: string,
+  evidence?: string | null,
 ): Promise<ReconcileOutcome> {
-  const cas = await deps.store.casTransition(task, {
+  // Terminal diagnosis must precede the failure/discard transaction: after it
+  // commits, another reconciler is entitled to delete the compute immediately.
+  // Diagnosis is bounded and best-effort; its failure is durable evidence, not
+  // a reason to preserve suspect compute or defer the terminal decision.
+  let terminalEvidence = evidence;
+  if (terminalEvidence === undefined) {
+    if (orb.hostRef === null) {
+      terminalEvidence = "diagnosis unavailable: no compute reference";
+    } else if (deps.hostProvider.diagnose === undefined) {
+      terminalEvidence = "diagnosis unavailable: provider does not support diagnosis";
+    } else {
+      const diagnosed = await withDeadline(
+        task,
+        deps.constants.providerOperationTimeoutMs,
+        "diagnose terminal failure",
+        (context) =>
+          deps.hostProvider.diagnose?.(task, hostRefOf(deps, orb.hostRef ?? ""), context) ??
+          ResultAsync.fromSafePromise(Promise.resolve(null)),
+      );
+      terminalEvidence = diagnosed.isOk()
+        ? diagnosed.value === null || diagnosed.value === ""
+          ? "diagnosis unavailable: provider returned no evidence"
+          : boundedDiscardText(diagnosed.value)
+        : `diagnosis unavailable: ${boundedDiscardText(diagnosed.error.message)}`;
+    }
+  }
+  const boundedEvidence = boundedDiscardText(
+    terminalEvidence ?? "diagnosis unavailable: no evidence supplied",
+  );
+  const failureMessage =
+    boundedEvidence.startsWith("diagnosis unavailable:") || message.includes(boundedEvidence)
+      ? message
+      : `${message}; host_evidence: ${boundedEvidence}`;
+  const cas = await deps.store.failOrbAndRequestComputeDiscard(task, {
     orbId: orb.id,
     expectedStateVersion: orb.stateVersion,
-    toState: "failed",
     now: task.wallNow(),
-    lastError: formatOrbFailure(code, message),
+    lastError: formatOrbFailure(code, failureMessage),
+    evidence: boundedEvidence,
   });
   if (cas.isErr()) {
     return cas.error.type === "state_conflict" ? { type: "conflict" } : retryable(cas.error);
   }
+  await task.checkpoint("compute-replacement.failure-intent-committed");
   logOrbEvent(task, orb.id, "transition", {
     from: orb.state,
     to: "failed",
     code,
     error: message,
   });
+  logOrbEvent(task, orb.id, "compute-discard-requested", {
+    host: orb.hostRef,
+    through_incarnation: orb.hostIncarnation,
+    reason: "failed",
+    failure_code: code,
+  });
   deps.control.clearOrb(orb.id);
   return { type: "transitioned", toState: "failed" };
 }
 
-/** Stop the host (best effort, tolerating absence and errors), then fail the orb. */
+async function failOnObservationMismatch(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  observation: OrbHostObservation | null,
+): Promise<ReconcileOutcome | null> {
+  if (
+    observation === null ||
+    (observation.orbId === orb.id && observation.incarnation === orb.hostIncarnation)
+  ) {
+    return null;
+  }
+  return failOrb(
+    task,
+    deps,
+    orb,
+    "provider_failed",
+    `host identity mismatch: observed orb=${observation.orbId} incarnation=${observation.incarnation}, ` +
+      `expected orb=${orb.id} incarnation=${orb.hostIncarnation}`,
+  );
+}
+
+/** Commit failure first; shared reconciliation exclusively owns disposal. */
 async function failOrbStoppingHost(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orb: OrbRow,
   code: OrbFailureCode,
   message: string,
+  evidence?: string | null,
 ): Promise<ReconcileOutcome> {
-  if (orb.hostRef !== null) {
-    await stopHost(task, deps, orb.id, orb.hostRef, `orb_failing:${code}`);
+  return failOrb(task, deps, orb, code, message, evidence);
+}
+
+/**
+ * Reconcile one durable compute-discard intent before any state-specific host
+ * work. Provider absence is not enough: finalization advances the incarnation
+ * only after the adapter has verified every resource through the fence absent.
+ */
+async function reconcileHostDiscard(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+): Promise<ReconcileOutcome> {
+  const through = orb.hostDiscardThroughIncarnation;
+  if (through === null) return { type: "noop" };
+
+  let evidence = orb.hostDiscardEvidence;
+  if (evidence === null && orb.hostRef !== null && deps.hostProvider.diagnose !== undefined) {
+    const diagnosed = await withDeadline(
+      task,
+      deps.constants.providerOperationTimeoutMs,
+      "diagnose before compute discard",
+      (context) =>
+        deps.hostProvider.diagnose?.(task, hostRefOf(deps, orb.hostRef ?? ""), context) ??
+        ResultAsync.fromSafePromise(Promise.resolve(null)),
+    );
+    evidence = diagnosed.isOk()
+      ? diagnosed.value === null
+        ? "diagnosis unavailable: provider returned no evidence"
+        : boundedDiscardText(diagnosed.value)
+      : `diagnosis unavailable: ${boundedDiscardText(diagnosed.error.message)}`;
+    const recorded = await deps.store.recordHostDiscardStatus(task, {
+      orbId: orb.id,
+      throughIncarnation: through,
+      now: task.wallNow(),
+      evidence,
+    });
+    if (recorded.isErr()) return retryable(recorded.error);
   }
-  return failOrb(task, deps, orb, code, message);
+
+  await task.checkpoint("compute-replacement.discard-before-provider");
+  const discarded = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "discard compute",
+    (context) =>
+      deps.hostProvider.discardCompute(
+        task,
+        { orbId: orb.id, throughIncarnation: through },
+        context,
+      ),
+  );
+  await task.checkpoint("compute-replacement.discard-after-provider");
+  const condition = `compute-discard:${orb.id}:${through}`;
+  if (discarded.isErr()) {
+    const message = boundedDiscardText(discarded.error.message);
+    const recorded = await deps.store.recordHostDiscardStatus(task, {
+      orbId: orb.id,
+      throughIncarnation: through,
+      now: task.wallNow(),
+      error: message,
+    });
+    if (recorded.isErr()) return retryable(recorded.error);
+    const enteredInMemory = deps.control.noteCondition(condition, true);
+    // The durable error is the edge authority across process restarts. Do not
+    // re-log the same persisting condition merely because ControlState is new.
+    if (orb.hostDiscardError !== message || (orb.hostDiscardError === null && enteredInMemory)) {
+      logOrbEvent(task, orb.id, "compute-discard", {
+        host: orb.hostRef,
+        through_incarnation: through,
+        outcome: "error",
+        error: message,
+        evidence,
+      });
+    }
+    return retryable(discarded.error);
+  }
+
+  const recoveredInMemory = deps.control.noteCondition(condition, false);
+  if (orb.hostDiscardError !== null || recoveredInMemory) {
+    logOrbEvent(task, orb.id, "compute-discard-recovered", {
+      through_incarnation: through,
+    });
+  }
+  await task.checkpoint("compute-replacement.discard-before-finalize");
+  const finalized = await deps.store.finalizeHostDiscard(task, {
+    orbId: orb.id,
+    expectedStateVersion: orb.stateVersion,
+    throughIncarnation: through,
+    now: task.wallNow(),
+  });
+  if (finalized.isErr()) {
+    return finalized.error.type === "state_conflict"
+      ? { type: "conflict" }
+      : retryable(finalized.error);
+  }
+  await task.checkpoint("compute-replacement.discard-finalized");
+  logOrbEvent(task, orb.id, "compute-discard", {
+    host: orb.hostRef,
+    through_incarnation: through,
+    outcome: "ok",
+    evidence,
+  });
+  return { type: "progressed" };
 }
 
 async function transitionTo(
@@ -379,11 +567,19 @@ async function reconcileCreateStart(
     if (project === null) {
       return failOrb(task, deps, orb, "provider_failed", `project ${orb.projectId} not found`);
     }
+    const isReplacement = orb.hostIncarnation > 0;
+    if (isReplacement) {
+      await task.checkpoint("compute-replacement.replacement-before-provision");
+    }
     const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "no_host_ref");
     if (provisioned.isErr()) {
       return provisioned.error.retryable
         ? retryable(provisioned.error)
         : failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
+    }
+    if (isReplacement) {
+      await task.checkpoint("compute-replacement.replacement-after-provision");
+      await task.checkpoint("compute-replacement.replacement-before-commit");
     }
     const updated = await deps.store.casUpdateFields(task, {
       orbId: orb.id,
@@ -399,6 +595,13 @@ async function reconcileCreateStart(
     }
     orb = updated.value;
     hostResourceId = provisioned.value.ref.resourceId;
+    if (isReplacement) {
+      await task.checkpoint("compute-replacement.replacement-committed");
+      logOrbEvent(task, orb.id, "replacement-provisioned", {
+        host: hostResourceId,
+        incarnation: provisioned.value.incarnation,
+      });
+    }
   }
 
   // 4. Drive the host toward a ready runtime.
@@ -409,6 +612,8 @@ async function reconcileCreateStart(
       : failOrb(task, deps, orb, "provider_failed", observed.error.message);
   }
   const observation = observed.value;
+  const identityFailure = await failOnObservationMismatch(task, deps, orb, observation);
+  if (identityFailure !== null) return identityFailure;
   if (observation === null) {
     // Whatever boot this probe was measuring is over (docs/lifecycle.md): the
     // sub-deadline below must time *this* host incarnation, not a previous one.
@@ -484,6 +689,7 @@ async function reconcileCreateStart(
         deps,
         orb.id,
         hostResourceId,
+        orb.hostIncarnation,
         `host_observed_${observation.state}`,
       );
       if (started.isErr()) {
@@ -551,6 +757,7 @@ async function reconcileCreateStart(
             `host ran for ${seconds}s but the runtime never answered ` +
               `(${probe.attempts} probes; last error: ${health.error.message})` +
               (evidence !== null && evidence !== "" ? `; host diagnostics: ${evidence}` : ""),
+            evidence,
           );
         }
         return waiting("readiness");
@@ -658,6 +865,8 @@ async function reconcileRunning(
       : failOrb(task, deps, orb, "provider_failed", observed.error.message);
   }
   const observation = observed.value;
+  const identityFailure = await failOnObservationMismatch(task, deps, orb, observation);
+  if (identityFailure !== null) return identityFailure;
   if (observation === null || observation.state === "stopped" || observation.state === "failed") {
     // Unexpected absence/stop: restore the host around the retained
     // filesystem (docs/lifecycle.md).
@@ -695,7 +904,14 @@ async function reconcileRunning(
         ? retryable(stopped.error)
         : failOrb(task, deps, orb, "provider_failed", stopped.error.message);
     }
-    const started = await startHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
+    const started = await startHost(
+      task,
+      deps,
+      orb.id,
+      orb.hostRef,
+      orb.hostIncarnation,
+      "unreachable_runtime",
+    );
     if (started.isErr()) {
       return started.error.retryable
         ? retryable(started.error)
@@ -852,11 +1068,20 @@ async function reconcileStopping(
       : failOrb(task, deps, orb, "provider_failed", observed.error.message);
   }
   const observation = observed.value;
+  const identityFailure = await failOnObservationMismatch(task, deps, orb, observation);
+  if (identityFailure !== null) return identityFailure;
   if (observation === null || observation.state === "stopped" || observation.state === "failed") {
     // A host we stopped ourselves as half of an unreachable-runtime restart
     // is not "already stopped": complete the restart so the drain can finish.
     if (observation !== null && deps.control.isRestartPending(orb.id)) {
-      const started = await startHost(task, deps, orb.id, orb.hostRef, "complete_pending_restart");
+      const started = await startHost(
+        task,
+        deps,
+        orb.id,
+        orb.hostRef,
+        orb.hostIncarnation,
+        "complete_pending_restart",
+      );
       if (started.isErr()) return retryable(started.error);
       deps.control.clearRestartPending(orb.id);
       deps.control.resetLivenessBaseline(
@@ -942,7 +1167,14 @@ async function reconcileStopping(
     deps.control.markRestartPending(orb.id);
     const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
     if (stopped.isErr()) return retryable(stopped.error);
-    const started = await startHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
+    const started = await startHost(
+      task,
+      deps,
+      orb.id,
+      orb.hostRef,
+      orb.hostIncarnation,
+      "unreachable_runtime",
+    );
     if (started.isErr()) return retryable(started.error);
     deps.control.clearRestartPending(orb.id);
     deps.control.resetLivenessBaseline(
@@ -980,7 +1212,7 @@ async function reconcileStopping(
       deps.control.setDrainStatus(orb.id, { retrying: true, message: outcome.message });
       return waiting("drain_blocked");
     case "integrity":
-      // Already stopped the host and failed the orb inside the poll.
+      // The poll atomically failed the orb and requested shared compute disposal.
       logOrbEvent(task, orb.id, "drain-integrity", { reason: outcome.reason });
       return { type: "transitioned", toState: "failed" };
     case "orb_gone":
@@ -1080,13 +1312,64 @@ async function reconcileArchiving(
   if (intent.value.historySealedAt === null) {
     if (!hasNeverBeenReady(orb)) {
       if (orb.hostRef === null) {
-        const message = "archive cannot restore the authoritative runtime: no host reference";
+        // Failed-compute disposal intentionally clears the old host ref. An
+        // archive still needs a readable authoritative runtime to pull and
+        // seal the retained workspace, so provision the already-advanced clean
+        // incarnation before continuing the ordinary archive barrier.
+        const projectResult = await deps.store.getProject(task, orb.projectId);
+        if (projectResult.isErr()) return retryable(projectResult.error);
+        if (projectResult.value === null) {
+          const message = `archive cannot restore runtime: project ${orb.projectId} is absent`;
+          await deps.store.recordOrbDeletionError(task, {
+            orbId: orb.id,
+            message,
+            now: task.wallNow(),
+          });
+          return retryable(message);
+        }
+        await task.checkpoint("compute-replacement.replacement-before-provision");
+        const provisioned = await provisionHost(
+          task,
+          deps,
+          orb,
+          projectResult.value.repositoryUrl,
+          "archive_history_seal",
+        );
+        if (provisioned.isErr()) {
+          const message = boundedDiscardText(provisioned.error.message);
+          await deps.store.recordOrbDeletionError(task, {
+            orbId: orb.id,
+            message,
+            now: task.wallNow(),
+          });
+          return retryable(provisioned.error);
+        }
+        await task.checkpoint("compute-replacement.replacement-after-provision");
+        await task.checkpoint("compute-replacement.replacement-before-commit");
+        const committed = await deps.store.casUpdateFields(task, {
+          orbId: orb.id,
+          expectedStateVersion: orb.stateVersion,
+          now: task.wallNow(),
+          hostRef: provisioned.value.ref.resourceId,
+          runtimeTokenHash: provisioned.value.runtimeTokenHash,
+        });
+        if (committed.isErr()) {
+          return committed.error.type === "state_conflict"
+            ? { type: "conflict" }
+            : retryable(committed.error);
+        }
+        await task.checkpoint("compute-replacement.replacement-committed");
         await deps.store.recordOrbDeletionError(task, {
           orbId: orb.id,
-          message,
+          message: null,
           now: task.wallNow(),
         });
-        return retryable(message);
+        logOrbEvent(task, orb.id, "replacement-provisioned", {
+          host: provisioned.value.ref.resourceId,
+          incarnation: provisioned.value.incarnation,
+          reason: "archive_history_seal",
+        });
+        return { type: "progressed" };
       }
       const observed = await observeHost(task, deps, orb.hostRef);
       if (observed.isErr()) return retryable(observed.error);
@@ -1100,7 +1383,14 @@ async function reconcileArchiving(
         return retryable(message);
       }
       if (observed.value.state === "stopped" || observed.value.state === "failed") {
-        const started = await startHost(task, deps, orb.id, orb.hostRef, "archive_history_seal");
+        const started = await startHost(
+          task,
+          deps,
+          orb.id,
+          orb.hostRef,
+          orb.hostIncarnation,
+          "archive_history_seal",
+        );
         return started.isErr() ? retryable(started.error) : { type: "progressed" };
       }
       if (observed.value.state !== "running" || observed.value.runtimeAddress === undefined) {
@@ -1204,6 +1494,8 @@ async function reconcileTerminalBackstop(
   const observed = await observeHost(task, deps, orb.hostRef);
   if (observed.isErr()) return retryable(observed.error);
   const observation = observed.value;
+  const identityFailure = await failOnObservationMismatch(task, deps, orb, observation);
+  if (identityFailure !== null) return identityFailure;
   if (observation === null || observation.state === "stopped") return { type: "noop" };
   if (observation.state === "stopping") return waiting("host_transition");
   const stopped = await stopHost(task, deps, orb.id, orb.hostRef, `terminal_backstop:${orb.state}`);
@@ -1226,6 +1518,13 @@ export async function reconcileOrbOnce(
   // its state (docs/lifecycle.md): a reconciler that never made the transition
   // itself must not judge this episode by the previous one's clocks.
   deps.control.noteStateEpisode(orb.id, orb.stateChangedAt);
+  if (
+    orb.hostDiscardThroughIncarnation !== null &&
+    orb.state !== "deleting" &&
+    orb.state !== "archived"
+  ) {
+    return reconcileHostDiscard(task, deps, orb);
+  }
   switch (orb.state) {
     case "creating":
     case "starting":
@@ -1328,6 +1627,14 @@ export function createOrb(
       stateVersion: 0,
       hostKind: deps.hostProvider.kind,
       hostRef: null,
+      hostIncarnation: 0,
+      hostSpecFingerprint: null,
+      hostSpecGeneration: null,
+      hostDiscardThroughIncarnation: null,
+      hostDiscardReason: null,
+      hostDiscardError: null,
+      hostDiscardEvidence: null,
+      hostDiscardRequestedAt: null,
       checkoutCommit: null,
       harnessSessionId: null,
       harnessSessionHeader: null,

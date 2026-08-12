@@ -155,6 +155,40 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
+  it("fails closed when provider observation carries the wrong incarnation", async () => {
+    await runDst({ name: "observed-incarnation-mismatch", iterations: 20 }, async (sim) => {
+      const harness = makeHarness();
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const row = harness.store.orbSnapshot(ORB);
+            expect(row).not.toBeNull();
+            if (row === null) return;
+            harness.store.seedOrb({ ...row, hostIncarnation: 1 });
+
+            await waitUntil(
+              task,
+              "incarnation mismatch failed closed",
+              () => harness.store.orbSnapshot(ORB)?.state === "failed",
+            );
+            expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+              state: "failed",
+              runtimeTokenHash: null,
+              hostDiscardThroughIncarnation: 1,
+              hostDiscardReason: "failed",
+            });
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("retryable provider failures delay but do not fail creation", async () => {
     await runDst(
       {
@@ -269,8 +303,15 @@ describe("orb lifecycle (DST)", () => {
             seedCreatingOrb(task, harness);
             await waitUntil(
               task,
-              "orb failed after login expiry",
-              () => harness.store.orbSnapshot(ORB)?.state === "failed",
+              "auth failure disposal finalized",
+              () => {
+                const row = harness.store.orbSnapshot(ORB);
+                return (
+                  row?.state === "failed" &&
+                  row.hostDiscardThroughIncarnation === null &&
+                  row.hostIncarnation === 1
+                );
+              },
               { timeoutMs: 300_000 },
             );
             stop.abort();
@@ -278,7 +319,13 @@ describe("orb lifecycle (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(harness.store.orbSnapshot(ORB)?.lastError).toContain("auth_failed");
+      expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+        lastError: expect.stringContaining("auth_failed"),
+        hostDiscardEvidence: "diagnosis unavailable: no compute reference",
+        hostIncarnation: 1,
+        hostRef: null,
+      });
+      expect(harness.world.hostCount(ORB)).toBe(0);
     });
   });
 
@@ -357,12 +404,12 @@ describe("orb lifecycle (DST)", () => {
               () => harness.store.orbSnapshot(ORB)?.state === "failed",
               { timeoutMs: 600_000 },
             );
-            // The host stop may have been cancelled by its own deadline; the
-            // failed-state backstop reconciler then stops it shortly after.
             await waitUntil(
               task,
-              "host stopped (possibly via backstop)",
-              () => harness.world.hostStateOf(ORB) === "stopped",
+              "failed compute discarded",
+              () =>
+                harness.world.hostStateOf(ORB) === null &&
+                harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null,
               { timeoutMs: 120_000 },
             );
             stop.abort();
@@ -371,7 +418,8 @@ describe("orb lifecycle (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.store.orbSnapshot(ORB)?.lastError).toContain("deadline_exceeded");
-      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+      expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(1);
+      expect(harness.world.hostStateOf(ORB)).toBeNull();
     });
   });
 
@@ -388,6 +436,7 @@ describe("orb lifecycle (DST)", () => {
               initDurationMs: 2_000,
               initOutcome: "failed_nonretryable",
             });
+            harness.world.setDiagnosis(ORB, "container_status=exited restart_count=7 exit_code=42");
             seedCreatingOrb(task, harness);
             await waitUntil(
               task,
@@ -397,8 +446,10 @@ describe("orb lifecycle (DST)", () => {
             );
             await waitUntil(
               task,
-              "host stopped (possibly via backstop)",
-              () => harness.world.hostStateOf(ORB) === "stopped",
+              "failed compute discarded",
+              () =>
+                harness.world.hostStateOf(ORB) === null &&
+                harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null,
               { timeoutMs: 120_000 },
             );
             stop.abort();
@@ -406,8 +457,16 @@ describe("orb lifecycle (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(harness.store.orbSnapshot(ORB)?.lastError).toContain("runtime_failed");
-      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+      const terminal = harness.store.orbSnapshot(ORB);
+      expect(terminal?.lastError).toContain("runtime_failed: session_load_failed: session corrupt");
+      expect(terminal?.hostDiscardEvidence).toMatch(
+        /^(container_status=exited restart_count=7 exit_code=42|diagnosis unavailable:)/,
+      );
+      if (!terminal?.hostDiscardEvidence?.startsWith("diagnosis unavailable:")) {
+        expect(terminal?.lastError).toContain(`host_evidence: ${terminal?.hostDiscardEvidence}`);
+      }
+      expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(1);
+      expect(harness.world.hostStateOf(ORB)).toBeNull();
     });
   });
 
@@ -440,8 +499,10 @@ describe("orb lifecycle (DST)", () => {
             expect(failedAfterMs).toBeLessThan(TEST_CONSTANTS.createStartDeadlineMs);
             await waitUntil(
               task,
-              "host stopped after terminal clone error",
-              () => harness.world.hostStateOf(ORB) === "stopped",
+              "failed compute discarded after terminal clone error",
+              () =>
+                harness.world.hostStateOf(ORB) === null &&
+                harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null,
               { timeoutMs: 120_000 },
             );
             stop.abort();
@@ -451,7 +512,8 @@ describe("orb lifecycle (DST)", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(failedAfterMs).toBeLessThan(TEST_CONSTANTS.createStartDeadlineMs);
       expect(harness.store.orbSnapshot(ORB)?.lastError).not.toContain("deadline_exceeded");
-      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+      expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(1);
+      expect(harness.world.hostStateOf(ORB)).toBeNull();
     });
   });
 
@@ -961,6 +1023,360 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
+  it("persists a discard error separately, then recovers exactly once", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "failed-discard-error-recovery", iterations: 30, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        let sawDurableError = false;
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              const running = harness.store.orbSnapshot(ORB);
+              expect(running).not.toBeNull();
+              if (running === null) return;
+              harness.world.failNextComputeDiscards(1);
+              const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+                orbId: ORB,
+                expectedStateVersion: running.stateVersion,
+                now: task.wallNow(),
+                lastError: "runtime_failed: original failure",
+              });
+              expect(failed.isOk()).toBe(true);
+              await waitUntil(
+                task,
+                "discard error persisted",
+                () => harness.store.orbSnapshot(ORB)?.hostDiscardError !== null,
+              );
+              sawDurableError = true;
+              expect(harness.store.orbSnapshot(ORB)?.lastError).toBe(
+                "runtime_failed: original failure",
+              );
+              await waitUntil(
+                task,
+                "discard recovered",
+                () => harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null,
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(sawDurableError).toBe(true);
+        // A legal late provider deadline may add a distinct cancellation edge;
+        // the scripted persisting condition itself is emitted only once.
+        expect(
+          capture
+            .matching("compute-discard ")
+            .filter(
+              (line) =>
+                line.includes("outcome=error") && line.includes("scripted compute discard failure"),
+            ),
+        ).toHaveLength(1);
+        expect(capture.matching("compute-discard-recovered")).toHaveLength(1);
+        expect(harness.store.orbSnapshot(ORB)?.lastError).toBe("runtime_failed: original failure");
+      },
+    );
+  });
+
+  it("retries safely after restart when compute is absent but finalization failed", async () => {
+    await runDst({ name: "discard-finalization-after-delete", iterations: 30 }, async (sim) => {
+      let harness = makeHarness();
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const running = harness.store.orbSnapshot(ORB);
+            expect(running).not.toBeNull();
+            if (running === null) return;
+            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+              orbId: ORB,
+              expectedStateVersion: running.stateVersion,
+              now: task.wallNow(),
+              lastError: "runtime_failed: original failure",
+            });
+            expect(failed.isOk()).toBe(true);
+            harness.store.failNextHostDiscardFinalizations(1);
+
+            let sawAbsentPendingFinalize = false;
+            for (let attempt = 0; attempt < 20; attempt++) {
+              await reconcileOrbOnce(task, harness.deps, ORB);
+              const row = harness.store.orbSnapshot(ORB);
+              if (harness.world.hostCount(ORB) === 0 && row?.hostDiscardThroughIncarnation === 0) {
+                sawAbsentPendingFinalize = true;
+                break;
+              }
+              await task.sleep(1, "reach discard finalization crash window");
+            }
+            expect(sawAbsentPendingFinalize).toBe(true);
+            expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(0);
+            // Process death loses every in-memory condition and operation
+            // handle; durable intent plus provider absence are sufficient.
+            harness = restartControlPlane(harness);
+
+            for (let attempt = 0; attempt < 20; attempt++) {
+              await reconcileOrbOnce(task, harness.deps, ORB);
+              if (harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null) {
+                break;
+              }
+              await task.sleep(1, "retry discard finalization");
+            }
+            expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+              hostDiscardThroughIncarnation: null,
+              hostIncarnation: 1,
+            });
+            expect(harness.world.hostCount(ORB)).toBe(0);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
+  it("two reconcilers dispose idempotently without provisioning replacement", async () => {
+    await runDst({ name: "concurrent-failed-disposal", iterations: 50 }, async (sim) => {
+      const harness = makeHarness();
+      const result = await sim.runTasks([
+        {
+          name: "seed",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const running = harness.store.orbSnapshot(ORB);
+            expect(running).not.toBeNull();
+            if (running === null) return;
+            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+              orbId: ORB,
+              expectedStateVersion: running.stateVersion,
+              now: task.wallNow(),
+              lastError: "runtime_failed: test failure",
+            });
+            expect(failed.isOk()).toBe(true);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+
+      const concurrent = await sim.runTasks([
+        { name: "reconciler-a", f: (task) => reconcileOrbOnce(task, harness.deps, ORB) },
+        { name: "reconciler-b", f: (task) => reconcileOrbOnce(task, harness.deps, ORB) },
+      ]);
+      expect(concurrent.isOk(), concurrent.isErr() ? concurrent.error.message : "").toBe(true);
+      // If a late cancellation left finalization pending, one ordinary pass
+      // completes it; no pass is authorized to provision while still failed.
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null) break;
+        const pass = await sim.runTasks([
+          { name: `finalizer-${attempt}`, f: (task) => reconcileOrbOnce(task, harness.deps, ORB) },
+        ]);
+        expect(pass.isOk(), pass.isErr() ? pass.error.message : "").toBe(true);
+      }
+      expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+        state: "failed",
+        hostRef: null,
+        hostIncarnation: 1,
+        hostDiscardThroughIncarnation: null,
+      });
+      expect(harness.world.hostCount(ORB)).toBe(0);
+      expect(harness.world.hostStartCountOf(ORB)).toBe(1);
+    });
+  });
+
+  it("Stop racing failed-compute disposal finishes cleanup and converges stopped", async () => {
+    await runDst({ name: "stop-during-failed-disposal", iterations: 30 }, async (sim) => {
+      const harness = makeHarness();
+      const stopLoop = new AbortController();
+      let stopRequested = false;
+      const result = await sim.runTasks([
+        {
+          name: "reconciler",
+          f: async (task) => {
+            while (!stopRequested) await task.sleep(1, "wait for stop during disposal");
+            await reconcileLoop(task, harness.deps, stopLoop.signal);
+          },
+        },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const running = harness.store.orbSnapshot(ORB);
+            expect(running).not.toBeNull();
+            if (running === null) return;
+            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+              orbId: ORB,
+              expectedStateVersion: running.stateVersion,
+              now: task.wallNow(),
+              lastError: "runtime_failed: test failure",
+            });
+            expect(failed.isOk()).toBe(true);
+            const stopped = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopped.isOk() && stopped.value).toMatchObject({
+              state: "stopping",
+              hostDiscardThroughIncarnation: 0,
+            });
+            stopRequested = true;
+            await waitUntil(
+              task,
+              "stop converged after required discard",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+            );
+            stopLoop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+        state: "stopped",
+        hostRef: null,
+        hostIncarnation: 1,
+        hostDiscardThroughIncarnation: null,
+      });
+      expect(harness.world.hostCount(ORB)).toBe(0);
+      expect(harness.world.filesystemExists(ORB)).toBe(true);
+    });
+  });
+
+  it("explicit Start admitted during failed disposal cannot provision before finalization", async () => {
+    await runDst({ name: "failed-explicit-start-during-disposal", iterations: 30 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB, { initDurationMs: 0 });
+            const running = harness.store.orbSnapshot(ORB);
+            expect(running).not.toBeNull();
+            if (running === null) return;
+            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+              orbId: ORB,
+              expectedStateVersion: running.stateVersion,
+              now: task.wallNow(),
+              lastError: "runtime_failed: test failure",
+              evidence: "container_status=exited exit_code=42",
+            });
+            expect(failed.isOk()).toBe(true);
+
+            const started = await requestOrbStart(task, harness.deps, ORB);
+            expect(started.isOk()).toBe(true);
+            expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+              state: "starting",
+              hostDiscardThroughIncarnation: 0,
+              hostIncarnation: 0,
+            });
+            expect(harness.world.hostCount(ORB)).toBe(1);
+
+            for (let attempt = 0; attempt < 100; attempt++) {
+              await reconcileOrbOnce(task, harness.deps, ORB);
+              if (harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null) break;
+              // A modeled provider/store outage is allowed; the fence must
+              // remain authoritative until an ordinary retry succeeds.
+              expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+                state: "starting",
+                hostDiscardThroughIncarnation: 0,
+                hostIncarnation: 0,
+              });
+              await task.sleep(100, "retry explicit-start disposal");
+            }
+            expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+              state: "starting",
+              hostDiscardThroughIncarnation: null,
+              hostIncarnation: 1,
+              hostRef: null,
+            });
+            expect(harness.world.hostCount(ORB)).toBe(0);
+
+            for (let attempt = 0; attempt < 2_000; attempt++) {
+              await reconcileOrbOnce(task, harness.deps, ORB);
+              if (harness.store.orbSnapshot(ORB)?.state === "running") return;
+              await task.sleep(100, "wait for explicit replacement readiness");
+            }
+            expect.fail("explicit replacement did not become running");
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(1);
+      expect(harness.world.hostCount(ORB)).toBe(1);
+      // One original boot plus exactly one user-authorized replacement boot.
+      expect(harness.world.hostStartCountOf(ORB)).toBe(2);
+    });
+  });
+
+  it("a failed-orb wake admitted while disposal is pending survives finalization", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "failed-wake-during-disposal", iterations: 30, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const stop = new AbortController();
+        const messageId = "00000000-0000-4000-8000-000000000143";
+        let intentReady = false;
+        const result = await sim.runTasks([
+          {
+            name: "reconciler",
+            f: async (task) => {
+              while (!intentReady) {
+                await task.sleep(1, "wait for failed wake and discard intent");
+              }
+              await reconcileLoop(task, harness.deps, stop.signal);
+            },
+          },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB, { initDurationMs: 0 });
+              const running = harness.store.orbSnapshot(ORB);
+              expect(running).not.toBeNull();
+              if (running === null) return;
+              const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+                orbId: ORB,
+                expectedStateVersion: running.stateVersion,
+                now: task.wallNow(),
+                lastError: "runtime_failed: test failure",
+              });
+              expect(failed.isOk() && failed.value.hostDiscardThroughIncarnation).toBe(0);
+              const queued = await harness.store.enqueueOrbMessage(task, {
+                orbId: ORB,
+                messageId,
+                content: [{ type: "text", text: "retry after cleanup" }],
+                now: task.wallNow(),
+              });
+              expect(queued.isOk() && queued.value.message.wakeStateVersion).toBe(
+                failed.isOk() ? failed.value.stateVersion : -1,
+              );
+              intentReady = true;
+
+              await waitUntil(
+                task,
+                "wake provisions a clean incarnation",
+                () => harness.store.orbSnapshot(ORB)?.state === "running",
+                { timeoutMs: 600_000 },
+              );
+              await waitUntil(
+                task,
+                "wake message delivered once",
+                () => harness.store.messageSnapshots(ORB)[0]?.status === "delivered",
+                { timeoutMs: 300_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(1);
+        expect(harness.world.hostCount(ORB)).toBe(1);
+        expect(inboxRecordsFor(harness.store.replicaRecords(ORB), messageId)).toHaveLength(1);
+        expect(capture.matching("replacement-provisioned")).toHaveLength(1);
+      },
+    );
+  });
+
   it("a boot that fails again is never retried by the intent that woke it", async () => {
     // The other half of the same rule: the wake is one-shot per failure, so a
     // permanent boot failure plus a standing intent cannot become an unbounded
@@ -989,6 +1405,8 @@ describe("orb lifecycle (DST)", () => {
               harness.store.seedOrb(
                 makeOrbRow(ORB, PROJECT, "failed", {
                   lastError: "runtime_failed: session corrupt",
+                  hostIncarnation: 1,
+                  hostDiscardEvidence: "container_status=exited exit_code=42",
                   stateChangedAt: task.wallNow(),
                 }),
               );
@@ -1032,12 +1450,28 @@ describe("orb lifecycle (DST)", () => {
               await waitUntil(task, "the new send wakes the orb again", () => wakes() === 2, {
                 timeoutMs: 600_000,
               });
+              await waitUntil(
+                task,
+                "the second authorized boot fails and is disposed",
+                () => {
+                  const row = harness.store.orbSnapshot(ORB);
+                  return (
+                    row?.state === "failed" &&
+                    row.hostIncarnation === 3 &&
+                    row.hostDiscardThroughIncarnation === null
+                  );
+                },
+                { timeoutMs: 600_000 },
+              );
               stop.abort();
             },
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(wakes()).toBe(2);
+        expect(capture.matching("replacement-provisioned")).toHaveLength(2);
+        expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(3);
+        expect(harness.world.hostCount(ORB)).toBe(0);
       },
     );
   });
@@ -1737,7 +2171,7 @@ describe("orb lifecycle (DST)", () => {
     );
   });
 
-  it("an integrity failure during drain stops the host and fails the orb", async () => {
+  it("an integrity failure during drain fails the orb and discards compute", async () => {
     await runDst({ name: "drain-integrity", iterations: 20 }, async (sim) => {
       const harness = makeHarness();
       const stop = new AbortController();
@@ -1777,8 +2211,10 @@ describe("orb lifecycle (DST)", () => {
             );
             await waitUntil(
               task,
-              "host stopped (possibly via backstop)",
-              () => harness.world.hostStateOf(ORB) === "stopped",
+              "failed compute discarded",
+              () =>
+                harness.world.hostStateOf(ORB) === null &&
+                harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation === null,
               { timeoutMs: 120_000 },
             );
             stop.abort();
@@ -1787,7 +2223,8 @@ describe("orb lifecycle (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.store.orbSnapshot(ORB)?.lastError).toContain("replication_integrity");
-      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+      expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(1);
+      expect(harness.world.hostStateOf(ORB)).toBeNull();
     });
   });
 
@@ -2868,6 +3305,45 @@ describe("reconciler logging (DST)", () => {
         expect(blocked).toBeGreaterThanOrEqual(2);
         expect(capture.matching("drain-blocked").length).toBe(1);
         expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopping");
+      },
+    );
+  });
+
+  it("logs discard recovery from durable error state after control-plane restart", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "logging-discard-recovery-after-restart", iterations: 20, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness({ constants: QUIET_CONSTANTS });
+        const result = await sim.runTasks([
+          {
+            name: "driver",
+            f: async (task) => {
+              harness.store.seedProject(makeProjectRow(PROJECT));
+              harness.store.seedOrb(
+                makeOrbRow(ORB, PROJECT, "failed", {
+                  lastError: "runtime_failed: original failure",
+                  hostIncarnation: 0,
+                  hostDiscardThroughIncarnation: 0,
+                  hostDiscardReason: "failed",
+                  hostDiscardError: "provider was unavailable",
+                  hostDiscardRequestedAt: task.wallNow(),
+                }),
+              );
+              // Fresh ControlState models a restarted process: the only
+              // recovery evidence is the persisted discard error.
+              const outcome = await reconcileOrbOnce(task, harness.deps, ORB);
+              expect(["progressed", "retryable"]).toContain(outcome.type);
+              if (outcome.type === "retryable") {
+                const retried = await reconcileOrbOnce(task, harness.deps, ORB);
+                expect(retried.type).toBe("progressed");
+              }
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("compute-discard-recovered").length).toBe(1);
+        expect(harness.store.orbSnapshot(ORB)?.hostDiscardThroughIncarnation).toBeNull();
       },
     );
   });

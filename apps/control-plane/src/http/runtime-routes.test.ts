@@ -103,6 +103,21 @@ describe("runtime broker routes", () => {
     expect(body.generation).toBe(1);
   });
 
+  it("rejects old runtime authorization whenever a discard fence exists", async () => {
+    store.seedOrb(
+      makeOrbRow(ORB, PROJECT, "running", {
+        runtimeTokenHash: sha256(TOKEN),
+        hostIncarnation: 0,
+        hostDiscardThroughIncarnation: 0,
+        hostDiscardReason: "failed",
+        hostDiscardRequestedAt: task.wallNow(),
+      }),
+    );
+    seedCredential();
+    const response = await request({ reason: "startup" });
+    expect(response.statusCode).toBe(401);
+  });
+
   it("rejects a missing bearer", async () => {
     seedOrb("running");
     seedCredential();

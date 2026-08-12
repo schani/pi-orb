@@ -99,6 +99,7 @@ export async function startControlPlane(options: {
   nameFake?: FakeSession;
   dockerNetwork?: string;
   runtimeImage?: string;
+  launchFailureMarker?: string;
 }): Promise<ControlPlaneHandle> {
   const authDir = mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const logs: string[] = [];
@@ -118,6 +119,7 @@ export async function startControlPlane(options: {
       PI_ORB_AUTH_DIR: authDir,
       PI_ORB_RUNTIME_IMAGE: options.runtimeImage,
       PI_ORB_DOCKER_NETWORK: options.dockerNetwork,
+      PI_ORB_E2E_LAUNCH_FAILURE_MARKER: options.launchFailureMarker,
       PI_ORB_FAKE_OPENAI_OAUTH_URL: options.fake.oauthBaseUrl,
       PI_ORB_FAKE_OPENAI_INFERENCE_URL: options.fake.inferenceBaseUrl,
       ...(options.nameFake === undefined

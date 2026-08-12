@@ -31,6 +31,14 @@ const orb: OrbRow = {
   stateVersion: 0,
   hostKind: "process",
   hostRef: null,
+  hostIncarnation: 0,
+  hostSpecFingerprint: null,
+  hostSpecGeneration: null,
+  hostDiscardThroughIncarnation: null,
+  hostDiscardReason: null,
+  hostDiscardError: null,
+  hostDiscardEvidence: null,
+  hostDiscardRequestedAt: null,
   checkoutCommit: null,
   harnessSessionId: null,
   harnessSessionHeader: null,
@@ -121,6 +129,88 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         now: 3_000,
       });
       expect(stale.isErr() && stale.error.type).toBe("state_conflict");
+    });
+
+    it("atomically fails, revokes runtime auth, and fences compute disposal", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+      });
+      expect(hosted.isOk()).toBe(true);
+
+      const failed = await store.failOrbAndRequestComputeDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        now: 3_000,
+        lastError: "runtime_never_answered: no response",
+        evidence: "container_status=exited exit_code=42",
+      });
+      expect(failed.isOk() && failed.value).toMatchObject({
+        state: "failed",
+        stateVersion: 2,
+        hostRef: "pi-orb-orb-1-i0",
+        hostIncarnation: 0,
+        runtimeTokenHash: null,
+        hostDiscardThroughIncarnation: 0,
+        hostDiscardReason: "failed",
+        hostDiscardError: null,
+        hostDiscardEvidence: "container_status=exited exit_code=42",
+        hostDiscardRequestedAt: 3_000,
+      });
+
+      await store.recordHostDiscardStatus(task, {
+        orbId: orb.id,
+        throughIncarnation: 0,
+        now: 4_000,
+        error: "provider temporarily unavailable",
+      });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        lastError: "runtime_never_answered: no response",
+        hostDiscardError: "provider temporarily unavailable",
+      });
+
+      const queued = await store.enqueueOrbMessage(task, {
+        orbId: orb.id,
+        messageId: "00000000-0000-4000-8000-000000000098",
+        content: [{ type: "text", text: "retry this failure" }],
+        now: 4_500,
+      });
+      expect(queued.isOk() && queued.value.message.wakeStateVersion).toBe(2);
+
+      const finalized = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        throughIncarnation: 0,
+        now: 5_000,
+      });
+      expect(finalized.isOk() && finalized.value).toMatchObject({
+        state: "failed",
+        // Disposal preparation must not retire a wake admitted against this
+        // failure. Only the failed -> starting transition consumes its one shot.
+        stateVersion: 2,
+        hostRef: null,
+        hostIncarnation: 1,
+        hostDiscardThroughIncarnation: null,
+        hostDiscardReason: null,
+        hostDiscardError: null,
+        hostDiscardEvidence: "container_status=exited exit_code=42",
+        hostDiscardRequestedAt: null,
+      });
+
+      const woken = await store.casStartOrbForQueuedMessage(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        now: 6_000,
+      });
+      expect(woken.isOk() && woken.value).toMatchObject({
+        state: "starting",
+        stateVersion: 3,
+        hostIncarnation: 1,
+      });
     });
 
     it("coordinates auto-naming and preserves a manual name", async () => {

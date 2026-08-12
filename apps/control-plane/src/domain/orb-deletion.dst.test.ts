@@ -44,6 +44,49 @@ describe("orb deletion (DST)", () => {
     });
   });
 
+  it("permanent delete supersedes an in-progress failed-compute discard", async () => {
+    await runDst({ name: "delete-supersedes-discard", iterations: 30 }, async (sim) => {
+      const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            harness.world.appendMessage(ORB);
+            const running = harness.store.orbSnapshot(ORB);
+            expect(running).not.toBeNull();
+            if (running === null) return;
+            const failed = await harness.store.failOrbAndRequestComputeDiscard(task, {
+              orbId: ORB,
+              expectedStateVersion: running.stateVersion,
+              now: task.wallNow(),
+              lastError: "runtime_failed: test failure",
+            });
+            expect(failed.isOk()).toBe(true);
+            const deleted = await requestOrbDeletion(task, harness.deps, ORB);
+            expect(deleted.isOk() && deleted.value).toMatchObject({
+              state: "deleting",
+              hostDiscardThroughIncarnation: 0,
+            });
+            await waitUntil(
+              task,
+              "deletion-grade cleanup supersedes discard",
+              () => harness.store.orbSnapshot(ORB) === null,
+              { timeoutMs: 120_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.world.hostCount(ORB)).toBe(0);
+      expect(harness.world.filesystemExists(ORB)).toBe(false);
+      expect(harness.store.replicaRecords(ORB)).toEqual([]);
+    });
+  });
+
   it("survives destroy/store failures and a control-plane restart", async () => {
     await runDst(
       {

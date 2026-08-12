@@ -63,6 +63,8 @@ export interface PiOrbAgentOptions {
   readonly previewHost?: string | null;
   /** Test seam; production creates the Luna adapter from the orb's existing ModelRuntime. */
   readonly turnSummarizer?: TurnSummarizer;
+  /** E2E composition seam: expose one selected incarnation as terminally failed. */
+  readonly testLaunchFailure?: boolean;
 }
 
 export interface SnapshotError {
@@ -238,6 +240,15 @@ export class PiOrbAgent {
   }
 
   private async bootSteps(): Promise<Result<void, RuntimeHealth>> {
+    if (this.options.testLaunchFailure === true) {
+      return err(
+        this.failed(
+          "e2e_launch_failure",
+          "test composition deliberately failed this compute incarnation",
+          false,
+        ),
+      );
+    }
     // 0. Home is ordinary durable orb state, not disposable container state
     // (docs/host-provider.md). Enforce this in the runtime as well as providers
     // so direct launches cannot inherit a shared or ephemeral host home.

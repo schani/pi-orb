@@ -20,6 +20,7 @@ import type {
   OrbHostState,
   ProvisionedOrbHost,
   ProvisionOrbHostRequest,
+  StartOrbHostRequest,
 } from "../../domain/ports.ts";
 import type { TailscaleHostOptions } from "../tailscale/client.ts";
 
@@ -46,6 +47,7 @@ export interface DockerOrbHostProviderOptions {
 }
 
 const ORB_LABEL = "pi-orb.orb-id";
+const INCARNATION_LABEL = "pi-orb.host-incarnation";
 
 /** Port the orb runtime listens on inside the container (apps/orb-runtime). */
 export const RUNTIME_PORT = 8080;
@@ -121,8 +123,22 @@ function providerError(
   };
 }
 
-function containerName(orbId: string): string {
+function legacyContainerName(orbId: string): string {
   return `pi-orb-${orbId}`;
+}
+
+function containerName(orbId: string, incarnation: number): string {
+  return `${legacyContainerName(orbId)}-i${incarnation}`;
+}
+
+function incarnationFromInspect(info: Record<string, unknown>): number | null {
+  const config = info["Config"] as Record<string, unknown> | undefined;
+  const labels = (config?.["Labels"] ?? {}) as Record<string, unknown>;
+  const stamped = labels[INCARNATION_LABEL];
+  if (stamped === undefined || stamped === null) return 0;
+  if (typeof stamped !== "string" || !/^\d+$/.test(stamped)) return null;
+  const incarnation = Number(stamped);
+  return Number.isSafeInteger(incarnation) ? incarnation : null;
 }
 
 function volumeName(orbId: string): string {
@@ -254,13 +270,20 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     const labels = (config?.["Labels"] ?? {}) as Record<string, unknown>;
     const orbId = labels[ORB_LABEL];
     if (typeof orbId !== "string") return null;
+    const incarnation = incarnationFromInspect(info);
+    if (incarnation === null) return null;
     const stateInfo = (info["State"] ?? {}) as Record<string, unknown>;
     const status = String(stateInfo["Status"] ?? "dead");
     const state = mapContainerState(status);
-    const name = containerName(orbId);
+    const inspectedName = info["Name"];
+    const name =
+      typeof inspectedName === "string" && inspectedName !== ""
+        ? inspectedName.replace(/^\//, "")
+        : containerName(orbId, incarnation);
     const observation: OrbHostObservation = {
       ref: { provider: "docker", resourceId: name },
       orbId,
+      incarnation,
       state,
       ...(state === "running"
         ? { runtimeAddress: { baseUrl: this.runtimeBaseUrl(info, name) } }
@@ -278,11 +301,12 @@ export class DockerOrbHostProvider implements OrbHostProvider {
    */
   private async tailscaleEnv(
     orbId: string,
+    incarnation: number,
     context: OperationContext,
   ): Promise<Result<string[], OrbHostProviderError>> {
     const tailscale = this.options.tailscale;
     if (tailscale === undefined) return ok([]);
-    const key = await tailscale.minter.mintAuthKey(orbId, context.signal);
+    const key = await tailscale.minter.mintAuthKey(orbId, incarnation, context.signal);
     if (key.isErr()) {
       return err(
         providerError(
@@ -303,12 +327,57 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     ]);
   }
 
+  private async listOrbContainers(
+    operation: OrbHostProviderError["operation"],
+    orbId: string,
+    context: OperationContext,
+  ): Promise<
+    Result<
+      { name: string; info: Record<string, unknown>; incarnation: number }[],
+      OrbHostProviderError
+    >
+  > {
+    const listed = await this.exec(
+      operation,
+      ["ps", "--all", "--filter", `label=${ORB_LABEL}=${orbId}`, "--format", "{{.Names}}"],
+      context,
+    );
+    if (listed.isErr()) return err(listed.error);
+    const result: { name: string; info: Record<string, unknown>; incarnation: number }[] = [];
+    for (const name of listed.value.stdout.split("\n").filter((entry) => entry !== "")) {
+      const inspected = await this.inspect(operation, name, context);
+      if (inspected.isErr()) return err(inspected.error);
+      if (inspected.value === null) continue;
+      const labels = ((inspected.value["Config"] as Record<string, unknown> | undefined)?.[
+        "Labels"
+      ] ?? {}) as Record<string, unknown>;
+      if (labels[ORB_LABEL] !== orbId) {
+        return err(
+          providerError(
+            operation,
+            "conflict",
+            `container ${name} is not labeled for orb ${orbId}`,
+            false,
+          ),
+        );
+      }
+      const incarnation = incarnationFromInspect(inspected.value);
+      if (incarnation === null) {
+        return err(
+          providerError(operation, "conflict", `container ${name} has invalid incarnation`, false),
+        );
+      }
+      result.push({ name, info: inspected.value, incarnation });
+    }
+    return ok(result);
+  }
+
   provision(
     task: SimulationTask,
     request: ProvisionOrbHostRequest,
     context: OperationContext,
   ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError> {
-    const name = containerName(request.orbId);
+    const name = containerName(request.orbId, request.incarnation);
     const ref: OrbHostRef = { provider: "docker", resourceId: name };
     const run = async (): Promise<Result<ProvisionedOrbHost, OrbHostProviderError>> => {
       const existing = await this.inspect("provision", name, context);
@@ -323,7 +392,18 @@ export class DockerOrbHostProvider implements OrbHostProvider {
             const started = await this.exec("provision", ["start", name], context);
             if (started.isErr()) return err(started.error);
           }
-          return ok({ ref, runtimeTokenHash: sha256Hex(existingToken) });
+          const incarnation = incarnationFromInspect(existing.value);
+          if (incarnation !== request.incarnation) {
+            return err(
+              providerError(
+                "provision",
+                "conflict",
+                `container ${name} carries incarnation ${String(incarnation)}, expected ${request.incarnation}`,
+                false,
+              ),
+            );
+          }
+          return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(existingToken) });
         }
         // A container without a token predates the broker: replace it. The
         // data volume persists; only the compute incarnation rotates.
@@ -333,7 +413,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       // Minted only for a container that is actually about to be created —
       // the reuse path above keeps whatever env its incarnation was born
       // with, exactly like the runtime token.
-      const tailscaleEnv = await this.tailscaleEnv(request.orbId, context);
+      const tailscaleEnv = await this.tailscaleEnv(request.orbId, request.incarnation, context);
       if (tailscaleEnv.isErr()) return err(tailscaleEnv.error);
       const volume = await this.exec(
         "provision",
@@ -351,6 +431,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           name,
           "--label",
           `${ORB_LABEL}=${request.orbId}`,
+          "--label",
+          `${INCARNATION_LABEL}=${request.incarnation}`,
           "--network",
           this.options.network,
           // Publish the runtime port on an ephemeral host-loopback port: bridge
@@ -368,6 +450,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           `PI_ORB_ID=${request.orbId}`,
           "--env",
           `PI_ORB_REPOSITORY_URL=${request.bootstrap.repositoryUrl}`,
+          "--env",
+          `PI_ORB_HOST_INCARNATION=${request.incarnation}`,
           "--env",
           `${RUNTIME_TOKEN_ENV}=${runtimeToken}`,
           "--env",
@@ -398,22 +482,49 @@ export class DockerOrbHostProvider implements OrbHostProvider {
               providerError("provision", "conflict", "racing container has no token", true),
             );
           }
-          return ok({ ref, runtimeTokenHash: sha256Hex(winnerToken) });
+          const incarnation = incarnationFromInspect(winner.value ?? {});
+          if (incarnation !== request.incarnation) {
+            return err(
+              providerError(
+                "provision",
+                "conflict",
+                `racing container ${name} has the wrong incarnation`,
+                false,
+              ),
+            );
+          }
+          return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(winnerToken) });
         }
         return err(created.error);
       }
       task.log(`provisioned docker host ${name}`);
-      return ok({ ref, runtimeTokenHash: sha256Hex(runtimeToken) });
+      return ok({
+        ref,
+        incarnation: request.incarnation,
+        runtimeTokenHash: sha256Hex(runtimeToken),
+      });
     };
     return new ResultAsync(run());
   }
 
   start(
     _task: SimulationTask,
-    ref: OrbHostRef,
+    request: StartOrbHostRequest,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
-    return this.exec("start", ["start", ref.resourceId], context).map(() => undefined);
+    const run = async (): Promise<Result<void, OrbHostProviderError>> => {
+      const inspected = await this.inspect("start", request.ref.resourceId, context);
+      if (inspected.isErr()) return err(inspected.error);
+      if (inspected.value === null) {
+        return err(providerError("start", "invalid_state", "container is absent", false));
+      }
+      if (incarnationFromInspect(inspected.value) !== request.expectedIncarnation) {
+        return err(providerError("start", "conflict", "container incarnation mismatch", false));
+      }
+      const started = await this.exec("start", ["start", request.ref.resourceId], context);
+      return started.map(() => undefined);
+    };
+    return new ResultAsync(run());
   }
 
   stop(
@@ -435,30 +546,36 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     return new ResultAsync(run());
   }
 
+  discardCompute(
+    _task: SimulationTask,
+    request: { orbId: string; throughIncarnation: number },
+    context: OperationContext,
+  ): ResultAsync<void, OrbHostProviderError> {
+    const run = async (): Promise<Result<void, OrbHostProviderError>> => {
+      const listed = await this.listOrbContainers("discard", request.orbId, context);
+      if (listed.isErr()) return err(listed.error);
+      for (const container of listed.value) {
+        if (container.incarnation > request.throughIncarnation) continue;
+        const removed = await this.exec("discard", ["rm", "--force", container.name], context);
+        if (removed.isErr() && !/no such (object|container)/i.test(removed.error.message)) {
+          return err(removed.error);
+        }
+      }
+      return ok(undefined);
+    };
+    return new ResultAsync(run());
+  }
+
   destroy(
     _task: SimulationTask,
     orbId: string,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
-      const name = containerName(orbId);
-      const existing = await this.inspect("destroy", name, context);
-      if (existing.isErr()) return err(existing.error);
-      if (existing.value !== null) {
-        const labels = ((existing.value["Config"] as Record<string, unknown> | undefined)?.[
-          "Labels"
-        ] ?? {}) as Record<string, unknown>;
-        if (labels[ORB_LABEL] !== orbId) {
-          return err(
-            providerError(
-              "destroy",
-              "conflict",
-              `container ${name} is not labeled for orb ${orbId}`,
-              false,
-            ),
-          );
-        }
-        const removed = await this.exec("destroy", ["rm", "--force", name], context);
+      const listed = await this.listOrbContainers("destroy", orbId, context);
+      if (listed.isErr()) return err(listed.error);
+      for (const container of listed.value) {
+        const removed = await this.exec("destroy", ["rm", "--force", container.name], context);
         if (removed.isErr() && !/no such (object|container)/i.test(removed.error.message)) {
           return err(removed.error);
         }
@@ -513,6 +630,21 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     return this.inspect("observe", ref.resourceId, context).map((info) =>
       info === null ? null : this.toObservation(info),
     );
+  }
+
+  diagnose(
+    _task: SimulationTask,
+    ref: OrbHostRef,
+    context: OperationContext,
+  ): ResultAsync<string | null, OrbHostProviderError> {
+    return this.inspect("observe", ref.resourceId, context).map((info) => {
+      if (info === null) return null;
+      const state = (info["State"] ?? {}) as Record<string, unknown>;
+      const status = String(state["Status"] ?? "unknown");
+      const restartCount = Number(info["RestartCount"] ?? state["RestartCount"] ?? 0);
+      const exitCode = Number(state["ExitCode"] ?? 0);
+      return `container_status=${status} restart_count=${restartCount} exit_code=${exitCode}`;
+    });
   }
 
   listManagedHosts(

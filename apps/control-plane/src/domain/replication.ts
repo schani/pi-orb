@@ -68,7 +68,8 @@ function validatePullResponse(
  * first: stopping a `stopping` orb's host before claiming the row lets the
  * drain reconciler observe the stop as an already-stopped host and CAS the orb
  * to a clean `stopped`, discarding the integrity signal (DST-found 2026-08-06).
- * The host stop is best effort; the failed-state reconciler is the backstop.
+ * The same transaction revokes runtime authorization and creates durable
+ * compute-discard authority; shared lifecycle reconciliation owns disposal.
  */
 export async function failOrbForIntegrity(
   task: SimulationTask,
@@ -92,10 +93,9 @@ export async function failOrbForIntegrity(
       orb.state === "archived"
     )
       return;
-    const cas = await deps.store.casTransition(task, {
+    const cas = await deps.store.failOrbAndRequestComputeDiscard(task, {
       orbId,
       expectedStateVersion: orb.stateVersion,
-      toState: "failed",
       now: task.wallNow(),
       lastError: formatOrbFailure("replication_integrity", `${error.reason}: ${error.message}`),
     });
@@ -107,6 +107,7 @@ export async function failOrbForIntegrity(
       await sleepResult(task, deps.constants.retryBackoffBaseMs, "integrity fail: cas retry");
       continue;
     }
+    await task.checkpoint("compute-replacement.failure-intent-committed");
     logOrbEvent(task, orbId, "transition", {
       from: orb.state,
       to: "failed",
@@ -114,23 +115,13 @@ export async function failOrbForIntegrity(
       reason: error.reason,
       error: error.message,
     });
+    logOrbEvent(task, orbId, "compute-discard-requested", {
+      host: orb.hostRef,
+      through_incarnation: orb.hostIncarnation,
+      reason: "failed",
+      failure_code: "replication_integrity",
+    });
     deps.control.clearOrb(orbId);
-    if (orb.hostRef !== null) {
-      const ref: OrbHostRef = { provider: deps.hostProvider.kind, resourceId: orb.hostRef };
-      const stopped = await withDeadline(
-        task,
-        deps.constants.providerOperationTimeoutMs,
-        "integrity fail: stop host",
-        (context) => deps.hostProvider.stop(task, ref, context),
-      );
-      logOrbEvent(task, orbId, "host-stop", {
-        host: orb.hostRef,
-        reason: "integrity_failure",
-        ...(stopped.isErr()
-          ? { error: stopped.error.message, retryable: stopped.error.retryable }
-          : { outcome: "ok" }),
-      });
-    }
     return;
   }
 }
