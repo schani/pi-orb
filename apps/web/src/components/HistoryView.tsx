@@ -7,6 +7,7 @@ import type {
   OrbMessageView,
 } from "@pi-orb/protocol";
 import type { ReactNode } from "react";
+import { representedInboxMessageIds } from "../lib/queued-messages.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
@@ -397,18 +398,6 @@ function persistedToolCallIds(records: readonly HistoryRecord[]): Set<string> {
   return ids;
 }
 
-function inboxMessageIds(record: HistoryRecord): string[] {
-  const native = record.overflow["native"];
-  if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
-  if (native["customType"] !== "pi-orb.user-message") return [];
-  const details = native["details"];
-  if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
-  if (Array.isArray(details["messageIds"])) {
-    return details["messageIds"].filter((id): id is string => typeof id === "string");
-  }
-  return typeof details["messageId"] === "string" ? [details["messageId"]] : [];
-}
-
 export function HistoryView({
   records,
   liveBlocks,
@@ -416,7 +405,7 @@ export function HistoryView({
   busy,
   queuedMessages = [],
 }: HistoryViewProps) {
-  const representedMessageIds = new Set(records.flatMap(inboxMessageIds));
+  const representedMessageIds = representedInboxMessageIds(records);
   const pendingMessages = queuedMessages.filter(
     (message) => !representedMessageIds.has(message.id),
   );

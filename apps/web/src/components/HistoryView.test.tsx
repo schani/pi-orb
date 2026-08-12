@@ -52,7 +52,7 @@ describe("HistoryView turn structure", () => {
       id: "00000000-0000-4000-8000-000000000123",
       orbId: "orb-1",
       content: [{ type: "text" as const, text: "queued while starting" }],
-      status: "queued" as const,
+      status: "delivered" as const,
       createdAt: "2026-08-10T00:00:00.000Z",
       updatedAt: "2026-08-10T00:00:00.000Z",
     };
@@ -66,7 +66,7 @@ describe("HistoryView turn structure", () => {
       />,
     );
     expect(queuedHtml).toContain("turn-user turn-queued");
-    expect(queuedHtml).toContain("You · queued");
+    expect(queuedHtml).toContain("You · delivered");
     expect(queuedHtml).toContain("queued while starting");
 
     const committed = message("record-1", "user", "queued while starting");

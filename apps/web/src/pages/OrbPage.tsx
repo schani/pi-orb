@@ -30,11 +30,13 @@ import {
 } from "../lib/api.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
+import { mergeReplicatedHistory } from "../lib/history-refresh.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
 import {
   createMutationEpoch,
-  undeliveredMessages,
+  hasDeliveredMessageAwaitingHistory,
+  messagesAwaitingHistory,
   withQueuedMessage,
 } from "../lib/queued-messages.ts";
 import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
@@ -86,6 +88,7 @@ interface OrbPageState {
 
 type OrbPageAction =
   | { type: "history_loaded"; view: OrbHistoryView }
+  | { type: "history_refreshed"; view: OrbHistoryView }
   | { type: "history_failed"; error: ApiError }
   | { type: "frame"; frame: ServerFrame }
   | { type: "connection_status"; status: LiveConnectionStatus }
@@ -273,6 +276,23 @@ function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
         historyError: null,
       };
     }
+    case "history_refreshed": {
+      const merged = mergeReplicatedHistory(
+        {
+          records: [...state.records.values()],
+          afterRecordId: state.afterRecordId,
+          headId: state.headId,
+        },
+        action.view,
+      );
+      return {
+        ...state,
+        records: new Map(merged.records.map((record) => [record.id, record])),
+        afterRecordId: merged.afterRecordId,
+        headId: merged.headId,
+        historyError: null,
+      };
+    }
     case "history_failed":
       return { ...state, historyError: action.error };
     case "frame":
@@ -364,6 +384,9 @@ export function OrbPage({ orbId }: { orbId: string }) {
   // Invalidates queued-message reads that were already in flight when a
   // message mutation committed (see lib/queued-messages.ts).
   const [messageEpoch] = useState(createMutationEpoch);
+  const transcriptRef = useRef({ records: state.records, historyLoaded: state.historyLoaded });
+  transcriptRef.current = { records: state.records, historyLoaded: state.historyLoaded };
+  const historyRefreshInFlightRef = useRef(false);
   const [orbNotFound, setOrbNotFound] = useState(false);
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -437,7 +460,30 @@ export function OrbPage({ orbId }: { orbId: string }) {
         // Discard a snapshot taken before a message mutation committed: it
         // would clobber the optimistic append with a list that predates it.
         if (cancelled || messageEpoch.isStale(token) || result.isErr()) return;
-        setQueuedMessages(undeliveredMessages(result.value.items));
+        const transcript = transcriptRef.current;
+        const records = [...transcript.records.values()];
+        setQueuedMessages(messagesAwaitingHistory(result.value.items, records));
+
+        // `delivered` is committed in the same transaction as replicated
+        // history, but the independent WebSocket may not have supplied that
+        // record to this tab. Converge from PostgreSQL instead of hiding the
+        // provisional turn or requiring a browser reload.
+        if (
+          transcript.historyLoaded &&
+          hasDeliveredMessageAwaitingHistory(result.value.items, records) &&
+          !historyRefreshInFlightRef.current
+        ) {
+          historyRefreshInFlightRef.current = true;
+          void getOrbHistory(orbId).then((history) => {
+            historyRefreshInFlightRef.current = false;
+            if (cancelled) return;
+            dispatch(
+              history.isOk()
+                ? { type: "history_refreshed", view: history.value }
+                : { type: "history_failed", error: history.error },
+            );
+          });
+        }
       });
     };
     poll();

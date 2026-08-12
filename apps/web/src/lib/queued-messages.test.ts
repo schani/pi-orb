@@ -1,8 +1,18 @@
-import type { OrbMessageListView, OrbMessageStatus, OrbMessageView } from "@pi-orb/protocol";
+import type {
+  HistoryRecord,
+  OrbMessageListView,
+  OrbMessageStatus,
+  OrbMessageView,
+} from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import type { ApiError } from "./api.ts";
-import { createMutationEpoch, undeliveredMessages, withQueuedMessage } from "./queued-messages.ts";
+import {
+  createMutationEpoch,
+  hasDeliveredMessageAwaitingHistory,
+  messagesAwaitingHistory,
+  withQueuedMessage,
+} from "./queued-messages.ts";
 
 const message = (id: string, status: OrbMessageStatus): OrbMessageView => ({
   id,
@@ -46,7 +56,7 @@ function orbPageQueue() {
       const token = epoch.begin();
       return response.then((result) => {
         if (cancelled || epoch.isStale(token) || result.isErr()) return;
-        queued = undeliveredMessages(result.value.items);
+        queued = messagesAwaitingHistory(result.value.items, []);
       });
     },
     /** Starts an enqueue; commits the epoch and appends when it resolves. */
@@ -81,15 +91,41 @@ describe("queued message mutation epoch", () => {
 });
 
 describe("queued message list updates", () => {
-  it("drops delivered messages from the queue view", () => {
+  it("keeps a delivered message provisional until its history record is locally visible", () => {
     expect(
-      undeliveredMessages([
-        message("a", "delivered"),
-        message("b", "queued"),
-        message("c", "delivering"),
-        message("d", "failed"),
-      ]).map((entry) => entry.id),
-    ).toEqual(["b", "c", "d"]);
+      messagesAwaitingHistory(
+        [
+          message("a", "delivered"),
+          message("b", "queued"),
+          message("c", "delivering"),
+          message("d", "failed"),
+        ],
+        [],
+      ).map((entry) => entry.id),
+    ).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("retires a delivered provisional only when history names its inbox identity", () => {
+    const delivered = message("a", "delivered");
+    const represented: HistoryRecord = {
+      id: "record-a",
+      parentId: null,
+      timestamp: "2026-08-10T00:00:01.000Z",
+      type: "message",
+      role: "user",
+      content: delivered.content,
+      overflow: {
+        native: {
+          customType: "pi-orb.user-message",
+          details: { messageIds: [delivered.id] },
+        },
+      },
+    };
+
+    expect(messagesAwaitingHistory([delivered], [])).toEqual([delivered]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered], [])).toBe(true);
+    expect(messagesAwaitingHistory([delivered], [represented])).toEqual([]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered], [represented])).toBe(false);
   });
 
   it("replaces an existing entry instead of duplicating it", () => {
@@ -130,8 +166,8 @@ describe("queued message poll/enqueue race", () => {
     list.resolve(ok({ items: [message("m1", "delivered"), message("m2", "delivering")] }));
     await polled;
 
-    expect(queue.messages.map((entry) => entry.id)).toEqual(["m2"]);
-    expect(queue.messages[0]?.status).toBe("delivering");
+    expect(queue.messages.map((entry) => entry.id)).toEqual(["m1", "m2"]);
+    expect(queue.messages[1]?.status).toBe("delivering");
   });
 
   it("discards a stale poll but lets the following poll reconcile the queue", async () => {
@@ -149,7 +185,9 @@ describe("queued message poll/enqueue race", () => {
     fresh.resolve(ok({ items: [message("m2", "delivered"), message("m3", "queued")] }));
     await freshPolled;
 
-    expect(queue.messages.map((entry) => entry.id)).toEqual(["m3"]);
+    // Delivery status cannot retire m2: the independent history channel has
+    // not supplied the native record that represents it yet.
+    expect(queue.messages.map((entry) => entry.id)).toEqual(["m2", "m3"]);
   });
 
   it("leaves the queue untouched on a failed poll or a failed enqueue", async () => {

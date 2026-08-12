@@ -1,4 +1,4 @@
-import type { OrbMessageView } from "@pi-orb/protocol";
+import type { HistoryRecord, OrbMessageView } from "@pi-orb/protocol";
 
 /**
  * Guards the queued-message list against the poll/enqueue race.
@@ -35,9 +35,43 @@ export function createMutationEpoch(): MutationEpoch {
   };
 }
 
-/** The queue shown beside the transcript: everything not yet delivered. */
-export function undeliveredMessages(items: readonly OrbMessageView[]): OrbMessageView[] {
-  return items.filter((message) => message.status !== "delivered");
+export function inboxMessageIds(record: HistoryRecord): string[] {
+  const native = record.overflow["native"];
+  if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
+  if (native["customType"] !== "pi-orb.user-message") return [];
+  const details = native["details"];
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
+  if (Array.isArray(details["messageIds"])) {
+    return details["messageIds"].filter((id): id is string => typeof id === "string");
+  }
+  return typeof details["messageId"] === "string" ? [details["messageId"]] : [];
+}
+
+export function representedInboxMessageIds(records: readonly HistoryRecord[]): Set<string> {
+  return new Set(records.flatMap(inboxMessageIds));
+}
+
+/**
+ * Inbox rows that still need a provisional transcript turn.
+ *
+ * `delivered` is a control-plane replication fact, not proof that this browser
+ * has applied the corresponding record. Retire it only at the identity-based
+ * history handoff. Failed rows are terminal UI resources and remain visible.
+ */
+export function messagesAwaitingHistory(
+  items: readonly OrbMessageView[],
+  records: readonly HistoryRecord[],
+): OrbMessageView[] {
+  const represented = representedInboxMessageIds(records);
+  return items.filter((message) => message.status !== "delivered" || !represented.has(message.id));
+}
+
+export function hasDeliveredMessageAwaitingHistory(
+  items: readonly OrbMessageView[],
+  records: readonly HistoryRecord[],
+): boolean {
+  const represented = representedInboxMessageIds(records);
+  return items.some((message) => message.status === "delivered" && !represented.has(message.id));
 }
 
 /** Optimistic append; any existing entry for the same message id is replaced. */
