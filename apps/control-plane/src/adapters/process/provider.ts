@@ -52,6 +52,7 @@ export interface ProcessOrbHostProviderOptions {
    * against an in-flight relaunch deterministically.
    */
   readonly onCrashRelaunch?: (orbId: string) => Promise<void>;
+  readonly specGeneration?: number;
 }
 
 interface HostMetadata {
@@ -59,6 +60,7 @@ interface HostMetadata {
   readonly orbId: string;
   readonly incarnation: number;
   readonly repositoryUrl: string;
+  readonly specFingerprint: string | null;
   readonly runtimeToken: string;
   readonly port: number;
   /** Process-group leader PID, persisted so disposal survives provider restart. */
@@ -93,6 +95,7 @@ function sha256(value: string): string {
 
 export class ProcessOrbHostProvider implements OrbHostProvider {
   readonly kind = "process";
+  readonly specGeneration: number;
   private readonly children = new Map<string, ManagedChild>();
   private readonly locks = new Map<string, Promise<void>>();
   private closing = false;
@@ -101,6 +104,23 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
 
   constructor(options: ProcessOrbHostProviderOptions) {
     this.options = options;
+    this.specGeneration = options.specGeneration ?? 0;
+  }
+
+  desiredSpecFingerprint(input: {
+    readonly orbId: string;
+    readonly repositoryUrl: string;
+  }): string {
+    return sha256(
+      JSON.stringify({
+        v: 1,
+        runtimeEntryPoint: this.options.runtimeEntryPoint,
+        nodeExecutable: this.options.nodeExecutable ?? process.execPath,
+        controlPlaneUrl: this.options.controlPlaneUrl,
+        extraEnv: this.options.extraEnv ?? {},
+        repositoryUrl: input.repositoryUrl,
+      }),
+    );
   }
 
   private hostDirectory(orbId: string): string {
@@ -150,6 +170,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         orbId,
         incarnation,
         repositoryUrl: parsed.repositoryUrl,
+        specFingerprint: typeof parsed.specFingerprint === "string" ? parsed.specFingerprint : null,
         runtimeToken: parsed.runtimeToken,
         port: parsed.port,
         processGroupId,
@@ -399,6 +420,10 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       const found = this.readMetadata("provision", request.orbId);
       if (found.isErr()) return err(found.error);
       let metadata = found.value;
+      const specFingerprint = this.desiredSpecFingerprint({
+        orbId: request.orbId,
+        repositoryUrl: request.bootstrap.repositoryUrl,
+      });
       if (metadata === null) {
         const port = await this.allocatePort(context.signal);
         if (port.isErr()) return err(port.error);
@@ -407,6 +432,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           orbId: request.orbId,
           incarnation: request.incarnation,
           repositoryUrl: request.bootstrap.repositoryUrl,
+          specFingerprint,
           runtimeToken: randomBytes(32).toString("hex"),
           port: port.value,
           processGroupId: null,
@@ -424,6 +450,8 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
             false,
           ),
         );
+      } else if (metadata.specFingerprint !== specFingerprint) {
+        return err(hostError("provision", "conflict", "process specification mismatch", false));
       } else if (metadata.desiredState === "stopped") {
         metadata = { ...metadata, desiredState: "running" };
         const written = this.writeMetadata("provision", metadata);
@@ -435,6 +463,8 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         ref: this.ref(request.orbId, metadata.incarnation),
         incarnation: metadata.incarnation,
         runtimeTokenHash: sha256(metadata.runtimeToken),
+        specFingerprint,
+        specGeneration: this.specGeneration,
       });
     });
     return new ResultAsync(run);
@@ -472,6 +502,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         ) {
           return err(hostError("start", "conflict", "process incarnation mismatch", false));
         }
+        if (found.value.specFingerprint !== request.expectedSpecFingerprint) {
+          return err(hostError("start", "conflict", "process specification mismatch", false));
+        }
         const metadata = { ...found.value, desiredState: "running" as const };
         const written = this.writeMetadata("start", metadata);
         if (written.isErr()) return err(written.error);
@@ -502,6 +535,31 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     // libuv reaps it, which is exactly the conservative direction).
     const target = process.platform === "win32" ? processGroupId : -processGroupId;
     const grace = this.options.terminateGraceMs ?? 2_000;
+    const groupHasLiveMembers = (): Result<boolean, OrbHostProviderError> => {
+      if (process.platform !== "linux") return ok(true);
+      return Result.fromThrowable(
+        () => {
+          for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+            if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+            let stat: string;
+            try {
+              stat = readFileSync(`/proc/${entry.name}/stat`, "utf8");
+            } catch {
+              continue; // Process exited between directory enumeration and read.
+            }
+            // /proc/<pid>/stat fields: pid, (comm), state, ppid, pgrp. A
+            // zombie is definitively dead even while an unreaping PID 1 keeps
+            // its process-group identity visible to kill(-pgrp, 0).
+            const match = /^\d+ \(.*\) ([A-Z]) \d+ (\d+) /.exec(stat);
+            if (match !== null && Number(match[2]) === processGroupId && match[1] !== "Z") {
+              return true;
+            }
+          }
+          return false;
+        },
+        (error) => hostError(operation, "unavailable", String(error), true),
+      )();
+    };
     const groupGone = async (): Promise<Result<boolean, OrbHostProviderError>> => {
       const deadline = Date.now() + grace;
       for (;;) {
@@ -511,6 +569,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
             ? ok(true)
             : err(hostError(operation, "unavailable", String(exists.error), true));
         }
+        const live = groupHasLiveMembers();
+        if (live.isErr()) return err(live.error);
+        if (!live.value) return ok(true);
         if (Date.now() >= deadline) return ok(false);
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
@@ -674,6 +735,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           ref: this.ref(found.value.orbId, found.value.incarnation),
           orbId: found.value.orbId,
           incarnation: found.value.incarnation,
+          specFingerprint: found.value.specFingerprint,
           state: running ? "running" : "stopped",
           ...(running
             ? { runtimeAddress: { baseUrl: `http://127.0.0.1:${found.value.port}` } }

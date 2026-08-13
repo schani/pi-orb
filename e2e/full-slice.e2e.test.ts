@@ -91,6 +91,7 @@ let nameFake: FakeSession;
 let controlPlane: ControlPlaneHandle;
 let orbId = "";
 let failedOrbId = "";
+let specOrbId = "";
 let localStateDirectory = "";
 
 function processHostDirectory(id: string): string {
@@ -103,6 +104,18 @@ function processHostDirectory(id: string): string {
  * metadata gone while the workspace (optionally a specific surviving file)
  * is still on disk.
  */
+async function computeIncarnation(id: string): Promise<number | null> {
+  if (PROCESS_BACKEND) {
+    const path = join(processHostDirectory(id), "host.json");
+    if (!existsSync(path)) return null;
+    return Number((JSON.parse(readFileSync(path, "utf8")) as { incarnation: number }).incarnation);
+  }
+  const [name] = await orbContainerNames(id);
+  if (name === undefined) return null;
+  const match = /-i(\d+)$/.exec(name);
+  return match === null ? null : Number(match[1]);
+}
+
 async function computeAbsent(id: string, workspaceFile?: string): Promise<boolean> {
   if (PROCESS_BACKEND) {
     const hostDirectory = processHostDirectory(id);
@@ -238,6 +251,8 @@ beforeAll(async () => {
       fake,
       nameFake,
       launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
+      hostSpecGeneration: 1,
+      e2eHostSpec: "stage2-spec-a",
     });
     return;
   }
@@ -280,12 +295,14 @@ beforeAll(async () => {
     dockerNetwork: NETWORK,
     runtimeImage: RUNTIME_IMAGE,
     launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
+    hostSpecGeneration: 1,
+    e2eHostSpec: "stage2-spec-a",
   });
 }, 720_000);
 
 afterAll(async () => {
   if (!PROCESS_BACKEND) {
-    for (const id of [orbId, failedOrbId]) {
+    for (const id of [orbId, failedOrbId, specOrbId]) {
       if (id === "") continue;
       await removeOrbContainers(id);
       await docker(["volume", "rm", "-f", `pi-orb-data-${id}`]).catch(() => undefined);
@@ -297,6 +314,28 @@ afterAll(async () => {
   if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
   if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
 }, 120_000);
+
+async function restartControlPlaneWithSpec(spec: string, generation: number): Promise<void> {
+  const authDir = controlPlane.authDir;
+  await controlPlane.stop();
+  controlPlane = await startControlPlane({
+    ...(PROCESS_BACKEND
+      ? {
+          pglitePath: join(localStateDirectory, "control-plane.pglite"),
+          processStateDirectory: join(localStateDirectory, "process-hosts"),
+        }
+      : { databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb` }),
+    port: CP_PORT,
+    fake,
+    nameFake,
+    dockerNetwork: NETWORK,
+    runtimeImage: RUNTIME_IMAGE,
+    launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
+    hostSpecGeneration: generation,
+    e2eHostSpec: spec,
+    authDir,
+  });
+}
 
 describe("full slice E2E", () => {
   it("runs login, a scripted tool round trip, replication, and drain", async () => {
@@ -478,6 +517,91 @@ describe("full slice E2E", () => {
       },
     );
   }, 600_000);
+
+  it("leaves running compute untouched and replaces stale stopped compute on Start", async () => {
+    const projectId = randomUUID();
+    specOrbId = randomUUID();
+    await withOrbDiagnostics(
+      () => specOrbId,
+      async () => {
+        expect(
+          (
+            await api(controlPlane.baseUrl, "POST", "/api/v1/projects", {
+              id: projectId,
+              name: `e2e-host-spec-${projectId.slice(0, 8)}`,
+              repositoryUrl: REPOSITORY_URL,
+            })
+          ).status,
+        ).toBe(201);
+        expect(
+          (
+            await api(controlPlane.baseUrl, "POST", `/api/v1/projects/${projectId}/orbs`, {
+              id: specOrbId,
+            })
+          ).status,
+        ).toBe(202);
+        await waitFor("host-spec fixture running", async () => {
+          const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`);
+          if (view.body["state"] === "failed") {
+            throw new FatalProbeError(String(view.body["lastError"]));
+          }
+          return view.body["state"] === "running" ? true : null;
+        });
+        expect(await computeIncarnation(specOrbId)).toBe(0);
+        const sentinel = `stage2-${specOrbId}`;
+        await writeWorkspaceFiles(specOrbId, 0, { "stage2-sentinel": sentinel });
+
+        // A deployed spec change does not bounce running compute. Restarting
+        // the control plane models the next revision while preserving the
+        // database, provider state, and credential directory.
+        if (PROCESS_BACKEND) {
+          controlPlane.process.kill("SIGHUP");
+          await waitFor("E2E host spec advanced", async () =>
+            controlPlane.logs.join("").includes("E2E host specification advanced") ? true : null,
+          );
+        } else {
+          await restartControlPlaneWithSpec("stage2-spec-b", 2);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        expect(
+          (await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`)).body["state"],
+        ).toBe("running");
+        expect(await computeIncarnation(specOrbId)).toBe(0);
+
+        expect(
+          (await api(controlPlane.baseUrl, "POST", `/api/v1/orbs/${specOrbId}/stop`)).status,
+        ).toBe(202);
+        await waitFor("host-spec fixture stopped", async () =>
+          (await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`)).body["state"] ===
+          "stopped"
+            ? true
+            : null,
+        );
+        expect(await computeIncarnation(specOrbId)).toBe(0);
+        expect(
+          (await api(controlPlane.baseUrl, "POST", `/api/v1/orbs/${specOrbId}/start`)).status,
+        ).toBe(202);
+        await waitFor(
+          "host-spec replacement running",
+          async () => {
+            const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`);
+            if (view.body["state"] === "failed") {
+              throw new FatalProbeError(String(view.body["lastError"]));
+            }
+            return view.body["state"] === "running" && (await computeIncarnation(specOrbId)) === 1
+              ? true
+              : null;
+          },
+          { timeoutMs: 120_000 },
+        );
+        expect(await readWorkspaceFile(specOrbId, 1, "stage2-sentinel")).toBe(sentinel);
+        expect(controlPlane.logs.join("")).not.toContain("setMetadata");
+        expect(
+          (await api(controlPlane.baseUrl, "DELETE", `/api/v1/projects/${projectId}`)).status,
+        ).toBe(202);
+      },
+    );
+  }, 240_000);
 
   it("surfaces a real clone failure, disposes compute, and never autonomously replaces it", async () => {
     const base = controlPlane.baseUrl;

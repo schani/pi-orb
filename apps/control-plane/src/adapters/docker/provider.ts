@@ -44,10 +44,12 @@ export interface DockerOrbHostProviderOptions {
    * created exactly as before and the runtime never sees the feature.
    */
   readonly tailscale?: TailscaleHostOptions;
+  readonly specGeneration?: number;
 }
 
 const ORB_LABEL = "pi-orb.orb-id";
 const INCARNATION_LABEL = "pi-orb.host-incarnation";
+const SPEC_FINGERPRINT_LABEL = "pi-orb.host-spec-fingerprint";
 
 /** Port the orb runtime listens on inside the container (apps/orb-runtime). */
 export const RUNTIME_PORT = 8080;
@@ -173,10 +175,35 @@ function mapContainerState(state: string): OrbHostState {
  */
 export class DockerOrbHostProvider implements OrbHostProvider {
   readonly kind = "docker";
+  readonly specGeneration: number;
   private readonly options: DockerOrbHostProviderOptions;
 
   constructor(options: DockerOrbHostProviderOptions) {
     this.options = options;
+    this.specGeneration = options.specGeneration ?? 0;
+  }
+
+  desiredSpecFingerprint(input: {
+    readonly orbId: string;
+    readonly repositoryUrl: string;
+  }): string {
+    return sha256Hex(
+      JSON.stringify({
+        v: 1,
+        image: this.options.image,
+        network: this.options.network,
+        controlPlaneUrl: this.controlPlaneUrl(),
+        extraEnv: this.options.extraEnv ?? {},
+        tailscale:
+          this.options.tailscale === undefined
+            ? null
+            : {
+                hostname: tailscaleHostname(input.orbId),
+                previewHost: previewHost(input.orbId, this.options.tailscale.tailnetDnsName),
+              },
+        repositoryUrl: input.repositoryUrl,
+      }),
+    );
   }
 
   /**
@@ -284,6 +311,10 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       ref: { provider: "docker", resourceId: name },
       orbId,
       incarnation,
+      specFingerprint:
+        typeof labels[SPEC_FINGERPRINT_LABEL] === "string"
+          ? String(labels[SPEC_FINGERPRINT_LABEL])
+          : null,
       state,
       ...(state === "running"
         ? { runtimeAddress: { baseUrl: this.runtimeBaseUrl(info, name) } }
@@ -383,6 +414,10 @@ export class DockerOrbHostProvider implements OrbHostProvider {
   ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError> {
     const name = containerName(request.orbId, request.incarnation);
     const ref: OrbHostRef = { provider: "docker", resourceId: name };
+    const specFingerprint = this.desiredSpecFingerprint({
+      orbId: request.orbId,
+      repositoryUrl: request.bootstrap.repositoryUrl,
+    });
     const run = async (): Promise<Result<ProvisionedOrbHost, OrbHostProviderError>> => {
       const existing = await this.inspect("provision", name, context);
       if (existing.isErr()) return err(existing.error);
@@ -409,7 +444,19 @@ export class DockerOrbHostProvider implements OrbHostProvider {
             const started = await this.exec("provision", ["start", name], context);
             if (started.isErr()) return err(started.error);
           }
-          return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(existingToken) });
+          const stamped = this.toObservation(existing.value)?.specFingerprint ?? null;
+          if (stamped !== specFingerprint) {
+            return err(
+              providerError("provision", "conflict", "container specification mismatch", false),
+            );
+          }
+          return ok({
+            ref,
+            incarnation,
+            runtimeTokenHash: sha256Hex(existingToken),
+            specFingerprint,
+            specGeneration: this.specGeneration,
+          });
         }
         // A container without a token predates the broker: replace it. The
         // data volume persists; only the compute incarnation rotates.
@@ -439,6 +486,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
           `${ORB_LABEL}=${request.orbId}`,
           "--label",
           `${INCARNATION_LABEL}=${request.incarnation}`,
+          "--label",
+          `${SPEC_FINGERPRINT_LABEL}=${specFingerprint}`,
           "--network",
           this.options.network,
           // Publish the runtime port on an ephemeral host-loopback port: bridge
@@ -499,7 +548,19 @@ export class DockerOrbHostProvider implements OrbHostProvider {
               ),
             );
           }
-          return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(winnerToken) });
+          const stamped = this.toObservation(winner.value ?? {})?.specFingerprint ?? null;
+          if (stamped !== specFingerprint) {
+            return err(
+              providerError("provision", "conflict", "racing specification mismatch", false),
+            );
+          }
+          return ok({
+            ref,
+            incarnation,
+            runtimeTokenHash: sha256Hex(winnerToken),
+            specFingerprint,
+            specGeneration: this.specGeneration,
+          });
         }
         return err(created.error);
       }
@@ -508,6 +569,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         ref,
         incarnation: request.incarnation,
         runtimeTokenHash: sha256Hex(runtimeToken),
+        specFingerprint,
+        specGeneration: this.specGeneration,
       });
     };
     return new ResultAsync(run());
@@ -526,6 +589,11 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       }
       if (incarnationFromInspect(inspected.value) !== request.expectedIncarnation) {
         return err(providerError("start", "conflict", "container incarnation mismatch", false));
+      }
+      if (
+        this.toObservation(inspected.value)?.specFingerprint !== request.expectedSpecFingerprint
+      ) {
+        return err(providerError("start", "conflict", "container specification mismatch", false));
       }
       const started = await this.exec("start", ["start", request.ref.resourceId], context);
       return started.map(() => undefined);

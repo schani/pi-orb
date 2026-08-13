@@ -213,6 +213,94 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       });
     });
 
+    it("fences immutable host-spec replacement forward and commits durable intent", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 10,
+      });
+      expect(hosted.isOk()).toBe(true);
+
+      const declined = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-stale-revision",
+        configuredGeneration: 9,
+        now: 3_000,
+      });
+      expect(declined.isOk() && declined.value).toMatchObject({
+        type: "declined",
+        committedGeneration: 10,
+      });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 10,
+        runtimeTokenHash: "old-token-hash",
+        hostDiscardThroughIncarnation: null,
+      });
+
+      const requested = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-new",
+        configuredGeneration: 11,
+        now: 4_000,
+      });
+      expect(requested.isOk() && requested.value).toMatchObject({
+        type: "requested",
+        orb: {
+          hostSpecFingerprint: "spec-new",
+          hostSpecGeneration: 11,
+          runtimeTokenHash: null,
+          hostDiscardThroughIncarnation: 0,
+          hostDiscardReason: "host_spec_changed",
+        },
+      });
+
+      const finalized = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        throughIncarnation: 0,
+        now: 5_000,
+      });
+      expect(finalized.isOk() && finalized.value).toMatchObject({
+        hostRef: null,
+        hostIncarnation: 1,
+        hostSpecFingerprint: "spec-new",
+        hostSpecGeneration: 11,
+        hostDiscardThroughIncarnation: null,
+      });
+    });
+
+    it("forces replacement when provider stamps disagree with durable current spec", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+        hostSpecFingerprint: "spec-current",
+        hostSpecGeneration: 12,
+      });
+      expect(hosted.isOk()).toBe(true);
+      const requested = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-current",
+        configuredGeneration: 12,
+        force: true,
+        now: 3_000,
+      });
+      expect(requested.isOk() && requested.value.type).toBe("requested");
+      expect(requested.isOk() && requested.value.orb.hostDiscardReason).toBe("host_spec_changed");
+    });
+
     it("guards discard finalization and clears retained evidence on replacement commit", async () => {
       await seed();
       const hosted = await store.casUpdateFields(task, {

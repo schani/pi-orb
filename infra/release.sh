@@ -200,7 +200,7 @@ current_generation=$(
     --project "$PROJECT" \
     --region "$REGION" \
     --format=json |
-    jq -r '[.spec.template.spec.containers[].env[]? | select(.name == "PI_ORB_SCRIPT_GENERATION") | .value][0] // "0"'
+    jq -r '[.spec.template.spec.containers[].env[]? | select(.name == "PI_ORB_HOST_SPEC_GENERATION") | .value][0] // "0"'
 )
 case "$candidate_generation:$current_generation" in
   *[!0-9:]*|:*)

@@ -285,6 +285,7 @@ describe("DockerOrbHostProvider", () => {
       {
         ref: { provider: "docker", resourceId: "pi-orb-orb-1-i1" },
         expectedIncarnation: 0,
+        expectedSpecFingerprint: "irrelevant-after-incarnation-mismatch",
       },
       context,
     );
@@ -576,7 +577,13 @@ describe("DockerOrbHostProvider tailscale env", () => {
             {
               Config: {
                 Env: [`${RUNTIME_TOKEN_ENV}=tok`, `${TAILSCALE_AUTH_KEY_ENV}=tskey-auth-old`],
-                Labels: { "pi-orb.orb-id": "orb-1" },
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-spec-fingerprint": provider.desiredSpecFingerprint({
+                    orbId: request.orbId,
+                    repositoryUrl: request.bootstrap.repositoryUrl,
+                  }),
+                },
               },
               State: { Status: "running" },
               NetworkSettings: { Networks: { "pi-orb": { IPAddress: "172.20.0.5" } } },

@@ -52,7 +52,7 @@ class FakeTransport implements GceApiTransport {
 function makeProvider(
   transport: GceApiTransport,
   tailscale?: TailscaleHostOptions,
-  scriptGeneration?: number,
+  specGeneration?: number,
 ): GceOrbHostProvider {
   return new GceOrbHostProvider(transport, {
     projectId: "proj",
@@ -63,7 +63,7 @@ function makeProvider(
     runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
     controlPlaneUrl: "https://runtime.example",
     ...(tailscale === undefined ? {} : { tailscale }),
-    ...(scriptGeneration === undefined ? {} : { scriptGeneration }),
+    ...(specGeneration === undefined ? {} : { specGeneration }),
   });
 }
 
@@ -129,21 +129,14 @@ const provisionRequest = {
   bootstrap: { repositoryUrl: "https://github.com/o/r" },
 };
 
-/** The script hash a `makeProvider` provider expects for orb-1 (fresh stamp). */
-const currentScriptHash = sha256(
-  buildStartupScript({
-    runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
-    orbId: provisionRequest.orbId,
-    repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
-    controlPlaneUrl: "https://runtime.example",
-    extraEnv: {},
-  }),
-);
+const currentSpecFingerprint = makeProvider(new FakeTransport([])).desiredSpecFingerprint({
+  orbId: provisionRequest.orbId,
+  repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
+});
 
 const freshMetadataItems = [
   { key: "pi-orb-runtime-token", value: "tok" },
-  { key: "pi-orb-script-sha256", value: currentScriptHash },
-  { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
+  { key: "pi-orb-host-spec-fingerprint", value: currentSpecFingerprint },
 ];
 
 const existingInstance = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -339,13 +332,10 @@ describe("GceOrbHostProvider", () => {
     // Cloud Logging, and guest attributes are off unless asked for.
     expect(items.find((item) => item.key === "google-logging-enabled")?.value).toBe("true");
     expect(items.find((item) => item.key === "enable-guest-attributes")?.value).toBe("TRUE");
-    // Script-version stamp and the re-derivation input (open question 32),
-    // plus the repair fence — 0 when the deploy did not set a generation.
-    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(sha256(script));
-    expect(items.find((item) => item.key === "pi-orb-script-generation")?.value).toBe("0");
-    expect(items.find((item) => item.key === "pi-orb-repository-url")?.value).toBe(
-      "https://github.com/o/r",
-    );
+    const spec = items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value;
+    expect(spec).toBe(result.isOk() ? result.value.specFingerprint : "");
+    expect(items.some((item) => item.key === "pi-orb-script-sha256")).toBe(false);
+    expect(items.some((item) => item.key === "pi-orb-script-generation")).toBe(false);
   });
 
   it("reuses an existing instance and reads its token back", async () => {
@@ -369,209 +359,39 @@ describe("GceOrbHostProvider", () => {
     expect(transport.requests[1]?.path).toContain("/instances/pi-orb-orb-1-i0/start");
   });
 
-  it("repairs a stale startup script on a reused running instance", async () => {
-    const staleItems = [
-      { key: "pi-orb-runtime-token", value: "tok" },
-      { key: "pi-orb-script-sha256", value: "stale-hash" },
-      { key: "pi-orb-repository-url", value: "https://github.com/o/r" },
-      { key: "ssh-keys", value: "someone:ssh-rsa AAAA" },
-      // A host from before the observability keys existed, or with one turned off.
-      { key: "google-logging-enabled", value: "false" },
-    ];
-    const transport = new FakeTransport([
-      () => ok200(existingInstance({ metadata: { fingerprint: "fp-1", items: staleItems } })),
-      () => ok200({ name: "op-stop" }), // stop for repair
-      () => done,
-      () =>
-        ok200(
-          existingInstance({
-            status: "TERMINATED",
-            metadata: { fingerprint: "fp-2", items: staleItems },
-          }),
-        ), // re-get for a fresh fingerprint
-      () => ok200({ name: "op-meta" }), // setMetadata
-      () => done,
-      () => ok200({ name: "op-start" }), // start
-      () => done,
-    ]);
-    const provider = makeProvider(transport);
-    const result = await provider.provision(task, provisionRequest, context);
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    // The token is preserved by the repair, so the committed hash stays valid.
-    if (result.isOk()) expect(result.value.runtimeTokenHash).toBe(sha256("tok"));
-    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
-    expect(setMetadata).toBeDefined();
-    const body = setMetadata?.body ?? {};
-    expect(body["fingerprint"]).toBe("fp-2");
-    const items = body["items"] as { key: string; value: string }[];
-    expect(items.find((item) => item.key === "pi-orb-runtime-token")?.value).toBe("tok");
-    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(
-      currentScriptHash,
-    );
-    expect(items.find((item) => item.key === "startup-script")?.value).toContain("docker run");
-    // Keys the provider does not manage survive untouched...
-    expect(items.find((item) => item.key === "ssh-keys")?.value).toBe("someone:ssh-rsa AAAA");
-    // ...while the observability keys are rewritten, exactly once, so a host
-    // predating them adopts them on the repair that is its only upgrade path.
-    expect(items.filter((item) => item.key === "google-logging-enabled")).toEqual([
-      { key: "google-logging-enabled", value: "true" },
-    ]);
-    expect(items.filter((item) => item.key === "enable-guest-attributes")).toEqual([
-      { key: "enable-guest-attributes", value: "TRUE" },
-    ]);
-  });
-
-  it("stamps its own script generation on insert", async () => {
-    const transport = new FakeTransport([
-      () => notFound, // instance get
-      () => ok200(existingInstance()), // disk exists
-      () => ok200({ name: "op-inst" }),
-      () => done,
-    ]);
-    const provider = makeProvider(transport, undefined, 7);
-    const result = await provider.provision(task, provisionRequest, context);
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    const insert = transport.requests.find(
-      (request) => request.method === "POST" && request.path.endsWith("/instances"),
-    );
-    const metadata = insert?.body?.["metadata"] as
-      | { items: { key: string; value: string }[] }
-      | undefined;
-    const items = metadata?.items ?? [];
-    expect(items.find((item) => item.key === "pi-orb-script-generation")?.value).toBe("7");
-  });
-
-  it("repairs an unstamped host forward and takes ownership of the fence", async () => {
-    // The host predates generations entirely: it reads as 0, the lowest there
-    // is, so the repair is forward and the stamp becomes this revision's.
-    const transport = new FakeTransport([
-      () =>
-        ok200(
-          existingInstance({
-            status: "TERMINATED",
-            metadata: {
-              fingerprint: "fp-1",
-              items: [
-                { key: "pi-orb-runtime-token", value: "tok" },
-                { key: "pi-orb-script-sha256", value: "stale-hash" },
-                { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
-              ],
-            },
-          }),
-        ),
-      () => ok200({ name: "op-meta" }),
-      () => done,
-      () => ok200({ name: "op-start" }),
-      () => done,
-    ]);
-    const provider = makeProvider(transport, undefined, 3);
-    const result = await provider.provision(task, provisionRequest, context);
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
-    const items = (setMetadata?.body?.["items"] ?? []) as { key: string; value: string }[];
-    expect(items.filter((item) => item.key === "pi-orb-script-generation")).toEqual([
-      { key: "pi-orb-script-generation", value: "3" },
-    ]);
-    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(
-      currentScriptHash,
-    );
-  });
-
-  it("repairs a host stamped with its own generation (hash still decides)", async () => {
-    // Same generation, different script: a feature toggle or a config change
-    // within one revision — and every local development host, which runs at
-    // generation 0 forever.
-    const transport = new FakeTransport([
-      () =>
-        ok200(
-          existingInstance({
-            status: "TERMINATED",
-            metadata: {
-              fingerprint: "fp-1",
-              items: [
-                { key: "pi-orb-runtime-token", value: "tok" },
-                { key: "pi-orb-script-sha256", value: "stale-hash" },
-                { key: "pi-orb-script-generation", value: "4" },
-                { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
-              ],
-            },
-          }),
-        ),
-      () => ok200({ name: "op-meta" }),
-      () => done,
-      () => ok200({ name: "op-start" }),
-      () => done,
-    ]);
-    const provider = makeProvider(transport, undefined, 4);
-    const result = await provider.provision(task, provisionRequest, context);
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
-    expect(setMetadata).toBeDefined();
-    const items = (setMetadata?.body?.["items"] ?? []) as { key: string; value: string }[];
-    expect(items.find((item) => item.key === "pi-orb-script-generation")?.value).toBe("4");
-  });
-
-  it("never repairs a host stamped by a newer generation", async () => {
-    // The rollover fence: an older revision meeting the new revision's host
-    // leaves script, metadata and power state alone — no stop, no setMetadata,
-    // no start (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
+  it("never repairs a stale immutable specification in place", async () => {
     const transport = new FakeTransport([
       () =>
         ok200(
           existingInstance({
             metadata: {
               fingerprint: "fp-1",
-              items: [
-                { key: "pi-orb-runtime-token", value: "tok" },
-                { key: "pi-orb-script-sha256", value: "hash-of-a-newer-script" },
-                { key: "pi-orb-script-generation", value: "9" },
-                { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
-              ],
+              items: [{ key: "pi-orb-runtime-token", value: "tok" }],
             },
           }),
         ),
     ]);
-    const provider = makeProvider(transport, undefined, 2);
-    const result = await provider.provision(task, provisionRequest, context);
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    if (result.isOk()) expect(result.value.runtimeTokenHash).toBe(sha256("tok"));
-    expect(transport.requests.length).toBe(1);
-  });
-
-  it("still boots a host stamped newer, without rewriting its script", async () => {
-    // Fencing withholds the repair, not the start: the orb must come up on the
-    // newer revision's script rather than stay down.
-    const transport = new FakeTransport([
-      () =>
-        ok200(
-          existingInstance({
-            status: "TERMINATED",
-            metadata: {
-              fingerprint: "fp-1",
-              items: [
-                { key: "pi-orb-runtime-token", value: "tok" },
-                { key: "pi-orb-script-sha256", value: "hash-of-a-newer-script" },
-                { key: "pi-orb-script-generation", value: "9" },
-                { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
-              ],
-            },
-          }),
-        ),
-      () => ok200({ name: "op-start" }),
-      () => done,
-    ]);
-    const provider = makeProvider(transport, undefined, 2);
-    const result = await provider.start(
-      task,
-      {
-        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
-        expectedIncarnation: 0,
-      },
-      context,
-    );
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
     expect(transport.requests.some((request) => request.path.endsWith("/setMetadata"))).toBe(false);
-    expect(transport.requests[1]?.path).toContain("/instances/pi-orb-orb-1/start");
+    expect(transport.requests.some((request) => request.path.endsWith("/stop"))).toBe(false);
+  });
+
+  it("fingerprint and generation change only with effective specification", () => {
+    const first = makeProvider(new FakeTransport([]), undefined, 7);
+    const same = makeProvider(new FakeTransport([]), undefined, 8);
+    const fingerprint = first.desiredSpecFingerprint({
+      orbId: provisionRequest.orbId,
+      repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
+    });
+    expect(
+      same.desiredSpecFingerprint({
+        orbId: provisionRequest.orbId,
+        repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
+      }),
+    ).toBe(fingerprint);
+    expect(first.specGeneration).toBe(7);
+    expect(same.specGeneration).toBe(8);
   });
 
   it("start refuses a resource carrying a different incarnation", async () => {
@@ -592,52 +412,12 @@ describe("GceOrbHostProvider", () => {
       {
         ref: { provider: "gce", resourceId: "pi-orb-orb-1-i1" },
         expectedIncarnation: 0,
+        expectedSpecFingerprint: currentSpecFingerprint,
       },
       context,
     );
     expect(result.isErr() && result.error.code).toBe("conflict");
     expect(transport.requests).toHaveLength(1);
-  });
-
-  it("start() repairs a pre-stamp TERMINATED instance, recovering the repo URL", async () => {
-    const legacyScript = "#!/bin/bash\n  -e PI_ORB_REPOSITORY_URL='https://github.com/o/r' \\\n";
-    const transport = new FakeTransport([
-      () =>
-        ok200(
-          existingInstance({
-            status: "TERMINATED",
-            metadata: {
-              fingerprint: "fp-1",
-              items: [
-                { key: "pi-orb-runtime-token", value: "tok" },
-                { key: "startup-script", value: legacyScript },
-              ],
-            },
-          }),
-        ),
-      () => ok200({ name: "op-meta" }), // setMetadata (no stop needed)
-      () => done,
-      () => ok200({ name: "op-start" }),
-      () => done,
-    ]);
-    const provider = makeProvider(transport);
-    const result = await provider.start(
-      task,
-      {
-        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
-        expectedIncarnation: 0,
-      },
-      context,
-    );
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
-    const items = (setMetadata?.body?.["items"] ?? []) as { key: string; value: string }[];
-    expect(items.find((item) => item.key === "pi-orb-repository-url")?.value).toBe(
-      "https://github.com/o/r",
-    );
-    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(
-      currentScriptHash,
-    );
   });
 
   it("start() with a current stamp starts without touching metadata", async () => {
@@ -652,6 +432,7 @@ describe("GceOrbHostProvider", () => {
       {
         ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
         expectedIncarnation: 0,
+        expectedSpecFingerprint: currentSpecFingerprint,
       },
       context,
     );
@@ -689,7 +470,12 @@ describe("GceOrbHostProvider", () => {
       () =>
         ok200(
           existingInstance({
-            metadata: { items: [{ key: "pi-orb-runtime-token", value: "winner" }] },
+            metadata: {
+              items: [
+                { key: "pi-orb-runtime-token", value: "winner" },
+                { key: "pi-orb-host-spec-fingerprint", value: currentSpecFingerprint },
+              ],
+            },
           }),
         ),
     ]);
@@ -995,8 +781,9 @@ describe("GceOrbHostProvider", () => {
     expect(script).toContain('-e PI_ORB_TAILSCALE_AUTH_KEY="$TS_AUTHKEY"');
     expect(script).toContain("-e PI_ORB_TAILSCALE_HOSTNAME='pi-orb-orb-1'");
     expect(script).toContain("-e PI_ORB_PREVIEW_HOST='pi-orb-orb-1.tailnet.ts.net'");
-    // The stamp still describes the script that was written.
-    expect(items.find((item) => item.key === "pi-orb-script-sha256")?.value).toBe(sha256(script));
+    expect(items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value).toBe(
+      result.isOk() ? result.value.specFingerprint : "",
+    );
   });
 
   it("fails provisioning retryably and inserts nothing when minting fails", async () => {
@@ -1027,119 +814,6 @@ describe("GceOrbHostProvider", () => {
         (request) => request.method === "POST" && request.path.endsWith("/instances"),
       ),
     ).toBe(false);
-  });
-
-  it("preserves an existing auth key through a script repair", async () => {
-    const minter = countingMinter();
-    const staleItems = [
-      { key: "pi-orb-runtime-token", value: "tok" },
-      { key: "pi-orb-tailscale-auth-key", value: "tskey-auth-existing" },
-      { key: "pi-orb-script-sha256", value: "stale-hash" },
-      { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
-    ];
-    const transport = new FakeTransport([
-      () =>
-        ok200(
-          existingInstance({
-            status: "TERMINATED",
-            metadata: { fingerprint: "fp-1", items: staleItems },
-          }),
-        ),
-      () => ok200({ name: "op-meta" }), // setMetadata (no stop needed)
-      () => done,
-      () => ok200({ name: "op-start" }),
-      () => done,
-    ]);
-    const provider = makeProvider(transport, tailscaleOptions(minter));
-    const result = await provider.provision(task, provisionRequest, context);
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    // An existing host is never re-keyed: it keeps the identity it joined with.
-    expect(minter.minted()).toBe(0);
-    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
-    const items = (setMetadata?.body?.["items"] ?? []) as { key: string; value: string }[];
-    expect(items.find((item) => item.key === "pi-orb-tailscale-auth-key")?.value).toBe(
-      "tskey-auth-existing",
-    );
-    expect(items.find((item) => item.key === "pi-orb-runtime-token")?.value).toBe("tok");
-  });
-
-  it("mints the key a pre-tailscale host is missing while repairing it", async () => {
-    const minter = countingMinter();
-    const transport = new FakeTransport([
-      () => ok200(existingInstance({ status: "TERMINATED" })), // no tailscale key
-      () => ok200({ name: "op-meta" }),
-      () => done,
-      () => ok200({ name: "op-start" }),
-      () => done,
-    ]);
-    const provider = makeProvider(transport, tailscaleOptions(minter));
-    const result = await provider.start(
-      task,
-      {
-        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
-        expectedIncarnation: 0,
-      },
-      context,
-    );
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    expect(minter.minted()).toBe(1);
-    const setMetadata = transport.requests.find((request) => request.path.endsWith("/setMetadata"));
-    const items = (setMetadata?.body?.["items"] ?? []) as { key: string; value: string }[];
-    // Key and script land together: the new script curls that attribute under
-    // `set -e`, so a repair without it would brick the host at boot.
-    expect(items.find((item) => item.key === "pi-orb-tailscale-auth-key")?.value).toBe(
-      "tskey-auth-1",
-    );
-    const script = items.find((item) => item.key === "startup-script")?.value ?? "";
-    expect(script).toContain("instance/attributes/pi-orb-tailscale-auth-key");
-  });
-
-  it("start() re-derives the identical tailscale script (no repeat repair)", async () => {
-    const minter = countingMinter();
-    const tailscaleScriptHash = sha256(
-      buildStartupScript({
-        runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
-        orbId: provisionRequest.orbId,
-        repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
-        controlPlaneUrl: "https://runtime.example",
-        extraEnv: {},
-        tailscale: {
-          hostname: "pi-orb-orb-1",
-          previewHost: "pi-orb-orb-1.tailnet.ts.net",
-        },
-      }),
-    );
-    const transport = new FakeTransport([
-      () =>
-        ok200(
-          existingInstance({
-            status: "TERMINATED",
-            metadata: {
-              fingerprint: "fp-1",
-              items: [
-                { key: "pi-orb-runtime-token", value: "tok" },
-                { key: "pi-orb-tailscale-auth-key", value: "tskey-auth-existing" },
-                { key: "pi-orb-script-sha256", value: tailscaleScriptHash },
-                { key: "pi-orb-repository-url", value: provisionRequest.bootstrap.repositoryUrl },
-              ],
-            },
-          }),
-        ),
-      () => ok200({ name: "op-start" }),
-      () => done,
-    ]);
-    const provider = makeProvider(transport, tailscaleOptions(minter));
-    const result = await provider.start(
-      task,
-      {
-        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
-        expectedIncarnation: 0,
-      },
-      context,
-    );
-    expect(result.isOk(), JSON.stringify(result)).toBe(true);
-    expect(transport.requests.some((request) => request.path.endsWith("/setMetadata"))).toBe(false);
-    expect(minter.minted()).toBe(0);
   });
 
   it("emits no tailscale plumbing when the feature is off", () => {

@@ -148,13 +148,22 @@ export function seedRunningOrb(
   const projectId = `project-of-${orbId}`;
   harness.store.seedProject(makeProjectRow(projectId));
   harness.world.configureOrb(orbId, { initDurationMs: 0, ...config });
-  const provisioned = harness.world.provisionHost(task, orbId, 0);
+  const repositoryUrl = makeProjectRow(projectId).repositoryUrl;
+  const provisioned = harness.world.provisionHost(
+    task,
+    orbId,
+    0,
+    harness.deps.hostProvider.specGeneration,
+    harness.deps.hostProvider.desiredSpecFingerprint({ orbId, repositoryUrl }),
+  );
   harness.world.finishBoot(task, orbId);
   harness.world.ensureSessionExists(orbId);
   harness.store.seedOrb(
     makeOrbRow(orbId, projectId, "running", {
       hostRef: provisioned.ref.resourceId,
       runtimeTokenHash: provisioned.runtimeTokenHash,
+      hostSpecFingerprint: provisioned.specFingerprint,
+      hostSpecGeneration: provisioned.specGeneration,
       checkoutCommit: "commit-0",
       stateChangedAt: task.wallNow(),
     }),

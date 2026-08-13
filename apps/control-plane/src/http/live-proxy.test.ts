@@ -51,6 +51,8 @@ describe("live proxy", () => {
     const delegate = harness.deps.hostProvider;
     const hostProvider: OrbHostProvider = {
       kind: delegate.kind,
+      specGeneration: delegate.specGeneration,
+      desiredSpecFingerprint: (input) => delegate.desiredSpecFingerprint(input),
       provision: (task, request, context) => delegate.provision(task, request, context),
       start: (task, ref, context) => delegate.start(task, ref, context),
       stop: (task, ref, context) => delegate.stop(task, ref, context),
@@ -63,6 +65,7 @@ describe("live proxy", () => {
           ref,
           orbId,
           incarnation: 0,
+          specFingerprint: null,
           state: "running" as const,
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         }));
@@ -118,6 +121,8 @@ describe("live proxy", () => {
     const delegate = harness.deps.hostProvider;
     const hostProvider: OrbHostProvider = {
       kind: delegate.kind,
+      specGeneration: delegate.specGeneration,
+      desiredSpecFingerprint: (input) => delegate.desiredSpecFingerprint(input),
       provision: (task, request, context) => delegate.provision(task, request, context),
       start: (task, ref, context) => delegate.start(task, ref, context),
       stop: (task, ref, context) => delegate.stop(task, ref, context),
@@ -129,6 +134,7 @@ describe("live proxy", () => {
           ref,
           orbId,
           incarnation: 0,
+          specFingerprint: null,
           state: "running" as const,
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         })),
@@ -180,6 +186,8 @@ describe("live proxy", () => {
     const delegate = harness.deps.hostProvider;
     const hostProvider: OrbHostProvider = {
       kind: delegate.kind,
+      specGeneration: delegate.specGeneration,
+      desiredSpecFingerprint: (input) => delegate.desiredSpecFingerprint(input),
       provision: (task, request, context) => delegate.provision(task, request, context),
       start: (task, ref, context) => delegate.start(task, ref, context),
       stop: (task, ref, context) => delegate.stop(task, ref, context),
@@ -191,6 +199,7 @@ describe("live proxy", () => {
           ref,
           orbId,
           incarnation: 0,
+          specFingerprint: null,
           state: "running" as const,
           runtimeAddress: { baseUrl: `http://127.0.0.1:${runtimeAddress.port}` },
         })),

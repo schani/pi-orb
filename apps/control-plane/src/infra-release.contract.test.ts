@@ -52,7 +52,7 @@ if [ "$1 $2" = "storage cp" ]; then exit "\${MOCK_LOCK_STATUS:-0}"; fi
 if [ "$1 $2 $3" = "storage objects describe" ]; then echo 42; exit 0; fi
 if [ "$1 $2" = "storage rm" ]; then exit 0; fi
 cat <<'JSON'
-{"spec":{"template":{"spec":{"containers":[{"env":[{"name":"PI_ORB_SCRIPT_GENERATION","value":"200"}]}]}}}}
+{"spec":{"template":{"spec":{"containers":[{"env":[{"name":"PI_ORB_HOST_SPEC_GENERATION","value":"200"}]}]}}}}
 JSON
 `,
   );

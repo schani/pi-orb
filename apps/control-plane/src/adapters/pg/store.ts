@@ -18,6 +18,7 @@ import type {
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
   RecordHostDiscardStatusParams,
+  RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
   RequestOrbDeletionParams,
 } from "../../domain/ports.ts";
@@ -992,8 +993,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         "updated_at = $3",
         "host_ref = NULL",
         "runtime_token_hash = NULL",
-        "host_spec_fingerprint = NULL",
-        "host_spec_generation = NULL",
+        "host_spec_fingerprint = CASE WHEN host_discard_reason = 'host_spec_changed' THEN host_spec_fingerprint ELSE NULL END",
+        "host_spec_generation = CASE WHEN host_discard_reason = 'host_spec_changed' THEN host_spec_generation ELSE NULL END",
         "host_discard_through_incarnation = NULL",
         "host_discard_reason = NULL",
         "host_discard_error = NULL",
@@ -1003,6 +1004,61 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       [new Date(params.now), params.throughIncarnation],
       "host_discard_through_incarnation = $4 AND host_incarnation <= $4",
     );
+  }
+
+  requestHostSpecReplacement(
+    _task: SimulationTask,
+    params: RequestHostSpecReplacementParams,
+  ): ResultAsync<
+    import("../../domain/ports.ts").HostSpecReplacementOutcome,
+    StoreError | StateConflict
+  > {
+    return this.db.transaction<
+      import("../../domain/ports.ts").HostSpecReplacementOutcome,
+      StoreError | StateConflict
+    >(async (query) => {
+      const selected = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
+      if (selected.isErr()) return err(selected.error);
+      const raw = selected.value.rows[0];
+      if (raw === undefined || Number(raw["state_version"]) !== params.expectedStateVersion) {
+        return err(
+          stateConflict(
+            typeof raw?.["state"] === "string" ? (raw["state"] as OrbState) : undefined,
+          ),
+        );
+      }
+      const orb = mapOrbRow(raw);
+      if (
+        orb.hostRef === null ||
+        (params.force !== true && orb.hostSpecFingerprint === params.desiredFingerprint)
+      ) {
+        return ok({ type: "current" as const, orb });
+      }
+      const committed = orb.hostSpecGeneration ?? 0;
+      if (params.configuredGeneration < committed) {
+        return ok({ type: "declined" as const, orb, committedGeneration: committed });
+      }
+      const updated = await query(
+        `UPDATE orbs SET runtime_token_hash = NULL,
+           host_spec_fingerprint = $4, host_spec_generation = $5,
+           host_discard_through_incarnation = host_incarnation,
+           host_discard_reason = 'host_spec_changed', host_discard_error = NULL,
+           host_discard_evidence = NULL, host_discard_requested_at = $3, updated_at = $3
+         WHERE id = $1 AND state_version = $2 RETURNING *`,
+        [
+          params.orbId,
+          params.expectedStateVersion,
+          new Date(params.now),
+          params.desiredFingerprint,
+          params.configuredGeneration,
+        ],
+      );
+      if (updated.isErr()) return err(updated.error);
+      const row = updated.value.rows[0];
+      return row === undefined
+        ? err(stateConflict(orb.state))
+        : ok({ type: "requested" as const, orb: mapOrbRow(row) });
+    });
   }
 
   private casUpdate(
@@ -1087,6 +1143,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     if (params.runtimeTokenHash !== undefined) {
       sets.push(`runtime_token_hash = $${index}`);
       values.push(params.runtimeTokenHash);
+      index += 1;
+    }
+    if (params.hostSpecFingerprint !== undefined) {
+      sets.push(`host_spec_fingerprint = $${index}`);
+      values.push(params.hostSpecFingerprint);
+      index += 1;
+    }
+    if (params.hostSpecGeneration !== undefined) {
+      sets.push(`host_spec_generation = $${index}`);
+      values.push(params.hostSpecGeneration);
       index += 1;
     }
     if (params.hostDiscardEvidence !== undefined) {

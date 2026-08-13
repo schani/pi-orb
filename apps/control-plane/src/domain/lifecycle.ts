@@ -28,6 +28,7 @@ export type ReconcileOutcome =
         | "auth"
         | "readiness"
         | "host_transition"
+        | "stale_compute_disposal"
         | "drain_blocked"
         | "deletion_quarantine";
     }
@@ -58,7 +59,13 @@ const retryable = (source: RetryableSource): ReconcileOutcome => {
     : { type: "retryable", message: source.message };
 };
 const waiting = (
-  reason: "auth" | "readiness" | "host_transition" | "drain_blocked" | "deletion_quarantine",
+  reason:
+    | "auth"
+    | "readiness"
+    | "host_transition"
+    | "stale_compute_disposal"
+    | "drain_blocked"
+    | "deletion_quarantine",
 ) => ({ type: "waiting", reason }) as const;
 
 async function diagnoseHost(
@@ -162,6 +169,7 @@ async function startHost(
   orbId: string,
   resourceId: string,
   expectedIncarnation: number,
+  expectedSpecFingerprint: string,
   reason: string,
 ): Promise<Result<void, OrbHostProviderError>> {
   const result = await withDeadline(
@@ -171,7 +179,7 @@ async function startHost(
     (context) =>
       deps.hostProvider.start(
         task,
-        { ref: hostRefOf(deps, resourceId), expectedIncarnation },
+        { ref: hostRefOf(deps, resourceId), expectedIncarnation, expectedSpecFingerprint },
         context,
       ),
   );
@@ -480,6 +488,71 @@ async function reconcileCreateStart(
 ): Promise<ReconcileOutcome> {
   let orb = initial;
 
+  // Immutable specification is evaluated only in the ordinary create/start
+  // path: deploys neither sweep stopped compute nor bounce running orbs.
+  const projectResult = await deps.store.getProject(task, orb.projectId);
+  if (projectResult.isErr()) return retryable(projectResult.error);
+  const project = projectResult.value;
+  if (project === null) {
+    return failOrb(task, deps, orb, "provider_failed", `project ${orb.projectId} not found`);
+  }
+  const desiredSpecFingerprint = deps.hostProvider.desiredSpecFingerprint({
+    orbId: orb.id,
+    repositoryUrl: project.repositoryUrl,
+  });
+  const declinedCondition = `spec-replacement-declined:${orb.id}`;
+  let startSpecFingerprint = desiredSpecFingerprint;
+  if (
+    orb.hostRef === null &&
+    orb.hostSpecFingerprint !== null &&
+    orb.hostSpecFingerprint !== desiredSpecFingerprint &&
+    deps.hostProvider.specGeneration < (orb.hostSpecGeneration ?? 0)
+  ) {
+    if (deps.control.noteCondition(declinedCondition, true)) {
+      logOrbEvent(task, orb.id, "spec-replacement-declined", {
+        committed_generation: orb.hostSpecGeneration ?? 0,
+        configured_generation: deps.hostProvider.specGeneration,
+      });
+    }
+    return waiting("stale_compute_disposal");
+  }
+  if (orb.hostRef !== null && orb.hostSpecFingerprint !== desiredSpecFingerprint) {
+    const requested = await deps.store.requestHostSpecReplacement(task, {
+      orbId: orb.id,
+      expectedStateVersion: orb.stateVersion,
+      desiredFingerprint: desiredSpecFingerprint,
+      configuredGeneration: deps.hostProvider.specGeneration,
+      now: task.wallNow(),
+    });
+    if (requested.isErr()) {
+      return requested.error.type === "state_conflict"
+        ? { type: "conflict" }
+        : retryable(requested.error);
+    }
+    if (requested.value.type === "requested") {
+      deps.control.noteCondition(declinedCondition, false);
+      logOrbEvent(task, orb.id, "compute-discard-requested", {
+        host: orb.hostRef,
+        through_incarnation: orb.hostIncarnation,
+        reason: "host_spec_changed",
+      });
+      return waiting("stale_compute_disposal");
+    }
+    if (requested.value.type === "declined") {
+      startSpecFingerprint = orb.hostSpecFingerprint ?? desiredSpecFingerprint;
+      if (deps.control.noteCondition(declinedCondition, true)) {
+        logOrbEvent(task, orb.id, "spec-replacement-declined", {
+          committed_generation: requested.value.committedGeneration,
+          configured_generation: deps.hostProvider.specGeneration,
+        });
+      }
+    } else {
+      deps.control.noteCondition(declinedCondition, false);
+    }
+  } else {
+    deps.control.noteCondition(declinedCondition, false);
+  }
+
   // 1. Codex auth is a prerequisite for host work (docs/credentials.md).
   const auth = await deps.authGate.ensureAuth(task);
   if (auth.isErr()) return retryable(auth.error);
@@ -549,12 +622,6 @@ async function reconcileCreateStart(
   // 3. Ensure a host exists.
   let hostResourceId = orb.hostRef;
   if (hostResourceId === null) {
-    const projectResult = await deps.store.getProject(task, orb.projectId);
-    if (projectResult.isErr()) return retryable(projectResult.error);
-    const project = projectResult.value;
-    if (project === null) {
-      return failOrb(task, deps, orb, "provider_failed", `project ${orb.projectId} not found`);
-    }
     const isReplacement = orb.hostIncarnation > 0;
     if (isReplacement) {
       await task.checkpoint("compute-replacement.replacement-before-provision");
@@ -575,6 +642,8 @@ async function reconcileCreateStart(
       now: task.wallNow(),
       hostRef: provisioned.value.ref.resourceId,
       runtimeTokenHash: provisioned.value.runtimeTokenHash,
+      hostSpecFingerprint: orb.hostSpecFingerprint ?? provisioned.value.specFingerprint,
+      hostSpecGeneration: orb.hostSpecGeneration ?? provisioned.value.specGeneration,
       // Replacement succeeded: the retained discard evidence has served its
       // purpose and must not shadow a later, unrelated incident.
       hostDiscardEvidence: null,
@@ -591,6 +660,7 @@ async function reconcileCreateStart(
       logOrbEvent(task, orb.id, "replacement-provisioned", {
         host: hostResourceId,
         incarnation: provisioned.value.incarnation,
+        spec: provisioned.value.specFingerprint.slice(0, 12),
       });
     }
   }
@@ -605,6 +675,42 @@ async function reconcileCreateStart(
   const observation = observed.value;
   const identityFailure = await failOnObservationMismatch(task, deps, orb, observation);
   if (identityFailure !== null) return identityFailure;
+  if (
+    observation !== null &&
+    observation.specFingerprint !== undefined &&
+    observation.specFingerprint !== startSpecFingerprint
+  ) {
+    const replacement = await deps.store.requestHostSpecReplacement(task, {
+      orbId: orb.id,
+      expectedStateVersion: orb.stateVersion,
+      desiredFingerprint: desiredSpecFingerprint,
+      configuredGeneration: deps.hostProvider.specGeneration,
+      force: true,
+      now: task.wallNow(),
+    });
+    if (replacement.isErr()) {
+      return replacement.error.type === "state_conflict"
+        ? { type: "conflict" }
+        : retryable(replacement.error);
+    }
+    if (replacement.value.type === "requested") {
+      logOrbEvent(task, orb.id, "compute-discard-requested", {
+        host: orb.hostRef,
+        through_incarnation: orb.hostIncarnation,
+        reason: "host_spec_changed",
+      });
+      return waiting("stale_compute_disposal");
+    }
+    if (replacement.value.type === "declined") {
+      startSpecFingerprint = observation.specFingerprint ?? startSpecFingerprint;
+      if (deps.control.noteCondition(declinedCondition, true)) {
+        logOrbEvent(task, orb.id, "spec-replacement-declined", {
+          committed_generation: replacement.value.committedGeneration,
+          configured_generation: deps.hostProvider.specGeneration,
+        });
+      }
+    }
+  }
   if (observation === null) {
     // Whatever boot this probe was measuring is over (docs/lifecycle.md): the
     // sub-deadline below must time *this* host incarnation, not a previous one.
@@ -615,12 +721,6 @@ async function reconcileCreateStart(
       answered: false,
     });
     // Definitive absence: idempotent provision restores the host (docs/lifecycle.md).
-    const projectResult = await deps.store.getProject(task, orb.projectId);
-    if (projectResult.isErr()) return retryable(projectResult.error);
-    const project = projectResult.value;
-    if (project === null) {
-      return failOrb(task, deps, orb, "provider_failed", `project ${orb.projectId} not found`);
-    }
     const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "host_absent");
     if (provisioned.isErr()) {
       return provisioned.error.retryable
@@ -640,6 +740,8 @@ async function reconcileCreateStart(
         now: task.wallNow(),
         hostRef: provisioned.value.ref.resourceId,
         runtimeTokenHash: provisioned.value.runtimeTokenHash,
+        hostSpecFingerprint: provisioned.value.specFingerprint,
+        hostSpecGeneration: provisioned.value.specGeneration,
       });
       if (updated.isErr()) {
         return updated.error.type === "state_conflict"
@@ -681,6 +783,7 @@ async function reconcileCreateStart(
         orb.id,
         hostResourceId,
         orb.hostIncarnation,
+        startSpecFingerprint,
         `host_observed_${observation.state}`,
       );
       if (started.isErr()) {
@@ -901,6 +1004,7 @@ async function reconcileRunning(
       orb.id,
       orb.hostRef,
       orb.hostIncarnation,
+      orb.hostSpecFingerprint ?? "",
       "unreachable_runtime",
     );
     if (started.isErr()) {
@@ -1071,6 +1175,7 @@ async function reconcileStopping(
         orb.id,
         orb.hostRef,
         orb.hostIncarnation,
+        orb.hostSpecFingerprint ?? "",
         "complete_pending_restart",
       );
       if (started.isErr()) return retryable(started.error);
@@ -1164,6 +1269,7 @@ async function reconcileStopping(
       orb.id,
       orb.hostRef,
       orb.hostIncarnation,
+      orb.hostSpecFingerprint ?? "",
       "unreachable_runtime",
     );
     if (started.isErr()) return retryable(started.error);
@@ -1383,6 +1489,7 @@ async function reconcileArchiving(
           orb.id,
           orb.hostRef,
           orb.hostIncarnation,
+          orb.hostSpecFingerprint ?? "",
           "archive_history_seal",
         );
         return started.isErr() ? retryable(started.error) : { type: "progressed" };

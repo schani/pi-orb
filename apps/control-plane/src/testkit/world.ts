@@ -20,6 +20,7 @@ import type {
   ProvisionedOrbHost,
   ProvisionOrbHostRequest,
   PullHistoryClientRequest,
+  StartOrbHostRequest,
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 
@@ -161,12 +162,10 @@ interface FakeHost {
   incarnation: number;
   state: OrbHostState;
   runtime: FakeRuntimeInstance | null;
-  /**
-   * The script generation stamped on the host, as the GCE provider stamps
-   * `pi-orb-script-generation` (docs/host-provider.md). Every host carries
-   * one; the single-provider harness stamps 0 everywhere and never repairs.
-   */
-  scriptGeneration: number;
+  /** Deploy generation that committed this immutable specification. */
+  specGeneration: number;
+  /** Immutable launch specification carried by this incarnation. */
+  specFingerprint: string;
   /** Per-incarnation runtime token "carried in the host's env". */
   runtimeToken: string;
   /** Monotonic ms of a hypervisor ACPI soft-off in progress, or null. */
@@ -178,13 +177,6 @@ interface FakeHost {
 /** The deterministic stand-in for SHA-256 used by the fake provider. */
 export function fakeTokenHash(token: string): string {
   return `sha256(${token})`;
-}
-
-/** One completed script repair: the host's stamp moved `from` → `to`. */
-export interface ScriptRepair {
-  readonly orbId: string;
-  readonly from: number;
-  readonly to: number;
 }
 
 interface OrbWorldState {
@@ -204,8 +196,6 @@ interface OrbWorldState {
   /** Provider stop/start operations applied to this orb's host. */
   hostStopCount: number;
   hostStartCount: number;
-  /** Every completed script repair of this orb's host, in order. */
-  scriptRepairs: ScriptRepair[];
 }
 
 /** Measured GCE figure: ~60–70s from `instances.start` to a serving container. */
@@ -292,7 +282,6 @@ export class FakeWorld {
       deliverMessageScript: { kind: "ok" },
       hostStopCount: 0,
       hostStartCount: 0,
-      scriptRepairs: [],
     });
   }
 
@@ -751,7 +740,8 @@ export class FakeWorld {
     task: SimulationTask,
     orbId: string,
     incarnation: number,
-    scriptGeneration: number = 0,
+    specGeneration: number = 0,
+    specFingerprint: string = `fake-spec-${specGeneration}`,
   ): ProvisionedOrbHost {
     const state = this.orbState(orbId);
     if (state.host !== null) {
@@ -765,9 +755,7 @@ export class FakeWorld {
         );
       }
       // Idempotent: return the existing host (starting it if stopped) and
-      // read its token back — never re-mint for an existing incarnation. A
-      // reused host keeps the generation it was stamped with; only a repair
-      // (`completeScriptRepair`) restamps it.
+      // read its token back — never re-mint for an existing incarnation.
       if (state.host.state === "stopped" || state.host.state === "failed") {
         this.startHost(task, state.host.ref);
       }
@@ -775,6 +763,8 @@ export class FakeWorld {
         ref: state.host.ref,
         incarnation: state.host.incarnation,
         runtimeTokenHash: fakeTokenHash(state.host.runtimeToken),
+        specFingerprint: state.host.specFingerprint,
+        specGeneration: state.host.specGeneration,
       };
     }
     this.refCounter += 1;
@@ -790,63 +780,25 @@ export class FakeWorld {
       state: "running",
       runtime: null,
       runtimeToken,
-      scriptGeneration,
+      specGeneration,
+      specFingerprint,
       preemptedAtMonotonic: null,
       preemptionSoftWindowMs: DEFAULT_PREEMPTION_SOFT_WINDOW_MS,
     };
     state.hostStartCount += 1;
     this.bootRuntime(task, orbId);
-    return { ref, incarnation, runtimeTokenHash: fakeTokenHash(runtimeToken) };
+    return {
+      ref,
+      incarnation,
+      runtimeTokenHash: fakeTokenHash(runtimeToken),
+      specFingerprint,
+      specGeneration,
+    };
   }
 
   /** The orb's host reference, or null when it has none. */
   hostRefOf(orbId: string): OrbHostRef | null {
     return this.orbState(orbId).host?.ref ?? null;
-  }
-
-  /** The script generation stamped on the orb's host. */
-  scriptGenerationOf(orbId: string): number | null {
-    return this.orbState(orbId).host?.scriptGeneration ?? null;
-  }
-
-  /** Every completed script repair of the orb's host, oldest first. */
-  scriptRepairsOf(orbId: string): readonly ScriptRepair[] {
-    return this.orbState(orbId).scriptRepairs;
-  }
-
-  /**
-   * The fencing rule, in one place: a repair only ever moves a host's stamp
-   * *forward*. An older revision meeting a newer host's script leaves it
-   * alone; an equal generation repairs nothing, because the stamp already
-   * says the host carries this revision's script (the real adapter compares
-   * script hashes at equal generation — the fake has no script text, so the
-   * generation is the whole comparison).
-   */
-  private repairIsNeeded(stamped: number, generation: number): boolean {
-    return stamped < generation;
-  }
-
-  /** Whether `generation` would repair the host behind `ref` right now. */
-  needsScriptRepair(ref: OrbHostRef, generation: number): boolean {
-    const host = this.findByRef(ref)?.host;
-    if (host === null || host === undefined) return false;
-    return this.repairIsNeeded(host.scriptGeneration, generation);
-  }
-
-  /**
-   * The second half of a repair: restamp and start. Re-checks the fence, so a
-   * repair whose stop half raced another revision's repair cannot write the
-   * stamp backward, and only a repair that actually moved the stamp counts.
-   */
-  completeScriptRepair(task: SimulationTask, ref: OrbHostRef, generation: number): void {
-    const state = this.findByRef(ref);
-    if (state === null || state.host === null) return;
-    const host = state.host;
-    if (this.repairIsNeeded(host.scriptGeneration, generation)) {
-      state.scriptRepairs.push({ orbId: host.orbId, from: host.scriptGeneration, to: generation });
-      host.scriptGeneration = generation;
-    }
-    this.startHost(task, ref);
   }
 
   /** The host vanishes entirely (manual removal, definitive absence). */
@@ -1035,6 +987,7 @@ export class FakeWorld {
       ref: state.host.ref,
       orbId: state.host.orbId,
       incarnation: state.host.incarnation,
+      specFingerprint: state.host.specFingerprint,
       state: state.host.state,
       ...(state.host.state === "running"
         ? { runtimeAddress: { baseUrl: `http://${state.host.ref.resourceId}:8080` } }
@@ -1149,46 +1102,22 @@ const providerError = (
   retryable,
 });
 
-/**
- * How long a script repair holds the host stopped between its stop and its
- * restamp+start, standing in for the GCE stop operation plus `setMetadata`.
- * It has to be long enough for another reconciler to *observe* the stopped
- * host — that window is what turned dueling repairs into a war on 2026-08-06
- * (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md) — and
- * short enough to fit inside a provider operation deadline.
- */
-const SCRIPT_REPAIR_STOP_MS = 2_000;
-
 export class FakeOrbHostProvider implements OrbHostProvider {
   readonly kind = "fake";
+  readonly specGeneration: number;
   private readonly world: FakeWorld;
   private readonly maxLatencyMs: number;
-  private readonly scriptGeneration: number;
-
-  constructor(world: FakeWorld, maxLatencyMs: number = 50, scriptGeneration: number = 0) {
+  constructor(world: FakeWorld, maxLatencyMs: number = 50, specGeneration: number = 0) {
     this.world = world;
     this.maxLatencyMs = maxLatencyMs;
-    this.scriptGeneration = scriptGeneration;
+    this.specGeneration = specGeneration;
   }
 
-  /**
-   * The fake's mirror of `GceOrbHostProvider.ensureCurrentScript`: before
-   * provisioning-by-reuse or starting a host, bring its stamped script
-   * generation up to this provider's — stop, wait, restamp, start — and let
-   * the host pay a full boot again. Fenced forward-only in the world, so a
-   * revision never repairs a host stamped by a newer one. Returns whether it
-   * repaired (and therefore already started the host).
-   */
-  private async repairScriptIfNeeded(
-    task: SimulationTask,
-    ref: OrbHostRef,
-    context: OperationContext,
-  ): Promise<boolean> {
-    if (!this.world.needsScriptRepair(ref, this.scriptGeneration)) return false;
-    this.world.stopHost(ref);
-    await task.sleep(SCRIPT_REPAIR_STOP_MS, "script repair", { signal: context.signal });
-    this.world.completeScriptRepair(task, ref, this.scriptGeneration);
-    return true;
+  desiredSpecFingerprint(input: {
+    readonly orbId: string;
+    readonly repositoryUrl: string;
+  }): string {
+    return `fake-spec-${this.specGeneration}:${input.repositoryUrl}`;
   }
 
   private op<T>(
@@ -1222,31 +1151,33 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError> {
     return this.op(task, "provision", FAILPOINTS.providerProvision, context, async () => {
-      // Reuse repairs the script first, exactly as the GCE provider does, so
-      // the start below finds an already-running host.
-      const existing = this.world.hostRefOf(request.orbId);
-      if (existing !== null) await this.repairScriptIfNeeded(task, existing, context);
       return this.world.provisionHost(
         task,
         request.orbId,
         request.incarnation,
-        this.scriptGeneration,
+        this.specGeneration,
+        this.desiredSpecFingerprint({
+          orbId: request.orbId,
+          repositoryUrl: request.bootstrap.repositoryUrl,
+        }),
       );
     });
   }
 
   start(
     task: SimulationTask,
-    request: { ref: OrbHostRef; expectedIncarnation: number },
+    request: StartOrbHostRequest,
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     return this.op(task, "start", FAILPOINTS.providerStart, context, async () => {
       const state = this.world.findByRef(request.ref);
-      if (state?.host?.incarnation !== request.expectedIncarnation) {
+      const host = state?.host;
+      if (host?.incarnation !== request.expectedIncarnation) {
         throw new ApplicationFailure("host incarnation mismatch");
       }
-      // A repair has already started the host (GceOrbHostProvider.start).
-      if (await this.repairScriptIfNeeded(task, request.ref, context)) return;
+      if (host.specFingerprint !== request.expectedSpecFingerprint) {
+        throw new ApplicationFailure("host specification mismatch");
+      }
       this.world.startHost(task, request.ref);
     });
   }

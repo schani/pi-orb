@@ -139,6 +139,7 @@ function reconcileDelayMs(
         case "auth":
         case "readiness":
         case "host_transition":
+        case "stale_compute_disposal":
           return constants.readinessPollMs;
         case "drain_blocked":
         case "deletion_quarantine":

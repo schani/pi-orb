@@ -77,6 +77,11 @@ function makeProvider(
 function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
+    if (process.platform === "linux") {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const state = /^\d+ \(.*\) ([A-Z]) /.exec(stat)?.[1];
+      return state !== "Z";
+    }
     return true;
   } catch {
     return false;
@@ -269,7 +274,11 @@ describe("ProcessOrbHostProvider", () => {
       (
         await provider.start(
           task,
-          { ref: first.value.ref, expectedIncarnation: first.value.incarnation },
+          {
+            ref: first.value.ref,
+            expectedIncarnation: first.value.incarnation,
+            expectedSpecFingerprint: first.value.specFingerprint,
+          },
           context,
         )
       ).isOk(),
