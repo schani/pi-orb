@@ -13,6 +13,7 @@ import { okAsync } from "neverthrow";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
+import { isDigestPinnedImage } from "./adapters/gce/image-pin.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
 import {
   type GithubOAuthConfig,
@@ -88,10 +89,17 @@ async function main(): Promise<void> {
   const authDir = env("PI_ORB_AUTH_DIR", join(homedir(), ".pi-orb", "auth"));
   const runtimeImage = env("PI_ORB_RUNTIME_IMAGE", "pi-orb-runtime:dev");
   const dockerNetwork = env("PI_ORB_DOCKER_NETWORK", "pi-orb");
+  const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
+  const bootTask = new NoSimulationTask("boot", true);
+  if (providerKind === "gce" && !isDigestPinnedImage(runtimeImage)) {
+    // Refuse before any side effect — a misconfigured deploy must not migrate
+    // the schema and then die.
+    bootTask.error("PI_ORB_RUNTIME_IMAGE must be digest-pinned for GCE");
+    process.exitCode = 1;
+    return;
+  }
 
   mkdirSync(authDir, { recursive: true });
-
-  const bootTask = new NoSimulationTask("boot", true);
   const openedDatabase = openControlPlaneDatabase(
     databaseKind === "pglite"
       ? { kind: "pglite", path: pglitePath }
@@ -227,7 +235,6 @@ async function main(): Promise<void> {
     const missing = tailscaleEnvNames.filter((name) => env(name, "") === "");
     bootTask.log(`Tailscale port exposure disabled (${missing.join(", ")} unset)`);
   }
-  const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
   const tailscaleForProvider = tailscale !== null && providerKind !== "process";
   if (tailscale !== null && !tailscaleForProvider) {
     bootTask.log("Tailscale port exposure disabled for process host provider");
@@ -235,13 +242,9 @@ async function main(): Promise<void> {
   const tailscaleOption = tailscaleForProvider ? { tailscale } : {};
   const viewConfig = tailscaleForProvider ? { tailnetDnsName } : {};
   // Forward-only immutable-spec replacement fence (docs/compute-replacement.md).
-  const specGeneration = Number.parseInt(env("PI_ORB_HOST_SPEC_GENERATION", "0"), 10);
-  const configuredSpecGeneration = Number.isFinite(specGeneration) ? specGeneration : 0;
-  if (providerKind === "gce" && !/@sha256:[0-9a-f]{64}$/i.test(runtimeImage)) {
-    bootTask.error("PI_ORB_RUNTIME_IMAGE must be digest-pinned for GCE");
-    process.exitCode = 1;
-    return;
-  }
+  // An unparsable or unset value folds to 0: such a revision replaces nothing
+  // a real deploy stamped, and the next real deploy replaces forward.
+  const specGeneration = Number.parseInt(env("PI_ORB_HOST_SPEC_GENERATION", "0"), 10) || 0;
   const hostProvider =
     providerKind === "gce"
       ? new GceOrbHostProvider(new RestGceApiTransport(), {
@@ -255,7 +258,7 @@ async function main(): Promise<void> {
           serviceAccount: env("PI_ORB_GCE_SERVICE_ACCOUNT", ""),
           runtimeImage,
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
-          specGeneration: configuredSpecGeneration,
+          specGeneration,
           ...extraEnvOption,
           ...tailscaleOption,
         })
@@ -269,7 +272,7 @@ async function main(): Promise<void> {
               new URL("../../orb-runtime/src/main.ts", import.meta.url),
             ),
             controlPlaneUrl: env("PI_ORB_BROKER_URL", `http://127.0.0.1:${port}`),
-            specGeneration: configuredSpecGeneration,
+            specGeneration,
             ...extraEnvOption,
           })
         : new DockerOrbHostProvider({
@@ -280,7 +283,7 @@ async function main(): Promise<void> {
             process.env["PI_ORB_BROKER_URL"] !== ""
               ? { controlPlaneUrl: process.env["PI_ORB_BROKER_URL"] }
               : {}),
-            specGeneration: configuredSpecGeneration,
+            specGeneration,
             ...extraEnvOption,
             ...tailscaleOption,
           });

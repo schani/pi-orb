@@ -96,6 +96,14 @@ export const OrbStateDetailSchema = Type.Union([
   ),
   Type.Object(
     {
+      type: Type.Literal("replacing_stale_compute"),
+      retrying: Type.Boolean(),
+      message: Type.Optional(Type.String()),
+    },
+    closed,
+  ),
+  Type.Object(
+    {
       type: Type.Literal("draining_history"),
       retrying: Type.Boolean(),
       message: Type.Optional(Type.String()),

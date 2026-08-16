@@ -335,7 +335,12 @@ describe("GceOrbHostProvider", () => {
     const spec = items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value;
     expect(spec).toBe(result.isOk() ? result.value.specFingerprint : "");
     expect(items.some((item) => item.key === "pi-orb-script-sha256")).toBe(false);
-    expect(items.some((item) => item.key === "pi-orb-script-generation")).toBe(false);
+    // Transitional rollover fence: the legacy generation stamp carries the
+    // configured deploy generation so a draining pre-replacement revision
+    // reads new instances as "the future" and never repairs them backward
+    // (docs/compute-replacement.md). It is a stamp only — nothing in the
+    // current adapter reads it back.
+    expect(items.find((item) => item.key === "pi-orb-script-generation")?.value).toBe("0");
   });
 
   it("reuses an existing instance and reads its token back", async () => {

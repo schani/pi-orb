@@ -33,6 +33,7 @@ import type {
   ProvisionOrbHostRequest,
   StartOrbHostRequest,
 } from "../../domain/ports.ts";
+import { specFingerprintOf } from "../spec-fingerprint.ts";
 
 export interface ProcessOrbHostProviderOptions {
   readonly stateDirectory: string;
@@ -111,16 +112,14 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     readonly orbId: string;
     readonly repositoryUrl: string;
   }): string {
-    return sha256(
-      JSON.stringify({
-        v: 1,
-        runtimeEntryPoint: this.options.runtimeEntryPoint,
-        nodeExecutable: this.options.nodeExecutable ?? process.execPath,
-        controlPlaneUrl: this.options.controlPlaneUrl,
-        extraEnv: this.options.extraEnv ?? {},
-        repositoryUrl: input.repositoryUrl,
-      }),
-    );
+    return specFingerprintOf({
+      v: 1,
+      runtimeEntryPoint: this.options.runtimeEntryPoint,
+      nodeExecutable: this.options.nodeExecutable ?? process.execPath,
+      controlPlaneUrl: this.options.controlPlaneUrl,
+      extraEnv: this.options.extraEnv ?? {},
+      repositoryUrl: input.repositoryUrl,
+    });
   }
 
   private hostDirectory(orbId: string): string {

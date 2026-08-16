@@ -1043,7 +1043,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            host_spec_fingerprint = $4, host_spec_generation = $5,
            host_discard_through_incarnation = host_incarnation,
            host_discard_reason = 'host_spec_changed', host_discard_error = NULL,
-           host_discard_evidence = NULL, host_discard_requested_at = $3, updated_at = $3
+           host_discard_requested_at = $3, updated_at = $3
          WHERE id = $1 AND state_version = $2 RETURNING *`,
         [
           params.orbId,

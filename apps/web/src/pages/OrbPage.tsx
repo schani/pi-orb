@@ -875,6 +875,13 @@ export function OrbPage({ orbId }: { orbId: string }) {
             {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
           </div>
         )}
+        {orb?.stateDetail?.type === "replacing_stale_compute" && (
+          <div className="banner banner-info">
+            Replacing compute for an updated host specification while preserving the workspace…
+            {orb.stateDetail.retrying && " (retrying)"}
+            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+          </div>
+        )}
         {orb?.stateDetail?.type === "deleting_resources" && (
           <div className="banner banner-info">
             Permanently deleting orb resources…

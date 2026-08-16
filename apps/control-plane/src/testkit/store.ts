@@ -1105,7 +1105,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         hostDiscardThroughIncarnation: orb.hostIncarnation,
         hostDiscardReason: "host_spec_changed",
         hostDiscardError: null,
-        hostDiscardEvidence: null,
+        // Retained evidence from an earlier failure survives the request: it
+        // is cleared only when a replacement commits or a later failure
+        // supersedes it (docs/compute-replacement.md).
         hostDiscardRequestedAt: params.now,
         updatedAt: params.now,
       };

@@ -429,7 +429,14 @@ export interface ProvisionOrbHostRequest {
 export interface StartOrbHostRequest {
   readonly ref: OrbHostRef;
   readonly expectedIncarnation: number;
-  readonly expectedSpecFingerprint: string;
+  /**
+   * The durable committed fingerprint, or null for a legacy row that predates
+   * spec stamping. Providers conflict on any stamp difference; a null
+   * expectation matches only an unstamped legacy resource, so pre-migration
+   * compute can still restart in place until its next ordinary Start replaces
+   * it (docs/compute-replacement.md).
+   */
+  readonly expectedSpecFingerprint: string | null;
 }
 
 /**

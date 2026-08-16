@@ -316,15 +316,16 @@ afterAll(async () => {
 }, 120_000);
 
 async function restartControlPlaneWithSpec(spec: string, generation: number): Promise<void> {
+  // Restarting the control plane terminates its child compute on the process
+  // backend — that is exactly why the SIGHUP seam exists. Docker compute
+  // survives, so only the docker leg may use a restart to change generation.
+  if (PROCESS_BACKEND) {
+    throw new Error("restartControlPlaneWithSpec kills process-backend compute; use SIGHUP");
+  }
   const authDir = controlPlane.authDir;
   await controlPlane.stop();
   controlPlane = await startControlPlane({
-    ...(PROCESS_BACKEND
-      ? {
-          pglitePath: join(localStateDirectory, "control-plane.pglite"),
-          processStateDirectory: join(localStateDirectory, "process-hosts"),
-        }
-      : { databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb` }),
+    databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
     port: CP_PORT,
     fake,
     nameFake,

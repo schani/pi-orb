@@ -22,6 +22,7 @@ import type {
   ProvisionOrbHostRequest,
   StartOrbHostRequest,
 } from "../../domain/ports.ts";
+import { specFingerprintOf } from "../spec-fingerprint.ts";
 import type { TailscaleHostOptions } from "../tailscale/client.ts";
 
 export interface DockerOrbHostProviderOptions {
@@ -143,6 +144,14 @@ function incarnationFromInspect(info: Record<string, unknown>): number | null {
   return Number.isSafeInteger(incarnation) ? incarnation : null;
 }
 
+/** The committed host-spec stamp, or null when the container carries none. */
+function specFingerprintFromInspect(info: Record<string, unknown>): string | null {
+  const config = info["Config"] as Record<string, unknown> | undefined;
+  const labels = (config?.["Labels"] ?? {}) as Record<string, unknown>;
+  const stamped = labels[SPEC_FINGERPRINT_LABEL];
+  return typeof stamped === "string" ? stamped : null;
+}
+
 function volumeName(orbId: string): string {
   return `pi-orb-data-${orbId}`;
 }
@@ -187,23 +196,21 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     readonly orbId: string;
     readonly repositoryUrl: string;
   }): string {
-    return sha256Hex(
-      JSON.stringify({
-        v: 1,
-        image: this.options.image,
-        network: this.options.network,
-        controlPlaneUrl: this.controlPlaneUrl(),
-        extraEnv: this.options.extraEnv ?? {},
-        tailscale:
-          this.options.tailscale === undefined
-            ? null
-            : {
-                hostname: tailscaleHostname(input.orbId),
-                previewHost: previewHost(input.orbId, this.options.tailscale.tailnetDnsName),
-              },
-        repositoryUrl: input.repositoryUrl,
-      }),
-    );
+    return specFingerprintOf({
+      v: 1,
+      image: this.options.image,
+      network: this.options.network,
+      controlPlaneUrl: this.controlPlaneUrl(),
+      extraEnv: this.options.extraEnv ?? {},
+      tailscale:
+        this.options.tailscale === undefined
+          ? null
+          : {
+              hostname: tailscaleHostname(input.orbId),
+              previewHost: previewHost(input.orbId, this.options.tailscale.tailnetDnsName),
+            },
+      repositoryUrl: input.repositoryUrl,
+    });
   }
 
   /**
@@ -311,10 +318,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       ref: { provider: "docker", resourceId: name },
       orbId,
       incarnation,
-      specFingerprint:
-        typeof labels[SPEC_FINGERPRINT_LABEL] === "string"
-          ? String(labels[SPEC_FINGERPRINT_LABEL])
-          : null,
+      specFingerprint: specFingerprintFromInspect(info),
       state,
       ...(state === "running"
         ? { runtimeAddress: { baseUrl: this.runtimeBaseUrl(info, name) } }
@@ -439,16 +443,18 @@ export class DockerOrbHostProvider implements OrbHostProvider {
               ),
             );
           }
+          // The spec stamp is checked before any state change, exactly like
+          // the incarnation: a stale-spec container must never be started —
+          // resurrecting it in place is the mutation this design forbids.
+          if (specFingerprintFromInspect(existing.value) !== specFingerprint) {
+            return err(
+              providerError("provision", "conflict", "container specification mismatch", false),
+            );
+          }
           const observation = this.toObservation(existing.value);
           if (observation !== null && observation.state !== "running") {
             const started = await this.exec("provision", ["start", name], context);
             if (started.isErr()) return err(started.error);
-          }
-          const stamped = this.toObservation(existing.value)?.specFingerprint ?? null;
-          if (stamped !== specFingerprint) {
-            return err(
-              providerError("provision", "conflict", "container specification mismatch", false),
-            );
           }
           return ok({
             ref,
@@ -531,13 +537,14 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         if (/is already in use/i.test(created.error.message)) {
           const winner = await this.inspect("provision", name, context);
           if (winner.isErr()) return err(winner.error);
-          const winnerToken = winner.value === null ? null : tokenFromInspect(winner.value);
-          if (winnerToken === null) {
+          const winnerInfo = winner.value;
+          const winnerToken = winnerInfo === null ? null : tokenFromInspect(winnerInfo);
+          if (winnerInfo === null || winnerToken === null) {
             return err(
               providerError("provision", "conflict", "racing container has no token", true),
             );
           }
-          const incarnation = incarnationFromInspect(winner.value ?? {});
+          const incarnation = incarnationFromInspect(winnerInfo);
           if (incarnation !== request.incarnation) {
             return err(
               providerError(
@@ -548,8 +555,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
               ),
             );
           }
-          const stamped = this.toObservation(winner.value ?? {})?.specFingerprint ?? null;
-          if (stamped !== specFingerprint) {
+          if (specFingerprintFromInspect(winnerInfo) !== specFingerprint) {
             return err(
               providerError("provision", "conflict", "racing specification mismatch", false),
             );
@@ -590,9 +596,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       if (incarnationFromInspect(inspected.value) !== request.expectedIncarnation) {
         return err(providerError("start", "conflict", "container incarnation mismatch", false));
       }
-      if (
-        this.toObservation(inspected.value)?.specFingerprint !== request.expectedSpecFingerprint
-      ) {
+      if (specFingerprintFromInspect(inspected.value) !== request.expectedSpecFingerprint) {
         return err(providerError("start", "conflict", "container specification mismatch", false));
       }
       const started = await this.exec("start", ["start", request.ref.resourceId], context);
