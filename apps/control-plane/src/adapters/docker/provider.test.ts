@@ -63,7 +63,11 @@ const request = {
 };
 
 interface ProviderOverrides {
+  readonly image?: string;
+  readonly network?: string;
   readonly controlPlaneUrl?: string;
+  readonly extraEnv?: Readonly<Record<string, string>>;
+  readonly specGeneration?: number;
   readonly tailscale?: { minter: TailscaleAuthKeyMinter; tailnetDnsName: string };
 }
 
@@ -262,6 +266,64 @@ describe("DockerOrbHostProvider", () => {
     const result = await makeProvider().provision(task, request, context);
     expect(result.isErr() && result.error.code).toBe("conflict");
     // The stamp is checked before any state change: no `docker start`.
+    expect(dockerFake.calls.some((args) => args[0] === "start")).toBe(false);
+  });
+
+  it("provision never starts an existing container carrying a stale host spec", async () => {
+    // Regression: the spec stamp is checked on the same footing as the
+    // incarnation, *before* any `docker start`. Resurrecting a stale-spec
+    // container in place is exactly the mutation this design forbids
+    // (docs/compute-replacement.md).
+    dockerFake.install((args) => {
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: {
+                  "pi-orb.orb-id": "orb-1",
+                  "pi-orb.host-incarnation": "0",
+                  "pi-orb.host-spec-fingerprint": "stale-fingerprint",
+                },
+                Env: [`${RUNTIME_TOKEN_ENV}=tok`],
+              },
+              State: { Status: "exited" },
+              NetworkSettings: {},
+            },
+          ]),
+        };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().provision(task, request, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(result.isErr() && result.error.retryable).toBe(false);
+    expect(dockerFake.calls.some((args) => args[0] === "start")).toBe(false);
+  });
+
+  it("provision never starts a legacy unstamped container when a spec is expected", async () => {
+    dockerFake.install((args) => {
+      if (args[0] === "inspect") {
+        return {
+          stdout: JSON.stringify([
+            {
+              Name: "/pi-orb-orb-1-i0",
+              Config: {
+                Labels: { "pi-orb.orb-id": "orb-1", "pi-orb.host-incarnation": "0" },
+                Env: [`${RUNTIME_TOKEN_ENV}=tok`],
+              },
+              State: { Status: "exited" },
+              NetworkSettings: {},
+            },
+          ]),
+        };
+      }
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const result = await makeProvider().provision(task, request, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(result.isErr() && result.error.retryable).toBe(false);
     expect(dockerFake.calls.some((args) => args[0] === "start")).toBe(false);
   });
 
@@ -508,6 +570,157 @@ describe("DockerOrbHostProvider deletion", () => {
     const result = await makeProvider().destroy(task, "orb-1", context);
     expect(result.isErr() && result.error.code).toBe("conflict");
     expect(dockerFake.calls).toHaveLength(2);
+  });
+});
+
+describe("DockerOrbHostProvider host specification", () => {
+  beforeEach(() => {
+    dockerFake.reset();
+  });
+
+  const specInput = { orbId: request.orbId, repositoryUrl: request.bootstrap.repositoryUrl };
+  const desired = (overrides: ProviderOverrides = {}): string =>
+    makeProvider(overrides).desiredSpecFingerprint(specInput);
+
+  /** A `docker inspect` payload for the orb's incarnation-0 container. */
+  function containerPayload(labels: Record<string, string>, status = "running"): string {
+    return JSON.stringify([
+      {
+        Name: "/pi-orb-orb-1-i0",
+        Config: {
+          Labels: { "pi-orb.orb-id": "orb-1", "pi-orb.host-incarnation": "0", ...labels },
+          Env: [`${RUNTIME_TOKEN_ENV}=tok`],
+        },
+        State: { Status: status },
+        NetworkSettings: withoutMapping,
+      },
+    ]);
+  }
+
+  it("is stable for the same launch facts", () => {
+    expect(desired()).toBe(desired());
+    expect(desired({ extraEnv: { A: "1", B: "2" } })).toBe(
+      desired({ extraEnv: { B: "2", A: "1" } }),
+    );
+  });
+
+  it("changes when any launch fact that requires new compute changes", () => {
+    const base = desired();
+    expect(desired({ image: "pi-orb-runtime:next" })).not.toBe(base);
+    expect(desired({ network: "other-net" })).not.toBe(base);
+    expect(desired({ controlPlaneUrl: "https://broker.example" })).not.toBe(base);
+    expect(desired({ extraEnv: { OPENAI_BASE_URL: "http://a" } })).not.toBe(base);
+    expect(
+      makeProvider().desiredSpecFingerprint({ ...specInput, repositoryUrl: "https://other/repo" }),
+    ).not.toBe(base);
+    const withTailscale = desired({
+      tailscale: { minter: minterReturning("tskey-auth-abc"), ...tailnet },
+    });
+    expect(withTailscale).not.toBe(base);
+  });
+
+  it("changes when an extraEnv value changes, not just its key set", () => {
+    expect(desired({ extraEnv: { OPENAI_BASE_URL: "http://a" } })).not.toBe(
+      desired({ extraEnv: { OPENAI_BASE_URL: "http://b" } }),
+    );
+  });
+
+  it("does not change with the spec generation alone", () => {
+    // The generation is a rollover fence, not part of the specification:
+    // bumping it must never replace every orb's compute.
+    expect(desired({ specGeneration: 7 })).toBe(desired({ specGeneration: 0 }));
+    expect(makeProvider({ specGeneration: 7 }).specGeneration).toBe(7);
+  });
+
+  /** The value of `--label NAME=…` in a `docker run` argv. */
+  function labelValue(argv: string[], name: string): string | null {
+    for (let index = 0; index < argv.length - 1; index += 1) {
+      const entry = argv[index + 1];
+      if (argv[index] === "--label" && entry !== undefined && entry.startsWith(`${name}=`)) {
+        return entry.slice(name.length + 1);
+      }
+    }
+    return null;
+  }
+
+  it("stamps the desired fingerprint on the container it creates", async () => {
+    const provider = makeProvider();
+    const run = await provisionArgv(provider);
+    expect(labelValue(run, "pi-orb.host-spec-fingerprint")).toBe(
+      provider.desiredSpecFingerprint(specInput),
+    );
+  });
+
+  it("reports the container's stamp in observations", async () => {
+    dockerFake.install(() => ({
+      stdout: containerPayload({ "pi-orb.host-spec-fingerprint": "fingerprint-abc" }),
+    }));
+    const observed = await makeProvider().observe(task, ref, context);
+    expect(observed.isOk() && observed.value?.specFingerprint).toBe("fingerprint-abc");
+  });
+
+  it("observes a legacy unstamped container as having no fingerprint", async () => {
+    dockerFake.install(() => ({ stdout: containerPayload({}) }));
+    const observed = await makeProvider().observe(task, ref, context);
+    expect(observed.isOk(), JSON.stringify(observed)).toBe(true);
+    expect(observed.isOk() && observed.value !== null).toBe(true);
+    expect(observed.isOk() && observed.value?.specFingerprint).toBeNull();
+  });
+
+  it("round-trips the provisioned stamp through observation", async () => {
+    const provider = makeProvider({ image: "pi-orb-runtime:next" });
+    const run = await provisionArgv(provider);
+    const stamped = labelValue(run, "pi-orb.host-spec-fingerprint") ?? "";
+    dockerFake.reset();
+    dockerFake.install(() => ({
+      stdout: containerPayload({ "pi-orb.host-spec-fingerprint": stamped }),
+    }));
+    const observed = await provider.observe(task, ref, context);
+    expect(observed.isOk() && observed.value?.specFingerprint).toBe(
+      provider.desiredSpecFingerprint(specInput),
+    );
+  });
+
+  it("start refuses a container whose stamp differs from the expectation", async () => {
+    dockerFake.install(() => ({
+      stdout: containerPayload({ "pi-orb.host-spec-fingerprint": "old-fingerprint" }, "exited"),
+    }));
+    const result = await makeProvider().start(
+      task,
+      { ref, expectedIncarnation: 0, expectedSpecFingerprint: "new-fingerprint" },
+      context,
+    );
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(result.isErr() && result.error.retryable).toBe(false);
+    expect(dockerFake.calls.some((args) => args[0] === "start")).toBe(false);
+  });
+
+  it("start accepts a legacy unstamped container only when no stamp is expected", async () => {
+    dockerFake.install((args) => {
+      if (args[0] === "inspect") return { stdout: containerPayload({}, "exited") };
+      if (args[0] === "start") return { stdout: "" };
+      return { error: `unexpected docker ${args.join(" ")}` };
+    });
+    const legacy = await makeProvider().start(
+      task,
+      { ref, expectedIncarnation: 0, expectedSpecFingerprint: null },
+      context,
+    );
+    expect(legacy.isOk(), JSON.stringify(legacy)).toBe(true);
+    expect(dockerFake.calls.some((args) => args[0] === "start")).toBe(true);
+
+    dockerFake.reset();
+    dockerFake.install(() => ({
+      stdout: containerPayload({ "pi-orb.host-spec-fingerprint": "fingerprint-abc" }, "exited"),
+    }));
+    const stamped = await makeProvider().start(
+      task,
+      { ref, expectedIncarnation: 0, expectedSpecFingerprint: null },
+      context,
+    );
+    expect(stamped.isErr() && stamped.error.code).toBe("conflict");
+    expect(stamped.isErr() && stamped.error.retryable).toBe(false);
+    expect(dockerFake.calls.some((args) => args[0] === "start")).toBe(false);
   });
 });
 

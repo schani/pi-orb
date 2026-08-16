@@ -7,7 +7,13 @@ import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type { ControlPlaneDeps, OrbNameGenerator } from "../domain/ports.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
-import { type FakeOrbConfig, FakeOrbHostProvider, FakeRuntimeClient, FakeWorld } from "./world.ts";
+import {
+  type FakeOrbConfig,
+  FakeOrbHostProvider,
+  type FakeProvisionedHost,
+  FakeRuntimeClient,
+  FakeWorld,
+} from "./world.ts";
 
 /**
  * Faster constants so DST scenarios cover many cycles in little virtual time.
@@ -134,28 +140,67 @@ export function makeOrbRow(
 }
 
 /**
+ * The specification stamp the harness's own provider would put on this orb's
+ * compute. Seeding with anything else (the old `fake-spec-<generation>`
+ * default did) makes the seeded host look stale to the start path and turns
+ * every scenario into an unintended replacement scenario.
+ */
+export function desiredSpecFingerprintOf(
+  harness: TestHarness,
+  orbId: string,
+  repositoryUrl: string = makeProjectRow("seed").repositoryUrl,
+): string {
+  return harness.deps.hostProvider.desiredSpecFingerprint({ orbId, repositoryUrl });
+}
+
+/**
+ * Provision a host for a seeded orb through the world directly, stamped the
+ * way the harness's provider stamps it — or deliberately unstamped
+ * (`legacy: true`) to seed the pre-fingerprint cohort of
+ * docs/compute-replacement.md rule 1.
+ */
+export function seedProvisionedHost(
+  task: SimulationTask,
+  harness: TestHarness,
+  orbId: string,
+  options?: { repositoryUrl?: string; incarnation?: number; legacy?: boolean },
+): FakeProvisionedHost {
+  const repositoryUrl = options?.repositoryUrl ?? makeProjectRow("seed").repositoryUrl;
+  return harness.world.provisionHost(
+    task,
+    orbId,
+    options?.incarnation ?? 0,
+    harness.deps.hostProvider.specGeneration,
+    options?.legacy === true ? null : desiredSpecFingerprintOf(harness, orbId, repositoryUrl),
+  );
+}
+
+/**
  * Seed a project plus an orb that is already `running` with a live host and
  * ready runtime — the starting point for pure replication scenarios. The host
  * boot is behind us, so the configured boot latency is fast-forwarded here; it
  * still applies in full to every later restart of this host.
+ *
+ * `legacy: true` seeds the pre-Stage-2 cohort instead: an unstamped host under
+ * a row with no committed fingerprint or generation, which must keep starting
+ * in place until an ordinary stop/start replaces it.
  */
 export function seedRunningOrb(
   task: SimulationTask,
   harness: TestHarness,
   orbId: string,
   config?: FakeOrbConfig,
+  options?: { legacy?: boolean },
 ): void {
   const projectId = `project-of-${orbId}`;
   harness.store.seedProject(makeProjectRow(projectId));
   harness.world.configureOrb(orbId, { initDurationMs: 0, ...config });
   const repositoryUrl = makeProjectRow(projectId).repositoryUrl;
-  const provisioned = harness.world.provisionHost(
-    task,
-    orbId,
-    0,
-    harness.deps.hostProvider.specGeneration,
-    harness.deps.hostProvider.desiredSpecFingerprint({ orbId, repositoryUrl }),
-  );
+  const legacy = options?.legacy === true;
+  const provisioned = seedProvisionedHost(task, harness, orbId, {
+    repositoryUrl,
+    ...(legacy ? { legacy: true } : {}),
+  });
   harness.world.finishBoot(task, orbId);
   harness.world.ensureSessionExists(orbId);
   harness.store.seedOrb(
@@ -163,7 +208,7 @@ export function seedRunningOrb(
       hostRef: provisioned.ref.resourceId,
       runtimeTokenHash: provisioned.runtimeTokenHash,
       hostSpecFingerprint: provisioned.specFingerprint,
-      hostSpecGeneration: provisioned.specGeneration,
+      hostSpecGeneration: legacy ? null : provisioned.specGeneration,
       checkoutCommit: "commit-0",
       stateChangedAt: task.wallNow(),
     }),

@@ -26,7 +26,10 @@ function seedOrbCompute(
   }
 }
 
-function provider(model: DeterministicGceApiModel): GceOrbHostProvider {
+function provider(
+  model: DeterministicGceApiModel,
+  overrides: { runtimeImage?: string } = {},
+): GceOrbHostProvider {
   return new GceOrbHostProvider(model, {
     projectId: "proj",
     zone: "us-central1-a",
@@ -35,7 +38,34 @@ function provider(model: DeterministicGceApiModel): GceOrbHostProvider {
     serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
     runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
     controlPlaneUrl: "https://runtime.example",
+    ...overrides,
   });
+}
+
+const anyContext = (): { signal: AbortSignal } => ({ signal: new AbortController().signal });
+
+/** Read modeled instance state back through the transport the adapter uses. */
+async function instanceStatus(
+  model: DeterministicGceApiModel,
+  name: string,
+): Promise<string | null> {
+  const response = await model.request({
+    method: "GET",
+    path: `projects/proj/zones/us-central1-a/instances/${name}`,
+    ...anyContext(),
+  });
+  return response.status === 200 ? String(response.body["status"] ?? "") : null;
+}
+
+/** The orb's instances as the API would list them. */
+async function listOrbInstances(model: DeterministicGceApiModel): Promise<string[]> {
+  const response = await model.request({
+    method: "GET",
+    path: `projects/proj/zones/us-central1-a/instances?filter=labels.pi-orb-orb-id%3D${ORB}`,
+    ...anyContext(),
+  });
+  const items = (response.body["items"] ?? []) as Record<string, unknown>[];
+  return items.map((item) => String(item["name"] ?? ""));
 }
 
 describe("GCE adapter over deterministic stateful model (DST)", () => {
@@ -212,6 +242,100 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(model.hasInstance(instanceName(1))).toBe(true);
+      expect(model.hasDisk(DISK)).toBe(true);
+    });
+  });
+
+  it("replaces stopped stale-spec compute instead of repairing or booting it", async () => {
+    await runDst({ name: "gce-model-spec-replacement", iterations: 30 }, async (sim) => {
+      const model = new DeterministicGceApiModel({
+        operationWaitPolls: 1,
+        deletionVisibilityPolls: 1,
+      });
+      const bootstrap = { repositoryUrl: "https://github.com/o/r" };
+      const result = await sim.runTasks([
+        {
+          name: "spec-replacement",
+          f: async (task) => {
+            // The deployed revision creates the orb's compute and stops it.
+            const deployed = provider(model);
+            const provisioned = await deployed.provision(
+              task,
+              { orbId: ORB, incarnation: 0, bootstrap },
+              anyContext(),
+            );
+            expect(provisioned.isOk(), JSON.stringify(provisioned)).toBe(true);
+            if (provisioned.isErr()) return;
+            expect((await deployed.stop(task, provisioned.value.ref, anyContext())).isOk()).toBe(
+              true,
+            );
+            expect(await instanceStatus(model, instanceName(0))).toBe("TERMINATED");
+
+            // A new revision desires a different runtime image: the existing
+            // stopped instance is stale specification, not repairable input.
+            const updated = provider(model, {
+              runtimeImage: "registry.example/runtime@sha256:def",
+            });
+            const desired = updated.desiredSpecFingerprint({ orbId: ORB, ...bootstrap });
+            expect(desired).not.toBe(provisioned.value.specFingerprint);
+
+            // Neither entry point may adopt it, and neither may boot it: a
+            // successful start here would run the old image on the workspace.
+            const reprovisioned = await updated.provision(
+              task,
+              { orbId: ORB, incarnation: 0, bootstrap },
+              anyContext(),
+            );
+            expect(reprovisioned.isErr() && reprovisioned.error.code).toBe("conflict");
+            expect(reprovisioned.isErr() && reprovisioned.error.retryable).toBe(false);
+            const started = await updated.start(
+              task,
+              {
+                ref: provisioned.value.ref,
+                expectedIncarnation: 0,
+                expectedSpecFingerprint: desired,
+              },
+              anyContext(),
+            );
+            expect(started.isErr() && started.error.code).toBe("conflict");
+            expect(started.isErr() && started.error.retryable).toBe(false);
+            // The model throws on setMetadata, so reaching here at all proves
+            // no in-place repair was attempted; the VM also never booted.
+            expect(await instanceStatus(model, instanceName(0))).toBe("TERMINATED");
+
+            // Forward through the fence: discard the stale incarnation, then
+            // create the replacement around the retained workspace disk.
+            // Deletion visibility trails the operation, so absence is only
+            // reported on a later pass: the caller retries, exactly like the
+            // reconciler does.
+            let discarded = await updated.discardCompute(
+              task,
+              { orbId: ORB, throughIncarnation: 0 },
+              anyContext(),
+            );
+            for (let attempt = 0; attempt < 10 && discarded.isErr(); attempt += 1) {
+              expect(discarded.error.retryable).toBe(true);
+              await task.sleep(1, "retry discard past delayed deletion visibility");
+              discarded = await updated.discardCompute(
+                task,
+                { orbId: ORB, throughIncarnation: 0 },
+                anyContext(),
+              );
+            }
+            expect(discarded.isOk(), JSON.stringify(discarded)).toBe(true);
+            const replacement = await updated.provision(
+              task,
+              { orbId: ORB, incarnation: 1, bootstrap },
+              anyContext(),
+            );
+            expect(replacement.isOk(), JSON.stringify(replacement)).toBe(true);
+            expect(replacement.isOk() && replacement.value.specFingerprint).toBe(desired);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(await listOrbInstances(model)).toEqual([instanceName(1)]);
+      expect(model.hasInstance(instanceName(0))).toBe(false);
       expect(model.hasDisk(DISK)).toBe(true);
     });
   });

@@ -5,6 +5,7 @@ import {
   makeOrbRow,
   makeProjectRow,
   restartControlPlane,
+  seedProvisionedHost,
 } from "../testkit/fixtures.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
 import { createOrb } from "./lifecycle.ts";
@@ -24,7 +25,7 @@ function seed(
   harness.store.seedProject(makeProjectRow(PROJECT));
   for (const orbId of ORBS.slice(0, 2)) {
     harness.world.configureOrb(orbId, { initDurationMs: 0 });
-    const provisioned = harness.world.provisionHost(task, orbId, 0);
+    const provisioned = seedProvisionedHost(task, harness, orbId);
     harness.world.finishBoot(task, orbId);
     harness.world.ensureSessionExists(orbId);
     if (orbId === ORBS[1]) harness.world.stopHost(provisioned.ref);

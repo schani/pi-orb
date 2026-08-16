@@ -164,8 +164,13 @@ interface FakeHost {
   runtime: FakeRuntimeInstance | null;
   /** Deploy generation that committed this immutable specification. */
   specGeneration: number;
-  /** Immutable launch specification carried by this incarnation. */
-  specFingerprint: string;
+  /**
+   * Immutable launch specification carried by this incarnation, or `null` for
+   * a legacy resource created before stamps existed: "unstamped" is a state
+   * the real adapters can observe (docs/compute-replacement.md rule 1), so the
+   * world must be able to represent it.
+   */
+  specFingerprint: string | null;
   /** Per-incarnation runtime token "carried in the host's env". */
   runtimeToken: string;
   /** Monotonic ms of a hypervisor ACPI soft-off in progress, or null. */
@@ -173,6 +178,26 @@ interface FakeHost {
   /** How long a preempted host keeps observing `running` before `stopped`. */
   preemptionSoftWindowMs: number;
 }
+
+/**
+ * What the world hands back for a provisioned host. It differs from the port's
+ * `ProvisionedOrbHost` in one place only: the stamp may be `null`, because the
+ * world can hold a legacy unstamped resource. The provider narrows it back to
+ * the port type, which a stamped provision always satisfies.
+ */
+export interface FakeProvisionedHost extends Omit<ProvisionedOrbHost, "specFingerprint"> {
+  readonly specFingerprint: string | null;
+}
+
+/**
+ * A provider-side conflict the caller cannot retry away: the resource exists
+ * but carries the wrong incarnation or a specification stamp that contradicts
+ * the request. All three real adapters answer this class with
+ * `code: "conflict", retryable: false`, which routes the control plane into
+ * the durable replacement path instead of an endless retry, so the fake must
+ * distinguish it from its ordinary transient failures.
+ */
+class FakeProviderConflict extends Error {}
 
 /** The deterministic stand-in for SHA-256 used by the fake provider. */
 export function fakeTokenHash(token: string): string {
@@ -196,6 +221,20 @@ interface OrbWorldState {
   /** Provider stop/start operations applied to this orb's host. */
   hostStopCount: number;
   hostStartCount: number;
+  /**
+   * Every compute incarnation ever *created* for this orb, in creation order,
+   * with the stamp it was created with. Adoption of an existing incarnation
+   * appends nothing. This is the world's own ground truth about replacement:
+   * the durable row can be rewritten around untouched compute, this history
+   * cannot.
+   */
+  createdHosts: HostCreation[];
+}
+
+/** One created compute incarnation: what the provider actually built. */
+export interface HostCreation {
+  readonly incarnation: number;
+  readonly specFingerprint: string | null;
 }
 
 /** Measured GCE figure: ~60–70s from `instances.start` to a serving container. */
@@ -203,6 +242,9 @@ const DEFAULT_BOOT_LATENCY_MS = 65_000;
 
 /** The soft-off window a preempted Spot VM still observes as `running`. */
 const DEFAULT_PREEMPTION_SOFT_WINDOW_MS = 30_000;
+
+/** The effective host specification a world deploys until a test changes it. */
+const DEFAULT_DESIRED_SPEC = "spec-a";
 
 /**
  * The native `customType` of the resume marker the runtime appends when it
@@ -262,6 +304,25 @@ export class FakeWorld {
   private readonly orbs = new Map<string, OrbWorldState>();
   private refCounter = 0;
   private computeDiscardFailuresRemaining = 0;
+  private desiredSpecInput = DEFAULT_DESIRED_SPEC;
+
+  /**
+   * The fleet's current *effective* host specification — the deployed runtime
+   * digest, startup contract, machine settings and so on, collapsed into one
+   * opaque token. The provider hashes it with the orb's repository URL into
+   * `desiredSpecFingerprint`, deliberately **without** the deploy generation:
+   * an ordinary redeploy that changes nothing effective must produce the same
+   * fingerprint and therefore replace nothing (docs/compute-replacement.md).
+   * A scenario that wants a real host-spec update calls this.
+   */
+  setDesiredSpec(spec: string): void {
+    this.desiredSpecInput = spec;
+  }
+
+  /** The effective specification the fleet currently deploys. */
+  desiredSpec(): string {
+    return this.desiredSpecInput;
+  }
 
   configureOrb(orbId: string, config: FakeOrbConfig = {}): void {
     this.orbs.set(orbId, {
@@ -282,6 +343,7 @@ export class FakeWorld {
       deliverMessageScript: { kind: "ok" },
       hostStopCount: 0,
       hostStartCount: 0,
+      createdHosts: [],
     });
   }
 
@@ -736,22 +798,45 @@ export class FakeWorld {
     }
   }
 
+  /**
+   * Create or idempotently adopt this orb's compute, exactly as the real
+   * adapters do: an existing incarnation is reused (and started if it was
+   * down) and its token read back, while a wrong incarnation or a stamp that
+   * contradicts the requested specification is a non-retryable conflict that
+   * only the durable replacement path can resolve — never an in-place repair
+   * and never a silent adoption (docs/compute-replacement.md).
+   *
+   * `specFingerprint` is required and may be `null` to create the legacy
+   * unstamped cohort; there is deliberately no default, because a default that
+   * differed from the provider's own `desiredSpecFingerprint` made every
+   * seeded host look stale to the very code under test.
+   */
   provisionHost(
     task: SimulationTask,
     orbId: string,
     incarnation: number,
-    specGeneration: number = 0,
-    specFingerprint: string = `fake-spec-${specGeneration}`,
-  ): ProvisionedOrbHost {
+    specGeneration: number,
+    specFingerprint: string | null,
+  ): FakeProvisionedHost {
     const state = this.orbState(orbId);
     if (state.host !== null) {
       if (state.host.incarnation !== incarnation) {
         // A provision that meets live compute of another incarnation means the
         // caller skipped required disposal; adopting it silently would mask
-        // exactly the bug class the discard fence exists to prevent.
-        throw new Error(
-          `fake provision invariant: orb ${orbId} requested incarnation ${incarnation} ` +
+        // exactly the bug class the discard fence exists to prevent. GCE
+        // answers the same situation with "racing incarnation mismatch".
+        throw new FakeProviderConflict(
+          `orb ${orbId} requested incarnation ${incarnation} ` +
             `while incarnation ${state.host.incarnation} still exists`,
+        );
+      }
+      if (state.host.specFingerprint !== specFingerprint) {
+        // All three real adapters refuse here (Docker "container specification
+        // mismatch", GCE "instance specification mismatch", process "process
+        // specification mismatch"): stale compute is replaced, never adopted.
+        throw new FakeProviderConflict(
+          `orb ${orbId} host carries specification ${String(state.host.specFingerprint)}, ` +
+            `expected ${String(specFingerprint)}`,
         );
       }
       // Idempotent: return the existing host (starting it if stopped) and
@@ -785,6 +870,7 @@ export class FakeWorld {
       preemptedAtMonotonic: null,
       preemptionSoftWindowMs: DEFAULT_PREEMPTION_SOFT_WINDOW_MS,
     };
+    state.createdHosts.push({ incarnation, specFingerprint });
     state.hostStartCount += 1;
     this.bootRuntime(task, orbId);
     return {
@@ -804,6 +890,37 @@ export class FakeWorld {
   /** The host vanishes entirely (manual removal, definitive absence). */
   removeHost(orbId: string): void {
     this.orbState(orbId).host = null;
+  }
+
+  /**
+   * The specification stamp the *actual* compute carries, which is what the
+   * durable row claims to describe. Asserting on the store row alone cannot
+   * tell a real replacement from a row rewritten around untouched compute.
+   */
+  specFingerprintOf(orbId: string): string | null {
+    return this.orbState(orbId).host?.specFingerprint ?? null;
+  }
+
+  /** Every compute incarnation this world has created for the orb, in order. */
+  createdHostsOf(orbId: string): readonly HostCreation[] {
+    return this.orbState(orbId).createdHosts;
+  }
+
+  /** The incarnation the orb's actual compute carries, or null with no host. */
+  hostIncarnationOf(orbId: string): number | null {
+    return this.orbState(orbId).host?.incarnation ?? null;
+  }
+
+  /**
+   * Rewrite the live host's stamp behind the control plane's back: the durable
+   * row now describes compute that does not exist as recorded. That is the
+   * drift the post-observation forced replacement exists for (a resource
+   * replaced out of band, a row committed by another revision).
+   */
+  setHostSpecFingerprint(orbId: string, specFingerprint: string | null): void {
+    const host = this.orbState(orbId).host;
+    if (host === null) throw new Error(`orb ${orbId} has no host to restamp`);
+    host.specFingerprint = specFingerprint;
   }
 
   hostTokenOf(orbId: string): string | null {
@@ -1107,17 +1224,38 @@ export class FakeOrbHostProvider implements OrbHostProvider {
   readonly specGeneration: number;
   private readonly world: FakeWorld;
   private readonly maxLatencyMs: number;
-  constructor(world: FakeWorld, maxLatencyMs: number = 50, specGeneration: number = 0) {
+  private readonly desiredSpecOverride: string | null;
+
+  /**
+   * `desiredSpec` pins this provider's effective specification instead of
+   * following the world's current one — how a scenario models two revisions
+   * that deploy *different* specifications at the same time. It is independent
+   * of `specGeneration`, which only fences which revision may replace forward.
+   */
+  constructor(
+    world: FakeWorld,
+    maxLatencyMs: number = 50,
+    specGeneration: number = 0,
+    desiredSpec: string | null = null,
+  ) {
     this.world = world;
     this.maxLatencyMs = maxLatencyMs;
     this.specGeneration = specGeneration;
+    this.desiredSpecOverride = desiredSpec;
   }
 
+  /**
+   * The pure fingerprint calculation of docs/compute-replacement.md: it hashes
+   * the effective specification with the orb's repository URL and nothing
+   * else. The deploy generation is deliberately not an input — an ordinary
+   * redeploy of an unchanged specification must leave the fleet alone.
+   */
   desiredSpecFingerprint(input: {
     readonly orbId: string;
     readonly repositoryUrl: string;
   }): string {
-    return `fake-spec-${this.specGeneration}:${input.repositoryUrl}`;
+    const spec = this.desiredSpecOverride ?? this.world.desiredSpec();
+    return `fake-spec-${spec}:${input.repositoryUrl}`;
   }
 
   private op<T>(
@@ -1137,6 +1275,11 @@ export class FakeOrbHostProvider implements OrbHostProvider {
       return f();
     };
     return ResultAsync.fromPromise(run(), (error) => {
+      if (error instanceof FakeProviderConflict) {
+        // Retrying cannot change the answer: the resource is what it is, and
+        // only durable replacement moves this orb forward.
+        return providerError(operation, "conflict", error.message, false);
+      }
       if (error instanceof ApplicationFailure) {
         return providerError(operation, "unavailable", error.message, true);
       }
@@ -1151,16 +1294,20 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<ProvisionedOrbHost, OrbHostProviderError> {
     return this.op(task, "provision", FAILPOINTS.providerProvision, context, async () => {
-      return this.world.provisionHost(
+      const specFingerprint = this.desiredSpecFingerprint({
+        orbId: request.orbId,
+        repositoryUrl: request.bootstrap.repositoryUrl,
+      });
+      const host = this.world.provisionHost(
         task,
         request.orbId,
         request.incarnation,
         this.specGeneration,
-        this.desiredSpecFingerprint({
-          orbId: request.orbId,
-          repositoryUrl: request.bootstrap.repositoryUrl,
-        }),
+        specFingerprint,
       );
+      // The world either created this host with the requested stamp or adopted
+      // one already carrying it; any other stamp conflicted above.
+      return { ...host, specFingerprint };
     });
   }
 
@@ -1172,11 +1319,20 @@ export class FakeOrbHostProvider implements OrbHostProvider {
     return this.op(task, "start", FAILPOINTS.providerStart, context, async () => {
       const state = this.world.findByRef(request.ref);
       const host = state?.host;
-      if (host?.incarnation !== request.expectedIncarnation) {
-        throw new ApplicationFailure("host incarnation mismatch");
+      if (host === null || host === undefined) {
+        // Absence is transient from the reconciler's viewpoint, as the GCE
+        // adapter documents: the next observe sees null and reprovisions.
+        throw new ApplicationFailure("host is absent");
+      }
+      // Both remaining checks precede any state change, as in the real
+      // adapters: a wrong-incarnation or stale-spec resource must never be
+      // started, and no number of retries makes it startable. A `null`
+      // expectation matches an unstamped legacy resource and nothing else.
+      if (host.incarnation !== request.expectedIncarnation) {
+        throw new FakeProviderConflict("host incarnation mismatch");
       }
       if (host.specFingerprint !== request.expectedSpecFingerprint) {
-        throw new ApplicationFailure("host specification mismatch");
+        throw new FakeProviderConflict("host specification mismatch");
       }
       this.world.startHost(task, request.ref);
     });

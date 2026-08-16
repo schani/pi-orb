@@ -236,7 +236,17 @@ export class DockerOrbHostProvider implements OrbHostProvider {
         execFile(
           "docker",
           args,
-          { signal: context.signal, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 },
+          // SIGKILL, not the default SIGTERM: a docker CLI wedged in a
+          // distressed daemon-socket read can ignore SIGTERM (observed
+          // 2026-08-16), leaving this promise unsettled and the calling
+          // reconcile pass wedged forever. The timeout must guarantee that
+          // the call settles.
+          {
+            signal: context.signal,
+            timeout: 60_000,
+            killSignal: "SIGKILL",
+            maxBuffer: 8 * 1024 * 1024,
+          },
           (error, stdout, stderr) => {
             if (error !== null) {
               reject(new Error(`docker ${args[0]}: ${stderr || error.message}`));

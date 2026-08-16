@@ -628,9 +628,14 @@ async function reconcileCreateStart(
     }
     const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "no_host_ref");
     if (provisioned.isErr()) {
-      return provisioned.error.retryable
-        ? retryable(provisioned.error)
-        : failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
+      if (provisioned.error.retryable) return retryable(provisioned.error);
+      // A conflict here is a racing revision, not a broken orb: the winner's
+      // compute exists but its commit may not have landed yet, so a failOrb
+      // CAS could still succeed and discard the winner's fresh compute.
+      // Re-read and reconcile instead; the durable spec/incarnation logic
+      // owns any surviving mismatch (docs/compute-replacement.md).
+      if (provisioned.error.code === "conflict") return { type: "conflict" };
+      return failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
     }
     if (isReplacement) {
       await task.checkpoint("compute-replacement.replacement-after-provision");
@@ -722,9 +727,14 @@ async function reconcileCreateStart(
     // Definitive absence: idempotent provision restores the host (docs/lifecycle.md).
     const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "host_absent");
     if (provisioned.isErr()) {
-      return provisioned.error.retryable
-        ? retryable(provisioned.error)
-        : failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
+      if (provisioned.error.retryable) return retryable(provisioned.error);
+      // A conflict here is a racing revision, not a broken orb: the winner's
+      // compute exists but its commit may not have landed yet, so a failOrb
+      // CAS could still succeed and discard the winner's fresh compute.
+      // Re-read and reconcile instead; the durable spec/incarnation logic
+      // owns any surviving mismatch (docs/compute-replacement.md).
+      if (provisioned.error.code === "conflict") return { type: "conflict" };
+      return failOrb(task, deps, orb, "provider_failed", provisioned.error.message);
     }
     if (
       provisioned.value.ref.resourceId !== hostResourceId ||
@@ -1440,6 +1450,9 @@ async function reconcileArchiving(
           "archive_history_seal",
         );
         if (provisioned.isErr()) {
+          // A racing revision's compute answers this provision with a
+          // conflict; re-read rather than recording a permanent-looking error.
+          if (provisioned.error.code === "conflict") return { type: "conflict" };
           const message = boundedDiscardText(provisioned.error.message);
           await deps.store.recordOrbDeletionError(task, {
             orbId: orb.id,

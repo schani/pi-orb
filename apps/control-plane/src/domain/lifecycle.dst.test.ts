@@ -9,6 +9,7 @@ import {
   makeProjectRow,
   restartControlPlane,
   seedFailedOrbWithDiscardIntent,
+  seedProvisionedHost,
   seedRunningOrb,
   TEST_CONSTANTS,
   type TestHarness,
@@ -3024,7 +3025,7 @@ describe("orb lifecycle (DST)", () => {
           f: async (task) => {
             harness.store.seedProject(makeProjectRow(PROJECT));
             harness.world.configureOrb(ORB, { initDurationMs: 0 });
-            const provisioned = harness.world.provisionHost(task, ORB, 0); // stray host
+            const provisioned = seedProvisionedHost(task, harness, ORB); // stray host
             harness.store.seedOrb(
               makeOrbRow(ORB, PROJECT, "stopped", { hostRef: provisioned.ref.resourceId }),
             );

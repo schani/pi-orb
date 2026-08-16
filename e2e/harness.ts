@@ -52,10 +52,18 @@ export async function deleteFakeSession(sessionKey: string): Promise<void> {
 
 export function docker(args: string[], timeoutMs = 120_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("docker", args, { timeout: timeoutMs, maxBuffer: 16e6 }, (error, stdout, stderr) => {
-      if (error !== null) reject(new Error(`docker ${args[0]}: ${stderr || error.message}`));
-      else resolve(stdout.trim());
-    });
+    // killSignal SIGKILL: a docker CLI wedged against a distressed daemon can
+    // ignore SIGTERM, and a hanging helper turns one failed test into an
+    // hours-long silent teardown (observed 2026-08-16).
+    execFile(
+      "docker",
+      args,
+      { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16e6 },
+      (error, stdout, stderr) => {
+        if (error !== null) reject(new Error(`docker ${args[0]}: ${stderr || error.message}`));
+        else resolve(stdout.trim());
+      },
+    );
   });
 }
 

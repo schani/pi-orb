@@ -8,6 +8,7 @@ import type { GceApiTransport, GceResponse } from "./api.ts";
 import {
   buildStartupScript,
   GceOrbHostProvider,
+  type GceOrbHostProviderOptions,
   mapInstanceStatus,
   metadataValue,
 } from "./provider.ts";
@@ -378,6 +379,9 @@ describe("GceOrbHostProvider", () => {
     ]);
     const result = await makeProvider(transport).provision(task, provisionRequest, context);
     expect(result.isErr() && result.error.code).toBe("conflict");
+    // Non-retryable by decision: only replacement clears it, so a retry loop
+    // would burn the reconciler against an instance that can never match.
+    expect(result.isErr() && result.error.retryable).toBe(false);
     expect(transport.requests.some((request) => request.path.endsWith("/setMetadata"))).toBe(false);
     expect(transport.requests.some((request) => request.path.endsWith("/stop"))).toBe(false);
   });
@@ -852,5 +856,181 @@ describe("GceOrbHostProvider", () => {
     expect(metadataValue({}, "k")).toBeNull();
     expect(metadataValue({ metadata: { items: [{ key: "k", value: "v" }] } }, "k")).toBe("v");
     expect(metadataValue({ metadata: { items: [{ key: "k", value: 3 }] } }, "k")).toBeNull();
+  });
+});
+
+describe("GceOrbHostProvider host specification", () => {
+  const specInput = {
+    orbId: provisionRequest.orbId,
+    repositoryUrl: provisionRequest.bootstrap.repositoryUrl,
+  };
+
+  /** A provider whose configuration differs from the shared one by `overrides`. */
+  function reconfigured(overrides: Partial<GceOrbHostProviderOptions>): GceOrbHostProvider {
+    return new GceOrbHostProvider(new FakeTransport([]), {
+      projectId: "proj",
+      zone: "us-central1-a",
+      machineType: "n2d-highmem-4",
+      subnetwork: "regions/us-central1/subnetworks/pi-orb-us-central1",
+      serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
+      runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
+      controlPlaneUrl: "https://runtime.example",
+      ...overrides,
+    });
+  }
+  const fingerprintWith = (overrides: Partial<GceOrbHostProviderOptions>): string =>
+    reconfigured(overrides).desiredSpecFingerprint(specInput);
+
+  /** An instance whose metadata carries only the given items. */
+  const instanceWithItems = (
+    items: { key: string; value: string }[],
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> =>
+    existingInstance({ metadata: { fingerprint: "fp-1", items }, ...overrides });
+
+  const legacyItems = [{ key: "pi-orb-runtime-token", value: "tok" }];
+
+  it("changes with every launch fact that requires new compute", () => {
+    expect(fingerprintWith({})).toBe(currentSpecFingerprint);
+    expect(fingerprintWith({ runtimeImage: "registry/other@sha256:def" })).not.toBe(
+      currentSpecFingerprint,
+    );
+    expect(fingerprintWith({ machineType: "n2d-highmem-8" })).not.toBe(currentSpecFingerprint);
+    expect(fingerprintWith({ subnetwork: "regions/us-central1/subnetworks/other" })).not.toBe(
+      currentSpecFingerprint,
+    );
+    expect(fingerprintWith({ serviceAccount: "other@proj.iam.gserviceaccount.com" })).not.toBe(
+      currentSpecFingerprint,
+    );
+    expect(fingerprintWith({ dataDiskSizeGb: 512 })).not.toBe(currentSpecFingerprint);
+    expect(fingerprintWith({ extraEnv: { OPENAI_BASE_URL: "http://a" } })).not.toBe(
+      currentSpecFingerprint,
+    );
+    expect(fingerprintWith({ extraEnv: { OPENAI_BASE_URL: "http://a" } })).not.toBe(
+      fingerprintWith({ extraEnv: { OPENAI_BASE_URL: "http://b" } }),
+    );
+    expect(fingerprintWith({ controlPlaneUrl: "https://other.example" })).not.toBe(
+      currentSpecFingerprint,
+    );
+    expect(
+      reconfigured({}).desiredSpecFingerprint({
+        ...specInput,
+        repositoryUrl: "https://github.com/o/other",
+      }),
+    ).not.toBe(currentSpecFingerprint);
+  });
+
+  it("deliberately ignores zone, project, and the spec generation", () => {
+    // The data disk is zonal, so replacement cannot move an orb: a "replacement"
+    // in another zone would come up on a fresh, empty workspace. A zone or
+    // project move is an explicit operator migration, outside this mechanism
+    // (docs/compute-replacement.md).
+    expect(fingerprintWith({ zone: "europe-west4-a" })).toBe(currentSpecFingerprint);
+    expect(fingerprintWith({ projectId: "other-proj" })).toBe(currentSpecFingerprint);
+    // The generation is a rollover fence, not part of the specification.
+    expect(fingerprintWith({ specGeneration: 9 })).toBe(currentSpecFingerprint);
+  });
+
+  it("describes the specification, not the incarnation that carries it", async () => {
+    const transport = new FakeTransport([
+      () => notFound, // instance get
+      () => ok200(existingInstance()), // disk exists
+      () => ok200({ name: "op-inst" }),
+      () => done,
+    ]);
+    const provider = makeProvider(transport);
+    const result = await provider.provision(task, { ...provisionRequest, incarnation: 3 }, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    const insert = transport.requests.find(
+      (request) => request.method === "POST" && request.path.endsWith("/instances"),
+    );
+    const body = insert?.body ?? {};
+    expect(body["name"]).toBe("pi-orb-orb-1-i3");
+    const items = (body["metadata"] as { items: { key: string; value: string }[] }).items;
+    expect(items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value).toBe(
+      currentSpecFingerprint,
+    );
+    expect(result.isOk() && result.value.specFingerprint).toBe(currentSpecFingerprint);
+  });
+
+  it("reports the stamped fingerprint in observations", async () => {
+    const transport = new FakeTransport([
+      () => ok200(existingInstance()),
+      () => ok200(instanceWithItems(legacyItems)),
+    ]);
+    const provider = makeProvider(transport);
+    const ref = { provider: "gce", resourceId: "pi-orb-orb-1" };
+    const stamped = await provider.observe(task, ref, context);
+    expect(stamped.isOk() && stamped.value?.specFingerprint).toBe(currentSpecFingerprint);
+    const legacy = await provider.observe(task, ref, context);
+    expect(legacy.isOk() && legacy.value !== null).toBe(true);
+    expect(legacy.isOk() && legacy.value?.specFingerprint).toBeNull();
+  });
+
+  it("start refuses an instance whose stamp differs from the expectation", async () => {
+    const transport = new FakeTransport([() => ok200(existingInstance({ status: "TERMINATED" }))]);
+    const result = await makeProvider(transport).start(
+      task,
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
+        expectedIncarnation: 0,
+        expectedSpecFingerprint: fingerprintWith({ runtimeImage: "registry/other@sha256:def" }),
+      },
+      context,
+    );
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(result.isErr() && result.error.retryable).toBe(false);
+    expect(transport.requests.some((request) => request.path.endsWith("/start"))).toBe(false);
+    expect(transport.requests.some((request) => request.path.endsWith("/setMetadata"))).toBe(false);
+  });
+
+  it("start accepts a legacy unstamped instance only when no stamp is expected", async () => {
+    const legacyTransport = new FakeTransport([
+      () => ok200(instanceWithItems(legacyItems, { status: "TERMINATED" })),
+      () => ok200({ name: "op-start" }),
+      () => done,
+    ]);
+    const legacyStart = await makeProvider(legacyTransport).start(
+      task,
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
+        expectedIncarnation: 0,
+        expectedSpecFingerprint: null,
+      },
+      context,
+    );
+    expect(legacyStart.isOk(), JSON.stringify(legacyStart)).toBe(true);
+    expect(legacyTransport.requests.some((request) => request.path.endsWith("/start"))).toBe(true);
+
+    const stampedTransport = new FakeTransport([
+      () => ok200(existingInstance({ status: "TERMINATED" })),
+    ]);
+    const stampedStart = await makeProvider(stampedTransport).start(
+      task,
+      {
+        ref: { provider: "gce", resourceId: "pi-orb-orb-1" },
+        expectedIncarnation: 0,
+        expectedSpecFingerprint: null,
+      },
+      context,
+    );
+    expect(stampedStart.isErr() && stampedStart.error.code).toBe("conflict");
+    expect(stampedStart.isErr() && stampedStart.error.retryable).toBe(false);
+    expect(stampedTransport.requests.some((request) => request.path.endsWith("/start"))).toBe(
+      false,
+    );
+  });
+
+  it("provision never boots a stopped instance carrying a stale specification", async () => {
+    // The dangerous case: reuse would `instances.start` the stale VM, booting
+    // exactly the compute the caller decided to replace.
+    const transport = new FakeTransport([
+      () => ok200(instanceWithItems(legacyItems, { status: "TERMINATED" })),
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(result.isErr() && result.error.retryable).toBe(false);
+    expect(transport.requests.some((request) => request.path.endsWith("/start"))).toBe(false);
+    expect(transport.requests.some((request) => request.path.endsWith("/setMetadata"))).toBe(false);
   });
 });

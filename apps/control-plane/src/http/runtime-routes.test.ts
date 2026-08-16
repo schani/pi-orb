@@ -118,6 +118,90 @@ describe("runtime broker routes", () => {
     expect(response.statusCode).toBe(401);
   });
 
+  it("rejects old runtime authorization while a host_spec_changed fence is pending", async () => {
+    // The same fence as the `failed` case above, created by an immutable-spec
+    // replacement instead: an orb carrying any discard intent is unauthorized
+    // whatever its lifecycle state says (docs/compute-replacement.md).
+    store.seedOrb(
+      makeOrbRow(ORB, PROJECT, "starting", {
+        runtimeTokenHash: sha256(TOKEN),
+        hostRef: "host-a",
+        hostIncarnation: 0,
+        hostSpecFingerprint: "spec-new",
+        hostSpecGeneration: 2,
+        hostDiscardThroughIncarnation: 0,
+        hostDiscardReason: "host_spec_changed",
+        hostDiscardRequestedAt: task.wallNow(),
+      }),
+    );
+    seedCredential();
+    const response = await request({ reason: "startup" });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("revokes the old token across a replacement and honors the new one only after commit", async () => {
+    const NEW_TOKEN = "runtime-token-replacement";
+    store.seedOrb(
+      makeOrbRow(ORB, PROJECT, "starting", {
+        runtimeTokenHash: sha256(TOKEN),
+        hostRef: "host-a",
+        hostIncarnation: 0,
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 1,
+      }),
+    );
+    seedCredential();
+    // Stale compute still authorized before the update is noticed.
+    expect((await request({ reason: "startup" })).statusCode).toBe(200);
+
+    // 1. The start path requests replacement: fence plus token revocation in
+    // one transaction.
+    const requested = await store.requestHostSpecReplacement(task, {
+      orbId: ORB,
+      expectedStateVersion: store.orbSnapshot(ORB)?.stateVersion ?? 0,
+      desiredFingerprint: "spec-new",
+      configuredGeneration: 2,
+      now: task.wallNow(),
+    });
+    expect(requested.isOk()).toBe(true);
+    expect(store.orbSnapshot(ORB)).toMatchObject({
+      hostDiscardReason: "host_spec_changed",
+      runtimeTokenHash: null,
+    });
+    expect((await request({ reason: "startup" })).statusCode).toBe(401);
+
+    // 2. Disposal is verified and finalized: still nothing is authorized.
+    const finalized = await store.finalizeHostDiscard(task, {
+      orbId: ORB,
+      expectedStateVersion: store.orbSnapshot(ORB)?.stateVersion ?? 0,
+      throughIncarnation: 0,
+      now: task.wallNow(),
+    });
+    expect(finalized.isOk()).toBe(true);
+    expect(store.orbSnapshot(ORB)).toMatchObject({
+      hostIncarnation: 1,
+      hostDiscardThroughIncarnation: null,
+    });
+    expect((await request({ reason: "startup" })).statusCode).toBe(401);
+    expect((await request({ reason: "startup" }, NEW_TOKEN)).statusCode).toBe(401);
+
+    // 3. Only the replacement commit authorizes the new incarnation — and the
+    // old token stays dead forever.
+    const committed = await store.casUpdateFields(task, {
+      orbId: ORB,
+      expectedStateVersion: store.orbSnapshot(ORB)?.stateVersion ?? 0,
+      now: task.wallNow(),
+      hostRef: "host-b",
+      runtimeTokenHash: sha256(NEW_TOKEN),
+      hostSpecFingerprint: "spec-new",
+      hostSpecGeneration: 2,
+      hostDiscardEvidence: null,
+    });
+    expect(committed.isOk()).toBe(true);
+    expect((await request({ reason: "startup" }, NEW_TOKEN)).statusCode).toBe(200);
+    expect((await request({ reason: "startup" })).statusCode).toBe(401);
+  });
+
   it("rejects a missing bearer", async () => {
     seedOrb("running");
     seedCredential();

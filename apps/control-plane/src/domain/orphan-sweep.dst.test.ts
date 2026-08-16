@@ -4,6 +4,7 @@ import {
   makeHarness,
   makeOrbRow,
   makeProjectRow,
+  seedProvisionedHost,
   seedRunningOrb,
   TEST_CONSTANTS,
 } from "../testkit/fixtures.ts";
@@ -37,7 +38,7 @@ describe("orphan-host sweep (DST)", () => {
             f: async (task) => {
               // A provision whose database commit was lost: host, no orb row.
               harness.world.configureOrb(ORB, { initDurationMs: 0 });
-              harness.world.provisionHost(task, ORB, 0);
+              seedProvisionedHost(task, harness, ORB);
               await waitUntil(
                 task,
                 "orphan host stopped",
@@ -73,7 +74,7 @@ describe("orphan-host sweep (DST)", () => {
           f: async (task) => {
             harness.store.seedProject(makeProjectRow(PROJECT));
             harness.world.configureOrb(ORB, { initDurationMs: 0 });
-            harness.world.provisionHost(task, ORB, 0);
+            seedProvisionedHost(task, harness, ORB);
             // The stopped orb row no longer records the host, so the per-orb
             // terminal backstop cannot see it — only the sweep can.
             harness.store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped", { hostRef: null }));
