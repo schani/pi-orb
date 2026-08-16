@@ -56,6 +56,8 @@ export interface CasUpdateFieldsParams {
   readonly checkoutCommit?: string | null;
   readonly lastError?: string | null;
   readonly runtimeTokenHash?: string | null;
+  readonly hostSpecFingerprint?: string | null;
+  readonly hostSpecGeneration?: number | null;
   /**
    * Clear-only: retained discard evidence is dropped when a replacement
    * commits, so it cannot shadow a later incident (docs/compute-replacement.md).
@@ -86,6 +88,21 @@ export interface FinalizeHostDiscardParams {
   readonly throughIncarnation: number;
   readonly now: number;
 }
+
+export interface RequestHostSpecReplacementParams {
+  readonly orbId: string;
+  readonly expectedStateVersion: number;
+  readonly desiredFingerprint: string;
+  readonly configuredGeneration: number;
+  /** Provider observation proved the durable stamp does not match the resource. */
+  readonly force?: boolean;
+  readonly now: number;
+}
+
+export type HostSpecReplacementOutcome =
+  | { readonly type: "current"; readonly orb: OrbRow }
+  | { readonly type: "requested"; readonly orb: OrbRow }
+  | { readonly type: "declined"; readonly orb: OrbRow; readonly committedGeneration: number };
 
 export interface RequestOrbDeletionParams {
   readonly orbId: string;
@@ -309,6 +326,12 @@ export interface ControlPlaneStore {
     params: FinalizeHostDiscardParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict>;
 
+  /** Atomically requests immutable replacement, fenced by the committed deploy generation. */
+  requestHostSpecReplacement(
+    task: SimulationTask,
+    params: RequestHostSpecReplacementParams,
+  ): ResultAsync<HostSpecReplacementOutcome, StoreError | StateConflict>;
+
   /** State transition: bumps `state_version`, sets `state_changed_at` to `now`. */
   casTransition(
     task: SimulationTask,
@@ -389,6 +412,8 @@ export interface OrbHostObservation {
   readonly orbId: string;
   /** Incarnation stamped on the observed resource; legacy unstamped compute is 0. */
   readonly incarnation: number;
+  /** Immutable specification stamped on this resource; legacy resources report null. */
+  readonly specFingerprint: string | null;
   readonly state: OrbHostState;
   /** Ephemeral observation; never authoritative persisted state. */
   readonly runtimeAddress?: { baseUrl: string };
@@ -404,6 +429,14 @@ export interface ProvisionOrbHostRequest {
 export interface StartOrbHostRequest {
   readonly ref: OrbHostRef;
   readonly expectedIncarnation: number;
+  /**
+   * The durable committed fingerprint, or null for a legacy row that predates
+   * spec stamping. Providers conflict on any stamp difference; a null
+   * expectation matches only an unstamped legacy resource, so pre-migration
+   * compute can still restart in place until its next ordinary Start replaces
+   * it (docs/compute-replacement.md).
+   */
+  readonly expectedSpecFingerprint: string | null;
 }
 
 /**
@@ -417,10 +450,16 @@ export interface ProvisionedOrbHost {
   readonly ref: OrbHostRef;
   readonly incarnation: number;
   readonly runtimeTokenHash: string;
+  readonly specFingerprint: string;
+  readonly specGeneration: number;
 }
 
 export interface OrbHostProvider {
   readonly kind: string;
+  /** Deploy-monotone authority used only to fence specification replacement. */
+  readonly specGeneration: number;
+  /** Pure fingerprint of every non-secret input that fixes an incarnation's launch contract. */
+  desiredSpecFingerprint(input: { readonly orbId: string; readonly repositoryUrl: string }): string;
   /** Idempotent by orbId. */
   provision(
     task: SimulationTask,

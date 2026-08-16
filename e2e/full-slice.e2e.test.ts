@@ -91,6 +91,7 @@ let nameFake: FakeSession;
 let controlPlane: ControlPlaneHandle;
 let orbId = "";
 let failedOrbId = "";
+let specOrbId = "";
 let localStateDirectory = "";
 
 function processHostDirectory(id: string): string {
@@ -103,6 +104,84 @@ function processHostDirectory(id: string): string {
  * metadata gone while the workspace (optionally a specific surviving file)
  * is still on disk.
  */
+async function computeIncarnation(id: string): Promise<number | null> {
+  if (PROCESS_BACKEND) {
+    const path = join(processHostDirectory(id), "host.json");
+    if (!existsSync(path)) return null;
+    return Number((JSON.parse(readFileSync(path, "utf8")) as { incarnation: number }).incarnation);
+  }
+  const [name] = await orbContainerNames(id);
+  if (name === undefined) return null;
+  const match = /-i(\d+)$/.exec(name);
+  return match === null ? null : Number(match[1]);
+}
+
+/**
+ * The identity of the compute incarnation currently backing the orb, as
+ * opposed to its incarnation *number*. Docker: the container ID, which changes
+ * whenever the container is recreated. Process: the recorded process-group
+ * leader plus its loopback port, which change whenever the child is
+ * relaunched. Either one detects an in-place bounce that leaves the
+ * incarnation number untouched — the mutation `docs/compute-replacement.md`
+ * forbids and which an incarnation-only assertion cannot see.
+ */
+async function computeIdentity(id: string, incarnation: number): Promise<string> {
+  if (PROCESS_BACKEND) {
+    const metadata = JSON.parse(
+      readFileSync(join(processHostDirectory(id), "host.json"), "utf8"),
+    ) as { processGroupId: number | null; port: number };
+    return `pgid=${String(metadata.processGroupId)} port=${String(metadata.port)}`;
+  }
+  return await docker(["inspect", "-f", "{{.Id}}", `pi-orb-${id}-i${incarnation}`]);
+}
+
+/** The runtime token the given incarnation actually carries. */
+async function readRuntimeToken(id: string, incarnation: number): Promise<string> {
+  if (PROCESS_BACKEND) {
+    const metadata = JSON.parse(
+      readFileSync(join(processHostDirectory(id), "host.json"), "utf8"),
+    ) as { runtimeToken: string };
+    return metadata.runtimeToken;
+  }
+  const environment = JSON.parse(
+    await docker(["inspect", `pi-orb-${id}-i${incarnation}`, "--format", "{{json .Config.Env}}"]),
+  ) as string[];
+  const entry = environment.find((value) => value.startsWith("PI_ORB_RUNTIME_TOKEN="));
+  if (entry === undefined) {
+    throw new Error(`runtime token missing from inspect for ${id} i${incarnation}`);
+  }
+  return entry.slice("PI_ORB_RUNTIME_TOKEN=".length);
+}
+
+/**
+ * The durable lifecycle edges for one orb, in emission order, out of the log
+ * tail the harness captures. Chunks are joined before splitting: a stdout
+ * chunk boundary can fall inside a line.
+ */
+function lifecycleLines(id: string): string[] {
+  return controlPlane.logs
+    .join("")
+    .split("\n")
+    .filter((line) => line.includes(`lifecycle: orb=${id} `));
+}
+
+/**
+ * A bounded wait on the orb's lifecycle edges. The edges are written to stdout
+ * slightly before the API view catches up, so asserting them directly after a
+ * state wait would race the pipe; the timeout dumps the same diagnostics as
+ * every other wait through `withOrbDiagnostics`.
+ */
+async function waitForLifecycleEdges(
+  what: string,
+  id: string,
+  predicate: (lines: string[]) => boolean,
+): Promise<void> {
+  await waitFor(what, async () => (predicate(lifecycleLines(id)) ? true : null), {
+    timeoutMs: 30_000,
+    intervalMs: 500,
+  });
+}
+
 async function computeAbsent(id: string, workspaceFile?: string): Promise<boolean> {
   if (PROCESS_BACKEND) {
     const hostDirectory = processHostDirectory(id);
@@ -238,6 +317,8 @@ beforeAll(async () => {
       fake,
       nameFake,
       launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
+      hostSpecGeneration: 1,
+      e2eHostSpec: "stage2-spec-a",
     });
     return;
   }
@@ -280,12 +361,14 @@ beforeAll(async () => {
     dockerNetwork: NETWORK,
     runtimeImage: RUNTIME_IMAGE,
     launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
+    hostSpecGeneration: 1,
+    e2eHostSpec: "stage2-spec-a",
   });
 }, 720_000);
 
 afterAll(async () => {
   if (!PROCESS_BACKEND) {
-    for (const id of [orbId, failedOrbId]) {
+    for (const id of [orbId, failedOrbId, specOrbId]) {
       if (id === "") continue;
       await removeOrbContainers(id);
       await docker(["volume", "rm", "-f", `pi-orb-data-${id}`]).catch(() => undefined);
@@ -297,6 +380,29 @@ afterAll(async () => {
   if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
   if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
 }, 120_000);
+
+async function restartControlPlaneWithSpec(spec: string, generation: number): Promise<void> {
+  // Restarting the control plane terminates its child compute on the process
+  // backend — that is exactly why the SIGHUP seam exists. Docker compute
+  // survives, so only the docker leg may use a restart to change generation.
+  if (PROCESS_BACKEND) {
+    throw new Error("restartControlPlaneWithSpec kills process-backend compute; use SIGHUP");
+  }
+  const authDir = controlPlane.authDir;
+  await controlPlane.stop();
+  controlPlane = await startControlPlane({
+    databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
+    port: CP_PORT,
+    fake,
+    nameFake,
+    dockerNetwork: NETWORK,
+    runtimeImage: RUNTIME_IMAGE,
+    launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
+    hostSpecGeneration: generation,
+    e2eHostSpec: spec,
+    authDir,
+  });
+}
 
 describe("full slice E2E", () => {
   it("runs login, a scripted tool round trip, replication, and drain", async () => {
@@ -369,28 +475,7 @@ describe("full slice E2E", () => {
             incarnation: 0,
           }),
         });
-        const readToken = async (incarnation: number): Promise<string> => {
-          if (PROCESS_BACKEND) {
-            const metadata = JSON.parse(
-              readFileSync(join(processHostDirectory(replacementOrbId), "host.json"), "utf8"),
-            ) as { runtimeToken: string };
-            return metadata.runtimeToken;
-          }
-          const environment = JSON.parse(
-            await docker([
-              "inspect",
-              `pi-orb-${replacementOrbId}-i${incarnation}`,
-              "--format",
-              "{{json .Config.Env}}",
-            ]),
-          ) as string[];
-          const entry = environment.find((value) => value.startsWith("PI_ORB_RUNTIME_TOKEN="));
-          if (entry === undefined) {
-            throw new Error("replacement runtime token missing from inspect");
-          }
-          return entry.slice("PI_ORB_RUNTIME_TOKEN=".length);
-        };
-        const oldToken = await readToken(0);
+        const oldToken = await readRuntimeToken(replacementOrbId, 0);
         const historyBefore = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
         expect(historyBefore.status).toBe(200);
 
@@ -448,7 +533,7 @@ describe("full slice E2E", () => {
           },
           { timeoutMs: 300_000, intervalMs: 1_000 },
         );
-        expect(await readToken(1)).not.toBe(oldToken);
+        expect(await readRuntimeToken(replacementOrbId, 1)).not.toBe(oldToken);
         expect(await readWorkspaceFile(replacementOrbId, 1, "replacement-sentinel")).toBe(sentinel);
         // Exactly one compute identity exists for the orb, and it is the
         // replacement incarnation 1 — never the discarded incarnation 0 or a
@@ -475,6 +560,189 @@ describe("full slice E2E", () => {
             (await api(base, "GET", `/api/v1/projects/${projectId}`)).status === 404 ? true : null,
           { timeoutMs: 240_000, intervalMs: 1_000 },
         );
+      },
+    );
+  }, 600_000);
+
+  it("leaves running compute untouched and replaces stale stopped compute on Start", async () => {
+    const projectId = randomUUID();
+    specOrbId = randomUUID();
+    await withOrbDiagnostics(
+      () => specOrbId,
+      async () => {
+        expect(
+          (
+            await api(controlPlane.baseUrl, "POST", "/api/v1/projects", {
+              id: projectId,
+              name: `e2e-host-spec-${projectId.slice(0, 8)}`,
+              repositoryUrl: REPOSITORY_URL,
+            })
+          ).status,
+        ).toBe(201);
+        expect(
+          (
+            await api(controlPlane.baseUrl, "POST", `/api/v1/projects/${projectId}/orbs`, {
+              id: specOrbId,
+            })
+          ).status,
+        ).toBe(202);
+        await waitFor(
+          "host-spec fixture running",
+          async () => {
+            const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`);
+            if (view.body["state"] === "failed") {
+              throw new FatalProbeError(String(view.body["lastError"]));
+            }
+            return view.body["state"] === "running" ? true : null;
+          },
+          { timeoutMs: 300_000, intervalMs: 1_000 },
+        );
+        expect(await computeIncarnation(specOrbId)).toBe(0);
+        const sentinel = `stage2-${specOrbId}`;
+        await writeWorkspaceFiles(specOrbId, 0, { "stage2-sentinel": sentinel });
+        // Captured before the specification changes: the running incarnation
+        // must still be this exact compute afterwards, not a same-numbered
+        // replacement or an in-place bounce.
+        const runningIdentity = await computeIdentity(specOrbId, 0);
+        const staleToken = await readRuntimeToken(specOrbId, 0);
+
+        // A deployed spec change does not bounce running compute. Restarting
+        // the control plane models the next revision while preserving the
+        // database, provider state, and credential directory.
+        if (PROCESS_BACKEND) {
+          controlPlane.process.kill("SIGHUP");
+          await waitFor("E2E host spec advanced", async () =>
+            controlPlane.logs.join("").includes("E2E host specification advanced") ? true : null,
+          );
+        } else {
+          await restartControlPlaneWithSpec("stage2-spec-b", 2);
+        }
+        // Deliberate elapsed-time wait #2 in this suite (docs/compute-replacement.md):
+        // the assertion is a negative one — several reconcile passes at the new
+        // specification must leave the running orb's compute completely alone —
+        // and a negative has no completion signal to wait on.
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        expect(
+          (await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`)).body["state"],
+        ).toBe("running");
+        expect(await computeIncarnation(specOrbId)).toBe(0);
+        expect(await computeIdentity(specOrbId, 0)).toBe(runningIdentity);
+
+        expect(
+          (await api(controlPlane.baseUrl, "POST", `/api/v1/orbs/${specOrbId}/stop`)).status,
+        ).toBe(202);
+        await waitFor(
+          "host-spec fixture stopped",
+          async () =>
+            (await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`)).body["state"] ===
+            "stopped"
+              ? true
+              : null,
+          { timeoutMs: 120_000, intervalMs: 1_000 },
+        );
+        expect(await computeIncarnation(specOrbId)).toBe(0);
+        // A stopped Docker container keeps its ID, so the stale compute must
+        // still be the exact same container. The process backend clears the
+        // recorded process group when the child exits, so a stopped host there
+        // legitimately has no process identity left to compare.
+        if (!PROCESS_BACKEND) {
+          expect(await computeIdentity(specOrbId, 0)).toBe(runningIdentity);
+        }
+        expect(
+          (await api(controlPlane.baseUrl, "POST", `/api/v1/orbs/${specOrbId}/start`)).status,
+        ).toBe(202);
+        await waitFor(
+          "host-spec replacement running",
+          async () => {
+            const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`);
+            if (view.body["state"] === "failed") {
+              throw new FatalProbeError(String(view.body["lastError"]));
+            }
+            return view.body["state"] === "running" && (await computeIncarnation(specOrbId)) === 1
+              ? true
+              : null;
+          },
+          { timeoutMs: 300_000, intervalMs: 1_000 },
+        );
+        expect(await readWorkspaceFile(specOrbId, 1, "stage2-sentinel")).toBe(sentinel);
+        // The replacement rotated the compute identity and its runtime token,
+        // and exactly one compute identity remains for the orb.
+        expect(await computeIdentity(specOrbId, 1)).not.toBe(runningIdentity);
+        expect(await readRuntimeToken(specOrbId, 1)).not.toBe(staleToken);
+        if (PROCESS_BACKEND) {
+          const metadata = JSON.parse(
+            readFileSync(join(processHostDirectory(specOrbId), "host.json"), "utf8"),
+          ) as { incarnation?: number };
+          expect(metadata.incarnation).toBe(1);
+        } else {
+          expect(await orbContainerNames(specOrbId)).toEqual([`pi-orb-${specOrbId}-i1`]);
+        }
+        // The durable edges tie the replacement to the specification change:
+        // a discard requested for `host_spec_changed`, then the replacement
+        // incarnation provisioned after it (docs/compute-replacement.md).
+        await waitForLifecycleEdges("host-spec replacement lifecycle edges", specOrbId, (lines) => {
+          const discarded = lines.findIndex(
+            (line) =>
+              line.includes(" compute-discard-requested ") &&
+              line.includes("reason=host_spec_changed"),
+          );
+          const provisioned = lines.findIndex(
+            (line) => line.includes(" replacement-provisioned ") && line.includes("incarnation=1"),
+          );
+          return discarded >= 0 && provisioned > discarded;
+        });
+
+        // Docker leg only: a draining *lower*-generation revision must decline
+        // the replacement and start the existing incarnation unchanged, so a
+        // stale revision can never replace newer-spec compute backward.
+        // `restartControlPlaneWithSpec` would terminate process-backend
+        // compute, which is why this leg is Docker-only.
+        if (!PROCESS_BACKEND) {
+          expect(
+            (await api(controlPlane.baseUrl, "POST", `/api/v1/orbs/${specOrbId}/stop`)).status,
+          ).toBe(202);
+          await waitFor(
+            "host-spec fixture stopped before declined generation",
+            async () =>
+              (await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`)).body[
+                "state"
+              ] === "stopped"
+                ? true
+                : null,
+            { timeoutMs: 120_000, intervalMs: 1_000 },
+          );
+          const declinedIdentity = await computeIdentity(specOrbId, 1);
+          // Lower generation, different effective specification: the fresh log
+          // array of the restarted handle contains only this revision's edges.
+          await restartControlPlaneWithSpec("stage2-spec-c", 1);
+          expect(
+            (await api(controlPlane.baseUrl, "POST", `/api/v1/orbs/${specOrbId}/start`)).status,
+          ).toBe(202);
+          await waitFor(
+            "declined-generation start running",
+            async () => {
+              const view = await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`);
+              if (view.body["state"] === "failed") {
+                throw new FatalProbeError(String(view.body["lastError"]));
+              }
+              return view.body["state"] === "running" ? true : null;
+            },
+            { timeoutMs: 300_000, intervalMs: 1_000 },
+          );
+          await waitForLifecycleEdges("spec-replacement declined edge", specOrbId, (lines) =>
+            lines.some((line) => line.includes(" spec-replacement-declined ")),
+          );
+          expect(await computeIncarnation(specOrbId)).toBe(1);
+          expect(await computeIdentity(specOrbId, 1)).toBe(declinedIdentity);
+          expect(await orbContainerNames(specOrbId)).toEqual([`pi-orb-${specOrbId}-i1`]);
+          expect(lifecycleLines(specOrbId).join("\n")).not.toContain("compute-discard-requested");
+          // Leave the suite on a control plane whose configured specification
+          // matches the committed one.
+          await restartControlPlaneWithSpec("stage2-spec-b", 2);
+        }
+        expect(
+          (await api(controlPlane.baseUrl, "DELETE", `/api/v1/projects/${projectId}`)).status,
+        ).toBe(202);
       },
     );
   }, 600_000);

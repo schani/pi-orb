@@ -52,10 +52,18 @@ export async function deleteFakeSession(sessionKey: string): Promise<void> {
 
 export function docker(args: string[], timeoutMs = 120_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("docker", args, { timeout: timeoutMs, maxBuffer: 16e6 }, (error, stdout, stderr) => {
-      if (error !== null) reject(new Error(`docker ${args[0]}: ${stderr || error.message}`));
-      else resolve(stdout.trim());
-    });
+    // killSignal SIGKILL: a docker CLI wedged against a distressed daemon can
+    // ignore SIGTERM, and a hanging helper turns one failed test into an
+    // hours-long silent teardown (observed 2026-08-16).
+    execFile(
+      "docker",
+      args,
+      { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16e6 },
+      (error, stdout, stderr) => {
+        if (error !== null) reject(new Error(`docker ${args[0]}: ${stderr || error.message}`));
+        else resolve(stdout.trim());
+      },
+    );
   });
 }
 
@@ -128,8 +136,11 @@ export async function startControlPlane(options: {
   dockerNetwork?: string;
   runtimeImage?: string;
   launchFailureMarker?: string;
+  hostSpecGeneration?: number;
+  e2eHostSpec?: string;
+  authDir?: string;
 }): Promise<ControlPlaneHandle> {
-  const authDir = mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
+  const authDir = options.authDir ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const logs: string[] = [];
   const child = spawn("node", ["apps/control-plane/src/main.ts"], {
     cwd: join(import.meta.dirname, ".."),
@@ -148,6 +159,8 @@ export async function startControlPlane(options: {
       PI_ORB_RUNTIME_IMAGE: options.runtimeImage,
       PI_ORB_DOCKER_NETWORK: options.dockerNetwork,
       PI_ORB_E2E_LAUNCH_FAILURE_MARKER: options.launchFailureMarker,
+      PI_ORB_HOST_SPEC_GENERATION: String(options.hostSpecGeneration ?? 0),
+      PI_ORB_E2E_HOST_SPEC: options.e2eHostSpec,
       PI_ORB_FAKE_OPENAI_OAUTH_URL: options.fake.oauthBaseUrl,
       PI_ORB_FAKE_OPENAI_INFERENCE_URL: options.fake.inferenceBaseUrl,
       ...(options.nameFake === undefined

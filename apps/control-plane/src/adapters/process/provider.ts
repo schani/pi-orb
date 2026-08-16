@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
@@ -33,6 +33,7 @@ import type {
   ProvisionOrbHostRequest,
   StartOrbHostRequest,
 } from "../../domain/ports.ts";
+import { specFingerprintOf } from "../spec-fingerprint.ts";
 
 export interface ProcessOrbHostProviderOptions {
   readonly stateDirectory: string;
@@ -52,6 +53,7 @@ export interface ProcessOrbHostProviderOptions {
    * against an in-flight relaunch deterministically.
    */
   readonly onCrashRelaunch?: (orbId: string) => Promise<void>;
+  readonly specGeneration?: number;
 }
 
 interface HostMetadata {
@@ -59,6 +61,7 @@ interface HostMetadata {
   readonly orbId: string;
   readonly incarnation: number;
   readonly repositoryUrl: string;
+  readonly specFingerprint: string | null;
   readonly runtimeToken: string;
   readonly port: number;
   /** Process-group leader PID, persisted so disposal survives provider restart. */
@@ -91,8 +94,37 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export interface ProcessRow {
+  readonly pid: number;
+  readonly processGroupId: number;
+}
+
+/**
+ * The live (non-zombie) rows of `ps -o pid=,pgid=,stat= …` output. Pure so the
+ * classification is unit-testable without depending on real process timing.
+ *
+ * A zombie — state column starting with `Z` — is definitively dead even though
+ * `kill(pid, 0)` and `kill(-pgid, 0)` still answer for it until the parent
+ * reaps it. Rows are also carried with their group so callers can filter,
+ * which keeps the answer correct even where `ps -g` does not filter itself.
+ * Anything unparseable is ignored rather than guessed at.
+ */
+export function liveProcessRows(stdout: string): ProcessRow[] {
+  const rows: ProcessRow[] = [];
+  for (const line of stdout.split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    const [pid, processGroupId, state] = fields;
+    if (pid === undefined || processGroupId === undefined || state === undefined) continue;
+    if (!/^\d+$/.test(pid) || !/^\d+$/.test(processGroupId)) continue;
+    if (state.startsWith("Z")) continue;
+    rows.push({ pid: Number(pid), processGroupId: Number(processGroupId) });
+  }
+  return rows;
+}
+
 export class ProcessOrbHostProvider implements OrbHostProvider {
   readonly kind = "process";
+  readonly specGeneration: number;
   private readonly children = new Map<string, ManagedChild>();
   private readonly locks = new Map<string, Promise<void>>();
   private closing = false;
@@ -101,6 +133,21 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
 
   constructor(options: ProcessOrbHostProviderOptions) {
     this.options = options;
+    this.specGeneration = options.specGeneration ?? 0;
+  }
+
+  desiredSpecFingerprint(input: {
+    readonly orbId: string;
+    readonly repositoryUrl: string;
+  }): string {
+    return specFingerprintOf({
+      v: 1,
+      runtimeEntryPoint: this.options.runtimeEntryPoint,
+      nodeExecutable: this.options.nodeExecutable ?? process.execPath,
+      controlPlaneUrl: this.options.controlPlaneUrl,
+      extraEnv: this.options.extraEnv ?? {},
+      repositoryUrl: input.repositoryUrl,
+    });
   }
 
   private hostDirectory(orbId: string): string {
@@ -150,6 +197,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         orbId,
         incarnation,
         repositoryUrl: parsed.repositoryUrl,
+        specFingerprint: typeof parsed.specFingerprint === "string" ? parsed.specFingerprint : null,
         runtimeToken: parsed.runtimeToken,
         port: parsed.port,
         processGroupId,
@@ -295,12 +343,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       const managed: ManagedChild = { child, intentional: false };
       this.children.set(metadata.orbId, managed);
       child.once("exit", () => {
-        if (this.children.get(metadata.orbId) !== managed) return;
-        this.children.delete(metadata.orbId);
-        const latest = this.readMetadata("start", metadata.orbId);
-        if (latest.isOk() && latest.value !== null && latest.value.processGroupId === child.pid) {
-          this.writeMetadata("start", { ...latest.value, processGroupId: null });
-        }
+        if (!this.forgetChild(metadata.orbId, managed)) return;
         if (managed.intentional || this.closing) return;
         setTimeout(() => {
           void (async (): Promise<void> => {
@@ -365,6 +408,25 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     }
   }
 
+  /**
+   * Drop a child this provider no longer supervises and release the process
+   * group it committed. Returns whether this call owned the entry — a later
+   * `exit` event for an already-forgotten child must not touch anything.
+   */
+  private forgetChild(orbId: string, managed: ManagedChild): boolean {
+    if (this.children.get(orbId) !== managed) return false;
+    this.children.delete(orbId);
+    const latest = this.readMetadata("start", orbId);
+    if (
+      latest.isOk() &&
+      latest.value !== null &&
+      latest.value.processGroupId === managed.child.pid
+    ) {
+      this.writeMetadata("start", { ...latest.value, processGroupId: null });
+    }
+    return true;
+  }
+
   private ref(orbId: string, incarnation: number): OrbHostRef {
     return {
       provider: "process",
@@ -399,6 +461,10 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       const found = this.readMetadata("provision", request.orbId);
       if (found.isErr()) return err(found.error);
       let metadata = found.value;
+      const specFingerprint = this.desiredSpecFingerprint({
+        orbId: request.orbId,
+        repositoryUrl: request.bootstrap.repositoryUrl,
+      });
       if (metadata === null) {
         const port = await this.allocatePort(context.signal);
         if (port.isErr()) return err(port.error);
@@ -407,6 +473,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           orbId: request.orbId,
           incarnation: request.incarnation,
           repositoryUrl: request.bootstrap.repositoryUrl,
+          specFingerprint,
           runtimeToken: randomBytes(32).toString("hex"),
           port: port.value,
           processGroupId: null,
@@ -424,6 +491,8 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
             false,
           ),
         );
+      } else if (metadata.specFingerprint !== specFingerprint) {
+        return err(hostError("provision", "conflict", "process specification mismatch", false));
       } else if (metadata.desiredState === "stopped") {
         metadata = { ...metadata, desiredState: "running" };
         const written = this.writeMetadata("provision", metadata);
@@ -435,6 +504,8 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         ref: this.ref(request.orbId, metadata.incarnation),
         incarnation: metadata.incarnation,
         runtimeTokenHash: sha256(metadata.runtimeToken),
+        specFingerprint,
+        specGeneration: this.specGeneration,
       });
     });
     return new ResultAsync(run);
@@ -472,6 +543,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         ) {
           return err(hostError("start", "conflict", "process incarnation mismatch", false));
         }
+        if (found.value.specFingerprint !== request.expectedSpecFingerprint) {
+          return err(hostError("start", "conflict", "process specification mismatch", false));
+        }
         const metadata = { ...found.value, desiredState: "running" as const };
         const written = this.writeMetadata("start", metadata);
         if (written.isErr()) return err(written.error);
@@ -498,36 +572,102 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     );
     // On POSIX the negative pid addresses the whole group for signals and
     // for the signal-0 existence probe alike: ESRCH means every member is
-    // gone (an exited-but-unreaped leader still counts as present until
-    // libuv reaps it, which is exactly the conservative direction).
+    // gone. It still answers for an exited-but-unreaped leader, so absence
+    // is confirmed by the zombie-aware group probe below rather than by the
+    // signal-0 result alone.
     const target = process.platform === "win32" ? processGroupId : -processGroupId;
     const grace = this.options.terminateGraceMs ?? 2_000;
+    /**
+     * macOS has no `/proc`, so `ps` is the only way to tell a real group member
+     * from an exited-but-unreaped zombie that `kill(-pgid, 0)` still answers
+     * for. Without this the ladder's post-SIGKILL probe waits out the whole
+     * grace whenever reaping lags under load and then reports a group that is
+     * in fact gone as "still exists after SIGKILL".
+     */
+    const darwinGroupHasLiveMembers = (): Result<boolean, OrbHostProviderError> =>
+      Result.fromThrowable(
+        () =>
+          spawnSync("ps", ["-o", "pid=,pgid=,stat=", "-g", String(processGroupId)], {
+            encoding: "utf8",
+          }),
+        (error) => hostError(operation, "unavailable", String(error), true),
+      )().andThen((probe) => {
+        if (probe.error !== undefined) {
+          return err(hostError(operation, "unavailable", String(probe.error), true));
+        }
+        // `ps` exits non-zero with empty output when nothing matches, which is
+        // exactly the absence answer — only a failure to run is uncertainty.
+        const stdout = typeof probe.stdout === "string" ? probe.stdout : "";
+        return ok(liveProcessRows(stdout).some((row) => row.processGroupId === processGroupId));
+      });
+    const groupHasLiveMembers = (): Result<boolean, OrbHostProviderError> => {
+      if (process.platform === "darwin") return darwinGroupHasLiveMembers();
+      // Unknown platforms stay conservative: kill(-pgid, 0) is the only evidence.
+      if (process.platform !== "linux") return ok(true);
+      return Result.fromThrowable(
+        () => {
+          for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+            if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+            let stat: string;
+            try {
+              stat = readFileSync(`/proc/${entry.name}/stat`, "utf8");
+            } catch {
+              continue; // Process exited between directory enumeration and read.
+            }
+            // /proc/<pid>/stat fields: pid, (comm), state, ppid, pgrp. A
+            // zombie is definitively dead even while an unreaping PID 1 keeps
+            // its process-group identity visible to kill(-pgrp, 0).
+            const match = /^\d+ \(.*\) ([A-Z]) \d+ (\d+) /.exec(stat);
+            if (match !== null && Number(match[2]) === processGroupId && match[1] !== "Z") {
+              return true;
+            }
+          }
+          return false;
+        },
+        (error) => hostError(operation, "unavailable", String(error), true),
+      )();
+    };
+    const groupGoneNow = (): Result<boolean, OrbHostProviderError> => {
+      const exists = kill(target, 0);
+      if (exists.isErr()) {
+        if (exists.error.code === "ESRCH") return ok(true);
+        // Darwin answers EPERM for a group whose every member is an unreaped
+        // zombie. Only the state probe separates that from a real permission
+        // problem, and a group with no live member is absent either way.
+        if (exists.error.code !== "EPERM") {
+          return err(hostError(operation, "unavailable", String(exists.error), true));
+        }
+      }
+      return groupHasLiveMembers().map((live) => !live);
+    };
     const groupGone = async (): Promise<Result<boolean, OrbHostProviderError>> => {
       const deadline = Date.now() + grace;
       for (;;) {
-        const exists = kill(target, 0);
-        if (exists.isErr()) {
-          return exists.error.code === "ESRCH"
-            ? ok(true)
-            : err(hostError(operation, "unavailable", String(exists.error), true));
-        }
+        const gone = groupGoneNow();
+        if (gone.isErr() || gone.value) return gone;
         if (Date.now() >= deadline) return ok(false);
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     };
-    const terminated = kill(target, "SIGTERM");
-    if (terminated.isErr()) {
-      return terminated.error.code === "ESRCH"
-        ? ok(undefined)
-        : err(hostError(operation, "unavailable", String(terminated.error), true));
-    }
+    /**
+     * Signal delivery that tolerates a group which is already gone: ESRCH is
+     * absence, and EPERM is the same zombie-group answer as above. Whether the
+     * group is really gone is decided by the probe, never by the send.
+     */
+    const signalGroup = (signal: NodeJS.Signals): Result<void, OrbHostProviderError> => {
+      const sent = kill(target, signal);
+      if (sent.isOk() || sent.error.code === "ESRCH" || sent.error.code === "EPERM") {
+        return ok(undefined);
+      }
+      return err(hostError(operation, "unavailable", String(sent.error), true));
+    };
+    const terminated = signalGroup("SIGTERM");
+    if (terminated.isErr()) return err(terminated.error);
     const goneAfterTerm = await groupGone();
     if (goneAfterTerm.isErr()) return err(goneAfterTerm.error);
     if (goneAfterTerm.value) return ok(undefined);
-    const killed = kill(target, "SIGKILL");
-    if (killed.isErr() && killed.error.code !== "ESRCH") {
-      return err(hostError(operation, "unavailable", String(killed.error), true));
-    }
+    const killed = signalGroup("SIGKILL");
+    if (killed.isErr()) return err(killed.error);
     const goneAfterKill = await groupGone();
     if (goneAfterKill.isErr()) return err(goneAfterKill.error);
     return goneAfterKill.value
@@ -548,6 +688,11 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
    * any live managed child — the latter matters when the persisted group is
    * null or stale, e.g. around a crash restart that has not committed its
    * new group yet. Resolves ok only once every addressed group is absent.
+   *
+   * Verified absence — not the child object's `exit` event — is what ends
+   * this: the event fires when the runtime reaps, which can lag arbitrarily
+   * under load. The child is therefore forgotten here, so observation and any
+   * later termination reflect the ladder's answer instead of the reap's timing.
    */
   private async terminateOrbProcesses(
     operation: OrbHostProviderError["operation"],
@@ -563,6 +708,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       const killed = await this.killProcessGroup(operation, group);
       if (killed.isErr()) return killed;
     }
+    if (managed !== undefined) this.forgetChild(orbId, managed);
     return ok(undefined);
   }
 
@@ -674,6 +820,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           ref: this.ref(found.value.orbId, found.value.incarnation),
           orbId: found.value.orbId,
           incarnation: found.value.incarnation,
+          specFingerprint: found.value.specFingerprint,
           state: running ? "running" : "stopped",
           ...(running
             ? { runtimeAddress: { baseUrl: `http://127.0.0.1:${found.value.port}` } }

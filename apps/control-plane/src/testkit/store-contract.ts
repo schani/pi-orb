@@ -83,25 +83,33 @@ export interface StoreContractSubject {
   readonly client: PostgreSQLClient;
 }
 
-export function storeContractTests(name: string, open: () => Promise<StoreContractSubject>): void {
+export interface StoreSemanticsSubject {
+  readonly store: ControlPlaneStore;
+  close(): Promise<void>;
+}
+
+/**
+ * The interface-only half of the contract: everything expressible through
+ * `ControlPlaneStore` alone. It runs against every PostgreSQL client *and*
+ * against `InMemoryControlPlaneStore`, because that in-memory store is the
+ * substrate of every DST claim — a divergence there silently invalidates the
+ * simulation, not just a test.
+ */
+export function storeSemanticsContractTests(
+  name: string,
+  open: () => Promise<StoreSemanticsSubject>,
+): void {
   describe(`${name} store contract`, () => {
-    let database: ControlPlaneDatabase;
-    let client: PostgreSQLClient;
+    let subject: StoreSemanticsSubject;
     let store: ControlPlaneStore;
-    let pointers: CredentialPointerStore;
 
     beforeEach(async () => {
-      const subject = await open();
-      database = subject.database;
-      client = subject.client;
-      const migrated = await database.migrate();
-      expect(migrated.isOk()).toBe(true);
-      store = database.store;
-      pointers = database.pointers;
+      subject = await open();
+      store = subject.store;
     });
 
     afterEach(async () => {
-      expect((await database.close()).isOk()).toBe(true);
+      await subject.close();
     });
 
     async function seed(): Promise<void> {
@@ -213,6 +221,308 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       });
     });
 
+    it("fences immutable host-spec replacement forward and commits durable intent", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 10,
+      });
+      expect(hosted.isOk()).toBe(true);
+
+      const declined = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-stale-revision",
+        configuredGeneration: 9,
+        now: 3_000,
+      });
+      expect(declined.isOk() && declined.value).toMatchObject({
+        type: "declined",
+        committedGeneration: 10,
+      });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 10,
+        runtimeTokenHash: "old-token-hash",
+        hostDiscardThroughIncarnation: null,
+      });
+
+      const requested = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-new",
+        configuredGeneration: 11,
+        now: 4_000,
+      });
+      expect(requested.isOk() && requested.value).toMatchObject({
+        type: "requested",
+        orb: {
+          hostSpecFingerprint: "spec-new",
+          hostSpecGeneration: 11,
+          runtimeTokenHash: null,
+          hostDiscardThroughIncarnation: 0,
+          hostDiscardReason: "host_spec_changed",
+        },
+      });
+
+      const finalized = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        throughIncarnation: 0,
+        now: 5_000,
+      });
+      expect(finalized.isOk() && finalized.value).toMatchObject({
+        hostRef: null,
+        hostIncarnation: 1,
+        hostSpecFingerprint: "spec-new",
+        hostSpecGeneration: 11,
+        hostDiscardThroughIncarnation: null,
+      });
+    });
+
+    it("leaves a hostless or same-spec orb untouched and conflicts on a stale version", async () => {
+      await seed();
+      const seeded = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      // No compute means nothing to replace: the start path provisions the
+      // current spec directly (docs/compute-replacement.md).
+      const hostless = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        desiredFingerprint: "spec-a",
+        configuredGeneration: 5,
+        now: 2_000,
+      });
+      expect(hostless.isOk() && hostless.value.type).toBe("current");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toEqual(seeded);
+
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 3_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "live-token-hash",
+        hostSpecFingerprint: "spec-a",
+        hostSpecGeneration: 5,
+      });
+      expect(hosted.isOk()).toBe(true);
+      const before = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+
+      // The same-spec reuse guarantee is a *store-level* one: an ordinary
+      // stop/start of unchanged compute must not write a fence, must not
+      // revoke the runtime token, and must not touch the row at all.
+      const same = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-a",
+        configuredGeneration: 6,
+        now: 4_000,
+      });
+      expect(same.isOk() && same.value.type).toBe("current");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toEqual(before);
+
+      // A request built from a stale read cannot request replacement either.
+      const stale = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        desiredFingerprint: "spec-b",
+        configuredGeneration: 6,
+        now: 5_000,
+      });
+      expect(stale.isErr() && stale.error.type).toBe("state_conflict");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toEqual(before);
+    });
+
+    it("requests replacement at the generation boundary and reads a null committed generation as zero", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 7,
+      });
+      expect(hosted.isOk()).toBe(true);
+      // The fence is forward-only, not strictly-forward: a revision redeploying
+      // its own generation with a changed spec still replaces. A `<` vs `<=`
+      // slip in either implementation strands the fleet on the old spec.
+      const boundary = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-new",
+        configuredGeneration: 7,
+        now: 3_000,
+      });
+      expect(boundary.isOk() && boundary.value).toMatchObject({
+        type: "requested",
+        orb: {
+          hostSpecFingerprint: "spec-new",
+          hostSpecGeneration: 7,
+          runtimeTokenHash: null,
+          hostDiscardThroughIncarnation: 0,
+          hostDiscardReason: "host_spec_changed",
+        },
+      });
+
+      // An orb whose compute predates fingerprint stamping has a null
+      // committed generation, which reads as 0 — so generation 0 is not
+      // "lower" and the first stamped replacement is allowed.
+      const unstamped: OrbRow = { ...orb, id: "00000000-0000-4000-8000-00000000000b" };
+      expect((await store.insertOrb(task, unstamped)).isOk()).toBe(true);
+      expect(
+        (
+          await store.casUpdateFields(task, {
+            orbId: unstamped.id,
+            expectedStateVersion: 0,
+            now: 4_000,
+            hostRef: "pi-orb-orb-2-i0",
+          })
+        ).isOk(),
+      ).toBe(true);
+      const legacy = await store.requestHostSpecReplacement(task, {
+        orbId: unstamped.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-first-stamped",
+        configuredGeneration: 0,
+        now: 5_000,
+      });
+      expect(legacy.isOk() && legacy.value).toMatchObject({
+        type: "requested",
+        orb: {
+          hostSpecFingerprint: "spec-first-stamped",
+          hostSpecGeneration: 0,
+          hostDiscardThroughIncarnation: 0,
+          hostDiscardReason: "host_spec_changed",
+        },
+      });
+    });
+
+    it("carries retained failure evidence through a replacement request and finalization", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+      });
+      expect(hosted.isOk()).toBe(true);
+      const failed = await store.failOrbAndRequestComputeDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        now: 3_000,
+        lastError: "runtime_never_answered: no response",
+        evidence: "container_status=exited exit_code=42",
+      });
+      expect(failed.isOk()).toBe(true);
+      expect(
+        (
+          await store.recordHostDiscardStatus(task, {
+            orbId: orb.id,
+            throughIncarnation: 0,
+            now: 3_500,
+            error: "provider temporarily unavailable",
+          })
+        ).isOk(),
+      ).toBe(true);
+
+      // A deploy lands while the failed orb still owns its evidence. The
+      // request re-aims the intent at the new spec and clears the stale
+      // cleanup error, but the evidence is the only forensics left once the
+      // host is gone: it survives until a replacement commits.
+      const requested = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        desiredFingerprint: "spec-new",
+        configuredGeneration: 3,
+        now: 4_000,
+      });
+      expect(requested.isOk() && requested.value).toMatchObject({
+        type: "requested",
+        orb: {
+          hostSpecFingerprint: "spec-new",
+          hostSpecGeneration: 3,
+          runtimeTokenHash: null,
+          hostDiscardThroughIncarnation: 0,
+          hostDiscardReason: "host_spec_changed",
+          hostDiscardError: null,
+          hostDiscardEvidence: "container_status=exited exit_code=42",
+        },
+      });
+
+      const finalized = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        throughIncarnation: 0,
+        now: 5_000,
+      });
+      expect(finalized.isOk() && finalized.value).toMatchObject({
+        hostRef: null,
+        hostIncarnation: 1,
+        // Reason `host_spec_changed` carries the desired spec into the
+        // replacement; reason `failed` clears it instead.
+        hostSpecFingerprint: "spec-new",
+        hostSpecGeneration: 3,
+        hostDiscardThroughIncarnation: null,
+        hostDiscardEvidence: "container_status=exited exit_code=42",
+      });
+
+      const committed = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        now: 6_000,
+        hostRef: "pi-orb-orb-1-i1",
+        runtimeTokenHash: "new-token-hash",
+        hostDiscardEvidence: null,
+      });
+      expect(committed.isOk() && committed.value.hostDiscardEvidence).toBeNull();
+    });
+
+    it("forces replacement when provider stamps disagree with durable current spec", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+        hostSpecFingerprint: "spec-current",
+        hostSpecGeneration: 12,
+      });
+      expect(hosted.isOk()).toBe(true);
+      const requested = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-current",
+        configuredGeneration: 12,
+        force: true,
+        now: 3_000,
+      });
+      expect(requested.isOk() && requested.value.type).toBe("requested");
+      expect(requested.isOk() && requested.value.orb.hostDiscardReason).toBe("host_spec_changed");
+
+      // Force repairs drift; it is not authority. A draining revision still
+      // cannot aim newer-generation compute backwards at its own spec.
+      const declined = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-stale-revision",
+        configuredGeneration: 11,
+        force: true,
+        now: 4_000,
+      });
+      expect(declined.isOk() && declined.value).toMatchObject({
+        type: "declined",
+        committedGeneration: 12,
+      });
+    });
+
     it("guards discard finalization and clears retained evidence on replacement commit", async () => {
       await seed();
       const hosted = await store.casUpdateFields(task, {
@@ -221,6 +531,8 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         now: 2_000,
         hostRef: "pi-orb-orb-1-i0",
         runtimeTokenHash: "old-token-hash",
+        hostSpecFingerprint: "spec-failed",
+        hostSpecGeneration: 4,
       });
       expect(hosted.isOk()).toBe(true);
       const failed = await store.failOrbAndRequestComputeDiscard(task, {
@@ -253,7 +565,12 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         throughIncarnation: 0,
         now: 5_000,
       });
-      expect(finalized.isOk()).toBe(true);
+      // Reason `failed` carries no desired spec: the replacement recomputes
+      // and recommits one, so the disposed incarnation's stamps are cleared.
+      expect(finalized.isOk() && finalized.value).toMatchObject({
+        hostSpecFingerprint: null,
+        hostSpecGeneration: null,
+      });
 
       // A repeated finalize for the already-cleared fence conflicts instead of
       // advancing the incarnation twice.
@@ -900,6 +1217,51 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         second,
       ]);
     });
+  });
+}
+
+/**
+ * The full contract for a PostgreSQL-backed store: the shared semantics above
+ * plus the driver-level expectations that need the raw client and the
+ * credential pointer store.
+ */
+export function storeContractTests(name: string, open: () => Promise<StoreContractSubject>): void {
+  storeSemanticsContractTests(name, async () => {
+    const subject = await open();
+    const migrated = await subject.database.migrate();
+    expect(migrated.isOk()).toBe(true);
+    return {
+      store: subject.database.store,
+      close: async () => {
+        expect((await subject.database.close()).isOk()).toBe(true);
+      },
+    };
+  });
+
+  describe(`${name} driver contract`, () => {
+    let database: ControlPlaneDatabase;
+    let client: PostgreSQLClient;
+    let store: ControlPlaneStore;
+    let pointers: CredentialPointerStore;
+
+    beforeEach(async () => {
+      const subject = await open();
+      database = subject.database;
+      client = subject.client;
+      const migrated = await database.migrate();
+      expect(migrated.isOk()).toBe(true);
+      store = database.store;
+      pointers = database.pointers;
+    });
+
+    afterEach(async () => {
+      expect((await database.close()).isOk()).toBe(true);
+    });
+
+    async function seed(): Promise<void> {
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
+    }
 
     // The regression from
     // docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md: the

@@ -216,16 +216,13 @@ export class DeterministicGceApiModel implements GceApiTransport {
       });
     }
 
+    // Kept routed so the forbidden call is caught here rather than falling
+    // through to a generic 404 that reads like an ordinary absence.
     const metadata = /^instances\/([^/]+)\/setMetadata$/.exec(relative);
     if (args.method === "POST" && metadata?.[1] !== undefined) {
-      const resource = this.live(this.instances, metadata[1]);
-      if (resource === undefined) return { status: 404, body: {} };
-      return this.operation(() => {
-        resource.body["metadata"] = {
-          ...(args.body ?? {}),
-          fingerprint: `fp-${metadata[1]}-${this.nextOperation}`,
-        };
-      });
+      throw new Error(
+        `gce model: setMetadata is forbidden — the adapter must never repair ${metadata[1]} in place (docs/compute-replacement.md)`,
+      );
     }
 
     const disk = /^disks\/([^/?]+)$/.exec(relative);

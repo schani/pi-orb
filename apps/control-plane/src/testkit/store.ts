@@ -18,6 +18,7 @@ import type {
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
   RecordHostDiscardStatusParams,
+  RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
   RequestOrbDeletionParams,
 } from "../domain/ports.ts";
@@ -1047,8 +1048,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         updatedAt: params.now,
         hostRef: null,
         runtimeTokenHash: null,
-        hostSpecFingerprint: null,
-        hostSpecGeneration: null,
+        hostSpecFingerprint:
+          orb.hostDiscardReason === "host_spec_changed" ? orb.hostSpecFingerprint : null,
+        hostSpecGeneration:
+          orb.hostDiscardReason === "host_spec_changed" ? orb.hostSpecGeneration : null,
         hostDiscardThroughIncarnation: null,
         hostDiscardReason: null,
         hostDiscardError: null,
@@ -1070,6 +1073,54 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           })
         : okAsync(outcome.row);
     });
+  }
+
+  requestHostSpecReplacement(
+    task: SimulationTask,
+    params: RequestHostSpecReplacementParams,
+  ): ResultAsync<
+    import("../domain/ports.ts").HostSpecReplacementOutcome,
+    StoreError | StateConflict
+  > {
+    return this.access(task, FAILPOINTS.storeWrite, "request host spec replacement", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
+        return { type: "conflict" as const, currentState: orb?.state };
+      }
+      if (
+        orb.hostRef === null ||
+        (params.force !== true && orb.hostSpecFingerprint === params.desiredFingerprint)
+      ) {
+        return { type: "current" as const, orb };
+      }
+      const committedGeneration = orb.hostSpecGeneration ?? 0;
+      if (params.configuredGeneration < committedGeneration) {
+        return { type: "declined" as const, orb, committedGeneration };
+      }
+      const updated: OrbRow = {
+        ...orb,
+        runtimeTokenHash: null,
+        hostSpecFingerprint: params.desiredFingerprint,
+        hostSpecGeneration: params.configuredGeneration,
+        hostDiscardThroughIncarnation: orb.hostIncarnation,
+        hostDiscardReason: "host_spec_changed",
+        hostDiscardError: null,
+        // Retained evidence from an earlier failure survives the request: it
+        // is cleared only when a replacement commits or a later failure
+        // supersedes it (docs/compute-replacement.md).
+        hostDiscardRequestedAt: params.now,
+        updatedAt: params.now,
+      };
+      this.orbs.set(orb.id, updated);
+      return { type: "requested" as const, orb: updated };
+    }).andThen((outcome) =>
+      outcome.type === "conflict"
+        ? errAsync({
+            type: "state_conflict" as const,
+            ...(outcome.currentState === undefined ? {} : { currentState: outcome.currentState }),
+          })
+        : okAsync(outcome),
+    );
   }
 
   casTransition(
@@ -1144,6 +1195,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.checkoutCommit !== undefined ? { checkoutCommit: params.checkoutCommit } : {}),
         ...(params.runtimeTokenHash !== undefined
           ? { runtimeTokenHash: params.runtimeTokenHash }
+          : {}),
+        ...(params.hostSpecFingerprint !== undefined
+          ? { hostSpecFingerprint: params.hostSpecFingerprint }
+          : {}),
+        ...(params.hostSpecGeneration !== undefined
+          ? { hostSpecGeneration: params.hostSpecGeneration }
           : {}),
         ...(params.hostDiscardEvidence !== undefined ? { hostDiscardEvidence: null } : {}),
       };

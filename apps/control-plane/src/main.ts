@@ -13,6 +13,7 @@ import { okAsync } from "neverthrow";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
+import { isDigestPinnedImage } from "./adapters/gce/image-pin.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
 import {
   type GithubOAuthConfig,
@@ -88,10 +89,17 @@ async function main(): Promise<void> {
   const authDir = env("PI_ORB_AUTH_DIR", join(homedir(), ".pi-orb", "auth"));
   const runtimeImage = env("PI_ORB_RUNTIME_IMAGE", "pi-orb-runtime:dev");
   const dockerNetwork = env("PI_ORB_DOCKER_NETWORK", "pi-orb");
+  const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
+  const bootTask = new NoSimulationTask("boot", true);
+  if (providerKind === "gce" && !isDigestPinnedImage(runtimeImage)) {
+    // Refuse before any side effect — a misconfigured deploy must not migrate
+    // the schema and then die.
+    bootTask.error("PI_ORB_RUNTIME_IMAGE must be digest-pinned for GCE");
+    process.exitCode = 1;
+    return;
+  }
 
   mkdirSync(authDir, { recursive: true });
-
-  const bootTask = new NoSimulationTask("boot", true);
   const openedDatabase = openControlPlaneDatabase(
     databaseKind === "pglite"
       ? { kind: "pglite", path: pglitePath }
@@ -173,7 +181,8 @@ async function main(): Promise<void> {
     constants: DEFAULT_BROKER_CONSTANTS,
   };
   const e2eLaunchFailureMarker = env("PI_ORB_E2E_LAUNCH_FAILURE_MARKER", "");
-  const runtimeExtraEnv = {
+  const e2eHostSpec = env("PI_ORB_E2E_HOST_SPEC", "");
+  const runtimeExtraEnv: Record<string, string> = {
     ...(mockOpenAi === null
       ? {}
       : {
@@ -184,7 +193,21 @@ async function main(): Promise<void> {
     ...(e2eLaunchFailureMarker === ""
       ? {}
       : { PI_ORB_E2E_LAUNCH_FAILURE_MARKER: e2eLaunchFailureMarker }),
+    // Test-composition-only effective launch input used to prove immutable
+    // host-spec replacement end to end. It is inert outside E2E composition.
+    ...(e2eHostSpec === "" ? {} : { PI_ORB_E2E_HOST_SPEC: e2eHostSpec }),
   };
+  // E2E-only live spec switch: process-backed acceptance cannot restart the
+  // control plane without also terminating its child compute. SIGHUP mutates
+  // one effective launch input in place so the test can prove that a running
+  // orb is untouched and its next Start replaces compute. No handler exists
+  // in production compositions, where PI_ORB_E2E_HOST_SPEC is unset.
+  if (e2eHostSpec !== "") {
+    process.on("SIGHUP", () => {
+      runtimeExtraEnv["PI_ORB_E2E_HOST_SPEC"] = `${runtimeExtraEnv["PI_ORB_E2E_HOST_SPEC"]}-next`;
+      bootTask.log("E2E host specification advanced");
+    });
+  }
   const extraEnvOption =
     Object.keys(runtimeExtraEnv).length === 0 ? {} : { extraEnv: runtimeExtraEnv };
   // Tailscale tier-1 port exposure (docs/ports.md). All three settings or
@@ -212,20 +235,16 @@ async function main(): Promise<void> {
     const missing = tailscaleEnvNames.filter((name) => env(name, "") === "");
     bootTask.log(`Tailscale port exposure disabled (${missing.join(", ")} unset)`);
   }
-  const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
   const tailscaleForProvider = tailscale !== null && providerKind !== "process";
   if (tailscale !== null && !tailscaleForProvider) {
     bootTask.log("Tailscale port exposure disabled for process host provider");
   }
   const tailscaleOption = tailscaleForProvider ? { tailscale } : {};
   const viewConfig = tailscaleForProvider ? { tailnetDnsName } : {};
-  // Forward-only script-repair fencing (docs/host-provider.md): the deploy
-  // stamps a monotonic generation, and a revision refuses to repair a host
-  // stamped by a newer one. Unset means 0, which is also what an apply that
-  // forgets `-var deploy_generation=…` produces: such a revision repairs
-  // nothing that a real deploy stamped, and the next real deploy repairs
-  // forward. Never backward, at the cost of a delayed upgrade.
-  const scriptGeneration = Number.parseInt(env("PI_ORB_SCRIPT_GENERATION", "0"), 10);
+  // Forward-only immutable-spec replacement fence (docs/compute-replacement.md).
+  // An unparsable or unset value folds to 0: such a revision replaces nothing
+  // a real deploy stamped, and the next real deploy replaces forward.
+  const specGeneration = Number.parseInt(env("PI_ORB_HOST_SPEC_GENERATION", "0"), 10) || 0;
   const hostProvider =
     providerKind === "gce"
       ? new GceOrbHostProvider(new RestGceApiTransport(), {
@@ -239,7 +258,7 @@ async function main(): Promise<void> {
           serviceAccount: env("PI_ORB_GCE_SERVICE_ACCOUNT", ""),
           runtimeImage,
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
-          scriptGeneration: Number.isFinite(scriptGeneration) ? scriptGeneration : 0,
+          specGeneration,
           ...extraEnvOption,
           ...tailscaleOption,
         })
@@ -253,6 +272,7 @@ async function main(): Promise<void> {
               new URL("../../orb-runtime/src/main.ts", import.meta.url),
             ),
             controlPlaneUrl: env("PI_ORB_BROKER_URL", `http://127.0.0.1:${port}`),
+            specGeneration,
             ...extraEnvOption,
           })
         : new DockerOrbHostProvider({
@@ -263,6 +283,7 @@ async function main(): Promise<void> {
             process.env["PI_ORB_BROKER_URL"] !== ""
               ? { controlPlaneUrl: process.env["PI_ORB_BROKER_URL"] }
               : {}),
+            specGeneration,
             ...extraEnvOption,
             ...tailscaleOption,
           });

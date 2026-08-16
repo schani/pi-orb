@@ -16,7 +16,7 @@ locals {
       PI_ORB_RUNTIME_IMAGE        = var.runtime_image
       # Always set, so a revision's fence is explicit rather than inherited
       # from a default (docs/host-provider.md).
-      PI_ORB_SCRIPT_GENERATION    = tostring(var.deploy_generation)
+      PI_ORB_HOST_SPEC_GENERATION = tostring(var.deploy_generation)
     },
     var.github_client_id != "" ? { PI_ORB_GITHUB_CLIENT_ID = var.github_client_id } : {},
     var.tailscale_oauth_client_id != "" ? {

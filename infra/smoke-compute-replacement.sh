@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Disposable live-GCE acceptance smoke for docs/compute-replacement.md Stage 1.
+# Disposable live-GCE acceptance smoke for docs/compute-replacement.md.
 # Required environment:
 #   PI_ORB_BASE_URL, PI_ORB_GCP_PROJECT, PI_ORB_GCE_ZONE
 # Optional:
 #   PI_ORB_SMOKE_REPOSITORY_URL, PI_ORB_SMOKE_PROJECT_ID, PI_ORB_SMOKE_ORB_ID
+#   PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND — deploys a higher generation with a
+#     different effective host spec; when set, the Stage 2 leg is mandatory.
 #
 # This script intentionally uses product lifecycle APIs plus a workspace marker;
 # there is no production failpoint. The runtime E2E marker is accepted only when
@@ -14,8 +16,10 @@ set -euo pipefail
 # Outer budget: every bounded wait below derives from one provision + COS boot
 # + runtime-ready pass (the slowest provider operation this smoke performs).
 # Three lifecycle waits use it in full; stop and disposal are pure provider
-# operations and get a fraction; the 65-second negative-observation window is
-# the only deliberate elapsed-time assertion in this script.
+# operations and get a fraction. The two 65-second negative-observation windows
+# — no autonomous replacement after failure, and no running orb touched by a
+# deployed specification change — are the only deliberate elapsed-time
+# assertions in this script.
 boot_deadline_seconds=900             # provision + boot + runtime ready
 stop_deadline_seconds=$((boot_deadline_seconds / 3))    # graceful stop drain
 dispose_deadline_seconds=$((boot_deadline_seconds / 3)) # instance + boot-disk disposal
@@ -187,10 +191,13 @@ new_data_disk=$(jq -r '.disks[] | select(.boot == false) | .source | split("/") 
   <<<"$new_description")
 new_token=$(jq -r '.metadata.items[] | select(.key == "pi-orb-runtime-token") | .value' \
   <<<"$new_description")
+new_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value' \
+  <<<"$new_description")
 [[ -n "$new_instance_id" && "$new_instance_id" != "$old_instance_id" ]]
 [[ -n "$new_boot_disk" && "$new_boot_disk" != "$old_boot_disk" ]]
 [[ "$new_data_disk" == "$data_disk" ]]
 [[ -n "$new_token" && "$new_token" != null && "$new_token" != "$old_token" ]]
+[[ -n "$new_spec" && "$new_spec" != null ]]
 
 # The workspace survived replacement, exactly one compute identity remains,
 # and the orb is still running through the replacement incarnation.
@@ -199,5 +206,54 @@ gcloud compute ssh "$new_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_O
 [[ "$(instances)" == "$new_instance" ]]
 instance_absent "$old_instance"
 [[ $(orb_row | jq -r .state) == running ]]
+
+if [[ -n "${PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND:-}" ]]; then
+  # The deployment command must advance PI_ORB_HOST_SPEC_GENERATION and alter
+  # one effective fingerprint input. Its completion is the synchronization
+  # point: running compute must still be the exact same GCE instance afterward.
+  bash -lc "$PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND"
+
+  # Negative observation, the same shape as the Stage 1 window above: for more
+  # than two 30-second terminal-backstop intervals the running orb keeps its
+  # state, its exact instance identity, and incarnation 1. Compute is immutable,
+  # so a deployed specification change must not touch a running orb at all —
+  # neither by replacing it nor by mutating it in place.
+  [[ $(describe_instance "$new_instance" | jq -r .id) == "$new_instance_id" ]]
+  for (( i = 0; i < negative_window_seconds; i++ )); do
+    [[ $(orb_row | jq -r .state) == running ]]
+    [[ "$(instances)" == "$new_instance" ]]
+    sleep 1
+  done
+  # The numeric ID at both ends of the window rules out a same-named instance
+  # having been recreated inside it.
+  [[ $(describe_instance "$new_instance" | jq -r .id) == "$new_instance_id" ]]
+
+  api POST "/api/v1/orbs/$orb_id/stop" >/dev/null
+  wait_orb_state stopped "$stop_deadline_seconds" >/dev/null
+  api POST "/api/v1/orbs/$orb_id/start" >/dev/null
+  wait_orb_state running "$boot_deadline_seconds" >"$log_dir/spec-replacement-running.json"
+  stage2_instance=$(instances)
+  [[ "$stage2_instance" == "${instance_prefix}2" ]]
+  stage2_description=$(describe_instance "$stage2_instance" | tee "$log_dir/stage2-instance.json")
+  stage2_id=$(jq -r .id <<<"$stage2_description")
+  stage2_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value' \
+    <<<"$stage2_description")
+  stage2_data_disk=$(jq -r '.disks[] | select(.boot == false) | .source | split("/") | last' \
+    <<<"$stage2_description")
+  stage2_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") | last' \
+    <<<"$stage2_description")
+  # Replacement, not repair: a new instance ID, a new disposable boot disk, and
+  # a new specification stamp around the one retained workspace disk. The new
+  # code contains no in-place repair path at all, so the identity change is
+  # what this leg proves; there is no repair event to observe.
+  [[ "$stage2_id" != "$new_instance_id" ]]
+  [[ "$stage2_spec" != "$new_spec" ]]
+  [[ -n "$stage2_boot_disk" && "$stage2_boot_disk" != "$new_boot_disk" ]]
+  [[ "$stage2_data_disk" == "$data_disk" ]]
+  instance_absent "$new_instance"
+  gcloud compute ssh "$stage2_instance" --project "$PI_ORB_GCP_PROJECT" \
+    --zone "$PI_ORB_GCE_ZONE" -- \
+    "sudo grep -Fx '$sentinel' /mnt/disks/orb-data/replacement-sentinel"
+fi
 
 echo "compute replacement smoke passed: $old_instance ($old_instance_id) -> $new_instance ($new_instance_id); disk=$data_disk"

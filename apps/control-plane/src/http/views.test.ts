@@ -103,6 +103,63 @@ describe("orbView compute discard", () => {
     });
     expect(Check(OrbViewSchema, view)).toBe(true);
   });
+
+  it("reports a spec replacement as routine hygiene, never as a failure", () => {
+    // Same durable columns, different reason: a deploy replacing stale
+    // compute must not tell the user their orb failed
+    // (docs/compute-replacement.md).
+    const view = orbView(
+      {
+        ...orb,
+        state: "starting",
+        hostDiscardThroughIncarnation: 0,
+        hostDiscardReason: "host_spec_changed",
+        hostDiscardError: "compute.instances.delete rate limited",
+        hostDiscardRequestedAt: 1_700_000_001_000,
+      },
+      new ControlState(),
+      {},
+    );
+
+    expect(view.stateDetail).toEqual({
+      type: "replacing_stale_compute",
+      retrying: true,
+      message: "compute.instances.delete rate limited",
+    });
+    expect(Check(OrbViewSchema, view)).toBe(true);
+  });
+
+  it("omits the cleanup message while disposal is progressing normally", () => {
+    const replacing = orbView(
+      {
+        ...orb,
+        state: "starting",
+        hostDiscardThroughIncarnation: 0,
+        hostDiscardReason: "host_spec_changed",
+        hostDiscardRequestedAt: 1_700_000_001_000,
+      },
+      new ControlState(),
+      {},
+    );
+    expect(replacing.stateDetail).toEqual({ type: "replacing_stale_compute", retrying: false });
+
+    const discarding = orbView(
+      {
+        ...orb,
+        state: "failed",
+        lastError: "runtime_failed: process exited",
+        hostDiscardThroughIncarnation: 0,
+        hostDiscardReason: "failed",
+        hostDiscardRequestedAt: 1_700_000_001_000,
+      },
+      new ControlState(),
+      {},
+    );
+    expect(discarding.stateDetail).toEqual({ type: "discarding_failed_compute", retrying: false });
+    expect(discarding.lastError).toBe("runtime_failed: process exited");
+    expect(Check(OrbViewSchema, replacing)).toBe(true);
+    expect(Check(OrbViewSchema, discarding)).toBe(true);
+  });
 });
 
 describe("orbView previewHost", () => {

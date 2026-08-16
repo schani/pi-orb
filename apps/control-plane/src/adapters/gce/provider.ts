@@ -21,6 +21,7 @@ import type {
   ProvisionOrbHostRequest,
   StartOrbHostRequest,
 } from "../../domain/ports.ts";
+import { specFingerprintOf } from "../spec-fingerprint.ts";
 import type { TailscaleHostOptions } from "../tailscale/client.ts";
 import type { GceApiTransport, GceResponse } from "./api.ts";
 
@@ -39,36 +40,19 @@ export interface GceOrbHostProviderOptions {
   readonly controlPlaneUrl: string;
   readonly dataDiskSizeGb?: number;
   readonly extraEnv?: Readonly<Record<string, string>>;
-  /**
-   * Tailscale port exposure (docs/ports.md). Enabling it changes the startup
-   * script text, so `ensureCurrentScript` repairs existing hosts onto it once
-   * — and mints the auth key they are missing while doing so.
-   */
+  /** Tailscale port exposure; enabling it changes the immutable specification. */
   readonly tailscale?: TailscaleHostOptions;
-  /**
-   * Deploy-monotonic script generation (docs/host-provider.md). Stamped into
-   * instance metadata and used to fence script repairs: a revision never
-   * repairs a host stamped by a *newer* one, which is what turns the deploy
-   * rollover from a repair war into a one-way upgrade
-   * (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
-   * Absent means 0 — see the note on `stampedGeneration` for why that is the
-   * safe direction to fail.
-   */
-  readonly scriptGeneration?: number;
+  /** Deploy-monotone generation used to fence replacement decisions. */
+  readonly specGeneration?: number;
 }
 
 const ORB_LABEL = "pi-orb-orb-id";
 const INCARNATION_LABEL = "pi-orb-host-incarnation";
+const SPEC_FINGERPRINT_METADATA_KEY = "pi-orb-host-spec-fingerprint";
 const TOKEN_METADATA_KEY = "pi-orb-runtime-token";
-const SCRIPT_HASH_METADATA_KEY = "pi-orb-script-sha256";
-/**
- * The generation of the control-plane revision that last wrote the script.
- * Decimal string; absent or unparseable reads as 0.
- */
-const SCRIPT_GENERATION_METADATA_KEY = "pi-orb-script-generation";
-const REPO_URL_METADATA_KEY = "pi-orb-repository-url";
-/** The auth key lives in metadata, never in the script: it is per-orb state
- * and would otherwise make `pi-orb-script-sha256` differ for every host. */
+/** The auth key lives in metadata, never in the script: it is per-orb secret
+ * state, and keeping it out of the script body keeps the script — and therefore
+ * the host-spec fingerprint — free of per-host secrets. */
 const TAILSCALE_KEY_METADATA_KEY = "pi-orb-tailscale-auth-key";
 /**
  * Guest attributes are off by default. Without this key every `report()` PUT
@@ -84,6 +68,17 @@ const GUEST_ATTRIBUTES_METADATA_KEY = "enable-guest-attributes";
  */
 const LOGGING_METADATA_KEY = "google-logging-enabled";
 const DATA_DEVICE = "pi-orb-data";
+/** Container-Optimized OS: the only supported boot image for orb hosts. */
+const BOOT_IMAGE = "projects/cos-cloud/global/images/family/cos-stable";
+/** The boot disk is disposable — the workspace lives on the data disk. */
+const BOOT_DISK_SIZE_GB = "20";
+const DEFAULT_DATA_DISK_SIZE_GB = 50;
+/** Spot with STOP on preemption; the retained data disk survives the stop. */
+const SCHEDULING = {
+  provisioningModel: "SPOT",
+  instanceTerminationAction: "STOP",
+} as const;
+const SERVICE_ACCOUNT_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"] as const;
 /**
  * Guest-attribute paths this provider writes from the VM and reads back. A
  * guest attribute is `namespace/key`, so both live directly under the `pi-orb`
@@ -96,28 +91,30 @@ const GUEST_ATTRIBUTES_URL =
 /** Transient systemd unit that owns the container-state reporter loop. */
 const REPORTER_UNIT = "pi-orb-container-reporter";
 
+/** Non-secret launch facts shared by the insert body and the fingerprint. */
+interface GceLaunchSpec {
+  readonly runtimeImage: string;
+  readonly startupScript: string;
+  readonly bootImage: string;
+  readonly bootDiskSizeGb: string;
+  readonly machineType: string;
+  readonly subnetwork: string;
+  readonly serviceAccount: string;
+  readonly scopes: readonly string[];
+  readonly scheduling: {
+    readonly provisioningModel: string;
+    readonly instanceTerminationAction: string;
+  };
+  readonly dataDiskSizeGb: number;
+}
+
 /**
- * Observability metadata every host must carry. Written on insert and
- * rewritten by `ensureCurrentScript`, so hosts created before these existed
- * adopt them on their next repair rather than staying blind forever.
+ * Observability metadata every immutable host carries from insertion.
  */
 const observabilityMetadataItems = (): { key: string; value: string }[] => [
   { key: GUEST_ATTRIBUTES_METADATA_KEY, value: "TRUE" },
   { key: LOGGING_METADATA_KEY, value: "true" },
 ];
-
-/**
- * The generation stamped on an instance. Anything unreadable is 0, the lowest
- * generation there is, so an unstamped host (every host created before this
- * existed) is repaired forward by the first revision that meets it instead of
- * being fenced off from repairs forever.
- */
-export function stampedGeneration(instance: Record<string, unknown>): number {
-  const raw = metadataValue(instance, SCRIPT_GENERATION_METADATA_KEY);
-  if (raw === null) return 0;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 
 const legacyInstanceName = (orbId: string): string => `pi-orb-${orbId}`;
 const instanceName = (orbId: string, incarnation: number): string =>
@@ -315,12 +312,61 @@ systemd-run --unit=${REPORTER_UNIT} --collect \\
  */
 export class GceOrbHostProvider implements OrbHostProvider {
   readonly kind = "gce";
+  readonly specGeneration: number;
   private readonly api: GceApiTransport;
   private readonly options: GceOrbHostProviderOptions;
 
   constructor(api: GceApiTransport, options: GceOrbHostProviderOptions) {
     this.api = api;
     this.options = options;
+    this.specGeneration = options.specGeneration ?? 0;
+  }
+
+  desiredSpecFingerprint(input: {
+    readonly orbId: string;
+    readonly repositoryUrl: string;
+  }): string {
+    // Rendered at incarnation 0 on purpose: the fingerprint describes the
+    // desired specification, not which incarnation happens to carry it, so
+    // rotating an incarnation must not read as a specification change.
+    return specFingerprintOf({
+      v: 1,
+      ...this.launchSpec({
+        orbId: input.orbId,
+        incarnation: 0,
+        repositoryUrl: input.repositoryUrl,
+      }),
+    });
+  }
+
+  /**
+   * The one source of an orb host's non-secret launch facts: every field feeds
+   * both the instance-insert body and `desiredSpecFingerprint`, so a host
+   * cannot carry a setting the fingerprint does not cover — drift between the
+   * two would leave stale compute looking current (docs/compute-replacement.md).
+   *
+   * Zone and project are deliberately absent. The data disk is zonal, so
+   * compute replacement cannot move an orb: a replacement in the new zone would
+   * come up on a fresh, empty workspace. A zone or project move is an explicit
+   * operator migration, out of scope for this mechanism.
+   */
+  private launchSpec(input: {
+    readonly orbId: string;
+    readonly incarnation: number;
+    readonly repositoryUrl: string;
+  }): GceLaunchSpec {
+    return {
+      runtimeImage: this.options.runtimeImage,
+      startupScript: this.expectedScript(input.orbId, input.incarnation, input.repositoryUrl),
+      bootImage: BOOT_IMAGE,
+      bootDiskSizeGb: BOOT_DISK_SIZE_GB,
+      machineType: this.options.machineType,
+      subnetwork: this.options.subnetwork,
+      serviceAccount: this.options.serviceAccount,
+      scopes: SERVICE_ACCOUNT_SCOPES,
+      scheduling: SCHEDULING,
+      dataDiskSizeGb: this.options.dataDiskSizeGb ?? DEFAULT_DATA_DISK_SIZE_GB,
+    };
   }
 
   private zonePath(suffix: string): string {
@@ -399,9 +445,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
   }
 
   /**
-   * The one script generator for this provider: insert, script-hash repair,
-   * and `start()`'s re-derivation all go through it, so the three can never
-   * disagree about what the current script is.
+   * The one script generator for this provider: the insert body and the
+   * host-spec fingerprint both go through it (via `launchSpec`), so an
+   * inserted host and the specification it is measured against can never
+   * disagree about the script.
    */
   private expectedScript(orbId: string, incarnation: number, repositoryUrl: string): string {
     const tailscale = this.options.tailscale;
@@ -450,177 +497,6 @@ export class GceOrbHostProvider implements OrbHostProvider {
     return ok(key.value);
   }
 
-  /**
-   * Bring a reused instance's startup script up to date (docs/host-provider.md rollout
-   * caveat, open question 32). The stamped script hash is compared with the
-   * script this provider would generate; a mismatch means the instance was
-   * created by a different control-plane revision — or predates stamping —
-   * and would boot the wrong runtime image. Repair stops the instance if
-   * needed, rewrites the script metadata while preserving the runtime token
-   * (so the committed token hash stays valid), and starts it. Provision and
-   * start only run while the orb is `creating`/`starting`, so the bounce
-   * never interrupts a ready runtime.
-   *
-   * Repairs are fenced forward-only by `pi-orb-script-generation`: a revision
-   * that meets a host stamped by a *newer* generation leaves it alone. Without
-   * that fence two revisions with different expected scripts each read the
-   * other's script as damage, and every repair's stop re-arms the other side —
-   * the war that hard-bounced a VM through its first image pull on 2026-08-06
-   * (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md). Equal
-   * generations still repair on hash mismatch, which is what local development
-   * (always generation 0) and same-revision config changes need.
-   */
-  private async ensureCurrentScript(
-    task: SimulationTask,
-    operation: OrbHostProviderError["operation"],
-    instance: Record<string, unknown>,
-    orbId: string,
-    repositoryUrl: string,
-    context: OperationContext,
-  ): Promise<Result<"current" | "repaired", OrbHostProviderError>> {
-    const name = String(instance["name"] ?? "");
-    const script = this.expectedScript(orbId, instanceIncarnation(instance) ?? 0, repositoryUrl);
-    const expectedHash = sha256Hex(script);
-    if (metadataValue(instance, SCRIPT_HASH_METADATA_KEY) === expectedHash) return ok("current");
-    const generation = this.options.scriptGeneration ?? 0;
-    const stamped = stampedGeneration(instance);
-    if (stamped > generation) {
-      // A newer revision owns this host's script. Its script is the one that
-      // should boot, so the mismatch is not damage — it is the future.
-      task.log(`gce host ${name} carries newer script generation ${stamped}; skipping repair`);
-      return ok("current");
-    }
-
-    let current = instance;
-    const status = String(current["status"] ?? "");
-    if (status !== "TERMINATED" && status !== "SUSPENDED") {
-      const stopped = await this.request(
-        operation,
-        "POST",
-        this.zonePath(`instances/${name}/stop`),
-        context,
-      );
-      if (stopped.isErr()) return err(stopped.error);
-      if (stopped.value.status !== 200) {
-        return err(
-          providerError(
-            operation,
-            "operation_failed",
-            `stop for script repair HTTP ${stopped.value.status}`,
-            true,
-          ),
-        );
-      }
-      const waited = await this.waitOperation(
-        task,
-        operation,
-        String(stopped.value.body["name"] ?? ""),
-        context,
-      );
-      if (waited.isErr()) return err(waited.error);
-      // The metadata fingerprint may have moved; re-read before mutating.
-      const reread = await this.request(
-        operation,
-        "GET",
-        this.zonePath(`instances/${name}`),
-        context,
-      );
-      if (reread.isErr()) return err(reread.error);
-      if (reread.value.status !== 200) {
-        return err(
-          providerError(
-            operation,
-            "unavailable",
-            `instance re-get HTTP ${reread.value.status}`,
-            true,
-          ),
-        );
-      }
-      current = reread.value.body;
-    }
-
-    const metadata = (current["metadata"] ?? {}) as Record<string, unknown>;
-    const fingerprint = metadata["fingerprint"];
-    if (typeof fingerprint !== "string") {
-      return err(
-        providerError(operation, "unavailable", "instance metadata has no fingerprint", true),
-      );
-    }
-    const items = Array.isArray(metadata["items"])
-      ? (metadata["items"] as { key?: unknown; value?: unknown }[])
-      : [];
-    // Everything not rewritten below survives the repair (the runtime token
-    // and the tailscale auth key most importantly). The observability keys are
-    // rewritten rather than merely preserved so hosts created before they
-    // existed adopt them here — the repair is the only upgrade path they get.
-    const rewritten = new Set<unknown>([
-      "startup-script",
-      SCRIPT_HASH_METADATA_KEY,
-      SCRIPT_GENERATION_METADATA_KEY,
-      REPO_URL_METADATA_KEY,
-      GUEST_ATTRIBUTES_METADATA_KEY,
-      LOGGING_METADATA_KEY,
-    ]);
-    const preserved = items.filter((item) => !rewritten.has(item.key));
-    // Preserved above (like the runtime token) when the host already has one.
-    // When it does not, the repair is what turns tailscale on for this host,
-    // and the new script would `curl -sf` a metadata key that does not exist
-    // — fatal under `set -e`. Mint it here so script and metadata land in the
-    // same setMetadata call.
-    const adopted =
-      metadataValue(current, TAILSCALE_KEY_METADATA_KEY) === null
-        ? await this.mintTailscaleKey(operation, orbId, instanceIncarnation(current) ?? 0, context)
-        : ok<string | null, OrbHostProviderError>(null);
-    if (adopted.isErr()) return err(adopted.error);
-    const updated = await this.request(
-      operation,
-      "POST",
-      this.zonePath(`instances/${name}/setMetadata`),
-      context,
-      {
-        fingerprint,
-        items: [
-          ...preserved,
-          ...observabilityMetadataItems(),
-          ...(adopted.value === null
-            ? []
-            : [{ key: TAILSCALE_KEY_METADATA_KEY, value: adopted.value }]),
-          { key: "startup-script", value: script },
-          { key: SCRIPT_HASH_METADATA_KEY, value: expectedHash },
-          // The repair takes ownership of the script, so it takes ownership of
-          // the fence too: from here on, older revisions leave this host alone.
-          { key: SCRIPT_GENERATION_METADATA_KEY, value: String(generation) },
-          { key: REPO_URL_METADATA_KEY, value: repositoryUrl },
-        ],
-      },
-    );
-    if (updated.isErr()) return err(updated.error);
-    if (updated.value.status !== 200) {
-      return err(
-        providerError(
-          operation,
-          "operation_failed",
-          `setMetadata HTTP ${updated.value.status}`,
-          true,
-        ),
-      );
-    }
-    const metadataWaited = await this.waitOperation(
-      task,
-      operation,
-      String(updated.value.body["name"] ?? ""),
-      context,
-    );
-    if (metadataWaited.isErr()) return err(metadataWaited.error);
-    const started = await this.startByName(task, name, context);
-    if (started.isErr()) return err(started.error);
-    task.log(
-      `gce host ${name} startup script repaired to ${expectedHash.slice(0, 12)} ` +
-        `(generation ${stamped} -> ${generation})`,
-    );
-    return ok("repaired");
-  }
-
   private toObservation(instance: Record<string, unknown>): OrbHostObservation | null {
     const labels = (instance["labels"] ?? {}) as Record<string, unknown>;
     const orbId = labels[ORB_LABEL];
@@ -639,6 +515,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       ref: { provider: "gce", resourceId: String(instance["name"] ?? "") },
       orbId,
       incarnation,
+      specFingerprint: metadataValue(instance, SPEC_FINGERPRINT_METADATA_KEY),
       state,
       ...(state === "running" && internalIp !== ""
         ? { runtimeAddress: { baseUrl: `http://${internalIp}:8080` } }
@@ -657,6 +534,15 @@ export class GceOrbHostProvider implements OrbHostProvider {
     const run = async (): Promise<Result<ProvisionedOrbHost, OrbHostProviderError>> => {
       const name = instanceName(request.orbId, request.incarnation);
       const ref: OrbHostRef = { provider: "gce", resourceId: name };
+      const specFingerprint = this.desiredSpecFingerprint({
+        orbId: request.orbId,
+        repositoryUrl: request.bootstrap.repositoryUrl,
+      });
+      const spec = this.launchSpec({
+        orbId: request.orbId,
+        incarnation: request.incarnation,
+        repositoryUrl: request.bootstrap.repositoryUrl,
+      });
 
       const existing = await this.request(
         "provision",
@@ -700,24 +586,28 @@ export class GceOrbHostProvider implements OrbHostProvider {
             ),
           );
         }
-        const freshness = await this.ensureCurrentScript(
-          task,
-          "provision",
-          instance,
-          request.orbId,
-          request.bootstrap.repositoryUrl,
-          context,
-        );
-        if (freshness.isErr()) return err(freshness.error);
-        if (
-          freshness.value === "current" &&
-          (instance["status"] === "TERMINATED" || instance["status"] === "SUSPENDED")
-        ) {
+        if (metadataValue(instance, SPEC_FINGERPRINT_METADATA_KEY) !== specFingerprint) {
+          return err(
+            providerError(
+              "provision",
+              "conflict",
+              `instance ${name} specification mismatch`,
+              false,
+            ),
+          );
+        }
+        if (instance["status"] === "TERMINATED" || instance["status"] === "SUSPENDED") {
           const started = await this.startByName(task, name, context);
           if (started.isErr()) return err(started.error);
         }
         task.log(`gce host ${name} reused (read-back token)`);
-        return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(token) });
+        return ok({
+          ref,
+          incarnation,
+          runtimeTokenHash: sha256Hex(token),
+          specFingerprint,
+          specGeneration: this.specGeneration,
+        });
       }
       if (existing.value.status !== 404) {
         return err(
@@ -741,7 +631,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       if (disk.value.status === 404) {
         const created = await this.request("provision", "POST", this.zonePath("disks"), context, {
           name: diskName(request.orbId),
-          sizeGb: String(this.options.dataDiskSizeGb ?? 50),
+          sizeGb: String(spec.dataDiskSizeGb),
           type: this.zonePath("diskTypes/pd-balanced"),
           labels: { [ORB_LABEL]: request.orbId },
         });
@@ -776,11 +666,6 @@ export class GceOrbHostProvider implements OrbHostProvider {
         context,
       );
       if (tailscaleKey.isErr()) return err(tailscaleKey.error);
-      const startupScript = this.expectedScript(
-        request.orbId,
-        request.incarnation,
-        request.bootstrap.repositoryUrl,
-      );
       const inserted = await this.request(
         "provision",
         "POST",
@@ -788,22 +673,19 @@ export class GceOrbHostProvider implements OrbHostProvider {
         context,
         {
           name,
-          machineType: this.zonePath(`machineTypes/${this.options.machineType}`),
+          machineType: this.zonePath(`machineTypes/${spec.machineType}`),
           labels: {
             [ORB_LABEL]: request.orbId,
             [INCARNATION_LABEL]: String(request.incarnation),
           },
-          scheduling: {
-            provisioningModel: "SPOT",
-            instanceTerminationAction: "STOP",
-          },
+          scheduling: spec.scheduling,
           disks: [
             {
               boot: true,
               autoDelete: true,
               initializeParams: {
-                sourceImage: "projects/cos-cloud/global/images/family/cos-stable",
-                diskSizeGb: "20",
+                sourceImage: spec.bootImage,
+                diskSizeGb: spec.bootDiskSizeGb,
               },
             },
             {
@@ -814,18 +696,13 @@ export class GceOrbHostProvider implements OrbHostProvider {
           ],
           networkInterfaces: [
             {
-              subnetwork: `projects/${this.options.projectId}/${this.options.subnetwork}`,
+              subnetwork: `projects/${this.options.projectId}/${spec.subnetwork}`,
               // Ephemeral external IP for outbound only (no NAT, docs/host-provider.md); the
               // VPC firewall denies all inbound except the control plane.
               accessConfigs: [{ type: "ONE_TO_ONE_NAT", name: "External NAT" }],
             },
           ],
-          serviceAccounts: [
-            {
-              email: this.options.serviceAccount,
-              scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-            },
-          ],
+          serviceAccounts: [{ email: spec.serviceAccount, scopes: spec.scopes }],
           metadata: {
             items: [
               { key: TOKEN_METADATA_KEY, value: runtimeToken },
@@ -833,16 +710,16 @@ export class GceOrbHostProvider implements OrbHostProvider {
               ...(tailscaleKey.value === null
                 ? []
                 : [{ key: TAILSCALE_KEY_METADATA_KEY, value: tailscaleKey.value }]),
-              { key: "startup-script", value: startupScript },
-              // Script-version stamp plus the input needed to re-derive the
-              // script on later starts (ensureCurrentScript), plus the
-              // generation that fences repairs forward-only.
-              { key: SCRIPT_HASH_METADATA_KEY, value: sha256Hex(startupScript) },
-              {
-                key: SCRIPT_GENERATION_METADATA_KEY,
-                value: String(this.options.scriptGeneration ?? 0),
-              },
-              { key: REPO_URL_METADATA_KEY, value: request.bootstrap.repositoryUrl },
+              { key: "startup-script", value: spec.startupScript },
+              { key: SPEC_FINGERPRINT_METADATA_KEY, value: specFingerprint },
+              // Transitional rollover fence: the draining pre-replacement
+              // revision treats an absent `pi-orb-script-generation` stamp as
+              // generation 0 and would stop this instance and rewrite its
+              // script in place — the exact 2026-08-06 repair-war class.
+              // Stamping the current deploy generation makes the old code
+              // read the instance as "the future" and leave it alone. Remove
+              // once no revision with in-place repair can drain (TODO.md).
+              { key: "pi-orb-script-generation", value: String(this.specGeneration) },
             ],
           },
         },
@@ -866,7 +743,18 @@ export class GceOrbHostProvider implements OrbHostProvider {
         if (incarnation !== request.incarnation) {
           return err(providerError("provision", "conflict", "racing incarnation mismatch", false));
         }
-        return ok({ ref, incarnation, runtimeTokenHash: sha256Hex(token) });
+        if (metadataValue(winner.value.body, SPEC_FINGERPRINT_METADATA_KEY) !== specFingerprint) {
+          return err(
+            providerError("provision", "conflict", "racing specification mismatch", false),
+          );
+        }
+        return ok({
+          ref,
+          incarnation,
+          runtimeTokenHash: sha256Hex(token),
+          specFingerprint,
+          specGeneration: this.specGeneration,
+        });
       }
       if (inserted.value.status !== 200) {
         return err(
@@ -890,6 +778,8 @@ export class GceOrbHostProvider implements OrbHostProvider {
         ref,
         incarnation: request.incarnation,
         runtimeTokenHash: sha256Hex(runtimeToken),
+        specFingerprint,
+        specGeneration: this.specGeneration,
       });
     };
     return new ResultAsync(run());
@@ -921,8 +811,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<void, OrbHostProviderError> {
     const run = async (): Promise<Result<void, OrbHostProviderError>> => {
-      // Restart-in-place is where a stale startup script would otherwise
-      // survive forever: check the stamp before booting (open question 32).
+      // Compute is immutable: a stale instance is replaced, never repaired.
+      // Verify the incarnation and specification stamps before booting so a
+      // restart-in-place cannot resurrect an instance the caller believes it
+      // already replaced (docs/compute-replacement.md).
       const got = await this.request(
         "start",
         "GET",
@@ -942,8 +834,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
         return err(providerError("start", "conflict", "instance incarnation mismatch", false));
       }
       const labels = (instance["labels"] ?? {}) as Record<string, unknown>;
-      const orbId = labels[ORB_LABEL];
-      if (typeof orbId !== "string") {
+      if (typeof labels[ORB_LABEL] !== "string") {
         return err(
           providerError(
             "start",
@@ -953,34 +844,11 @@ export class GceOrbHostProvider implements OrbHostProvider {
           ),
         );
       }
-      const repositoryUrl =
-        metadataValue(instance, REPO_URL_METADATA_KEY) ??
-        // Pre-stamp instances carry the URL only inside the script text.
-        /-e PI_ORB_REPOSITORY_URL='([^']*)'/.exec(
-          metadataValue(instance, "startup-script") ?? "",
-        )?.[1] ??
-        null;
-      if (repositoryUrl === null) {
-        return err(
-          providerError(
-            "start",
-            "operation_failed",
-            `instance ${request.ref.resourceId} carries no repository URL`,
-            false,
-          ),
-        );
+      if (
+        metadataValue(instance, SPEC_FINGERPRINT_METADATA_KEY) !== request.expectedSpecFingerprint
+      ) {
+        return err(providerError("start", "conflict", "instance specification mismatch", false));
       }
-      const freshness = await this.ensureCurrentScript(
-        task,
-        "start",
-        instance,
-        orbId,
-        repositoryUrl,
-        context,
-      );
-      if (freshness.isErr()) return err(freshness.error);
-      // A repair already started the instance.
-      if (freshness.value === "repaired") return ok(undefined);
       return this.startByName(task, request.ref.resourceId, context);
     };
     return new ResultAsync(run());
