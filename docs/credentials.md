@@ -103,6 +103,9 @@ The control plane's own compute access is similarly fenced (decided and applied 
 - Do not bake secrets into images.
 - Use short-lived, single-use registration credentials for runtime bootstrap.
 - Prefer short-lived workload identity over forwarding developer credentials.
+- Orb-issued OIDC workload identity is specified separately in `docs/workload-identity.md`; it
+  reuses the per-incarnation runtime bearer as bootstrap proof but does not replace the broker for
+  renewable model/GitHub credentials.
 - Treat repository setup hooks and project-local agent extensions as executable, trusted code.
 - Keep the host-provider control path unavailable to arbitrary project processes.
 - Use least-privilege service accounts in GCP.
