@@ -1,7 +1,8 @@
 # Orb workload identity requirements
 
 > **Status:** Requirements accepted 2026-08-21; implementation plan added 2026-08-21 (see
-> "Implementation plan" below); not implemented. This document defines a
+> "Implementation plan" below). Stage 1 and stage 2A (crypto adapter, key management, signer)
+> have landed; nothing is reachable in the product until the CLI ships in stage 3. This document defines a
 > provider-neutral OIDC identity that code running inside a pi-orb can exchange for
 > short-lived credentials from cloud providers and private services. It does not grant any
 > permission by itself: each relying party owns its trust policy and authorization.
@@ -461,10 +462,38 @@ perturbing the immutable host-spec fingerprint (`docs/compute-replacement.md`).
   generation, JWK export, and RFC 7638 thumbprints, every platform throw caught at the adapter
   into typed results; private key bytes through the existing secret-store port (Google Secret
   Manager in cloud, file store locally), exact versions only.
-- Boot: any role that mints ensures an active signing key exists, generating one on first boot
-  and failing closed when the secret store is unavailable (the digest-pin boot-validation
-  precedent). Rotation is an ops action: create pending key → publish in JWKS → activate →
-  retire the old key after the maximum JWT lifetime plus skew; no orb restarts.
+- Boot: any role that mints calls `ensureActiveSigningKey` (`domain/signing-keys.ts`), which is
+  idempotent and fails closed when the key store or the secret store is unavailable (the digest-pin
+  boot-validation precedent). Implemented 2026-08-21: it prefers activating an already-published
+  `pending` key over generating one — that is how an interrupted rotation is repaired — and only
+  when nothing exists at all does it generate, write the PKCS#8 PEM through the existing
+  secret-store port under provider `oidc-signing-key` (exact versions, never `latest`), and insert
+  the row *directly* as `active`. Publishing a first key as `pending` first would buy nothing: no
+  verifier can hold a cached key set that would have explained a key that never existed, and the
+  alternative to signing with it is not signing at all. Two instances booting together therefore
+  race on the unique-active index rather than on a read; the loser re-reads, destroys the secret
+  version nobody references, and adopts the winner's key. It never destroys a version whose row it
+  cannot prove absent, because an unreferenced version is inert while destroying a referenced one
+  breaks the issuer permanently.
+- Rotation is an ops action, `rotateSigningKey`, in three durable steps (decided and implemented
+  2026-08-21). **Publish:** insert the new key as `pending`, so JWKS serves it beside the still-active
+  old key and verifiers can refresh their cache before anything signs with it. **Retire:** CAS the
+  old key `active` → `retired`; it stays published for the overlap window, so tokens it already
+  signed keep verifying. **Activate:** CAS the new key `pending` → `active`. The last two cannot be
+  one write, because the schema permits exactly one active key, so rotation has a short window in
+  which none is active. A crash inside that window is not a lost issuer: minting fails closed with
+  a retryable error until the next `ensureActiveSigningKey` — which every minting instance runs at
+  boot — or a repeated rotation activates the published key. Re-running rotation adopts an existing
+  `pending` key instead of stacking another one. Rejected: activating before retiring (the schema
+  refuses it), and a combined transactional store operation that would close the window (new store
+  machinery for an ops-only path whose failure mode is already recoverable). No orbs restart.
+- JWKS is a view over the same rows: `pending` + `active` + `retired` within
+  `IssuerConstants.jwksOverlapMs` — the maximum token lifetime plus five minutes for verifier cache
+  staleness and clock skew — with the active key first. Retired rows and their secret versions are
+  deliberately *not* deleted in this stage: leaving the served set is what the overlap window
+  governs, while removing the row and destroying its material is later work under the same TODO
+  item. A retired row carrying no `retiredAt` is kept rather than guessed about, since publishing a
+  spare public key is harmless where dropping one too early breaks live tokens.
 - A new `PI_ORB_ROLE=issuer` branch registering `GET /.well-known/openid-configuration` and the
   JWKS endpoint (active plus retiring keys) straight from `oidc_signing_keys` — public,
   cacheable, secret-free, so the issuer service needs no secret-store access. The issuer URL
@@ -474,6 +503,17 @@ perturbing the immutable host-spec fingerprint (`docs/compute-replacement.md`).
   status alongside issuer readiness.
 - Tests: route tests via injection, discovery-document conformance, and signature verification of
   minted JWTs against the served JWKS using `node:crypto` verify.
+
+Stage 2 landed in two parts. **2A** (2026-08-21) is everything below the HTTP layer:
+`adapters/oidc/jose.ts` (unpadded base64url, RS256 signing, 2048-bit RSA generation, JWK export,
+and RFC 7638 thumbprints checked against the RFC's own published vector), `adapters/oidc/signer.ts`
+(`OidcTokenSigner`, `NodeCryptoSigningKeyGenerator`, `CryptoMintIdSource`), `domain/signing-keys.ts`
+(the key management above plus `assembleJwks` and the material cache), and
+`domain/signing-keys.dst.test.ts`. The signer holds the private PEM in memory keyed by `kid` *and*
+secret version, so the active row is still read per signature and a rotation is a cache miss by
+construction. **2B** is the wiring: the shared bearer-authentication helper, the mint route, the
+`issuer` role with discovery and JWKS, the boot hook, and the per-orb identity status in
+`http/views.ts`.
 
 ### Stage 3 — CLI, image, end-to-end
 

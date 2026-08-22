@@ -670,19 +670,37 @@ export interface StoredCredential {
   readonly expiresAt: number;
 }
 
+/**
+ * The issuer's private signing key (docs/workload-identity.md). Like a stored
+ * credential it exists only in the secret store, addressed by exact version,
+ * and never in PostgreSQL, an orb, an image, or a log. Only the public half
+ * lives in `oidc_signing_keys`.
+ */
+export interface StoredSigningKey {
+  /** PKCS#8 PEM. */
+  readonly privateKeyPem: string;
+}
+
+/**
+ * What the secret store holds. Each consumer writes and reads back exactly one
+ * of these shapes under its own provider name, so the store itself stays a
+ * dumb immutable-version keeper with no idea what a version means.
+ */
+export type StoredSecret = StoredCredential | StoredSigningKey;
+
 export interface CredentialSecretStore {
   /** Creates a new immutable version and returns its identifier. */
-  writeSecret(
+  writeSecret<T extends StoredSecret = StoredCredential>(
     task: SimulationTask,
     provider: string,
-    credential: StoredCredential,
+    credential: T,
   ): ResultAsync<{ version: string }, StoreError>;
   /** Reads one exact version; null when it does not exist or was destroyed. */
-  readSecret(
+  readSecret<T extends StoredSecret = StoredCredential>(
     task: SimulationTask,
     provider: string,
     version: string,
-  ): ResultAsync<StoredCredential | null, StoreError>;
+  ): ResultAsync<T | null, StoreError>;
   /** Best-effort cleanup of a superseded version. */
   destroySecret(
     task: SimulationTask,
@@ -739,9 +757,11 @@ export interface IdTokenClaims {
 }
 
 /**
- * Signs identity tokens. The private key never leaves this port's adapter, and
- * the domain never sees key material — only the finished JWT and the `kid` it
- * was signed with, so a caller can be told which published key verifies it.
+ * Signs identity tokens. The mint path never sees key material — only the
+ * finished JWT and the `kid` it was signed with, so a caller can be told which
+ * published key verifies it. Key *management* is the one place that does
+ * handle a private key, because it has to hand a freshly generated one to the
+ * secret store (`domain/signing-keys.ts`).
  */
 export interface TokenSigner {
   signIdToken(
@@ -799,6 +819,26 @@ export interface CasSigningKeyStateParams {
   readonly retiredAt?: number;
 }
 
+/** A freshly generated key, before anything durable knows about it. */
+export interface GeneratedSigningKey {
+  /** The RFC 7638 thumbprint of the public JWK: derivable by any verifier. */
+  readonly kid: string;
+  /** PKCS#8 PEM, on its way to the secret store and nowhere else. */
+  readonly privateKeyPem: string;
+  /** The public JWK as JWKS will publish it; opaque to the domain. */
+  readonly publicJwk: unknown;
+}
+
+/**
+ * Makes signing keys. Separate from `TokenSigner` because key generation is
+ * expensive, happens on ops paths rather than per mint, and must be replaced
+ * by a deterministic fake in simulation — real RSA generation in a DST loop
+ * would be neither deterministic nor fast.
+ */
+export interface SigningKeyGenerator {
+  generate(task: SimulationTask): ResultAsync<GeneratedSigningKey, SignerError>;
+}
+
 export interface SigningKeyStore {
   /** Every key, oldest first: JWKS publishes the active one plus retiring ones. */
   listSigningKeys(task: SimulationTask): ResultAsync<SigningKeyRow[], StoreError>;
@@ -816,6 +856,30 @@ export interface SigningKeyStore {
     task: SimulationTask,
     params: CasSigningKeyStateParams,
   ): ResultAsync<SigningKeyRow, StoreError | SigningKeyConflict>;
+}
+
+/**
+ * What reading the *current* signing material needs: the published rows plus
+ * the secret version one of them points at. Narrower than `SigningKeyDeps` so
+ * the signing path cannot generate a key by accident.
+ */
+export interface SigningKeyMaterialDeps {
+  readonly keys: SigningKeyStore;
+  readonly secrets: CredentialSecretStore;
+}
+
+/**
+ * What serving JWKS needs. Deliberately without a secret store: the published
+ * key set contains no secret, so the issuer role never gets secret access.
+ */
+export interface JwksDeps {
+  readonly keys: SigningKeyStore;
+  readonly constants: import("./constants.ts").IssuerConstants;
+}
+
+/** Everything key management needs (`domain/signing-keys.ts`). */
+export interface SigningKeyDeps extends SigningKeyMaterialDeps, JwksDeps {
+  readonly generator: SigningKeyGenerator;
 }
 
 // ---------------------------------------------------------------------------

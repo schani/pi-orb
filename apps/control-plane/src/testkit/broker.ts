@@ -8,6 +8,7 @@ import type {
   CredentialSecretStore,
   OperationContext,
   StoredCredential,
+  StoredSecret,
   UpstreamRefresher,
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
@@ -121,15 +122,27 @@ export class FakePointerStore implements CredentialPointerStore {
   }
 }
 
-/** Deterministic in-memory secret store with immutable versions. */
+/**
+ * Deterministic in-memory secret store with immutable versions. The failpoint
+ * names are constructor parameters because the store has two independent
+ * users — the credential broker and the issuer's signing keys — whose outages
+ * a scenario must be able to inject separately.
+ */
 export class FakeSecretStore implements CredentialSecretStore {
-  private readonly versions = new Map<string, StoredCredential>();
+  private readonly versions = new Map<string, StoredSecret>();
   private readonly destroyed = new Set<string>();
   private counter = 0;
   /** When true, every write fails after the failpoint gate (loss-window tests). */
   failWrites = false;
+  private readonly readFailpoint: string;
+  private readonly writeFailpoint: string;
 
-  seedSecret(provider: string, credential: StoredCredential): string {
+  constructor(failpoints?: { read: string; write: string }) {
+    this.readFailpoint = failpoints?.read ?? FAILPOINTS.brokerSecretRead;
+    this.writeFailpoint = failpoints?.write ?? FAILPOINTS.brokerSecretWrite;
+  }
+
+  seedSecret(provider: string, credential: StoredSecret): string {
     this.counter += 1;
     const version = `v${this.counter}`;
     this.versions.set(`${provider}/${version}`, credential);
@@ -140,26 +153,34 @@ export class FakeSecretStore implements CredentialSecretStore {
     return [...this.destroyed];
   }
 
-  writeSecret(
+  /** Versions written under `provider` that still hold material. */
+  liveVersions(provider: string): string[] {
+    const prefix = `${provider}/`;
+    return [...this.versions.keys()]
+      .filter((key) => key.startsWith(prefix) && !this.destroyed.has(key))
+      .map((key) => key.slice(prefix.length));
+  }
+
+  writeSecret<T extends StoredSecret = StoredCredential>(
     task: SimulationTask,
     provider: string,
-    credential: StoredCredential,
+    credential: T,
   ): ResultAsync<{ version: string }, StoreError> {
-    return accessGate(task, FAILPOINTS.brokerSecretWrite, "write secret", 5, () => {
+    return accessGate(task, this.writeFailpoint, "write secret", 5, () => {
       if (this.failWrites) throw new ApplicationFailure("secret write refused");
       return { version: this.seedSecret(provider, credential) };
     });
   }
 
-  readSecret(
+  readSecret<T extends StoredSecret = StoredCredential>(
     task: SimulationTask,
     provider: string,
     version: string,
-  ): ResultAsync<StoredCredential | null, StoreError> {
-    return accessGate(task, FAILPOINTS.brokerSecretRead, "read secret", 5, () => {
+  ): ResultAsync<T | null, StoreError> {
+    return accessGate(task, this.readFailpoint, "read secret", 5, () => {
       const key = `${provider}/${version}`;
       if (this.destroyed.has(key)) return null;
-      return this.versions.get(key) ?? null;
+      return (this.versions.get(key) ?? null) as T | null;
     });
   }
 
@@ -168,7 +189,7 @@ export class FakeSecretStore implements CredentialSecretStore {
     provider: string,
     version: string,
   ): ResultAsync<void, StoreError> {
-    return accessGate(task, FAILPOINTS.brokerSecretWrite, "destroy secret", 5, () => {
+    return accessGate(task, this.writeFailpoint, "destroy secret", 5, () => {
       this.destroyed.add(`${provider}/${version}`);
     });
   }
