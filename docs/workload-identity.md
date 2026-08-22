@@ -1,6 +1,7 @@
 # Orb workload identity requirements
 
-> **Status:** Requirements accepted 2026-08-21; not implemented. This document defines a
+> **Status:** Requirements accepted 2026-08-21; implementation plan added 2026-08-21 (see
+> "Implementation plan" below); not implemented. This document defines a
 > provider-neutral OIDC identity that code running inside a pi-orb can exchange for
 > short-lived credentials from cloud providers and private services. It does not grant any
 > permission by itself: each relying party owns its trust policy and authorization.
@@ -154,7 +155,7 @@ Requirements:
 - print only the JWT and a trailing newline to standard output on success;
 - never print the runtime bearer, signing material, or token to standard error or logs;
 - reject an absent/empty audience and out-of-range lifetime before making a request;
-- return nonzero with a concise typed failure for unavailable runtime, unauthorized/stale
+- return nonzero with a concise typed failure for an unreachable control plane, unauthorized/stale
   incarnation, invalid request, rate limit, or issuer failure;
 - support command substitution and executable credential-source protocols;
 - never cache the JWT on disk;
@@ -173,38 +174,48 @@ The runtime bearer must not be sent to an external relying party. Token minting 
 existing internal runtime-authentication boundary:
 
 ```diagram
-┌────────────────┐    local command     ┌─────────────┐
-│ Agent/project  │─────────────────────▶│ Orb runtime │
-│ process        │                      └──────┬──────┘
-└────────────────┘                             │ authenticated internal request
-                                               │ with incarnation bearer
-                                               ▼
-                                    ┌─────────────────────┐
-                                    │ Control plane OIDC  │
-                                    │ issuer              │
-                                    └──────────┬──────────┘
-                                               │ signed short-lived JWT
-                                               ▼
-                                    ┌─────────────────────┐
-                                    │ Relying party / STS │
-                                    └─────────────────────┘
+┌────────────────┐    local command     ┌──────────────────┐
+│ Agent/project  │─────────────────────▶│ pi-orb id-token  │
+│ process        │                      │ CLI (in orb)     │
+└────────────────┘                      └────────┬─────────┘
+                                                 │ authenticated request
+                                                 │ with incarnation bearer
+                                                 ▼
+                                      ┌─────────────────────┐
+                                      │ Control plane OIDC  │
+                                      │ issuer              │
+                                      └──────────┬──────────┘
+                                                 │ signed short-lived JWT
+                                                 ▼
+                                      ┌─────────────────────┐
+                                      │ Relying party / STS │
+                                      └─────────────────────┘
 ```
 
 1. The workload invokes `pi-orb id-token` with an audience and optional lifetime.
-2. The local CLI asks its own orb runtime over a loopback-only endpoint or equivalent private IPC.
-3. The runtime calls a versioned control-plane runtime endpoint with the existing per-incarnation
-   bearer. The request includes only audience and requested lifetime; identity is never supplied
-   by the runtime.
-4. The control plane hashes and constant-time verifies the bearer, loads the orb, and derives all
+2. The CLI reads the injected runtime environment (control-plane runtime URL and per-incarnation
+   bearer) and calls a versioned control-plane runtime endpoint directly, exactly like the
+   existing in-orb `gh` and git-credential helpers. The request includes only audience and
+   requested lifetime; identity is never supplied by the caller.
+3. The control plane hashes and constant-time verifies the bearer, loads the orb, and derives all
    identity claims from that row.
-5. It verifies that the bearer hash and requested incarnation are current, no discard fence covers
-   the incarnation, and the orb is in a lifecycle state authorized to mint.
-6. One store transaction rechecks the token hash, state version, incarnation, discard fence, and
-   mint-authorized state, then durably records the successful decision. This transaction is the
-   mint's linearization point relative to stop, replacement, archive, and delete.
-7. It signs and returns a token with `Cache-Control: no-store`. Signing may occur before the
-   authorization transaction if needed, but an uncommitted token is never returned.
-8. The runtime returns the token to the one local request. Neither layer persists it.
+4. The authorization decision is one consistent snapshot read of that orb row: the bearer hash
+   matches, no discard fence covers the incarnation, the orb is in a lifecycle state authorized
+   to mint, and the per-orb rate-limit floor has passed. That read is the mint's linearization
+   point relative to stop, replacement, archive, and delete: a lifecycle change committed before
+   the read denies the mint, while a mint whose read linearized first remains valid even if its
+   response arrives after the change commits.
+5. A successful mint durably advances the orb's rate-limit timestamp with a monotone write that
+   does not bump the lifecycle state version.
+6. It signs and returns a token with `Cache-Control: no-store`.
+7. The CLI prints the token to its one caller. Neither the CLI nor the control plane persists it.
+
+Decided 2026-08-21: the CLI calls the control plane directly with the injected bearer, matching
+the existing in-orb credential helpers. Rejected: a loopback-only orb-runtime hop (CLI → orb
+runtime → control plane). The runtime's HTTP server has no loopback-only listener, and the hop
+would add no security boundary: every process in the orb already inherits the bearer through the
+runtime environment, an exposure accepted in `docs/credentials.md`. The invariant that matters is
+unchanged — the bearer travels only to the control plane, never to an external relying party.
 
 The runtime endpoint belongs beside the existing `/runtime/v1/tokens/{name}` broker boundary, but
 OIDC identity is not another brokered upstream credential: the control plane is the issuer and no
@@ -231,8 +242,8 @@ refresh token exists. It therefore needs a distinct request/response schema and 
 
 Docker, process, GCE, and future providers must not implement OIDC or hold signing keys. They keep
 their existing responsibility: place the control-plane runtime URL, orb ID, host incarnation, and
-per-incarnation bearer into the runtime's private launch channel. The runtime and control plane
-compose the provider-neutral identity flow above.
+per-incarnation bearer into the runtime's private launch channel. The in-orb CLI and the control
+plane compose the provider-neutral identity flow above.
 
 Repository code is considered able to read the current runtime environment and invoke the local
 CLI. Preventing code in an orb from minting that orb's identity is not a goal; limiting what that
@@ -243,6 +254,9 @@ identity can do belongs in relying-party policy. One orb must never mint another
 - Expose an HTTPS OIDC discovery document at
   `/.well-known/openid-configuration` beneath a stable issuer URL and a public JWKS endpoint.
 - Initially sign with RS256 for broad federation compatibility. Every JWT carries a `kid`.
+- Signing, JWK export, and `kid` derivation are first-party code over `node:crypto` behind a
+  simulation-friendly signer port (decided 2026-08-21; the dependency decision and the rejected
+  `jose` alternative are recorded in `docs/stack.md`).
 - Keep private signing keys outside orb hosts, container images, PostgreSQL state, logs, and source
   control. In cloud deployment they live in a dedicated secret/KMS boundary readable only by the
   issuer service identity.
@@ -294,8 +308,11 @@ preserve exact-orb tags, ephemeral nodes, lifecycle cleanup, and current user-vi
 - Minting is allowed for arbitrary syntactically valid audiences, matching standard OIDC and Amp's
   model. Audience values have a bounded UTF-8 length and must not enter structured logs without
   safe encoding.
-- Apply per-orb and deployment-wide mint rate limits. Return a typed retryable result and
-  `Retry-After`; do not use exceptions for expected throttling.
+- Apply a per-orb mint rate limit: a durable minimum interval between successful mints, following
+  the credential broker's persisted refresh floor. Return a typed retryable result and
+  `Retry-After`; do not use exceptions for expected throttling. Rejected for the POC (2026-08-21):
+  a deployment-wide limit — per-orb throttling bounds the abuse that matters, and a correct
+  cross-instance global counter is machinery the POC does not need.
 - Bound request body size, audience length, token lifetime, signing concurrency, and response size.
 - Every first-party fallible boundary returns `neverthrow` `Result`/`ResultAsync` with a
   discriminated error. Crypto, KMS, HTTP, and platform exceptions are caught at their immediate
@@ -307,40 +324,49 @@ preserve exact-orb tags, ephemeral nodes, lifecycle cleanup, and current user-vi
 - A malformed request, stale bearer, stopped orb, signing outage, and rate limit must remain
   distinguishable to the local caller without revealing whether another orb exists.
 
-## Observability and audit
+## Observability and failure visibility
 
-Workload identity is security-sensitive and must be reconstructable without recording tokens.
+Workload identity is security-sensitive, and its failures must be visible to the orb user without
+recording tokens.
 
-- Persist one queryable audit record per mint decision containing: timestamp, project ID, orb ID,
-  host incarnation, JWT ID or a one-way hash of it, exact bounded audience, requested/effective
-  lifetime, signing key ID, outcome, and typed denial/error code.
+- Persist the latest mint failure per orb as durable columns: a typed denial/error code and a
+  timestamp, nothing else. The write must not bump the lifecycle state version, so failure status
+  never conflicts with lifecycle CAS. Raw audience values do not enter this status.
 - Never persist the JWT, runtime bearer, private key, or downstream cloud credential.
-- Audit writes for successful minting must be committed before returning the JWT. If the durable
-  audit sink is unavailable, minting fails closed rather than creating unaudited authority.
-- Denials caused by expected stale/stopped callers are rate-limited in operational logs, while the
-  durable audit record remains queryable. Healthy minting must not create noisy lifecycle events.
-- Key activation/retirement, signer unavailability edges, sustained throttling, and policy/config
-  changes produce durable operator-visible security events.
 - The CLI reports actionable failures to the orb user. A dashboard/API identity status must expose
   issuer readiness and the latest non-secret mint failure for that orb; a silent refusal is not
   acceptable.
-- Downstream provider audit logs remain part of the end-to-end trail. Recipes must explain how to
-  correlate their delegated principal/session with pi-orb's orb, incarnation, and JWT audit ID.
+- Healthy minting is silent: successful mints produce no lifecycle events and no durable pi-orb
+  record beyond the rate-limit timestamp. Denials caused by expected stale/stopped callers are
+  edge-deduplicated in operational logs.
+- Key activation/retirement, signer unavailability edges, sustained throttling, and policy/config
+  changes produce durable operator-visible security events.
+- Downstream provider audit logs are the forensic trail for issued tokens: federation recipes must
+  map the delegated principal/session back to pi-orb's immutable `project_id`, `orb_id`, and
+  `host_incarnation` claims, so a misused token identifies its orb from the provider's side.
+- Rejected for the POC (2026-08-21): a durable per-mint audit table (timestamp, identity claims,
+  `jti` hash, audience, key ID, outcome per decision) with fail-closed commit-before-return
+  semantics. It was the largest piece of new machinery in the feature, and its forensic value is
+  mostly recoverable from provider-side audit logs; the accepted cost is that pi-orb cannot
+  enumerate what it minted or for which audiences. If that trade stops being acceptable, adding
+  the table later is an ordinary schema migration.
 
 ## Deterministic verification requirements
 
 Concurrency-critical issuance and revocation must sit behind simulation-friendly clock, random,
-signer, audit-store, and orb-store ports. Deterministic scheduling tests must cover at least:
+signer, and orb-store ports. Deterministic scheduling tests must cover at least:
 
 - valid mint from each allowed lifecycle state;
 - denial in every disallowed state;
-- stop racing mint, proving no mint decision linearizes after durable mint authority closes (a
-  mint that linearized first remains valid even if its HTTP response arrives after the stop);
+- stop racing mint, proving no mint decision linearizes after the stop's state transition commits
+  (a mint that linearized first remains valid even if its HTTP response arrives after the stop);
 - compute replacement racing mint, proving the old bearer cannot mint the new incarnation;
 - archive/delete and discard-fence races;
 - first-boot request before bearer-hash commit followed by bounded successful retry;
-- signer failure, audit-write failure, and recovery without an unaudited token;
-- rate-limit races across control-plane instances;
+- signer failure and recovery, never returning an unsigned token;
+- failure-status and rate-limit-timestamp writes racing lifecycle CAS without state-version
+  conflicts;
+- per-orb rate-limit enforcement under concurrent requests across control-plane instances;
 - key rotation with old/new verifier caches and retirement after the overlap window;
 - clock boundaries, skew, minimum/maximum lifetime, malformed audiences, and unique `jti` values;
 - two orbs attempting cross-orb token use;
@@ -370,12 +396,110 @@ The feature is complete only when:
 4. No private signing key, runtime bearer, JWT, or downstream access token is present in the
    repository, image, PostgreSQL rows other than permitted one-way hashes, normal logs, or orb
    persistent filesystem.
-5. Every mint decision has a durable non-secret audit record, and user-visible failures explain
-   why identity is unavailable.
+5. User-visible failures explain why identity is unavailable: the latest typed non-secret mint
+   failure for an orb is durably persisted and exposed in the product.
 6. Provider implementations remain unaware of OIDC and all supported host providers pass the same
    contract tests.
 7. The deterministic race suite and full runtime E2E pass, including stop/replacement revocation
    boundaries.
+
+## Implementation plan
+
+Four stages, each independently mergeable and leaving `main` deployable. Stages 1–2 are inert in
+the product until the CLI ships in stage 3; that is deliberate, so the security-critical core is
+reviewed and DST-hardened before anything can call it. Host providers are untouched in every
+stage: all four identity inputs (control-plane runtime URL, orb ID, host incarnation, bearer)
+are already injected by Docker, process, and GCE, and adding no launch input also avoids
+perturbing the immutable host-spec fingerprint (`docs/compute-replacement.md`).
+
+### Stage 1 — protocol, store, domain core, deterministic tests
+
+- `packages/protocol/src/workload-identity.ts`: an `ID_TOKEN_PATH` constant beside
+  `RUNTIME_TOKENS_PREFIX`, plus closed TypeBox schemas — request `{audience, ttlSeconds?}` with
+  the audience byte bound, success `{token}`, and a runtime-style error envelope with codes
+  `invalid_request | unauthorized | not_mintable | rate_limited | retryable` (optional
+  `retryAfterMs`). `unauthorized` covers unknown, stale, and fenced bearers identically, so the
+  response never reveals whether another orb exists. Discovery/JWKS document shapes stay inside
+  the control plane: they have one producer and no first-party consumer.
+- Migration `011_workload_identity.sql`: on `orbs`, the columns `mint_failure_code`,
+  `mint_failure_at`, and `last_mint_at`; a new `oidc_signing_keys` table (`kid` primary key,
+  secret-store version reference, public JWK JSON, state `pending | active | retired`,
+  timestamps, row-version CAS). Public JWKs are not secrets and may live in PostgreSQL; private
+  keys exist only in the secret store, addressed by exact version.
+- Ports in `domain/ports.ts`: `TokenSigner` (claims in, `{jwt, kid}` out, typed retryable signer
+  errors), `SigningKeyStore` (create/activate/retire/list, CAS-fenced), and a mint-ID entropy
+  port for `jti`. New `ControlPlaneStore` methods: `recordMintFailure` (no state-version bump,
+  following `recordHostDiscardStatus`/`touchLastBusy`), `advanceLastMintAt` (monotone), and the
+  signing-key operations — each implemented in the PostgreSQL adapter, the in-memory store, and
+  the shared store contract suite.
+- `domain/workload-identity.ts`: `MINT_STATES = creating | starting | running` — deliberately
+  narrower than the broker's `RUNTIME_TOKEN_STATES`, which admits `stopping` and `archiving` —
+  and a `mintIdToken` function implementing the request-path steps above, with `IssuerConstants`
+  (default lifetime 600 s, bounds 60–3600 s, audience byte cap, per-orb mint-interval floor) in
+  `domain/constants.ts` and test overrides in the testkit fixtures.
+- Testkit: a fake signer and key store; failpoints `signer.sign`, `signer.key.read`, and
+  `issuer.status.write`; a `workload-identity.dst.test.ts` covering the deterministic checklist
+  above. Templates: the broker DST storm/rate-limit/failpoint scenarios and the lifecycle DST
+  stop-race scenario with a live reconcile loop.
+
+### Stage 2 — HTTP route, issuer endpoints, real keys
+
+- Factor the duplicated bearer-authentication logic in `http/runtime-routes.ts` into one shared
+  helper, then add `POST` `ID_TOKEN_PATH` using it with `MINT_STATES`: `Cache-Control: no-store`
+  on success, `Retry-After` on throttle, store `unavailable` as 503 retryable, store `invariant`
+  as 500 (`docs/lifecycle.md`).
+- `adapters/oidc/`: the `node:crypto` signer adapter (RS256, base64url, `kid` header), RSA key
+  generation, JWK export, and RFC 7638 thumbprints, every platform throw caught at the adapter
+  into typed results; private key bytes through the existing secret-store port (Google Secret
+  Manager in cloud, file store locally), exact versions only.
+- Boot: any role that mints ensures an active signing key exists, generating one on first boot
+  and failing closed when the secret store is unavailable (the digest-pin boot-validation
+  precedent). Rotation is an ops action: create pending key → publish in JWKS → activate →
+  retire the old key after the maximum JWT lifetime plus skew; no orb restarts.
+- A new `PI_ORB_ROLE=issuer` branch registering `GET /.well-known/openid-configuration` and the
+  JWKS endpoint (active plus retiring keys) straight from `oidc_signing_keys` — public,
+  cacheable, secret-free, so the issuer service needs no secret-store access. The issuer URL
+  comes from a required `PI_ORB_OIDC_ISSUER_URL` validated at boot, never from request headers;
+  `role=all` serves the same routes locally.
+- The persisted mint failure surfaces through `http/views.ts` and the web UI as per-orb identity
+  status alongside issuer readiness.
+- Tests: route tests via injection, discovery-document conformance, and signature verification of
+  minted JWTs against the served JWKS using `node:crypto` verify.
+
+### Stage 3 — CLI, image, end-to-end
+
+- `apps/orb-runtime/src/id-token/`: the request/validation logic (reusing the broker env reader;
+  argument and bounds validation before any request; the bounded first-boot 401 retry with the
+  tighter CLI-scale constants used by the `gh` helper) plus a thin argv entry point, and a
+  `docker/pi-orb` shim installed as `/usr/local/bin/pi-orb` following the `gh`/git-credential
+  discipline: JWT and trailing newline on stdout only, typed failures on stderr, nonzero exit
+  codes, nothing cached. Assert the shim's presence in the Dockerfile contract test.
+- The process host provider runs without the image; the CLI remains invokable there as the Node
+  entry point. Record the `pi-orb` shim in the runtime tool baseline in `docs/host-provider.md`.
+- E2E (`e2e/full-slice.e2e.test.ts`): mint via `docker exec … pi-orb id-token`; an in-test fake
+  relying party verifies the signature against the served JWKS and rejects wrong issuer,
+  audience, project, orb, incarnation, and expiration; the existing
+  stale-bearer-after-replacement leg extends to prove the old incarnation cannot mint; a stopped
+  orb is denied. This stage touches runtime-facing routes, so `npm run test:e2e` gates it
+  (`docs/testing.md`).
+
+### Stage 4 — cloud deployment and federation
+
+- `infra/run.tf`: a fourth Cloud Run service with `PI_ORB_ROLE=issuer`, public ingress, invoker
+  IAM disabled — the first public unauthenticated surface, serving only discovery and JWKS. A
+  tofu-managed parent secret for signing keys with accessor bindings for the minting service;
+  `PI_ORB_OIDC_ISSUER_URL` in the shared environment.
+- Workload Identity Federation bootstrap as a separately invoked script (the
+  `bootstrap-amp-oidc.sh` tier, outside the recurring plan): pool and provider with exact issuer
+  and audience, attribute mappings for `project_id`/`orb_id`/`host_incarnation`, the
+  `token_use=exchanged` condition, and a read-only test grant.
+- `infra/smoke-workload-identity.sh` invoked from `release.sh` beside the existing smokes: a
+  disposable orb mints (via `gcloud compute ssh` plus `docker exec` on the GCE leg), exchanges
+  through STS, calls a read-only GCP API, and proves wrong-audience and wrong-orb rejection.
+- The generated external-account configuration and the GCP/AWS/generic verification recipes from
+  the Federation integrations section above, including provider-side principal-to-orb
+  correlation. `docs/deployment.md` and `docs/credentials.md` are updated in the same task, and
+  this document's status header flips as stages land.
 
 ## Non-goals
 
