@@ -77,6 +77,9 @@ case "$*" in
     if [ "\${MOCK_APPLY_SIGNAL:-}" = TERM ]; then kill -TERM "$PPID"; sleep 0.1; exit 143; fi
     exit "\${MOCK_APPLY_STATUS:-0}"
     ;;
+  *"output -raw zone"*)
+    echo us-central1-a
+    ;;
 esac
 `,
   );

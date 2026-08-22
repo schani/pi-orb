@@ -110,19 +110,40 @@ export function registerIssuerRoutes(
     const jwks = await assembleJwks(task, deps, { now: task.wallNow() });
     if (jwks.isErr()) {
       // Fail closed and say so: serving an empty or partial key set would make
-      // every live token look forged. The error is never cached, and a
-      // deterministic bug of ours answers 500 rather than inviting a verifier
-      // to retry forever (docs/lifecycle.md).
+      // every live token look forged. The refusal is never cached.
+      //
+      // Every store failure answers 503 here, including `invariant` — a
+      // deliberate deviation on this one route from the rule in
+      // docs/lifecycle.md that an `invariant` store error is a 500. That rule
+      // exists so *internal* loops stop retrying our own deterministic bugs
+      // (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md), and
+      // it is the right rule where the retrier is ours. Here the caller is an
+      // external verifier that cannot act on the distinction at all: 500 only
+      // tells it "do not come back", which is exactly wrong for the case this
+      // route actually hits. `PI_ORB_ROLE=issuer` is the one role that never
+      // runs migrations, so a not-yet-migrated `oidc_signing_keys` reaches us
+      // as SQLSTATE 42P01 → `invariant`, and that first-deploy race against the
+      // browser role's migration is genuinely retryable — a 500 would burn the
+      // deployment's first minutes on verifiers that already gave up.
+      //
       // The body is a fixed string on purpose: this is the deployment's one
       // public unauthenticated route, and a raw store message here would hand
       // SQL fragments to the internet (TODO.md tracks the same sanitization
       // for the authenticated routes).
-      const invariant = jwks.error.code === "invariant";
       reply.header("cache-control", "no-store");
-      return reply.status(invariant ? 500 : 503).send({
-        error: invariant ? "internal" : "unavailable",
-        message: "signing keys unavailable",
-      });
+      return reply.status(503).send({ error: "unavailable", message: "signing keys unavailable" });
+    }
+    if (jwks.value.keys.length === 0) {
+      // The first-deploy window, before the boot hook has established a key.
+      // `200 {"keys":[]}` is the dangerous answer here, not the honest one: it
+      // is cacheable, so every verifier and cloud STS that asks during this
+      // window caches *emptiness* for the full five minutes and rejects the
+      // very first tokens this deployment mints. An uncached 503 costs those
+      // verifiers one retry and costs the deployment nothing.
+      reply.header("cache-control", "no-store");
+      return reply
+        .status(503)
+        .send({ error: "unavailable", message: "no signing keys published yet" });
     }
     const document: JwksDocument = { keys: [...jwks.value.keys] };
     reply.header("cache-control", CACHE_CONTROL);

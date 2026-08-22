@@ -54,9 +54,22 @@ function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
 }
 
-/** A store failure as a mint failure: `invariant` is internal, never retryable. */
+/**
+ * Store failures asking again cannot repair. `invariant` is a deterministic bug
+ * of ours — a bad parameter encoding, a missing column, malformed SQL — and
+ * `corruption` is a row shape the schema refuses outright; both carry
+ * `retryable: false` for the same reason. Advertising either as retryable is
+ * precisely the defect of
+ * docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md: a client
+ * spinning forever on a refusal that will never change its answer.
+ */
+function isNonRetryable(error: StoreError): boolean {
+  return error.code === "invariant" || error.code === "corruption";
+}
+
+/** A store failure as a mint failure; a non-retryable one is `internal`. */
 function mapStoreError(error: StoreError): MintError {
-  return error.code === "invariant"
+  return isNonRetryable(error)
     ? { type: "internal", message: error.message }
     : { type: "retryable", message: error.message };
 }
@@ -94,8 +107,34 @@ export function mintIdToken(
     /**
      * Best-effort: the status is advisory, so a failed status write must never
      * replace the real denial with a store error the caller cannot act on.
+     *
+     * Deduplicated against the code already on the orb row, because two of the
+     * denials below — `not_mintable` and `invalid_request` — are decided
+     * *before* the rate-limit slot is claimed. Without this, nothing throttles
+     * them at all: a caller holding a stopped orb's bearer drives one UPDATE
+     * per request, forever. The dedup lives here rather than at each call site
+     * so every path gets the same floor, and a *different* code still writes —
+     * `rate_limited` becoming `not_mintable` is a state change the user needs
+     * to see.
+     *
+     * The price is a stale `mintFailureAt`: through a run of identical denials
+     * the timestamp stays at the first one instead of tracking the latest, and
+     * that staleness is accepted deliberately in exchange for not writing per
+     * request. The product reads this status as "the last identity mint attempt
+     * failed" — a *last failure*, not a *latest timestamp*
+     * (docs/workload-identity.md).
      */
     const record = async (code: MintFailureCode): Promise<void> => {
+      // Skipped only while the row already says this *and* still says it
+      // visibly. Currency is decided on read (`http/views.ts`): a failure older
+      // than `lastMintAt` is hidden as superseded by the later success. So a
+      // bare code comparison would keep deduplicating against a status the user
+      // can no longer see, and an orb that starts failing again after a healthy
+      // stretch would go silent forever.
+      const visible =
+        orb.mintFailureAt !== null &&
+        (orb.lastMintAt === null || orb.mintFailureAt >= orb.lastMintAt);
+      if (orb.mintFailureCode === code && visible) return;
       await deps.store.recordMintFailure(task, { orbId, code, at: task.wallNow() });
     };
 
@@ -131,7 +170,7 @@ export function mintIdToken(
       minIntervalMs: constants.minMintIntervalMs,
     });
     if (claim.isErr()) {
-      if (claim.error.code === "invariant") return err(mapStoreError(claim.error));
+      if (isNonRetryable(claim.error)) return err(mapStoreError(claim.error));
       // A store outage is what the user sees as "identity unavailable"; the
       // status write goes to the same store and may well fail too, which is
       // exactly what best-effort recording is for.

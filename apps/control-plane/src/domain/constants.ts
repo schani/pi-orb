@@ -101,6 +101,26 @@ export interface IssuerConstants {
    * (docs/workload-identity.md, "Issuer and signing requirements").
    */
   readonly jwksOverlapMs: number;
+  /**
+   * How long a signer may keep reusing private key material it has already
+   * read. The active *row* is read per signature, so a rotation takes effect
+   * immediately; this bounds the other revocation the row cannot express —
+   * destroying the secret version under a still-active key, which is how an
+   * operator kills a leaked key without waiting for a rotation to converge.
+   * A warm signer would otherwise keep signing with destroyed material
+   * indefinitely, so this is the revocation window for that case.
+   */
+  readonly signingKeyMaterialTtlMs: number;
+  /**
+   * How long a newly published key must sit in JWKS before it may start
+   * signing. It has to exceed the `max-age` the JWKS endpoint serves
+   * (`http/issuer-routes.ts`, five minutes), so that a verifier which fetched
+   * the key set the instant before publication has refreshed before the first
+   * token it cannot otherwise explain arrives. The emergency rotation of a
+   * leaked key overrides it deliberately: a few rejected tokens beat a key
+   * that keeps signing.
+   */
+  readonly rotationSoakMs: number;
 }
 
 export const DEFAULT_ISSUER_CONSTANTS: IssuerConstants = {
@@ -112,6 +132,10 @@ export const DEFAULT_ISSUER_CONSTANTS: IssuerConstants = {
   // The maximum token lifetime plus five minutes of verifier cache and clock
   // skew, which is the allowance the federation recipes ask relying parties for.
   jwksOverlapMs: MAX_TTL_SECONDS * 1_000 + 5 * 60_000,
+  signingKeyMaterialTtlMs: 60_000,
+  // Twice the JWKS `max-age`, so even a verifier that fetched the key set one
+  // instant before the new key was published has re-fetched before it signs.
+  rotationSoakMs: 10 * 60_000,
 };
 
 export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {

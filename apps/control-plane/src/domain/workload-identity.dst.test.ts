@@ -132,6 +132,85 @@ describe("identity minting across lifecycle states (DST)", () => {
     });
   }
 
+  it("a hostile stream of identical denials costs one status write, not one per request", async () => {
+    await runDst({ name: "mint-denial-write-storm", iterations: 20 }, async (sim) => {
+      const harness = makeMintHarness();
+      let bearer = "";
+      const seed = await sim.runTasks([
+        {
+          name: "seed",
+          f: async (task) => {
+            bearer = seedOrbWithBearer(task, harness, ORB, "stopped");
+          },
+        },
+      ]);
+      expect(seed.isOk(), seed.isErr() ? seed.error.message : "").toBe(true);
+
+      // `not_mintable` is decided before the rate-limit slot is claimed, so
+      // nothing downstream throttles this: the dedup against the code already
+      // on the row is the only floor a caller holding a stopped orb's bearer
+      // ever meets, whatever the interleaving of the eight callers.
+      const storm = await sim.runTasks(
+        Array.from({ length: 8 }, (_, index) => ({
+          name: `attacker-${index}`,
+          f: async (task: SimulationTask) => {
+            for (let attempt = 0; attempt < 10; attempt++) {
+              await task.sleep(1 + task.random(`denial stagger ${index}`) * 50, "denial stagger");
+              expect(errorType(await mint(task, harness, bearer))).toBe("not_mintable");
+            }
+          },
+        })),
+      );
+      expect(storm.isOk(), storm.isErr() ? storm.error.message : "").toBe(true);
+
+      // Concurrent callers may each read the row before the first write lands,
+      // so the bound is "a handful", not exactly one — but it is a constant,
+      // not the 80 requests that arrived.
+      expect(harness.store.mintFailureWrites).toBeGreaterThan(0);
+      expect(harness.store.mintFailureWrites).toBeLessThanOrEqual(8);
+      expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("not_mintable");
+    });
+  });
+
+  it("keeps a repeated denial visible after a healthy stretch superseded the last one", async () => {
+    await runDst({ name: "mint-denial-after-success", iterations: 20 }, async (sim) => {
+      const harness = makeMintHarness();
+      const result = await sim.runTasks([
+        {
+          name: "workload",
+          f: async (task) => {
+            const bearer = seedOrbWithBearer(task, harness, ORB, "stopped");
+            expect(errorType(await mint(task, harness, bearer))).toBe("not_mintable");
+
+            // The orb comes back and mints successfully: the failure is now
+            // older than `lastMintAt`, so `http/views.ts` hides it as
+            // superseded even though the row still carries the code.
+            const stopped = harness.store.orbSnapshot(ORB);
+            if (stopped === null) throw new Error("seed missing");
+            harness.store.seedOrb({ ...stopped, state: "running" });
+            await task.sleep(harness.mintDeps.constants.minMintIntervalMs + 1, "past the floor");
+            expect((await mint(task, harness, bearer)).isOk()).toBe(true);
+            const healthy = harness.store.orbSnapshot(ORB);
+            if (healthy === null) throw new Error("orb missing");
+            expect(healthy.mintFailureAt).toBeLessThan(healthy.lastMintAt ?? 0);
+
+            // It stops again. The denial-write dedup must not suppress this on
+            // the grounds that the row already says `not_mintable`: that status
+            // is invisible now, so the user would be shown nothing at all.
+            harness.store.seedOrb({ ...healthy, state: "stopped" });
+            await task.sleep(1, "a moment later");
+            expect(errorType(await mint(task, harness, bearer))).toBe("not_mintable");
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      const current = harness.store.orbSnapshot(ORB);
+      expect(current?.mintFailureCode).toBe("not_mintable");
+      // Visible again, which is the whole point of writing rather than deduping.
+      expect(current?.mintFailureAt).toBeGreaterThanOrEqual(current?.lastMintAt ?? 0);
+    });
+  });
+
   it("treats an unknown, mismatched, or fenced bearer as one indistinguishable denial", async () => {
     await runDst({ name: "mint-unauthorized", iterations: 20 }, async (sim) => {
       const harness = makeMintHarness();

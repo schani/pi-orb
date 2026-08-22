@@ -68,6 +68,35 @@ function expectNoDanglingMaterial(harness: {
 }
 
 /**
+ * Live private-key versions no row names. Harmless to the issuer — nothing can
+ * reach them — but they are private key material nobody will ever clean up, so
+ * the number of them a converging boot may leave behind is a property worth
+ * bounding rather than ignoring.
+ */
+function orphanedVersions(harness: {
+  keys: FakeSigningKeyStore;
+  secrets: FakeSecretStore;
+}): string[] {
+  const referenced = new Set(harness.keys.allRows().map((row) => row.secretVersion));
+  return harness.secrets
+    .liveVersions(SIGNING_KEY_SECRET_PROVIDER)
+    .filter((version) => !referenced.has(version));
+}
+
+/** The strict form, for scenarios with no injected failures: rows and material match exactly. */
+function expectMaterialMatchesRows(harness: {
+  keys: FakeSigningKeyStore;
+  secrets: FakeSecretStore;
+}): void {
+  expectNoDanglingMaterial(harness);
+  expect(orphanedVersions(harness), "private key material no row references").toEqual([]);
+}
+
+/** Every write the schema refused, as messages, for the "never attempted" assertions. */
+const refusalMessages = (keys: FakeSigningKeyStore): string[] =>
+  keys.refusals.map((error) => error.message);
+
+/**
  * Every published key id, as a relying party would read the served JWKS, or
  * null when the read itself failed — which under an injected store outage is
  * a legitimate answer rather than a defect.
@@ -224,6 +253,70 @@ describe("establishing the issuer's signing key (DST)", () => {
         expect(succeeded).toBeGreaterThan(0);
         theActiveKey(substrate.keys);
         expectNoDanglingMaterial(substrate);
+        // Under injected failures a boot can write material and then be unable
+        // to insert, read, or clean up — so orphans are possible. What must
+        // not be possible is a *stream* of them: each instance generates its
+        // key once and carries it across every convergence attempt, so the
+        // ceiling is one unreferenced version per instance rather than one per
+        // attempt per boot retry.
+        expect(
+          orphanedVersions(substrate).length,
+          `orphaned private key material: ${JSON.stringify(orphanedVersions(substrate))}`,
+        ).toBeLessThanOrEqual(instances.length);
+      },
+    );
+  });
+
+  it("refuses to declare a key established when its material cannot be read", async () => {
+    const log = new LogCapture();
+    await runDst(
+      { name: "signing-key-boot-unreadable-material", iterations: 15, logCapture: log },
+      async (sim) => {
+        const substrate = makeSubstrate();
+        const harness = makeSigningKeyHarness(substrate);
+        const result = await sim.runTasks([
+          {
+            name: "boot",
+            f: async (task: SimulationTask) => {
+              const established = (
+                await ensureActiveSigningKey(task, harness.deps, { now: task.wallNow() })
+              )._unsafeUnwrap();
+              // Whatever destroyed it — an operator killing a leaked key, a
+              // secret-store lifecycle rule — the row survives and still says
+              // `active`. A boot that trusted the row alone would report a
+              // healthy issuer that cannot sign a single token, and the only
+              // symptom would be a per-orb `signer_failure` much later.
+              expect(
+                (
+                  await substrate.secrets.destroySecret(
+                    task,
+                    SIGNING_KEY_SECRET_PROVIDER,
+                    established.secretVersion,
+                  )
+                ).isOk(),
+              ).toBe(true);
+
+              const rebooted = await ensureActiveSigningKey(task, harness.deps, {
+                now: task.wallNow(),
+              });
+              expect(rebooted.isErr()).toBe(true);
+              if (rebooted.isErr()) {
+                expect(rebooted.error.code).toBe("unavailable");
+                expect(rebooted.error.retryable).toBe(true);
+                expect(rebooted.error.message).not.toContain("fake-private-key");
+              }
+              // Nothing was papered over: the row is untouched, so a rotation
+              // still has the same predecessor to fence against.
+              expect(theActiveKey(substrate.keys).kid).toBe(established.kid);
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        // The durable operator-visible edge for "the issuer cannot sign", on
+        // the boot that noticed rather than on the first workload that asked.
+        const unusable = log.matching("issuer-key-unusable");
+        expect(unusable.length).toBe(1);
+        expect(unusable[0]).toContain(`kid=${theActiveKey(substrate.keys).kid}`);
       },
     );
   });
@@ -415,6 +508,88 @@ describe("rotating the issuer's signing key (DST)", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expectNoDanglingMaterial(substrate);
     });
+  });
+
+  it("never retires the key a concurrent rotation just activated", async () => {
+    const log = new LogCapture();
+    await runDst(
+      { name: "signing-key-rotation-race", iterations: 60, logCapture: log },
+      async (sim) => {
+        const substrate = makeSubstrate();
+        // Two operators rotating at once over one database and one secret
+        // store, each with its own key generator.
+        const alpha = makeSigningKeyHarness({ ...substrate, kidPrefix: "kid-a" });
+        const beta = makeSigningKeyHarness({ ...substrate, kidPrefix: "kid-b" });
+        const operators = [alpha, beta];
+
+        const seed = await sim.runTasks([
+          {
+            name: "seed",
+            f: async (task: SimulationTask) => {
+              const first = await ensureActiveSigningKey(task, alpha.deps, {
+                now: task.wallNow(),
+              });
+              expect(first.isOk()).toBe(true);
+            },
+          },
+        ]);
+        expect(seed.isOk(), seed.isErr() ? seed.error.message : "").toBe(true);
+        const original = theActiveKey(substrate.keys).kid;
+
+        const race = await sim.runTasks(
+          operators.map((harness, index) => ({
+            name: `rotate-${index}`,
+            f: async (task: SimulationTask) => {
+              // Deliberately no stagger. Both rotations must read the active
+              // key before either finishes, or the scenario degenerates into
+              // two *serial* rotations — which legitimately retire two keys and
+              // would prove nothing about the fence.
+              const rotated = await rotateSigningKey(task, harness.deps, { now: task.wallNow() });
+              expect(rotated.isOk(), JSON.stringify(rotated.isErr() ? rotated.error : null)).toBe(
+                true,
+              );
+            },
+          })),
+        );
+        expect(race.isOk(), race.isErr() ? race.error.message : "").toBe(true);
+
+        // Exactly one key signs, and it is not the one the rotations replaced.
+        const winner = theActiveKey(substrate.keys);
+        expect(winner.kid).not.toBe(original);
+        expect(substrate.keys.snapshot(original)?.state).toBe("retired");
+
+        // The whole point of the fence: the *original* key is the only thing
+        // either rotation may retire. A key a rotation just activated is fresh,
+        // published, and signing; retiring it would open a no-active-key window
+        // for nothing, and the escalation out of that window is the one write
+        // the schema forbids.
+        const retired = substrate.keys.allRows().filter((row) => row.state === "retired");
+        expect(retired.map((row) => row.kid)).toEqual([original]);
+        expect(log.matching("issuer-key-retired").length).toBe(1);
+
+        // Where two keys were published, the loser's stays published-but-unused
+        // exactly as the doc promises — never retired, never resurrected.
+        for (const row of substrate.keys.allRows()) {
+          if (row.kid === original || row.kid === winner.kid) continue;
+          expect(row.state, `${row.kid} should still be awaiting adoption`).toBe("pending");
+        }
+
+        // Nothing ever *attempted* a row shape the schema forbids outright —
+        // above all `retired` → `active`, the escalation the old convergence
+        // loop could reach after retiring a fresh key. Recovering from your own
+        // impossible write is not the same as never making it.
+        //
+        // A "would be a second active key" refusal is deliberately *not*
+        // forbidden here: two rotations that each read no active key and then
+        // race to activate are exactly what the unique-active index exists to
+        // arbitrate, the same way two booting instances race their inserts. The
+        // loser re-reads and adopts.
+        expect(
+          refusalMessages(substrate.keys).filter((message) => /must be (set|null)/.test(message)),
+        ).toEqual([]);
+        expectMaterialMatchesRows(substrate);
+      },
+    );
   });
 
   it("survives arbitrary write failures during rotation with one active key", async () => {
@@ -619,6 +794,79 @@ describe("minting across a key rotation (DST)", () => {
                 theActiveKey(substrate.keys).kid,
               );
             }
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
+  it("stops a warm signer within the material TTL once its version is destroyed", async () => {
+    await runDst({ name: "signing-key-material-revoked-warm", iterations: 20 }, async (sim) => {
+      const substrate = makeSubstrate();
+      const ttlMs = 5_000;
+      const keyHarness = makeSigningKeyHarness({
+        ...substrate,
+        issuerConstants: { signingKeyMaterialTtlMs: ttlMs },
+      });
+      const mintHarness = makeMintHarness({ issuerConstants: { minMintIntervalMs: 0 } });
+      const signer = new KeyStoreBackedTokenSigner(keyHarness.deps);
+      const mintDeps: MintDeps = { ...mintHarness.mintDeps, signer };
+
+      const result = await sim.runTasks([
+        {
+          name: "workload",
+          f: async (task) => {
+            const bearer = seedOrbWithBearer(task, mintHarness, ORB, "running");
+            const active = (
+              await ensureActiveSigningKey(task, keyHarness.deps, { now: task.wallNow() })
+            )._unsafeUnwrap();
+
+            // Warm the cache first. This is the case the cold-start scenario
+            // above cannot reach: destroying the version leaves the row
+            // untouched, so a signer that already holds the material has
+            // nothing to notice unless it revalidates.
+            const warm = await mintIdToken(task, mintDeps, {
+              tokenHash: bearer,
+              audience: AUDIENCE,
+            });
+            expect(warm.isOk(), JSON.stringify(warm.isErr() ? warm.error : null)).toBe(true);
+            expect(signer.calls).toBe(1);
+
+            expect(
+              (
+                await substrate.secrets.destroySecret(
+                  task,
+                  SIGNING_KEY_SECRET_PROVIDER,
+                  active.secretVersion,
+                )
+              ).isOk(),
+            ).toBe(true);
+
+            // The accepted staleness: inside the window the material is still
+            // reused, which is the price of not reading a secret per token.
+            // The 100 ms margins keep the assertions about the TTL rather than
+            // about how many bounded store latencies the schedule chose to put
+            // on either side of it.
+            await task.sleep(ttlMs - 100, "inside the material TTL");
+            const stale = await mintIdToken(task, mintDeps, {
+              tokenHash: bearer,
+              audience: AUDIENCE,
+            });
+            expect(stale.isOk()).toBe(true);
+
+            // Past it, revocation takes effect and stays in effect.
+            await task.sleep(200, "past the material TTL");
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const refused = await mintIdToken(task, mintDeps, {
+                tokenHash: bearer,
+                audience: AUDIENCE,
+              });
+              expect(refused.isErr() && refused.error.type).toBe("retryable");
+              await task.sleep(1, "again");
+            }
+            expect(signer.calls).toBe(2);
+            expect(mintHarness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("signer_failure");
           },
         },
       ]);

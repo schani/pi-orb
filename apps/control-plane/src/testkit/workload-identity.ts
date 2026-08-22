@@ -23,7 +23,7 @@ const unavailable = (message: string): StoreError => ({
 });
 
 /** A shape the schema refuses outright, so no retry can repair it. */
-const corruption = (message: string): StoreError => ({
+const corruptionError = (message: string): StoreError => ({
   type: "store_error",
   code: "corruption",
   message,
@@ -48,11 +48,45 @@ function accessGate<T>(
 }
 
 /**
+ * Migration 011's `oidc_signing_keys_timestamps_complete`, restated: a row
+ * carries `activated_at` exactly when it is `active` or `retired`, and
+ * `retired_at` exactly when it is `retired`. PostgreSQL refuses every other
+ * shape as a check violation, which its client reports as `corruption`.
+ *
+ * The fake has to refuse them too, or a scenario proves transitions the real
+ * store would reject: retiring a key that never signed, activating one without
+ * recording when it started signing, or CASing a retired row back to `active`
+ * while its `retired_at` still stands.
+ */
+function timestampsViolation(row: SigningKeyRow): string | null {
+  const activated = row.state === "active" || row.state === "retired";
+  if ((row.activatedAt !== null) !== activated) {
+    return `signing key ${row.kid}: activatedAt must be ${activated ? "set" : "null"} in state ${row.state}`;
+  }
+  if ((row.retiredAt !== null) !== (row.state === "retired")) {
+    return `signing key ${row.kid}: retiredAt must be ${
+      row.state === "retired" ? "set" : "null"
+    } in state ${row.state}`;
+  }
+  return null;
+}
+
+/**
  * Deterministic in-memory `SigningKeyStore` with the semantics the PostgreSQL
- * adapter must implement (docs/workload-identity.md), including the two shapes
- * its schema refuses: a duplicate `kid` and a second active key.
+ * adapter must implement (docs/workload-identity.md): the two shapes the schema
+ * refuses outright — a duplicate `kid` and a second active key — plus the
+ * timestamp completeness check above.
  */
 export class FakeSigningKeyStore implements SigningKeyStore {
+  /**
+   * Every write the schema refused, in order. A scenario asserts on these
+   * because "the store said no" is the wrong outcome even when the caller
+   * recovers: a `corruption` here means the product attempted a row
+   * PostgreSQL would have rejected, and recovering from your own impossible
+   * write is not the same as never attempting it.
+   */
+  readonly refusals: StoreError[] = [];
+
   private readonly rows = new Map<string, SigningKeyRow>();
 
   /** Simulates leftovers of another instance: an unfenced direct write. */
@@ -89,11 +123,13 @@ export class FakeSigningKeyStore implements SigningKeyStore {
   ): ResultAsync<SigningKeyRow, StoreError> {
     return accessGate(task, FAILPOINTS.signingKeyWrite, "insert signing key", () => {
       if (this.rows.has(row.kid)) {
-        return { refused: corruption(`duplicate signing key ${row.kid}`) };
+        return { refused: this.refuse(`duplicate signing key ${row.kid}`) };
       }
       if (row.state === "active" && this.activeKid(row.kid) !== null) {
-        return { refused: corruption(`signing key ${row.kid} would be a second active key`) };
+        return { refused: this.refuse(`signing key ${row.kid} would be a second active key`) };
       }
+      const violation = timestampsViolation(row);
+      if (violation !== null) return { refused: this.refuse(violation) };
       this.rows.set(row.kid, row);
       return { refused: null, row };
     }).andThen((outcome) =>
@@ -111,7 +147,7 @@ export class FakeSigningKeyStore implements SigningKeyStore {
         return { refused: { type: "signing_key_conflict" as const } };
       }
       if (params.state === "active" && this.activeKid(params.kid) !== null) {
-        return { refused: corruption(`signing key ${params.kid} would be a second active key`) };
+        return { refused: this.refuse(`signing key ${params.kid} would be a second active key`) };
       }
       const updated: SigningKeyRow = {
         ...current,
@@ -120,6 +156,10 @@ export class FakeSigningKeyStore implements SigningKeyStore {
         ...(params.activatedAt !== undefined ? { activatedAt: params.activatedAt } : {}),
         ...(params.retiredAt !== undefined ? { retiredAt: params.retiredAt } : {}),
       };
+      // The CAS updates only the timestamps it was given, exactly like the SQL
+      // `UPDATE`, so the check runs over the row the write would leave behind.
+      const violation = timestampsViolation(updated);
+      if (violation !== null) return { refused: this.refuse(violation) };
       this.rows.set(params.kid, updated);
       return { refused: null, row: updated };
     }).andThen((outcome) =>
@@ -127,6 +167,12 @@ export class FakeSigningKeyStore implements SigningKeyStore {
         ? errAsync<SigningKeyRow, StoreError | SigningKeyConflict>(outcome.refused)
         : okAsync(outcome.row),
     );
+  }
+
+  private refuse(message: string): StoreError {
+    const error = corruptionError(message);
+    this.refusals.push(error);
+    return error;
   }
 
   /** The active key other than `exceptKid`, which is the row being written. */

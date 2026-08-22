@@ -21,3 +21,12 @@ output "ops_url" {
 output "issuer_url" {
   value = google_cloud_run_v2_service.issuer.uri
 }
+
+# The zone orb VMs are actually created in — `var.zone`, which is its own
+# variable and not derivable from `var.region`. The live smokes look for an
+# orb's instance by zone, so they read it back from here instead of guessing
+# `<region>-a`: a guess that is wrong finds no instances and fails a release for
+# a reason that has nothing to do with the release.
+output "zone" {
+  value = var.zone
+}

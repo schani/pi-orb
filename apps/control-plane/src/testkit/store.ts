@@ -76,6 +76,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly invariantOperations = new Set<InvariantOperation>();
   /** Gate the next `noteOrbMessageDelivery` until this predicate holds. */
   private noteDeliveryHold: (() => boolean) | null = null;
+  /**
+   * How many `recordMintFailure` calls reached the store. The denial path
+   * deduplicates its status writes against the code already on the row
+   * (docs/workload-identity.md), and "how many UPDATEs did a hostile caller
+   * provoke?" is a count, not something a row snapshot can answer.
+   */
+  mintFailureWrites = 0;
 
   private readonly maxLatencyMs: number;
 
@@ -1243,6 +1250,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<void, StoreError> {
     // Same latest-wins, CAS-free semantics as the pg adapter
     // (docs/workload-identity.md).
+    this.mintFailureWrites += 1;
     return this.access(task, FAILPOINTS.storeWrite, "record mint failure", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined) return;

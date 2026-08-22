@@ -3,8 +3,9 @@
 Project `playground-dev-6ae7`, region `us-central1`, zone `us-central1-a`.
 Services: `pi-orb` (browser, IAP: @heyglide.com), `pi-orb-runtime-api`
 (internal broker), `pi-orb-ops` (tooling; invoker-IAM: pi-orb-debug SA),
-`pi-orb-issuer` (public OIDC discovery + JWKS, unauthenticated by design; its
-own least-privilege service account).
+`pi-orb-issuer` (public OIDC discovery + JWKS, unauthenticated by design; its own
+service account, which can read no signing key and no brokered credential — but
+does share the one read/write database credential, `docs/deployment.md`).
 
 ## Deploy workflow
 
@@ -101,11 +102,20 @@ administrator step**, deliberately outside the recurring plan (same rationale as
     PI_ORB_TRUSTED_PROJECT_ID=<pi-orb project UUID> \
       ./infra/bootstrap-pi-orb-oidc.sh
 
-It is idempotent, deletes nothing, and prints the `PI_ORB_SMOKE_WIF_*` values the
-federation smoke needs. It refuses to run without an identity scope: the audience
-is not an authorization boundary, since any orb of this deployment can request
-any audience. It also refuses to repoint an existing provider at a different
-issuer — that is a trust migration, not an edit.
+It is idempotent, deletes no resource, and prints the `PI_ORB_SMOKE_WIF_*` values
+the federation smoke needs. It refuses to run without an identity scope: the
+audience is not an authorization boundary, since any orb of this deployment can
+request any audience. It also refuses to repoint an existing provider at a
+different issuer — that is a trust migration, not an edit.
+
+Re-running it with a *narrower* scope actually narrows. `add-iam-policy-binding`
+is additive, so the script reconciles the two bindings it owns — the pool's
+`roles/iam.workloadIdentityUser` admissions on its test account, and that
+account's project role — revoking a previous, broader grant (including an
+`ALLOW_ANY_ORB=1` wildcard) instead of leaving it standing behind a narrow
+`admitted:` line. Nothing else in the project is read or touched, and `--dry-run`
+lists every planned revocation under `revoking:`. Review that line: it is the
+only place a surviving over-broad grant becomes visible.
 
 `release.sh` then runs `smoke-workload-identity.sh` after `smoke.sh`. It always
 creates two disposable orbs (the second exists so a *stopped* orb's refusal can

@@ -3,6 +3,7 @@ import {
   type HistoryRecord,
   type MessageInputBlock,
   type OrbHistoryView,
+  type OrbIdentityStatus,
   type OrbMessageView,
   type OrbView,
   type RuntimeEvent,
@@ -371,6 +372,30 @@ function CopyCodeButton({ code }: { code: string }) {
     >
       {copyStatus === "copied" ? "copied" : copyStatus === "failed" ? "copy failed" : "copy"}
     </button>
+  );
+}
+
+interface IdentityBannerProps {
+  readonly identity?: OrbIdentityStatus | undefined;
+}
+
+/**
+ * The orb's last recorded workload-identity mint failure
+ * (docs/workload-identity.md). Deliberately phrased as a report about an
+ * attempt that happened, not a claim about the orb's present ability to mint:
+ * the durable columns are never cleared, and only a *later successful mint*
+ * supersedes them. Most orbs never call `pi-orb id-token` at all, so a denial
+ * recorded during an ordinary stop window would otherwise still be on screen,
+ * as a present-tense lie, after the orb restarted perfectly healthy. The
+ * failure code and the timestamp are what make it actionable — they tell the
+ * user whether the attempt predates whatever they last changed.
+ */
+export function IdentityBanner({ identity }: IdentityBannerProps) {
+  if (identity === undefined) return null;
+  return (
+    <div className="banner banner-error">
+      Last workload-identity mint failed: {identity.failureCode} (at {identity.failureAt})
+    </div>
   );
 }
 
@@ -939,16 +964,11 @@ export function OrbPage({ orbId }: { orbId: string }) {
             <span className="muted"> (expires {orb.actionRequired.expiresAt})</span>
           </div>
         )}
-        {orb?.identity !== undefined && (
-          // The latest workload-identity mint failed and nothing has minted
-          // since (docs/workload-identity.md): a silent refusal would leave the
-          // user with code in the orb that cannot get cloud credentials and no
-          // way to find out why.
-          <div className="banner banner-error">
-            Workload identity unavailable: {orb.identity.failureCode} (since{" "}
-            {orb.identity.failureAt})
-          </div>
-        )}
+        {/*
+         * A silent refusal would leave the user with code in the orb that
+         * cannot get cloud credentials and no way to find out why.
+         */}
+        <IdentityBanner identity={orb?.identity} />
         <OrbFailureBanner message={orb?.lastError} />
         {orbError !== null && (
           <div className="banner banner-error">{describeApiError(orbError)}</div>

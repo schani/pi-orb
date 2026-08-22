@@ -8,7 +8,10 @@
 > the public `pi-orb-issuer` Cloud Run service, `PI_ORB_OIDC_ISSUER_URL` on both roles that need
 > it, the signing-key parent secret, the separately invoked federation bootstrap
 > (`infra/bootstrap-pi-orb-oidc.sh`), the release smoke (`infra/smoke-workload-identity.sh`), and
-> the integration recipes (`docs/workload-identity-recipes.md`).
+> the integration recipes (`docs/workload-identity-recipes.md`). **Hardened 2026-08-22** after a
+> review of all four stages: see "Issuer hardening (2026-08-22)" below for the JWKS first-deploy
+> window, the signing-material revocation window, the staged operator rotation, the fenced
+> retirement, and the boot hook that no longer gates `listen`.
 >
 > **Remaining release gate:** the live GCP federation validation. Nothing in stage 4 has been
 > applied to a real project or exchanged through a real STS; the deterministic-URL assumption, the
@@ -205,6 +208,16 @@ budget with the `gh` helper's 250 ms/2 s backoff, honoring `Retry-After` but nev
 that budget: a `Retry-After` longer than the whole budget is an answer, not an instruction to
 hang. `not_mintable`, `invalid_request`, and `internal` are returned on the first response.
 
+Hardened 2026-08-22: `HttpIdTokenEndpoint` bounds each mint request with
+`AbortSignal.timeout(MINT_REQUEST_TIMEOUT_MS)` — 3 s, comfortably under the CLI's 10-second budget,
+so one silent attempt still leaves room for the retry a restarting control plane deserves. Without
+it a control plane that accepts the connection and never answers hangs the CLI past its own budget,
+and an executable credential source that hangs is worse than one that fails: the SDK invoking
+`pi-orb id-token` inherits the hang. The abort surfaces as the ordinary typed `retryable` result,
+never a rejected promise, on both the request leg and a stall mid-body — and only when the body read
+actually failed, so a response that arrived complete is never discarded by a deadline firing during
+parsing.
+
 ## Orb integration
 
 ### Request path
@@ -309,10 +322,15 @@ identity can do belongs in relying-party policy. One orb must never mint another
 - Support overlapping key rotation: publish the new public key before signing with it, retain old
   public keys for at least the maximum JWT lifetime plus verifier cache/clock-skew allowance, then
   remove them. Rotation must not require restarting orbs.
-- Discovery and JWKS are public, cacheable, and contain no secret. Token-mint responses are
-  `no-store`.
+- Discovery is public and cacheable. JWKS is cacheable only when it has something to say: a key set
+  that is empty or unreadable is answered uncached, never cached as an authoritative "no keys"
+  (2026-08-22, below). Neither document contains a secret. Token-mint responses are `no-store`.
 - If signing material is unavailable, fail closed with a typed retryable error. Never fall back to
-  an unsigned token, another deployment's key, or a long-lived static token.
+  an unsigned token, another deployment's key, or a long-lived static token. "Available" means
+  *readable*, not merely referenced by a row: a boot that establishes a key reads its material once
+  before reporting success, and a signer reusing material it read earlier revalidates it on a
+  bounded interval, so destroying a secret version stops signing within a known window rather than
+  whenever the process happens to restart (2026-08-22, below).
 - The issuer URL is part of the security identity. Changing it is a breaking trust migration and
   must not occur implicitly from request host headers.
 
@@ -334,7 +352,13 @@ The implementation must ship reviewed recipes and helpers for at least:
 ### AWS
 
 - IAM OIDC provider and role trust policy matching exact issuer/audience;
-- a subject/custom-claim policy scoped to the intended project/orb;
+- a subject-scoped policy for one-orb grants. Amended 2026-08-22: the original requirement of a
+  "subject/custom-claim policy scoped to the intended project/orb" is not expressible on AWS —
+  role trust policies for a self-registered OIDC issuer can condition only on a fixed key
+  allowlist (`aud`, `sub`, and a few others), never on custom claims like `project_id` or
+  `token_use`, so a one-orb grant conditions on `sub` (the orb ID) plus `aud`, and a project-wide
+  grant needs an explicit workaround (`docs/workload-identity-recipes.md` documents the options
+  and their caveats);
 - a mode-0600 temporary web-identity token file and short role session;
 - cleanup and refresh instructions that do not put the JWT in shell history.
 
@@ -378,6 +402,30 @@ recording tokens.
 - Persist the latest mint failure per orb as durable columns: a typed denial/error code and a
   timestamp, nothing else. The write must not bump the lifecycle state version, so failure status
   never conflicts with lifecycle CAS. Raw audience values do not enter this status.
+
+  The columns are never cleared, and the only thing that retires a failure is a *later successful
+  mint*, decided on read (`mintFailureAt >= lastMintAt`). **Decided 2026-08-22: the status is
+  therefore a historical report, not a statement about the orb's present ability to mint, and every
+  consumer must present it in the past tense.** Most orbs never call `pi-orb id-token` at all, so a
+  `not_mintable` denial recorded during an ordinary stop window is never superseded: the orb
+  restarts healthy and the denial is still the latest recorded outcome. A present-tense banner
+  ("Workload identity unavailable") would then be a standing lie on a perfectly good orb. Rejected:
+  clearing the columns on start or on a lifecycle transition — that puts identity status back on the
+  lifecycle CAS path, which is exactly what the no-clearing-write design buys. The product renders
+  it as "Last workload-identity mint failed: `<code>` (at `<time>`)"; the code and the timestamp are
+  what make it actionable, since they let the user judge whether the attempt predates whatever they
+  last changed.
+
+  **Denial status writes are deduplicated against the code already on the orb row (decided
+  2026-08-22).** `not_mintable` and `invalid_request` are decided *before* the rate-limit slot is
+  claimed, so without dedup a caller holding a stopped orb's bearer drove one `UPDATE` per request
+  against no floor at all. The consequence is a deliberately stale `mintFailureAt`: through a run of
+  identical denials it stamps the first request, not the latest, which is why the product surfaces
+  this as a *last failure* rather than a *latest timestamp*. The dedup is conditioned on the
+  existing status still being *visible*: `http/views.ts` hides a failure older than `lastMintAt`, so
+  a repeat denial after a healthy stretch writes again rather than deduplicating against a status
+  the user can no longer see. Without that condition an orb that starts failing again after a
+  successful mint would go silent permanently.
 - Never persist the JWT, runtime bearer, private key, or downstream cloud credential.
 - The CLI reports actionable failures to the orb user. A dashboard/API identity status must expose
   issuer readiness and the latest non-secret mint failure for that orb; a silent refusal is not
@@ -458,7 +506,7 @@ Reconciled 2026-08-21 against what stage 4 leaves true:
 | 3 | **Met except live.** Wrong audience, wrong issuer, tampered signature, stopped-orb `403 not_mintable`, discarded-incarnation `401`, and an out-of-range TTL are all covered in the E2E suite and the DST scenarios; the smoke re-proves wrong-audience (at STS), stopped-orb 403, and unknown-bearer 401 on real infrastructure. |
 | 4 | **Met, and the deployment tier preserves it.** Private keys exist only as Secret Manager versions under `pi-orb-credential-oidc-signing-key`; the public issuer service runs as its own service account with no access to them. The smoke moves tokens through pipes and mode-0600 files in a mode-0700 directory removed on exit, and prints claims, never tokens. |
 | 5 | **Met.** `OrbView.identity` plus the orb page banner (stage 2B). |
-| 6 | **Met.** No provider knows about OIDC; the four launch inputs were already injected before stage 1. |
+| 6 | **Met for provider unawareness, partial for test parity.** No provider knows about OIDC; the four launch inputs were already injected before stage 1. But the identity E2E legs go through `docker exec`, so they run only on the Docker backend — the process backend has no exec seam (its CLI path is covered by unit tests only), and the GCE composition is exercised solely by the unrun live smoke. "All supported host providers pass the same contract tests" is not yet demonstrated for the identity path (noted 2026-08-22). |
 | 7 | **Met at the last full run.** Re-run both before the live gate. |
 
 ## Implementation plan
@@ -525,8 +573,9 @@ perturbing the immutable host-spec fingerprint (`docs/compute-replacement.md`).
   version nobody references, and adopts the winner's key. It never destroys a version whose row it
   cannot prove absent, because an unreferenced version is inert while destroying a referenced one
   breaks the issuer permanently.
-- Rotation is an ops action, `rotateSigningKey`, in three durable steps (decided and implemented
-  2026-08-21). **Publish:** insert the new key as `pending`, so JWKS serves it beside the still-active
+- Rotation is an ops action in three durable steps (decided and implemented 2026-08-21; split into
+  two operator-invoked stages with an enforced soak window and fenced retirement on 2026-08-22, see
+  "Issuer hardening" above). **Publish:** insert the new key as `pending`, so JWKS serves it beside the still-active
   old key and verifiers can refresh their cache before anything signs with it. **Retire:** CAS the
   old key `active` → `retired`; it stays published for the overlap window, so tokens it already
   signed keep verifying. **Activate:** CAS the new key `pending` → `active`. The last two cannot be
@@ -596,7 +645,9 @@ Stage 2B landed 2026-08-21 (`http/runtime-routes.ts`, `http/issuer-routes.ts`, `
   token endpoint to advertise), `subject_types_supported: ["public"]`,
   `id_token_signing_alg_values_supported: ["RS256"]`, and the claim list above. Both documents are
   served `public, max-age=300`: five minutes is the same verifier-staleness allowance
-  `jwksOverlapMs` already budgets for on the publishing side. The two document shapes stay in the
+  `jwksOverlapMs` already budgets for on the publishing side. Amended 2026-08-22: that holds for the
+  discovery document and for a JWKS response that has keys in it; an empty or unreadable key set is
+  answered uncached (see "Issuer hardening" above). The two document shapes stay in the
   control plane — one producer, and the consumers are external verifiers reading OIDC Discovery
   and RFC 7517.
 - **The boot key hook never fails the boot.** `runtime`/`all` run `ensureActiveSigningKey` with a
@@ -610,6 +661,101 @@ The per-orb identity status is `OrbView.identity` (`{failureCode, failureAt}`, a
 nothing to report). Currency is decided on read: the failure is exposed only while
 `mintFailureAt >= lastMintAt`, so a later successful mint supersedes it with no clearing write and
 the status stays off the lifecycle CAS path. The orb page renders it as a compact banner.
+
+### Issuer hardening (2026-08-22)
+
+A review of stages 1–4 found seven defects in the issuer's key handling and its public surface. The
+decisions taken while fixing them, and the alternatives rejected:
+
+- **JWKS answers 503, never 500, and never an empty key set.** An empty `oidc_signing_keys` table
+  served `200 {"keys":[]}` with `public, max-age=300`, so any verifier or cloud STS that asked
+  during the window before the boot hook established a key cached *emptiness* for five minutes and
+  rejected the deployment's very first minted tokens. Zero keys now answer an uncached
+  `503 {"error":"unavailable","message":"no signing keys published yet"}`. And a not-yet-migrated
+  table surfaces as SQLSTATE 42P01 → `StoreError` code `invariant` → the 500 that
+  `docs/lifecycle.md` prescribes — but `PI_ORB_ROLE=issuer` is the one role that never runs
+  migrations, so this is a real race against the browser role's migration, and 500 tells the
+  verifier not to come back. On this route only, every store failure — `invariant` included —
+  answers the same uncached `503 unavailable`. The invariant→500 rule (from
+  `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`) exists so *internal* loops do
+  not retry our own deterministic bugs; it stands everywhere the retrier is ours, and is
+  deliberately not applied where the caller is an external verifier that cannot act on the
+  distinction and where the misclassified case is genuinely retryable. Both refusals keep the
+  fixed-string body: a raw store message on the deployment's one public unauthenticated route would
+  hand SQL fragments to the internet. The discovery document is unchanged — static configuration,
+  still `200` and `public, max-age=300` even before the first key exists, because a verifier may
+  pin the issuer long before then.
+
+- **Cached signing material expires.** `SigningKeyMaterialCache` keyed only on (`kid`,
+  `secretVersion`), which makes a rotation a cache miss but makes *revocation* invisible:
+  destroying the active key's secret version leaves the row untouched, so a warm signer kept
+  signing with destroyed material for the life of the process. Since destroying the version is
+  precisely how an operator kills a leaked key without waiting for a rotation to converge, that was
+  a revocation with no window at all. Material is now revalidated after
+  `IssuerConstants.signingKeyMaterialTtlMs` (60 s) on the injected monotonic clock, which is the
+  revocation window for that case. Rejected: reading the secret per signature — the cache exists
+  because the mint path is the hot path, and a bounded window is the trade the design already makes
+  for the row read.
+
+- **Rotation is staged, and is reachable.** `rotateSigningKey` activated microseconds after
+  publishing, so the `pending` state existed but the verifier-cache overlap it exists for was never
+  granted; and it had no production caller at all, so an operator could not rotate a leaked key.
+  The operator flow is now two requests on the private browser/`ops` API:
+
+  ```text
+  POST /api/v1/issuer/signing-keys/publish     → the new key appears in JWKS, still not signing
+  (wait at least the JWKS max-age — the activate stage enforces it)
+  POST /api/v1/issuer/signing-keys/activate    → retire the old key, activate the new one
+  ```
+
+  `activate` refuses with a non-retryable `409 conflict` while the newest published key is younger
+  than `IssuerConstants.rotationSoakMs` (10 minutes — twice the JWKS `max-age`, so even a verifier
+  that fetched the key set one instant before publication has re-fetched). `{"force": true}`
+  overrides it for the leaked-key emergency, where a few tokens rejected by a stale verifier cost
+  less than one more minute of signing with a key someone else holds. The routes are registered
+  only where key management is wired in: the public `issuer` role publishes JWKS and must not be
+  able to change what it publishes, and the `runtime` role is the credential broker every orb
+  depends on. `rotateSigningKey` survives as the unstaged form the recovery scenarios and the
+  composition tests drive; it takes no soak because it publishes the key itself.
+
+- **Rotation retires only the key it started from.** The convergence loop retired *whatever was
+  active when the loop got around to it*, so two rotations converging at once let the slower one
+  retire the key the faster one had just activated — opening a no-active-key window for nothing,
+  and then escalating out of it by CASing a retired row back to `active`, which migration 011's
+  `oidc_signing_keys_timestamps_complete` refuses outright. Retirement is now fenced to the exact
+  (`kid`, `rowVersion`) that was active when the rotation started, pinned *before* the publish step
+  rather than after it (publishing is the slow part and therefore the window a concurrent rotation
+  finishes in). When the fence conflicts, the rotation re-reads and adopts the other rotation's
+  outcome, leaving its own key published-but-unused — exactly what this document already promised
+  the loser's key would be. A key that has left the signing set never re-enters it: the schema
+  refuses the resurrection, and so does the design, because a resurrected key would start signing
+  without the publish overlap that made it safe.
+
+- **Establishing a key means proving it can sign.** `ensureActiveSigningKey` returned an active row
+  without reading its material, so an issuer whose secret version had been destroyed booted
+  "healthy" and the only symptom was a per-orb `signer_failure` on the first workload that asked
+  for a token. It now reads the material once before declaring success and logs a durable
+  `issuer-key-unusable` edge when it cannot. Separately, the no-key path generated a fresh key and
+  wrote a fresh private-key secret version on *every* convergence attempt, so a store that kept
+  refusing left up to attempts × boot-retries orphaned private keys behind; the generated key is
+  now carried across attempts, and the loser's version is destroyed on every exit where its row is
+  provably absent and another key holds the active slot — not only on the one branch that used to
+  check.
+
+- **The boot key hook never gates `listen`.** It ran awaited *before* `app.listen`, with raw
+  `setTimeout`/`Date.now()` retries. A database that refuses answers fast, but one that hangs — a
+  saturated pool, a partition that drops packets instead of resetting — answers never, and the
+  runtime service is the credential broker every running orb depends on. The hook now runs after
+  the socket is open, fire-and-forget, on the task's clock, and reports giving up as a durable
+  `lifecycle:` `issuer-key-unavailable` event rather than free-text stderr, because "why could this
+  instance not sign?" is asked long afterwards and has to be queryable beside the key events the
+  ensure itself emits. Identity is one feature; listening is the whole service.
+
+- **The in-memory signing-key store enforces the schema's timestamp check.** Migration 011 refuses
+  `retired` → `active` while `retired_at` stands, activation without an `activated_at`, and
+  retirement of a key that never activated; the fake accepted all three, which is why the rotation
+  defect above could hide behind green tests. Both drivers now prove those three refusals in
+  `signingKeyStoreContractTests`.
 
 ### Stage 3 — CLI, image, end-to-end
 
@@ -690,7 +836,11 @@ been applied to GCP. Six decisions taken while implementing it:
   read exactly one secret (the database URL, for the *public* JWKs in `oidc_signing_keys`) and
   write logs. The signing-key grants name only the control-plane account. Splitting `browser`/`ops`
   off that account is separate pre-existing work; what stage 4 required was that "unauthenticated"
-  and "can read private keys" never be the same identity.
+  and "can read private keys" never be the same identity. That separation is a Secret Manager
+  boundary and stops there (POC limitation, recorded 2026-08-22): the database URL it reads is the
+  deployment's single full read/write application credential, so at the PostgreSQL layer the public
+  issuer holds the same rights as every other service — only its route allowlist keeps it to two
+  public documents. A read-only PostgreSQL role for the issuer is tracked in `TODO.md`.
 - **The parent secret is `pi-orb-credential-oidc-signing-key`**, not the prettier
   `pi-orb-oidc-signing-key`. `GsmSecretStore` addresses `<prefix>-<provider>` with the prefix
   defaulting to `pi-orb-credential`, and `domain/signing-keys.ts` writes under provider

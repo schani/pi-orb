@@ -110,8 +110,23 @@ done
 : "${PI_ORB_GCP_PROJECT:?required}"
 : "${PI_ORB_GCE_ZONE:?required}"
 
-export PI_ORB_OPS_URL=${PI_ORB_OPS_URL:-$(cd "$DIR" && tofu output -raw ops_url)}
-ISSUER_URL=${PI_ORB_ISSUER_URL:-$(cd "$DIR" && tofu output -raw issuer_url)}
+# `set -e` makes a failing command substitution abort the script *silently* at
+# the assignment, before the diagnostic that explains it can run — so every
+# assignment whose failure the operator must understand uses the `if !` form.
+if [ -z "${PI_ORB_OPS_URL:-}" ]; then
+  if ! PI_ORB_OPS_URL=$(cd "$DIR" && tofu output -raw ops_url); then
+    fail "preflight" "no ops URL (set PI_ORB_OPS_URL, or make 'tofu output -raw ops_url' readable)"
+  fi
+fi
+export PI_ORB_OPS_URL
+[ -n "$PI_ORB_OPS_URL" ] || fail "preflight" "the ops URL is empty"
+
+ISSUER_URL=${PI_ORB_ISSUER_URL:-}
+if [ -z "$ISSUER_URL" ]; then
+  if ! ISSUER_URL=$(cd "$DIR" && tofu output -raw issuer_url); then
+    fail "preflight" "no issuer URL (set PI_ORB_ISSUER_URL, or make 'tofu output -raw issuer_url' readable)"
+  fi
+fi
 [ -n "$ISSUER_URL" ] || fail "preflight" "no issuer URL (tofu output issuer_url)"
 
 WIF_AUDIENCE=${PI_ORB_SMOKE_WIF_AUDIENCE:-}
@@ -126,7 +141,9 @@ fi
 AUDIENCE=${WIF_AUDIENCE:-urn:pi-orb-smoke:identity}
 WRONG_AUDIENCE="urn:pi-orb-smoke:not-this-provider"
 
-WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pi-orb-wif-smoke.XXXXXX")
+if ! WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pi-orb-wif-smoke.XXXXXX"); then
+  fail "preflight" "could not create a working directory under ${TMPDIR:-/tmp}"
+fi
 chmod 700 "$WORK_DIR"
 
 # --- JSON access ------------------------------------------------------------
@@ -175,7 +192,7 @@ cat > "$WORK_DIR/verify.js" <<'VERIFY_JS'
 const { createPublicKey, createVerify } = require("node:crypto");
 
 // Run as a file (`node verify.js …`), so the arguments start after argv[1].
-const [issuer, audience, orbId, incarnation] = process.argv.slice(2);
+const [issuer, audience, projectId, orbId, incarnation] = process.argv.slice(2);
 const fail = (message) => {
   process.stderr.write(`verify: ${message}\n`);
   process.exit(1);
@@ -231,8 +248,11 @@ const getJson = async (url) => {
 
   // 3. The claim rules a relying party owns. `iss`/`aud` exactly; a live
   //    lifetime; the workload token class; and the immutable pi-orb identity
-  //    the caller could not have chosen — including the compute incarnation,
-  //    cross-checked here against the GCE instance the token was minted from.
+  //    the caller could not have chosen — project, orb, and the compute
+  //    incarnation, each cross-checked against what the control plane and GCE
+  //    say the minting orb actually is. Asserting a claim is merely *present*
+  //    would pass for any orb of the deployment, which is precisely the
+  //    authorization mistake the recipes warn about.
   const now = Math.floor(Date.now() / 1000);
   const skew = 60;
   if (claims.iss !== issuer) fail(`iss ${claims.iss} != ${issuer}`);
@@ -246,7 +266,7 @@ const getJson = async (url) => {
   if (String(claims.host_incarnation) !== incarnation) {
     fail(`host_incarnation ${claims.host_incarnation} != live incarnation ${incarnation}`);
   }
-  if (!claims.project_id) fail("no project_id claim");
+  if (claims.project_id !== projectId) fail(`project_id ${claims.project_id} != ${projectId}`);
   if (!claims.jti) fail("no jti claim");
   if (claims.user_id || claims.email) fail("the token carries a user identity it must not have");
 
@@ -266,6 +286,12 @@ VERIFY_JS
 # Remote probe, run *inside another live orb* because the runtime service has
 # internal ingress and is unreachable from this machine. The bearer under test
 # arrives on stdin; the mint URL is its only argument. Prints "<status> <code>".
+#
+# The mint route's error envelope is `{"error":"not_mintable"}` — the code *is*
+# the `error` field, a bare string (packages/protocol/src/workload-identity.ts).
+# It is not the `{"error":{"code":...}}` shape the browser API uses, and reading
+# `.error.code` here silently printed an empty code for every refusal, so the
+# step-6 assertion could never match and the release gate could never pass.
 cat > "$WORK_DIR/probe.js" <<'PROBE_JS'
 let bearer = "";
 process.stdin.setEncoding("utf8");
@@ -277,7 +303,8 @@ process.stdin.on("end", async () => {
     body: JSON.stringify({ audience: "urn:pi-orb-smoke:revocation-probe" }),
   });
   const body = await response.json().catch(() => ({}));
-  process.stdout.write(`${response.status} ${(body.error && body.error.code) || ""}\n`);
+  const code = typeof body.error === "string" ? body.error : "";
+  process.stdout.write(`${response.status} ${code}\n`);
 });
 PROBE_JS
 
@@ -408,8 +435,10 @@ wait_for_state "$MINT_ORB" running "$RUNNING_TIMEOUT" "mint-orb-boot"
 wait_for_state "$STOPPED_ORB" running "$RUNNING_TIMEOUT" "stopped-orb-boot"
 
 say "step 3/7: locate the live compute for each orb"
-MINT_INSTANCE=$(orb_instance "$MINT_ORB")
-STOPPED_INSTANCE=$(orb_instance "$STOPPED_ORB")
+MINT_INSTANCE=$(orb_instance "$MINT_ORB") ||
+  fail "locate-instance" "gcloud could not list instances for $MINT_ORB"
+STOPPED_INSTANCE=$(orb_instance "$STOPPED_ORB") ||
+  fail "locate-instance" "gcloud could not list instances for $STOPPED_ORB"
 [ "$(printf '%s\n' "$MINT_INSTANCE" | wc -w)" -eq 1 ] ||
   fail "locate-instance" "expected exactly one instance for $MINT_ORB, got '$MINT_INSTANCE'"
 [ "$(printf '%s\n' "$STOPPED_INSTANCE" | wc -w)" -eq 1 ] ||
@@ -442,7 +471,8 @@ mint() { # mint <audience> <out-file>
 say "step 4/7: mint through the in-orb CLI and verify against the live issuer"
 mint "$AUDIENCE" "$WORK_DIR/token" ||
   fail "mint" "the in-orb CLI produced no JWT: $(tail -n 3 "$WORK_DIR/mint.err")"
-CLAIMS=$(node "$WORK_DIR/verify.js" "$ISSUER_URL" "$AUDIENCE" "$MINT_ORB" "$MINT_INCARNATION" \
+CLAIMS=$(node "$WORK_DIR/verify.js" "$ISSUER_URL" "$AUDIENCE" \
+  "$PROJECT_ID" "$MINT_ORB" "$MINT_INCARNATION" \
   < "$WORK_DIR/token") || fail "verify" "the minted token did not verify against $ISSUER_URL"
 say "  verified: $CLAIMS"
 
@@ -460,7 +490,10 @@ url = "https://sts.googleapis.com/v1/token"
 header = "content-type: application/json"
 data = "{\"audience\":\"$WIF_STS_AUDIENCE\",\"grantType\":\"urn:ietf:params:oauth:grant-type:token-exchange\",\"requestedTokenType\":\"urn:ietf:params:oauth:token-type:access_token\",\"scope\":\"https://www.googleapis.com/auth/cloud-platform\",\"subjectTokenType\":\"urn:ietf:params:oauth:token-type:jwt\",\"subjectToken\":\"$token\"}"
 EOF
-    status=$(curl -s -K "$WORK_DIR/sts.conf" -o "$2" -w '%{http_code}')
+    # `|| true`: a transport failure must reach the caller as the status `000`
+    # curl already prints, not abort the script at this assignment under `set
+    # -e` before any diagnostic runs. Every caller distinguishes 000 explicitly.
+    status=$(curl -s -K "$WORK_DIR/sts.conf" -o "$2" -w '%{http_code}' || true)
     rm -f "$WORK_DIR/sts.conf"
     printf '%s' "$status"
   }
@@ -481,7 +514,7 @@ header = "authorization: Bearer $federated"
 header = "content-type: application/json"
 data = "{\"scope\":[\"https://www.googleapis.com/auth/cloud-platform\"],\"lifetime\":\"300s\"}"
 EOF
-  status=$(curl -s -K "$WORK_DIR/impersonate.conf" -o "$WORK_DIR/sa.json" -w '%{http_code}')
+  status=$(curl -s -K "$WORK_DIR/impersonate.conf" -o "$WORK_DIR/sa.json" -w '%{http_code}' || true)
   rm -f "$WORK_DIR/impersonate.conf"
   [ "$status" = "200" ] ||
     fail "impersonate" "generateAccessToken answered HTTP $status $(cat "$WORK_DIR/sa.json")"
@@ -496,7 +529,7 @@ EOF
 url = "https://cloudresourcemanager.googleapis.com/v1/projects/$PI_ORB_GCP_PROJECT"
 header = "authorization: Bearer $sa_token"
 EOF
-  status=$(curl -s -K "$WORK_DIR/read.conf" -o "$WORK_DIR/read.json" -w '%{http_code}')
+  status=$(curl -s -K "$WORK_DIR/read.conf" -o "$WORK_DIR/read.json" -w '%{http_code}' || true)
   rm -f "$WORK_DIR/read.conf"
   [ "$status" = "200" ] ||
     fail "read-only-api" "the read-only API call answered HTTP $status $(cat "$WORK_DIR/read.json")"
@@ -511,8 +544,22 @@ EOF
   mint "$WRONG_AUDIENCE" "$WORK_DIR/wrong-token" ||
     fail "wrong-audience" "the CLI refused to mint for a syntactically valid audience"
   status=$(sts_exchange "$WORK_DIR/wrong-token" "$WORK_DIR/wrong-sts.json")
-  [ "$status" != "200" ] ||
-    fail "wrong-audience" "STS accepted a token minted for '$WRONG_AUDIENCE'"
+  # This is the only negative federation assertion, so it must be an explicit
+  # rejection *by STS*. "anything that is not 200" also accepts curl's `000`
+  # transport failure, which would report a DNS blip or a proxy hiccup as proof
+  # that the audience check works — the one thing this step exists to prove.
+  case "$status" in
+    4??) ;;
+    200) fail "wrong-audience" "STS accepted a token minted for '$WRONG_AUDIENCE'" ;;
+    000)
+      fail "wrong-audience" \
+        "could not reach STS at all (curl transport failure); the audience rejection is unproven"
+      ;;
+    *)
+      fail "wrong-audience" \
+        "expected a 4xx rejection of '$WRONG_AUDIENCE' from STS, got HTTP $status $(cat "$WORK_DIR/wrong-sts.json")"
+      ;;
+  esac
   say "  STS rejected the wrong-audience token (HTTP $status)"
   rm -f "$WORK_DIR/wrong-token" "$WORK_DIR/wrong-sts.json"
 fi
@@ -522,13 +569,18 @@ say "step 6/7: prove a stopped orb cannot mint"
 # The bearer of the orb about to be stopped, read from its instance metadata —
 # the same place the provider injected it. It is transported to the prober orb
 # on stdin, so it never appears in an argument list on either machine.
-STOPPED_BEARER=$(instance_metadata "$STOPPED_INSTANCE" pi-orb-runtime-token)
+STOPPED_BEARER=$(instance_metadata "$STOPPED_INSTANCE" pi-orb-runtime-token) ||
+  fail "read-bearer" "gcloud could not describe $STOPPED_INSTANCE"
 [ -n "$STOPPED_BEARER" ] || fail "read-bearer" "no runtime token on $STOPPED_INSTANCE"
 # The runtime service's URL as orbs see it, straight from the container the
-# provider configured — no assumption about the deployment's topology.
-MINT_ROUTE=$(orb_ssh "$MINT_INSTANCE" \
+# provider configured — no assumption about the deployment's topology. The
+# `if !` form matters: `pipefail` makes a failed ssh fail the whole pipeline,
+# and a plain assignment would abort the script before `fail` could say why.
+if ! MINT_ROUTE=$(orb_ssh "$MINT_INSTANCE" \
   "sudo docker exec pi-orb-runtime printenv PI_ORB_CONTROL_PLANE_URL" 2>/dev/null |
-  tr -d '\r' | tail -n 1)
+  tr -d '\r' | tail -n 1); then
+  fail "probe-setup" "could not read the control-plane URL from $MINT_INSTANCE over ssh"
+fi
 [ -n "$MINT_ROUTE" ] || fail "probe-setup" "could not read the control-plane URL from the orb"
 MINT_ROUTE="${MINT_ROUTE%/}/runtime/v1/id-token"
 
@@ -538,7 +590,9 @@ probe() { # probe <bearer> ; prints "<status> <code>"
     tr -d '\r' | tail -n 1
 }
 
-result=$(probe "$STOPPED_BEARER")
+if ! result=$(probe "$STOPPED_BEARER"); then
+  fail "probe-baseline" "the in-VPC probe could not be run on $MINT_INSTANCE"
+fi
 case "$result" in
   200*) : ;;
   *) fail "probe-baseline" "a running orb's own bearer did not mint: $result" ;;
@@ -547,12 +601,16 @@ say "  baseline: the live bearer mints (HTTP 200)"
 
 command_orb "$STOPPED_ORB" stop
 wait_for_state "$STOPPED_ORB" stopped "$STOPPED_TIMEOUT" "stop-probe-orb"
-result=$(probe "$STOPPED_BEARER")
+if ! result=$(probe "$STOPPED_BEARER"); then
+  fail "stopped-orb-mint" "the in-VPC probe could not be run on $MINT_INSTANCE"
+fi
 [ "$result" = "403 not_mintable" ] ||
   fail "stopped-orb-mint" "expected '403 not_mintable' after the stop, got '$result'"
 say "  a stopped orb is refused: $result"
 
-result=$(probe "$(uuidgen | tr -d '-')$(uuidgen | tr -d '-')")
+if ! result=$(probe "$(uuidgen | tr -d '-')$(uuidgen | tr -d '-')"); then
+  fail "unknown-bearer" "the in-VPC probe could not be run on $MINT_INSTANCE"
+fi
 case "$result" in
   401*) : ;;
   *) fail "unknown-bearer" "expected 401 for an unknown bearer, got '$result'" ;;

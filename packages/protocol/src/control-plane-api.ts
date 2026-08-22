@@ -160,11 +160,14 @@ export const OrbActionRequiredSchema = Type.Object(
 export type OrbActionRequired = Static<typeof OrbActionRequiredSchema>;
 
 /**
- * The orb's workload-identity status (docs/workload-identity.md). Present only
- * while the latest mint outcome is a failure: a later successful mint
- * supersedes it, which is why the view carries no "healthy" variant. It is
- * durable status read straight off the orb row, never a token, an audience, or
- * anything else the mint saw.
+ * The orb's last recorded workload-identity mint failure
+ * (docs/workload-identity.md). Present while that failure is the latest mint
+ * outcome: only a later *successful* mint supersedes it, which is why the view
+ * carries no "healthy" variant — and why this is a report about an attempt
+ * that happened rather than a claim that the orb cannot mint now. An orb that
+ * simply never mints again keeps the field forever, so consumers must present
+ * it in the past tense. It is durable status read straight off the orb row,
+ * never a token, an audience, or anything else the mint saw.
  */
 export const OrbIdentityStatusSchema = Type.Object(
   { failureCode: MintFailureCodeSchema, failureAt: Type.String() },
