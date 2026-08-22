@@ -69,7 +69,11 @@ COPY apps/orb-runtime/src apps/orb-runtime/src
 # short-lived tokens per invocation — no hosts.yml, nothing persisted.
 COPY apps/orb-runtime/docker/gh /usr/local/bin/gh
 COPY apps/orb-runtime/docker/pi-orb-git-credential /usr/local/bin/pi-orb-git-credential
-RUN chmod 755 /usr/local/bin/gh /usr/local/bin/pi-orb-git-credential \
+# The `pi-orb` CLI (docs/workload-identity.md): `pi-orb id-token` mints a
+# short-lived OIDC identity token for a caller-chosen audience, so code in an
+# orb can federate into a cloud account without any stored cloud secret.
+COPY apps/orb-runtime/docker/pi-orb /usr/local/bin/pi-orb
+RUN chmod 755 /usr/local/bin/gh /usr/local/bin/pi-orb-git-credential /usr/local/bin/pi-orb \
   && git config --system credential.https://github.com.helper '!pi-orb-git-credential'
 
 # The persistent orb filesystem is mounted here (Docker volume).
