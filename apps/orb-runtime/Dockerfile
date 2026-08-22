@@ -1,5 +1,6 @@
 # Orb runtime image (DESIGN.md §3.3, §17.7): Debian-based Node 24 with git,
-# Python 3, zip/unzip, the GitHub CLI (§15.3), and Tailscale for tier-1 port exposure
+# Python 3, zip/unzip, the GitHub CLI (§15.3), the Google Cloud CLI, and
+# Tailscale for tier-1 port exposure
 # (docs/ports.md). No systemd unit is enabled — the runtime process spawns
 # tailscaled itself, in userspace-networking mode, so the container needs
 # neither a TUN device nor NET_ADMIN. Build from the repository root:
@@ -19,8 +20,13 @@ RUN apt-get update \
   && chmod go+r /etc/apt/keyrings/tailscale-archive-keyring.gpg \
   && echo "deb [signed-by=/etc/apt/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian bookworm main" \
        > /etc/apt/sources.list.d/tailscale.list \
+  && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+       -o /usr/share/keyrings/cloud.google.asc \
+  && chmod go+r /usr/share/keyrings/cloud.google.asc \
+  && echo "deb [signed-by=/usr/share/keyrings/cloud.google.asc] https://packages.cloud.google.com/apt cloud-sdk main" \
+       > /etc/apt/sources.list.d/google-cloud-sdk.list \
   && apt-get update \
-  && apt-get install -y --no-install-recommends gh tailscale chromium \
+  && apt-get install -y --no-install-recommends gh tailscale chromium google-cloud-cli \
   && rm -rf /var/lib/apt/lists/*
 
 # Install only the pinned rustup multiplexer in the disposable image. The
