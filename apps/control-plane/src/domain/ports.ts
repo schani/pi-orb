@@ -12,10 +12,12 @@ import type { ResultAsync } from "neverthrow";
 import type {
   AuthGateError,
   CommitPullError,
+  MintFailureCode,
   OrbHostProviderError,
   PointerConflict,
   ProjectConflict,
   RuntimeClientError,
+  SigningKeyConflict,
   StateConflict,
   StoreError,
 } from "./errors.ts";
@@ -356,6 +358,28 @@ export interface ControlPlaneStore {
   ): ResultAsync<void, StoreError>;
 
   /**
+   * Latest typed identity-mint denial, for the user-visible identity status
+   * (docs/workload-identity.md). Advisory like `touchLastBusy`: it replaces
+   * both columns together, bumps no `state_version` and moves no
+   * `state_changed_at`, so a denial can never conflict with lifecycle CAS. An
+   * unknown orb is a silent no-op.
+   */
+  recordMintFailure(
+    task: SimulationTask,
+    params: { orbId: string; code: MintFailureCode; at: number },
+  ): ResultAsync<void, StoreError>;
+
+  /**
+   * Monotone advisory update of `last_mint_at`, the durable per-orb mint
+   * rate-limit floor (docs/workload-identity.md). Same CAS-free shape as
+   * `touchLastBusy`; an `at` older than the stored value is a no-op.
+   */
+  advanceLastMintAt(
+    task: SimulationTask,
+    params: { orbId: string; at: number },
+  ): ResultAsync<void, StoreError>;
+
+  /**
    * Same-state re-entry with a fresh `state_changed_at` (OAuth completion,
    * docs/lifecycle.md): user login time never consumes the create/start deadline.
    */
@@ -665,6 +689,59 @@ export interface BrokerDeps {
   /** One refresher per provider; a provider with no entry cannot refresh. */
   readonly upstreams: Readonly<Record<string, UpstreamRefresher>>;
   readonly constants: import("./constants.ts").BrokerConstants;
+}
+
+// ---------------------------------------------------------------------------
+// Workload identity (docs/workload-identity.md)
+
+export type SigningKeyState = "pending" | "active" | "retired";
+
+/**
+ * The public half of one issuer signing key. Nothing here is secret — JWKS is
+ * served straight from these rows — while the private key exists only in the
+ * secret store, addressed by the exact `secretVersion`. `rowVersion` is the
+ * CAS fence and bumps on every state change.
+ */
+export interface SigningKeyRow {
+  readonly kid: string;
+  readonly secretVersion: string;
+  /** RFC 7517 JWK of the public half; opaque to the store. */
+  readonly publicJwk: unknown;
+  readonly state: SigningKeyState;
+  /** Wall-clock ms. Set exactly when the state requires it. */
+  readonly createdAt: number;
+  readonly activatedAt: number | null;
+  readonly retiredAt: number | null;
+  readonly rowVersion: number;
+}
+
+export interface CasSigningKeyStateParams {
+  readonly kid: string;
+  readonly expectedRowVersion: number;
+  readonly state: SigningKeyState;
+  /** Required when entering `active`; the row keeps its value when omitted. */
+  readonly activatedAt?: number;
+  /** Required when entering `retired`. */
+  readonly retiredAt?: number;
+}
+
+export interface SigningKeyStore {
+  /** Every key, oldest first: JWKS publishes the active one plus retiring ones. */
+  listSigningKeys(task: SimulationTask): ResultAsync<SigningKeyRow[], StoreError>;
+  /**
+   * Inserts a key. A duplicate `kid` and a second `active` key are both
+   * refused by the schema, so they surface as a `corruption` StoreError rather
+   * than a conflict a caller could retry into.
+   */
+  insertSigningKey(
+    task: SimulationTask,
+    row: SigningKeyRow,
+  ): ResultAsync<SigningKeyRow, StoreError>;
+  /** Fenced state change: activation and retirement never race each other. */
+  casSigningKeyState(
+    task: SimulationTask,
+    params: CasSigningKeyStateParams,
+  ): ResultAsync<SigningKeyRow, StoreError | SigningKeyConflict>;
 }
 
 // ---------------------------------------------------------------------------

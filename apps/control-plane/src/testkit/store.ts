@@ -3,6 +3,7 @@ import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import type {
   CommitPullError,
+  MintFailureCode,
   ProjectConflict,
   ReplicationIntegrityError,
   StateConflict,
@@ -1229,6 +1230,40 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...orb,
         lastBusyAt: params.now,
         updatedAt: Math.max(orb.updatedAt, params.now),
+      });
+    });
+  }
+
+  recordMintFailure(
+    task: SimulationTask,
+    params: { orbId: string; code: MintFailureCode; at: number },
+  ): ResultAsync<void, StoreError> {
+    // Same latest-wins, CAS-free semantics as the pg adapter
+    // (docs/workload-identity.md).
+    return this.access(task, FAILPOINTS.storeWrite, "record mint failure", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined) return;
+      this.orbs.set(orb.id, {
+        ...orb,
+        mintFailureCode: params.code,
+        mintFailureAt: params.at,
+        updatedAt: Math.max(orb.updatedAt, params.at),
+      });
+    });
+  }
+
+  advanceLastMintAt(
+    task: SimulationTask,
+    params: { orbId: string; at: number },
+  ): ResultAsync<void, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "advance last mint at", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined) return;
+      if (orb.lastMintAt !== null && orb.lastMintAt >= params.at) return;
+      this.orbs.set(orb.id, {
+        ...orb,
+        lastMintAt: params.at,
+        updatedAt: Math.max(orb.updatedAt, params.at),
       });
     });
   }
