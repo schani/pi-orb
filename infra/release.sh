@@ -11,6 +11,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 INFRA="$ROOT/infra"
 PROJECT=${PROJECT:-playground-dev-6ae7}
 REGION=${REGION:-us-central1}
+ZONE=${ZONE:-$REGION-a}
 STATE_BUCKET=${STATE_BUCKET:-pi-orb-tfstate-$PROJECT}
 STATE_PREFIX=${STATE_PREFIX:-static-plane}
 AUTO_APPROVE=false
@@ -110,7 +111,9 @@ trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
-for command in curl docker gcloud git jq tofu; do
+# `node` is here for the workload-identity smoke's RS256 verification against
+# the deployed JWKS; failing at preflight beats failing after a live deploy.
+for command in curl docker gcloud git jq node tofu; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "release preflight failed: missing required command '$command'" >&2
     exit 1
@@ -261,6 +264,14 @@ IAP_REPAIRED=true
 
 echo "release: running live lifecycle smoke test ..."
 "$INFRA/smoke.sh"
+
+# The workload-identity gate (docs/workload-identity.md). It mints inside a
+# disposable orb and verifies against the deployed public issuer unconditionally;
+# the GCP federation legs additionally run when the separately bootstrapped WIF
+# tier is configured through PI_ORB_SMOKE_WIF_* (infra/bootstrap-pi-orb-oidc.sh)
+# and otherwise skip with a loud notice.
+echo "release: running live workload-identity smoke test ..."
+PI_ORB_GCP_PROJECT="$PROJECT" PI_ORB_GCE_ZONE="$ZONE" "$INFRA/smoke-workload-identity.sh"
 
 control_plane_image=$(awk -F'"' '/^control_plane_image/{print $2}' "$VARS")
 runtime_image=$(awk -F'"' '/^runtime_image/{print $2}' "$VARS")

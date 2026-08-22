@@ -53,7 +53,7 @@ resource "google_secret_manager_secret" "database_url" {
 }
 
 resource "google_secret_manager_secret_version" "database_url" {
-  secret = google_secret_manager_secret.database_url.id
+  secret      = google_secret_manager_secret.database_url.id
   secret_data = "postgres://${google_sql_user.pi_orb.name}:${random_password.db.result}@${google_sql_database_instance.pi_orb.private_ip_address}:5432/${google_sql_database.pi_orb.name}"
 }
 

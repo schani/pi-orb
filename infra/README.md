@@ -2,7 +2,9 @@
 
 Project `playground-dev-6ae7`, region `us-central1`, zone `us-central1-a`.
 Services: `pi-orb` (browser, IAP: @heyglide.com), `pi-orb-runtime-api`
-(internal broker), `pi-orb-ops` (tooling; invoker-IAM: pi-orb-debug SA).
+(internal broker), `pi-orb-ops` (tooling; invoker-IAM: pi-orb-debug SA),
+`pi-orb-issuer` (public OIDC discovery + JWKS, unauthenticated by design; its
+own least-privilege service account).
 
 ## Deploy workflow
 
@@ -20,7 +22,8 @@ future serialized CI job. The script owns the complete transaction:
    Run, then create and apply an exact saved OpenTofu plan;
 3. repair IAP after every attempted apply (`deploy.sh --iap-only` on apply
    failure), and after success delete drained browser revisions;
-4. run the live create → running → stop → start → stop smoke test.
+4. run the live create → running → stop → start → stop smoke test;
+5. run the live workload-identity smoke (`smoke-workload-identity.sh`).
 
 Generated variables and the binary plan live under `umask 077` in a mode-0700
 temporary directory and are removed on exit; they must never be retained because
@@ -32,8 +35,8 @@ If a process is killed without running traps and leaves the object behind,
 verify no release is active before removing that object. The future GitHub
 workflow must use the same lock in addition to its native concurrency group.
 
-`build-push.sh`, `deploy.sh`, and `smoke.sh` remain implementation stages for
-diagnostics; they are not separate operator steps. `build-push.sh` boots the
+`build-push.sh`, `deploy.sh`, `smoke.sh`, and `smoke-workload-identity.sh` remain
+implementation stages for diagnostics; they are not separate operator steps. `build-push.sh` boots the
 freshly built runtime image locally and requires it to answer `/v1/health`
 before anything is pushed — Cloud Run already fails a control-plane rollout
 loudly, but nothing downstream ever verifies the runtime artifact.
@@ -71,6 +74,54 @@ necessarily escalation-capable even without Owner or Editor: a compromised
 deployer could alter project bindings. Moving stable IAM/bootstrap resources
 out of the recurring root is required before this becomes a least-privilege
 production deployment identity.
+
+## Workload identity (docs/workload-identity.md)
+
+The `pi-orb-issuer` service publishes the OIDC documents relying parties verify
+minted tokens against. Its URL is the deployment's trust anchor:
+
+    tofu -chdir=infra output -raw issuer_url
+    curl -s "$(tofu -chdir=infra output -raw issuer_url)/.well-known/openid-configuration"
+
+Nothing sets that URL by hand. OpenTofu computes it from the Cloud Run v2
+deterministic URL scheme and hands the identical string to the `runtime` service
+(which mints) and the `issuer` service (which publishes) — so a deploy cannot
+ship one without the other, and there is no release step to forget. The issuer
+service asserts the computed value against its real `.uri` on every apply; if
+that postcondition ever fails, stop and reconcile `local.oidc_issuer_url` in
+`infra/oidc.tf` before releasing, because every token in flight names the value
+that failed.
+
+Federating a cloud account with this issuer is a **separate, one-time
+administrator step**, deliberately outside the recurring plan (same rationale as
+`bootstrap-amp-oidc.sh`):
+
+    PI_ORB_TRUSTED_PROJECT_ID=<pi-orb project UUID> \
+      ./infra/bootstrap-pi-orb-oidc.sh --dry-run
+    PI_ORB_TRUSTED_PROJECT_ID=<pi-orb project UUID> \
+      ./infra/bootstrap-pi-orb-oidc.sh
+
+It is idempotent, deletes nothing, and prints the `PI_ORB_SMOKE_WIF_*` values the
+federation smoke needs. It refuses to run without an identity scope: the audience
+is not an authorization boundary, since any orb of this deployment can request
+any audience. It also refuses to repoint an existing provider at a different
+issuer — that is a trust migration, not an edit.
+
+`release.sh` then runs `smoke-workload-identity.sh` after `smoke.sh`. It always
+creates two disposable orbs (the second exists so a *stopped* orb's refusal can
+be probed from inside the VPC), mints through `pi-orb id-token` over
+`gcloud compute ssh`, and verifies the token against the live issuer's discovery
+and JWKS. With `PI_ORB_SMOKE_WIF_AUDIENCE`, `PI_ORB_SMOKE_WIF_STS_AUDIENCE`, and
+`PI_ORB_SMOKE_WIF_TEST_SA` set it additionally exchanges through STS, impersonates
+the read-only test account, calls a real API, and proves a wrong-audience token
+dies at STS; unset, those legs skip with a loud notice. Both orbs are deleted on
+exit, pass or fail. No token is ever printed: they move through pipes and
+mode-0600 files in a mode-0700 directory removed on exit.
+
+Relying-party configuration — GCP external-account files, AWS role trust
+policies, generic OIDC verification rules — is
+`docs/workload-identity-recipes.md`. The reviewed in-orb credential helper is
+`scripts/pi-orb-gcp-identity`.
 
 ## Gotchas (each learned the hard way)
 
