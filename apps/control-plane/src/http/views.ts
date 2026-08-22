@@ -121,12 +121,18 @@ function stateDetailOf(
 }
 
 /**
- * The orb's workload-identity status (docs/workload-identity.md). The durable
- * columns are latest-wins and are never cleared, so currency is decided on
- * read: a failure is shown only when it is the latest outcome, meaning no mint
- * has succeeded since it was recorded. A later successful mint supersedes the
- * displayed failure without any clearing write — which is what keeps the
- * status off the lifecycle CAS path entirely.
+ * The orb's **last recorded mint failure** (docs/workload-identity.md), not a
+ * verdict on whether the orb can mint right now. The durable columns are
+ * latest-wins and are never cleared, so the only thing that retires a failure
+ * is a *later successful mint* — decided on read, without any clearing write,
+ * which is what keeps the status off the lifecycle CAS path entirely.
+ *
+ * The consequence is deliberate and must be respected by every consumer: most
+ * orbs never call `pi-orb id-token`, so nothing ever supersedes a denial. A
+ * `not_mintable` recorded during an ordinary stop window outlives the restart
+ * that made the orb healthy again, and the field is still populated. It is
+ * therefore a historical report — the product renders it in the past tense —
+ * and reading it as "identity is currently unavailable" is wrong.
  *
  * `>=` rather than `>` on purpose: the two timestamps come from the same
  * injected clock, and a failure recorded in the same millisecond as a

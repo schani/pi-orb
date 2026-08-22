@@ -70,9 +70,14 @@ describe("orb runtime Dockerfile contract", () => {
       expect(existsSync(join(repositoryRoot, "apps/orb-runtime/docker", shim))).toBe(true);
       expect(dockerfile).toContain(`COPY apps/orb-runtime/docker/${shim} /usr/local/bin/${shim}`);
     }
+    // Split into whole arguments before matching: `/usr/local/bin/pi-orb` is a
+    // prefix of `/usr/local/bin/pi-orb-git-credential`, so a substring check
+    // would call the `pi-orb` shim executable on the strength of a different
+    // shim's chmod.
     const chmod = /RUN chmod 755 ([^\n\\]*)/.exec(dockerfile)?.[1] ?? "";
+    const chmodTargets = chmod.trim().split(/\s+/);
     for (const shim of shims) {
-      expect(chmod, `${shim} must be made executable`).toContain(`/usr/local/bin/${shim}`);
+      expect(chmodTargets, `${shim} must be made executable`).toContain(`/usr/local/bin/${shim}`);
     }
     // Each shim dispatches to source the image actually carries.
     const piOrbShim = readFileSync(join(repositoryRoot, "apps/orb-runtime/docker/pi-orb"), "utf8");

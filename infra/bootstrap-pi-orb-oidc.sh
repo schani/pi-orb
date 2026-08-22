@@ -12,8 +12,13 @@
 # admits callers, and an operator reviewing a release plan never has to reason
 # about whether it moved the federation trust.
 #
-# Nothing here is destructive: every resource is created when absent and
-# converged when present, and no delete is ever issued.
+# No resource here is ever deleted: pool, provider, and service account are
+# created when absent and converged when present. The one thing the script does
+# remove is a binding it previously created itself — a workload-identity
+# admission from this pool, or a project role on its own test account, that the
+# scope it was just given no longer covers. That is not destruction, it is what
+# makes "the scope you asked for" true; `add-iam-policy-binding` alone would
+# leave every past, broader grant standing. `--dry-run` lists those removals.
 set -euo pipefail
 
 usage() {
@@ -52,9 +57,12 @@ Optional:
   --dry-run                 Print the planned identifiers and exit.
 
 Re-running with different values converges the provider's audience, attribute
-mapping, and attribute condition. The issuer URI cannot be changed after
-creation: pointing this pool at a different issuer is a trust migration and the
-script refuses to do it silently.
+mapping, and attribute condition, and reconciles the two IAM bindings this
+script owns: a previous, broader admission (including an ALLOW_ANY_ORB=1 pool
+wildcard) and a previous TEST_SA_ROLE are revoked rather than left standing
+beside the new ones. Nothing else in the project is touched. The issuer URI
+cannot be changed after creation: pointing this pool at a different issuer is a
+trust migration and the script refuses to do it silently.
 EOF
 }
 
@@ -139,23 +147,34 @@ fi
 # the delegated principal in Cloud Audit Logs — the provider-side correlation
 # back to one pi-orb orb the observability requirements ask for. The three
 # custom attributes are what IAM conditions and principalSets can bind to.
+#
+# `host_incarnation` is a JSON *number* in the token, and every mapped attribute
+# must evaluate to a STRING: GCP evaluates the whole mapping on every exchange,
+# so an unconverted number fails *all* exchanges with "The mapped attribute must
+# be of type STRING", including ones no policy scopes by incarnation. `string()`
+# is the CEL conversion the mapping language provides. The attribute *condition*
+# below needs no such cast: it compares `assertion.*` values, not mapped ones.
 mapping='google.subject=assertion.sub'
 mapping="$mapping,attribute.project_id=assertion.project_id"
 mapping="$mapping,attribute.orb_id=assertion.orb_id"
-mapping="$mapping,attribute.host_incarnation=assertion.host_incarnation"
+mapping="$mapping,attribute.host_incarnation=string(assertion.host_incarnation)"
 
 TEST_SA_EMAIL="$TEST_SA@$PROJECT.iam.gserviceaccount.com"
 
-project_number=""
-if [ "$DRY_RUN" != true ]; then
-  project_number=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
-  case "$project_number" in
-    "" | *[!0-9]*)
+# Read, not written — so a `--dry-run` resolves it too, and can therefore show
+# the real principalSet and the real list of bindings a run would revoke. Only
+# an actual run insists on succeeding; a dry run without credentials degrades to
+# the `<project-number>` placeholder and reports what it could not inspect.
+project_number=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)' 2>/dev/null || true)
+case "$project_number" in
+  "" | *[!0-9]*)
+    if [ "$DRY_RUN" != true ]; then
       echo "bootstrap failed: could not resolve the numeric project number for $PROJECT" >&2
       exit 1
-      ;;
-  esac
-fi
+    fi
+    project_number=""
+    ;;
+esac
 
 pool_root="projects/${project_number:-<project-number>}/locations/global/workloadIdentityPools/$POOL"
 # The narrowest principalSet the given scope allows. One orb beats one project;
@@ -168,6 +187,53 @@ else
   principal_set="principalSet://iam.googleapis.com/$pool_root/*"
 fi
 
+# --- reconciling the two bindings this script owns ---------------------------
+#
+# `add-iam-policy-binding` is additive, and that is a trap for a script whose
+# whole purpose is to express a scope: re-running with a *narrower* scope prints
+# the narrow principalSet as `admitted:` while the previous, broader grant —
+# a project-wide set, or the `ALLOW_ANY_ORB=1` pool wildcard — silently survives
+# on the test account, so the deployment stays as open as its most generous
+# past run. The same holds for TEST_SA_ROLE at the project level: switching to a
+# narrower role leaves the old one bound beside it.
+#
+# So the requested scope is *reconciled*, not merely added. Both queries stay
+# strictly inside this script's own two bindings: `roles/iam.workloadIdentityUser`
+# members from *this* pool on the test account, and project roles held by the
+# test account, which exists for nothing else. No other member, role, resource,
+# or conditional binding is ever touched, and nothing is deleted anywhere else.
+
+stale_admissions() { # principalSets from this pool that the requested scope does not cover
+  [ -n "$project_number" ] || return 0
+  gcloud iam service-accounts get-iam-policy "$TEST_SA_EMAIL" \
+    --project="$PROJECT" --flatten='bindings[].members' \
+    --filter='bindings.role=roles/iam.workloadIdentityUser' \
+    --format='value(bindings.members)' 2>/dev/null |
+    while read -r member; do
+      case "$member" in
+        "$principal_set") ;;
+        "principalSet://iam.googleapis.com/$pool_root/"*) printf '%s\n' "$member" ;;
+      esac
+    done
+}
+
+stale_test_sa_roles() { # project roles on the test account other than the requested one
+  gcloud projects get-iam-policy "$PROJECT" --flatten='bindings[].members' \
+    --filter="bindings.members:$TEST_SA_EMAIL" \
+    --format='value(bindings.role,bindings.members)' 2>/dev/null |
+    while IFS=$'\t' read -r role member; do
+      [ "$member" = "serviceAccount:$TEST_SA_EMAIL" ] || continue
+      [ "$role" = "$TEST_SA_ROLE" ] || printf '%s\n' "$role"
+    done
+}
+
+stale_members=$(stale_admissions)
+stale_roles=$(stale_test_sa_roles)
+revoking="(none)"
+if [ -n "$stale_members" ] || [ -n "$stale_roles" ]; then
+  revoking=$(printf '%s\n%s' "$stale_members" "$stale_roles" | sed '/^$/d' | sed '2,$s/^/                    /')
+fi
+
 cat >&2 <<EOF
 bootstrap plan
   gcp project:      $PROJECT
@@ -175,9 +241,14 @@ bootstrap plan
   audience:         $AUDIENCE
   pool / provider:  $POOL / $PROVIDER
   attribute cond.:  $condition
+  attribute map:    $mapping
   test account:     $TEST_SA_EMAIL ($TEST_SA_ROLE)
   admitted:         $principal_set
+  revoking:         $revoking
 EOF
+if [ -z "$project_number" ]; then
+  echo "bootstrap: could not read $PROJECT's policies; the revoking list above is incomplete" >&2
+fi
 if [ "$DRY_RUN" = true ]; then
   echo "bootstrap: --dry-run, nothing was changed" >&2
   exit 0
@@ -251,14 +322,38 @@ gcloud iam service-accounts add-iam-policy-binding "$TEST_SA_EMAIL" \
   --project="$PROJECT" --member="$principal_set" \
   --role='roles/iam.workloadIdentityUser' --quiet >/dev/null
 
+# Revoke *after* adding, so narrowing a scope never leaves a window in which the
+# account is reachable by nobody. The lists were read before anything was
+# created, and each removal is announced: a silent revocation is as confusing as
+# a silent survival.
+if [ -n "$stale_members" ]; then
+  printf '%s\n' "$stale_members" | while read -r member; do
+    [ -n "$member" ] || continue
+    echo "revoking stale admission: $member" >&2
+    gcloud iam service-accounts remove-iam-policy-binding "$TEST_SA_EMAIL" \
+      --project="$PROJECT" --member="$member" \
+      --role='roles/iam.workloadIdentityUser' --quiet >/dev/null
+  done
+fi
+if [ -n "$stale_roles" ]; then
+  printf '%s\n' "$stale_roles" | while read -r role; do
+    [ -n "$role" ] || continue
+    echo "revoking stale test-account role: $role" >&2
+    gcloud projects remove-iam-policy-binding "$PROJECT" \
+      --member="serviceAccount:$TEST_SA_EMAIL" --role="$role" \
+      --condition=None --quiet >/dev/null
+  done
+fi
+
 sts_audience="//iam.googleapis.com/$pool_root/providers/$PROVIDER"
+# `PI_ORB_SMOKE_PROJECT_ID` is the one scope variable the smoke reads: it makes
+# the smoke create its disposable orbs inside the pi-orb project this pool
+# trusts. There is deliberately no orb-scoped equivalent — the smoke's orbs are
+# created and deleted per run, so an orb-scoped grant can never name one, and a
+# variable the smoke ignores would be worse than none.
 smoke_scope=""
 if [ -n "$TRUSTED_PROJECT_ID" ]; then
   smoke_scope="  PI_ORB_SMOKE_PROJECT_ID='$TRUSTED_PROJECT_ID' \\
-"
-fi
-if [ -n "$TRUSTED_ORB_ID" ]; then
-  smoke_scope="$smoke_scope  PI_ORB_SMOKE_ORB_ID='$TRUSTED_ORB_ID' \\
 "
 fi
 cat <<EOF
@@ -275,3 +370,11 @@ Federation smoke:
   PI_ORB_SMOKE_WIF_TEST_SA='$TEST_SA_EMAIL' \\
 ${smoke_scope}  ./infra/smoke-workload-identity.sh
 EOF
+if [ -n "$TRUSTED_ORB_ID" ]; then
+  cat <<EOF
+Note: this grant is scoped to orb $TRUSTED_ORB_ID, and the federation smoke
+mints from a disposable orb it creates itself — so its STS legs will be refused
+by the attribute condition. Bootstrap a project-scoped grant (a separate pool or
+provider id) if you want the smoke to exercise the exchange.
+EOF
+fi

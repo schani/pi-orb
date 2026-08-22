@@ -4,6 +4,13 @@
 > the one the repository exercises end to end (`infra/bootstrap-pi-orb-oidc.sh`,
 > `infra/smoke-workload-identity.sh`); the AWS and generic recipes are reviewed guidance that has
 > not yet been run against a live account.
+>
+> **Review pass 2026-08-22**, still against no live account, corrected two things this document had
+> wrong. The GCP attribute mapping must cast the numeric `host_incarnation` claim with `string()`
+> or *every* exchange fails, and the AWS section documented a role trust policy that no principal
+> can satisfy — AWS exposes only a fixed set of condition keys for a self-registered OIDC provider,
+> and pi-orb's custom claims are not among them. Both are corrected below; the AWS section's
+> conclusion changed, not just its syntax.
 
 Requirements, the trust model, and the claim contract live in `docs/workload-identity.md`. This
 document is the *integration* side: how a relying party configures itself to accept a pi-orb orb's
@@ -47,6 +54,11 @@ claim:
 
 Nothing else in the token is an authorization identity. Names, repository URLs, Git authors, and
 host references are mutable or caller-influenced.
+
+Which of those three a relying party can *express* depends on the relying party. GCP can express
+all of them, because a workload identity pool maps arbitrary claims into condition attributes. AWS
+can express only the one-orb form, and only by `sub` — see the AWS section, which is where that
+limit and its workarounds are documented rather than discovered.
 
 ### What a relying party must verify
 
@@ -92,8 +104,15 @@ The mapping it installs, and the reason for each entry:
 google.subject          = assertion.sub               # the orb ID; what audit logs show
 attribute.project_id    = assertion.project_id        # project-wide grants bind to this
 attribute.orb_id        = assertion.orb_id            # one-orb grants bind to this
-attribute.host_incarnation = assertion.host_incarnation
+attribute.host_incarnation = string(assertion.host_incarnation)
 ```
+
+The `string()` is load-bearing, not decoration. `host_incarnation` is a JSON **number** in the
+token, every mapped attribute must evaluate to a string, and GCP evaluates the *whole* mapping on
+*every* exchange — so an unconverted number does not merely make incarnation-scoped policies
+unusable, it fails every exchange with `The mapped attribute must be of type STRING`, including
+exchanges whose policy never mentions the incarnation. The attribute *condition* below needs no
+cast: it compares `assertion.*` values directly, not mapped attributes.
 
 and the attribute condition, which is the provider-side half of authorization:
 
@@ -183,21 +202,34 @@ the provider's side, which is the forensic trail pi-orb deliberately does not ke
 
 ## AWS
 
+> AWS is **more restrictive than GCP here, and the difference changes what is expressible.** A
+> workload identity pool provider maps arbitrary claims into attributes that IAM conditions and
+> principalSets can bind to. AWS has no equivalent: for a self-registered OIDC provider, role trust
+> policies may condition only on a fixed allowlist of keys — `<issuer host>:aud`, `:sub`, and the
+> provider-specific `:amr`, `:oaud`, `:email` that only Amazon's built-in identity providers
+> populate. pi-orb's `project_id`, `orb_id`, `host_incarnation`, and `token_use` are simply not
+> available as condition keys, and a `StringEquals` on a key that is not present evaluates **false**
+> — so a policy naming them is not "extra safety", it is a role nobody can assume. Read the whole
+> section before writing a trust policy; the shape that works is narrower than the GCP one.
+
 ### 1. Register the issuer as an IAM OIDC provider
 
 ```sh
 aws iam create-open-id-connect-provider \
   --url '<issuer origin>' \
-  --client-id-list 'sts.amazonaws.com'
+  --client-id-list 'urn:pi-orb:aws:<account>:<role name>'
 ```
 
-The `--client-id-list` entries are the audiences AWS will accept; use a value you issued for this
-integration and check it in the trust policy too.
+The `--client-id-list` entries are the audiences AWS accepts for this provider, and they are the
+`aud` values orbs must request. Prefer a distinct audience string per AWS role over the generic
+`sts.amazonaws.com`: audience is the only per-integration lever AWS gives you here, so spending it
+on a shared constant wastes it. Add audiences to an existing provider with
+`aws iam add-client-id-to-open-id-connect-provider`.
 
-### 2. Role trust policy scoped to immutable claims
+### 2. Role trust policy — what AWS can actually check
 
-The `sub`/`aud` conditions are the whole authorization. Note the custom-claim conditions: without
-them, every orb of the deployment can assume this role.
+The whole authorization is `sub` plus `aud`. `sub` is the **orb ID**, which is the only pi-orb
+identity AWS can see:
 
 ```json
 {
@@ -208,19 +240,42 @@ them, every orb of the deployment can assume this role.
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {
-        "<issuer host>:aud": "sts.amazonaws.com",
-        "<issuer host>:sub": "<orb UUID>",
-        "<issuer host>:project_id": "<pi-orb project UUID>",
-        "<issuer host>:token_use": "exchanged"
+        "<issuer host>:aud": "urn:pi-orb:aws:<account>:<role name>",
+        "<issuer host>:sub": "<orb UUID>"
       }
     }
   }]
 }
 ```
 
-For a project-wide grant, drop the `sub` condition and keep `project_id`; never drop both. AWS
-supports `StringLike` with wildcards — resist using it on these claims, since a wildcarded UUID
-prefix is not a meaningful boundary.
+`<issuer host>` is the issuer URL without its scheme, exactly as the provider ARN spells it. Several
+orbs are a JSON array of `sub` values under the same key. AWS supports `StringLike` — resist it on
+`sub`: pi-orb orb IDs are random UUIDs, so a wildcarded prefix is not a boundary, it is a wider
+grant that looks narrow.
+
+**A project-wide grant is not expressible on AWS today.** `project_id` is not a condition key, and
+nothing else in the token carries the project. Three honest options, in the order to prefer them:
+
+1. **Enumerate the orbs.** Keep the `sub` list current in the trust policy. Correct, immediate, and
+   the operational cost is real: an orb is a disposable object in pi-orb, so a long-lived AWS role
+   granted to a specific orb has to be re-pointed whenever that orb is replaced by a new one.
+2. **A per-role audience, accepted deliberately.** Issue one audience string per AWS role
+   (`urn:pi-orb:aws:<account>:<role>`) and condition only on `aud`. Understand exactly what this
+   buys: **the audience is not a secret and not an authorization boundary** — any orb of the pi-orb
+   deployment can request any audience, so an `aud`-only trust policy grants that role to *every
+   orb of the deployment*, whoever created it and for whatever project. That is the same posture as
+   `ALLOW_ANY_ORB=1` on the GCP side, and it is defensible only where every orb of the deployment is
+   equally trusted for that role. Never describe it as project scoping; it is deployment scoping.
+   Pair it with the `sub` condition wherever the grant is meant to be narrower.
+3. **Verify the token yourself and vend credentials.** A small relying service (Lambda + API
+   Gateway, or any service following the generic recipe below) can check `project_id`, `orb_id`,
+   `host_incarnation`, and `token_use` properly and then call `sts:AssumeRole` on the workload's
+   behalf. This is the only way to get pi-orb-project-scoped AWS access with the full claim set
+   enforced, at the cost of a service to run.
+
+`token_use` is likewise uncheckable at AWS. Every pi-orb token is `token_use=exchanged` today, so
+nothing is lost right now — but if pi-orb ever mints a second token class, AWS trust policies will
+not be able to tell them apart, and option 3 becomes the only safe form.
 
 ### 3. Assume the role from inside the orb
 
@@ -231,7 +286,7 @@ mode-0600, short-lived, and out of shell history:
 umask 077
 token_file=$(mktemp "${TMPDIR:-/tmp}/pi-orb-web-identity.XXXXXX")
 trap 'rm -f "$token_file"' EXIT INT TERM HUP
-pi-orb id-token --audience sts.amazonaws.com > "$token_file"
+pi-orb id-token --audience 'urn:pi-orb:aws:<account>:<role name>' > "$token_file"
 
 export AWS_ROLE_ARN='arn:aws:iam::<account>:role/<role>'
 export AWS_WEB_IDENTITY_TOKEN_FILE="$token_file"
@@ -250,8 +305,14 @@ Rules that go with it:
 - Delete the token file when the process ends — the `trap` above, not a manual step.
 - The SDK re-reads `AWS_WEB_IDENTITY_TOKEN_FILE` on refresh, so a long-running process needs the
   file rewritten before the JWT expires, or a fresh process per session.
+- The audience must be one of the provider's client IDs *and* match the trust policy's `aud`
+  condition. A mismatch is refused by STS, which is the intended failure — but note it is refused
+  for the audience, not for the orb's identity, so a passing `get-caller-identity` proves the
+  audience matched, never that AWS checked which orb you are.
 - Set `AWS_ROLE_SESSION_NAME` to something that names the orb; it appears in CloudTrail and is the
-  AWS-side correlation back to pi-orb.
+  AWS-side correlation back to pi-orb. It is caller-chosen, so it is a forensic breadcrumb, not an
+  identity: the assumed-role ARN and the trust policy's `sub` condition are what actually bound the
+  session.
 
 ## Generic OIDC relying services
 

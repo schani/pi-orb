@@ -47,6 +47,7 @@ import {
 } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
+import { logEvent } from "./domain/log.ts";
 import {
   orphanSweepLoop,
   pollLoop,
@@ -54,7 +55,7 @@ import {
   type ReconcileTaskRunner,
   reconcileLoop,
 } from "./domain/loops.ts";
-import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
+import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
@@ -372,9 +373,20 @@ async function main(): Promise<void> {
   const app = Fastify({ logger: false });
   // Commands issued over HTTP log their transitions too (docs/lifecycle.md).
   const httpTask = new ControlPlaneTask("http");
+  // Everything key management needs. Shared by the boot hook below and, on the
+  // private roles, by the staged rotation routes.
+  const signingKeyDeps: SigningKeyDeps = {
+    keys: database.signingKeys,
+    secrets,
+    generator: new NodeCryptoSigningKeyGenerator(),
+    constants: DEFAULT_ISSUER_CONSTANTS,
+  };
   if (browserRole || opsRole) {
     await registerLiveProxy(app, httpTask, deps);
-    registerRoutes(app, httpTask, deps, viewConfig);
+    // Staged rotation lives only on the private roles: the public issuer
+    // publishes keys and must not be able to change them
+    // (docs/workload-identity.md).
+    registerRoutes(app, httpTask, deps, viewConfig, signingKeyDeps);
     // Cloud deployment serves the built web UI from the same process; local
     // development keeps the vite dev server + proxy instead.
     const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";
@@ -401,7 +413,11 @@ async function main(): Promise<void> {
         // The signer reads the active key row per signature and caches only
         // its material, so a rotation takes effect without a restart
         // (docs/workload-identity.md).
-        signer: new OidcTokenSigner({ keys: database.signingKeys, secrets }),
+        signer: new OidcTokenSigner({
+          keys: database.signingKeys,
+          secrets,
+          constants: DEFAULT_ISSUER_CONSTANTS,
+        }),
         mintIds: new CryptoMintIdSource(),
         constants: DEFAULT_ISSUER_CONSTANTS,
         issuerUrl,
@@ -418,33 +434,42 @@ async function main(): Promise<void> {
     });
   }
 
-  // Boot key ensure for the roles that mint (docs/workload-identity.md). It is
-  // idempotent, so every instance runs it and the losers adopt the winner's
-  // key. It deliberately does *not* fail the boot: the runtime service is also
-  // the credential broker every running orb depends on, and taking it down
-  // over issuer trouble would trade a feature outage for a fleet outage.
-  // Minting then fails closed per request with typed retryable errors, and the
-  // next boot or an operator's rotation repairs it.
-  if (runtimeRole) {
-    const keyDeps = {
-      keys: database.signingKeys,
-      secrets,
-      generator: new NodeCryptoSigningKeyGenerator(),
-      constants: DEFAULT_ISSUER_CONSTANTS,
-    };
-    let established = false;
+  /**
+   * Boot key ensure for the roles that mint (docs/workload-identity.md).
+   * Idempotent, so every instance runs it and the losers adopt the winner's
+   * key.
+   *
+   * It deliberately does *not* fail the boot: the runtime service is also the
+   * credential broker every running orb depends on, and taking it down over
+   * issuer trouble would trade a feature outage for a fleet outage. Minting
+   * then fails closed per request with typed retryable errors, and the next
+   * boot or an operator's rotation repairs it.
+   *
+   * For the same reason it must not run *before* `app.listen`. A database that
+   * refuses answers fast, but one that hangs — a saturated pool, a network
+   * partition that drops packets instead of resetting — answers never, and an
+   * awaited pre-listen hook would then keep every orb's credential broker from
+   * ever accepting a connection. Identity is one feature; listening is the
+   * whole service. So this runs after the socket is open, in the background,
+   * on the task's clock.
+   */
+  const ensureSigningKeyInBackground = async (): Promise<void> => {
     let lastFailure = "";
-    for (let attempt = 0; attempt < 3 && !established; attempt++) {
-      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
-      const ensured = await ensureActiveSigningKey(bootTask, keyDeps, { now: Date.now() });
-      established = ensured.isOk();
-      if (ensured.isErr()) lastFailure = ensured.error.message;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await bootTask.sleep(500, "signing key retry");
+      const ensured = await ensureActiveSigningKey(bootTask, signingKeyDeps, {
+        now: bootTask.wallNow(),
+      });
+      if (ensured.isOk()) return;
+      lastFailure = ensured.error.message;
     }
-    // One durable edge, and only on the failing edge: a healthy boot that
-    // found the key already active says nothing (docs/lifecycle.md). Key
-    // creation and adoption log their own `lifecycle:` events.
-    if (!established) bootTask.error(`issuer signing key unavailable: ${lastFailure}`);
-  }
+    // One durable edge, and only on the failing edge: a healthy boot that found
+    // the key already active says nothing (docs/lifecycle.md). It is a
+    // `lifecycle:` event rather than free-text stderr because "why could this
+    // instance not sign?" is a question asked long afterwards, and the answer
+    // has to be queryable beside the key events the ensure itself emits.
+    logEvent(bootTask, "issuer-key-unavailable", { reason: lastFailure });
+  };
 
   const stop = new AbortController();
   let appClosePromise: Promise<void> | null = null;
@@ -486,6 +511,10 @@ async function main(): Promise<void> {
   );
   if (listening === null) return;
   bootTask.log(`control plane listening on ${listening}`);
+
+  // Fire and forget: the socket is already accepting, and this repairs the
+  // issuer behind it (see `ensureSigningKeyInBackground`).
+  if (runtimeRole) void ensureSigningKeyInBackground();
 
   // Background loops: history polling and lifecycle reconciliation
   // (docs/history-replication.md). Same domain code as the simulations, on real time.

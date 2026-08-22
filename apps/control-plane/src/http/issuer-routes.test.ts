@@ -112,12 +112,33 @@ describe("issuer discovery and JWKS", () => {
     expect(response.json().jwks_uri.endsWith(JWKS_PATH)).toBe(true);
   });
 
-  it("publishes both documents as public and cacheable", async () => {
+  it("publishes both documents as public and cacheable once a key exists", async () => {
+    keys.seedKey(jwkRow("active-key"));
     for (const url of [OPENID_CONFIGURATION_PATH, JWKS_PATH]) {
       const response = await app.inject({ method: "GET", url });
       expect(response.statusCode, url).toBe(200);
       expect(response.headers["cache-control"], url).toBe("public, max-age=300");
     }
+  });
+
+  it("refuses to publish an empty key set, uncached, before the first key exists", async () => {
+    // The first-deploy window: the boot hook has not established a key yet. A
+    // `200 {"keys":[]}` with `public, max-age=300` would let every verifier and
+    // cloud STS cache *emptiness* for five minutes and reject the deployment's
+    // very first minted tokens. An uncached 503 makes them come back instead.
+    const response = await app.inject({ method: "GET", url: JWKS_PATH });
+    expect(response.statusCode).toBe(503);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toEqual({
+      error: "unavailable",
+      message: "no signing keys published yet",
+    });
+
+    // Discovery is static configuration and stays available and cacheable: a
+    // verifier may pin the issuer long before the first key is published.
+    const discovery = await app.inject({ method: "GET", url: OPENID_CONFIGURATION_PATH });
+    expect(discovery.statusCode).toBe(200);
+    expect(discovery.headers["cache-control"]).toBe("public, max-age=300");
   });
 
   it("serves the active key first, published keys beside it, and no secret", async () => {
@@ -161,19 +182,12 @@ describe("issuer discovery and JWKS", () => {
     ]);
   });
 
-  it("fails closed with an uncached 503 when the key rows cannot be read", async () => {
-    // An empty or partial key set would make every live token look forged, so
-    // the endpoint refuses to answer at all — and the refusal is never cached.
-    const unavailable: StoreError = {
-      type: "store_error",
-      code: "unavailable",
-      message: "connection terminated",
-      retryable: true,
-    };
+  /** An issuer whose key rows always fail to read with `error`. */
+  async function issuerOverBrokenKeys(error: StoreError): Promise<ReturnType<typeof Fastify>> {
     const brokenKeys: SigningKeyStore = {
-      listSigningKeys: () => errAsync(unavailable),
-      insertSigningKey: () => errAsync(unavailable),
-      casSigningKeyState: () => errAsync(unavailable),
+      listSigningKeys: () => errAsync(error),
+      insertSigningKey: () => errAsync(error),
+      casSigningKeyState: () => errAsync(error),
     };
     const broken = Fastify();
     registerIssuerRoutes(broken, task, {
@@ -182,6 +196,18 @@ describe("issuer discovery and JWKS", () => {
       issuerUrl: TEST_ISSUER_URL,
     });
     await broken.ready();
+    return broken;
+  }
+
+  it("fails closed with an uncached 503 when the key rows cannot be read", async () => {
+    // An empty or partial key set would make every live token look forged, so
+    // the endpoint refuses to answer at all — and the refusal is never cached.
+    const broken = await issuerOverBrokenKeys({
+      type: "store_error",
+      code: "unavailable",
+      message: "connection terminated",
+      retryable: true,
+    });
 
     const response = await broken.inject({ method: "GET", url: JWKS_PATH });
     expect(response.statusCode).toBe(503);
@@ -192,6 +218,44 @@ describe("issuer discovery and JWKS", () => {
       (await broken.inject({ method: "GET", url: OPENID_CONFIGURATION_PATH })).statusCode,
     ).toBe(200);
     await broken.close();
+  });
+
+  it("answers a missing key table as retryable rather than as our own bug", async () => {
+    // `relation "oidc_signing_keys" does not exist` (SQLSTATE 42P01) reaches
+    // the domain as an `invariant` store error. The issuer role is the one role
+    // that never runs migrations, so this is a real first-deploy race against
+    // the browser role's migration — and it is retryable, whatever the code
+    // says. A 500 here would tell the verifier to stop asking.
+    const broken = await issuerOverBrokenKeys({
+      type: "store_error",
+      code: "invariant",
+      message: 'relation "oidc_signing_keys" does not exist',
+      retryable: false,
+    });
+
+    const response = await broken.inject({ method: "GET", url: JWKS_PATH });
+    expect(response.statusCode).toBe(503);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toEqual({
+      error: "unavailable",
+      message: "signing keys unavailable",
+    });
+    await broken.close();
+  });
+
+  it("never leaks a store message to the internet", async () => {
+    for (const code of ["unavailable", "corruption", "invariant"] as const) {
+      const broken = await issuerOverBrokenKeys({
+        type: "store_error",
+        code,
+        message: 'select kid from "oidc_signing_keys" where secret_version = $1',
+        retryable: code === "unavailable",
+      });
+      const response = await broken.inject({ method: "GET", url: JWKS_PATH });
+      expect(response.body, code).not.toContain("secret_version");
+      expect(response.body, code).not.toContain("select");
+      await broken.close();
+    }
   });
 });
 
@@ -252,7 +316,7 @@ describe("minted tokens verify against the served JWKS", () => {
       nameLeaseMs: 30_000,
       mint: {
         store,
-        signer: new OidcTokenSigner({ keys, secrets }),
+        signer: new OidcTokenSigner({ keys, secrets, constants: DEFAULT_ISSUER_CONSTANTS }),
         mintIds: new CryptoMintIdSource(),
         constants: TEST_ISSUER_CONSTANTS,
         issuerUrl: TEST_ISSUER_URL,

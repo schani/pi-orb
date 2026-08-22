@@ -178,8 +178,9 @@ export interface SignerError {
  * deliberately carries no detail, because unknown, stale, and fenced bearers
  * must be indistinguishable.
  *
- * `internal` is a deterministic store bug (`StoreError` code `invariant`) that
- * no retry can fix and that must never be advertised as retryable
+ * `internal` is a store failure no retry can fix — `StoreError` code
+ * `invariant` (a deterministic bug of ours) or `corruption` (a row the schema
+ * refuses outright) — and must never be advertised as retryable
  * (docs/lifecycle.md).
  */
 export type MintError =

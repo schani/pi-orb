@@ -1,11 +1,11 @@
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { ID_TOKEN_PATH } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { BrokerEnv } from "../broker/endpoint.ts";
-import { HttpIdTokenEndpoint } from "./endpoint.ts";
-import type { IdTokenEndpointResult } from "./token.ts";
+import { HttpIdTokenEndpoint, MINT_REQUEST_TIMEOUT_MS } from "./endpoint.ts";
+import { CLI_ID_TOKEN_CONSTANTS, type IdTokenEndpointResult } from "./token.ts";
 
 /**
  * Transport mapping against a real HTTP server: statuses, the declared error
@@ -139,6 +139,45 @@ describe("id-token HTTP endpoint", () => {
       kind: "retryable",
       message: "control plane HTTP 502",
     });
+  });
+
+  it("gives up on a control plane that accepts the connection and never answers", async () => {
+    // The worst failure for an executable credential source is not an error,
+    // it is a hang: the SDK calling `pi-orb id-token` waits on a socket that a
+    // half-dead control plane will never write to. The upper bound is enforced
+    // by the suite's own test timeout — if the request were unbounded this test
+    // could not pass at all — so nothing here is asserted against wall time
+    // except the lower bound, which no clock can cross early.
+    const sockets: Socket[] = [];
+    const silent = createServer(() => {
+      // Accepted, parsed, and deliberately never answered.
+    });
+    silent.on("connection", (socket) => sockets.push(socket));
+    await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+    const { port } = silent.address() as AddressInfo;
+    const endpoint = new HttpIdTokenEndpoint({
+      controlPlaneUrl: `http://127.0.0.1:${port}`,
+      runtimeToken: "runtime-bearer",
+    });
+
+    const startedAt = Date.now();
+    const outcome = await endpoint.mint(new NoSimulationTask("silent", false), { audience: "ok" });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(outcome).toEqual({
+      kind: "retryable",
+      message: `control plane did not answer within ${MINT_REQUEST_TIMEOUT_MS}ms`,
+    });
+    expect(elapsedMs).toBeGreaterThanOrEqual(MINT_REQUEST_TIMEOUT_MS);
+
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => silent.close(() => resolve()));
+  });
+
+  it("leaves room in the CLI's budget for a retry after one timeout", () => {
+    // The timeout is the transport's share of `retryWindowMs`, not the whole
+    // of it: a single non-answering attempt must not exhaust the invocation.
+    expect(MINT_REQUEST_TIMEOUT_MS).toBeLessThan(CLI_ID_TOKEN_CONSTANTS.retryWindowMs / 2);
   });
 
   it("maps an unreachable control plane to a retryable outcome, never a throw", async () => {

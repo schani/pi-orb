@@ -58,7 +58,7 @@ beforeEach(async () => {
   mintHarness = makeMintHarness({ issuerConstants: { minMintIntervalMs: 0 } });
   mintDeps = {
     ...mintHarness.mintDeps,
-    signer: new OidcTokenSigner({ keys, secrets }),
+    signer: new OidcTokenSigner({ keys, secrets, constants: DEFAULT_ISSUER_CONSTANTS }),
     mintIds: new CryptoMintIdSource(),
   };
   bearer = seedOrbWithBearer(task, mintHarness, ORB, "running", { incarnation: 2 });
@@ -209,4 +209,62 @@ describe("OidcTokenSigner composed with real key material", () => {
       expect(minted.error.message).not.toContain("PRIVATE KEY");
     }
   });
+
+  it("stops signing within the material TTL when a warm key's version is destroyed", async () => {
+    // Destroying the active key's secret version is how an operator kills a
+    // leaked key without waiting for a rotation to converge — and the row it
+    // leaves behind is unchanged, so nothing but the material TTL can make a
+    // signer that already read that material notice.
+    const ttlMs = 5_000;
+    const clock = new SteppableClock();
+    const signer = new OidcTokenSigner({
+      keys,
+      secrets,
+      constants: { ...DEFAULT_ISSUER_CONSTANTS, signingKeyMaterialTtlMs: ttlMs },
+    });
+    const warmDeps: MintDeps = { ...mintDeps, signer };
+
+    const active = (
+      await ensureActiveSigningKey(task, keyDeps, { now: Date.now() })
+    )._unsafeUnwrap();
+    const warm = await mintIdToken(clock, warmDeps, { tokenHash: bearer, audience: AUDIENCE });
+    expect(warm.isOk(), JSON.stringify(warm.isErr() ? warm.error : null)).toBe(true);
+
+    await secrets.destroySecret(task, SIGNING_KEY_SECRET_PROVIDER, active.secretVersion);
+
+    // Inside the window the cached material is still reused; that bounded
+    // staleness is the price of not reading a secret per token, and it is the
+    // reason the window has to be short.
+    clock.advance(ttlMs - 1);
+    const stillWarm = await mintIdToken(clock, warmDeps, { tokenHash: bearer, audience: AUDIENCE });
+    expect(stillWarm.isOk()).toBe(true);
+
+    clock.advance(2);
+    const revoked = await mintIdToken(clock, warmDeps, { tokenHash: bearer, audience: AUDIENCE });
+    expect(revoked.isErr() && revoked.error.type).toBe("retryable");
+    if (revoked.isErr() && revoked.error.type === "retryable") {
+      expect(revoked.error.message).toContain("unusable");
+    }
+  });
 });
+
+/**
+ * A `NoSimulationTask` whose monotonic clock only moves when the test moves
+ * it. Real time may not decide whether a cache entry has expired — that is
+ * exactly the coupling that makes a timing test unreproducible.
+ */
+class SteppableClock extends NoSimulationTask {
+  private monotonic = 0;
+
+  constructor() {
+    super("material ttl clock", false);
+  }
+
+  override monotonicNow(): number {
+    return this.monotonic;
+  }
+
+  advance(ms: number): void {
+    this.monotonic += ms;
+  }
+}

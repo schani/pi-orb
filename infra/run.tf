@@ -308,6 +308,11 @@ resource "google_cloud_run_v2_service" "issuer" {
       # The issuer's one piece of state: the public JWKs in `oidc_signing_keys`.
       # Private key material is addressed from those rows but lives in Secret
       # Manager, which this service account cannot read.
+      #
+      # This is the deployment's *shared* read/write database credential, not a
+      # scoped one, so the public service's database rights equal every other
+      # service's; only its route allowlist keeps it to two public documents
+      # (oidc.tf, and the read-only-role item in TODO.md).
       env {
         name = "DATABASE_URL"
         value_source {

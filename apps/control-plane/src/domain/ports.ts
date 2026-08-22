@@ -866,6 +866,8 @@ export interface SigningKeyStore {
 export interface SigningKeyMaterialDeps {
   readonly keys: SigningKeyStore;
   readonly secrets: CredentialSecretStore;
+  /** `signingKeyMaterialTtlMs` bounds how long read material may be reused. */
+  readonly constants: import("./constants.ts").IssuerConstants;
 }
 
 /**

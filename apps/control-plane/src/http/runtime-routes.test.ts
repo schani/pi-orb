@@ -50,8 +50,34 @@ describe("runtime broker routes", () => {
   let secrets: FakeSecretStore;
   let signer: FakeTokenSigner;
 
-  beforeEach(async () => {
+  const nameGenerator: OrbNameGenerator = {
+    generate: () => okAsync("Repair Runtime Auth"),
+  };
+
+  /**
+   * Builds the app over the already-constructed dependencies. Split out of the
+   * hook so a describe block can rebuild the routes with its own issuer
+   * constants without duplicating the wiring.
+   */
+  async function startApp(issuerConstants = TEST_ISSUER_CONSTANTS): Promise<void> {
     app = Fastify();
+    registerRuntimeRoutes(app, task, {
+      store,
+      broker,
+      nameGenerator,
+      nameLeaseMs: 30_000,
+      mint: {
+        store,
+        signer,
+        mintIds: new FakeMintIdSource(),
+        constants: issuerConstants,
+        issuerUrl: TEST_ISSUER_URL,
+      },
+    });
+    await app.ready();
+  }
+
+  beforeEach(async () => {
     store = new InMemoryControlPlaneStore(0);
     pointers = new FakePointerStore();
     secrets = new FakeSecretStore();
@@ -66,23 +92,7 @@ describe("runtime broker routes", () => {
       constants: { ...DEFAULT_BROKER_CONSTANTS, requestDeadlineMs: 100, waiterPollMs: 5 },
     };
     store.seedProject(makeProjectRow(PROJECT));
-    const nameGenerator: OrbNameGenerator = {
-      generate: () => okAsync("Repair Runtime Auth"),
-    };
-    registerRuntimeRoutes(app, task, {
-      store,
-      broker,
-      nameGenerator,
-      nameLeaseMs: 30_000,
-      mint: {
-        store,
-        signer,
-        mintIds: new FakeMintIdSource(),
-        constants: TEST_ISSUER_CONSTANTS,
-        issuerUrl: TEST_ISSUER_URL,
-      },
-    });
-    await app.ready();
+    await startApp();
   });
 
   afterEach(async () => {
@@ -392,6 +402,24 @@ describe("runtime broker routes", () => {
    * never cached.
    */
   describe("id-token minting", () => {
+    /**
+     * An hour-long mint floor. The domain stamps the slot claim from real wall
+     * time here, so with the fixture's 1 s floor the throttle assertion would
+     * really be an assertion about how fast the machine runs two injections —
+     * green on a laptop, intermittently red on a loaded CI box, which is
+     * exactly the un-reproducible failure AGENTS.md forbids. An hour is a floor
+     * elapsed real time cannot plausibly cross, so what is under test is the
+     * throttle logic alone. Every other case in this block mints at most once
+     * against a store the hook rebuilds, so the larger floor is invisible to
+     * them.
+     */
+    const HOUR_LONG_MINT_FLOOR = { ...TEST_ISSUER_CONSTANTS, minMintIntervalMs: 3_600_000 };
+
+    beforeEach(async () => {
+      await app.close();
+      await startApp(HOUR_LONG_MINT_FLOOR);
+    });
+
     function mint(body: unknown, token: string | null = TOKEN) {
       return app.inject({
         method: "POST",
@@ -433,7 +461,7 @@ describe("runtime broker routes", () => {
       seedOrb("running");
       const response = await mint({ audience: "urn:example:service" });
       const claims = decodeFakeIdToken(response.json().token);
-      expect(claims.exp - claims.iat).toBe(TEST_ISSUER_CONSTANTS.defaultTtlSeconds);
+      expect(claims.exp - claims.iat).toBe(HOUR_LONG_MINT_FLOOR.defaultTtlSeconds);
     });
 
     it("rejects a malformed body before minting anything", async () => {
@@ -486,8 +514,12 @@ describe("runtime broker routes", () => {
       expect(response.statusCode).toBe(429);
       const body = response.json();
       expect(body.error).toBe("rate_limited");
-      expect(body.retryAfterMs).toBeGreaterThan(0);
-      expect(body.retryAfterMs).toBeLessThanOrEqual(TEST_ISSUER_CONSTANTS.minMintIntervalMs);
+      // The delay is the remainder of the floor, so it lands just under it: a
+      // whole minute of real time between the two injections still leaves the
+      // window open, while a broken remainder computation does not.
+      const floor = HOUR_LONG_MINT_FLOOR.minMintIntervalMs;
+      expect(body.retryAfterMs).toBeGreaterThan(floor - 60_000);
+      expect(body.retryAfterMs).toBeLessThanOrEqual(floor);
       expect(Check(IdTokenErrorSchema, body)).toBe(true);
       // Whole seconds, rounded up: a client honoring the header never returns
       // before the floor has actually passed.

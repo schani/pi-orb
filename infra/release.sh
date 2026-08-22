@@ -11,7 +11,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 INFRA="$ROOT/infra"
 PROJECT=${PROJECT:-playground-dev-6ae7}
 REGION=${REGION:-us-central1}
-ZONE=${ZONE:-$REGION-a}
+# No ZONE here on purpose: orb VMs are created in OpenTofu's `var.zone`, which
+# is an independent variable, not `$REGION-a`. The smoke reads the applied
+# root's `zone` output below, so the two agree by construction.
 STATE_BUCKET=${STATE_BUCKET:-pi-orb-tfstate-$PROJECT}
 STATE_PREFIX=${STATE_PREFIX:-static-plane}
 AUTO_APPROVE=false
@@ -271,7 +273,14 @@ echo "release: running live lifecycle smoke test ..."
 # tier is configured through PI_ORB_SMOKE_WIF_* (infra/bootstrap-pi-orb-oidc.sh)
 # and otherwise skip with a loud notice.
 echo "release: running live workload-identity smoke test ..."
-PI_ORB_GCP_PROJECT="$PROJECT" PI_ORB_GCE_ZONE="$ZONE" "$INFRA/smoke-workload-identity.sh"
+# The zone comes from the root that was just applied, not from a string built
+# out of REGION: `var.zone` is its own variable and a deployment whose zone is
+# not `<region>-a` would send the smoke looking for orb VMs in an empty zone.
+if ! zone=$(tofu -chdir="$INFRA" output -raw zone) || [ -z "$zone" ]; then
+  echo "release failed: could not read the deployed zone (tofu output -raw zone)" >&2
+  exit 1
+fi
+PI_ORB_GCP_PROJECT="$PROJECT" PI_ORB_GCE_ZONE="$zone" "$INFRA/smoke-workload-identity.sh"
 
 control_plane_image=$(awk -F'"' '/^control_plane_image/{print $2}' "$VARS")
 runtime_image=$(awk -F'"' '/^runtime_image/{print $2}' "$VARS")

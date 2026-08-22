@@ -1,5 +1,5 @@
 import { NoSimulationTask } from "determined";
-import type { Result } from "neverthrow";
+import { errAsync, type Result } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import {
   type MintHarness,
@@ -7,8 +7,9 @@ import {
   seedOrbWithBearer,
   TEST_ISSUER_URL,
 } from "../testkit/fixtures.ts";
+import type { InMemoryControlPlaneStore } from "../testkit/store.ts";
 import { decodeFakeIdToken, decodeFakeIdTokenKid } from "../testkit/workload-identity.ts";
-import type { MintError } from "./errors.ts";
+import type { MintError, StoreError } from "./errors.ts";
 import { mintIdToken } from "./workload-identity.ts";
 
 const ORB = "orb-mint";
@@ -147,5 +148,131 @@ describe("bearer authentication", () => {
     expect(errorOf(denied).type).toBe("unauthorized");
     expect(seeded.harness.store.orbSnapshot(ORB)?.mintFailureCode).toBeNull();
     expect(seeded.harness.store.orbSnapshot(ORB)?.lastMintAt).toBeNull();
+  });
+});
+
+describe("denial-path status writes", () => {
+  it("writes once for a run of identical denials, and again when the code changes", async () => {
+    // `not_mintable` and `invalid_request` are both recorded *before* the
+    // rate-limit slot is claimed, so without dedup a caller holding a stopped
+    // orb's bearer drives one UPDATE per request against no floor at all.
+    const task = new NoSimulationTask("denial dedup test", false);
+    const harness = makeMintHarness();
+    const bearer = seedOrbWithBearer(task, harness, ORB, "stopped");
+
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const denied = await mintIdToken(task, harness.mintDeps, {
+        tokenHash: bearer,
+        audience: AUDIENCE,
+      });
+      expect(errorOf(denied).type).toBe("not_mintable");
+    }
+    expect(harness.store.mintFailureWrites).toBe(1);
+    const stamped = harness.store.orbSnapshot(ORB)?.mintFailureAt;
+    expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("not_mintable");
+
+    // A different code is real news — the user needs to see the state change,
+    // not the previous run's verdict — so it always writes.
+    const running = harness.store.orbSnapshot(ORB);
+    if (running === null) throw new Error("seed missing");
+    harness.store.seedOrb({ ...running, state: "running" });
+    const invalid = await mintIdToken(task, harness.mintDeps, {
+      tokenHash: bearer,
+      audience: "",
+    });
+    expect(errorOf(invalid).type).toBe("invalid_request");
+    expect(harness.store.mintFailureWrites).toBe(2);
+    expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("invalid_request");
+    // The stamp the dedup deliberately lets go stale: it belongs to the *first*
+    // request of a run of identical denials, not the latest one.
+    expect(stamped).not.toBeNull();
+  });
+
+  it("records again once a later successful mint has superseded the same denial", async () => {
+    // The dedup must not outlive the status it is deduplicating against.
+    // `http/views.ts` hides a failure older than `lastMintAt`, so after a
+    // successful mint the row still *says* `not_mintable` while showing the
+    // user nothing — and a plain code comparison would then skip the write for
+    // the next real denial forever, leaving the orb silently failing.
+    const task = new NoSimulationTask("denial supersession test", false);
+    const harness = makeMintHarness();
+    const bearer = seedOrbWithBearer(task, harness, ORB, "stopped");
+
+    const first = await mintIdToken(task, harness.mintDeps, {
+      tokenHash: bearer,
+      audience: AUDIENCE,
+    });
+    expect(errorOf(first).type).toBe("not_mintable");
+    expect(harness.store.mintFailureWrites).toBe(1);
+
+    // A later successful mint, as the rate-limit slot would have recorded it.
+    const denied = harness.store.orbSnapshot(ORB);
+    if (denied === null) throw new Error("seed missing");
+    if (denied.mintFailureAt === null) throw new Error("denial was not recorded");
+    const supersededBy = denied.mintFailureAt + 1;
+    harness.store.seedOrb({ ...denied, lastMintAt: supersededBy });
+
+    const again = await mintIdToken(task, harness.mintDeps, {
+      tokenHash: bearer,
+      audience: AUDIENCE,
+    });
+    expect(errorOf(again).type).toBe("not_mintable");
+    expect(harness.store.mintFailureWrites).toBe(2);
+    expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("not_mintable");
+  });
+});
+
+/**
+ * The harness's store with its bearer lookup swapped for a fixed failure.
+ * Delegating through the prototype keeps every other method — and the seeded
+ * rows behind them — exactly as they were, which a hand-built stub of the whole
+ * `ControlPlaneStore` could not.
+ */
+function storeFailingLookup(
+  store: InMemoryControlPlaneStore,
+  error: StoreError,
+): InMemoryControlPlaneStore {
+  const failing: InMemoryControlPlaneStore = Object.create(store);
+  failing.getOrbByRuntimeTokenHash = () => errAsync(error);
+  return failing;
+}
+
+describe("store failures the caller cannot retry away", () => {
+  for (const code of ["invariant", "corruption"] as const) {
+    it(`reports a ${code} store failure as internal, never as retryable`, async () => {
+      // Both codes carry `retryable: false`: `invariant` is a deterministic bug
+      // of ours, `corruption` a row shape the schema refuses outright. Neither
+      // improves by being asked again, and advertising either as retryable is
+      // how a CLI ends up spinning on a refusal that never changes.
+      const seeded = seed();
+      const store = storeFailingLookup(seeded.harness.store, {
+        type: "store_error",
+        code,
+        message: "orbs.mint_failure_code holds an unknown value",
+        retryable: false,
+      });
+      const denied = await mintIdToken(
+        seeded.task,
+        { ...seeded.harness.mintDeps, store },
+        { tokenHash: seeded.bearer, audience: AUDIENCE },
+      );
+      expect(errorOf(denied).type).toBe("internal");
+    });
+  }
+
+  it("still reports an outage as retryable", async () => {
+    const seeded = seed();
+    const store = storeFailingLookup(seeded.harness.store, {
+      type: "store_error",
+      code: "unavailable",
+      message: "connection terminated",
+      retryable: true,
+    });
+    const denied = await mintIdToken(
+      seeded.task,
+      { ...seeded.harness.mintDeps, store },
+      { tokenHash: seeded.bearer, audience: AUDIENCE },
+    );
+    expect(errorOf(denied).type).toBe("retryable");
   });
 });

@@ -37,6 +37,18 @@ locals {
 # read every brokered user credential and the private signing keys below, and
 # the issuer needs none of them. Its own account can read exactly one secret —
 # the database URL, for the public JWKs in `oidc_signing_keys` — and write logs.
+#
+# Be precise about where that boundary stops (POC limitation, recorded
+# 2026-08-22). It is a *Secret Manager* boundary: the issuer cannot read a
+# private signing key, a brokered GitHub/Codex credential, or a Tailscale
+# secret. It is **not** a database boundary. `DATABASE_URL` is the deployment's
+# single full read/write application credential, so at the PostgreSQL layer this
+# internet-facing service holds the same rights every other service does — it
+# could read `orbs.runtime_token_hash` or write `oidc_signing_keys` if its code
+# asked. What stops it today is the role's route allowlist (only discovery and
+# JWKS are registered) and the trimmed environment, not the credential. A
+# read-only PostgreSQL role for the issuer, granted `SELECT` on
+# `oidc_signing_keys` alone, is tracked in `TODO.md` for the live gate.
 resource "google_service_account" "issuer" {
   account_id   = "pi-orb-issuer"
   display_name = "pi-orb public OIDC issuer"
@@ -82,7 +94,8 @@ resource "google_secret_manager_secret" "oidc_signing_key" {
 # the grant is as narrow as the account split currently allows. What matters
 # here is the boundary that is real: `google_service_account.issuer` — the
 # public, unauthenticated service — appears in neither binding and can never
-# read a private key.
+# read a private key. It is a Secret Manager boundary only; the issuer shares
+# the one database credential with every other service (see the note above).
 resource "google_secret_manager_secret_iam_member" "cp_signing_key_accessor" {
   secret_id = google_secret_manager_secret.oidc_signing_key.id
   role      = "roles/secretmanager.secretAccessor"

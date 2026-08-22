@@ -1529,6 +1529,105 @@ export function signingKeyStoreContractTests(
       expect(listed.isOk() && listed.value.map((key) => key.state)).toEqual(["active", "pending"]);
     });
 
+    /**
+     * Migration 011's `oidc_signing_keys_timestamps_complete`. These three
+     * transitions are not races a caller retries into — they are rows the
+     * schema will not hold, so both drivers must refuse them as `corruption`
+     * and leave the row untouched. `rotateSigningKey`'s convergence loop
+     * depends on the last of them being impossible: a retired key can never be
+     * CASed back into signing.
+     */
+    it("refuses transitions the timestamp completeness check forbids", async () => {
+      expect((await keys.insertSigningKey(task, pending("kid-a", 1_000))).isOk()).toBe(true);
+
+      // Activation must record when the key started signing: `activated_at` is
+      // how the overlap window is reconstructed afterwards.
+      const undated = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 0,
+        state: "active",
+      });
+      expect(undated.isErr() && undated.error.type).toBe("store_error");
+      expect(undated.isErr() && undated.error.type === "store_error" && undated.error.code).toBe(
+        "corruption",
+      );
+
+      // Retiring a key that never signed would claim an overlap window for a
+      // key no live token can name.
+      const neverActive = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 0,
+        state: "retired",
+        retiredAt: 2_000,
+      });
+      expect(neverActive.isErr() && neverActive.error.type).toBe("store_error");
+      expect(
+        neverActive.isErr() && neverActive.error.type === "store_error" && neverActive.error.code,
+      ).toBe("corruption");
+
+      // Neither refusal wrote: the row is still the pending one it started as.
+      const untouched = await keys.listSigningKeys(task);
+      expect(untouched.isOk() && untouched.value[0]).toEqual(pending("kid-a", 1_000));
+
+      expect(
+        (
+          await keys.casSigningKeyState(task, {
+            kid: "kid-a",
+            expectedRowVersion: 0,
+            state: "active",
+            activatedAt: 3_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect(
+        (
+          await keys.casSigningKeyState(task, {
+            kid: "kid-a",
+            expectedRowVersion: 1,
+            state: "retired",
+            retiredAt: 4_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+
+      // Resurrection: a retired row CASed back to `active` keeps its
+      // `retired_at`, which the check forbids. Nothing may un-retire a key.
+      const resurrected = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 2,
+        state: "active",
+        activatedAt: 5_000,
+      });
+      expect(resurrected.isErr() && resurrected.error.type).toBe("store_error");
+      expect(
+        resurrected.isErr() && resurrected.error.type === "store_error" && resurrected.error.code,
+      ).toBe("corruption");
+      const listed = await keys.listSigningKeys(task);
+      expect(listed.isOk() && listed.value[0]).toMatchObject({
+        state: "retired",
+        activatedAt: 3_000,
+        retiredAt: 4_000,
+        rowVersion: 2,
+      });
+    });
+
+    it("refuses an inserted row whose timestamps do not match its state", async () => {
+      // The boot path inserts directly as `active`, so the insert has to carry
+      // an activation time; a `pending` row carrying one is equally refused.
+      const undated = await keys.insertSigningKey(task, {
+        ...pending("kid-a", 1_000),
+        state: "active",
+      });
+      expect(undated.isErr() && undated.error.code).toBe("corruption");
+      const predated = await keys.insertSigningKey(task, {
+        ...pending("kid-b", 1_000),
+        activatedAt: 1_000,
+      });
+      expect(predated.isErr() && predated.error.code).toBe("corruption");
+      const listed = await keys.listSigningKeys(task);
+      expect(listed.isOk() && listed.value).toEqual([]);
+    });
+
     it("conflicts on a stale row version and on an unknown kid without writing", async () => {
       expect((await keys.insertSigningKey(task, pending("kid-a", 1_000))).isOk()).toBe(true);
       expect(
