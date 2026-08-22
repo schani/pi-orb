@@ -1,8 +1,10 @@
 # Orb workload identity requirements
 
 > **Status:** Requirements accepted 2026-08-21; implementation plan added 2026-08-21 (see
-> "Implementation plan" below). Stage 1 and stage 2A (crypto adapter, key management, signer)
-> have landed; nothing is reachable in the product until the CLI ships in stage 3. This document defines a
+> "Implementation plan" below). Stage 1 and stage 2 have landed: the domain core, the crypto
+> adapter and key management, the mint route, the `issuer` role's discovery/JWKS endpoints, the
+> boot key hook, and the per-orb identity status in the product. Nothing in an orb can call any of
+> it until the CLI ships in stage 3. This document defines a
 > provider-neutral OIDC identity that code running inside a pi-orb can exchange for
 > short-lived credentials from cloud providers and private services. It does not grant any
 > permission by itself: each relying party owns its trust policy and authorization.
@@ -515,6 +517,52 @@ construction. **2B** is the wiring: the shared bearer-authentication helper, the
 `issuer` role with discovery and JWKS, the boot hook, and the per-orb identity status in
 `http/views.ts`.
 
+Stage 2B landed 2026-08-21 (`http/runtime-routes.ts`, `http/issuer-routes.ts`, `main.ts`,
+`http/views.ts`, `apps/web/src/pages/OrbPage.tsx`). Five decisions taken while implementing it:
+
+- **The mint route does not pre-authenticate.** The two older runtime routes resolve the bearer at
+  the HTTP boundary through the now-shared helper; the mint route hashes the bearer and hands the
+  hash straight to `mintIdToken`, because the domain's snapshot read of the orb row *is* the mint's
+  linearization point against stop, replacement, archive, and delete. A route-level check would be
+  a second, earlier read whose verdict the domain would then have to ignore. The shared helper
+  still distinguishes a store outage from a refusal, which is why the broker route can answer 503
+  where a naive 401 would tell a live runtime its incarnation is dead. The orb-name trigger keeps
+  folding a store outage into 401 exactly as before; the honest 503 is tracked in `TODO.md`.
+- **`internal` is a wire error code** (deviation from stage 1's five-code envelope). `MintError`
+  already carried `internal` for a `StoreError` of code `invariant`, and `IdTokenErrorSchema` had
+  nowhere to put it. Rejected: reporting it as `retryable` with HTTP 500 — that is precisely the
+  "client retries forever a deterministic bug" defect of
+  `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md`. The full HTTP fold is
+  `invalid_request` 400, `unauthorized` 401, `not_mintable` 403, `rate_limited` 429 with
+  `Retry-After`, `retryable` 503, `internal` 500, success 200 with `Cache-Control: no-store`.
+- **`PI_ORB_OIDC_ISSUER_URL` is canonicalized to a bare origin** — scheme, host, non-default port,
+  no trailing slash, no path, query, fragment, or credentials — and validated before any boot side
+  effect, beside the GCE digest-pin check. `https:` is required except for `127.0.0.1`,
+  `localhost`, and `[::1]`, so local development needs no certificate. A path is refused rather
+  than dropped: the well-known endpoints are served at the origin root, so a path-carrying issuer
+  URL would advertise documents that are not there, and `https://x` versus `https://x/` must never
+  become two trust identities. `role=all` defaults it to `http://127.0.0.1:<port>`; `issuer` and
+  `runtime` must be told, and refuse to boot otherwise.
+- **Discovery advertises only what exists**: `response_types_supported: ["id_token"]` (the field is
+  REQUIRED by OpenID Discovery and this issuer mints ID tokens directly, with no authorization or
+  token endpoint to advertise), `subject_types_supported: ["public"]`,
+  `id_token_signing_alg_values_supported: ["RS256"]`, and the claim list above. Both documents are
+  served `public, max-age=300`: five minutes is the same verifier-staleness allowance
+  `jwksOverlapMs` already budgets for on the publishing side. The two document shapes stay in the
+  control plane — one producer, and the consumers are external verifiers reading OIDC Discovery
+  and RFC 7517.
+- **The boot key hook never fails the boot.** `runtime`/`all` run `ensureActiveSigningKey` with a
+  small bounded retry; on persistent failure they log one durable operator-visible edge and keep
+  serving. The runtime role is also the credential broker every running orb depends on, so failing
+  closed at boot would trade a feature outage for a fleet outage. Minting then fails closed per
+  request with typed retryable errors, and the next boot or an operator rotation repairs it.
+  Migrations remain the browser role's job alone.
+
+The per-orb identity status is `OrbView.identity` (`{failureCode, failureAt}`, absent when there is
+nothing to report). Currency is decided on read: the failure is exposed only while
+`mintFailureAt >= lastMintAt`, so a later successful mint supersedes it with no clearing write and
+the status stays off the lifecycle CAS path. The orb page renders it as a compact banner.
+
 ### Stage 3 — CLI, image, end-to-end
 
 - `apps/orb-runtime/src/id-token/`: the request/validation logic (reusing the broker env reader;
@@ -537,7 +585,10 @@ construction. **2B** is the wiring: the shared bearer-authentication helper, the
 - `infra/run.tf`: a fourth Cloud Run service with `PI_ORB_ROLE=issuer`, public ingress, invoker
   IAM disabled — the first public unauthenticated surface, serving only discovery and JWKS. A
   tofu-managed parent secret for signing keys with accessor bindings for the minting service;
-  `PI_ORB_OIDC_ISSUER_URL` in the shared environment.
+  `PI_ORB_OIDC_ISSUER_URL` in the shared environment. **This is now a hard boot requirement**: as of
+  stage 2B the `runtime` and `issuer` roles refuse to start without it, so the deploy that ships
+  stage 2B's control-plane image to Cloud Run must set it in the same change. `PI_ORB_ROLE` is
+  likewise an allowlist now (`all | browser | runtime | ops | issuer`) and a typo refuses to boot.
 - Workload Identity Federation bootstrap as a separately invoked script (the
   `bootstrap-amp-oidc.sh` tier, outside the recurring plan): pool and provider with exact issuer
   and audience, attribute mappings for `project_id`/`orb_id`/`host_incarnation`, the

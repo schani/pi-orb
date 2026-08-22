@@ -956,6 +956,16 @@ export function OrbPage({ orbId }: { orbId: string }) {
             <span className="muted"> (expires {orb.actionRequired.expiresAt})</span>
           </div>
         )}
+        {orb?.identity !== undefined && (
+          // The latest workload-identity mint failed and nothing has minted
+          // since (docs/workload-identity.md): a silent refusal would leave the
+          // user with code in the orb that cannot get cloud credentials and no
+          // way to find out why.
+          <div className="banner banner-error">
+            Workload identity unavailable: {orb.identity.failureCode} (since{" "}
+            {orb.identity.failureAt})
+          </div>
+        )}
         <OrbFailureBanner message={orb?.lastError} />
         {orbError !== null && (
           <div className="banner banner-error">{describeApiError(orbError)}</div>

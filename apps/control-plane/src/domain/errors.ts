@@ -1,4 +1,4 @@
-import type { OrbState } from "@pi-orb/protocol";
+import type { OrbState, MintFailureCode as WireMintFailureCode } from "@pi-orb/protocol";
 
 /**
  * Storage failure. `retryable` distinguishes outages from corruption.
@@ -144,13 +144,12 @@ export type TokenError =
  * status is this code plus its timestamp: never the audience, the bearer, or
  * the token. `unauthorized` has no code here — a bearer that does not resolve
  * to an orb has no orb row to record it on.
+ *
+ * The vocabulary lives in `@pi-orb/protocol` because the orb view publishes it
+ * to the browser; this alias keeps domain code from importing the wire module
+ * for a type it treats as its own.
  */
-export type MintFailureCode =
-  | "invalid_request"
-  | "not_mintable"
-  | "rate_limited"
-  | "signer_failure"
-  | "store_unavailable";
+export type MintFailureCode = WireMintFailureCode;
 
 /** CAS on a signing key's `row_version` affected zero rows. */
 export interface SigningKeyConflict {
@@ -173,14 +172,15 @@ export interface SignerError {
 }
 
 /**
- * What one identity-mint attempt can fail with. The first five mirror the
- * protocol error codes exactly (`IdTokenErrorSchema`), so the HTTP layer is a
- * fold with no decisions of its own; `unauthorized` deliberately carries no
- * detail, because unknown, stale, and fenced bearers must be indistinguishable.
+ * What one identity-mint attempt can fail with. Every variant mirrors a
+ * protocol error code exactly (`IdTokenErrorSchema`), so the HTTP layer is a
+ * fold with no decisions of its own beyond the status code; `unauthorized`
+ * deliberately carries no detail, because unknown, stale, and fenced bearers
+ * must be indistinguishable.
  *
- * `internal` is the extra one: a deterministic store bug (`StoreError` code
- * `invariant`) that no retry can fix and that must never be advertised as
- * retryable (docs/lifecycle.md).
+ * `internal` is a deterministic store bug (`StoreError` code `invariant`) that
+ * no retry can fix and that must never be advertised as retryable
+ * (docs/lifecycle.md).
  */
 export type MintError =
   | { readonly type: "invalid_request"; readonly message: string }

@@ -1,5 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  ID_TOKEN_PATH,
+  type IdTokenErrorBody,
+  IdTokenRequestSchema,
+  type IdTokenResponseBody,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
   ORB_NAME_TRIGGER_PATH,
@@ -20,14 +24,19 @@ import {
   TOKEN_PROVIDERS,
   type TokenRequest,
 } from "../domain/broker.ts";
+import type { MintError } from "../domain/errors.ts";
+import type { OrbRow } from "../domain/orb.ts";
 import { generateOrbName } from "../domain/orb-naming.ts";
-import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
+import type { BrokerDeps, ControlPlaneStore, MintDeps, OrbNameGenerator } from "../domain/ports.ts";
+import { mintIdToken } from "../domain/workload-identity.ts";
 
 export interface RuntimeRouteDeps {
   readonly store: ControlPlaneStore;
   readonly broker: BrokerDeps;
   readonly nameGenerator: OrbNameGenerator;
   readonly nameLeaseMs: number;
+  /** Identity issuance (docs/workload-identity.md); its own store lookup. */
+  readonly mint: MintDeps;
 }
 
 const unauthorized: TokenErrorBody = { error: "unauthorized" };
@@ -44,6 +53,77 @@ function hashesEqual(a: string, b: string): boolean {
 }
 
 /**
+ * SHA-256 hex of the presented bearer, or null when no bearer was presented at
+ * all. Hashing lives at this boundary: nothing below it ever sees the token.
+ */
+function bearerHash(authorization: unknown): string | null {
+  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) return null;
+  return createHash("sha256").update(authorization.slice("Bearer ".length)).digest("hex");
+}
+
+/**
+ * The outcome of resolving a runtime bearer. A store outage is kept apart from
+ * a refusal on purpose: answering 401 for a database blip tells the runtime its
+ * incarnation is dead, which is both false and unrecoverable from its side.
+ */
+type BearerAuth =
+  | { readonly kind: "orb"; readonly orb: OrbRow }
+  | { readonly kind: "unauthorized" }
+  | { readonly kind: "unavailable"; readonly message: string };
+
+const UNAUTHENTICATED: BearerAuth = { kind: "unauthorized" };
+
+interface IdTokenFailure {
+  readonly status: number;
+  readonly body: IdTokenErrorBody;
+  /** Set exactly when a delay is meaningful; becomes the `retry-after` header. */
+  readonly retryAfterMs?: number;
+}
+
+/**
+ * One mint denial as an HTTP answer. The error codes are the protocol's own,
+ * so the only decision here is the status: 403 rather than 401 for a valid
+ * bearer whose orb may not mint (retrying the same request is pointless until
+ * the lifecycle changes), 429 for the per-orb floor, 503 for anything
+ * transient, and 500 for a deterministic bug of ours, which must never be
+ * advertised as retryable
+ * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
+ */
+function idTokenFailure(error: MintError): IdTokenFailure {
+  switch (error.type) {
+    case "invalid_request":
+      return { status: 400, body: { error: "invalid_request", message: error.message } };
+    case "unauthorized":
+      // Deliberately detail-free: unknown, stale, and fenced bearers must be
+      // indistinguishable, so the answer never reveals that another orb exists.
+      return { status: 401, body: { error: "unauthorized" } };
+    case "not_mintable":
+      return {
+        status: 403,
+        body: { error: "not_mintable", message: `orb state ${error.state} may not mint` },
+      };
+    case "rate_limited":
+      return {
+        status: 429,
+        body: { error: "rate_limited", retryAfterMs: error.retryAfterMs },
+        retryAfterMs: error.retryAfterMs,
+      };
+    case "retryable":
+      return {
+        status: 503,
+        body: {
+          error: "retryable",
+          message: error.message,
+          ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
+        },
+        ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
+      };
+    case "internal":
+      return { status: 500, body: { error: "internal", message: error.message } };
+  }
+}
+
+/**
  * The runtime-facing broker surface (docs/credentials.md, docs/credentials.md). One
  * parameterized route serves every token name; the name → provider mapping
  * is internal. Registered only when the deployment role includes runtime
@@ -56,13 +136,19 @@ export function registerRuntimeRoutes(
   task: SimulationTask,
   deps: RuntimeRouteDeps,
 ): void {
-  const authenticate = async (authorization: unknown) => {
-    if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) return null;
-    const tokenHash = createHash("sha256")
-      .update(authorization.slice("Bearer ".length))
-      .digest("hex");
+  /**
+   * The one bearer check every runtime route shares: hash the presented token,
+   * resolve the orb it names, and accept it only when all five conditions hold
+   * — the row exists, it still carries a bearer hash, no discard fence covers
+   * its incarnation, the hashes match in constant time, and the lifecycle state
+   * still authorizes runtime credentials. A store failure is reported as such
+   * so each route can answer it honestly.
+   */
+  const authenticate = async (authorization: unknown): Promise<BearerAuth> => {
+    const tokenHash = bearerHash(authorization);
+    if (tokenHash === null) return UNAUTHENTICATED;
     const orbResult = await deps.store.getOrbByRuntimeTokenHash(task, tokenHash);
-    if (orbResult.isErr()) return null;
+    if (orbResult.isErr()) return { kind: "unavailable", message: "store unavailable" };
     const orb = orbResult.value;
     if (
       orb === null ||
@@ -70,9 +156,10 @@ export function registerRuntimeRoutes(
       orb.hostDiscardThroughIncarnation !== null ||
       !hashesEqual(orb.runtimeTokenHash, tokenHash) ||
       !RUNTIME_TOKEN_STATES.includes(orb.state)
-    )
-      return null;
-    return orb;
+    ) {
+      return UNAUTHENTICATED;
+    }
+    return { kind: "orb", orb };
   };
 
   app.post<{ Params: { name: string } }>(
@@ -84,27 +171,12 @@ export function registerRuntimeRoutes(
         return reply.status(404).send(errorBody);
       }
 
-      const header = request.headers.authorization;
-      if (typeof header !== "string" || !header.startsWith("Bearer ")) {
-        return sendUnauthorized(reply);
-      }
-      const tokenHash = createHash("sha256").update(header.slice("Bearer ".length)).digest("hex");
-
-      const orbResult = await deps.store.getOrbByRuntimeTokenHash(task, tokenHash);
-      if (orbResult.isErr()) {
-        const body: TokenErrorBody = { error: "retryable", message: "store unavailable" };
+      const auth = await authenticate(request.headers.authorization);
+      if (auth.kind === "unavailable") {
+        const body: TokenErrorBody = { error: "retryable", message: auth.message };
         return reply.status(503).send(body);
       }
-      const orb = orbResult.value;
-      if (
-        orb === null ||
-        orb.runtimeTokenHash === null ||
-        orb.hostDiscardThroughIncarnation !== null ||
-        !hashesEqual(orb.runtimeTokenHash, tokenHash) ||
-        !RUNTIME_TOKEN_STATES.includes(orb.state)
-      ) {
-        return sendUnauthorized(reply);
-      }
+      if (auth.kind !== "orb") return sendUnauthorized(reply);
 
       const body = request.body;
       if (!Check(TokenRequestSchema, body)) {
@@ -146,8 +218,13 @@ export function registerRuntimeRoutes(
   );
 
   app.post(ORB_NAME_TRIGGER_PATH, async (request, reply) => {
-    const orb = await authenticate(request.headers.authorization);
-    if (orb === null) return sendUnauthorized(reply);
+    // Naming folds a store outage into the same 401 it always has: it is a
+    // cosmetic, fire-and-forget trigger the runtime replays on its next boot,
+    // and nothing downstream distinguishes the two answers (TODO.md tracks
+    // giving it the honest 503 the other two routes return).
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    const orb = auth.orb;
     if (!Check(OrbNameTriggerSchema, request.body)) {
       return reply.status(400).send({ error: "invalid_request" });
     }
@@ -183,6 +260,46 @@ export function registerRuntimeRoutes(
         .send({ error: generated.error.code, message: generated.error.message });
     }
     const response: OrbNameTriggerResponse = { outcome: generated.value };
+    return reply.send(response);
+  });
+
+  /**
+   * Identity minting (docs/workload-identity.md). Unlike the two routes above
+   * this one does *not* run `authenticate` first: `mintIdToken` resolves the
+   * bearer itself, because its snapshot read of the orb row is the mint's
+   * linearization point against stop, replacement, archive, and delete. A
+   * route-level check would be a second, earlier read whose answer the domain
+   * would then have to ignore. The route's job is the hash, the request
+   * schema, and the status fold.
+   */
+  app.post(ID_TOKEN_PATH, async (request, reply) => {
+    const tokenHash = bearerHash(request.headers.authorization);
+    if (tokenHash === null) {
+      const body: IdTokenErrorBody = { error: "unauthorized" };
+      return reply.status(401).send(body);
+    }
+    if (!Check(IdTokenRequestSchema, request.body)) {
+      const body: IdTokenErrorBody = { error: "invalid_request", message: "invalid request body" };
+      return reply.status(400).send(body);
+    }
+
+    const minted = await mintIdToken(task, deps.mint, {
+      tokenHash,
+      audience: request.body.audience,
+      ...(request.body.ttlSeconds === undefined ? {} : { ttlSeconds: request.body.ttlSeconds }),
+    });
+    if (minted.isErr()) {
+      const failure = idTokenFailure(minted.error);
+      if (failure.retryAfterMs !== undefined) {
+        reply.header("retry-after", Math.ceil(failure.retryAfterMs / 1000));
+      }
+      return reply.status(failure.status).send(failure.body);
+    }
+
+    // A JWT is a bearer credential: no cache, no store, no log — the response
+    // body is the only place it ever appears (docs/workload-identity.md).
+    const response: IdTokenResponseBody = { token: minted.value.token };
+    reply.header("cache-control", "no-store");
     return reply.send(response);
   });
 }

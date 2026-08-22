@@ -45,6 +45,13 @@ export type IdTokenResponseBody = Static<typeof IdTokenResponseSchema>;
  * `not_mintable` means the bearer is valid but the orb's lifecycle state
  * forbids minting. Only the two throttled/transient codes carry
  * `retryAfterMs`; on the others a delay means nothing.
+ *
+ * `internal` is a deterministic control-plane bug — the store's `invariant`
+ * code — and exists on the wire so the caller can tell it apart from
+ * `retryable`. Folding it into `retryable` would tell every CLI to keep
+ * re-sending a request that can never succeed, which is the defect
+ * `docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md` names
+ * (added 2026-08-21, docs/workload-identity.md).
  */
 export const IdTokenErrorSchema = Type.Union([
   Type.Object(
@@ -75,6 +82,23 @@ export const IdTokenErrorSchema = Type.Union([
     },
     closed,
   ),
+  Type.Object({ error: Type.Literal("internal"), message: Type.Optional(Type.String()) }, closed),
 ]);
 export type IdTokenErrorBody = Static<typeof IdTokenErrorSchema>;
 export type IdTokenErrorCode = IdTokenErrorBody["error"];
+
+/**
+ * The durable per-orb mint failure status (docs/workload-identity.md,
+ * "Observability and failure visibility"): a typed code and a timestamp, never
+ * the audience, the bearer, or the token. Shared with the browser because the
+ * orb view exposes it — a silent refusal is not acceptable. `unauthorized` has
+ * no code here: a bearer that resolves to no orb has no row to record it on.
+ */
+export const MintFailureCodeSchema = Type.Union([
+  Type.Literal("invalid_request"),
+  Type.Literal("not_mintable"),
+  Type.Literal("rate_limited"),
+  Type.Literal("signer_failure"),
+  Type.Literal("store_unavailable"),
+]);
+export type MintFailureCode = Static<typeof MintFailureCodeSchema>;
