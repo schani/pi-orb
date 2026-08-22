@@ -30,6 +30,9 @@ export const FAILPOINTS = {
   brokerPointerWriteAfter: "broker.pointer.write.after",
   brokerSecretRead: "broker.secret.read",
   brokerSecretWrite: "broker.secret.write",
+  /** Issuer signing-key table: public JWK rows, not the private key material. */
+  signingKeyRead: "issuer.signing-key.read",
+  signingKeyWrite: "issuer.signing-key.write",
   githubDeviceCode: "github.device.code",
   githubDevicePoll: "github.device.poll",
 } as const;

@@ -8,3 +8,4 @@ export * from "./repository-url.ts";
 export * from "./runtime-http.ts";
 export * from "./tailscale.ts";
 export * from "./terminal.ts";
+export * from "./workload-identity.ts";

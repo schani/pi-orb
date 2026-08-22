@@ -135,3 +135,24 @@ export type TokenError =
       readonly message: string;
       readonly retryAfterMs?: number;
     };
+
+// ---------------------------------------------------------------------------
+// Workload identity (docs/workload-identity.md)
+
+/**
+ * Typed values recorded in `orbs.mint_failure_code`. The whole durable failure
+ * status is this code plus its timestamp: never the audience, the bearer, or
+ * the token. `unauthorized` has no code here — a bearer that does not resolve
+ * to an orb has no orb row to record it on.
+ */
+export type MintFailureCode =
+  | "invalid_request"
+  | "not_mintable"
+  | "rate_limited"
+  | "signer_failure"
+  | "store_unavailable";
+
+/** CAS on a signing key's `row_version` affected zero rows. */
+export interface SigningKeyConflict {
+  readonly type: "signing_key_conflict";
+}
