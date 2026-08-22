@@ -73,8 +73,17 @@ COPY apps/orb-runtime/docker/pi-orb-git-credential /usr/local/bin/pi-orb-git-cre
 # short-lived OIDC identity token for a caller-chosen audience, so code in an
 # orb can federate into a cloud account without any stored cloud secret.
 COPY apps/orb-runtime/docker/pi-orb /usr/local/bin/pi-orb
-RUN chmod 755 /usr/local/bin/gh /usr/local/bin/pi-orb-git-credential /usr/local/bin/pi-orb \
+# Google's executable credential source (docs/workload-identity-recipes.md).
+# Baked so the in-orb agent points an external-account config at a reviewed
+# helper instead of writing its own — the same file the repository ships.
+COPY scripts/pi-orb-gcp-identity /usr/local/bin/pi-orb-gcp-identity
+RUN chmod 755 /usr/local/bin/gh /usr/local/bin/pi-orb-git-credential /usr/local/bin/pi-orb /usr/local/bin/pi-orb-gcp-identity \
   && git config --system credential.https://github.com.helper '!pi-orb-git-credential'
+
+# Agent skills baked into the image (docs/pi-adapter.md), loaded through the
+# resource loader's `additionalSkillPaths`. Outside /workspace on purpose: the
+# orb's persistent volume is mounted there and would shadow them.
+COPY apps/orb-runtime/skills /opt/pi-orb/skills
 
 # The persistent orb filesystem is mounted here (Docker volume).
 VOLUME /workspace

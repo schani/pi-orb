@@ -144,7 +144,10 @@ Start with a read-only role. `infra/bootstrap-pi-orb-oidc.sh` defaults its test 
 
 The configuration contains **no secret**. Its executable credential source is
 `scripts/pi-orb-gcp-identity`, a reviewed wrapper that runs `pi-orb id-token` and prints Google's
-executable-source envelope. Generate it with gcloud:
+executable-source envelope. The runtime image bakes that same file at
+`/usr/local/bin/pi-orb-gcp-identity` (added 2026-08-22), so inside an orb the command is that
+absolute path — `$PWD/scripts/…` below only resolves in a checkout of this repository. Generate it
+with gcloud:
 
 ```sh
 export PI_ORB_GCP_AUDIENCE='urn:pi-orb:gcp:<gcp project>'

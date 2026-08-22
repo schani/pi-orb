@@ -85,6 +85,30 @@ describe("orb runtime Dockerfile contract", () => {
     expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/id-token/cli.ts"))).toBe(true);
   });
 
+  it("installs the reviewed Google executable credential source", () => {
+    // The `cloud-identity` skill tells the agent to point an external-account
+    // credential file at this absolute path (docs/workload-identity-recipes.md).
+    // Without it the agent's only alternative is writing its own credential
+    // helper, which is exactly what "no unreviewed credential helper" forbids.
+    expect(existsSync(join(repositoryRoot, "scripts/pi-orb-gcp-identity"))).toBe(true);
+    expect(dockerfile).toContain(
+      "COPY scripts/pi-orb-gcp-identity /usr/local/bin/pi-orb-gcp-identity",
+    );
+    const chmod = /RUN chmod 755 ([^\n\\]*)/.exec(dockerfile)?.[1] ?? "";
+    expect(chmod.trim().split(/\s+/)).toContain("/usr/local/bin/pi-orb-gcp-identity");
+  });
+
+  it("bakes the agent skills outside the persistent volume", () => {
+    // /workspace is a VOLUME: anything the image places under it is shadowed
+    // by the orb's persistent filesystem at runtime, so the skills must live
+    // elsewhere. `BAKED_SKILLS_DIR` in the resource loader is the other half.
+    expect(dockerfile).toContain("COPY apps/orb-runtime/skills /opt/pi-orb/skills");
+    expect(
+      existsSync(join(repositoryRoot, "apps/orb-runtime/skills/cloud-identity/SKILL.md")),
+    ).toBe(true);
+    expect(dockerfile).not.toContain("/workspace/skills");
+  });
+
   it("declares HOME on the persistent orb volume", () => {
     expect(dockerfile).toContain("ENV HOME=/workspace/home");
     expect(dockerfile).toContain("VOLUME /workspace");
