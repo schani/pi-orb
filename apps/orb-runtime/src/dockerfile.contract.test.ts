@@ -30,6 +30,13 @@ describe("orb runtime Dockerfile contract", () => {
     );
   });
 
+  it("installs the Google Cloud CLI from Google's apt repository", () => {
+    expect(dockerfile).toMatch(/apt-get install[^\n]*\bgoogle-cloud-cli\b/);
+    expect(dockerfile).toContain(
+      "deb [signed-by=/usr/share/keyrings/cloud.google.asc] https://packages.cloud.google.com/apt cloud-sdk main",
+    );
+  });
+
   it("installs rustup and native build prerequisites with persistent Rust state", () => {
     expect(dockerfile).toContain("build-essential");
     expect(dockerfile).toContain("pkg-config");
