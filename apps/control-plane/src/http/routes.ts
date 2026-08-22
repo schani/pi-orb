@@ -10,6 +10,7 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { StoreError } from "../domain/errors.ts";
 import {
@@ -23,8 +24,13 @@ import {
 } from "../domain/lifecycle.ts";
 import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
-import type { ControlPlaneDeps } from "../domain/ports.ts";
+import type { ControlPlaneDeps, SigningKeyDeps, SigningKeyRow } from "../domain/ports.ts";
 import { type ProjectCommandError, requestProjectDeletion } from "../domain/project-deletion.ts";
+import {
+  activatePublishedSigningKey,
+  publishSigningKey,
+  type RotationError,
+} from "../domain/signing-keys.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
 function httpError(
@@ -93,16 +99,98 @@ function sendCommandError(
 }
 
 /**
+ * Staged signing-key rotation for an operator (docs/workload-identity.md).
+ * Registered only where key management is wired in, which is the browser and
+ * `ops` roles: they are the private, invoker-IAM-gated surface. The public
+ * `issuer` role serves JWKS and must never be able to change what it publishes,
+ * and the `runtime` role is the credential broker every orb depends on.
+ *
+ * The two stages are deliberately two requests. Publishing and activating in
+ * one breath publishes a key in name only: no verifier has re-fetched JWKS in
+ * between, so the overlap the design promises does not exist. The operator
+ * publishes, waits for verifier caches to turn over, and activates — and the
+ * activate stage refuses on its own if not enough time has passed, so the wait
+ * is enforced rather than remembered.
+ *
+ * The request and response shapes stay here rather than in `@pi-orb/protocol`:
+ * they have one producer and no first-party consumer — the caller is an
+ * operator with a shell, exactly like the discovery documents in
+ * `http/issuer-routes.ts`.
+ */
+const ActivateSigningKeyRequestSchema = Type.Object(
+  {
+    /**
+     * Skip the soak window. The one case it is right for is a leaked key,
+     * where a few tokens rejected by a stale verifier cost less than one more
+     * minute of signing with a key someone else holds.
+     */
+    force: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+
+/** What an operator needs to see after each stage: which key, and where it stands. */
+function signingKeyView(row: SigningKeyRow) {
+  return {
+    kid: row.kid,
+    state: row.state,
+    createdAt: new Date(row.createdAt).toISOString(),
+    ...(row.activatedAt === null ? {} : { activatedAt: new Date(row.activatedAt).toISOString() }),
+    ...(row.retiredAt === null ? {} : { retiredAt: new Date(row.retiredAt).toISOString() }),
+  };
+}
+
+/**
+ * A rotation failure as an HTTP answer. A refusal is a decision the operator
+ * acts on, not a condition that clears itself, so it is a non-retryable 409 —
+ * distinct from the 503 that means "the store or the secret store is down,
+ * try again". Reporting a soak refusal as retryable would invite a script to
+ * spin for ten minutes instead of telling a human to wait.
+ */
+function sendRotationError(reply: FastifyReply, error: RotationError): FastifyReply {
+  if (error.type === "rotation_refused") {
+    return reply.status(409).send(httpError("conflict", error.message, false));
+  }
+  return reply.status(503).send(httpError("unavailable", error.message, true));
+}
+
+/**
  * The docs/control-plane-api.md JSON API: Fastify handlers validate TypeBox schemas, call
  * Result-returning domain services, and fold each result into an explicit
  * response. No exceptions for normal control flow.
+ *
+ * `signingKeys` is optional because only the roles that manage keys pass it;
+ * without it the rotation routes are simply not registered, so a role that has
+ * no business rotating cannot be made to by a request.
  */
 export function registerRoutes(
   app: FastifyInstance,
   task: SimulationTask,
   deps: ControlPlaneDeps,
   config: ViewConfig,
+  signingKeys?: SigningKeyDeps,
 ): void {
+  if (signingKeys !== undefined) {
+    app.post("/api/v1/issuer/signing-keys/publish", async (_request, reply) => {
+      const published = await publishSigningKey(task, signingKeys, { now: task.wallNow() });
+      if (published.isErr()) return sendRotationError(reply, published.error);
+      return reply.send(signingKeyView(published.value));
+    });
+
+    app.post("/api/v1/issuer/signing-keys/activate", async (request, reply) => {
+      const body = request.body ?? {};
+      if (!Check(ActivateSigningKeyRequestSchema, body)) {
+        return reply.status(400).send(httpError("invalid_request", "invalid activate body", false));
+      }
+      const activated = await activatePublishedSigningKey(task, signingKeys, {
+        now: task.wallNow(),
+        ...(body.force === undefined ? {} : { force: body.force }),
+      });
+      if (activated.isErr()) return sendRotationError(reply, activated.error);
+      return reply.send(signingKeyView(activated.value));
+    });
+  }
+
   app.get("/api/v1/projects", async (_request, reply) => {
     const projects = await deps.store.listProjects(task);
     if (projects.isErr()) {

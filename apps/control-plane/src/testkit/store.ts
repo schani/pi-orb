@@ -3,6 +3,7 @@ import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import type {
   CommitPullError,
+  MintFailureCode,
   ProjectConflict,
   ReplicationIntegrityError,
   StateConflict,
@@ -17,6 +18,7 @@ import type {
   ControlPlaneStore,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  MintSlotClaim,
   RecordHostDiscardStatusParams,
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
@@ -25,7 +27,7 @@ import type {
 import { FAILPOINTS } from "./failpoints.ts";
 
 /** Store operations that can be scripted to fail deterministically. */
-export type InvariantOperation = "getOrb" | "enqueueOrbMessage";
+export type InvariantOperation = "getOrb" | "getOrbByRuntimeTokenHash" | "enqueueOrbMessage";
 
 interface OrbReplica {
   records: Map<string, HistoryRecord>;
@@ -74,6 +76,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly invariantOperations = new Set<InvariantOperation>();
   /** Gate the next `noteOrbMessageDelivery` until this predicate holds. */
   private noteDeliveryHold: (() => boolean) | null = null;
+  /**
+   * How many `recordMintFailure` calls reached the store. The denial path
+   * deduplicates its status writes against the code already on the row
+   * (docs/workload-identity.md), and "how many UPDATEs did a hostile caller
+   * provoke?" is a count, not something a row snapshot can answer.
+   */
+  mintFailureWrites = 0;
 
   private readonly maxLatencyMs: number;
 
@@ -379,6 +388,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     tokenHash: string,
   ): ResultAsync<OrbRow | null, StoreError> {
+    const scripted = this.scriptedInvariant("getOrbByRuntimeTokenHash");
+    if (scripted !== null) return errAsync(scripted);
     return this.access(task, FAILPOINTS.storeRead, "get orb by token hash", () => {
       for (const orb of this.orbs.values()) {
         if (orb.runtimeTokenHash === tokenHash) return orb;
@@ -1230,6 +1241,51 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         lastBusyAt: params.now,
         updatedAt: Math.max(orb.updatedAt, params.now),
       });
+    });
+  }
+
+  recordMintFailure(
+    task: SimulationTask,
+    params: { orbId: string; code: MintFailureCode; at: number },
+  ): ResultAsync<void, StoreError> {
+    // Same latest-wins, CAS-free semantics as the pg adapter
+    // (docs/workload-identity.md).
+    this.mintFailureWrites += 1;
+    return this.access(task, FAILPOINTS.storeWrite, "record mint failure", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined) return;
+      this.orbs.set(orb.id, {
+        ...orb,
+        mintFailureCode: params.code,
+        mintFailureAt: params.at,
+        updatedAt: Math.max(orb.updatedAt, params.at),
+      });
+    });
+  }
+
+  claimMintSlot(
+    task: SimulationTask,
+    params: { orbId: string; at: number; minIntervalMs: number },
+  ): ResultAsync<MintSlotClaim, StoreError> {
+    // The decision and the write are one indivisible step here, exactly as the
+    // pg adapter's conditional UPDATE is (docs/workload-identity.md): every
+    // interleaving happens in `access`, never inside this body.
+    return this.access(task, FAILPOINTS.storeWrite, "claim mint slot", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined) return { claimed: false as const, retryAfterMs: params.minIntervalMs };
+      const threshold = params.at - params.minIntervalMs;
+      if (orb.lastMintAt !== null && orb.lastMintAt > threshold) {
+        return {
+          claimed: false as const,
+          retryAfterMs: Math.max(0, orb.lastMintAt + params.minIntervalMs - params.at),
+        };
+      }
+      this.orbs.set(orb.id, {
+        ...orb,
+        lastMintAt: params.at,
+        updatedAt: Math.max(orb.updatedAt, params.at),
+      });
+      return { claimed: true as const };
     });
   }
 

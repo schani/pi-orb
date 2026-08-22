@@ -33,6 +33,9 @@ const orb: OrbRow = {
   replicatedHeadId: null,
   lastBusyAt: null,
   stopReason: null,
+  mintFailureCode: null,
+  mintFailureAt: null,
+  lastMintAt: null,
   stateChangedAt: 1_700_000_000_000,
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_000_000,
@@ -159,6 +162,78 @@ describe("orbView compute discard", () => {
     expect(discarding.lastError).toBe("runtime_failed: process exited");
     expect(Check(OrbViewSchema, replacing)).toBe(true);
     expect(Check(OrbViewSchema, discarding)).toBe(true);
+  });
+});
+
+describe("orbView workload identity", () => {
+  const failed: OrbRow = {
+    ...orb,
+    mintFailureCode: "signer_failure",
+    mintFailureAt: 1_700_000_050_000,
+  };
+
+  it("exposes the durable failure while it is the latest identity outcome", () => {
+    const never = orbView(failed, new ControlState(), {});
+    expect(never.identity).toEqual({
+      failureCode: "signer_failure",
+      failureAt: new Date(1_700_000_050_000).toISOString(),
+    });
+    expect(Check(OrbViewSchema, never)).toBe(true);
+
+    // A mint that succeeded *before* the failure explains nothing about it.
+    const earlierSuccess = orbView(
+      { ...failed, lastMintAt: 1_700_000_040_000 },
+      new ControlState(),
+      {},
+    );
+    expect(earlierSuccess.identity?.failureCode).toBe("signer_failure");
+
+    // Same millisecond: the slot claim happens before signing, so a failure
+    // stamped then is the later of the two outcomes.
+    const sameMs = orbView({ ...failed, lastMintAt: 1_700_000_050_000 }, new ControlState(), {});
+    expect(sameMs.identity?.failureCode).toBe("signer_failure");
+  });
+
+  it("keeps reporting a denial that no later mint superseded, healthy orb or not", () => {
+    // The field is a report about an attempt that happened, never a verdict on
+    // whether this orb can mint now. Nothing clears the columns and most orbs
+    // never call `pi-orb id-token`, so a `not_mintable` recorded during an
+    // ordinary stop window is still the latest outcome after the orb restarts
+    // healthy — and the view must go on exposing it
+    // (docs/workload-identity.md). That is precisely why the product words it
+    // as history rather than as "identity is currently unavailable".
+    const restarted = orbView(
+      {
+        ...orb,
+        state: "running",
+        mintFailureCode: "not_mintable",
+        mintFailureAt: 1_700_000_050_000,
+        lastMintAt: null,
+      },
+      new ControlState(),
+      {},
+    );
+    expect(restarted.state).toBe("running");
+    expect(restarted.identity).toEqual({
+      failureCode: "not_mintable",
+      failureAt: new Date(1_700_000_050_000).toISOString(),
+    });
+    expect(Check(OrbViewSchema, restarted)).toBe(true);
+  });
+
+  it("lets a later successful mint supersede the failure without any clearing write", () => {
+    // The durable columns still hold the old failure — nothing erases them —
+    // but the view stops showing it (docs/workload-identity.md).
+    const recovered = orbView({ ...failed, lastMintAt: 1_700_000_060_000 }, new ControlState(), {});
+    expect(recovered.identity).toBeUndefined();
+    expect("identity" in recovered).toBe(false);
+    expect(Check(OrbViewSchema, recovered)).toBe(true);
+  });
+
+  it("omits the field for an orb that has never failed to mint", () => {
+    const healthy = orbView({ ...orb, lastMintAt: 1_700_000_060_000 }, new ControlState(), {});
+    expect("identity" in healthy).toBe(false);
+    expect(Check(OrbViewSchema, healthy)).toBe(true);
   });
 });
 

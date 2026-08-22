@@ -6,7 +6,12 @@ import type { ControlPlaneDatabase } from "../adapters/database.ts";
 import type { PostgreSQLClient } from "../adapters/pg/client.ts";
 import type { StoreError } from "../domain/errors.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
-import type { ControlPlaneStore, CredentialPointerStore } from "../domain/ports.ts";
+import type {
+  ControlPlaneStore,
+  CredentialPointerStore,
+  SigningKeyRow,
+  SigningKeyStore,
+} from "../domain/ports.ts";
 
 const task = new NoSimulationTask("store contract test", false);
 const project: ProjectRow = {
@@ -48,6 +53,9 @@ const orb: OrbRow = {
   replicatedHeadId: null,
   lastBusyAt: null,
   stopReason: null,
+  mintFailureCode: null,
+  mintFailureAt: null,
+  lastMintAt: null,
   stateChangedAt: 1_000,
   createdAt: 1_000,
   updatedAt: 1_000,
@@ -626,6 +634,170 @@ export function storeSemanticsContractTests(
         hostDiscardThroughIncarnation: 1,
         hostDiscardError: null,
         hostDiscardEvidence: "second evidence",
+      });
+    });
+
+    it("records the latest mint failure without disturbing lifecycle state", async () => {
+      await seed();
+      const running = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        toState: "running",
+        now: 2_000,
+      });
+      expect(running.isOk() && running.value.stateVersion).toBe(1);
+
+      expect(
+        (
+          await store.recordMintFailure(task, {
+            orbId: orb.id,
+            code: "not_mintable",
+            at: 3_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+      // The whole point of the advisory write: identity status is durable, but
+      // it must not consume a lifecycle version or restart a state deadline.
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        mintFailureCode: "not_mintable",
+        mintFailureAt: 3_000,
+        stateVersion: 1,
+        stateChangedAt: 2_000,
+      });
+
+      // The columns move together: the latest failure replaces the previous
+      // one whole, never leaving a code without its timestamp.
+      expect(
+        (
+          await store.recordMintFailure(task, {
+            orbId: orb.id,
+            code: "rate_limited",
+            at: 4_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        mintFailureCode: "rate_limited",
+        mintFailureAt: 4_000,
+      });
+
+      // A bearer that resolves to nothing has no row to write: silently inert,
+      // never an error the mint path would have to classify.
+      const unknown = await store.recordMintFailure(task, {
+        orbId: "00000000-0000-4000-8000-0000000000cc",
+        code: "signer_failure",
+        at: 5_000,
+      });
+      expect(unknown.isOk()).toBe(true);
+    });
+
+    it("claims the mint rate-limit slot atomically and only moves it forward", async () => {
+      await seed();
+      const running = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        toState: "running",
+        now: 2_000,
+      });
+      expect(running.isOk()).toBe(true);
+
+      // A never-minted orb claims immediately, and the claim is the write:
+      // the floor is at the claim's own timestamp afterwards.
+      const first = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 5_000,
+        minIntervalMs: 2_000,
+      });
+      expect(first._unsafeUnwrap()).toEqual({ claimed: true });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        lastMintAt: 5_000,
+        stateVersion: 1,
+        stateChangedAt: 2_000,
+      });
+
+      // Inside the interval: refused, with the remaining wait.
+      const throttled = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 5_500,
+        minIntervalMs: 2_000,
+      });
+      expect(throttled._unsafeUnwrap()).toEqual({ claimed: false, retryAfterMs: 1_500 });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(5_000);
+
+      // A late-arriving claim from another instance carries an older `at`; it
+      // must not move the floor backwards and hand the next caller a free mint.
+      const late = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 4_000,
+        minIntervalMs: 2_000,
+      });
+      expect(late._unsafeUnwrap().claimed).toBe(false);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(5_000);
+
+      // Exactly at the interval boundary the slot is free again.
+      const after = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 7_000,
+        minIntervalMs: 2_000,
+      });
+      expect(after._unsafeUnwrap()).toEqual({ claimed: true });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(7_000);
+
+      // Nothing to throttle: an orb id with no row is refused for the full
+      // interval rather than granted a claim it has no floor to record.
+      const unknown = await store.claimMintSlot(task, {
+        orbId: "00000000-0000-4000-8000-0000000000cd",
+        at: 9_000,
+        minIntervalMs: 2_000,
+      });
+      expect(unknown._unsafeUnwrap()).toEqual({ claimed: false, retryAfterMs: 2_000 });
+    });
+
+    it("admits exactly one of many concurrent mint-slot claims", async () => {
+      await seed();
+      // The defect the atomic claim exists to prevent: with a read-then-write
+      // floor every one of these passes the same stale check and mints.
+      const claims = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          store.claimMintSlot(task, { orbId: orb.id, at: 10_000, minIntervalMs: 2_000 }),
+        ),
+      );
+      const winners = claims.filter((claim) => claim._unsafeUnwrap().claimed);
+      expect(winners.length).toBe(1);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(10_000);
+    });
+
+    it("lets mint status writes interleave a lifecycle read and its CAS", async () => {
+      await seed();
+      const before = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      if (before === null) return;
+
+      // A mint racing a stop is the schedule that matters: both mint writes
+      // land between the reconciler's read and its transition, and the
+      // transition must still commit against the version it read.
+      expect(
+        (
+          await store.recordMintFailure(task, { orbId: orb.id, code: "rate_limited", at: 2_500 })
+        ).isOk(),
+      ).toBe(true);
+      const claim = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 2_600,
+        minIntervalMs: 2_000,
+      });
+      expect(claim._unsafeUnwrap()).toEqual({ claimed: true });
+
+      const stopping = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: before.stateVersion,
+        toState: "stopping",
+        now: 3_000,
+      });
+      expect(stopping.isOk() && stopping.value.state).toBe("stopping");
+      expect(stopping.isOk() && stopping.value).toMatchObject({
+        mintFailureCode: "rate_limited",
+        mintFailureAt: 2_500,
+        lastMintAt: 2_600,
       });
     });
 
@@ -1220,6 +1392,284 @@ export function storeSemanticsContractTests(
   });
 }
 
+export interface SigningKeyStoreSubject {
+  readonly keys: SigningKeyStore;
+  close(): Promise<void>;
+}
+
+const jwk = (n: string): unknown => ({ kty: "RSA", alg: "RS256", use: "sig", e: "AQAB", n });
+
+/**
+ * The signing-key contract (docs/workload-identity.md), run against the SQL
+ * adapter and the in-memory fake alike: the fake is what the deterministic
+ * issuer tests reason about, so a divergence there invalidates the simulation
+ * rather than merely a test.
+ */
+export function signingKeyStoreContractTests(
+  name: string,
+  open: () => Promise<SigningKeyStoreSubject>,
+): void {
+  describe(`${name} signing key store contract`, () => {
+    let subject: SigningKeyStoreSubject;
+    let keys: SigningKeyStore;
+
+    beforeEach(async () => {
+      subject = await open();
+      keys = subject.keys;
+    });
+
+    afterEach(async () => {
+      await subject.close();
+    });
+
+    const pending = (kid: string, createdAt: number): SigningKeyRow => ({
+      kid,
+      secretVersion: `secret/${kid}`,
+      publicJwk: jwk(`modulus-${kid}`),
+      state: "pending",
+      createdAt,
+      activatedAt: null,
+      retiredAt: null,
+      rowVersion: 0,
+    });
+
+    it("inserts keys with their JWK intact and lists them oldest first", async () => {
+      expect((await keys.insertSigningKey(task, pending("kid-b", 2_000))).isOk()).toBe(true);
+      expect((await keys.insertSigningKey(task, pending("kid-a", 1_000))).isOk()).toBe(true);
+      const listed = await keys.listSigningKeys(task);
+      expect(listed.isOk() && listed.value.map((key) => key.kid)).toEqual(["kid-a", "kid-b"]);
+      expect(listed.isOk() && listed.value[0]).toEqual(pending("kid-a", 1_000));
+    });
+
+    it("refuses a duplicate kid and a second active key as corruption", async () => {
+      expect((await keys.insertSigningKey(task, pending("kid-a", 1_000))).isOk()).toBe(true);
+      const duplicate = await keys.insertSigningKey(task, pending("kid-a", 2_000));
+      expect(duplicate.isErr() && duplicate.error.type).toBe("store_error");
+      expect(duplicate.isErr() && duplicate.error.code).toBe("corruption");
+
+      const activated = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 0,
+        state: "active",
+        activatedAt: 3_000,
+      });
+      expect(activated.isOk()).toBe(true);
+      // Exactly one key signs: an insert that would create a second active key
+      // is a schema violation, not a conflict a caller could retry into.
+      const second = await keys.insertSigningKey(task, {
+        ...pending("kid-b", 4_000),
+        state: "active",
+        activatedAt: 4_000,
+      });
+      expect(second.isErr() && second.error.type).toBe("store_error");
+      expect(second.isErr() && second.error.code).toBe("corruption");
+      const listed = await keys.listSigningKeys(task);
+      expect(listed.isOk() && listed.value.map((key) => key.kid)).toEqual(["kid-a"]);
+    });
+
+    it("fences activation and retirement on the row version", async () => {
+      expect((await keys.insertSigningKey(task, pending("kid-a", 1_000))).isOk()).toBe(true);
+      const activated = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 0,
+        state: "active",
+        activatedAt: 2_000,
+      });
+      expect(activated.isOk() && activated.value).toMatchObject({
+        state: "active",
+        activatedAt: 2_000,
+        retiredAt: null,
+        rowVersion: 1,
+      });
+
+      // Retirement keeps the activation timestamp: the overlap window is
+      // reconstructable from the row after the fact.
+      const retired = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 1,
+        state: "retired",
+        retiredAt: 5_000,
+      });
+      expect(retired.isOk() && retired.value).toMatchObject({
+        state: "retired",
+        activatedAt: 2_000,
+        retiredAt: 5_000,
+        rowVersion: 2,
+      });
+    });
+
+    it("refuses to activate a second key while one is already active", async () => {
+      expect((await keys.insertSigningKey(task, pending("kid-a", 1_000))).isOk()).toBe(true);
+      expect((await keys.insertSigningKey(task, pending("kid-b", 2_000))).isOk()).toBe(true);
+      expect(
+        (
+          await keys.casSigningKeyState(task, {
+            kid: "kid-a",
+            expectedRowVersion: 0,
+            state: "active",
+            activatedAt: 3_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+
+      // Rotation activates the new key only after retiring the old one, so an
+      // activation that would double the signing key is a schema violation,
+      // not a race the caller retries.
+      const second = await keys.casSigningKeyState(task, {
+        kid: "kid-b",
+        expectedRowVersion: 0,
+        state: "active",
+        activatedAt: 4_000,
+      });
+      expect(second.isErr() && second.error.type).toBe("store_error");
+      expect(second.isErr() && second.error.type === "store_error" && second.error.code).toBe(
+        "corruption",
+      );
+      const listed = await keys.listSigningKeys(task);
+      expect(listed.isOk() && listed.value.map((key) => key.state)).toEqual(["active", "pending"]);
+    });
+
+    /**
+     * Migration 011's `oidc_signing_keys_timestamps_complete`. These three
+     * transitions are not races a caller retries into — they are rows the
+     * schema will not hold, so both drivers must refuse them as `corruption`
+     * and leave the row untouched. `rotateSigningKey`'s convergence loop
+     * depends on the last of them being impossible: a retired key can never be
+     * CASed back into signing.
+     */
+    it("refuses transitions the timestamp completeness check forbids", async () => {
+      expect((await keys.insertSigningKey(task, pending("kid-a", 1_000))).isOk()).toBe(true);
+
+      // Activation must record when the key started signing: `activated_at` is
+      // how the overlap window is reconstructed afterwards.
+      const undated = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 0,
+        state: "active",
+      });
+      expect(undated.isErr() && undated.error.type).toBe("store_error");
+      expect(undated.isErr() && undated.error.type === "store_error" && undated.error.code).toBe(
+        "corruption",
+      );
+
+      // Retiring a key that never signed would claim an overlap window for a
+      // key no live token can name.
+      const neverActive = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 0,
+        state: "retired",
+        retiredAt: 2_000,
+      });
+      expect(neverActive.isErr() && neverActive.error.type).toBe("store_error");
+      expect(
+        neverActive.isErr() && neverActive.error.type === "store_error" && neverActive.error.code,
+      ).toBe("corruption");
+
+      // Neither refusal wrote: the row is still the pending one it started as.
+      const untouched = await keys.listSigningKeys(task);
+      expect(untouched.isOk() && untouched.value[0]).toEqual(pending("kid-a", 1_000));
+
+      expect(
+        (
+          await keys.casSigningKeyState(task, {
+            kid: "kid-a",
+            expectedRowVersion: 0,
+            state: "active",
+            activatedAt: 3_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect(
+        (
+          await keys.casSigningKeyState(task, {
+            kid: "kid-a",
+            expectedRowVersion: 1,
+            state: "retired",
+            retiredAt: 4_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+
+      // Resurrection: a retired row CASed back to `active` keeps its
+      // `retired_at`, which the check forbids. Nothing may un-retire a key.
+      const resurrected = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 2,
+        state: "active",
+        activatedAt: 5_000,
+      });
+      expect(resurrected.isErr() && resurrected.error.type).toBe("store_error");
+      expect(
+        resurrected.isErr() && resurrected.error.type === "store_error" && resurrected.error.code,
+      ).toBe("corruption");
+      const listed = await keys.listSigningKeys(task);
+      expect(listed.isOk() && listed.value[0]).toMatchObject({
+        state: "retired",
+        activatedAt: 3_000,
+        retiredAt: 4_000,
+        rowVersion: 2,
+      });
+    });
+
+    it("refuses an inserted row whose timestamps do not match its state", async () => {
+      // The boot path inserts directly as `active`, so the insert has to carry
+      // an activation time; a `pending` row carrying one is equally refused.
+      const undated = await keys.insertSigningKey(task, {
+        ...pending("kid-a", 1_000),
+        state: "active",
+      });
+      expect(undated.isErr() && undated.error.code).toBe("corruption");
+      const predated = await keys.insertSigningKey(task, {
+        ...pending("kid-b", 1_000),
+        activatedAt: 1_000,
+      });
+      expect(predated.isErr() && predated.error.code).toBe("corruption");
+      const listed = await keys.listSigningKeys(task);
+      expect(listed.isOk() && listed.value).toEqual([]);
+    });
+
+    it("conflicts on a stale row version and on an unknown kid without writing", async () => {
+      expect((await keys.insertSigningKey(task, pending("kid-a", 1_000))).isOk()).toBe(true);
+      expect(
+        (
+          await keys.casSigningKeyState(task, {
+            kid: "kid-a",
+            expectedRowVersion: 0,
+            state: "active",
+            activatedAt: 2_000,
+          })
+        ).isOk(),
+      ).toBe(true);
+
+      // Two operators rotate at once from the same read; the loser must not
+      // retire the key the winner just activated.
+      const stale = await keys.casSigningKeyState(task, {
+        kid: "kid-a",
+        expectedRowVersion: 0,
+        state: "retired",
+        retiredAt: 3_000,
+      });
+      expect(stale.isErr() && stale.error.type).toBe("signing_key_conflict");
+
+      const missing = await keys.casSigningKeyState(task, {
+        kid: "kid-missing",
+        expectedRowVersion: 0,
+        state: "active",
+        activatedAt: 3_000,
+      });
+      expect(missing.isErr() && missing.error.type).toBe("signing_key_conflict");
+
+      const listed = await keys.listSigningKeys(task);
+      expect(listed.isOk() && listed.value).toHaveLength(1);
+      expect(listed.isOk() && listed.value[0]).toMatchObject({
+        state: "active",
+        retiredAt: null,
+        rowVersion: 1,
+      });
+    });
+  });
+}
+
 /**
  * The full contract for a PostgreSQL-backed store: the shared semantics above
  * plus the driver-level expectations that need the raw client and the
@@ -1232,6 +1682,18 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
     expect(migrated.isOk()).toBe(true);
     return {
       store: subject.database.store,
+      close: async () => {
+        expect((await subject.database.close()).isOk()).toBe(true);
+      },
+    };
+  });
+
+  signingKeyStoreContractTests(name, async () => {
+    const subject = await open();
+    const migrated = await subject.database.migrate();
+    expect(migrated.isOk()).toBe(true);
+    return {
+      keys: subject.database.signingKeys,
       close: async () => {
         expect((await subject.database.close()).isOk()).toBe(true);
       },

@@ -21,6 +21,12 @@ import {
   GithubUpstreamRefresher,
 } from "./adapters/github-oauth/client.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
+import { readIssuerUrl } from "./adapters/oidc/issuer-url.ts";
+import {
+  CryptoMintIdSource,
+  NodeCryptoSigningKeyGenerator,
+  OidcTokenSigner,
+} from "./adapters/oidc/signer.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
@@ -34,9 +40,14 @@ import {
 } from "./adapters/tailscale/client.ts";
 import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
 import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
-import { DEFAULT_BROKER_CONSTANTS, DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
+import {
+  DEFAULT_BROKER_CONSTANTS,
+  DEFAULT_ISSUER_CONSTANTS,
+  DEFAULT_LIFECYCLE_CONSTANTS,
+} from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
+import { logEvent } from "./domain/log.ts";
 import {
   orphanSweepLoop,
   pollLoop,
@@ -44,7 +55,9 @@ import {
   type ReconcileTaskRunner,
   reconcileLoop,
 } from "./domain/loops.ts";
-import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
+import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
+import { ensureActiveSigningKey } from "./domain/signing-keys.ts";
+import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
@@ -78,6 +91,13 @@ class ControlPlaneTask extends NoSimulationTask {
   }
 }
 
+/**
+ * Every deployment role this binary knows how to be. `all` is the local
+ * single-process composition; the cloud deployment runs one service per other
+ * role (docs/deployment.md, docs/workload-identity.md).
+ */
+const ROLES: readonly string[] = ["all", "browser", "runtime", "ops", "issuer"];
+
 async function main(): Promise<void> {
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
@@ -99,6 +119,44 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Which route families this process registers (docs/credentials.md): the
+  // cloud deployment splits "browser", "runtime", and the public "issuer" into
+  // separate services; local development serves all of them from one process.
+  // A hard allowlist: a typo must refuse to boot rather than come up healthy
+  // and serve nothing but 404s.
+  const role = env("PI_ORB_ROLE", "all");
+  if (!ROLES.includes(role)) {
+    bootTask.error(`PI_ORB_ROLE must be one of ${ROLES.join(", ")}`);
+    process.exitCode = 1;
+    return;
+  }
+  const browserRole = role === "all" || role === "browser";
+  // "ops": the browser API surface for tooling, with no background loops,
+  // no migrations, and no web assets — invoker-IAM keeps it private.
+  const opsRole = role === "ops";
+  const runtimeRole = role === "all" || role === "runtime";
+  // "issuer": the deployment's only public unauthenticated surface, serving
+  // OIDC discovery and JWKS and nothing else (docs/workload-identity.md).
+  const issuerRole = role === "all" || role === "issuer";
+
+  // The issuer URL is part of the security identity of every minted token, so
+  // it is configuration and is validated before any side effect, exactly like
+  // the digest pin above. Every role that mints or publishes the issuer's
+  // metadata needs it; the others never look at it.
+  const configuredIssuerUrl = readIssuerUrl(
+    env("PI_ORB_OIDC_ISSUER_URL", ""),
+    // Local development serves the issuer from the same process it mints in,
+    // so the loopback origin it is already listening on is the truthful
+    // default. A split deployment has no such default and must be told.
+    role === "all" ? `http://127.0.0.1:${port}` : null,
+  );
+  if ((runtimeRole || issuerRole) && configuredIssuerUrl.isErr()) {
+    bootTask.error(`PI_ORB_OIDC_ISSUER_URL ${configuredIssuerUrl.error}`);
+    process.exitCode = 1;
+    return;
+  }
+  const issuerUrl = configuredIssuerUrl.isOk() ? configuredIssuerUrl.value : "";
+
   mkdirSync(authDir, { recursive: true });
   const openedDatabase = openControlPlaneDatabase(
     databaseKind === "pglite"
@@ -111,13 +169,8 @@ async function main(): Promise<void> {
     return;
   }
   const database = openedDatabase.value;
-  const role = env("PI_ORB_ROLE", "all");
-  const browserRole = role === "all" || role === "browser";
-  // "ops": the browser API surface for tooling, with no background loops,
-  // no migrations, and no web assets — invoker-IAM keeps it private.
-  const opsRole = role === "ops";
-  // Only the single-instance browser role migrates; the runtime role's
-  // queries fail retryably until the schema exists.
+  // Only the single-instance browser role migrates; the runtime and issuer
+  // roles' queries fail retryably until the schema exists.
   if (browserRole) {
     const migrated = await database.migrate();
     if (migrated.isErr()) {
@@ -317,15 +370,23 @@ async function main(): Promise<void> {
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
   };
 
-  // Which route families this process registers (docs/credentials.md): the cloud
-  // deployment splits "browser" and "runtime" into separate services; local
-  // development serves both from one process.
   const app = Fastify({ logger: false });
   // Commands issued over HTTP log their transitions too (docs/lifecycle.md).
   const httpTask = new ControlPlaneTask("http");
+  // Everything key management needs. Shared by the boot hook below and, on the
+  // private roles, by the staged rotation routes.
+  const signingKeyDeps: SigningKeyDeps = {
+    keys: database.signingKeys,
+    secrets,
+    generator: new NodeCryptoSigningKeyGenerator(),
+    constants: DEFAULT_ISSUER_CONSTANTS,
+  };
   if (browserRole || opsRole) {
     await registerLiveProxy(app, httpTask, deps);
-    registerRoutes(app, httpTask, deps, viewConfig);
+    // Staged rotation lives only on the private roles: the public issuer
+    // publishes keys and must not be able to change them
+    // (docs/workload-identity.md).
+    registerRoutes(app, httpTask, deps, viewConfig, signingKeyDeps);
     // Cloud deployment serves the built web UI from the same process; local
     // development keeps the vite dev server + proxy instead.
     const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";
@@ -341,14 +402,74 @@ async function main(): Promise<void> {
       });
     }
   }
-  if (role === "all" || role === "runtime") {
+  if (runtimeRole) {
     registerRuntimeRoutes(app, httpTask, {
       store: deps.store,
       broker,
       nameGenerator: deps.nameGenerator,
       nameLeaseMs: deps.nameLeaseMs,
+      mint: {
+        store: deps.store,
+        // The signer reads the active key row per signature and caches only
+        // its material, so a rotation takes effect without a restart
+        // (docs/workload-identity.md).
+        signer: new OidcTokenSigner({
+          keys: database.signingKeys,
+          secrets,
+          constants: DEFAULT_ISSUER_CONSTANTS,
+        }),
+        mintIds: new CryptoMintIdSource(),
+        constants: DEFAULT_ISSUER_CONSTANTS,
+        issuerUrl,
+      },
     });
   }
+  if (issuerRole) {
+    // Public, cacheable, secret-free: no auth gate, no orb data, no secret
+    // store (docs/workload-identity.md).
+    registerIssuerRoutes(app, httpTask, {
+      keys: database.signingKeys,
+      constants: DEFAULT_ISSUER_CONSTANTS,
+      issuerUrl,
+    });
+  }
+
+  /**
+   * Boot key ensure for the roles that mint (docs/workload-identity.md).
+   * Idempotent, so every instance runs it and the losers adopt the winner's
+   * key.
+   *
+   * It deliberately does *not* fail the boot: the runtime service is also the
+   * credential broker every running orb depends on, and taking it down over
+   * issuer trouble would trade a feature outage for a fleet outage. Minting
+   * then fails closed per request with typed retryable errors, and the next
+   * boot or an operator's rotation repairs it.
+   *
+   * For the same reason it must not run *before* `app.listen`. A database that
+   * refuses answers fast, but one that hangs — a saturated pool, a network
+   * partition that drops packets instead of resetting — answers never, and an
+   * awaited pre-listen hook would then keep every orb's credential broker from
+   * ever accepting a connection. Identity is one feature; listening is the
+   * whole service. So this runs after the socket is open, in the background,
+   * on the task's clock.
+   */
+  const ensureSigningKeyInBackground = async (): Promise<void> => {
+    let lastFailure = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await bootTask.sleep(500, "signing key retry");
+      const ensured = await ensureActiveSigningKey(bootTask, signingKeyDeps, {
+        now: bootTask.wallNow(),
+      });
+      if (ensured.isOk()) return;
+      lastFailure = ensured.error.message;
+    }
+    // One durable edge, and only on the failing edge: a healthy boot that found
+    // the key already active says nothing (docs/lifecycle.md). It is a
+    // `lifecycle:` event rather than free-text stderr because "why could this
+    // instance not sign?" is a question asked long afterwards, and the answer
+    // has to be queryable beside the key events the ensure itself emits.
+    logEvent(bootTask, "issuer-key-unavailable", { reason: lastFailure });
+  };
 
   const stop = new AbortController();
   let appClosePromise: Promise<void> | null = null;
@@ -390,6 +511,10 @@ async function main(): Promise<void> {
   );
   if (listening === null) return;
   bootTask.log(`control plane listening on ${listening}`);
+
+  // Fire and forget: the socket is already accepting, and this repairs the
+  // issuer behind it (see `ensureSigningKeyInBackground`).
+  if (runtimeRole) void ensureSigningKeyInBackground();
 
   // Background loops: history polling and lifecycle reconciliation
   // (docs/history-replication.md). Same domain code as the simulations, on real time.

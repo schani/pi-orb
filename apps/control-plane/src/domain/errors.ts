@@ -1,4 +1,4 @@
-import type { OrbState } from "@pi-orb/protocol";
+import type { OrbState, MintFailureCode as WireMintFailureCode } from "@pi-orb/protocol";
 
 /**
  * Storage failure. `retryable` distinguishes outages from corruption.
@@ -135,3 +135,62 @@ export type TokenError =
       readonly message: string;
       readonly retryAfterMs?: number;
     };
+
+// ---------------------------------------------------------------------------
+// Workload identity (docs/workload-identity.md)
+
+/**
+ * Typed values recorded in `orbs.mint_failure_code`. The whole durable failure
+ * status is this code plus its timestamp: never the audience, the bearer, or
+ * the token. `unauthorized` has no code here — a bearer that does not resolve
+ * to an orb has no orb row to record it on.
+ *
+ * The vocabulary lives in `@pi-orb/protocol` because the orb view publishes it
+ * to the browser; this alias keeps domain code from importing the wire module
+ * for a type it treats as its own.
+ */
+export type MintFailureCode = WireMintFailureCode;
+
+/** CAS on a signing key's `row_version` affected zero rows. */
+export interface SigningKeyConflict {
+  readonly type: "signing_key_conflict";
+}
+
+/**
+ * Signing failed. `retryable` is the literal `true` on purpose: the issuer
+ * fails closed (docs/workload-identity.md), so an unavailable key, an
+ * unreachable secret store, and a failed signature all mean "ask again" and
+ * never "here is a token signed some other way".
+ */
+export interface SignerError {
+  readonly type: "signer_error";
+  /** `unavailable`: no usable key material. `signing_failed`: the operation itself. */
+  readonly code: "unavailable" | "signing_failed";
+  readonly message: string;
+  readonly retryable: true;
+  readonly retryAfterMs?: number;
+}
+
+/**
+ * What one identity-mint attempt can fail with. Every variant mirrors a
+ * protocol error code exactly (`IdTokenErrorSchema`), so the HTTP layer is a
+ * fold with no decisions of its own beyond the status code; `unauthorized`
+ * deliberately carries no detail, because unknown, stale, and fenced bearers
+ * must be indistinguishable.
+ *
+ * `internal` is a store failure no retry can fix — `StoreError` code
+ * `invariant` (a deterministic bug of ours) or `corruption` (a row the schema
+ * refuses outright) — and must never be advertised as retryable
+ * (docs/lifecycle.md).
+ */
+export type MintError =
+  | { readonly type: "invalid_request"; readonly message: string }
+  | { readonly type: "unauthorized" }
+  | { readonly type: "not_mintable"; readonly state: OrbState }
+  | { readonly type: "rate_limited"; readonly retryAfterMs: number }
+  | {
+      readonly type: "retryable";
+      readonly message: string;
+      readonly retryAfterMs?: number;
+    }
+  | { readonly type: "internal"; readonly message: string };

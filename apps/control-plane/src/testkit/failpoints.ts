@@ -30,6 +30,16 @@ export const FAILPOINTS = {
   brokerPointerWriteAfter: "broker.pointer.write.after",
   brokerSecretRead: "broker.secret.read",
   brokerSecretWrite: "broker.secret.write",
+  /** Issuer signing-key table: public JWK rows, not the private key material. */
+  signingKeyRead: "issuer.signing-key.read",
+  signingKeyWrite: "issuer.signing-key.write",
+  /** Key generation, which is CPU and entropy rather than storage. */
+  signingKeyGenerate: "issuer.signing-key.generate",
+  /** The secret store holding issuer private keys; the broker's own is separate. */
+  issuerSecretRead: "issuer.secret.read",
+  issuerSecretWrite: "issuer.secret.write",
+  /** The signing operation itself: key material unavailable or signing failed. */
+  signerSign: "signer.sign",
   githubDeviceCode: "github.device.code",
   githubDevicePoll: "github.device.poll",
 } as const;

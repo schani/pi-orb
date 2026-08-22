@@ -118,6 +118,7 @@ Use the shared TypeBox schemas to validate data received by the browser. Add Pla
 - Invoke the Git CLI directly for cloning rather than adding a Git library.
 - Add OpenTofu/Terraform only when implementing the cloud deployment; it is not an application dependency.
 - Add the GCE client only when `GceOrbHostProvider` is implemented.
+- Implement OIDC workload-identity signing (RS256 JWTs, JWK export, RFC 7638 `kid` thumbprints; `docs/workload-identity.md`) as first-party code over `node:crypto` behind the signer port, instead of adding `jose` (decided 2026-08-21). Node 24's `crypto` provides RSA key generation, signing, and JWK export natively; the JOSE surface we need is on the order of a hundred lines and must sit behind a DST-fakeable port either way. Rejected alternative: `jose`, defensible because JOSE serialization details are easy to get subtly wrong — revisit if the issuer grows beyond RS256 or the hand-rolled surface accretes.
 
 Test framework assertions and React/framework error boundaries may use exceptions where their contracts require them; production/domain APIs remain Result-based. Every external adapter owns immediate exception/rejection conversion. No Docker, database, filesystem, Git, HTTP, Pi SDK, or future GCP exception may cross into domain code.
 

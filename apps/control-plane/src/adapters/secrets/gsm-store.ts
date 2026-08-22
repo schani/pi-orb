@@ -2,7 +2,7 @@ import { SecretManagerServiceClient } from "@google-cloud/secret-manager";
 import type { SimulationTask } from "determined";
 import { ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
-import type { CredentialSecretStore, StoredCredential } from "../../domain/ports.ts";
+import type { CredentialSecretStore, StoredCredential, StoredSecret } from "../../domain/ports.ts";
 
 const unavailable = (message: string): StoreError => ({
   type: "store_error",
@@ -43,10 +43,10 @@ export class GsmSecretStore implements CredentialSecretStore {
     return `projects/${this.options.projectId}/secrets/${this.options.secretPrefix}-${provider}`;
   }
 
-  writeSecret(
+  writeSecret<T extends StoredSecret = StoredCredential>(
     _task: SimulationTask,
     provider: string,
-    credential: StoredCredential,
+    credential: T,
   ): ResultAsync<{ version: string }, StoreError> {
     return ResultAsync.fromPromise(
       this.client
@@ -64,18 +64,18 @@ export class GsmSecretStore implements CredentialSecretStore {
     );
   }
 
-  readSecret(
+  readSecret<T extends StoredSecret = StoredCredential>(
     _task: SimulationTask,
     provider: string,
     version: string,
-  ): ResultAsync<StoredCredential | null, StoreError> {
+  ): ResultAsync<T | null, StoreError> {
     return ResultAsync.fromPromise(
       this.client
         .accessSecretVersion({ name: `${this.parent(provider)}/versions/${version}` })
-        .then(([response]): StoredCredential | null => {
+        .then(([response]): T | null => {
           const data = response.payload?.data;
           if (data === null || data === undefined) return null;
-          return JSON.parse(Buffer.from(data).toString("utf8")) as StoredCredential;
+          return JSON.parse(Buffer.from(data).toString("utf8")) as T;
         })
         .catch((error: unknown) => {
           // A destroyed or absent version is definitive null, not an outage.

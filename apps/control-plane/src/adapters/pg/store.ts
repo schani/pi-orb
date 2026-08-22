@@ -1,8 +1,9 @@
 import type { HarnessSessionMetadata, HistoryRecord, OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { err, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import type {
   CommitPullError,
+  MintFailureCode,
   ProjectConflict,
   ReplicationIntegrityError,
   StateConflict,
@@ -17,6 +18,7 @@ import type {
   ControlPlaneStore,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  MintSlotClaim,
   RecordHostDiscardStatusParams,
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
@@ -72,6 +74,12 @@ function mapOrbRow(row: PgRow): OrbRow {
     replicatedHeadId: row["replicated_head_id"] === null ? null : String(row["replicated_head_id"]),
     lastBusyAt: row["last_busy_at"] == null ? null : toMs(row["last_busy_at"]),
     stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
+    mintFailureCode:
+      row["mint_failure_code"] == null
+        ? null
+        : (String(row["mint_failure_code"]) as MintFailureCode),
+    mintFailureAt: row["mint_failure_at"] == null ? null : toMs(row["mint_failure_at"]),
+    lastMintAt: row["last_mint_at"] == null ? null : toMs(row["last_mint_at"]),
     stateChangedAt: toMs(row["state_changed_at"]),
     archivedAt: row["archived_at"] == null ? null : toMs(row["archived_at"]),
     createdAt: toMs(row["created_at"]),
@@ -406,8 +414,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            host_discard_evidence, host_discard_requested_at,
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
-           stop_reason, state_changed_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30)
+           stop_reason, mint_failure_code, mint_failure_at, last_mint_at,
+           state_changed_at, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
          RETURNING *`,
         [
           orb.id,
@@ -437,6 +446,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.replicatedHeadId,
           orb.lastBusyAt === null ? null : new Date(orb.lastBusyAt),
           orb.stopReason,
+          orb.mintFailureCode,
+          orb.mintFailureAt === null ? null : new Date(orb.mintFailureAt),
+          orb.lastMintAt === null ? null : new Date(orb.lastMintAt),
           new Date(orb.stateChangedAt),
           new Date(orb.createdAt),
           new Date(orb.updatedAt),
@@ -1175,6 +1187,59 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         [params.orbId, new Date(params.now)],
       )
       .map(() => undefined);
+  }
+
+  recordMintFailure(
+    _task: SimulationTask,
+    params: { orbId: string; code: MintFailureCode; at: number },
+  ): ResultAsync<void, StoreError> {
+    // Latest-failure-wins and CAS-free (docs/workload-identity.md): both
+    // columns move together, no state_version bump, and no state_changed_at
+    // change, so a denial can never conflict with a lifecycle transition.
+    return this.db
+      .query(
+        `UPDATE orbs SET mint_failure_code = $2, mint_failure_at = $3,
+           updated_at = GREATEST(updated_at, $3)
+         WHERE id = $1`,
+        [params.orbId, params.code, new Date(params.at)],
+      )
+      .map(() => undefined);
+  }
+
+  claimMintSlot(
+    _task: SimulationTask,
+    params: { orbId: string; at: number; minIntervalMs: number },
+  ): ResultAsync<MintSlotClaim, StoreError> {
+    // One conditional UPDATE decides and writes together, so of any number of
+    // concurrent requests exactly one row update succeeds and the rest are
+    // throttled (docs/workload-identity.md). A read-then-advance pair would
+    // let all of them pass the same stale check. The floor cannot move
+    // backwards: a claim is admitted only from strictly below the threshold.
+    const at = new Date(params.at);
+    return this.db
+      .query(
+        `UPDATE orbs SET last_mint_at = $2, updated_at = GREATEST(updated_at, $2)
+         WHERE id = $1 AND (last_mint_at IS NULL OR last_mint_at <= $3)`,
+        [params.orbId, at, new Date(params.at - params.minIntervalMs)],
+      )
+      .andThen((updated) => {
+        if (updated.rowCount > 0) return okAsync<MintSlotClaim, StoreError>({ claimed: true });
+        // Zero rows means throttled or gone; re-read to tell the caller when
+        // to come back. A vanished orb cannot be throttled at all, so it gets
+        // the full interval — the fail-closed answer for a bearer whose orb
+        // disappeared between the two statements.
+        return this.db
+          .query("SELECT last_mint_at FROM orbs WHERE id = $1", [params.orbId])
+          .map((current): MintSlotClaim => {
+            const row = current.rows[0];
+            const lastMintAt = row?.["last_mint_at"] == null ? null : toMs(row["last_mint_at"]);
+            if (lastMintAt === null) return { claimed: false, retryAfterMs: params.minIntervalMs };
+            return {
+              claimed: false,
+              retryAfterMs: Math.max(0, lastMintAt + params.minIntervalMs - params.at),
+            };
+          });
+      });
   }
 
   casReenterState(

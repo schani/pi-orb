@@ -1,3 +1,10 @@
+import {
+  DEFAULT_TTL_SECONDS,
+  MAX_AUDIENCE_BYTES,
+  MAX_TTL_SECONDS,
+  MIN_TTL_SECONDS,
+} from "@pi-orb/protocol";
+
 /**
  * Lifecycle timing constants (docs/lifecycle.md/docs/lifecycle.md). All time flows through the
  * injected `SimulationTask` clock, so simulations tune these freely.
@@ -69,6 +76,66 @@ export const DEFAULT_BROKER_CONSTANTS: BrokerConstants = {
   upstreamTimeoutMs: 20_000,
   waiterPollMs: 500,
   requestDeadlineMs: 45_000,
+};
+
+/**
+ * Identity-issuer bounds (docs/workload-identity.md). The three lifetime
+ * numbers and the audience cap are the protocol's, re-exported here so the
+ * domain has one constants object to inject and simulations can tighten the
+ * rate-limit floor without touching the wire contract.
+ */
+export interface IssuerConstants {
+  /** Applied when the caller requests no explicit lifetime. */
+  readonly defaultTtlSeconds: number;
+  readonly minTtlSeconds: number;
+  readonly maxTtlSeconds: number;
+  /** UTF-8 bytes, not characters: the audience is user-chosen text. */
+  readonly maxAudienceBytes: number;
+  /** Durable per-orb floor between successful mints; the abuse backstop. */
+  readonly minMintIntervalMs: number;
+  /**
+   * How long a retired key keeps being published in JWKS. It must cover the
+   * longest token that key could have signed plus the time a verifier may
+   * serve a stale cached JWKS and a skewed clock — otherwise a token still
+   * inside its own lifetime meets a key set that no longer explains it
+   * (docs/workload-identity.md, "Issuer and signing requirements").
+   */
+  readonly jwksOverlapMs: number;
+  /**
+   * How long a signer may keep reusing private key material it has already
+   * read. The active *row* is read per signature, so a rotation takes effect
+   * immediately; this bounds the other revocation the row cannot express —
+   * destroying the secret version under a still-active key, which is how an
+   * operator kills a leaked key without waiting for a rotation to converge.
+   * A warm signer would otherwise keep signing with destroyed material
+   * indefinitely, so this is the revocation window for that case.
+   */
+  readonly signingKeyMaterialTtlMs: number;
+  /**
+   * How long a newly published key must sit in JWKS before it may start
+   * signing. It has to exceed the `max-age` the JWKS endpoint serves
+   * (`http/issuer-routes.ts`, five minutes), so that a verifier which fetched
+   * the key set the instant before publication has refreshed before the first
+   * token it cannot otherwise explain arrives. The emergency rotation of a
+   * leaked key overrides it deliberately: a few rejected tokens beat a key
+   * that keeps signing.
+   */
+  readonly rotationSoakMs: number;
+}
+
+export const DEFAULT_ISSUER_CONSTANTS: IssuerConstants = {
+  defaultTtlSeconds: DEFAULT_TTL_SECONDS,
+  minTtlSeconds: MIN_TTL_SECONDS,
+  maxTtlSeconds: MAX_TTL_SECONDS,
+  maxAudienceBytes: MAX_AUDIENCE_BYTES,
+  minMintIntervalMs: 2_000,
+  // The maximum token lifetime plus five minutes of verifier cache and clock
+  // skew, which is the allowance the federation recipes ask relying parties for.
+  jwksOverlapMs: MAX_TTL_SECONDS * 1_000 + 5 * 60_000,
+  signingKeyMaterialTtlMs: 60_000,
+  // Twice the JWKS `max-age`, so even a verifier that fetched the key set one
+  // instant before the new key was published has re-fetched before it signs.
+  rotationSoakMs: 10 * 60_000,
 };
 
 export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {
