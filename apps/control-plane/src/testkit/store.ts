@@ -27,7 +27,7 @@ import type {
 import { FAILPOINTS } from "./failpoints.ts";
 
 /** Store operations that can be scripted to fail deterministically. */
-export type InvariantOperation = "getOrb" | "enqueueOrbMessage";
+export type InvariantOperation = "getOrb" | "getOrbByRuntimeTokenHash" | "enqueueOrbMessage";
 
 interface OrbReplica {
   records: Map<string, HistoryRecord>;
@@ -381,6 +381,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     tokenHash: string,
   ): ResultAsync<OrbRow | null, StoreError> {
+    const scripted = this.scriptedInvariant("getOrbByRuntimeTokenHash");
+    if (scripted !== null) return errAsync(scripted);
     return this.access(task, FAILPOINTS.storeRead, "get orb by token hash", () => {
       for (const orb of this.orbs.values()) {
         if (orb.runtimeTokenHash === tokenHash) return orb;

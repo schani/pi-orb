@@ -2,6 +2,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { MessageInputBlockSchema } from "./frames.ts";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
 import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
+import { MintFailureCodeSchema } from "./workload-identity.ts";
 
 const closed = { additionalProperties: false } as const;
 
@@ -158,6 +159,19 @@ export const OrbActionRequiredSchema = Type.Object(
 );
 export type OrbActionRequired = Static<typeof OrbActionRequiredSchema>;
 
+/**
+ * The orb's workload-identity status (docs/workload-identity.md). Present only
+ * while the latest mint outcome is a failure: a later successful mint
+ * supersedes it, which is why the view carries no "healthy" variant. It is
+ * durable status read straight off the orb row, never a token, an audience, or
+ * anything else the mint saw.
+ */
+export const OrbIdentityStatusSchema = Type.Object(
+  { failureCode: MintFailureCodeSchema, failureAt: Type.String() },
+  closed,
+);
+export type OrbIdentityStatus = Static<typeof OrbIdentityStatusSchema>;
+
 export const OrbViewSchema = Type.Object(
   {
     id: Type.String(),
@@ -183,6 +197,8 @@ export const OrbViewSchema = Type.Object(
     previewHost: Type.Optional(Type.String()),
     /** Synthesized from the in-memory device flow; never stored. */
     actionRequired: Type.Optional(OrbActionRequiredSchema),
+    /** Durable mint failure, present only while it is the latest outcome. */
+    identity: Type.Optional(OrbIdentityStatusSchema),
     createdAt: Type.String(),
     updatedAt: Type.String(),
   },

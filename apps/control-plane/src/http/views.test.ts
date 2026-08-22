@@ -165,6 +165,51 @@ describe("orbView compute discard", () => {
   });
 });
 
+describe("orbView workload identity", () => {
+  const failed: OrbRow = {
+    ...orb,
+    mintFailureCode: "signer_failure",
+    mintFailureAt: 1_700_000_050_000,
+  };
+
+  it("exposes the durable failure while it is the latest identity outcome", () => {
+    const never = orbView(failed, new ControlState(), {});
+    expect(never.identity).toEqual({
+      failureCode: "signer_failure",
+      failureAt: new Date(1_700_000_050_000).toISOString(),
+    });
+    expect(Check(OrbViewSchema, never)).toBe(true);
+
+    // A mint that succeeded *before* the failure explains nothing about it.
+    const earlierSuccess = orbView(
+      { ...failed, lastMintAt: 1_700_000_040_000 },
+      new ControlState(),
+      {},
+    );
+    expect(earlierSuccess.identity?.failureCode).toBe("signer_failure");
+
+    // Same millisecond: the slot claim happens before signing, so a failure
+    // stamped then is the later of the two outcomes.
+    const sameMs = orbView({ ...failed, lastMintAt: 1_700_000_050_000 }, new ControlState(), {});
+    expect(sameMs.identity?.failureCode).toBe("signer_failure");
+  });
+
+  it("lets a later successful mint supersede the failure without any clearing write", () => {
+    // The durable columns still hold the old failure — nothing erases them —
+    // but the view stops showing it (docs/workload-identity.md).
+    const recovered = orbView({ ...failed, lastMintAt: 1_700_000_060_000 }, new ControlState(), {});
+    expect(recovered.identity).toBeUndefined();
+    expect("identity" in recovered).toBe(false);
+    expect(Check(OrbViewSchema, recovered)).toBe(true);
+  });
+
+  it("omits the field for an orb that has never failed to mint", () => {
+    const healthy = orbView({ ...orb, lastMintAt: 1_700_000_060_000 }, new ControlState(), {});
+    expect("identity" in healthy).toBe(false);
+    expect(Check(OrbViewSchema, healthy)).toBe(true);
+  });
+});
+
 describe("orbView previewHost", () => {
   it("derives the MagicDNS host when a tailnet is configured", () => {
     const view = orbView(orb, new ControlState(), { tailnetDnsName: "tailabc123.ts.net" });

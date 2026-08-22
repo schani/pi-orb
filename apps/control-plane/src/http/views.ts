@@ -87,6 +87,25 @@ function stateDetailOf(
 }
 
 /**
+ * The orb's workload-identity status (docs/workload-identity.md). The durable
+ * columns are latest-wins and are never cleared, so currency is decided on
+ * read: a failure is shown only when it is the latest outcome, meaning no mint
+ * has succeeded since it was recorded. A later successful mint supersedes the
+ * displayed failure without any clearing write — which is what keeps the
+ * status off the lifecycle CAS path entirely.
+ *
+ * `>=` rather than `>` on purpose: the two timestamps come from the same
+ * injected clock, and a failure recorded in the same millisecond as a
+ * successful mint's slot claim is the *later* of the two — the claim happens
+ * before signing, and only signing can fail after it.
+ */
+function identityOf(orb: OrbRow): OrbView["identity"] {
+  if (orb.mintFailureCode === null || orb.mintFailureAt === null) return undefined;
+  if (orb.lastMintAt !== null && orb.mintFailureAt < orb.lastMintAt) return undefined;
+  return { failureCode: orb.mintFailureCode, failureAt: iso(orb.mintFailureAt) };
+}
+
+/**
  * Fold an orb row plus in-memory reconciler state into the browser view
  * (docs/control-plane-api.md). `actionRequired` and `stateDetail` are synthesized, never
  * stored; no host ref, credential, session ID, or replication field leaks.
@@ -105,6 +124,7 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
       ? control.getBootProbe(orb.id)
       : null;
   const stateDetail = stateDetailOf(orb, control, drain, bootProbe);
+  const identity = identityOf(orb);
   return {
     id: orb.id,
     projectId: orb.projectId,
@@ -115,6 +135,7 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
     ...(stateDetail !== undefined ? { stateDetail } : {}),
+    ...(identity !== undefined ? { identity } : {}),
     ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),
     stateChangedAt: iso(orb.stateChangedAt),
     ...(orb.archivedAt != null ? { archivedAt: iso(orb.archivedAt) } : {}),

@@ -9,6 +9,7 @@ import {
   MAX_AUDIENCE_BYTES,
   MAX_TTL_SECONDS,
   MIN_TTL_SECONDS,
+  MintFailureCodeSchema,
 } from "./workload-identity.ts";
 
 describe("workload identity contract", () => {
@@ -62,5 +63,30 @@ describe("workload identity contract", () => {
     expect(Check(IdTokenErrorSchema, { error: "unknown_token" })).toBe(false);
     // A denial never carries the token, the bearer, or the audience back.
     expect(Check(IdTokenErrorSchema, { error: "unauthorized", token: "t" })).toBe(false);
+  });
+
+  it("distinguishes a deterministic control-plane bug from a transient failure", () => {
+    // Without its own code, an `invariant` store failure would have to be
+    // reported as `retryable`, telling every caller to re-send a request that
+    // can never succeed
+    // (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md).
+    expect(Check(IdTokenErrorSchema, { error: "internal" })).toBe(true);
+    expect(Check(IdTokenErrorSchema, { error: "internal", message: "bad parameter" })).toBe(true);
+    expect(Check(IdTokenErrorSchema, { error: "internal", retryAfterMs: 100 })).toBe(false);
+  });
+
+  it("names every durable mint failure without naming what the caller asked for", () => {
+    for (const code of [
+      "invalid_request",
+      "not_mintable",
+      "rate_limited",
+      "signer_failure",
+      "store_unavailable",
+    ]) {
+      expect(Check(MintFailureCodeSchema, code)).toBe(true);
+    }
+    // An unresolvable bearer has no orb row to record anything on.
+    expect(Check(MintFailureCodeSchema, "unauthorized")).toBe(false);
+    expect(Check(MintFailureCodeSchema, "urn:example:service")).toBe(false);
   });
 });

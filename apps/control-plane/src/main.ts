@@ -21,6 +21,12 @@ import {
   GithubUpstreamRefresher,
 } from "./adapters/github-oauth/client.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
+import { readIssuerUrl } from "./adapters/oidc/issuer-url.ts";
+import {
+  CryptoMintIdSource,
+  NodeCryptoSigningKeyGenerator,
+  OidcTokenSigner,
+} from "./adapters/oidc/signer.ts";
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
@@ -34,7 +40,11 @@ import {
 } from "./adapters/tailscale/client.ts";
 import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
 import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
-import { DEFAULT_BROKER_CONSTANTS, DEFAULT_LIFECYCLE_CONSTANTS } from "./domain/constants.ts";
+import {
+  DEFAULT_BROKER_CONSTANTS,
+  DEFAULT_ISSUER_CONSTANTS,
+  DEFAULT_LIFECYCLE_CONSTANTS,
+} from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
 import {
@@ -45,6 +55,8 @@ import {
   reconcileLoop,
 } from "./domain/loops.ts";
 import type { BrokerDeps, ControlPlaneDeps } from "./domain/ports.ts";
+import { ensureActiveSigningKey } from "./domain/signing-keys.ts";
+import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
@@ -78,6 +90,13 @@ class ControlPlaneTask extends NoSimulationTask {
   }
 }
 
+/**
+ * Every deployment role this binary knows how to be. `all` is the local
+ * single-process composition; the cloud deployment runs one service per other
+ * role (docs/deployment.md, docs/workload-identity.md).
+ */
+const ROLES: readonly string[] = ["all", "browser", "runtime", "ops", "issuer"];
+
 async function main(): Promise<void> {
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
@@ -99,6 +118,44 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Which route families this process registers (docs/credentials.md): the
+  // cloud deployment splits "browser", "runtime", and the public "issuer" into
+  // separate services; local development serves all of them from one process.
+  // A hard allowlist: a typo must refuse to boot rather than come up healthy
+  // and serve nothing but 404s.
+  const role = env("PI_ORB_ROLE", "all");
+  if (!ROLES.includes(role)) {
+    bootTask.error(`PI_ORB_ROLE must be one of ${ROLES.join(", ")}`);
+    process.exitCode = 1;
+    return;
+  }
+  const browserRole = role === "all" || role === "browser";
+  // "ops": the browser API surface for tooling, with no background loops,
+  // no migrations, and no web assets — invoker-IAM keeps it private.
+  const opsRole = role === "ops";
+  const runtimeRole = role === "all" || role === "runtime";
+  // "issuer": the deployment's only public unauthenticated surface, serving
+  // OIDC discovery and JWKS and nothing else (docs/workload-identity.md).
+  const issuerRole = role === "all" || role === "issuer";
+
+  // The issuer URL is part of the security identity of every minted token, so
+  // it is configuration and is validated before any side effect, exactly like
+  // the digest pin above. Every role that mints or publishes the issuer's
+  // metadata needs it; the others never look at it.
+  const configuredIssuerUrl = readIssuerUrl(
+    env("PI_ORB_OIDC_ISSUER_URL", ""),
+    // Local development serves the issuer from the same process it mints in,
+    // so the loopback origin it is already listening on is the truthful
+    // default. A split deployment has no such default and must be told.
+    role === "all" ? `http://127.0.0.1:${port}` : null,
+  );
+  if ((runtimeRole || issuerRole) && configuredIssuerUrl.isErr()) {
+    bootTask.error(`PI_ORB_OIDC_ISSUER_URL ${configuredIssuerUrl.error}`);
+    process.exitCode = 1;
+    return;
+  }
+  const issuerUrl = configuredIssuerUrl.isOk() ? configuredIssuerUrl.value : "";
+
   mkdirSync(authDir, { recursive: true });
   const openedDatabase = openControlPlaneDatabase(
     databaseKind === "pglite"
@@ -111,13 +168,8 @@ async function main(): Promise<void> {
     return;
   }
   const database = openedDatabase.value;
-  const role = env("PI_ORB_ROLE", "all");
-  const browserRole = role === "all" || role === "browser";
-  // "ops": the browser API surface for tooling, with no background loops,
-  // no migrations, and no web assets — invoker-IAM keeps it private.
-  const opsRole = role === "ops";
-  // Only the single-instance browser role migrates; the runtime role's
-  // queries fail retryably until the schema exists.
+  // Only the single-instance browser role migrates; the runtime and issuer
+  // roles' queries fail retryably until the schema exists.
   if (browserRole) {
     const migrated = await database.migrate();
     if (migrated.isErr()) {
@@ -317,9 +369,6 @@ async function main(): Promise<void> {
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
   };
 
-  // Which route families this process registers (docs/credentials.md): the cloud
-  // deployment splits "browser" and "runtime" into separate services; local
-  // development serves both from one process.
   const app = Fastify({ logger: false });
   // Commands issued over HTTP log their transitions too (docs/lifecycle.md).
   const httpTask = new ControlPlaneTask("http");
@@ -341,13 +390,60 @@ async function main(): Promise<void> {
       });
     }
   }
-  if (role === "all" || role === "runtime") {
+  if (runtimeRole) {
     registerRuntimeRoutes(app, httpTask, {
       store: deps.store,
       broker,
       nameGenerator: deps.nameGenerator,
       nameLeaseMs: deps.nameLeaseMs,
+      mint: {
+        store: deps.store,
+        // The signer reads the active key row per signature and caches only
+        // its material, so a rotation takes effect without a restart
+        // (docs/workload-identity.md).
+        signer: new OidcTokenSigner({ keys: database.signingKeys, secrets }),
+        mintIds: new CryptoMintIdSource(),
+        constants: DEFAULT_ISSUER_CONSTANTS,
+        issuerUrl,
+      },
     });
+  }
+  if (issuerRole) {
+    // Public, cacheable, secret-free: no auth gate, no orb data, no secret
+    // store (docs/workload-identity.md).
+    registerIssuerRoutes(app, httpTask, {
+      keys: database.signingKeys,
+      constants: DEFAULT_ISSUER_CONSTANTS,
+      issuerUrl,
+    });
+  }
+
+  // Boot key ensure for the roles that mint (docs/workload-identity.md). It is
+  // idempotent, so every instance runs it and the losers adopt the winner's
+  // key. It deliberately does *not* fail the boot: the runtime service is also
+  // the credential broker every running orb depends on, and taking it down
+  // over issuer trouble would trade a feature outage for a fleet outage.
+  // Minting then fails closed per request with typed retryable errors, and the
+  // next boot or an operator's rotation repairs it.
+  if (runtimeRole) {
+    const keyDeps = {
+      keys: database.signingKeys,
+      secrets,
+      generator: new NodeCryptoSigningKeyGenerator(),
+      constants: DEFAULT_ISSUER_CONSTANTS,
+    };
+    let established = false;
+    let lastFailure = "";
+    for (let attempt = 0; attempt < 3 && !established; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+      const ensured = await ensureActiveSigningKey(bootTask, keyDeps, { now: Date.now() });
+      established = ensured.isOk();
+      if (ensured.isErr()) lastFailure = ensured.error.message;
+    }
+    // One durable edge, and only on the failing edge: a healthy boot that
+    // found the key already active says nothing (docs/lifecycle.md). Key
+    // creation and adoption log their own `lifecycle:` events.
+    if (!established) bootTask.error(`issuer signing key unavailable: ${lastFailure}`);
   }
 
   const stop = new AbortController();
