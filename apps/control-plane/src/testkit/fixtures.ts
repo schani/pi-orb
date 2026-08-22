@@ -9,10 +9,22 @@ import {
 } from "../domain/constants.ts";
 import { ControlState } from "../domain/control-state.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
-import type { ControlPlaneDeps, MintDeps, OrbNameGenerator } from "../domain/ports.ts";
+import type {
+  ControlPlaneDeps,
+  MintDeps,
+  OrbNameGenerator,
+  SigningKeyDeps,
+} from "../domain/ports.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
+import { FakeSecretStore } from "./broker.ts";
+import { FAILPOINTS } from "./failpoints.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
-import { FakeMintIdSource, FakeTokenSigner } from "./workload-identity.ts";
+import {
+  FakeMintIdSource,
+  FakeSigningKeyGenerator,
+  FakeSigningKeyStore,
+  FakeTokenSigner,
+} from "./workload-identity.ts";
 import {
   type FakeOrbConfig,
   FakeOrbHostProvider,
@@ -125,6 +137,46 @@ export function makeMintHarness(options?: {
       mintIds,
       constants: { ...TEST_ISSUER_CONSTANTS, ...options?.issuerConstants },
       issuerUrl: options?.issuerUrl ?? TEST_ISSUER_URL,
+    },
+  };
+}
+
+export interface SigningKeyHarness {
+  /** The durable key rows, shared by every instance in a scenario. */
+  readonly keys: FakeSigningKeyStore;
+  /** The private key material, likewise shared. */
+  readonly secrets: FakeSecretStore;
+  readonly generator: FakeSigningKeyGenerator;
+  readonly deps: SigningKeyDeps;
+}
+
+/**
+ * One control-plane instance's view of the issuer's signing keys. Passing the
+ * same `keys`/`secrets` to two harnesses models two instances over one
+ * database and one secret store, each with its own key generator — which is
+ * exactly the shape a boot race and a rotation crash have to survive.
+ */
+export function makeSigningKeyHarness(options?: {
+  keys?: FakeSigningKeyStore;
+  secrets?: FakeSecretStore;
+  /** Distinguishes this instance's generated `kid`s from another's. */
+  kidPrefix?: string;
+  issuerConstants?: Partial<IssuerConstants>;
+}): SigningKeyHarness {
+  const keys = options?.keys ?? new FakeSigningKeyStore();
+  const secrets =
+    options?.secrets ??
+    new FakeSecretStore({ read: FAILPOINTS.issuerSecretRead, write: FAILPOINTS.issuerSecretWrite });
+  const generator = new FakeSigningKeyGenerator(options?.kidPrefix ?? "kid");
+  return {
+    keys,
+    secrets,
+    generator,
+    deps: {
+      keys,
+      secrets,
+      generator,
+      constants: { ...TEST_ISSUER_CONSTANTS, ...options?.issuerConstants },
     },
   };
 }

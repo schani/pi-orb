@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { SimulationTask } from "determined";
 import { ResultAsync } from "neverthrow";
 import type { StoreError } from "../../domain/errors.ts";
-import type { CredentialSecretStore, StoredCredential } from "../../domain/ports.ts";
+import type { CredentialSecretStore, StoredCredential, StoredSecret } from "../../domain/ports.ts";
 
 const unavailable = (message: string): StoreError => ({
   type: "store_error",
@@ -34,10 +34,10 @@ export class FileSecretStore implements CredentialSecretStore {
     return join(this.dir, `${provider}-${version}.json`);
   }
 
-  writeSecret(
+  writeSecret<T extends StoredSecret = StoredCredential>(
     _task: SimulationTask,
     provider: string,
-    credential: StoredCredential,
+    credential: T,
   ): ResultAsync<{ version: string }, StoreError> {
     const version = `v-${randomBytes(8).toString("hex")}`;
     return ResultAsync.fromPromise(
@@ -50,14 +50,14 @@ export class FileSecretStore implements CredentialSecretStore {
     );
   }
 
-  readSecret(
+  readSecret<T extends StoredSecret = StoredCredential>(
     _task: SimulationTask,
     provider: string,
     version: string,
-  ): ResultAsync<StoredCredential | null, StoreError> {
+  ): ResultAsync<T | null, StoreError> {
     return ResultAsync.fromPromise(
       readFile(this.path(provider, version), "utf8").then(
-        (raw) => JSON.parse(raw) as StoredCredential,
+        (raw) => JSON.parse(raw) as T,
         (error: unknown) =>
           (error as NodeJS.ErrnoException).code === "ENOENT" ? null : Promise.reject(error),
       ),

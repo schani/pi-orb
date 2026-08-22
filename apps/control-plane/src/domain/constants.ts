@@ -93,6 +93,14 @@ export interface IssuerConstants {
   readonly maxAudienceBytes: number;
   /** Durable per-orb floor between successful mints; the abuse backstop. */
   readonly minMintIntervalMs: number;
+  /**
+   * How long a retired key keeps being published in JWKS. It must cover the
+   * longest token that key could have signed plus the time a verifier may
+   * serve a stale cached JWKS and a skewed clock — otherwise a token still
+   * inside its own lifetime meets a key set that no longer explains it
+   * (docs/workload-identity.md, "Issuer and signing requirements").
+   */
+  readonly jwksOverlapMs: number;
 }
 
 export const DEFAULT_ISSUER_CONSTANTS: IssuerConstants = {
@@ -101,6 +109,9 @@ export const DEFAULT_ISSUER_CONSTANTS: IssuerConstants = {
   maxTtlSeconds: MAX_TTL_SECONDS,
   maxAudienceBytes: MAX_AUDIENCE_BYTES,
   minMintIntervalMs: 2_000,
+  // The maximum token lifetime plus five minutes of verifier cache and clock
+  // skew, which is the allowance the federation recipes ask relying parties for.
+  jwksOverlapMs: MAX_TTL_SECONDS * 1_000 + 5 * 60_000,
 };
 
 export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {
