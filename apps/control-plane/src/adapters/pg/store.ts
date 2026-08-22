@@ -1,6 +1,6 @@
 import type { HarnessSessionMetadata, HistoryRecord, OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { err, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import type {
   CommitPullError,
   MintFailureCode,
@@ -18,6 +18,7 @@ import type {
   ControlPlaneStore,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  MintSlotClaim,
   RecordHostDiscardStatusParams,
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
@@ -1205,20 +1206,40 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map(() => undefined);
   }
 
-  advanceLastMintAt(
+  claimMintSlot(
     _task: SimulationTask,
-    params: { orbId: string; at: number },
-  ): ResultAsync<void, StoreError> {
-    // The rate-limit floor only moves forward, so out-of-order writes from
-    // concurrent instances cannot hand the next caller a free mint.
+    params: { orbId: string; at: number; minIntervalMs: number },
+  ): ResultAsync<MintSlotClaim, StoreError> {
+    // One conditional UPDATE decides and writes together, so of any number of
+    // concurrent requests exactly one row update succeeds and the rest are
+    // throttled (docs/workload-identity.md). A read-then-advance pair would
+    // let all of them pass the same stale check. The floor cannot move
+    // backwards: a claim is admitted only from strictly below the threshold.
+    const at = new Date(params.at);
     return this.db
       .query(
-        `UPDATE orbs SET last_mint_at = GREATEST(COALESCE(last_mint_at, to_timestamp(0)), $2),
-           updated_at = GREATEST(updated_at, $2)
-         WHERE id = $1`,
-        [params.orbId, new Date(params.at)],
+        `UPDATE orbs SET last_mint_at = $2, updated_at = GREATEST(updated_at, $2)
+         WHERE id = $1 AND (last_mint_at IS NULL OR last_mint_at <= $3)`,
+        [params.orbId, at, new Date(params.at - params.minIntervalMs)],
       )
-      .map(() => undefined);
+      .andThen((updated) => {
+        if (updated.rowCount > 0) return okAsync<MintSlotClaim, StoreError>({ claimed: true });
+        // Zero rows means throttled or gone; re-read to tell the caller when
+        // to come back. A vanished orb cannot be throttled at all, so it gets
+        // the full interval — the fail-closed answer for a bearer whose orb
+        // disappeared between the two statements.
+        return this.db
+          .query("SELECT last_mint_at FROM orbs WHERE id = $1", [params.orbId])
+          .map((current): MintSlotClaim => {
+            const row = current.rows[0];
+            const lastMintAt = row?.["last_mint_at"] == null ? null : toMs(row["last_mint_at"]);
+            if (lastMintAt === null) return { claimed: false, retryAfterMs: params.minIntervalMs };
+            return {
+              claimed: false,
+              retryAfterMs: Math.max(0, lastMintAt + params.minIntervalMs - params.at),
+            };
+          });
+      });
   }
 
   casReenterState(

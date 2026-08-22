@@ -1,3 +1,10 @@
+import {
+  DEFAULT_TTL_SECONDS,
+  MAX_AUDIENCE_BYTES,
+  MAX_TTL_SECONDS,
+  MIN_TTL_SECONDS,
+} from "@pi-orb/protocol";
+
 /**
  * Lifecycle timing constants (docs/lifecycle.md/docs/lifecycle.md). All time flows through the
  * injected `SimulationTask` clock, so simulations tune these freely.
@@ -69,6 +76,31 @@ export const DEFAULT_BROKER_CONSTANTS: BrokerConstants = {
   upstreamTimeoutMs: 20_000,
   waiterPollMs: 500,
   requestDeadlineMs: 45_000,
+};
+
+/**
+ * Identity-issuer bounds (docs/workload-identity.md). The three lifetime
+ * numbers and the audience cap are the protocol's, re-exported here so the
+ * domain has one constants object to inject and simulations can tighten the
+ * rate-limit floor without touching the wire contract.
+ */
+export interface IssuerConstants {
+  /** Applied when the caller requests no explicit lifetime. */
+  readonly defaultTtlSeconds: number;
+  readonly minTtlSeconds: number;
+  readonly maxTtlSeconds: number;
+  /** UTF-8 bytes, not characters: the audience is user-chosen text. */
+  readonly maxAudienceBytes: number;
+  /** Durable per-orb floor between successful mints; the abuse backstop. */
+  readonly minMintIntervalMs: number;
+}
+
+export const DEFAULT_ISSUER_CONSTANTS: IssuerConstants = {
+  defaultTtlSeconds: DEFAULT_TTL_SECONDS,
+  minTtlSeconds: MIN_TTL_SECONDS,
+  maxTtlSeconds: MAX_TTL_SECONDS,
+  maxAudienceBytes: MAX_AUDIENCE_BYTES,
+  minMintIntervalMs: 2_000,
 };
 
 export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {

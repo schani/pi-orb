@@ -691,7 +691,7 @@ export function storeSemanticsContractTests(
       expect(unknown.isOk()).toBe(true);
     });
 
-    it("advances the mint rate-limit floor monotonically and only forward", async () => {
+    it("claims the mint rate-limit slot atomically and only moves it forward", async () => {
       await seed();
       const running = await store.casTransition(task, {
         orbId: orb.id,
@@ -701,27 +701,70 @@ export function storeSemanticsContractTests(
       });
       expect(running.isOk()).toBe(true);
 
-      expect((await store.advanceLastMintAt(task, { orbId: orb.id, at: 5_000 })).isOk()).toBe(true);
+      // A never-minted orb claims immediately, and the claim is the write:
+      // the floor is at the claim's own timestamp afterwards.
+      const first = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 5_000,
+        minIntervalMs: 2_000,
+      });
+      expect(first._unsafeUnwrap()).toEqual({ claimed: true });
       expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
         lastMintAt: 5_000,
         stateVersion: 1,
         stateChangedAt: 2_000,
       });
 
-      // Two instances mint concurrently and their writes land out of order:
-      // the floor must not move backwards, or the older mint would hand the
-      // next caller a free pass through the rate limit.
-      expect((await store.advanceLastMintAt(task, { orbId: orb.id, at: 4_000 })).isOk()).toBe(true);
+      // Inside the interval: refused, with the remaining wait.
+      const throttled = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 5_500,
+        minIntervalMs: 2_000,
+      });
+      expect(throttled._unsafeUnwrap()).toEqual({ claimed: false, retryAfterMs: 1_500 });
       expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(5_000);
 
-      expect((await store.advanceLastMintAt(task, { orbId: orb.id, at: 6_000 })).isOk()).toBe(true);
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(6_000);
-
-      const unknown = await store.advanceLastMintAt(task, {
-        orbId: "00000000-0000-4000-8000-0000000000cd",
-        at: 7_000,
+      // A late-arriving claim from another instance carries an older `at`; it
+      // must not move the floor backwards and hand the next caller a free mint.
+      const late = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 4_000,
+        minIntervalMs: 2_000,
       });
-      expect(unknown.isOk()).toBe(true);
+      expect(late._unsafeUnwrap().claimed).toBe(false);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(5_000);
+
+      // Exactly at the interval boundary the slot is free again.
+      const after = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 7_000,
+        minIntervalMs: 2_000,
+      });
+      expect(after._unsafeUnwrap()).toEqual({ claimed: true });
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(7_000);
+
+      // Nothing to throttle: an orb id with no row is refused for the full
+      // interval rather than granted a claim it has no floor to record.
+      const unknown = await store.claimMintSlot(task, {
+        orbId: "00000000-0000-4000-8000-0000000000cd",
+        at: 9_000,
+        minIntervalMs: 2_000,
+      });
+      expect(unknown._unsafeUnwrap()).toEqual({ claimed: false, retryAfterMs: 2_000 });
+    });
+
+    it("admits exactly one of many concurrent mint-slot claims", async () => {
+      await seed();
+      // The defect the atomic claim exists to prevent: with a read-then-write
+      // floor every one of these passes the same stale check and mints.
+      const claims = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          store.claimMintSlot(task, { orbId: orb.id, at: 10_000, minIntervalMs: 2_000 }),
+        ),
+      );
+      const winners = claims.filter((claim) => claim._unsafeUnwrap().claimed);
+      expect(winners.length).toBe(1);
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(10_000);
     });
 
     it("lets mint status writes interleave a lifecycle read and its CAS", async () => {
@@ -737,7 +780,12 @@ export function storeSemanticsContractTests(
           await store.recordMintFailure(task, { orbId: orb.id, code: "rate_limited", at: 2_500 })
         ).isOk(),
       ).toBe(true);
-      expect((await store.advanceLastMintAt(task, { orbId: orb.id, at: 2_600 })).isOk()).toBe(true);
+      const claim = await store.claimMintSlot(task, {
+        orbId: orb.id,
+        at: 2_600,
+        minIntervalMs: 2_000,
+      });
+      expect(claim._unsafeUnwrap()).toEqual({ claimed: true });
 
       const stopping = await store.casTransition(task, {
         orbId: orb.id,

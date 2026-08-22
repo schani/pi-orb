@@ -18,6 +18,7 @@ import type {
   ControlPlaneStore,
   FailOrbAndRequestComputeDiscardParams,
   FinalizeHostDiscardParams,
+  MintSlotClaim,
   RecordHostDiscardStatusParams,
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
@@ -1252,19 +1253,29 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  advanceLastMintAt(
+  claimMintSlot(
     task: SimulationTask,
-    params: { orbId: string; at: number },
-  ): ResultAsync<void, StoreError> {
-    return this.access(task, FAILPOINTS.storeWrite, "advance last mint at", () => {
+    params: { orbId: string; at: number; minIntervalMs: number },
+  ): ResultAsync<MintSlotClaim, StoreError> {
+    // The decision and the write are one indivisible step here, exactly as the
+    // pg adapter's conditional UPDATE is (docs/workload-identity.md): every
+    // interleaving happens in `access`, never inside this body.
+    return this.access(task, FAILPOINTS.storeWrite, "claim mint slot", () => {
       const orb = this.orbs.get(params.orbId);
-      if (orb === undefined) return;
-      if (orb.lastMintAt !== null && orb.lastMintAt >= params.at) return;
+      if (orb === undefined) return { claimed: false as const, retryAfterMs: params.minIntervalMs };
+      const threshold = params.at - params.minIntervalMs;
+      if (orb.lastMintAt !== null && orb.lastMintAt > threshold) {
+        return {
+          claimed: false as const,
+          retryAfterMs: Math.max(0, orb.lastMintAt + params.minIntervalMs - params.at),
+        };
+      }
       this.orbs.set(orb.id, {
         ...orb,
         lastMintAt: params.at,
         updatedAt: Math.max(orb.updatedAt, params.at),
       });
+      return { claimed: true as const };
     });
   }
 
