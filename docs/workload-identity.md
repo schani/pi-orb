@@ -1,15 +1,25 @@
 # Orb workload identity requirements
 
 > **Status:** Requirements accepted 2026-08-21; implementation plan added 2026-08-21 (see
-> "Implementation plan" below). Stages 1–3 have landed: the domain core, the crypto
-> adapter and key management, the mint route, the `issuer` role's discovery/JWKS endpoints, the
-> boot key hook, the per-orb identity status in the product, and the in-orb `pi-orb id-token` CLI
-> with its image shim and end-to-end coverage. Cloud deployment and federation are stage 4, so
-> nothing in the deployed product mints yet: `PI_ORB_OIDC_ISSUER_URL` and the public `issuer`
-> service still have to ship. This document defines a
-> provider-neutral OIDC identity that code running inside a pi-orb can exchange for
-> short-lived credentials from cloud providers and private services. It does not grant any
-> permission by itself: each relying party owns its trust policy and authorization.
+> "Implementation plan" below). **Implemented through stage 4 locally as of 2026-08-21**: the
+> domain core, the crypto adapter and key management, the mint route, the `issuer` role's
+> discovery/JWKS endpoints, the boot key hook, the per-orb identity status in the product, the
+> in-orb `pi-orb id-token` CLI with its image shim and end-to-end coverage, and the cloud tier —
+> the public `pi-orb-issuer` Cloud Run service, `PI_ORB_OIDC_ISSUER_URL` on both roles that need
+> it, the signing-key parent secret, the separately invoked federation bootstrap
+> (`infra/bootstrap-pi-orb-oidc.sh`), the release smoke (`infra/smoke-workload-identity.sh`), and
+> the integration recipes (`docs/workload-identity-recipes.md`).
+>
+> **Remaining release gate:** the live GCP federation validation. Nothing in stage 4 has been
+> applied to a real project or exchanged through a real STS; the deterministic-URL assumption, the
+> deployed issuer's public reachability, the pool/provider bootstrap, and the smoke's ssh and STS
+> legs are all unverified until that runs. Tracked in `TODO.md`.
+>
+> This document defines a provider-neutral OIDC identity that code running inside a pi-orb can
+> exchange for short-lived credentials from cloud providers and private services. It does not grant
+> any permission by itself: each relying party owns its trust policy and authorization. The
+> relying-party side — how to configure GCP, AWS, and generic OIDC services to accept it — is
+> `docs/workload-identity-recipes.md`.
 
 ## Purpose
 
@@ -439,6 +449,18 @@ The feature is complete only when:
 7. The deterministic race suite and full runtime E2E pass, including stop/replacement revocation
    boundaries.
 
+Reconciled 2026-08-21 against what stage 4 leaves true:
+
+| # | Status |
+| --- | --- |
+| 1 | **Met in the E2E slice, unverified live.** `e2e/full-slice.e2e.test.ts` mints through the shim in a Docker orb and verifies against the served JWKS. `infra/smoke-workload-identity.sh` is the same proof against real GCE and the deployed issuer, and has not been run. |
+| 2 | **Written, not demonstrated.** The configuration generator, the reviewed helper `scripts/pi-orb-gcp-identity`, and the recipe are in `docs/workload-identity-recipes.md`; the smoke performs the equivalent exchange explicitly (STS → impersonation → a read-only API). No live STS has yet accepted a pi-orb token. This is the criterion the release gate exists for. |
+| 3 | **Met except live.** Wrong audience, wrong issuer, tampered signature, stopped-orb `403 not_mintable`, discarded-incarnation `401`, and an out-of-range TTL are all covered in the E2E suite and the DST scenarios; the smoke re-proves wrong-audience (at STS), stopped-orb 403, and unknown-bearer 401 on real infrastructure. |
+| 4 | **Met, and the deployment tier preserves it.** Private keys exist only as Secret Manager versions under `pi-orb-credential-oidc-signing-key`; the public issuer service runs as its own service account with no access to them. The smoke moves tokens through pipes and mode-0600 files in a mode-0700 directory removed on exit, and prints claims, never tokens. |
+| 5 | **Met.** `OrbView.identity` plus the orb page banner (stage 2B). |
+| 6 | **Met.** No provider knows about OIDC; the four launch inputs were already injected before stage 1. |
+| 7 | **Met at the last full run.** Re-run both before the live gate. |
+
 ## Implementation plan
 
 Four stages, each independently mergeable and leaving `main` deployable. Stages 1–2 are inert in
@@ -641,6 +663,61 @@ suite's other container-shell steps.
   the Federation integrations section above, including provider-side principal-to-orb
   correlation. `docs/deployment.md` and `docs/credentials.md` are updated in the same task, and
   this document's status header flips as stages land.
+
+Stage 4 was implemented 2026-08-21 (`infra/oidc.tf`, `infra/run.tf`, `infra/outputs.tf`,
+`infra/bootstrap-pi-orb-oidc.sh`, `infra/smoke-workload-identity.sh`, `infra/release.sh`,
+`infra/api.sh`, `scripts/pi-orb-gcp-identity`, `docs/workload-identity-recipes.md`). It has not
+been applied to GCP. Six decisions taken while implementing it:
+
+- **The issuer URL is computed, not configured.** A Cloud Run service cannot reference its own
+  `.uri`, so the runtime service — which mints and therefore needs `iss` at boot — cannot be handed
+  the issuer's URL by ordinary reference. `local.oidc_issuer_url` in `infra/oidc.tf` instead builds
+  the URL Cloud Run v2 assigns deterministically to a new service,
+  `https://<service>-<project-number>.<region>.run.app`, from `data.google_project`. Both services
+  read the same local, so one apply cannot ship a minting image without the matching issuer
+  identity — which is exactly the stage 2B hazard, structurally removed rather than documented as a
+  checklist item. Rejected: an operator-supplied variable (a hand-copied trust anchor whose drift
+  is silent, and one more thing a release can forget) and a two-phase apply (machinery, plus a
+  window in which the two services disagree about who the issuer is). The assumption is not taken
+  on faith: the issuer service carries a `lifecycle.postcondition` asserting `self.uri` equals the
+  computed local, so a platform that stopped assigning that URL form fails the release instead of
+  deploying an issuer nobody can resolve. The three older services predate the deterministic scheme
+  and still carry hashed URLs, which is why this is only sound for a service created now.
+- **The public issuer runs as its own service account.** The requirement is that the issuer holds
+  no signing material, but all three existing services share one `pi-orb-control-plane` account
+  that can read every brokered credential — so simply not granting the new secret to "the control
+  plane" would have granted it to the public service anyway. `google_service_account.issuer` can
+  read exactly one secret (the database URL, for the *public* JWKs in `oidc_signing_keys`) and
+  write logs. The signing-key grants name only the control-plane account. Splitting `browser`/`ops`
+  off that account is separate pre-existing work; what stage 4 required was that "unauthenticated"
+  and "can read private keys" never be the same identity.
+- **The parent secret is `pi-orb-credential-oidc-signing-key`**, not the prettier
+  `pi-orb-oidc-signing-key`. `GsmSecretStore` addresses `<prefix>-<provider>` with the prefix
+  defaulting to `pi-orb-credential`, and `domain/signing-keys.ts` writes under provider
+  `oidc-signing-key`; any other name is simply not found at runtime. Both the Codex and GitHub
+  credential bindings are mirrored: `secretAccessor` for the signer's per-signature read of an
+  exact version, `secretVersionManager` for `addSecretVersion` on generation and
+  `destroySecretVersion` when a boot-race loser drops an unreferenced version.
+- **The issuer service's environment is trimmed to `PI_ORB_ROLE`, `PI_ORB_OIDC_ISSUER_URL`, and
+  `DATABASE_URL`**, with every omission from `local.shared_env` commented in place. Leaving
+  `PI_ORB_SECRET_STORE` unset means the process never even constructs a Secret Manager client;
+  leaving `PI_ORB_HOST_PROVIDER` unset also keeps the GCE digest-pin boot gate off a service that
+  creates no compute. Scaling stays capped at one instance: on the deployment's only public
+  unauthenticated endpoint that cap is the spend bound, and `public, max-age=300` on both documents
+  means a whole verifier fleet costs one request per key set per five minutes.
+- **The smoke uses two orbs.** Proving "a stopped orb cannot mint" needs both a stopped orb and a
+  caller that can reach the internal-ingress runtime service — and a stopped orb has no compute
+  left to be that caller. The second orb boots concurrently with the first, so it costs a VM and
+  almost no wall clock, and it probes with the stopped orb's bearer read from GCE instance
+  metadata. Rejected: probing during `stopping` from the orb's own VM (the state that is both
+  non-mintable and still running is a race, and a live smoke may not be flaky), and probing the
+  runtime service directly from the release machine (internal ingress makes it unreachable, and a
+  reachability flag would have gated a required check behind an environment variable).
+- **The federation legs degrade, the mint and revocation legs do not.** `PI_ORB_SMOKE_WIF_*` unset
+  means the WIF tier has not been bootstrapped, which is the expected state before
+  `infra/bootstrap-pi-orb-oidc.sh` runs; the smoke then still mints in a real orb, still verifies
+  against the deployed issuer's discovery and JWKS, and still proves stopped-orb and unknown-bearer
+  refusal — it just cannot claim GCP accepts the token, and says so loudly.
 
 ## Non-goals
 

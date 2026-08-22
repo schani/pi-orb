@@ -108,6 +108,7 @@ Subsystem designs:
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
 - [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
 - [docs/workload-identity.md](docs/workload-identity.md) — requirements for orb-issued OIDC identity and keyless federation with cloud providers and private services
+- [docs/workload-identity-recipes.md](docs/workload-identity-recipes.md) — relying-party integration recipes for that identity: GCP workload identity federation, AWS web-identity roles, and generic OIDC verification
 - [docs/ports.md](docs/ports.md) — port exposure and preview URLs: tier-1 Tailscale, per-orb auth keys, the preview-host contract
 - [docs/deployment.md](docs/deployment.md) — Cloud Run/OpenTofu deployment direction (operational workflow: `infra/README.md`)
 - [docs/testing.md](docs/testing.md) — DST strategy, the E2E slice, testing decisions

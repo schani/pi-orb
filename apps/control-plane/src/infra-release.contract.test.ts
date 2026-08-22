@@ -92,6 +92,12 @@ VARS
   );
   executable(join(infra, "deploy.sh"), 'echo "deploy:$*" >> "$CALL_LOG"\n');
   executable(join(infra, "smoke.sh"), 'echo smoke >> "$CALL_LOG"\n');
+  executable(
+    join(infra, "smoke-workload-identity.sh"),
+    // Both required inputs must reach it, or the real script exits at its own
+    // preflight (docs/workload-identity.md).
+    'echo "wif-smoke:$PI_ORB_GCP_PROJECT:$PI_ORB_GCE_ZONE" >> "$CALL_LOG"\n',
+  );
 
   return { root, log };
 }
@@ -181,8 +187,11 @@ describe("infra/release.sh", () => {
     expect(result.stdout).toContain("deploy generation:    201");
     const calls = readFileSync(log, "utf8");
     expect(calls).toMatch(
-      /gcloud:storage cp[\s\S]*build[\s\S]*tofu:.* init[\s\S]*tofu:.* plan[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*smoke[\s\S]*gcloud:storage rm/,
+      /gcloud:storage cp[\s\S]*build[\s\S]*tofu:.* init[\s\S]*tofu:.* plan[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*smoke[\s\S]*wif-smoke[\s\S]*gcloud:storage rm/,
     );
+    // The workload-identity smoke runs inside the lock, after the lifecycle
+    // smoke, and is handed the project and zone its GCE legs need.
+    expect(calls).toContain("wif-smoke:test-project:us-central1-a");
     expect(calls).toContain("plan-mode:600");
     expect(calls).not.toContain("--iap-only");
     const planPath = calls.match(/tofu:.* plan .* -out=([^ ]+)/)?.[1];

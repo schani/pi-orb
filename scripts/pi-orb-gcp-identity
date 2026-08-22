@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Reviewed executable credential source for Google external-account credentials
+# backed by pi-orb workload identity (docs/workload-identity-recipes.md).
+#
+# Google's SDKs execute this on every credential refresh and read one JSON
+# object from stdout. It mints a fresh, short-lived pi-orb token on demand: no
+# secret is stored here, in the credential configuration, or anywhere on the
+# orb's disk, and nothing is cached.
+#
+# It is the pi-orb sibling of scripts/amp-gcp-identity, and deliberately looks
+# the same — the whole point of a reviewed helper is that it stays boring.
+#
+# Requires GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1 in the environment of the
+# process that loads the credential. Set that only around callers you intend to
+# federate; it is a global "run programs named by credential files" switch.
+#
+# Never run this under shell tracing: `set -x` around it prints the token.
+set -euo pipefail
+
+: "${PI_ORB_GCP_AUDIENCE:?set PI_ORB_GCP_AUDIENCE to the audience the workload-identity provider allows}"
+
+token=$(pi-orb id-token --audience "$PI_ORB_GCP_AUDIENCE")
+
+# `expiration_time` must be the JWT's own `exp`, so the SDK refreshes before the
+# token dies rather than after a call fails. Only the unsigned payload is read;
+# nothing here verifies anything, because the relying party is what verifies.
+PI_ORB_ID_TOKEN="$token" python3 - <<'PY'
+import base64
+import json
+import os
+
+token = os.environ["PI_ORB_ID_TOKEN"]
+payload = token.split(".")[1]
+payload += "=" * (-len(payload) % 4)
+expiration = json.loads(base64.urlsafe_b64decode(payload))["exp"]
+print(json.dumps({
+    "version": 1,
+    "success": True,
+    "token_type": "urn:ietf:params:oauth:token-type:id_token",
+    "id_token": token,
+    "expiration_time": expiration,
+}))
+PY
