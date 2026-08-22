@@ -202,6 +202,11 @@ because an executable credential source has only the code to decide with:
 | 6 | unavailable: control plane unreachable or transiently failing |
 | 7 | internal: a control-plane bug, which retrying cannot fix |
 
+The in-orb Pi agent learns the feature exists through the `cloud-identity` skill baked into the
+runtime image at `apps/orb-runtime/skills/cloud-identity/SKILL.md` (mechanism and rejected
+alternatives in `docs/pi-adapter.md`, added 2026-08-22): nothing in a user's checkout mentions
+`pi-orb id-token`, so without it an agent asked to reach a cloud API looks for a stored key instead.
+
 The CLI retries only outcomes a later attempt can change — the first-boot 401 before the bearer
 hash commits, the per-orb floor, and transient issuer/network failures — inside one 10-second
 budget with the `gh` helper's 250 ms/2 s backoff, honoring `Retry-After` but never sleeping past
