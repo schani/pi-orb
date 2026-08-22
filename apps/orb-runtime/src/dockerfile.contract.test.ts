@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -43,6 +43,25 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain("--ignore-scripts");
     expect(dockerfile).toContain("rm -rf node_modules/node-pty/prebuilds");
     expect(dockerfile).toContain("npm rebuild node-pty");
+  });
+
+  it("installs every in-orb shim as an executable on PATH", () => {
+    // The three point-of-use helpers of docs/credentials.md and
+    // docs/workload-identity.md: an image that ships the source but not the
+    // shim leaves `gh`, git pushes, or `pi-orb id-token` broken inside the orb.
+    const shims = ["gh", "pi-orb-git-credential", "pi-orb"];
+    for (const shim of shims) {
+      expect(existsSync(join(repositoryRoot, "apps/orb-runtime/docker", shim))).toBe(true);
+      expect(dockerfile).toContain(`COPY apps/orb-runtime/docker/${shim} /usr/local/bin/${shim}`);
+    }
+    const chmod = /RUN chmod 755 ([^\n\\]*)/.exec(dockerfile)?.[1] ?? "";
+    for (const shim of shims) {
+      expect(chmod, `${shim} must be made executable`).toContain(`/usr/local/bin/${shim}`);
+    }
+    // Each shim dispatches to source the image actually carries.
+    const piOrbShim = readFileSync(join(repositoryRoot, "apps/orb-runtime/docker/pi-orb"), "utf8");
+    expect(piOrbShim).toContain("node /app/apps/orb-runtime/src/id-token/cli.ts");
+    expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/id-token/cli.ts"))).toBe(true);
   });
 
   it("declares HOME on the persistent orb volume", () => {

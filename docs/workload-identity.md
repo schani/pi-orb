@@ -1,10 +1,12 @@
 # Orb workload identity requirements
 
 > **Status:** Requirements accepted 2026-08-21; implementation plan added 2026-08-21 (see
-> "Implementation plan" below). Stage 1 and stage 2 have landed: the domain core, the crypto
+> "Implementation plan" below). Stages 1–3 have landed: the domain core, the crypto
 > adapter and key management, the mint route, the `issuer` role's discovery/JWKS endpoints, the
-> boot key hook, and the per-orb identity status in the product. Nothing in an orb can call any of
-> it until the CLI ships in stage 3. This document defines a
+> boot key hook, the per-orb identity status in the product, and the in-orb `pi-orb id-token` CLI
+> with its image shim and end-to-end coverage. Cloud deployment and federation are stage 4, so
+> nothing in the deployed product mints yet: `PI_ORB_OIDC_ISSUER_URL` and the public `issuer`
+> service still have to ship. This document defines a
 > provider-neutral OIDC identity that code running inside a pi-orb can exchange for
 > short-lived credentials from cloud providers and private services. It does not grant any
 > permission by itself: each relying party owns its trust policy and authorization.
@@ -168,6 +170,30 @@ Requirements:
 The CLI name describes the product interface. It may be implemented as a small executable in the
 runtime image or as an orb-runtime subcommand, but repository setup must not download an
 unreviewed credential helper.
+
+Implemented 2026-08-21 as `apps/orb-runtime/src/id-token/` behind the POSIX-`sh` shim
+`apps/orb-runtime/docker/pi-orb` at `/usr/local/bin/pi-orb`, beside the existing `gh` and
+git-credential helpers (`docs/host-provider.md`). Both `--flag value` and `--flag=value` forms are
+accepted, and the entry point also accepts the leading `id-token` word the shim consumes, so the
+process host provider — which has no image and therefore no shim — invokes the same CLI as
+`node apps/orb-runtime/src/id-token/cli.ts id-token …`. The exit codes are part of the interface,
+because an executable credential source has only the code to decide with:
+
+| Code | Class |
+| --- | --- |
+| 0 | a token was printed |
+| 2 | usage: bad arguments, or no orb runtime environment |
+| 3 | unauthorized: this incarnation's bearer was refused |
+| 4 | not mintable: the orb's lifecycle state forbids identity |
+| 5 | rate limited: the per-orb mint floor is still in force |
+| 6 | unavailable: control plane unreachable or transiently failing |
+| 7 | internal: a control-plane bug, which retrying cannot fix |
+
+The CLI retries only outcomes a later attempt can change — the first-boot 401 before the bearer
+hash commits, the per-orb floor, and transient issuer/network failures — inside one 10-second
+budget with the `gh` helper's 250 ms/2 s backoff, honoring `Retry-After` but never sleeping past
+that budget: a `Retry-After` longer than the whole budget is an answer, not an instruction to
+hang. `not_mintable`, `invalid_request`, and `internal` are returned on the first response.
 
 ## Orb integration
 
@@ -579,6 +605,21 @@ the status stays off the lifecycle CAS path. The orb page renders it as a compac
   stale-bearer-after-replacement leg extends to prove the old incarnation cannot mint; a stopped
   orb is denied. This stage touches runtime-facing routes, so `npm run test:e2e` gates it
   (`docs/testing.md`).
+
+Stage 3 landed 2026-08-21. The transport sits behind an `IdTokenEndpoint` port so argument
+validation, the bounds checks, and the retry policy are unit-testable without a network, mirroring
+the `gh` helper's split; the exit-code contract and the `set -x` exposure warning live in the CLI's
+own header text. The E2E additions ride on the existing compute-replacement fixture rather than
+creating another orb: the running incarnation mints through `docker exec … pi-orb id-token` and an
+in-test relying party (`e2e/harness.ts`) verifies it with `node:crypto` alone — following the
+discovery document's advertised `jwks_uri`, matching the JWK by `kid`, and checking issuer,
+audience, `token_use`, and expiry — with wrong-audience, wrong-issuer, and truncated-signature
+rejections proving the verifier is not a rubber stamp. The same leg then covers a custom
+`--ttl-seconds`, the locally rejected `--ttl-seconds 10` (nonzero exit, empty stdout), a stopped
+orb's 403 `not_mintable` with the retained bearer plus the resulting user-visible identity status,
+the discarded incarnation's 401 beside the existing broker 401, and the replacement incarnation's
+successful mint carrying `host_incarnation=1`. The `docker exec` legs are Docker-only, like the
+suite's other container-shell steps.
 
 ### Stage 4 — cloud deployment and federation
 
