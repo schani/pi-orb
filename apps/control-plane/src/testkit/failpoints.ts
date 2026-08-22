@@ -33,6 +33,8 @@ export const FAILPOINTS = {
   /** Issuer signing-key table: public JWK rows, not the private key material. */
   signingKeyRead: "issuer.signing-key.read",
   signingKeyWrite: "issuer.signing-key.write",
+  /** The signing operation itself: key material unavailable or signing failed. */
+  signerSign: "signer.sign",
   githubDeviceCode: "github.device.code",
   githubDevicePoll: "github.device.poll",
 } as const;

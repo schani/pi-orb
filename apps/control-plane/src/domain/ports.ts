@@ -17,6 +17,7 @@ import type {
   PointerConflict,
   ProjectConflict,
   RuntimeClientError,
+  SignerError,
   SigningKeyConflict,
   StateConflict,
   StoreError,
@@ -363,6 +364,12 @@ export interface ControlPlaneStore {
    * both columns together, bumps no `state_version` and moves no
    * `state_changed_at`, so a denial can never conflict with lifecycle CAS. An
    * unknown orb is a silent no-op.
+   *
+   * A successful mint deliberately does not clear it: the status is "the last
+   * denial", and whether it is still current is decided by the view layer
+   * comparing `mintFailureAt` against `lastMintAt`. Clearing it on success
+   * would instead make the status vanish the moment a retry succeeded, which
+   * is exactly when the user is looking for it.
    */
   recordMintFailure(
     task: SimulationTask,
@@ -370,14 +377,24 @@ export interface ControlPlaneStore {
   ): ResultAsync<void, StoreError>;
 
   /**
-   * Monotone advisory update of `last_mint_at`, the durable per-orb mint
-   * rate-limit floor (docs/workload-identity.md). Same CAS-free shape as
-   * `touchLastBusy`; an `at` older than the stored value is a no-op.
+   * Claims the orb's mint rate-limit slot: one atomic conditional write that
+   * moves `last_mint_at` to `at` only when the previous mint is at least
+   * `minIntervalMs` old (docs/workload-identity.md). Reading the floor and
+   * then advancing it would let N concurrent requests all pass the check, so
+   * the claim *is* the check — of any number of racing callers exactly one
+   * wins. Like `touchLastBusy` it is CAS-free: no `state_version` bump and no
+   * `state_changed_at` move, so it can never conflict with lifecycle CAS.
+   *
+   * The floor only moves forward, since a claim is admitted only from strictly
+   * below it. An orb id that resolves to no row cannot be throttled, so it is
+   * reported as not claimed with the full interval: the mint path calls this
+   * only after a bearer resolved to an orb, and denying is the fail-closed
+   * answer if that orb vanished in between.
    */
-  advanceLastMintAt(
+  claimMintSlot(
     task: SimulationTask,
-    params: { orbId: string; at: number },
-  ): ResultAsync<void, StoreError>;
+    params: { orbId: string; at: number; minIntervalMs: number },
+  ): ResultAsync<MintSlotClaim, StoreError>;
 
   /**
    * Same-state re-entry with a fresh `state_changed_at` (OAuth completion,
@@ -693,6 +710,63 @@ export interface BrokerDeps {
 
 // ---------------------------------------------------------------------------
 // Workload identity (docs/workload-identity.md)
+
+/** Outcome of one atomic `claimMintSlot` write. */
+export type MintSlotClaim =
+  | { readonly claimed: true }
+  | { readonly claimed: false; readonly retryAfterMs: number };
+
+/**
+ * The claim set of one issued identity token (docs/workload-identity.md). Every
+ * field is derived from the orb row and the deployment's configuration — none
+ * of it is ever supplied by the caller, which asks only for an audience and a
+ * lifetime. `iat`/`exp` are unix *seconds*, as JWT requires, while the rest of
+ * the control plane measures wall-clock milliseconds.
+ */
+export interface IdTokenClaims {
+  readonly iss: string;
+  readonly aud: string;
+  /** The orb ID: compact, immutable, and stable across compute replacement. */
+  readonly sub: string;
+  readonly iat: number;
+  readonly exp: number;
+  readonly jti: string;
+  readonly project_id: string;
+  readonly orb_id: string;
+  readonly host_incarnation: number;
+  /** Distinguishes workload exchange tokens from future token classes. */
+  readonly token_use: "exchanged";
+}
+
+/**
+ * Signs identity tokens. The private key never leaves this port's adapter, and
+ * the domain never sees key material — only the finished JWT and the `kid` it
+ * was signed with, so a caller can be told which published key verifies it.
+ */
+export interface TokenSigner {
+  signIdToken(
+    task: SimulationTask,
+    claims: IdTokenClaims,
+  ): ResultAsync<{ jwt: string; kid: string }, SignerError>;
+}
+
+/**
+ * Entropy for `jti`. Separate from the signer because it must be simulated
+ * independently: uniqueness across concurrent mints is a scheduling property.
+ */
+export interface MintIdSource {
+  newJti(task: SimulationTask): string;
+}
+
+/** Everything `mintIdToken` needs; the mint's counterpart to `BrokerDeps`. */
+export interface MintDeps {
+  readonly store: ControlPlaneStore;
+  readonly signer: TokenSigner;
+  readonly mintIds: MintIdSource;
+  readonly constants: import("./constants.ts").IssuerConstants;
+  /** The deployment's public issuer URL, validated at boot, never from a header. */
+  readonly issuerUrl: string;
+}
 
 export type SigningKeyState = "pending" | "active" | "retired";
 

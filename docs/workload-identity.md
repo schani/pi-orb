@@ -200,13 +200,20 @@ existing internal runtime-authentication boundary:
 3. The control plane hashes and constant-time verifies the bearer, loads the orb, and derives all
    identity claims from that row.
 4. The authorization decision is one consistent snapshot read of that orb row: the bearer hash
-   matches, no discard fence covers the incarnation, the orb is in a lifecycle state authorized
-   to mint, and the per-orb rate-limit floor has passed. That read is the mint's linearization
-   point relative to stop, replacement, archive, and delete: a lifecycle change committed before
-   the read denies the mint, while a mint whose read linearized first remains valid even if its
-   response arrives after the change commits.
-5. A successful mint durably advances the orb's rate-limit timestamp with a monotone write that
-   does not bump the lifecycle state version.
+   matches, no discard fence covers the incarnation, and the orb is in a lifecycle state
+   authorized to mint. That read is the mint's linearization point relative to stop, replacement,
+   archive, and delete: a lifecycle change committed before the read denies the mint, while a mint
+   whose read linearized first remains valid even if its response arrives after the change
+   commits.
+5. The per-orb rate-limit floor is then *claimed* by a separate atomic conditional write, after
+   the snapshot read and before signing: `last_mint_at` moves to now only if the previous mint is
+   at least the minimum interval old. The floor cannot be part of the snapshot read (decided
+   2026-08-21): reading it and then advancing it lets N concurrent requests all pass the same
+   stale check and all mint, so the claim has to be the check, and of any number of racing callers
+   exactly one wins. Like the failure status the claim bumps no lifecycle state version, so it
+   never conflicts with lifecycle CAS. A claim consumed by a mint that then fails at the signer is
+   deliberately not refunded: a signer outage under load must not become an unthrottled retry
+   loop, and the cost of a lost slot is one delayed token.
 6. It signs and returns a token with `Cache-Control: no-store`.
 7. The CLI prints the token to its one caller. Neither the CLI nor the control plane persists it.
 
@@ -429,18 +436,20 @@ perturbing the immutable host-spec fingerprint (`docs/compute-replacement.md`).
 - Ports in `domain/ports.ts`: `TokenSigner` (claims in, `{jwt, kid}` out, typed retryable signer
   errors), `SigningKeyStore` (create/activate/retire/list, CAS-fenced), and a mint-ID entropy
   port for `jti`. New `ControlPlaneStore` methods: `recordMintFailure` (no state-version bump,
-  following `recordHostDiscardStatus`/`touchLastBusy`), `advanceLastMintAt` (monotone), and the
-  signing-key operations — each implemented in the PostgreSQL adapter, the in-memory store, and
-  the shared store contract suite.
+  following `recordHostDiscardStatus`/`touchLastBusy`), `claimMintSlot` (the atomic conditional
+  floor write of request-path step 5), and the signing-key operations — each implemented in the
+  PostgreSQL adapter, the in-memory store, and the shared store contract suite.
 - `domain/workload-identity.ts`: `MINT_STATES = creating | starting | running` — deliberately
   narrower than the broker's `RUNTIME_TOKEN_STATES`, which admits `stopping` and `archiving` —
   and a `mintIdToken` function implementing the request-path steps above, with `IssuerConstants`
   (default lifetime 600 s, bounds 60–3600 s, audience byte cap, per-orb mint-interval floor) in
   `domain/constants.ts` and test overrides in the testkit fixtures.
-- Testkit: a fake signer and key store; failpoints `signer.sign`, `signer.key.read`, and
-  `issuer.status.write`; a `workload-identity.dst.test.ts` covering the deterministic checklist
-  above. Templates: the broker DST storm/rate-limit/failpoint scenarios and the lifecycle DST
-  stop-race scenario with a live reconcile loop.
+- Testkit: a fake signer and key store; the `signer.sign` failpoint beside the signing-key table's
+  `issuer.signing-key.read`/`.write`; a `workload-identity.dst.test.ts` covering the deterministic
+  checklist above. Templates: the broker DST storm/rate-limit/failpoint scenarios and the
+  lifecycle DST stop-race scenario with a live reconcile loop. The domain's constant-time hash
+  comparison is a pure character-code loop rather than the routes' `timingSafeEqual`, because
+  domain code may not import `node:crypto` (docs/testing.md).
 
 ### Stage 2 — HTTP route, issuer endpoints, real keys
 

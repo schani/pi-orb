@@ -156,3 +156,40 @@ export type MintFailureCode =
 export interface SigningKeyConflict {
   readonly type: "signing_key_conflict";
 }
+
+/**
+ * Signing failed. `retryable` is the literal `true` on purpose: the issuer
+ * fails closed (docs/workload-identity.md), so an unavailable key, an
+ * unreachable secret store, and a failed signature all mean "ask again" and
+ * never "here is a token signed some other way".
+ */
+export interface SignerError {
+  readonly type: "signer_error";
+  /** `unavailable`: no usable key material. `signing_failed`: the operation itself. */
+  readonly code: "unavailable" | "signing_failed";
+  readonly message: string;
+  readonly retryable: true;
+  readonly retryAfterMs?: number;
+}
+
+/**
+ * What one identity-mint attempt can fail with. The first five mirror the
+ * protocol error codes exactly (`IdTokenErrorSchema`), so the HTTP layer is a
+ * fold with no decisions of its own; `unauthorized` deliberately carries no
+ * detail, because unknown, stale, and fenced bearers must be indistinguishable.
+ *
+ * `internal` is the extra one: a deterministic store bug (`StoreError` code
+ * `invariant`) that no retry can fix and that must never be advertised as
+ * retryable (docs/lifecycle.md).
+ */
+export type MintError =
+  | { readonly type: "invalid_request"; readonly message: string }
+  | { readonly type: "unauthorized" }
+  | { readonly type: "not_mintable"; readonly state: OrbState }
+  | { readonly type: "rate_limited"; readonly retryAfterMs: number }
+  | {
+      readonly type: "retryable";
+      readonly message: string;
+      readonly retryAfterMs?: number;
+    }
+  | { readonly type: "internal"; readonly message: string };

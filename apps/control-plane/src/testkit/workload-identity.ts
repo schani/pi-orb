@@ -1,7 +1,14 @@
 import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
-import type { SigningKeyConflict, StoreError } from "../domain/errors.ts";
-import type { CasSigningKeyStateParams, SigningKeyRow, SigningKeyStore } from "../domain/ports.ts";
+import type { SignerError, SigningKeyConflict, StoreError } from "../domain/errors.ts";
+import type {
+  CasSigningKeyStateParams,
+  IdTokenClaims,
+  MintIdSource,
+  SigningKeyRow,
+  SigningKeyStore,
+  TokenSigner,
+} from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 
 const unavailable = (message: string): StoreError => ({
@@ -118,3 +125,89 @@ export class FakeSigningKeyStore implements SigningKeyStore {
 
 const compareKid = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
+
+const base64url = (value: string): string => Buffer.from(value, "utf8").toString("base64url");
+
+/**
+ * Deterministic stand-in for the RS256 signer. The output is JWT-shaped —
+ * `base64url(header).base64url(claims).<signature>` — with a literal signature
+ * segment, so a scenario can decode exactly what would have been signed and
+ * assert on the claims. Real signature verification belongs to the stage-2
+ * `node:crypto` adapter and its JWKS tests, not here.
+ */
+export class FakeTokenSigner implements TokenSigner {
+  /** Successful signatures; the count a rate-limit scenario bounds. */
+  calls = 0;
+
+  private readonly kid: string;
+  /** Remaining scripted outages, for the recovery leg a probability cannot pin down. */
+  private outages = 0;
+
+  constructor(kid = "fake-key-1") {
+    this.kid = kid;
+  }
+
+  /** Fail the next `count` signatures, then serve normally again. */
+  failNextSignatures(count: number): void {
+    this.outages = count;
+  }
+
+  signIdToken(
+    task: SimulationTask,
+    claims: IdTokenClaims,
+  ): ResultAsync<{ jwt: string; kid: string }, SignerError> {
+    const run = async (): Promise<{ jwt: string; kid: string }> => {
+      await task.sleep(1 + task.random("signer latency") * 5, "sign id token");
+      await task.failpoint(FAILPOINTS.signerSign, "sign id token");
+      if (this.outages > 0) {
+        this.outages -= 1;
+        throw new ApplicationFailure("scripted signing key outage");
+      }
+      this.calls += 1;
+      const header = base64url(JSON.stringify({ alg: "RS256", kid: this.kid }));
+      return { jwt: `${header}.${base64url(JSON.stringify(claims))}.fake`, kid: this.kid };
+    };
+    return ResultAsync.fromPromise(run(), (error) => {
+      if (error instanceof ApplicationFailure) {
+        return {
+          type: "signer_error" as const,
+          code: "unavailable" as const,
+          message: `sign id token: ${error.message}`,
+          retryable: true as const,
+        };
+      }
+      return task.abortSimulation(error);
+    });
+  }
+}
+
+/** The claims a `FakeTokenSigner` JWT carries, as the relying party would read them. */
+export function decodeFakeIdToken(jwt: string): IdTokenClaims {
+  const segments = jwt.split(".");
+  const payload = segments[1];
+  if (segments.length !== 3 || payload === undefined) {
+    throw new Error(`not a JWT-shaped token: ${jwt}`);
+  }
+  return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as IdTokenClaims;
+}
+
+/** The `kid` in a `FakeTokenSigner` JWT header. */
+export function decodeFakeIdTokenKid(jwt: string): string {
+  const header = jwt.split(".")[0];
+  if (header === undefined) throw new Error(`not a JWT-shaped token: ${jwt}`);
+  return String(JSON.parse(Buffer.from(header, "base64url").toString("utf8")).kid);
+}
+
+/**
+ * Counter-based `jti` source. Uniqueness under concurrent mints is the
+ * property scenarios assert, and a counter makes a duplicate a real defect
+ * rather than an entropy coincidence.
+ */
+export class FakeMintIdSource implements MintIdSource {
+  private counter = 0;
+
+  newJti(_task: SimulationTask): string {
+    this.counter += 1;
+    return `jti-${this.counter}`;
+  }
+}
