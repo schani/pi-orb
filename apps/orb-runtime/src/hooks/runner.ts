@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CONTROL_PLANE_URL_ENV,
@@ -118,7 +118,15 @@ export class BootHookRunner {
     this.options = options;
     for (const hook of ["setup", "resume"] as const) {
       const persisted = this.readStatus(hook);
-      if (persisted !== null) this.statuses.set(hook, persisted);
+      // The status files live in the persistent home and therefore outlive the
+      // compute they describe. A verdict from a previous incarnation says
+      // nothing about this one — and reporting it would put a failure banner
+      // on an orb whose hooks are fine, or gone.
+      if (persisted !== null && persisted.incarnation === options.incarnation) {
+        this.statuses.set(hook, persisted);
+      } else if (persisted !== null) {
+        this.clearStatus(hook);
+      }
     }
   }
 
@@ -142,7 +150,9 @@ export class BootHookRunner {
     const discovery = discoverHook(this.options.repoDir, "setup");
     if (discovery.kind === "absent") {
       // Nothing ran, but this incarnation is settled: a runtime restart must
-      // not re-scan for a hook the agent added after boot.
+      // not re-scan for a hook the agent added after boot. Any verdict on
+      // disk describes a hook this checkout no longer has.
+      this.clearStatus("setup");
       this.stampIncarnation();
       return null;
     }
@@ -159,7 +169,10 @@ export class BootHookRunner {
    */
   async runResume(): Promise<RuntimeHookStatus | null> {
     const discovery = discoverHook(this.options.repoDir, "resume");
-    if (discovery.kind === "absent") return null;
+    if (discovery.kind === "absent") {
+      this.clearStatus("resume");
+      return null;
+    }
     return this.run("resume", discovery, RESUME_BLOCKING_WINDOW_MS, "background");
   }
 
@@ -336,6 +349,15 @@ export class BootHookRunner {
     )().mapErr((message) =>
       this.options.log?.(`hook ${status.hook}: status write failed: ${message}`),
     );
+  }
+
+  /** Retire a verdict that no longer describes anything this boot could run. */
+  private clearStatus(hook: HookName): void {
+    this.statuses.delete(hook);
+    Result.fromThrowable(
+      () => rmSync(this.statusPath(hook), { force: true }),
+      () => undefined,
+    )();
   }
 
   private readStatus(hook: HookName): RuntimeHookStatus | null {

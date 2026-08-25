@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RuntimeHookStatus } from "@pi-orb/protocol";
@@ -240,6 +248,42 @@ describe("boot hook runner", () => {
     await boot("1");
     expect(counts("setup")).toBe(2);
     expect(counts("resume")).toBe(3);
+  });
+
+  it("never reports a verdict from a previous incarnation", async () => {
+    const orb = makeOrb();
+    writeHook(orb, "setup");
+    const spawner = new FakeHookSpawner();
+    const first = makeRunner(orb, spawner, task, { incarnation: "0" });
+    const running = first.runSetup();
+    spawner.runOf("setup").exit(1);
+    await running;
+
+    // The status file lives in the persistent home and survives replacement;
+    // the verdict it holds does not describe the new compute.
+    const replaced = makeRunner(orb, spawner, task, { incarnation: "1" });
+    expect(replaced.report()).toEqual({});
+    const rerun = replaced.runSetup();
+    spawner.runs.at(-1)?.exit(0);
+    expect((await rerun)?.incarnation).toBe("1");
+  });
+
+  it("retires a verdict for a hook the checkout no longer has", async () => {
+    const orb = makeOrb();
+    writeHook(orb, "resume");
+    const spawner = new FakeHookSpawner();
+    const first = makeRunner(orb, spawner, task);
+    const running = first.runResume();
+    spawner.runOf("resume").exit(1);
+    await running;
+    rmSync(join(orb.repoDir, ".agents", "resume"));
+
+    const second = makeRunner(orb, spawner, task);
+    expect(await second.runResume()).toBeNull();
+    expect(second.report()).toEqual({});
+    expect(existsSync(join(orb.home, ".cache", "pi-orb", "logs", "resume.status.json"))).toBe(
+      false,
+    );
   });
 
   it("carries the last outcome across a runtime restart within an incarnation", async () => {
