@@ -107,6 +107,7 @@ Subsystem designs:
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
 - [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
+- [docs/orb-setup-hook.md](docs/orb-setup-hook.md) — repository-owned `.agents/setup` / `.agents/resume` boot hooks, matched to Amp's convention: triggers per compute incarnation, identity-free setup, user-visible failure
 - [docs/ports.md](docs/ports.md) — port exposure and preview URLs: tier-1 Tailscale, per-orb auth keys, the preview-host contract
 - [docs/deployment.md](docs/deployment.md) — Cloud Run/OpenTofu deployment direction (operational workflow: `infra/README.md`)
 - [docs/testing.md](docs/testing.md) — DST strategy, the E2E slice, testing decisions
