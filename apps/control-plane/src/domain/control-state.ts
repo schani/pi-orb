@@ -40,7 +40,37 @@ export interface BootProbe {
   setupRunningSinceWall: number | null;
   /** Whether the *latest* answered probe still said setup is running. */
   setupRunning: boolean;
+  /** Whether the most recent probe got any answer at all. */
+  lastProbeAnswered: boolean;
+  /** Monotonic ms of the most recent answered probe; null before the first. */
+  lastAnswerMono: number | null;
   lastError?: string;
+}
+
+/**
+ * When this boot's setup hook started, in both clocks. An anchor already held
+ * wins; otherwise a live `setup_running` answer anchors at now, and a finished
+ * hook anchors at the start time the runtime persisted — the only evidence
+ * that survives a control-plane restart.
+ */
+function resolveSetupAnchor(
+  existing: BootProbe | undefined,
+  outcome: {
+    readonly setupRunning?: boolean;
+    readonly setupStartedAtWall?: number;
+    readonly nowMono?: number;
+    readonly nowWall?: number;
+  },
+): { readonly mono: number | null; readonly wall: number | null } {
+  if (existing?.setupRunningSinceMono != null) {
+    return { mono: existing.setupRunningSinceMono, wall: existing.setupRunningSinceWall };
+  }
+  const { nowMono, nowWall } = outcome;
+  if (nowMono === undefined || nowWall === undefined) return { mono: null, wall: null };
+  if (outcome.setupRunning === true) return { mono: nowMono, wall: nowWall };
+  const startedAt = outcome.setupStartedAtWall;
+  if (startedAt === undefined) return { mono: null, wall: null };
+  return { mono: nowMono - Math.max(0, nowWall - startedAt), wall: startedAt };
 }
 
 /**
@@ -265,6 +295,14 @@ export class ControlState {
       answered: boolean;
       /** The answer reported the `setup_running` readiness phase. */
       setupRunning?: boolean;
+      /**
+       * Wall ms at which this incarnation's setup hook started, as the runtime
+       * itself reports it once the hook has finished. It reseeds the anchor
+       * after a control-plane restart, which is the one loss `noteStateEpisode`
+       * cannot call safe: without it a restart lands on a boot whose ordinary
+       * deadline the hook legitimately outlasted, and fails a healthy orb.
+       */
+      setupStartedAtWall?: number;
       /** Clocks of this probe; required to time and display a setup hold. */
       nowMono?: number;
       nowWall?: number;
@@ -274,21 +312,19 @@ export class ControlState {
     const existing = this.bootProbes.get(orbId);
     const keepSince =
       existing?.hostRunningSinceMono != null && outcome.hostRunningSinceMono != null;
-    // The anchor is set by the first `setup_running` answer and then stands
-    // for the episode: the hold has to cover the hook *and* the boot that
-    // follows it, so a later phase must not retire it and drop the orb
-    // straight past an already-expired ordinary deadline. Only the hold's own
-    // bound ends it. The display flag is a level, not an edge, and follows the
-    // latest answer.
-    const answeredSetupRunning = outcome.setupRunning;
+    // Once set, the anchor stands for the episode: the hold has to cover the
+    // hook *and* the boot that follows it, so a later phase must not retire it
+    // and drop the orb straight past an already-expired ordinary deadline. The
+    // display flag is a level, not an edge, and follows the latest answer.
+    const anchor = resolveSetupAnchor(existing, outcome);
     this.bootProbes.set(orbId, {
-      setupRunningSinceMono:
-        existing?.setupRunningSinceMono ??
-        (answeredSetupRunning === true ? (outcome.nowMono ?? null) : null),
-      setupRunningSinceWall:
-        existing?.setupRunningSinceWall ??
-        (answeredSetupRunning === true ? (outcome.nowWall ?? null) : null),
-      setupRunning: answeredSetupRunning ?? existing?.setupRunning ?? false,
+      setupRunningSinceMono: anchor.mono,
+      setupRunningSinceWall: anchor.wall,
+      setupRunning: outcome.setupRunning ?? existing?.setupRunning ?? false,
+      lastProbeAnswered: outcome.answered,
+      lastAnswerMono: outcome.answered
+        ? (outcome.nowMono ?? existing?.lastAnswerMono ?? null)
+        : (existing?.lastAnswerMono ?? null),
       hostState: outcome.hostState,
       hostRunningSinceWall: keepSince
         ? existing.hostRunningSinceWall

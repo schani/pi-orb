@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -252,6 +253,9 @@ async function writeWorkspaceFiles(
       const path = join(processHostDirectory(id), "workspace", name);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, content, { mode });
+      // `writeFileSync`'s mode applies to a file it creates, not to one that
+      // already exists — a rewritten hook must still be executable.
+      chmodSync(path, mode);
     }
     return;
   }
@@ -299,10 +303,14 @@ function hookLogPath(id: string, hook: "setup" | "resume"): string {
   return join(workDir, "home", ".cache", "pi-orb", "logs", `${hook}.log`);
 }
 
-/** Read one workspace file back through the given incarnation. */
+/**
+ * Read one workspace file back through the given incarnation. Both backends
+ * trim: the Docker branch goes through `docker()`, which already does, and an
+ * assertion must not depend on which one ran.
+ */
 async function readWorkspaceFile(id: string, incarnation: number, name: string): Promise<string> {
   if (PROCESS_BACKEND) {
-    return readFileSync(join(processHostDirectory(id), "workspace", name), "utf8");
+    return readFileSync(join(processHostDirectory(id), "workspace", name), "utf8").trim();
   }
   return await docker([
     "exec",

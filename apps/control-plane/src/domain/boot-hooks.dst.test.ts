@@ -142,46 +142,65 @@ describe("orb boot hooks (DST)", () => {
     });
   });
 
-  it("fails a runtime that goes silent after reporting setup_running", async () => {
-    await runDst({ name: "setup-then-silence-fails", iterations: 20 }, async (sim) => {
-      const harness = makeHarness();
-      const stop = new AbortController();
-      const result = await sim.runTasks([
-        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
-        {
-          name: "driver",
-          f: async (task) => {
-            harness.world.configureOrb(ORB, {
-              hooks: {
-                setupOutcome: "ok",
-                setupDurationMs: TEST_CONSTANTS.setupHookHoldMs * 3,
-                resumeOutcome: "ok",
-              },
-            });
-            seedCreatingOrb(task, harness);
-            await waitUntil(
-              task,
-              "setup reported",
-              () => harness.deps.control.getBootProbe(ORB)?.setupRunningSinceMono !== null,
-              { timeoutMs: CONVERGE_MS },
-            );
-            // The runtime dies mid-hook. Nothing will report anything again,
-            // and the hold's own bound is the only thing that ends the boot —
-            // a runtime that stops reporting is still a dead runtime.
-            harness.world.killRuntimeProcess(ORB);
-            await waitUntil(
-              task,
-              "orb failed once the hold expired",
-              () => harness.store.orbSnapshot(ORB)?.state === "failed",
-              { timeoutMs: CONVERGE_MS },
-            );
-            stop.abort();
+  it("tells a silent runtime apart from one that is still running setup", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "setup-then-silence-fails", iterations: 20, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        let failedAfterSilenceMs = -1;
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              harness.world.configureOrb(ORB, {
+                hooks: {
+                  setupOutcome: "ok",
+                  setupDurationMs: TEST_CONSTANTS.setupHookHoldMs * 3,
+                  resumeOutcome: "ok",
+                },
+              });
+              seedCreatingOrb(task, harness);
+              await waitUntil(
+                task,
+                "setup reported",
+                () => harness.deps.control.getBootProbe(ORB)?.setupRunningSinceMono !== null,
+                { timeoutMs: CONVERGE_MS },
+              );
+              // The runtime goes dark mid-hook and answers nothing again, while
+              // the host still observes as running — the shape of a wedged or
+              // preempted runtime. The hold must not read that silence as a
+              // script still working.
+              harness.world.setRuntimeUnreachable(task, ORB, CONVERGE_MS * 2);
+              const silentAt = task.monotonicNow();
+              await waitUntil(
+                task,
+                "orb failed once the runtime went properly silent",
+                () => harness.store.orbSnapshot(ORB)?.state === "failed",
+                { timeoutMs: CONVERGE_MS },
+              );
+              failedAfterSilenceMs = task.monotonicNow() - silentAt;
+              stop.abort();
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(harness.store.orbSnapshot(ORB)?.lastError).toContain("deadline_exceeded");
-    });
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        // Either boot-failure path is a correct answer here — what matters is
+        // that the hold does not suppress them.
+        expect(harness.store.orbSnapshot(ORB)?.lastError).toMatch(
+          /deadline_exceeded|runtime_never_answered/,
+        );
+        // This is what distinguishes silence from a hook that is still working:
+        // an identically configured setup that keeps reporting survives all the
+        // way to `setupHookHoldMs` (the scenario above), while a silent runtime
+        // is failed well inside it.
+        expect(failedAfterSilenceMs, capture.lines().join("\n")).toBeLessThan(
+          TEST_CONSTANTS.setupHookHoldMs,
+        );
+      },
+    );
   });
 
   it("starts the orb after a failed setup, tells the user, and logs one edge each", async () => {
@@ -272,6 +291,54 @@ describe("orb boot hooks (DST)", () => {
         reason: "timeout",
       });
     });
+  });
+
+  it("logs a fresh edge when the next incarnation's setup fails too", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "setup-failed-per-incarnation", iterations: 20, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness({
+          constants: { idleStopAfterMs: 3_600_000, unreachableGraceMs: 600_000 },
+        });
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          { name: "poller", f: (task) => pollLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              harness.world.configureOrb(ORB, {
+                hooks: { setupOutcome: "failed", setupDurationMs: 5_000 },
+              });
+              seedCreatingOrb(task, harness);
+              await waitUntil(
+                task,
+                "orb running",
+                () => harness.store.orbSnapshot(ORB)?.state === "running",
+                { timeoutMs: CONVERGE_MS },
+              );
+              expect(capture.matching("setup-failed")).toHaveLength(1);
+
+              // Stop/start of the retained incarnation re-reports the same
+              // verdict about the same compute: one condition, still one edge.
+              await stopStartCycle(task, harness.deps, harness);
+              expect(capture.matching("setup-failed")).toHaveLength(1);
+
+              // A replacement runs the hook afresh on new compute. That is a
+              // new outcome, and the operator must see it.
+              harness.world.setDesiredSpec("spec-updated");
+              await stopStartCycle(task, harness.deps, harness);
+              expect(harness.world.hostIncarnationOf(ORB)).toBe(1);
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("setup-failed")).toHaveLength(2);
+        expect(capture.matching("setup-failed")[1]).toContain("incarnation=1");
+      },
+    );
   });
 
   it("re-runs setup on a replacement incarnation but not on stop/start", async () => {

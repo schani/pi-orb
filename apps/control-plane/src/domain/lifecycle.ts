@@ -115,8 +115,21 @@ function firstHookFailure(
  * finish is stuck, and gets the ordinary treatment.
  */
 function holdingForSetupHook(task: SimulationTask, deps: ControlPlaneDeps, orbId: string): boolean {
-  const since = deps.control.getBootProbe(orbId)?.setupRunningSinceMono ?? null;
-  return since !== null && task.monotonicNow() - since <= deps.constants.setupHookHoldMs;
+  const probe = deps.control.getBootProbe(orbId);
+  if (probe === null || probe.setupRunningSinceMono === null) return false;
+  const now = task.monotonicNow();
+  if (now - probe.setupRunningSinceMono > deps.constants.setupHookHoldMs) return false;
+  // And only while there is still a runtime to hold for: a runtime silent this
+  // long is gone, and without this the hold would hide that for twenty
+  // minutes — the "silence looks like progress" failure the readiness path
+  // exists to prevent. The grace is the boot-sized one, not the ordinary
+  // unreachable grace: readiness probes during a boot contend with slow
+  // provider observes and are routinely cancelled in bursts, and ending a
+  // legitimate twenty-minute setup over a burst of cancellations would be the
+  // 2026-08-05 livelock's mistake in a new place (docs/lifecycle.md).
+  return (
+    probe.lastAnswerMono !== null && now - probe.lastAnswerMono <= deps.constants.postRestartGraceMs
+  );
 }
 
 /** Fold the boot probe's live picture into a terminal error message. */
@@ -637,11 +650,11 @@ async function reconcileCreateStart(
   }
 
   // 2. Create/start deadline (docs/lifecycle.md deadline_exceeded rule), held
-  // off while the runtime keeps saying the repository's setup hook is running
-  // (docs/orb-setup-hook.md). The hold is not open-ended: it is anchored at
-  // the first `setup_running` report and dropped by the next probe that says
-  // anything else — including silence — so a runtime that stops reporting is
-  // still a dead runtime.
+  // off while the repository's setup hook is running (docs/orb-setup-hook.md).
+  // The hold is anchored at the first `setup_running` report of the episode
+  // and covers the hook plus the boot that follows it; it survives a single
+  // cancelled probe, and ends on its own bound or on a runtime that has gone
+  // properly silent. See `holdingForSetupHook`.
   if (
     !holdingForSetupHook(task, deps, orb.id) &&
     task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs
@@ -906,10 +919,17 @@ async function reconcileCreateStart(
         return waiting("readiness");
       }
       const status = health.value;
+      // A finished setup still anchors the hold; see `resolveSetupAnchor`.
+      const reportedSetup = status.status === "failed" ? undefined : status.hooks?.setup;
+      const setupStartedAt =
+        reportedSetup !== undefined && reportedSetup.incarnation === String(orb.hostIncarnation)
+          ? Date.parse(reportedSetup.startedAt)
+          : Number.NaN;
       deps.control.recordBootProbe(orb.id, {
         ...probeBase,
         answered: true,
         setupRunning: status.status === "initializing" && status.phase === "setup_running",
+        ...(Number.isFinite(setupStartedAt) ? { setupStartedAtWall: setupStartedAt } : {}),
         nowMono: task.monotonicNow(),
         nowWall: task.wallNow(),
       });
@@ -969,13 +989,16 @@ async function reconcileCreateStart(
           });
         }
         // Boot-hook failures, on the same transition and under the same rule:
-        // a hook that succeeded is silent, and a hook that keeps failing boot
-        // after boot is one condition, logged when it starts. Output content
-        // never reaches the log — only the outcome and the in-orb log path.
+        // a hook that succeeded is silent, and a hook that keeps failing every
+        // boot of one compute incarnation is one condition, logged when it
+        // starts. The incarnation is part of the key because a replacement is
+        // new compute running the hook afresh — that outcome is a new edge,
+        // not a repeat. Output content never reaches the log.
         for (const hook of ["setup", "resume"] as const) {
           const outcome = status.hooks?.[hook];
           const failed = outcome !== undefined && outcome.outcome !== "ok";
-          if (deps.control.noteCondition(`${hook}-hook-failed:${orb.id}`, failed) && failed) {
+          const key = `${hook}-hook-failed:${orb.id}:${outcome?.incarnation ?? orb.hostIncarnation}`;
+          if (deps.control.noteCondition(key, failed) && failed) {
             logOrbEvent(task, orb.id, `${hook}-failed`, {
               incarnation: outcome.incarnation,
               reason: outcome.outcome,

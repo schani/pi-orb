@@ -77,6 +77,10 @@ VOLUME /workspace
 EXPOSE 8080
 
 ENV PI_ORB_WORK_DIR=/workspace
+# The platform marker every process in the orb sees, Amp's `AMP_ORB=1`
+# analogue (docs/orb-setup-hook.md). Set on the image, not only by the runtime,
+# so a `docker exec` shell — the thing a human debugs a hook from — sees it too.
+ENV PI_ORB=1
 ENV HOME=/workspace/home
 ENV RUSTUP_HOME=/workspace/home/.rustup
 ENV CARGO_HOME=/workspace/home/.cargo

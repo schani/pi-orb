@@ -250,6 +250,54 @@ describe("boot hook runner", () => {
     expect(counts("resume")).toBe(3);
   });
 
+  it("does not spend the incarnation's setup on a failure that never ran the hook", async () => {
+    const orb = makeOrb();
+    writeHook(orb, "setup");
+    const spawner = new FakeHookSpawner();
+    spawner.spawnError = "EAGAIN";
+    const blocked = makeRunner(orb, spawner, task);
+    expect((await blocked.runSetup())?.outcome).toBe("failed");
+
+    // The next runtime start of the same incarnation must try again: nothing
+    // about the hook itself was learned.
+    const retried = makeRunner(orb, spawner, task);
+    const running = retried.runSetup();
+    spawner.runOf("setup").exit(0);
+    expect((await running)?.outcome).toBe("ok");
+  });
+
+  it("re-checks a hook whose execute bit the user is about to fix", async () => {
+    const orb = makeOrb();
+    writeHook(orb, "setup", false);
+    const spawner = new FakeHookSpawner();
+    expect((await makeRunner(orb, spawner, task).runSetup())?.outcome).toBe("hook_not_executable");
+    chmodSync(join(orb.repoDir, ".agents", "setup"), 0o755);
+
+    const fixed = makeRunner(orb, spawner, task);
+    const running = fixed.runSetup();
+    spawner.runOf("setup").exit(0);
+    expect((await running)?.outcome).toBe("ok");
+  });
+
+  it("records nothing when a shutdown kills setup, and leaves the incarnation unstamped", async () => {
+    const orb = makeOrb();
+    writeHook(orb, "setup");
+    const spawner = new FakeHookSpawner();
+    const runner = makeRunner(orb, spawner, task);
+    // The spawn happens before `runSetup` first awaits, so the stop below is
+    // ordered after it without racing the hook's own 20-minute deadline.
+    const running = runner.runSetup();
+    expect(spawner.runs).toHaveLength(1);
+    runner.shutdown();
+
+    expect(await running).toBeNull();
+    expect(spawner.runOf("setup").killed).toBe(true);
+    // Stopping an orb is not a hook failure, and it must not consume the one
+    // setup this compute gets.
+    expect(runner.report()).toEqual({});
+    expect(existsSync(join(orb.workDir, ".pi-orb", "setup-incarnation"))).toBe(false);
+  });
+
   it("never reports a verdict from a previous incarnation", async () => {
     const orb = makeOrb();
     writeHook(orb, "setup");
@@ -303,40 +351,40 @@ describe("boot hook runner", () => {
 
 describe("boot hook deadlines", () => {
   it("kills setup's process group at its deadline and continues the boot", async () => {
-    await runDst({ name: "setup-hook-timeout", iterations: 5 }, async (sim) => {
+    await runDst({ name: "setup-hook-timeout", iterations: 40 }, async (sim) => {
       const orb = makeOrb();
       writeHook(orb, "setup");
       const spawner = new FakeHookSpawner();
-      let status: RuntimeHookStatus | null = null;
+      const statuses: (RuntimeHookStatus | null)[] = [];
+      // The hook never exits, so the deadline is the only timer in the
+      // simulation and is the only thing that can end the run.
       const result = await sim.runTasks([
         {
           name: "boot",
           f: async (task) => {
             const runner = makeRunner(orb, spawner, task);
-            status = await runner.runSetup();
-          },
-        },
-        {
-          name: "clock",
-          f: async (task) => {
-            // The hook never exits; only the deadline can end it.
-            await task.sleep(SETUP_DEADLINE_MS * 2, "outlast the setup deadline");
+            statuses.push(await runner.runSetup());
+            expect(task.monotonicNow()).toBeGreaterThanOrEqual(SETUP_DEADLINE_MS);
           },
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(spawner.runOf("setup").killed).toBe(true);
-      expect(status).toMatchObject({ outcome: "timeout", exitCode: null });
+      expect(statuses[0]).toMatchObject({ outcome: "timeout", exitCode: null });
     });
   });
 
   it("stops blocking on resume after its window and records the late outcome", async () => {
-    await runDst({ name: "resume-hook-background", iterations: 5 }, async (sim) => {
+    await runDst({ name: "resume-hook-background", iterations: 40 }, async (sim) => {
       const orb = makeOrb();
       writeHook(orb, "resume");
       const spawner = new FakeHookSpawner();
       const runners: BootHookRunner[] = [];
       let unblockedAt = -1;
+      // One task and one timer — the blocking window itself. A second task
+      // sleeping "longer" would not be ordered after it: this scheduler
+      // deliberately explores firing a later timer first (docs/testing.md), so
+      // the hook must be ended by the observed unblocking, not by a race.
       const result = await sim.runTasks([
         {
           name: "boot",
@@ -347,26 +395,23 @@ describe("boot hook deadlines", () => {
             unblockedAt = task.monotonicNow();
             // The agent proceeds with no outcome yet: the hook is still running.
             expect(status).toBeNull();
-          },
-        },
-        {
-          name: "slow hook",
-          f: async (task) => {
-            await task.sleep(RESUME_BLOCKING_WINDOW_MS * 3, "resume outlasts its window");
+            expect(spawner.runOf("resume").killed).toBe(false);
+            // Only now does the hook finish, well past the window it outlasted.
             spawner.runOf("resume").exit(1);
           },
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(unblockedAt).toBeGreaterThanOrEqual(RESUME_BLOCKING_WINDOW_MS);
-      expect(unblockedAt).toBeLessThan(RESUME_BLOCKING_WINDOW_MS * 3);
       expect(spawner.runOf("resume").killed).toBe(false);
+      // The late verdict is still recorded, and replaces the "not known yet"
+      // the agent was given.
       expect(runners[0]?.report().resume).toMatchObject({ outcome: "failed", exitCode: 1 });
     });
   });
 
   it("terminates a backgrounded resume on shutdown", async () => {
-    await runDst({ name: "resume-hook-shutdown", iterations: 5 }, async (sim) => {
+    await runDst({ name: "resume-hook-shutdown", iterations: 40 }, async (sim) => {
       const orb = makeOrb();
       writeHook(orb, "resume");
       const spawner = new FakeHookSpawner();

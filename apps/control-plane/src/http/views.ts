@@ -71,7 +71,14 @@ function stateDetailOf(
       ...(drain.message !== undefined ? { message: drain.message } : {}),
     };
   }
-  if (bootProbe?.setupRunning && bootProbe.setupRunningSinceWall !== null) {
+  if (
+    bootProbe?.setupRunning &&
+    // Only while the runtime is actually answering: a runtime that died
+    // mid-hook must read as "waiting for the runtime", not as a script that
+    // is still working.
+    bootProbe.lastProbeAnswered &&
+    bootProbe.setupRunningSinceWall !== null
+  ) {
     // More specific than "waiting for the runtime": the runtime is up and
     // answering, and the repository's own script is what the orb waits on
     // (docs/orb-setup-hook.md).
@@ -96,10 +103,14 @@ function stateDetailOf(
     };
   }
   if (
+    orb.state === "running" &&
     orb.hookFailureHook !== null &&
     orb.hookFailureReason !== null &&
     orb.hookFailureLog !== null
   ) {
+    // Only while running: the columns are written at the ready transition and
+    // describe the boot that is serving right now. On a stopped orb, or during
+    // the next boot before it lands, they describe compute that is not there.
     // The orb is running regardless (docs/orb-setup-hook.md); this only says
     // the environment its hooks were meant to prepare may be incomplete.
     return {

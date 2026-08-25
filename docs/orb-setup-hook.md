@@ -76,6 +76,13 @@ half belongs in `.agents/resume`.
    racy by construction. Resume gets the full environment. Rejected: leaving the environment
    intact and documenting the rule — every process in the orb inherits the bearer (an accepted
    exposure), and a rule the tooling does not enforce is one the next `.agents/setup` breaks.
+   The residual, stated plainly (2026-08-25, from the implementation review): this stops the
+   tooling, not a determined script. The runtime is root and PID 1 still holds the bearer, so
+   `cat /proc/1/environ` recovers it from inside setup. That is the same authority repository code
+   already has (it runs as the agent), so it is not a new exposure — but "unavoidable" means
+   *`pi-orb id-token` and the brokered helpers cannot succeed by accident*, not that the token is
+   cryptographically out of reach. Closing the residual needs the unprivileged-user change
+   (question 42) or a bearer that never sits in an inherited environment.
 4. **`sudo` ships in the image; the runtime keeps running as root for now.** Amp scripts use
    `sudo apt-get …` throughout. The prescribed image has no `sudo`, and the runtime runs as root,
    so the cheapest full compatibility is installing `sudo` (a no-op elevation as root) rather than
@@ -241,6 +248,9 @@ and told to the agent; a healthy boot says nothing anywhere.
 Both hooks must be idempotent — setup runs again after every compute replacement, resume on every
 start, and a person or the agent may run either by hand. The canonical pattern is Amp's
 `if ! command -v X >/dev/null 2>&1; then …; fi`. Do not start long-running services from a hook.
+A hook is finished when its output is finished: if you must leave something running, redirect its
+output (`… >/dev/null 2>&1 &`), because a background child still holding the hook's stdout keeps
+the hook open, and setup will hold the boot until its twenty-minute deadline kills the group.
 
 **Review these files like CI configuration.** A commit to `.agents/setup` runs unattended, with the
 agent's authority, on the next fresh orb of every project member, before anyone reads the diff.

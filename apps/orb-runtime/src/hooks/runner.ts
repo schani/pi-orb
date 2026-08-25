@@ -103,6 +103,16 @@ export interface BootHookRunnerOptions {
 }
 
 /**
+ * How one hook run ended. `ranHook` separates "the script reached a verdict"
+ * from "we never got it started", which is what decides whether an
+ * incarnation's single setup has been spent.
+ */
+type HookRunOutcome =
+  | { readonly kind: "settled"; readonly status: RuntimeHookStatus; readonly ranHook: boolean }
+  | { readonly kind: "backgrounded" }
+  | { readonly kind: "aborted" };
+
+/**
  * Runs `.agents/setup` once per compute incarnation and `.agents/resume` on
  * every start (`docs/orb-setup-hook.md`). A hook failure is recorded and
  * surfaced but never fails the boot: a broken script must not make an orb
@@ -113,6 +123,8 @@ export class BootHookRunner {
   private readonly statuses = new Map<HookName, RuntimeHookStatus>();
   /** Whichever hook process is alive right now; terminated with the orb. */
   private inFlight: HookProcess | null = null;
+  /** Set by `shutdown`, so a killed hook is never mistaken for a failed one. */
+  private shuttingDown = false;
 
   constructor(options: BootHookRunnerOptions) {
     this.options = options;
@@ -157,9 +169,14 @@ export class BootHookRunner {
       return null;
     }
     this.options.onSetupStart?.();
-    const status = await this.run("setup", discovery, SETUP_DEADLINE_MS, "kill");
-    this.stampIncarnation();
-    return status;
+    const outcome = await this.run("setup", discovery, SETUP_DEADLINE_MS, "kill");
+    // The once-per-incarnation budget is spent only by a run that reached a
+    // verdict about the hook itself. A missing execute bit is a user error
+    // they will fix in place; a spawn or log-directory failure means the hook
+    // never ran at all; a shutdown killed it mid-flight. Stamping any of those
+    // would deny this compute its single setup forever.
+    if (outcome.kind === "settled" && outcome.ranHook) this.stampIncarnation();
+    return outcome.kind === "settled" ? outcome.status : null;
   }
 
   /**
@@ -173,15 +190,23 @@ export class BootHookRunner {
       this.clearStatus("resume");
       return null;
     }
-    return this.run("resume", discovery, RESUME_BLOCKING_WINDOW_MS, "background");
+    // The previous start of this same incarnation left its own verdict on
+    // disk. It describes that boot, not this one, and if this run outlives its
+    // blocking window nothing would replace it — "not known yet" is the only
+    // honest answer while the hook is in flight.
+    this.clearStatus("resume");
+    const outcome = await this.run("resume", discovery, RESUME_BLOCKING_WINDOW_MS, "background");
+    return outcome.kind === "settled" ? outcome.status : null;
   }
 
   /**
    * Terminates a hook still running when the orb stops — a resume past its
    * blocking window, or a setup a shutdown interrupted. Nothing a hook started
-   * outlives the orb.
+   * outlives the orb, and nothing the kill causes is recorded as the hook's
+   * own verdict: the orb was stopped, the script did not fail.
    */
   shutdown(): void {
+    this.shuttingDown = true;
     this.inFlight?.killGroup();
     this.inFlight = null;
   }
@@ -191,18 +216,27 @@ export class BootHookRunner {
     discovery: Exclude<HookDiscovery, { kind: "absent" }>,
     deadlineMs: number,
     onDeadline: "kill" | "background",
-  ): Promise<RuntimeHookStatus | null> {
+  ): Promise<HookRunOutcome> {
     const startedAt = this.options.task.wallNow();
     const logPath = this.logPath(hook);
+    const settled = (status: RuntimeHookStatus, ranHook: boolean): HookRunOutcome => ({
+      kind: "settled",
+      status,
+      ranHook,
+    });
+
     if (discovery.kind !== "executable") {
-      return this.record(hook, {
-        outcome: "hook_not_executable",
-        exitCode: null,
-        startedAt,
-        endedAt: startedAt,
-        logPath,
-        tail: [`${discovery.path} is present but not executable (chmod +x it)`],
-      });
+      return settled(
+        this.record(hook, {
+          outcome: "hook_not_executable",
+          exitCode: null,
+          startedAt,
+          endedAt: startedAt,
+          logPath,
+          tail: [`${discovery.path} is present but not executable (chmod +x it)`],
+        }),
+        false,
+      );
     }
 
     const prepared = Result.fromThrowable(
@@ -210,14 +244,17 @@ export class BootHookRunner {
       (error) => (error instanceof Error ? error.message : String(error)),
     )();
     if (prepared.isErr()) {
-      return this.record(hook, {
-        outcome: "failed",
-        exitCode: null,
-        startedAt,
-        endedAt: this.options.task.wallNow(),
-        logPath,
-        tail: [`could not prepare the hook log directory: ${prepared.error}`],
-      });
+      return settled(
+        this.record(hook, {
+          outcome: "failed",
+          exitCode: null,
+          startedAt,
+          endedAt: this.options.task.wallNow(),
+          logPath,
+          tail: [`could not prepare the hook log directory: ${prepared.error}`],
+        }),
+        false,
+      );
     }
 
     const spawned = this.options.spawner.spawn({
@@ -228,14 +265,17 @@ export class BootHookRunner {
       onLine: (line) => this.options.log?.(`hook ${hook}: ${line}`),
     });
     if (spawned.isErr()) {
-      return this.record(hook, {
-        outcome: "failed",
-        exitCode: null,
-        startedAt,
-        endedAt: this.options.task.wallNow(),
-        logPath,
-        tail: [spawned.error.message],
-      });
+      return settled(
+        this.record(hook, {
+          outcome: "failed",
+          exitCode: null,
+          startedAt,
+          endedAt: this.options.task.wallNow(),
+          logPath,
+          tail: [spawned.error.message],
+        }),
+        false,
+      );
     }
     const process = spawned.value;
     this.inFlight = process;
@@ -252,12 +292,15 @@ export class BootHookRunner {
       expired.then(() => ({ kind: "expired" as const })),
     ]);
     deadline.cancel();
+    // A shutdown is what ended this process, not the script.
+    if (this.shuttingDown) return { kind: "aborted" };
 
     if (raced.kind === "expired") {
       if (onDeadline === "background") {
         // The agent proceeds; the hook keeps running with its output captured
         // and records its own outcome when it exits (docs/orb-setup-hook.md).
         void process.exited.then((exit) => {
+          if (this.shuttingDown) return;
           this.record(hook, {
             outcome: exit.code === 0 ? "ok" : "failed",
             exitCode: exit.code,
@@ -267,27 +310,33 @@ export class BootHookRunner {
             tail: process.tail(),
           });
         });
-        return null;
+        return { kind: "backgrounded" };
       }
       process.killGroup();
-      return this.record(hook, {
-        outcome: "timeout",
-        exitCode: null,
+      return settled(
+        this.record(hook, {
+          outcome: "timeout",
+          exitCode: null,
+          startedAt,
+          endedAt: this.options.task.wallNow(),
+          logPath,
+          tail: process.tail(),
+        }),
+        true,
+      );
+    }
+
+    return settled(
+      this.record(hook, {
+        outcome: raced.exit.code === 0 ? "ok" : "failed",
+        exitCode: raced.exit.code,
         startedAt,
         endedAt: this.options.task.wallNow(),
         logPath,
         tail: process.tail(),
-      });
-    }
-
-    return this.record(hook, {
-      outcome: raced.exit.code === 0 ? "ok" : "failed",
-      exitCode: raced.exit.code,
-      startedAt,
-      endedAt: this.options.task.wallNow(),
-      logPath,
-      tail: process.tail(),
-    });
+      }),
+      true,
+    );
   }
 
   private record(

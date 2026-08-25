@@ -59,34 +59,39 @@ export class NodeHookSpawner implements HookSpawner {
         });
 
         const tail: string[] = [];
-        const splitter = new LineSplitter((line) => {
+        const emit = (line: string): void => {
           tail.push(line);
           if (tail.length > STATUS_TAIL_LINES) tail.shift();
           request.onLine(line);
-        });
+        };
         // A log file that cannot be written must not take the boot with it;
         // the hook's own outcome is still captured through the tail.
         logFile.on("error", (error) => request.onLine(`log capture failed: ${error.message}`));
-        for (const stream of [child.stdout, child.stderr]) {
+        // One splitter per stream: sharing a buffer between stdout and stderr
+        // splices a half-written line of one onto a line of the other, and the
+        // tail and the log mirror are exactly what a human reads afterwards.
+        const splitters = [child.stdout, child.stderr].map((stream) => {
+          const splitter = new LineSplitter(emit);
           stream.setEncoding("utf8");
           stream.on("data", (chunk: string) => {
             logFile.write(chunk);
             splitter.push(chunk);
           });
-        }
+          return splitter;
+        });
 
         const pid = child.pid;
         let killed = false;
         const exited = new Promise<HookProcessExit>((resolve) => {
           const settle = (exit: HookProcessExit): void => {
-            splitter.flush();
+            for (const splitter of splitters) splitter.flush();
             logFile.end();
             resolve(exit);
           };
           // A spawn failure is an exit too: the port never rejects, so the
           // runner reports `failed` instead of crashing the boot.
           child.on("error", (error) => {
-            splitter.push(`${error.message}\n`);
+            emit(error.message);
             settle({ code: null, signal: null });
           });
           child.on("close", (code, signal) => settle({ code, signal }));
