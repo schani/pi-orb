@@ -278,18 +278,26 @@ async function writeWorkspaceFiles(
  */
 const SETUP_HOOK = [
   "#!/bin/sh",
-  "env > /workspace/hook-setup-env",
-  "echo setup >> /workspace/hook-order",
+  // `$PI_ORB_WORK_DIR`, never a literal `/workspace`: the process backend's
+  // workspace is a directory on the developer's machine.
+  'env > "$PI_ORB_WORK_DIR/hook-setup-env"',
+  'echo setup >> "$PI_ORB_WORK_DIR/hook-order"',
   "exit 3",
   "",
 ].join("\n");
 
 const RESUME_HOOK = [
   "#!/bin/sh",
-  "env > /workspace/hook-resume-env",
-  "echo resume >> /workspace/hook-order",
+  'env > "$PI_ORB_WORK_DIR/hook-resume-env"',
+  'echo resume >> "$PI_ORB_WORK_DIR/hook-order"',
   "",
 ].join("\n");
+
+/** Where the runtime writes a hook's log, in the orb's own filesystem terms. */
+function hookLogPath(id: string, hook: "setup" | "resume"): string {
+  const workDir = PROCESS_BACKEND ? join(processHostDirectory(id), "workspace") : "/workspace";
+  return join(workDir, "home", ".cache", "pi-orb", "logs", `${hook}.log`);
+}
 
 /** Read one workspace file back through the given incarnation. */
 async function readWorkspaceFile(id: string, incarnation: number, name: string): Promise<string> {
@@ -632,7 +640,7 @@ describe("full slice E2E", () => {
           type: "setup_failed",
           hook: "setup",
           reason: "failed",
-          logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+          logPath: hookLogPath(replacementOrbId, "setup"),
         });
         await waitForLifecycleEdges("setup-failed edge", replacementOrbId, (lines) =>
           lines.some((line) => line.includes("setup-failed") && line.includes("reason=failed")),
