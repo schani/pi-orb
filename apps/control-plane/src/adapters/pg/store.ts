@@ -62,6 +62,15 @@ function mapOrbRow(row: PgRow): OrbRow {
       row["host_discard_evidence"] === null ? null : String(row["host_discard_evidence"]),
     hostDiscardRequestedAt:
       row["host_discard_requested_at"] === null ? null : toMs(row["host_discard_requested_at"]),
+    hookFailureHook:
+      row["hook_failure_hook"] === null
+        ? null
+        : (String(row["hook_failure_hook"]) as OrbRow["hookFailureHook"]),
+    hookFailureReason:
+      row["hook_failure_reason"] === null
+        ? null
+        : (String(row["hook_failure_reason"]) as OrbRow["hookFailureReason"]),
+    hookFailureLog: row["hook_failure_log"] === null ? null : String(row["hook_failure_log"]),
     checkoutCommit: row["checkout_commit"] === null ? null : String(row["checkout_commit"]),
     harnessSessionId: row["harness_session_id"] === null ? null : String(row["harness_session_id"]),
     harnessSessionHeader: (row["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
@@ -404,10 +413,11 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            host_incarnation, host_spec_fingerprint, host_spec_generation,
            host_discard_through_incarnation, host_discard_reason, host_discard_error,
            host_discard_evidence, host_discard_requested_at,
+           hook_failure_hook, hook_failure_reason, hook_failure_log,
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, state_changed_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24::jsonb,$25,$26,$27,$28,$29,$30,$31,$32,$33)
          RETURNING *`,
         [
           orb.id,
@@ -428,6 +438,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.hostDiscardError,
           orb.hostDiscardEvidence,
           orb.hostDiscardRequestedAt === null ? null : new Date(orb.hostDiscardRequestedAt),
+          orb.hookFailureHook,
+          orb.hookFailureReason,
+          orb.hookFailureLog,
           orb.checkoutCommit,
           orb.harnessSessionId,
           jsonParam(orb.harnessSessionHeader),
@@ -1157,6 +1170,21 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     }
     if (params.hostDiscardEvidence !== undefined) {
       sets.push("host_discard_evidence = NULL");
+    }
+    if (params.hookFailureHook !== undefined) {
+      sets.push(`hook_failure_hook = $${index}`);
+      values.push(params.hookFailureHook);
+      index += 1;
+    }
+    if (params.hookFailureReason !== undefined) {
+      sets.push(`hook_failure_reason = $${index}`);
+      values.push(params.hookFailureReason);
+      index += 1;
+    }
+    if (params.hookFailureLog !== undefined) {
+      sets.push(`hook_failure_log = $${index}`);
+      values.push(params.hookFailureLog);
+      index += 1;
     }
     return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values);
   }

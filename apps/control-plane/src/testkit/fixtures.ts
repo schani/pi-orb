@@ -30,6 +30,9 @@ export const TEST_CONSTANTS: LifecycleConstants = {
   unreachableGraceMs: 10_000,
   postRestartGraceMs: 120_000,
   createStartDeadlineMs: 300_000,
+  // Scaled like the production pair: comfortably longer than the create/start
+  // deadline it holds off, so a scenario can outlast both.
+  setupHookHoldMs: 440_000,
   unreachableBootDeadlineMs: 120_000,
   historyPullIntervalMs: 2_000,
   reconcileTickMs: 500,
@@ -123,6 +126,9 @@ export function makeOrbRow(
     hostDiscardError: null,
     hostDiscardEvidence: null,
     hostDiscardRequestedAt: null,
+    hookFailureHook: null,
+    hookFailureReason: null,
+    hookFailureLog: null,
     checkoutCommit: null,
     harnessSessionId: null,
     harnessSessionHeader: null,

@@ -27,6 +27,19 @@ export interface BootProbe {
   attempts: number;
   /** Whether the runtime has answered health at all this boot. */
   everAnswered: boolean;
+  /**
+   * Monotonic ms of the first health report of this boot that said the
+   * repository's setup hook is running (docs/orb-setup-hook.md), or null if
+   * none did. It anchors the deadline hold and is deliberately sticky for the
+   * episode: the hold has to cover the hook *and* the boot that follows it,
+   * and its own bound — not the next probe — is what ends it, so a runtime
+   * that stops reporting is still a dead runtime, just on a longer clock.
+   */
+  setupRunningSinceMono: number | null;
+  /** Wall companion of the above, for the user-visible "running setup" detail. */
+  setupRunningSinceWall: number | null;
+  /** Whether the *latest* answered probe still said setup is running. */
+  setupRunning: boolean;
   lastError?: string;
 }
 
@@ -250,13 +263,32 @@ export class ControlState {
       /** Monotonic ms companion for deadline math. */
       hostRunningSinceMono: number | null;
       answered: boolean;
+      /** The answer reported the `setup_running` readiness phase. */
+      setupRunning?: boolean;
+      /** Clocks of this probe; required to time and display a setup hold. */
+      nowMono?: number;
+      nowWall?: number;
       lastError?: string;
     },
   ): void {
     const existing = this.bootProbes.get(orbId);
     const keepSince =
       existing?.hostRunningSinceMono != null && outcome.hostRunningSinceMono != null;
+    // The anchor is set by the first `setup_running` answer and then stands
+    // for the episode: the hold has to cover the hook *and* the boot that
+    // follows it, so a later phase must not retire it and drop the orb
+    // straight past an already-expired ordinary deadline. Only the hold's own
+    // bound ends it. The display flag is a level, not an edge, and follows the
+    // latest answer.
+    const answeredSetupRunning = outcome.setupRunning;
     this.bootProbes.set(orbId, {
+      setupRunningSinceMono:
+        existing?.setupRunningSinceMono ??
+        (answeredSetupRunning === true ? (outcome.nowMono ?? null) : null),
+      setupRunningSinceWall:
+        existing?.setupRunningSinceWall ??
+        (answeredSetupRunning === true ? (outcome.nowWall ?? null) : null),
+      setupRunning: answeredSetupRunning ?? existing?.setupRunning ?? false,
       hostState: outcome.hostState,
       hostRunningSinceWall: keepSince
         ? existing.hostRunningSinceWall

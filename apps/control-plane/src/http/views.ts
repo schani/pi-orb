@@ -71,6 +71,18 @@ function stateDetailOf(
       ...(drain.message !== undefined ? { message: drain.message } : {}),
     };
   }
+  if (bootProbe?.setupRunning && bootProbe.setupRunningSinceWall !== null) {
+    // More specific than "waiting for the runtime": the runtime is up and
+    // answering, and the repository's own script is what the orb waits on
+    // (docs/orb-setup-hook.md).
+    return {
+      type: "running_setup",
+      secondsRunning: Math.max(
+        0,
+        Math.round((Date.now() - bootProbe.setupRunningSinceWall) / 1000),
+      ),
+    };
+  }
   if (bootProbe !== null) {
     return {
       type: "waiting_for_runtime",
@@ -81,6 +93,20 @@ function stateDetailOf(
           : Math.max(0, Math.round((Date.now() - bootProbe.hostRunningSinceWall) / 1000)),
       probeAttempts: bootProbe.attempts,
       ...(bootProbe.lastError !== undefined ? { lastProbeError: bootProbe.lastError } : {}),
+    };
+  }
+  if (
+    orb.hookFailureHook !== null &&
+    orb.hookFailureReason !== null &&
+    orb.hookFailureLog !== null
+  ) {
+    // The orb is running regardless (docs/orb-setup-hook.md); this only says
+    // the environment its hooks were meant to prepare may be incomplete.
+    return {
+      type: "setup_failed",
+      hook: orb.hookFailureHook,
+      reason: orb.hookFailureReason,
+      logPath: orb.hookFailureLog,
     };
   }
   return undefined;

@@ -4,6 +4,8 @@ import type {
   HistoryRecord,
   PullHistoryResponse,
   RuntimeHealth,
+  RuntimeHookStatus,
+  RuntimeHooks,
   RuntimeTurnResume,
 } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
@@ -95,7 +97,33 @@ export interface FakeOrbConfig {
    * default is the measured GCE figure and every scenario runs with it.
    */
   bootLatencyMs?: number;
+  /** The repository's boot hooks, as this orb's checkout carries them. */
+  hooks?: FakeHookConfig;
 }
+
+/**
+ * `.agents/setup` and `.agents/resume` as the runtime runs them
+ * (docs/orb-setup-hook.md). Setup precedes session loading and is reported as
+ * the `setup_running` readiness phase for its whole duration; resume runs once
+ * per runtime process after it. `absent` is a repository with no such file.
+ */
+export interface FakeHookConfig {
+  /** How long setup holds readiness on an incarnation that has not run it. */
+  setupDurationMs?: number;
+  setupOutcome?: "absent" | "ok" | "failed" | "timeout" | "hook_not_executable";
+  resumeOutcome?: "absent" | "ok" | "failed";
+}
+
+/** Every knob resolved, so the world never re-applies defaults while serving. */
+type ResolvedOrbConfig = Omit<Required<FakeOrbConfig>, "hooks"> & {
+  hooks: Required<FakeHookConfig>;
+};
+
+const DEFAULT_HOOKS: Required<FakeHookConfig> = {
+  setupDurationMs: 0,
+  setupOutcome: "absent",
+  resumeOutcome: "absent",
+};
 
 /** The persistent filesystem: survives host stop/start and runtime restarts. */
 interface FakeFilesystem {
@@ -114,6 +142,15 @@ interface FakeFilesystem {
    * it exactly as the runtime keys off the tail.
    */
   turnInFlight: boolean;
+  /**
+   * The runtime's durable setup stamp (docs/orb-setup-hook.md): the compute
+   * incarnation whose `.agents/setup` already ran. It lives on the workspace,
+   * so a runtime restart within an incarnation does not re-run setup and a
+   * replacement incarnation always does.
+   */
+  setupIncarnation: number | null;
+  /** The persisted status file beside each hook's log: the latest outcome. */
+  hooks: { setup?: RuntimeHookStatus; resume?: RuntimeHookStatus };
 }
 
 interface FakeRuntimeInstance {
@@ -146,6 +183,8 @@ interface FakeRuntimeInstance {
    * process, so a crash before the flush loses the batch entirely.
    */
   pendingBatches: Map<string, PendingInboxBatch>;
+  /** `.agents/resume` runs once per runtime process, after setup. */
+  resumeRan: boolean;
 }
 
 /** One accepted-but-unflushed batch: content plus the classification promised for it. */
@@ -205,7 +244,7 @@ export function fakeTokenHash(token: string): string {
 }
 
 interface OrbWorldState {
-  config: Required<FakeOrbConfig>;
+  config: ResolvedOrbConfig;
   filesystem: FakeFilesystem;
   host: FakeHost | null;
   runtimeInstanceCounter: number;
@@ -287,12 +326,13 @@ export function isDeclineMarker(record: HistoryRecord): boolean {
   return hasCustomType(record, DECLINE_MARKER_CUSTOM_TYPE);
 }
 
-const DEFAULT_CONFIG: Required<FakeOrbConfig> = {
+const DEFAULT_CONFIG: ResolvedOrbConfig = {
   initDurationMs: 2_000,
   initOutcome: "ready",
   checkoutCommit: "commit-0",
   containerNeverStarts: false,
   bootLatencyMs: DEFAULT_BOOT_LATENCY_MS,
+  hooks: DEFAULT_HOOKS,
 };
 
 /**
@@ -326,13 +366,15 @@ export class FakeWorld {
 
   configureOrb(orbId: string, config: FakeOrbConfig = {}): void {
     this.orbs.set(orbId, {
-      config: { ...DEFAULT_CONFIG, ...config },
+      config: { ...DEFAULT_CONFIG, ...config, hooks: { ...DEFAULT_HOOKS, ...config.hooks } },
       filesystem: {
         sessionId: null,
         header: null,
         entries: [],
         headId: null,
         turnInFlight: false,
+        setupIncarnation: null,
+        hooks: {},
       },
       host: null,
       runtimeInstanceCounter: 0,
@@ -677,6 +719,7 @@ export class FakeWorld {
       sessionLoaded: false,
       turnResume: null,
       pendingBatches: new Map(),
+      resumeRan: false,
     };
   }
 
@@ -911,6 +954,16 @@ export class FakeWorld {
     return this.orbState(orbId).host?.incarnation ?? null;
   }
 
+  /** The incarnation whose `.agents/setup` has run, from the durable stamp. */
+  setupIncarnationOf(orbId: string): number | null {
+    return this.orbState(orbId).filesystem.setupIncarnation;
+  }
+
+  /** The persisted boot-hook statuses, as the runtime would report them. */
+  hookStatusesOf(orbId: string): { setup?: RuntimeHookStatus; resume?: RuntimeHookStatus } {
+    return { ...this.orbState(orbId).filesystem.hooks };
+  }
+
   /**
    * Rewrite the live host's stamp behind the control plane's back: the durable
    * row now describes compute that does not exist as recorded. That is the
@@ -986,6 +1039,7 @@ export class FakeWorld {
       sessionLoaded: false,
       turnResume: null,
       pendingBatches: new Map(),
+      resumeRan: false,
     };
   }
 
@@ -1157,14 +1211,36 @@ export class FakeWorld {
     const runtime = host.runtime;
     const orbId = state.reportOrbId ?? host.orbId;
     const elapsed = task.monotonicNow() - runtime.startedAtMonotonic;
+    const fs = state.filesystem;
+    // The repository's `.agents/setup` runs before the session is loaded and
+    // holds readiness for its whole duration (docs/orb-setup-hook.md).
+    const setupPending =
+      state.config.hooks.setupOutcome !== "absent" && fs.setupIncarnation !== host.incarnation;
+    const setupWindowMs = setupPending ? state.config.hooks.setupDurationMs : 0;
+    const hooks = (): { hooks?: RuntimeHooks } =>
+      fs.hooks.setup === undefined && fs.hooks.resume === undefined
+        ? {}
+        : { hooks: { ...fs.hooks } };
+    if (elapsed < setupWindowMs) {
+      return {
+        v: 1,
+        orbId,
+        runtimeInstanceId: runtime.instanceId,
+        status: "initializing",
+        phase: "setup_running",
+        ...hooks(),
+      };
+    }
+    this.settleBootHooks(task, state, host.incarnation, setupPending);
     const initializing: RuntimeHealth = {
       v: 1,
       orbId,
       runtimeInstanceId: runtime.instanceId,
       status: "initializing",
       phase: "loading_session",
+      ...hooks(),
     };
-    if (elapsed < state.config.initDurationMs) return initializing;
+    if (elapsed < setupWindowMs + state.config.initDurationMs) return initializing;
     switch (state.config.initOutcome) {
       case "never_ready":
         return initializing;
@@ -1186,7 +1262,6 @@ export class FakeWorld {
         };
       case "ready": {
         this.ensureSessionExists(host.orbId);
-        const fs = state.filesystem;
         if (fs.sessionId === null) throw new Error("session must exist when ready");
         return {
           v: 1,
@@ -1197,8 +1272,47 @@ export class FakeWorld {
           checkoutCommit: state.config.checkoutCommit,
           activity: runtime.activity,
           ...(runtime.turnResume !== null ? { turnResume: runtime.turnResume } : {}),
+          ...hooks(),
         };
       }
+    }
+  }
+
+  /**
+   * Record the outcomes of the hooks whose window has just closed: setup once
+   * per incarnation (stamped on the persistent filesystem), resume once per
+   * runtime process, always after setup. Both statuses persist beside their
+   * logs, so a runtime restart still reports the last run's verdict.
+   */
+  private settleBootHooks(
+    task: SimulationTask,
+    state: OrbWorldState,
+    incarnation: number,
+    setupPending: boolean,
+  ): void {
+    const fs = state.filesystem;
+    const config = state.config.hooks;
+    const status = (
+      hook: "setup" | "resume",
+      outcome: Exclude<FakeHookConfig["setupOutcome"], "absent" | undefined>,
+    ): RuntimeHookStatus => ({
+      hook,
+      outcome,
+      exitCode: outcome === "failed" ? 1 : null,
+      incarnation: String(incarnation),
+      startedAt: new Date(task.wallNow()).toISOString(),
+      endedAt: new Date(task.wallNow()).toISOString(),
+      logPath: `/workspace/home/.cache/pi-orb/logs/${hook}.log`,
+    });
+    if (setupPending && config.setupOutcome !== "absent") {
+      fs.setupIncarnation = incarnation;
+      fs.hooks.setup = status("setup", config.setupOutcome);
+    }
+    const runtime = state.host?.runtime ?? null;
+    if (runtime === null || runtime.resumeRan) return;
+    runtime.resumeRan = true;
+    if (config.resumeOutcome !== "absent") {
+      fs.hooks.resume = status("resume", config.resumeOutcome);
     }
   }
 }

@@ -1,4 +1,4 @@
-import type { MessageInputBlock, OrbState, StopReason } from "@pi-orb/protocol";
+import type { MessageInputBlock, OrbState, RuntimeHooks, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { LivenessEntry } from "./control-state.ts";
@@ -11,7 +11,13 @@ import {
   type StoreError,
 } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
-import { hasNeverBeenReady, type OrbMessageRow, type OrbRow } from "./orb.ts";
+import {
+  type BootHook,
+  type BootHookFailureReason,
+  hasNeverBeenReady,
+  type OrbMessageRow,
+  type OrbRow,
+} from "./orb.ts";
 import type {
   ControlPlaneDeps,
   OrbHostObservation,
@@ -85,6 +91,32 @@ async function diagnoseHost(
   // host evidence is never silently dropped.
   if (result.isErr()) return { settled: false, evidence: null };
   return { settled: true, evidence: result.value };
+}
+
+/**
+ * The boot-hook failure the orb page reports, setup before resume: a setup
+ * that did not run is the more useful explanation of a broken environment,
+ * and one line is all the banner has room for.
+ */
+function firstHookFailure(
+  hooks: RuntimeHooks | undefined,
+): { hook: BootHook; reason: BootHookFailureReason; logPath: string } | null {
+  for (const status of [hooks?.setup, hooks?.resume]) {
+    if (status === undefined || status.outcome === "ok") continue;
+    return { hook: status.hook, reason: status.outcome, logPath: status.logPath };
+  }
+  return null;
+}
+
+/**
+ * Whether this boot's ordinary deadline is currently held off by a running
+ * `.agents/setup` (docs/orb-setup-hook.md). Bounded by `setupHookHoldMs`: a
+ * runtime that claims setup for longer than its own deadline plus room to
+ * finish is stuck, and gets the ordinary treatment.
+ */
+function holdingForSetupHook(task: SimulationTask, deps: ControlPlaneDeps, orbId: string): boolean {
+  const since = deps.control.getBootProbe(orbId)?.setupRunningSinceMono ?? null;
+  return since !== null && task.monotonicNow() - since <= deps.constants.setupHookHoldMs;
 }
 
 /** Fold the boot probe's live picture into a terminal error message. */
@@ -604,8 +636,16 @@ async function reconcileCreateStart(
     orb = reentered.value;
   }
 
-  // 2. Create/start deadline (docs/lifecycle.md deadline_exceeded rule).
-  if (task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs) {
+  // 2. Create/start deadline (docs/lifecycle.md deadline_exceeded rule), held
+  // off while the runtime keeps saying the repository's setup hook is running
+  // (docs/orb-setup-hook.md). The hold is not open-ended: it is anchored at
+  // the first `setup_running` report and dropped by the next probe that says
+  // anything else — including silence — so a runtime that stops reporting is
+  // still a dead runtime.
+  if (
+    !holdingForSetupHook(task, deps, orb.id) &&
+    task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs
+  ) {
     return failOrb(
       task,
       deps,
@@ -865,8 +905,14 @@ async function reconcileCreateStart(
         }
         return waiting("readiness");
       }
-      deps.control.recordBootProbe(orb.id, { ...probeBase, answered: true });
       const status = health.value;
+      deps.control.recordBootProbe(orb.id, {
+        ...probeBase,
+        answered: true,
+        setupRunning: status.status === "initializing" && status.phase === "setup_running",
+        nowMono: task.monotonicNow(),
+        nowWall: task.wallNow(),
+      });
       if (status.status === "initializing") return waiting("readiness");
       if (status.status === "failed") {
         return failOrb(
@@ -886,13 +932,19 @@ async function reconcileCreateStart(
           `runtime identity mismatch: expected ${orb.id}, got ${status.orbId}`,
         );
       }
-      // Persist ready identity before the orb becomes running (docs/lifecycle.md).
+      // Persist ready identity before the orb becomes running (docs/lifecycle.md),
+      // together with this boot's boot-hook verdict — written on every ready
+      // transition, so a clean boot clears the previous one's failure.
+      const hookFailure = firstHookFailure(status.hooks);
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
         expectedStateVersion: orb.stateVersion,
         now: task.wallNow(),
         checkoutCommit: status.checkoutCommit,
         hostRef: hostResourceId,
+        hookFailureHook: hookFailure?.hook ?? null,
+        hookFailureReason: hookFailure?.reason ?? null,
+        hookFailureLog: hookFailure?.logPath ?? null,
       });
       if (updated.isErr()) {
         return updated.error.type === "state_conflict"
@@ -915,6 +967,22 @@ async function reconcileCreateStart(
             shape: status.turnResume.shape,
             head_record_id: status.turnResume.headRecordId,
           });
+        }
+        // Boot-hook failures, on the same transition and under the same rule:
+        // a hook that succeeded is silent, and a hook that keeps failing boot
+        // after boot is one condition, logged when it starts. Output content
+        // never reaches the log — only the outcome and the in-orb log path.
+        for (const hook of ["setup", "resume"] as const) {
+          const outcome = status.hooks?.[hook];
+          const failed = outcome !== undefined && outcome.outcome !== "ok";
+          if (deps.control.noteCondition(`${hook}-hook-failed:${orb.id}`, failed) && failed) {
+            logOrbEvent(task, orb.id, `${hook}-failed`, {
+              incarnation: outcome.incarnation,
+              reason: outcome.outcome,
+              exit_code: outcome.exitCode,
+              log: outcome.logPath,
+            });
+          }
         }
       }
       return transitioned;
@@ -1797,6 +1865,9 @@ export function createOrb(
       hostDiscardError: null,
       hostDiscardEvidence: null,
       hostDiscardRequestedAt: null,
+      hookFailureHook: null,
+      hookFailureReason: null,
+      hookFailureLog: null,
       checkoutCommit: null,
       harnessSessionId: null,
       harnessSessionHeader: null,

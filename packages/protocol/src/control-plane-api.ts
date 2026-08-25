@@ -141,6 +141,32 @@ export const OrbStateDetailSchema = Type.Union([
     },
     closed,
   ),
+  /** The repository's `.agents/setup` is holding the boot (docs/orb-setup-hook.md). */
+  Type.Object(
+    {
+      type: Type.Literal("running_setup"),
+      secondsRunning: Type.Number(),
+    },
+    closed,
+  ),
+  /**
+   * The current boot's setup or resume hook did not succeed. The orb runs
+   * anyway; this says so and points at the log inside the orb. Never carries
+   * the hook's output.
+   */
+  Type.Object(
+    {
+      type: Type.Literal("setup_failed"),
+      hook: Type.Union([Type.Literal("setup"), Type.Literal("resume")]),
+      reason: Type.Union([
+        Type.Literal("failed"),
+        Type.Literal("timeout"),
+        Type.Literal("hook_not_executable"),
+      ]),
+      logPath: Type.String(),
+    },
+    closed,
+  ),
 ]);
 export type OrbStateDetail = Static<typeof OrbStateDetailSchema>;
 

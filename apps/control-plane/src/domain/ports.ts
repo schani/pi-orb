@@ -20,6 +20,8 @@ import type {
   StoreError,
 } from "./errors.ts";
 import type {
+  BootHook,
+  BootHookFailureReason,
   OrbDeletionRow,
   OrbMessageRow,
   OrbRow,
@@ -63,6 +65,14 @@ export interface CasUpdateFieldsParams {
    * commits, so it cannot shadow a later incident (docs/compute-replacement.md).
    */
   readonly hostDiscardEvidence?: null;
+  /**
+   * Written together at the ready transition from the runtime's health report:
+   * all three, or all three null to clear the previous boot's failure
+   * (docs/orb-setup-hook.md).
+   */
+  readonly hookFailureHook?: BootHook | null;
+  readonly hookFailureReason?: BootHookFailureReason | null;
+  readonly hookFailureLog?: string | null;
 }
 
 export interface RecordHostDiscardStatusParams {

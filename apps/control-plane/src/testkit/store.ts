@@ -39,6 +39,14 @@ const unavailable = (message: string): StoreError => ({
   retryable: true,
 });
 
+/** A write the schema rejects; `mapPgError` classifies a check violation the same way. */
+const corruption = (message: string): StoreError => ({
+  type: "store_error",
+  code: "corruption",
+  message,
+  retryable: false,
+});
+
 /**
  * A deterministic store bug: bad SQL or a parameter the driver cannot encode
  * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md). Scripted,
@@ -1203,17 +1211,36 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           ? { hostSpecGeneration: params.hostSpecGeneration }
           : {}),
         ...(params.hostDiscardEvidence !== undefined ? { hostDiscardEvidence: null } : {}),
+        ...(params.hookFailureHook !== undefined
+          ? { hookFailureHook: params.hookFailureHook }
+          : {}),
+        ...(params.hookFailureReason !== undefined
+          ? { hookFailureReason: params.hookFailureReason }
+          : {}),
+        ...(params.hookFailureLog !== undefined ? { hookFailureLog: params.hookFailureLog } : {}),
       };
+      // Same all-or-nothing rule the orbs_hook_failure_complete CHECK enforces.
+      if (
+        (updated.hookFailureHook === null) !== (updated.hookFailureReason === null) ||
+        (updated.hookFailureHook === null) !== (updated.hookFailureLog === null)
+      ) {
+        return { conflict: false as const, row: null };
+      }
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };
-    }).andThen((outcome) =>
-      outcome.conflict
-        ? errAsync<OrbRow, StateConflict>({
-            type: "state_conflict",
-            ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
-          })
-        : okAsync(outcome.row),
-    );
+    }).andThen((outcome) => {
+      if (outcome.conflict) {
+        return errAsync<OrbRow, StateConflict>({
+          type: "state_conflict",
+          ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
+        });
+      }
+      return outcome.row === null
+        ? errAsync<OrbRow, StoreError>(
+            corruption('new row for relation "orbs" violates check constraint'),
+          )
+        : okAsync(outcome.row);
+    });
   }
 
   touchLastBusy(

@@ -24,6 +24,9 @@ const orb: OrbRow = {
   hostDiscardError: null,
   hostDiscardEvidence: null,
   hostDiscardRequestedAt: null,
+  hookFailureHook: null,
+  hookFailureReason: null,
+  hookFailureLog: null,
   checkoutCommit: "abc123",
   harnessSessionId: null,
   harnessSessionHeader: null,
@@ -159,6 +162,65 @@ describe("orbView compute discard", () => {
     expect(discarding.lastError).toBe("runtime_failed: process exited");
     expect(Check(OrbViewSchema, replacing)).toBe(true);
     expect(Check(OrbViewSchema, discarding)).toBe(true);
+  });
+});
+
+describe("orbView boot hooks", () => {
+  it("reports a running setup hook instead of a bare readiness wait", () => {
+    const control = new ControlState();
+    control.recordBootProbe("orb-1", {
+      hostState: "running",
+      hostRunningSinceWall: Date.now() - 30_000,
+      hostRunningSinceMono: 0,
+      answered: true,
+      setupRunning: true,
+      nowMono: 0,
+      nowWall: Date.now() - 30_000,
+    });
+    const view = orbView({ ...orb, state: "starting" }, control, {});
+    expect(view.stateDetail).toMatchObject({ type: "running_setup" });
+    expect(Check(OrbViewSchema, view)).toBe(true);
+  });
+
+  it("falls back to the readiness wait once setup has finished", () => {
+    const control = new ControlState();
+    for (const setupRunning of [true, false]) {
+      control.recordBootProbe("orb-1", {
+        hostState: "running",
+        hostRunningSinceWall: Date.now(),
+        hostRunningSinceMono: 0,
+        answered: true,
+        setupRunning,
+        nowMono: 0,
+        nowWall: Date.now(),
+      });
+    }
+    const view = orbView({ ...orb, state: "starting" }, control, {});
+    expect(view.stateDetail).toMatchObject({ type: "waiting_for_runtime" });
+  });
+
+  it("keeps a running orb's hook failure visible with its log path", () => {
+    const view = orbView(
+      {
+        ...orb,
+        hookFailureHook: "setup",
+        hookFailureReason: "timeout",
+        hookFailureLog: "/workspace/home/.cache/pi-orb/logs/setup.log",
+      },
+      new ControlState(),
+      {},
+    );
+    expect(view.stateDetail).toEqual({
+      type: "setup_failed",
+      hook: "setup",
+      reason: "timeout",
+      logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+    });
+    expect(Check(OrbViewSchema, view)).toBe(true);
+  });
+
+  it("says nothing about hooks that succeeded", () => {
+    expect(orbView(orb, new ControlState(), {}).stateDetail).toBeUndefined();
   });
 });
 
