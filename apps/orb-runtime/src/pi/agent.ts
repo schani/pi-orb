@@ -18,6 +18,7 @@ import {
   ORB_NAME_README_MAX_BYTES,
   type RuntimeEvent,
   type RuntimeHealth,
+  type RuntimeHooks,
   type RuntimeTurnResume,
   type ServerFrame,
   validateRepositoryUrl,
@@ -37,6 +38,9 @@ import {
   TurnSummaryCoordinator,
 } from "../domain/turn-summary.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
+import type { HookSpawner } from "../hooks/ports.ts";
+import { BootHookRunner } from "../hooks/runner.ts";
+import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
@@ -61,6 +65,10 @@ export interface PiOrbAgentOptions {
    * when tier-1 port exposure is off. Only the agent's system prompt uses it.
    */
   readonly previewHost?: string | null;
+  /** Compute incarnation this boot belongs to; keys the setup hook's stamp. */
+  readonly incarnation?: string;
+  /** Test seam; production spawns the repository's boot hooks with `NodeHookSpawner`. */
+  readonly hookSpawner?: HookSpawner;
   /** Test seam; production creates the Luna adapter from the orb's existing ModelRuntime. */
   readonly turnSummarizer?: TurnSummarizer;
   /** E2E composition seam: expose one selected incarnation as terminally failed. */
@@ -178,6 +186,8 @@ export class PiOrbAgent {
     { delivery: "turn" | "steer"; operationId: string }
   >();
   private autoNameTriggered = false;
+  /** Created once the checkout exists; null before, and when hooks never ran. */
+  private hooks: BootHookRunner | null = null;
 
   constructor(options: PiOrbAgentOptions) {
     this.options = options;
@@ -185,7 +195,7 @@ export class PiOrbAgent {
   }
 
   private initializing(
-    phase: "booting" | "cloning" | "loading_session" | "checking_auth",
+    phase: "booting" | "cloning" | "setup_running" | "loading_session" | "checking_auth",
   ): RuntimeHealth {
     return {
       v: 1,
@@ -194,6 +204,15 @@ export class PiOrbAgent {
       status: "initializing",
       phase,
     };
+  }
+
+  /** Read at report time, not at transition time: a backgrounded resume finishes late. */
+  private hookReport(): { hooks?: RuntimeHooks } {
+    const report = this.hooks?.report();
+    if (report === undefined || (report.setup === undefined && report.resume === undefined)) {
+      return {};
+    }
+    return { hooks: report };
   }
 
   private failed(code: string, message: string, retryable: boolean): RuntimeHealth {
@@ -207,13 +226,20 @@ export class PiOrbAgent {
   }
 
   getHealth(): RuntimeHealth {
-    if (this.health.status !== "ready") return this.health;
+    if (this.health.status === "failed") return this.health;
+    if (this.health.status !== "ready") return { ...this.health, ...this.hookReport() };
     return {
       ...this.health,
       activity: this.activity,
       ...(this.operationId !== null ? { operationId: this.operationId } : {}),
       ...(this.turnResume !== null ? { turnResume: this.turnResume } : {}),
+      ...this.hookReport(),
     };
+  }
+
+  /** Terminates a resume hook that outlived its blocking window. */
+  shutdownHooks(): void {
+    this.hooks?.shutdown();
   }
 
   subscribe(listener: FrameListener): () => void {
@@ -291,6 +317,24 @@ export class PiOrbAgent {
     const commit = await execGit(["rev-parse", "HEAD"], repoDir);
     if (commit.isErr()) return err(this.failed("clone_failed", commit.error.message, true));
     this.checkoutCommit = commit.value;
+
+    // 1b. The repository's `.agents/setup` (docs/orb-setup-hook.md) — it needs
+    // the checkout, and everything after it may depend on what it installs.
+    // Readiness is held while it runs; its failure never fails the boot.
+    this.hooks = new BootHookRunner({
+      repoDir,
+      home: home.value,
+      workDir: this.options.workDir,
+      incarnation: this.options.incarnation ?? "0",
+      task: new NoSimulationTask(`hooks-${this.options.orbId}`, false),
+      spawner: this.options.hookSpawner ?? new NodeHookSpawner(),
+      environment: process.env,
+      log: (line) => console.log(line),
+      onSetupStart: () => {
+        this.health = this.initializing("setup_running");
+      },
+    });
+    await this.hooks.runSetup();
 
     // 2. Session: never replace an existing one (docs/host-provider.md).
     this.health = this.initializing("loading_session");
@@ -395,6 +439,12 @@ export class PiOrbAgent {
     if (model === undefined) {
       return err(this.failed("session_init_failed", "no openai-codex model available", true));
     }
+    // 3b. `.agents/resume` runs after setup and before the session exists, so
+    // the agent's first turn already sees whatever it authenticated. Its
+    // outcome is awaited only for the blocking window; a slower hook keeps
+    // running and only the prompt fragment misses it (docs/orb-setup-hook.md).
+    await this.hooks.runResume();
+
     const agentDir = join(this.options.workDir, "pi-agent");
     // SSE keeps the first E2E deterministic; the fake refuses the WebSocket
     // transport (docs/PI-CODEX-E2E.md).
@@ -407,6 +457,7 @@ export class PiOrbAgent {
       agentDir,
       settingsManager,
       previewHost: this.options.previewHost ?? null,
+      hooks: this.hooks.report(),
     });
     if (loaderResult.isErr()) {
       return err(this.failed("session_init_failed", loaderResult.error, true));

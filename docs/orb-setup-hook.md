@@ -1,6 +1,6 @@
 # Orb boot hooks requirements
 
-> **Status:** Requirements drafted 2026-08-25; not implemented. Resolves open questions 13 and
+> **Status:** Requirements accepted 2026-08-25; implementation in progress. Resolves open questions 13 and
 > 41 (`docs/open-questions.md`). This document defines two repository-owned hooks the orb runtime
 > runs on the repository's behalf — `.agents/setup` and `.agents/resume` — so a project can
 > prepare its own orbs unattended. The convention deliberately matches Amp's so a repository
@@ -211,6 +211,39 @@ where the agent's shells read them, and runs `gcloud auth login --cred-file=…`
 needs the orb's identity and therefore cannot live in setup. `apps/orb-runtime/skills/cloud-identity/SKILL.md` is updated to emit exactly these two files
 when the hooks ship, replacing its current "commit a script the next orb's agent runs by hand"
 guidance and the note that automatic execution is pending.
+
+## Using the hooks
+
+Put either file at the root of your repository, make it executable, and give it a shebang.
+
+| | `.agents/setup` | `.agents/resume` |
+| --- | --- | --- |
+| Runs | first boot of every compute incarnation — orb creation and every compute replacement | every start: creation, stop/start, and every runtime restart, always after setup |
+| Blocks | the orb, for up to 20 minutes; then its process group is killed and the orb starts anyway | up to 10 seconds; then it keeps running in the background while the agent proceeds, and is killed when the orb stops |
+| Identity | **none** — `PI_ORB_RUNTIME_TOKEN` and `PI_ORB_CONTROL_PLANE_URL` are removed, so `pi-orb id-token`, the brokered `gh`, and the git credential helper all fail | full: install the client in setup, authenticate it here |
+| cwd | repository root | repository root |
+| `$HOME` | the orb's persistent home; what you write there survives replacement, what you install into the image layer does not | same |
+
+Both hooks get the runtime's environment (`PI_ORB_WORK_DIR`, `HOME`, `PI_ORB_ID`,
+`PI_ORB_HOST_INCARNATION`, `PI_ORB_REPOSITORY_URL`, the image's `PATH`) plus `PI_ORB=1` and
+`PI_ORB_HOOK=setup|resume`. Neither gets Tailscale material. `PI_ORB=1` is set for every process in
+the orb, so a script shared with Amp can branch on it; `AMP_ORB` is never set. Nothing a hook
+exports reaches the agent — write to `/etc/profile.d` or your project's own convention instead.
+`sudo` is installed in the prescribed image (the runtime is root, so it elevates nothing); a
+process-provider orb inherits the developer's machine and may not have it.
+
+Output goes to `$HOME/.cache/pi-orb/logs/setup.log` and `resume.log`, overwritten on every run and
+mirrored into the runtime's log stream. Beside each log a `*.status.json` records the outcome
+(`ok`, `failed` with the exit code, `timeout`, `hook_not_executable`), the incarnation, the start
+and end times, and the last lines of output. A hook that did not succeed is shown on the orb page
+and told to the agent; a healthy boot says nothing anywhere.
+
+Both hooks must be idempotent — setup runs again after every compute replacement, resume on every
+start, and a person or the agent may run either by hand. The canonical pattern is Amp's
+`if ! command -v X >/dev/null 2>&1; then …; fi`. Do not start long-running services from a hook.
+
+**Review these files like CI configuration.** A commit to `.agents/setup` runs unattended, with the
+agent's authority, on the next fresh orb of every project member, before anyone reads the diff.
 
 ## Non-goals
 

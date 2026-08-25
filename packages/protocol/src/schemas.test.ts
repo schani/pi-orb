@@ -175,6 +175,60 @@ describe("runtime HTTP schemas", () => {
     ).toBe(false);
   });
 
+  it("accepts the setup_running phase and boot hook outcomes", () => {
+    const setup = {
+      hook: "setup",
+      outcome: "failed",
+      exitCode: 127,
+      incarnation: "3",
+      startedAt: "2026-08-25T00:00:00.000Z",
+      endedAt: "2026-08-25T00:01:00.000Z",
+      logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+    };
+    expect(
+      Check(RuntimeHealthSchema, {
+        v: 1,
+        orbId: "orb-1",
+        runtimeInstanceId: "run-1",
+        status: "initializing",
+        phase: "setup_running",
+      }),
+    ).toBe(true);
+    expect(
+      Check(RuntimeHealthSchema, {
+        v: 1,
+        orbId: "orb-1",
+        runtimeInstanceId: "run-1",
+        status: "ready",
+        sessionId: "session-1",
+        checkoutCommit: "abc123",
+        activity: "idle",
+        hooks: { setup, resume: { ...setup, hook: "resume", outcome: "ok", exitCode: 0 } },
+      }),
+    ).toBe(true);
+    // A timeout has no exit code, and hook output never rides the wire.
+    expect(
+      Check(RuntimeHealthSchema, {
+        v: 1,
+        orbId: "orb-1",
+        runtimeInstanceId: "run-1",
+        status: "initializing",
+        phase: "setup_running",
+        hooks: { setup: { ...setup, outcome: "timeout", exitCode: null } },
+      }),
+    ).toBe(true);
+    expect(
+      Check(RuntimeHealthSchema, {
+        v: 1,
+        orbId: "orb-1",
+        runtimeInstanceId: "run-1",
+        status: "initializing",
+        phase: "setup_running",
+        hooks: { setup: { ...setup, tail: ["apt-get: not found"] } },
+      }),
+    ).toBe(false);
+  });
+
   it("rejects a ready health without session identity", () => {
     expect(
       Check(RuntimeHealthSchema, {

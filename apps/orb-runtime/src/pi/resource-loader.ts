@@ -3,7 +3,9 @@ import {
   type ResourceLoader,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import type { RuntimeHooks } from "@pi-orb/protocol";
 import { Result, ResultAsync } from "neverthrow";
+import { bootHookPrompt } from "../hooks/prompt.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 
@@ -15,6 +17,8 @@ export interface OrbResourceLoaderInput {
   /** Shared with `createAgentSession`; omitted where the SDK default is used. */
   readonly settingsManager?: SettingsManager | undefined;
   readonly previewHost?: string | null;
+  /** Latest boot-hook outcomes; only failures reach the prompt. */
+  readonly hooks?: RuntimeHooks;
 }
 
 /**
@@ -30,6 +34,7 @@ export interface OrbResourceLoaderInput {
  */
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
   const previewHost = input.previewHost ?? null;
+  const hookPrompt = bootHookPrompt(input.hooks ?? {});
   return {
     cwd: input.cwd,
     agentDir: input.agentDir,
@@ -38,6 +43,7 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
       ...base,
       environmentPrompt,
       ...(previewHost !== null ? [portExposurePrompt(previewHost)] : []),
+      ...(hookPrompt !== null ? [hookPrompt] : []),
     ],
   };
 }

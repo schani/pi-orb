@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import { readBrokerEnv } from "./broker/endpoint.ts";
+import { ORB_MARKER_ENV } from "./hooks/runner.ts";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
 import { startTailscale } from "./tailscale/daemon.ts";
@@ -23,6 +24,10 @@ const unreachableRejection = (error: unknown): void => {
 
 async function main(): Promise<void> {
   const workDir = env("PI_ORB_WORK_DIR", "/workspace");
+  // Every process in the orb — hooks, the agent's shells, terminals — sees
+  // this, the analogue of Amp's `AMP_ORB=1` (docs/orb-setup-hook.md). `AMP_ORB`
+  // is deliberately never set: a script's Amp-only branch must not run here.
+  process.env[ORB_MARKER_ENV] = "1";
   const launchFailure = checkTestLaunchFailure(process.env, workDir);
   if (launchFailure.error !== undefined) console.error(launchFailure.error);
   if (launchFailure.inject) {
@@ -38,6 +43,7 @@ async function main(): Promise<void> {
     broker: readBrokerEnv(process.env),
     mockOpenAi: readMockOpenAiEnv(process.env),
     previewHost: tailscale?.previewHost ?? null,
+    incarnation: env("PI_ORB_HOST_INCARNATION", "0"),
     testLaunchFailure: launchFailure.inject,
   });
 
@@ -57,6 +63,8 @@ async function main(): Promise<void> {
   const shutdown = (reason: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
+    // A resume hook still running past its blocking window stops with the orb.
+    agent.shutdownHooks();
     void app.close().then(
       () => process.exit(0),
       (error: unknown) => {
