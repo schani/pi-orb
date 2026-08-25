@@ -14,8 +14,9 @@ const skillsDir = join(import.meta.dirname, "../../skills");
 const repoRoot = join(import.meta.dirname, "../../../..");
 
 /**
- * The cloud-identity skill prints a GCP bootstrap block for a human to run. That
- * block is the short form of `infra/bootstrap-pi-orb-oidc.sh`, which is the
+ * The cloud-identity skill carries a GCP bootstrap sequence — run in the orb on
+ * the primary path, printed for the human on the alternative one. It is the
+ * short form of `infra/bootstrap-pi-orb-oidc.sh`, which is the
  * reviewed one — so the pieces that are easy to get subtly wrong are read out of
  * the script here rather than restated, and a change to either without the other
  * fails.
@@ -121,17 +122,32 @@ describe("baked agent skills", () => {
       }
     });
 
-    it("never tells the agent to log gcloud in interactively", () => {
-      for (const invocation of body.match(/gcloud auth login[^\n]*/g) ?? []) {
-        expect(invocation, "in-orb gcloud login must federate, never prompt").toContain(
-          "--cred-file",
+    it("logs gcloud in interactively only as the human's own step", () => {
+      const invocations = body.match(/gcloud auth login[^\n]*/g) ?? [];
+      expect(invocations.length, "the skill must still show how to log gcloud in").toBeGreaterThan(
+        0,
+      );
+      // Two kinds of login exist and no third: the agent's own keyless
+      // `--cred-file` federation, and the human's interactive device flow.
+      for (const invocation of invocations) {
+        expect(invocation, "a gcloud login must federate or be the human's device flow").toMatch(
+          /--cred-file|--no-launch-browser/,
         );
       }
+      expect(
+        invocations.some((invocation) => invocation.includes("--no-launch-browser")),
+        "the primary path needs the human's interactive login",
+      ).toBe(true);
+      expect(body, "that login happens in the orb's terminal tab").toMatch(/terminal tab/i);
+      expect(body, "the human runs the interactive login; the agent never does").toMatch(
+        /(do \*\*not\*\*|do not|never) run `?gcloud auth login --no-launch-browser`? yourself/i,
+      );
     });
 
-    it("only shows administrative commands in sections that send them out of the orb", () => {
-      // An admin credential must never enter an orb, so every block that needs
-      // one has to be addressed to the human at their own machine.
+    it("runs administrative commands in the orb only behind a login it then revokes", () => {
+      // Admin rights reach the orb one way only: a login the human starts in the
+      // terminal and the agent revokes once federation is proven. Any other
+      // admin block has to be addressed to the human at their own machine.
       const adminMarkers = [
         "gcloud services enable",
         "workload-identity-pools",
@@ -143,9 +159,11 @@ describe("baked agent skills", () => {
       ];
       const outsideTheOrb =
         /on your own machine|not inside (this|the|an) orb|never inside (this|the|an) orb/i;
+      const asksForTheLogin = (section: string) =>
+        section.includes("gcloud auth login --no-launch-browser") && /terminal tab/i.test(section);
       const sections = body.split(/^(?=#{2,4} )/m);
-      const adminSections = sections.filter(
-        (section) =>
+      const adminSections = [...sections.entries()].filter(
+        ([, section]) =>
           section.includes("```") && adminMarkers.some((marker) => section.includes(marker)),
       );
 
@@ -153,10 +171,27 @@ describe("baked agent skills", () => {
         adminSections.length,
         "the skill must still print the operator commands",
       ).toBeGreaterThan(0);
-      for (const section of adminSections) {
+
+      let inOrb = 0;
+      let elsewhere = 0;
+      for (const [index, section] of adminSections) {
         const heading = section.split("\n", 1)[0];
-        expect(section, `"${heading}" must say these run outside the orb`).toMatch(outsideTheOrb);
+        if (outsideTheOrb.test(section)) {
+          elsewhere += 1;
+          continue;
+        }
+        inOrb += 1;
+        expect(
+          sections.slice(0, index).some(asksForTheLogin),
+          `"${heading}" runs admin commands here, so an earlier step must ask the human to log in`,
+        ).toBe(true);
+        expect(body, `"${heading}" runs admin commands here, so the login must be revoked`).toMatch(
+          /gcloud auth revoke/,
+        );
       }
+
+      expect(inOrb, "the primary path registers the trust from inside the orb").toBeGreaterThan(0);
+      expect(elsewhere, "the alternative path must still exist").toBeGreaterThan(0);
     });
   });
 });

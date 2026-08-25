@@ -206,10 +206,38 @@ The in-orb Pi agent learns the feature exists through the `cloud-identity` skill
 runtime image at `apps/orb-runtime/skills/cloud-identity/SKILL.md` (mechanism and rejected
 alternatives in `docs/pi-adapter.md`, added 2026-08-22): nothing in a user's checkout mentions
 `pi-orb id-token`, so without it an agent asked to reach a cloud API looks for a stored key instead.
-The skill also carries the relying-party side (rewritten 2026-08-25): given one GCP project ID it
-chooses the pool, provider, service account, and audience itself and prints a pre-filled idempotent
-`gcloud` block for a human to run with an admin identity outside the orb, rather than sending them
-to `docs/workload-identity-recipes.md`. An admin credential never enters an orb.
+The skill also carries the relying-party side: given one GCP project ID and one access level it
+chooses the pool, provider, service account, and audience itself, rather than sending the human to
+`docs/workload-identity-recipes.md`.
+
+**Decided 2026-08-25: the primary GCP path runs the admin sequence *inside* the orb, under a
+temporary human login the agent revokes once federation is proven.** The human is asked two
+questions and told to run `gcloud auth login --no-launch-browser` in the orb's Terminal tab
+(`docs/terminal.md`); the agent then registers the pool, provider, service account, and bindings
+itself, writes the external-account configuration, verifies with an isolated empty
+`CLOUDSDK_CONFIG` so the proof cannot ride on the human's credential, and finishes with
+`gcloud auth revoke`. The rationale is the reference experience: an Amp transcript of this exact
+setup contained no pasted command block at all — one login, one "done", and the agent reported a
+verified result — and a path that costs a human two answers is a path that gets used, where a
+pasted block is where setup stalls. **The trade-off, stated rather than hidden:** for the duration
+of the setup the human's own refresh token sits in the orb's persistent home, where every process
+in the orb can read it (`docs/credentials.md`), so the revoke is part of the flow and not an
+optional tidy-up; and the isolated verification exists so the revoke is never taken on an unproven
+federation. Revoking a login is also the thing that distinguishes this from what was previously
+forbidden: a pasted service-account key or long-lived admin token cannot be withdrawn from inside
+the orb, and the skill still refuses those outright.
+
+The earlier rule — an admin credential never enters an orb, so the agent only ever prints a
+pre-filled block for the human's own machine — survives as the documented **alternative** path,
+for a human who declines an in-orb login. It produces the same configuration at the cost of a
+round trip.
+
+The skill's "future orbs" step reflects a real gap: the GCP-side trust is permanent and
+project-wide, but the in-orb half (credential file, three environment variables, `--cred-file`
+login) has to be repeated in every new orb, and pi-orb has no per-project boot hook to run it.
+The skill therefore has the agent commit the non-secret pieces and say plainly that automatic
+execution on boot does not exist yet; the hook itself is open question 41 in
+`docs/open-questions.md`.
 
 The CLI retries only outcomes a later attempt can change — the first-boot 401 before the bearer
 hash commits, the per-orb floor, and transient issuer/network failures — inside one 10-second

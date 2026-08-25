@@ -86,11 +86,15 @@ shortest one the provider supports.
 ## Google Cloud
 
 **Easiest path:** ask the agent inside the orb. The baked `cloud-identity` skill
-(`apps/orb-runtime/skills/cloud-identity/SKILL.md`) asks only which GCP project to connect, picks
-the pool, provider, service account, and audience itself, and prints a finished, pre-filled,
-idempotent `gcloud` block to run with an admin identity on your own machine — the short form of the
-script below. The long form here is what to read when you want to know why each line is there, or
-when you are setting this up without an orb in the loop.
+(`apps/orb-runtime/skills/cloud-identity/SKILL.md`) asks which GCP project to connect and how much
+access it should get, picks the pool, provider, service account, and audience itself, and then —
+after you run one `gcloud auth login --no-launch-browser` in the orb's Terminal tab — performs the
+whole idempotent sequence below in the orb, verifies the federation against an isolated empty
+gcloud configuration, and revokes your login again (decided 2026-08-25, `docs/workload-identity.md`).
+If you would rather no admin login touched the orb, its alternative path prints the same commands
+pre-filled for your own machine and asks you to paste one line back. The long form here is what to
+read when you want to know why each line is there, or when you are setting this up without an orb
+in the loop.
 
 ### 1. Bootstrap the pool and provider (once, by an administrator)
 
