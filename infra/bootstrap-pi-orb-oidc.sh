@@ -205,6 +205,9 @@ fi
 
 stale_admissions() { # principalSets from this pool that the requested scope does not cover
   [ -n "$project_number" ] || return 0
+  # Not created yet on a first run: nothing to reconcile. Under pipefail a failed
+  # policy read would otherwise abort the script before it prints its plan.
+  gcloud iam service-accounts describe "$TEST_SA_EMAIL" --project="$PROJECT" >/dev/null 2>&1 || return 0
   gcloud iam service-accounts get-iam-policy "$TEST_SA_EMAIL" \
     --project="$PROJECT" --flatten='bindings[].members' \
     --filter='bindings.role=roles/iam.workloadIdentityUser' \

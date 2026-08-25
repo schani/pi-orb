@@ -206,6 +206,10 @@ The in-orb Pi agent learns the feature exists through the `cloud-identity` skill
 runtime image at `apps/orb-runtime/skills/cloud-identity/SKILL.md` (mechanism and rejected
 alternatives in `docs/pi-adapter.md`, added 2026-08-22): nothing in a user's checkout mentions
 `pi-orb id-token`, so without it an agent asked to reach a cloud API looks for a stored key instead.
+The skill also carries the relying-party side (rewritten 2026-08-25): given one GCP project ID it
+chooses the pool, provider, service account, and audience itself and prints a pre-filled idempotent
+`gcloud` block for a human to run with an admin identity outside the orb, rather than sending them
+to `docs/workload-identity-recipes.md`. An admin credential never enters an orb.
 
 The CLI retries only outcomes a later attempt can change — the first-boot 401 before the bearer
 hash commits, the per-orb floor, and transient issuer/network failures — inside one 10-second

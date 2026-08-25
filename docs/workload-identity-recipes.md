@@ -85,6 +85,13 @@ shortest one the provider supports.
 
 ## Google Cloud
 
+**Easiest path:** ask the agent inside the orb. The baked `cloud-identity` skill
+(`apps/orb-runtime/skills/cloud-identity/SKILL.md`) asks only which GCP project to connect, picks
+the pool, provider, service account, and audience itself, and prints a finished, pre-filled,
+idempotent `gcloud` block to run with an admin identity on your own machine — the short form of the
+script below. The long form here is what to read when you want to know why each line is there, or
+when you are setting this up without an orb in the loop.
+
 ### 1. Bootstrap the pool and provider (once, by an administrator)
 
 `infra/bootstrap-pi-orb-oidc.sh` is the reviewed, idempotent form of this. It creates a workload
