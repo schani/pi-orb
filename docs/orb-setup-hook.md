@@ -1,6 +1,6 @@
 # Orb boot hooks requirements
 
-> **Status:** Requirements accepted 2026-08-25; implementation in progress. Resolves open questions 13 and
+> **Status:** Requirements accepted 2026-08-25; implemented. Resolves open questions 13 and
 > 41 (`docs/open-questions.md`). This document defines two repository-owned hooks the orb runtime
 > runs on the repository's behalf — `.agents/setup` and `.agents/resume` — so a project can
 > prepare its own orbs unattended. The convention deliberately matches Amp's so a repository

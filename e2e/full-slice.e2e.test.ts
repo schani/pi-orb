@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { RUNTIME_SUBPROTOCOL, type ServerFrame, TERMINAL_SUBPROTOCOL } from "@pi-orb/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
@@ -228,15 +236,22 @@ async function observeNoAutonomousReplacement(id: string, workspaceFile?: string
   }
 }
 
-/** Write files into the orb's live workspace through the current incarnation. */
+/**
+ * Write files into the orb's live workspace through the current incarnation.
+ * Parent directories are created, and `mode` applies to every file — boot
+ * hooks have to land at `repo/.agents/…` and have to be executable.
+ */
 async function writeWorkspaceFiles(
   id: string,
   incarnation: number,
   files: Record<string, string>,
+  mode = 0o644,
 ): Promise<void> {
   if (PROCESS_BACKEND) {
     for (const [name, content] of Object.entries(files)) {
-      writeFileSync(join(processHostDirectory(id), "workspace", name), content);
+      const path = join(processHostDirectory(id), "workspace", name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, content, { mode });
     }
     return;
   }
@@ -245,12 +260,36 @@ async function writeWorkspaceFiles(
     `pi-orb-${id}-i${incarnation}`,
     "node",
     "-e",
-    "const files=JSON.parse(process.argv[1]);" +
-      "for(const [name,content] of Object.entries(files))" +
-      "require('fs').writeFileSync('/workspace/'+name,content)",
+    "const files=JSON.parse(process.argv[1]);const mode=Number(process.argv[2]);" +
+      "const fs=require('fs'),p=require('path');" +
+      "for(const [name,content] of Object.entries(files)){" +
+      "const f='/workspace/'+name;fs.mkdirSync(p.dirname(f),{recursive:true});" +
+      "fs.writeFileSync(f,content,{mode});fs.chmodSync(f,mode);}",
     JSON.stringify(files),
+    String(mode),
   ]);
 }
+
+/**
+ * A fixture repository's boot hooks (docs/orb-setup-hook.md). Each records the
+ * environment it was handed and appends to a shared order file, so one read
+ * proves both the ordering and the identity scrub. Setup exits non-zero: the
+ * orb must start anyway and say so.
+ */
+const SETUP_HOOK = [
+  "#!/bin/sh",
+  "env > /workspace/hook-setup-env",
+  "echo setup >> /workspace/hook-order",
+  "exit 3",
+  "",
+].join("\n");
+
+const RESUME_HOOK = [
+  "#!/bin/sh",
+  "env > /workspace/hook-resume-env",
+  "echo resume >> /workspace/hook-order",
+  "",
+].join("\n");
 
 /** Read one workspace file back through the given incarnation. */
 async function readWorkspaceFile(id: string, incarnation: number, name: string): Promise<string> {
@@ -475,6 +514,16 @@ describe("full slice E2E", () => {
             incarnation: 0,
           }),
         });
+        // Boot hooks for the replacement incarnation (docs/orb-setup-hook.md).
+        // Incarnation 0 never runs them: its next boot fails at the injected
+        // marker before the checkout is even reached, so every hook record
+        // this test reads belongs to incarnation 1.
+        await writeWorkspaceFiles(
+          replacementOrbId,
+          0,
+          { "repo/.agents/setup": SETUP_HOOK, "repo/.agents/resume": RESUME_HOOK },
+          0o755,
+        );
         const oldToken = await readRuntimeToken(replacementOrbId, 0);
         const historyBefore = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
         expect(historyBefore.status).toBe(200);
@@ -552,6 +601,72 @@ describe("full slice E2E", () => {
         expect(historyAfter.status).toBe(200);
         expect(historyAfter.body["records"]).toEqual(historyBefore.body["records"]);
         expect(historyAfter.body["session"]).not.toBeNull();
+
+        // -- boot hooks (docs/orb-setup-hook.md) ------------------------------
+        // The replacement incarnation ran setup then resume, and only reached
+        // `running` after both: readiness is behind the agent session, which is
+        // created after resume returns.
+        expect(await readWorkspaceFile(replacementOrbId, 1, "hook-order")).toBe("setup\nresume");
+
+        // Setup's identity scrub, asserted on the environment the hook itself
+        // captured. (`pi-orb id-token` failing closed is the same mechanism
+        // seen from the other side.)
+        const setupEnv = await readWorkspaceFile(replacementOrbId, 1, "hook-setup-env");
+        expect(setupEnv).not.toContain("PI_ORB_RUNTIME_TOKEN");
+        expect(setupEnv).not.toContain("PI_ORB_CONTROL_PLANE_URL");
+        expect(setupEnv).toContain("PI_ORB=1");
+        expect(setupEnv).toContain("PI_ORB_HOOK=setup");
+        expect(setupEnv).toContain("PI_ORB_HOST_INCARNATION=1");
+        const resumeEnv = await readWorkspaceFile(replacementOrbId, 1, "hook-resume-env");
+        expect(resumeEnv).toContain("PI_ORB_RUNTIME_TOKEN=");
+        expect(resumeEnv).toContain("PI_ORB_HOOK=resume");
+
+        // The failing setup is durable and user-visible while the orb runs.
+        const status = JSON.parse(
+          await readWorkspaceFile(replacementOrbId, 1, "home/.cache/pi-orb/logs/setup.status.json"),
+        ) as { outcome: string; exitCode: number; incarnation: string };
+        expect(status).toMatchObject({ outcome: "failed", exitCode: 3, incarnation: "1" });
+        const hooked = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`);
+        expect(hooked.body["state"]).toBe("running");
+        expect(hooked.body["stateDetail"]).toEqual({
+          type: "setup_failed",
+          hook: "setup",
+          reason: "failed",
+          logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+        });
+        await waitForLifecycleEdges("setup-failed edge", replacementOrbId, (lines) =>
+          lines.some((line) => line.includes("setup-failed") && line.includes("reason=failed")),
+        );
+
+        // Stop/start of the retained incarnation runs resume only: the setup
+        // stamp lives on the workspace and still names incarnation 1.
+        expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/stop`)).status).toBe(202);
+        await waitFor(
+          "hook fixture stopped",
+          async () =>
+            (await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`)).body["state"] === "stopped"
+              ? true
+              : null,
+          { timeoutMs: 120_000, intervalMs: 1_000 },
+        );
+        expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/start`)).status).toBe(
+          202,
+        );
+        await waitFor(
+          "hook fixture running again",
+          async () => {
+            const view = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`);
+            if (view.body["state"] === "failed") {
+              throw new FatalProbeError(`hook fixture failed: ${String(view.body["lastError"])}`);
+            }
+            return view.body["state"] === "running" ? true : null;
+          },
+          { timeoutMs: 300_000, intervalMs: 1_000 },
+        );
+        expect(await computeIncarnation(replacementOrbId)).toBe(1);
+        expect(await readWorkspaceFile(replacementOrbId, 1, "hook-order")).toBe(
+          "setup\nresume\nresume",
+        );
 
         expect((await api(base, "DELETE", `/api/v1/projects/${projectId}`)).status).toBe(202);
         await waitFor(

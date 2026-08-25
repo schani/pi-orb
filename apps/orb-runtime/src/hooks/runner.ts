@@ -111,8 +111,8 @@ export interface BootHookRunnerOptions {
 export class BootHookRunner {
   private readonly options: BootHookRunnerOptions;
   private readonly statuses = new Map<HookName, RuntimeHookStatus>();
-  /** A resume still running past its blocking window; terminated on shutdown. */
-  private background: HookProcess | null = null;
+  /** Whichever hook process is alive right now; terminated with the orb. */
+  private inFlight: HookProcess | null = null;
 
   constructor(options: BootHookRunnerOptions) {
     this.options = options;
@@ -163,10 +163,14 @@ export class BootHookRunner {
     return this.run("resume", discovery, RESUME_BLOCKING_WINDOW_MS, "background");
   }
 
-  /** Terminates a resume that outlived its blocking window. */
+  /**
+   * Terminates a hook still running when the orb stops — a resume past its
+   * blocking window, or a setup a shutdown interrupted. Nothing a hook started
+   * outlives the orb.
+   */
   shutdown(): void {
-    this.background?.killGroup();
-    this.background = null;
+    this.inFlight?.killGroup();
+    this.inFlight = null;
   }
 
   private async run(
@@ -221,6 +225,10 @@ export class BootHookRunner {
       });
     }
     const process = spawned.value;
+    this.inFlight = process;
+    void process.exited.then(() => {
+      if (this.inFlight === process) this.inFlight = null;
+    });
 
     const deadline = this.options.task.createDeadline(deadlineMs, `${hook} hook deadline`);
     const expired = new Promise<"expired">((resolve) => {
@@ -236,9 +244,7 @@ export class BootHookRunner {
       if (onDeadline === "background") {
         // The agent proceeds; the hook keeps running with its output captured
         // and records its own outcome when it exits (docs/orb-setup-hook.md).
-        this.background = process;
         void process.exited.then((exit) => {
-          this.background = null;
           this.record(hook, {
             outcome: exit.code === 0 ? "ok" : "failed",
             exitCode: exit.code,
