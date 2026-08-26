@@ -12,7 +12,7 @@ On the dashboard, Command-K on macOS and Control-K elsewhere opens pi-orb Find. 
 
 Find is navigation, not a general command palette. It does not search IDs, lifecycle state, transcript content, checkout files, or agent output. It does not make a network request per keystroke.
 
-The shortcut is dashboard-scoped. Orb, missing-resource, and create-orb routes retain the browser's default Command-K / Control-K behavior. On the dashboard, the shortcut opens Find even when focus is in a creation or rename field; this keeps the dashboard navigation shortcut globally available within its route. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists. The surface must also have a visible close control and a discoverable dashboard button so it is not keyboard-shortcut-only.
+The shortcut is dashboard-scoped. Orb, missing-resource, and create-orb routes retain the browser's default Command-K / Control-K behavior. On the dashboard, the shortcut opens Find even when focus is in a creation or rename field; this keeps the dashboard navigation shortcut globally available within its route. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists. The card has a visible close control, but the dashboard header has no persistent Find hint or button.
 
 ## Reusable client architecture
 
@@ -76,14 +76,15 @@ Activating a project result follows `#/projects/:projectId`, where the dashboard
 
 Find indexes only resources successfully loaded into the dashboard state. While any orb list is loading, the surface says `Searching loaded items · some orbs still loading`; the memoized index grows as responses arrive without clearing the query or active selection. A failed orb list stays visibly failed in its project panel and Find says that some orbs could not be searched. It must never claim `No matches` without this qualification.
 
-Project rename, orb auto-naming observed by a dashboard refresh, archival, deletion, and project removal rebuild the derived index. Active selection is identified by stable entry key, not row number; if that key disappears, selection moves to the nearest remaining result. No independent search cache is allowed, so results cannot outlive dashboard truth.
+Project rename, orb auto-naming observed by a dashboard refresh, archival, deletion, and project removal rebuild the derived index. Active selection is identified by stable entry key, not row number; if that key disappears, the first remaining result becomes the effective selection without an intermediate unselected render. Exactly zero or one row carries selected styling: pointer entry changes the same active key used by Up/Down, and CSS hover never adds a second visual selection. The result region remains mounted while the query changes so one result set is replaced directly by the next without an empty-frame flash. No independent search cache is allowed, so results cannot outlive dashboard truth.
 
 ## Keyboard and accessibility contract
 
 - Register one `keydown` listener in `AppSearchProvider` for the application lifetime. When and only when an active source exists, match `(event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k"`, call `preventDefault()`, then open/focus Find.
 - Use a real `search` landmark. Overlay treatments use an accessible dialog with `aria-modal="true"`; in-place treatments use an expanded region and do not claim modal behavior.
 - The query is `<input type="search">` with an explicit `aria-label`. Announce result count and partial-loading/failure status through one polite live region.
-- Up/Down changes the active result, Enter activates it, and Tab follows ordinary interactive-element order. Do not trap focus for nonmodal treatments; modal treatments contain focus until closed.
+- Up/Down changes the sole active result, pointer entry updates that same selection, Enter activates it, and Tab follows ordinary interactive-element order.
+- The close control and every result arrow share one fixed-width trailing column and horizontal center. Do not trap focus for nonmodal treatments; modal treatments contain focus until closed.
 - Result links include resource kind and parent context in their accessible names. Visual highlights may use `<mark>`, but accessible names remain uninterrupted.
 - At narrow widths, preserve a 44px close target, keep the query visible above the on-screen keyboard, and never depend on hover.
 

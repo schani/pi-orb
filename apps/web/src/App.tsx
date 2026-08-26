@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { AppSearchButton, AppSearchProvider } from "./components/AppSearch.tsx";
+import { AppSearchProvider } from "./components/AppSearch.tsx";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
@@ -46,7 +46,6 @@ function AppRoutes() {
             <a href="#/" className="app-title">
               pi-orb
             </a>
-            <AppSearchButton />
           </header>
           <div className="app-main">
             <ProjectsPage focusedProjectId={route.focusedProjectId} />

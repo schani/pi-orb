@@ -14,6 +14,8 @@ import {
   APP_SEARCH_RESULT_LIMIT,
   type AppSearchSource,
   matchAppSearchItems,
+  moveAppSearchSelection,
+  selectedAppSearchIndex,
   shouldCloseAppSearchForActivation,
 } from "../lib/app-search.ts";
 
@@ -23,10 +25,8 @@ interface SearchRegistration {
 }
 
 interface AppSearchContextValue {
-  source: AppSearchSource | null;
   upsertSource(owner: symbol, source: AppSearchSource): void;
   removeSource(owner: symbol): void;
-  open(): void;
 }
 
 const AppSearchContext = createContext<AppSearchContextValue | null>(null);
@@ -46,21 +46,6 @@ export function useAppSearchSource(source: AppSearchSource | null): void {
   }, [removeSource, source, upsertSource]);
 
   useEffect(() => () => removeSource(owner.current), [removeSource]);
-}
-
-export function AppSearchButton() {
-  const context = useContext(AppSearchContext);
-  if (context?.source === null || context === null) return null;
-  const { open } = context;
-  return (
-    <button type="button" className="app-search-trigger" onClick={open}>
-      <span className="app-search-trigger-icon" aria-hidden="true" />
-      find
-      <span className="app-search-shortcut" aria-hidden="true">
-        ⌘K
-      </span>
-    </button>
-  );
 }
 
 function highlightedText(text: string, query: string): ReactNode {
@@ -99,28 +84,19 @@ export function AppSearchDialog({
   const resultRefs = useRef(new Map<string, HTMLAnchorElement>());
   const matches = useMemo(() => matchAppSearchItems(source.items, query), [query, source.items]);
   const visibleMatches = matches.slice(0, APP_SEARCH_RESULT_LIMIT);
-  const activeIndex = visibleMatches.findIndex((item) => item.key === activeKey);
+  const selectedIndex = selectedAppSearchIndex(visibleMatches, activeKey);
+  const selectedKey = visibleMatches[selectedIndex]?.key ?? null;
 
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
 
-  useEffect(() => {
-    if (visibleMatches.length === 0) return;
-    if (!visibleMatches.some((item) => item.key === activeKey)) {
-      onActiveKeyChange(visibleMatches[0]?.key ?? "");
-    }
-  }, [activeKey, onActiveKeyChange, visibleMatches]);
-
   const move = (offset: number) => {
-    if (visibleMatches.length === 0) return;
-    const currentIndex = activeIndex < 0 ? 0 : activeIndex;
-    const nextIndex = (currentIndex + offset + visibleMatches.length) % visibleMatches.length;
-    const next = visibleMatches[nextIndex];
-    if (next !== undefined) {
-      onActiveKeyChange(next.key);
-      resultRefs.current.get(next.key)?.scrollIntoView({ block: "nearest" });
+    const nextKey = moveAppSearchSelection(visibleMatches, activeKey, offset);
+    if (nextKey !== null) {
+      onActiveKeyChange(nextKey);
+      resultRefs.current.get(nextKey)?.scrollIntoView({ block: "nearest" });
     }
   };
 
@@ -132,7 +108,7 @@ export function AppSearchDialog({
       event.preventDefault();
       move(-1);
     } else if (event.key === "Enter") {
-      const active = visibleMatches[activeIndex < 0 ? 0 : activeIndex];
+      const active = visibleMatches[selectedIndex < 0 ? 0 : selectedIndex];
       if (active !== undefined) {
         event.preventDefault();
         resultRefs.current.get(active.key)?.click();
@@ -186,7 +162,9 @@ export function AppSearchDialog({
             type="search"
             className="app-search-input"
             aria-label={source.label}
-            aria-activedescendant={activeIndex < 0 ? undefined : `app-search-result-${activeIndex}`}
+            aria-activedescendant={
+              selectedIndex < 0 ? undefined : `app-search-result-${selectedIndex}`
+            }
             autoComplete="off"
             placeholder={source.placeholder}
             value={query}
@@ -202,15 +180,15 @@ export function AppSearchDialog({
             ×
           </button>
         </search>
-        {query.trim() === "" ? (
-          <p className="app-search-empty">{source.scopeDescription}</p>
-        ) : visibleMatches.length === 0 ? (
-          <p className="app-search-empty">
-            No matches{source.status.type === "complete" ? "" : " in loaded items"}
-          </p>
-        ) : (
-          <div className="app-search-results">
-            {visibleMatches.map((item, index) => (
+        <div className="app-search-result-region">
+          {query.trim() === "" ? (
+            <p className="app-search-empty">{source.scopeDescription}</p>
+          ) : visibleMatches.length === 0 ? (
+            <p className="app-search-empty">
+              No matches{source.status.type === "complete" ? "" : " in loaded items"}
+            </p>
+          ) : (
+            visibleMatches.map((item, index) => (
               <a
                 key={item.key}
                 id={`app-search-result-${index}`}
@@ -218,7 +196,7 @@ export function AppSearchDialog({
                   if (element === null) resultRefs.current.delete(item.key);
                   else resultRefs.current.set(item.key, element);
                 }}
-                className={`app-search-result${item.key === activeKey ? " active" : ""}`}
+                className={`app-search-result${item.key === selectedKey ? " active" : ""}`}
                 href={item.href}
                 aria-label={`${item.kindLabel}: ${item.title}${item.context === undefined ? "" : `, ${item.context}`}`}
                 onMouseEnter={() => onActiveKeyChange(item.key)}
@@ -239,9 +217,9 @@ export function AppSearchDialog({
                   →
                 </span>
               </a>
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
         <div className="app-search-footer">
           <span>↑↓ move</span>
           <span>↵ open</span>
@@ -269,6 +247,12 @@ export function AppSearchProvider({ children }: { children: ReactNode }) {
         setOpen(false);
         setQuery("");
         setActiveKey(null);
+      } else {
+        setActiveKey((currentKey) =>
+          currentKey !== null && source.items.some((item) => item.key === currentKey)
+            ? currentKey
+            : null,
+        );
       }
       return { owner, source };
     });
@@ -320,13 +304,8 @@ export function AppSearchProvider({ children }: { children: ReactNode }) {
   }, [closeSearch, open, openSearch, registration]);
 
   const context = useMemo<AppSearchContextValue>(
-    () => ({
-      source: registration?.source ?? null,
-      upsertSource,
-      removeSource,
-      open: openSearch,
-    }),
-    [openSearch, registration?.source, removeSource, upsertSource],
+    () => ({ upsertSource, removeSource }),
+    [removeSource, upsertSource],
   );
 
   return (
@@ -339,7 +318,7 @@ export function AppSearchProvider({ children }: { children: ReactNode }) {
           activeKey={activeKey}
           onQueryChange={(nextQuery) => {
             setQuery(nextQuery);
-            setActiveKey(null);
+            setActiveKey(matchAppSearchItems(registration.source.items, nextQuery)[0]?.key ?? null);
           }}
           onActiveKeyChange={setActiveKey}
           onClose={closeSearch}

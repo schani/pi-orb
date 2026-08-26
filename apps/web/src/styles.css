@@ -85,16 +85,6 @@ body {
   text-decoration: none;
 }
 
-.app-search-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  padding: 5px 10px;
-  border-color: var(--rule);
-}
-
-.app-search-trigger-icon,
 .app-search-query-icon {
   position: relative;
   display: inline-block;
@@ -105,7 +95,6 @@ body {
   border-radius: 50%;
 }
 
-.app-search-trigger-icon::after,
 .app-search-query-icon::after {
   position: absolute;
   right: -5px;
@@ -115,15 +104,6 @@ body {
   background: currentcolor;
   content: "";
   transform: rotate(45deg);
-}
-
-.app-search-shortcut {
-  color: var(--ink-faint);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-variant-caps: normal;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
 .app-main {
@@ -249,6 +229,11 @@ a {
   outline: none;
 }
 
+.app-search-input::-webkit-search-cancel-button {
+  display: none;
+  appearance: none;
+}
+
 .app-search-close {
   width: 44px;
   height: 44px;
@@ -264,17 +249,17 @@ a {
   text-transform: none;
 }
 
-.app-search-results {
+.app-search-result-region {
   max-height: min(52vh, 420px);
   overflow-y: auto;
 }
 
 .app-search-result {
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr) auto;
+  grid-template-columns: 82px minmax(0, 1fr) 44px;
   align-items: center;
   gap: 12px;
-  padding: 11px 15px;
+  padding: 11px 17px 11px 15px;
   color: var(--ink);
   border-top: 1px solid var(--rule);
   text-decoration: none;
@@ -284,7 +269,6 @@ a {
   border-top: 0;
 }
 
-.app-search-result:hover,
 .app-search-result.active {
   background: var(--accent-soft);
 }
@@ -331,8 +315,10 @@ a {
 }
 
 .app-search-result-arrow {
+  width: 44px;
   color: var(--accent);
   font-size: 18px;
+  text-align: center;
 }
 
 .app-search-empty {
@@ -1985,7 +1971,7 @@ button.project-orb-action.danger:hover:not(:disabled) {
   }
 
   .app-search-result {
-    grid-template-columns: 66px minmax(0, 1fr) auto;
+    grid-template-columns: 66px minmax(0, 1fr) 44px;
   }
 
   .app-search-footer > span:not(.app-search-count) {

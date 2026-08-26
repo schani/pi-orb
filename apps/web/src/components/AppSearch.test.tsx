@@ -18,17 +18,25 @@ const source: AppSearchSource = {
       keywords: ["Compiler repair"],
       href: "#/orbs/orb-1",
     },
+    {
+      key: "fixture:item-2",
+      kindLabel: "orb",
+      title: "Compiler redesign",
+      context: "Atlas · working set",
+      keywords: ["Compiler redesign"],
+      href: "#/orbs/orb-2",
+    },
   ],
 };
 
 const noop = () => {};
 
-function render(query: string): string {
+function render(query: string, activeKey = "fixture:item"): string {
   return renderToStaticMarkup(
     <AppSearchDialog
       source={source}
       query={query}
-      activeKey="fixture:item"
+      activeKey={activeKey}
       onQueryChange={noop}
       onActiveKeyChange={noop}
       onClose={noop}
@@ -37,10 +45,12 @@ function render(query: string): string {
 }
 
 describe("AppSearchDialog", () => {
-  it("renders every matching result as a native link", () => {
-    const html = render("compiler");
+  it("renders every matching result as a native link with exactly one selection", () => {
+    const html = render("compiler", "no-longer-present");
     expect(html).toContain('<a id="app-search-result-0"');
     expect(html).toContain('href="#/orbs/orb-1"');
+    expect(html).toContain('href="#/orbs/orb-2"');
+    expect(html.match(/app-search-result active/g)).toHaveLength(1);
     expect(html).not.toContain('role="link"');
   });
 
@@ -48,6 +58,7 @@ describe("AppSearchDialog", () => {
     const html = render("");
     expect(html).toContain('type="search"');
     expect(html).toContain('aria-label="Find fixture resources"');
+    expect(html).toContain('class="app-search-result-region"');
     expect(html).toContain("Fixture names");
   });
 });

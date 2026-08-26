@@ -52,6 +52,25 @@ export function normalizeAppSearchText(value: string): string {
   return value.trim().normalize("NFKC").toLowerCase();
 }
 
+export function selectedAppSearchIndex(
+  items: readonly AppSearchItem[],
+  activeKey: string | null,
+): number {
+  const requestedIndex = items.findIndex((item) => item.key === activeKey);
+  return requestedIndex < 0 && items.length > 0 ? 0 : requestedIndex;
+}
+
+export function moveAppSearchSelection(
+  items: readonly AppSearchItem[],
+  activeKey: string | null,
+  offset: number,
+): string | null {
+  if (items.length === 0) return null;
+  const currentIndex = selectedAppSearchIndex(items, activeKey);
+  const nextIndex = (currentIndex + offset + items.length) % items.length;
+  return items[nextIndex]?.key ?? null;
+}
+
 /** Stable substring matching over only source-declared keywords. */
 export function matchAppSearchItems(
   items: readonly AppSearchItem[],
