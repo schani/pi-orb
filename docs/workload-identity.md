@@ -45,11 +45,13 @@
 > the VPC's lack of any port-22 ingress rule. The ordinary lifecycle smoke passed, while the
 > identity smoke stopped at its first SSH mint and was not rerun. See
 > `docs/postmortems/2026-08-26-workload-identity-cloud-release-gates.md`.
-> The resulting URL fix validates membership in Cloud Run's complete URL set and exports that same
-> deterministic trust anchor; the SSH fix adds an IAP-only port-22 rule targeted to orb service
-> accounts and makes the smoke wait through the IAP tunnel with complete failure diagnostics.
-> Both await live revalidation. The migration race was one-time for this production database;
-> general schema-before-consumer ordering remains tracked separately in `TODO.md`.
+> A follow-up release live-validated both fixes: the postcondition passed, IAP SSH was ready on its
+> first attempt, and a token minted in a real orb verified against the public issuer. That release
+> then exposed a smoke-only defect before the stopped-orb assertion: its singleton `gcloud compute
+> instances describe` command incorrectly used the list-only `--filter` flag. The smoke now requests
+> JSON and selects the metadata key locally; a complete fresh release remains the gate. The
+> migration race was one-time for this production database; general schema-before-consumer ordering
+> remains tracked separately in `TODO.md`.
 >
 > This document defines a provider-neutral OIDC identity that code running inside a pi-orb can
 > exchange for short-lived credentials from cloud providers and private services. It does not grant

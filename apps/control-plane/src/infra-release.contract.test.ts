@@ -196,6 +196,17 @@ describe("workload-identity cloud release configuration", () => {
     expect(smoke).toContain('wait_for_ssh "$MINT_INSTANCE"');
     expect(smoke).toContain("sed 's/^/  /' \"$WORK_DIR/mint.err\"");
   });
+
+  it("extracts instance metadata locally from describe JSON", () => {
+    const smoke = readFileSync(resolve("infra/smoke-workload-identity.sh"), "utf8");
+    const helper = smoke.match(/instance_metadata\(\)[\s\S]*?\n}\n\norb_ssh\(\)/)?.[0];
+
+    expect(helper).toBeDefined();
+    expect(helper).toContain("gcloud compute instances describe");
+    expect(helper).toContain("--format=json");
+    expect(helper).toContain("JSON.parse(input)");
+    expect(helper).not.toContain("--filter");
+  });
 });
 
 describe("infra/release.sh", () => {

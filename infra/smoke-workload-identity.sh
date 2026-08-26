@@ -385,9 +385,33 @@ orb_instance() { # the one live instance of an orb, by label
 instance_metadata() { # instance_metadata <instance> <key>
   gcloud compute instances describe "$1" --project "$PI_ORB_GCP_PROJECT" \
     --zone "$PI_ORB_GCE_ZONE" \
-    --flatten="metadata.items[]" \
-    --filter="metadata.items.key=$2" \
-    --format="value(metadata.items.value)"
+    --format=json |
+    node -e '
+const key = process.argv[1];
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => (input += chunk));
+process.stdin.on("end", () => {
+  let instance;
+  try {
+    instance = JSON.parse(input);
+  } catch {
+    process.stderr.write("instance metadata: gcloud returned invalid JSON\n");
+    process.exitCode = 3;
+    return;
+  }
+  const items = Array.isArray(instance.metadata?.items) ? instance.metadata.items : [];
+  const matches = items.filter((item) => item.key === key);
+  if (matches.length > 1) {
+    process.stderr.write(`instance metadata: duplicate key ${key}\n`);
+    process.exitCode = 3;
+    return;
+  }
+  if (matches.length === 1 && matches[0].value != null) {
+    process.stdout.write(String(matches[0].value));
+  }
+});
+' "$2"
 }
 
 orb_ssh() { # orb_ssh <instance> <remote command>; stdin is forwarded
