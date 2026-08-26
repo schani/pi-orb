@@ -102,22 +102,19 @@ function stateDetailOf(
       ...(bootProbe.lastError !== undefined ? { lastProbeError: bootProbe.lastError } : {}),
     };
   }
-  if (
-    orb.state === "running" &&
-    orb.hookFailureHook !== null &&
-    orb.hookFailureReason !== null &&
-    orb.hookFailureLog !== null
-  ) {
-    // Only while running: the columns are written at the ready transition and
-    // describe the boot that is serving right now. On a stopped orb, or during
-    // the next boot before it lands, they describe compute that is not there.
-    // The orb is running regardless (docs/orb-setup-hook.md); this only says
-    // the environment its hooks were meant to prepare may be incomplete.
+  const hookFailure = orb.state === "running" ? control.getHookFailure(orb.id) : null;
+  if (hookFailure !== null) {
+    // Only while running: the verdict is the one this process last heard from
+    // the runtime and describes the boot that is serving right now. On a
+    // stopped orb, or during the next boot before its first health report, it
+    // would describe compute that is not there. The orb is running regardless
+    // (docs/orb-setup-hook.md); this only says the environment its hooks were
+    // meant to prepare may be incomplete.
     return {
       type: "setup_failed",
-      hook: orb.hookFailureHook,
-      reason: orb.hookFailureReason,
-      logPath: orb.hookFailureLog,
+      hook: hookFailure.hook,
+      reason: hookFailure.reason,
+      logPath: hookFailure.logPath,
     };
   }
   return undefined;

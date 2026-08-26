@@ -95,6 +95,20 @@ half belongs in `.agents/resume`.
    the failure in a log file. pi-orb keeps "still starts" — a broken setup script must not make
    an orb unreachable, since the agent is the tool that fixes it — but the observability rule in
    `AGENTS.md` forbids the silent half. See "Observability" below.
+   **The control plane relays the failure; it does not store it (amended 2026-08-25).** The fact
+   is runtime-owned: the status file and the log live in the orb's persistent `$HOME`, the runtime
+   restates the latest outcome in every health report, and the agent is told through its
+   prompt fragment. So `stateDetail` is derived from the latest health report exactly the way
+   `waiting_for_runtime` is — ephemeral `ControlState`, re-learned on every poll, lost harmlessly
+   on a control-plane restart. Rejected: the three `hook_failure_*` columns the first
+   implementation added (migration `011_boot_hooks.sql`, now removed with no replacement). They
+   bought nothing the runtime does not already hold, and they cost a crash-consistency invariant
+   ("all three move together") and its coverage. What they *looked* like they bought was a verdict
+   visible while the orb is stopped — but that is the one moment the verdict is worthless: it
+   describes compute that is not running, and the view suppressed it anyway. While the orb is
+   stopped the control plane therefore says nothing about hooks; the log stays in the workspace,
+   and the truth is re-established from the runtime on the next start. The durable half of the
+   observability rule is met by the `lifecycle:` edge, which is unchanged.
 7. **No project-settings hooks, no services manifest.** Amp's pre-clone/pre-setup scripts live in
    project settings; pi-orb has no per-project settings store yet, so they are out of scope, and
    a repository that needs them declares the work in `.agents/setup` instead. Long-running
@@ -172,10 +186,15 @@ and outcomes that affect the user must be visible in the product.
   log stream so the operator can read them without an orb shell.
 - The result of the latest setup run — outcome (`ok`, `failed` with exit code, `timeout`,
   `hook_not_executable`), incarnation, start and end time, and the last lines of output — is
-  persisted next to the log as a small status file and reported to the control plane in the
-  runtime's health/readiness report, which surfaces it as a user-visible `stateDetail` on the
-  orb page (`setup_failed`, with the reason and a pointer to the log), following the
-  `host_discard_error` precedent. Success is silent in the product.
+  persisted next to the log as a small status file **in the orb**, and reported to the control
+  plane in the runtime's health/readiness report. The control plane keeps the latest reported
+  verdict in per-process memory and surfaces it as a user-visible `stateDetail` on the orb page
+  (`setup_failed`, with the reason and a pointer to the log) while the orb is `running`. It is
+  relayed, never stored (decision 6): the runtime owns the fact, the control plane caches its
+  last answer, and a control-plane restart simply re-learns it from the next boot's health
+  report. Unlike `host_discard_error`, which *is* persisted because it records a decision the
+  control plane itself took about compute that may no longer exist, this verdict is a property of
+  a live orb that keeps repeating it. Success is silent in the product.
 - The control plane logs one `lifecycle:` edge per non-`ok` outcome (`setup-failed` with
   incarnation, reason, exit code — never output content) and nothing on success, per the
   edges-not-levels rule in `docs/lifecycle.md`. Resume failures follow the same shape with a
@@ -277,8 +296,6 @@ Named checkpoints mark the crash boundaries, following the `compute-replacement.
 ```
 boot-hooks.hold-before-anchor        control plane, before the setup hold anchor is (re)seeded
 boot-hooks.hold-anchored             control plane, after it
-boot-hooks.failure-before-persist    control plane, before the three hook-failure columns are written
-boot-hooks.failure-persisted         control plane, after they are
 boot-hooks.before-ready-after-setup  control plane, before the ready transition that ends a held boot
 boot-hooks.status-before-write       runtime, before a hook's status file is written
 boot-hooks.status-written            runtime, after it
@@ -339,13 +356,15 @@ Three defects the coverage found, all fixed on the same branch:
   after a failed or timed-out setup (`setup-timeout-still-runs`); compute replacement re-runs
   setup on the new incarnation (`setup-per-incarnation`). Races: `setup-hold-across-restart`,
   `stop-during-setup`, `spec-change-during-setup`, `idle-stop-never-preempts-setup`,
-  `runtime-restart-runs-resume-only`. Crash windows, each restarting the control plane on the
-  durable state a death at the named checkpoint leaves behind:
-  `boot-hooks-crash-{hold-anchored, hold-reseeded, failure-before-persist, failure-persisted}`.
+  `runtime-restart-runs-resume-only`. `setup-hold-across-restart` doubles as the relay test: its
+  setup fails, so the second process must show `setup_failed` it learned from the runtime, with
+  nothing durable carrying it across the death. Crash windows, each restarting the control plane
+  on the durable state a death at the named checkpoint leaves behind:
+  `boot-hooks-crash-{hold-anchored, hold-reseeded, failed-setup-across-death}`.
   Failpoints: `setup-hold-under-store-failpoints` (`store.write`/`store.read`) and
   `setup-hold-under-health-failpoints` (`runtime.health`), both requiring that no orb is failed
-  while a live runtime keeps reporting setup inside the hold, that the three hook-failure columns
-  are never half-written, and that each edge still fires exactly once.
+  while a live runtime keeps reporting setup inside the hold, that the relayed verdict still
+  reaches the orb page, and that each edge still fires exactly once.
 - E2E (Docker backend): a fixture repository with both hooks proves the ordering
   (setup → resume → agent), that `pi-orb id-token` fails inside setup and succeeds inside resume,
   that a failing setup surfaces on the orb page and in the agent's context while the orb runs,

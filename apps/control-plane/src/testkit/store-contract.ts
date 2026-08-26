@@ -39,9 +39,6 @@ const orb: OrbRow = {
   hostDiscardError: null,
   hostDiscardEvidence: null,
   hostDiscardRequestedAt: null,
-  hookFailureHook: null,
-  hookFailureReason: null,
-  hookFailureLog: null,
   checkoutCommit: null,
   harnessSessionId: null,
   harnessSessionHeader: null,
@@ -485,59 +482,6 @@ export function storeSemanticsContractTests(
         hostDiscardEvidence: null,
       });
       expect(committed.isOk() && committed.value.hostDiscardEvidence).toBeNull();
-    });
-
-    it("records the current boot's hook failure and clears it on a clean boot", async () => {
-      await seed();
-      const failed = await store.casUpdateFields(task, {
-        orbId: orb.id,
-        expectedStateVersion: 0,
-        now: 2_000,
-        hookFailureHook: "setup",
-        hookFailureReason: "timeout",
-        hookFailureLog: "/root/.cache/pi-orb/logs/setup.log",
-      });
-      expect(failed.isOk() && failed.value).toMatchObject({
-        hookFailureHook: "setup",
-        hookFailureReason: "timeout",
-        hookFailureLog: "/root/.cache/pi-orb/logs/setup.log",
-      });
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
-        hookFailureHook: "setup",
-        hookFailureReason: "timeout",
-        hookFailureLog: "/root/.cache/pi-orb/logs/setup.log",
-      });
-
-      // The next ready transition describes its own boot, so a hookless or
-      // clean boot erases the previous one (docs/orb-setup-hook.md).
-      const cleared = await store.casUpdateFields(task, {
-        orbId: orb.id,
-        expectedStateVersion: 1,
-        now: 3_000,
-        hookFailureHook: null,
-        hookFailureReason: null,
-        hookFailureLog: null,
-      });
-      expect(cleared.isOk() && cleared.value).toMatchObject({
-        hookFailureHook: null,
-        hookFailureReason: null,
-        hookFailureLog: null,
-      });
-    });
-
-    it("refuses a hook failure written without all three columns", async () => {
-      await seed();
-      const partial = await store.casUpdateFields(task, {
-        orbId: orb.id,
-        expectedStateVersion: 0,
-        now: 2_000,
-        hookFailureHook: "resume",
-      });
-      expect(partial.isErr() && partial.error.type).toBe("store_error");
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
-        stateVersion: 0,
-        hookFailureHook: null,
-      });
     });
 
     it("forces replacement when provider stamps disagree with durable current spec", async () => {

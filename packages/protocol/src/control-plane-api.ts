@@ -150,9 +150,9 @@ export const OrbStateDetailSchema = Type.Union([
     closed,
   ),
   /**
-   * The current boot's setup or resume hook did not succeed. The orb runs
-   * anyway; this says so and points at the log inside the orb. Never carries
-   * the hook's output.
+   * The current boot's setup or resume hook did not succeed, as the running
+   * orb's own health report states it. The orb runs anyway; this says so and
+   * points at the log inside the orb. Never carries the hook's output.
    */
   Type.Object(
     {

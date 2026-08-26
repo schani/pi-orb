@@ -440,8 +440,11 @@ describe("orb boot hook races (DST)", () => {
         {
           name: "driver",
           f: async (task) => {
+            // A failing hook, so the same scenario also proves the second
+            // process re-learns the verdict from the runtime: nothing durable
+            // carries it across the death (docs/orb-setup-hook.md).
             harness.world.configureOrb(ORB, {
-              hooks: { setupOutcome: "ok", setupDurationMs, resumeOutcome: "ok" },
+              hooks: { setupOutcome: "failed", setupDurationMs, resumeOutcome: "ok" },
             });
             seedCreatingOrb(task, harness);
             const startedAt = task.wallNow();
@@ -474,6 +477,12 @@ describe("orb boot hook races (DST)", () => {
       expect(harness.world.hostIncarnationOf(ORB)).toBe(0);
       // One incarnation, one setup: the restart must not have re-run it.
       expect(harness.world.setupRunsOf(ORB)).toEqual([0]);
+      expect(view(harness)?.stateDetail).toEqual({
+        type: "setup_failed",
+        hook: "setup",
+        reason: "failed",
+        logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+      });
     });
   });
 
@@ -718,20 +727,6 @@ describe("orb boot hook crash windows (DST)", () => {
     readonly assertConverged: (harness: TestHarness) => void;
   }
 
-  const failedHooks = (harness: TestHarness): void =>
-    harness.world.configureOrb(ORB, {
-      hooks: { setupOutcome: "failed", setupDurationMs: 5_000, resumeOutcome: "ok" },
-    });
-
-  const setupFailureVisible = (harness: TestHarness): void => {
-    expect(harness.store.orbSnapshot(ORB)).toMatchObject({
-      hookFailureHook: "setup",
-      hookFailureReason: "failed",
-      hookFailureLog: "/workspace/home/.cache/pi-orb/logs/setup.log",
-    });
-    expect(view(harness)?.stateDetail).toMatchObject({ type: "setup_failed", hook: "setup" });
-  };
-
   const windows: readonly CrashWindow[] = [
     {
       // boot-hooks.hold-before-anchor / hold-anchored: the anchor lives only in
@@ -793,45 +788,34 @@ describe("orb boot hook crash windows (DST)", () => {
       },
     },
     {
-      // boot-hooks.failure-before-persist: the runtime has reached a verdict
-      // and no column carries it yet.
-      name: "failure-before-persist",
-      configure: failedHooks,
-      arrange: async (task, harness) => {
-        harness.store.failNextReadyIdentityWrites(1);
-        await drive(task, harness, "drive to the unpersisted hook verdict", () => {
-          return harness.store.pendingScriptedBootFailures() === 0;
-        });
-      },
+      // boot-hooks.before-ready-after-setup: the restarted process learns the
+      // failed verdict from the runtime, not from the row, and shows it once
+      // the boot it describes has ended (docs/orb-setup-hook.md).
+      name: "failed-setup-across-death",
+      configure: (harness) =>
+        harness.world.configureOrb(ORB, {
+          initDurationMs: 90_000,
+          hooks: { setupOutcome: "failed", setupDurationMs: 5_000, resumeOutcome: "ok" },
+        }),
+      arrange: (task, harness) =>
+        drive(
+          task,
+          harness,
+          "drive to a failed setup verdict inside a boot that has not ended",
+          () => harness.world.hookStatusesOf(ORB).setup?.outcome === "failed",
+        ),
       assertDurable: (harness) => {
-        expect(harness.store.orbSnapshot(ORB)).toMatchObject({
-          state: "creating",
-          hookFailureHook: null,
-          hookFailureReason: null,
-          hookFailureLog: null,
+        expect(harness.store.orbSnapshot(ORB)?.state).toBe("creating");
+        expect(harness.world.hookStatusesOf(ORB).setup?.outcome).toBe("failed");
+      },
+      assertConverged: (harness) => {
+        expect(view(harness)?.stateDetail).toEqual({
+          type: "setup_failed",
+          hook: "setup",
+          reason: "failed",
+          logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
         });
       },
-      assertConverged: setupFailureVisible,
-    },
-    {
-      // boot-hooks.failure-persisted / before-ready-after-setup: the verdict is
-      // durable and the boot it describes has not ended.
-      name: "failure-persisted",
-      configure: failedHooks,
-      arrange: async (task, harness) => {
-        harness.store.failNextRunningTransitions(1);
-        await drive(task, harness, "drive to the persisted-but-unfinished boot", () => {
-          return harness.store.pendingScriptedBootFailures() === 0;
-        });
-      },
-      assertDurable: (harness) => {
-        expect(harness.store.orbSnapshot(ORB)).toMatchObject({
-          state: "creating",
-          hookFailureHook: "setup",
-          hookFailureReason: "failed",
-        });
-      },
-      assertConverged: setupFailureVisible,
     },
   ];
 
@@ -882,19 +866,6 @@ describe("orb boot hook crash windows (DST)", () => {
 });
 
 describe("orb boot hooks under failpoints (DST)", () => {
-  /** All three hook columns move together, or none of them do. */
-  function assertHookColumnsWhole(harness: TestHarness): void {
-    const row = harness.store.orbSnapshot(ORB);
-    expect(row).not.toBeNull();
-    const set = [row?.hookFailureHook, row?.hookFailureReason, row?.hookFailureLog].filter(
-      (column) => column !== null && column !== undefined,
-    );
-    expect(
-      set.length === 0 || set.length === 3,
-      `half-written hook columns: ${set.join(",")}`,
-    ).toBe(true);
-  }
-
   it("keeps the held boot and its hook verdict whole under store failures", async () => {
     const capture = new LogCapture();
     await runDst(
@@ -926,28 +897,16 @@ describe("orb boot hooks under failpoints (DST)", () => {
                 },
               });
               seedCreatingOrb(task, harness);
-              await waitUntil(
-                task,
-                "orb running while the store misbehaves",
-                () => {
-                  assertHookColumnsWhole(harness);
-                  const row = harness.store.orbSnapshot(ORB);
-                  if (row?.state === "failed") {
-                    throw new Error(`orb failed under store failures: ${row.lastError}`);
-                  }
-                  return row?.state === "running";
-                },
-                { timeoutMs: CONVERGE_MS },
-              );
+              await waitForRunning(task, harness);
               stop.abort();
             },
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        assertHookColumnsWhole(harness);
-        expect(harness.store.orbSnapshot(ORB)).toMatchObject({
-          hookFailureHook: "setup",
-          hookFailureReason: "failed",
+        expect(view(harness)?.stateDetail).toMatchObject({
+          type: "setup_failed",
+          hook: "setup",
+          reason: "failed",
         });
         // Retried writes must not become retried edges.
         expect(capture.matching("setup-failed")).toHaveLength(1);
@@ -992,7 +951,7 @@ describe("orb boot hooks under failpoints (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        assertHookColumnsWhole(harness);
+        expect(view(harness)?.stateDetail).toMatchObject({ type: "setup_failed", hook: "setup" });
         expect(capture.matching("setup-failed")).toHaveLength(1);
         expect(capture.matching("resume-failed")).toEqual([]);
       },

@@ -39,14 +39,6 @@ const unavailable = (message: string): StoreError => ({
   retryable: true,
 });
 
-/** A write the schema rejects; `mapPgError` classifies a check violation the same way. */
-const corruption = (message: string): StoreError => ({
-  type: "store_error",
-  code: "corruption",
-  message,
-  retryable: false,
-});
-
 /**
  * A deterministic store bug: bad SQL or a parameter the driver cannot encode
  * (docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md). Scripted,
@@ -78,10 +70,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private hostDiscardFinalizeFailures = 0;
   /** External replacement provision landed, but committing its ref/token fails. */
   private hostReplacementCommitFailures = 0;
-  /** Crash window before this boot's hook verdict reaches its columns. */
-  private readyIdentityWriteFailures = 0;
-  /** Crash window after the hook verdict is durable and before the orb runs. */
-  private runningTransitionFailures = 0;
   /** Operations scripted to fail with a deterministic `invariant` store error. */
   private readonly invariantOperations = new Set<InvariantOperation>();
   /** Gate the next `noteOrbMessageDelivery` until this predicate holds. */
@@ -125,31 +113,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
 
   failNextHostReplacementCommits(count: number): void {
     this.hostReplacementCommitFailures = count;
-  }
-
-  /**
-   * Fail the next `count` ready-identity writes — the `casUpdateFields` that
-   * commits `checkout_commit` together with this boot's boot-hook verdict
-   * (docs/orb-setup-hook.md). Deterministically parks the machine in the
-   * crash window where the runtime has reached a verdict and no column
-   * carries it yet.
-   */
-  failNextReadyIdentityWrites(count: number): void {
-    this.readyIdentityWriteFailures = count;
-  }
-
-  /**
-   * Fail the next `count` transitions into `running` — the write that ends a
-   * boot the setup hook held open, leaving the hook columns durable on a row
-   * that is still booting.
-   */
-  failNextRunningTransitions(count: number): void {
-    this.runningTransitionFailures = count;
-  }
-
-  /** Scripted failures still owed, so a scenario can wait for one to fire. */
-  pendingScriptedBootFailures(): number {
-    return this.readyIdentityWriteFailures + this.runningTransitionFailures;
   }
 
   /**
@@ -1164,10 +1127,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     task: SimulationTask,
     params: CasTransitionParams,
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    if (this.runningTransitionFailures > 0 && params.toState === "running") {
-      this.runningTransitionFailures -= 1;
-      return errAsync(unavailable("running transition: scripted store failure"));
-    }
     return this.access(task, FAILPOINTS.storeWrite, `cas transition to ${params.toState}`, () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
@@ -1222,13 +1181,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       this.hostReplacementCommitFailures -= 1;
       return errAsync(unavailable("replacement host commit: scripted store failure"));
     }
-    // The ready-identity write is the only `casUpdateFields` that commits a
-    // checkout commit, which is what makes it identifiable without a
-    // discriminant (as `isReplacementCommit` above).
-    if (this.readyIdentityWriteFailures > 0 && params.checkoutCommit !== undefined) {
-      this.readyIdentityWriteFailures -= 1;
-      return errAsync(unavailable("ready identity write: scripted store failure"));
-    }
     return this.access(task, FAILPOINTS.storeWrite, "cas update fields", () => {
       const orb = this.orbs.get(params.orbId);
       if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
@@ -1251,21 +1203,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           ? { hostSpecGeneration: params.hostSpecGeneration }
           : {}),
         ...(params.hostDiscardEvidence !== undefined ? { hostDiscardEvidence: null } : {}),
-        ...(params.hookFailureHook !== undefined
-          ? { hookFailureHook: params.hookFailureHook }
-          : {}),
-        ...(params.hookFailureReason !== undefined
-          ? { hookFailureReason: params.hookFailureReason }
-          : {}),
-        ...(params.hookFailureLog !== undefined ? { hookFailureLog: params.hookFailureLog } : {}),
       };
-      // Same all-or-nothing rule the orbs_hook_failure_complete CHECK enforces.
-      if (
-        (updated.hookFailureHook === null) !== (updated.hookFailureReason === null) ||
-        (updated.hookFailureHook === null) !== (updated.hookFailureLog === null)
-      ) {
-        return { conflict: false as const, row: null };
-      }
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };
     }).andThen((outcome) => {
@@ -1275,11 +1213,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
         });
       }
-      return outcome.row === null
-        ? errAsync<OrbRow, StoreError>(
-            corruption('new row for relation "orbs" violates check constraint'),
-          )
-        : okAsync(outcome.row);
+      return okAsync(outcome.row);
     });
   }
 

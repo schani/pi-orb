@@ -38,10 +38,6 @@ export interface OrbRow {
   readonly hostDiscardError: string | null;
   readonly hostDiscardEvidence: string | null;
   readonly hostDiscardRequestedAt: number | null;
-  /** Latest boot-hook failure of the current boot (docs/orb-setup-hook.md); all three move together. */
-  readonly hookFailureHook: BootHook | null;
-  readonly hookFailureReason: BootHookFailureReason | null;
-  readonly hookFailureLog: string | null;
   /** Persisted when the runtime first reports ready; doubles as the "has ever been ready" marker. */
   readonly checkoutCommit: string | null;
   readonly harnessSessionId: string | null;

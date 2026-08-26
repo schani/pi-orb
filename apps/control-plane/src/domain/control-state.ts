@@ -1,4 +1,12 @@
+import type { BootHook, BootHookFailureReason } from "./orb.ts";
 import type { DeviceChallenge } from "./ports.ts";
+
+/** The boot-hook verdict the orb page reports (docs/orb-setup-hook.md). */
+export interface HookFailure {
+  readonly hook: BootHook;
+  readonly reason: BootHookFailureReason;
+  readonly logPath: string;
+}
 
 export interface LivenessEntry {
   /** Monotonic ms of the last successful pull (or seeded baseline). */
@@ -347,6 +355,26 @@ export class ControlState {
     return this.bootProbes.get(orbId) ?? null;
   }
 
+  /**
+   * The latest boot-hook verdict the runtime reported, relayed to the orb page
+   * and stored nowhere else (docs/orb-setup-hook.md). The fact is the
+   * runtime's: it lives in the orb's own status file and log, and every health
+   * report restates it, so this process only caches the last answer. It
+   * deliberately outlives the boot episode it was learned in — the orb it
+   * describes is the one running now — and is dropped with the orb's other
+   * per-orb state when the orb stops.
+   */
+  private readonly hookFailures = new Map<string, HookFailure>();
+
+  noteHookFailure(orbId: string, failure: HookFailure | null): void {
+    if (failure === null) this.hookFailures.delete(orbId);
+    else this.hookFailures.set(orbId, failure);
+  }
+
+  getHookFailure(orbId: string): HookFailure | null {
+    return this.hookFailures.get(orbId) ?? null;
+  }
+
   clearBootProbe(orbId: string): void {
     this.bootProbes.delete(orbId);
     this.bootEvidenceSince.delete(orbId);
@@ -437,6 +465,7 @@ export class ControlState {
   clearOrb(orbId: string): void {
     this.bootProbes.delete(orbId);
     this.bootEvidenceSince.delete(orbId);
+    this.hookFailures.delete(orbId);
     this.episodes.delete(orbId);
     this.liveness.delete(orbId);
     ControlState.forgetOrb(this.nextAttemptAt, orbId);

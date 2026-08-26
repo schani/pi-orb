@@ -1,7 +1,7 @@
 import type { MessageInputBlock, OrbState, RuntimeHooks, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
-import type { LivenessEntry } from "./control-state.ts";
+import type { HookFailure, LivenessEntry } from "./control-state.ts";
 import { withDeadline } from "./dst.ts";
 import {
   formatOrbFailure,
@@ -11,13 +11,7 @@ import {
   type StoreError,
 } from "./errors.ts";
 import { logOrbEvent } from "./log.ts";
-import {
-  type BootHook,
-  type BootHookFailureReason,
-  hasNeverBeenReady,
-  type OrbMessageRow,
-  type OrbRow,
-} from "./orb.ts";
+import { hasNeverBeenReady, type OrbMessageRow, type OrbRow } from "./orb.ts";
 import type {
   ControlPlaneDeps,
   OrbHostObservation,
@@ -98,9 +92,7 @@ async function diagnoseHost(
  * that did not run is the more useful explanation of a broken environment,
  * and one line is all the banner has room for.
  */
-function firstHookFailure(
-  hooks: RuntimeHooks | undefined,
-): { hook: BootHook; reason: BootHookFailureReason; logPath: string } | null {
+function firstHookFailure(hooks: RuntimeHooks | undefined): HookFailure | null {
   for (const status of [hooks?.setup, hooks?.resume]) {
     if (status === undefined || status.outcome === "ok") continue;
     return { hook: status.hook, reason: status.outcome, logPath: status.logPath };
@@ -980,31 +972,24 @@ async function reconcileCreateStart(
           `runtime identity mismatch: expected ${orb.id}, got ${status.orbId}`,
         );
       }
-      // Persist ready identity before the orb becomes running (docs/lifecycle.md),
-      // together with this boot's boot-hook verdict — written on every ready
-      // transition, so a clean boot clears the previous one's failure.
-      const hookFailure = firstHookFailure(status.hooks);
-      // Crash window: the three hook-failure columns move together or not at
-      // all, so a death on either side of this write must leave the row
-      // consistent (docs/orb-setup-hook.md).
-      const persistingHookVerdict = status.hooks !== undefined || orb.hookFailureHook !== null;
-      if (persistingHookVerdict) await task.checkpoint("boot-hooks.failure-before-persist");
+      // This boot's boot-hook verdict, relayed and not stored: the fact is the
+      // runtime's — status file and log in the orb's persistent `$HOME`, and
+      // restated in every health report — so the control plane only caches the
+      // latest answer for the orb page (docs/orb-setup-hook.md).
+      deps.control.noteHookFailure(orb.id, firstHookFailure(status.hooks));
+      // Persist ready identity before the orb becomes running (docs/lifecycle.md).
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
         expectedStateVersion: orb.stateVersion,
         now: task.wallNow(),
         checkoutCommit: status.checkoutCommit,
         hostRef: hostResourceId,
-        hookFailureHook: hookFailure?.hook ?? null,
-        hookFailureReason: hookFailure?.reason ?? null,
-        hookFailureLog: hookFailure?.logPath ?? null,
       });
       if (updated.isErr()) {
         return updated.error.type === "state_conflict"
           ? { type: "conflict" }
           : retryable(updated.error);
       }
-      if (persistingHookVerdict) await task.checkpoint("boot-hooks.failure-persisted");
       // Crash window: the boot a setup hook held open is about to end. A death
       // here leaves durable identity written and the orb still `starting`, and
       // the restarted process has to finish it without the lost anchor.
@@ -1928,9 +1913,6 @@ export function createOrb(
       hostDiscardError: null,
       hostDiscardEvidence: null,
       hostDiscardRequestedAt: null,
-      hookFailureHook: null,
-      hookFailureReason: null,
-      hookFailureLog: null,
       checkoutCommit: null,
       harnessSessionId: null,
       harnessSessionHeader: null,

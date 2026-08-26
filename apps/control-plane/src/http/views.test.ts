@@ -24,9 +24,6 @@ const orb: OrbRow = {
   hostDiscardError: null,
   hostDiscardEvidence: null,
   hostDiscardRequestedAt: null,
-  hookFailureHook: null,
-  hookFailureReason: null,
-  hookFailureLog: null,
   checkoutCommit: "abc123",
   harnessSessionId: null,
   harnessSessionHeader: null,
@@ -200,16 +197,13 @@ describe("orbView boot hooks", () => {
   });
 
   it("keeps a running orb's hook failure visible with its log path", () => {
-    const view = orbView(
-      {
-        ...orb,
-        hookFailureHook: "setup",
-        hookFailureReason: "timeout",
-        hookFailureLog: "/workspace/home/.cache/pi-orb/logs/setup.log",
-      },
-      new ControlState(),
-      {},
-    );
+    const control = new ControlState();
+    control.noteHookFailure(orb.id, {
+      hook: "setup",
+      reason: "timeout",
+      logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+    });
+    const view = orbView(orb, control, {});
     expect(view.stateDetail).toEqual({
       type: "setup_failed",
       hook: "setup",
@@ -220,7 +214,19 @@ describe("orbView boot hooks", () => {
   });
 
   it("says nothing about hooks that succeeded", () => {
-    expect(orbView(orb, new ControlState(), {}).stateDetail).toBeUndefined();
+    const control = new ControlState();
+    control.noteHookFailure(orb.id, null);
+    expect(orbView(orb, control, {}).stateDetail).toBeUndefined();
+  });
+
+  it("says nothing about a hook failure the orb is no longer running on", () => {
+    const control = new ControlState();
+    control.noteHookFailure(orb.id, {
+      hook: "resume",
+      reason: "failed",
+      logPath: "/workspace/home/.cache/pi-orb/logs/resume.log",
+    });
+    expect(orbView({ ...orb, state: "stopped" }, control, {}).stateDetail).toBeUndefined();
   });
 });
 
