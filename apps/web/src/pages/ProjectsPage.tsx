@@ -70,7 +70,7 @@ function ProjectOrbRow({
   const actions = projectOrbActions(orb.state);
   const favicon = projectOrbFaviconStatus(orb.state, orb.activity);
   const displayedState = orb.state === "running" && orb.activity === "busy" ? "busy" : orb.state;
-  const age = formatProjectOrbAge(orb.createdAt, now);
+  const age = formatProjectOrbAge(orb.updatedAt, now);
   const blocker =
     orb.state === "deleting" &&
     orb.stateDetail?.type === "deleting_resources" &&

@@ -12,12 +12,12 @@ const AGE_UNITS = [
   { unit: "minute", milliseconds: 60 * 1_000 },
 ] as const;
 
-/** Compact dashboard age: one whole number and the largest useful unit. */
-export function formatProjectOrbAge(createdAt: string, now: number): string | null {
-  const created = Date.parse(createdAt);
-  if (!Number.isFinite(created)) return null;
+/** Compact dashboard update age: one whole number and the largest useful unit. */
+export function formatProjectOrbAge(updatedAt: string, now: number): string | null {
+  const updated = Date.parse(updatedAt);
+  if (!Number.isFinite(updated)) return null;
 
-  const elapsed = Math.max(0, now - created);
+  const elapsed = Math.max(0, now - updated);
   const selected = AGE_UNITS.find(({ milliseconds }) => elapsed >= milliseconds);
   const unit = selected ?? AGE_UNITS.at(-1);
   if (unit === undefined) return null;
@@ -48,9 +48,24 @@ export function splitProjectOrbs(items: OrbView[]): {
   working: OrbView[];
   archive: OrbView[];
 } {
+  const sortableTime = (value: string) => {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+  };
+  const latestFirst = (left: OrbView, right: OrbView) => {
+    const leftUpdated = sortableTime(left.updatedAt);
+    const rightUpdated = sortableTime(right.updatedAt);
+    if (leftUpdated !== rightUpdated) return rightUpdated > leftUpdated ? 1 : -1;
+
+    const leftCreated = sortableTime(left.createdAt);
+    const rightCreated = sortableTime(right.createdAt);
+    if (leftCreated === rightCreated) return 0;
+    return rightCreated > leftCreated ? 1 : -1;
+  };
+
   return {
-    working: items.filter((orb) => projectOrbShelf(orb.state) === "working"),
-    archive: items.filter((orb) => projectOrbShelf(orb.state) === "archive"),
+    working: items.filter((orb) => projectOrbShelf(orb.state) === "working").sort(latestFirst),
+    archive: items.filter((orb) => projectOrbShelf(orb.state) === "archive").sort(latestFirst),
   };
 }
 

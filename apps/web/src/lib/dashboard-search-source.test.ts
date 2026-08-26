@@ -19,7 +19,7 @@ const orb = (id: string, name: string | null, state: OrbState): OrbView => ({
   state,
   stateVersion: 1,
   stateChangedAt: "2026-08-26T00:00:00.000Z",
-  createdAt: "2026-08-26T00:00:00.000Z",
+  createdAt: "2026-08-20T00:00:00.000Z",
   updatedAt: "2026-08-26T00:00:00.000Z",
 });
 

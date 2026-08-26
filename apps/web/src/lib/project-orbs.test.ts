@@ -8,7 +8,7 @@ import {
   splitProjectOrbs,
 } from "./project-orbs.ts";
 
-const orb = (id: string, state: OrbState): OrbView => ({
+const orb = (id: string, state: OrbState, updatedAt = "2026-08-09T00:00:00.000Z"): OrbView => ({
   id,
   projectId: "project",
   name: id,
@@ -16,11 +16,11 @@ const orb = (id: string, state: OrbState): OrbView => ({
   stateVersion: 1,
   stateChangedAt: "2026-08-09T00:00:00.000Z",
   createdAt: "2026-08-09T00:00:00.000Z",
-  updatedAt: "2026-08-09T00:00:00.000Z",
+  updatedAt,
 });
 
 describe("project orb presentation", () => {
-  it("formats age as one number and the largest useful unit", () => {
+  it("formats update age as one number and the largest useful unit", () => {
     const now = Date.parse("2026-08-26T12:00:00.000Z");
     const before = (milliseconds: number) => new Date(now - milliseconds).toISOString();
 
@@ -42,14 +42,24 @@ describe("project orb presentation", () => {
     expect(projectOrbFaviconStatus("archiving")).toBe("transitional");
   });
 
-  it("moves disposal states and retained transcripts to the archive shelf", () => {
+  it("moves disposal states to the archive shelf and sorts each shelf by latest update", () => {
     expect(projectOrbShelf("running")).toBe("working");
     expect(projectOrbShelf("archiving")).toBe("archive");
     expect(projectOrbShelf("archived")).toBe("archive");
     expect(projectOrbShelf("deleting")).toBe("archive");
-    expect(splitProjectOrbs([orb("active", "running"), orb("past", "archived")])).toEqual({
-      working: [orb("active", "running")],
-      archive: [orb("past", "archived")],
+
+    const older = "2026-08-09T01:00:00.000Z";
+    const newer = "2026-08-09T02:00:00.000Z";
+    expect(
+      splitProjectOrbs([
+        orb("older-active", "running", older),
+        orb("newer-archived", "archived", newer),
+        orb("older-archived", "archived", older),
+        orb("newer-active", "stopped", newer),
+      ]),
+    ).toEqual({
+      working: [orb("newer-active", "stopped", newer), orb("older-active", "running", older)],
+      archive: [orb("newer-archived", "archived", newer), orb("older-archived", "archived", older)],
     });
   });
 

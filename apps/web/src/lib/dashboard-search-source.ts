@@ -46,7 +46,7 @@ function orbItem(
   now: number,
 ): AppSearchItem {
   const name = orb.name ?? "untitled orb";
-  const age = formatProjectOrbAge(orb.createdAt, now);
+  const age = formatProjectOrbAge(orb.updatedAt, now);
   const shelf = archived ? "archive shelf" : "working set";
   return {
     key: `dashboard:orb:${orb.id}`,
