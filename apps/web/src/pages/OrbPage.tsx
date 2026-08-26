@@ -923,6 +923,23 @@ export function OrbPage({ orbId }: { orbId: string }) {
               ` — last error: ${orb.stateDetail.lastProbeError}`}
           </div>
         )}
+        {orb?.stateDetail?.type === "running_setup" && (
+          <div className="banner banner-info">
+            Running the repository's <code>.agents/setup</code>…
+            {` for ${orb.stateDetail.secondsRunning}s`}
+          </div>
+        )}
+        {orb?.stateDetail?.type === "setup_failed" && (
+          <div className="banner banner-error">
+            The repository's <code>.agents/{orb.stateDetail.hook}</code>{" "}
+            {orb.stateDetail.reason === "timeout"
+              ? "ran past its deadline and was stopped"
+              : orb.stateDetail.reason === "hook_not_executable"
+                ? "is not executable"
+                : "failed"}
+            . The orb started anyway; its log is at <code>{orb.stateDetail.logPath}</code>.
+          </div>
+        )}
         {orb?.actionRequired !== undefined && (
           <div className="banner banner-action">
             <strong>

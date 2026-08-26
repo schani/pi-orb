@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { bootHookPrompt } from "../hooks/prompt.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 import { orbResourceLoaderOptions } from "./resource-loader.ts";
@@ -34,6 +35,45 @@ describe("orbResourceLoaderOptions", () => {
       previewHost: null,
     }).appendSystemPromptOverride;
     expect(override?.([])).toEqual([environmentPrompt]);
+  });
+
+  it("appends nothing for boot hooks that succeeded", () => {
+    const override = orbResourceLoaderOptions({
+      ...base,
+      previewHost: null,
+      hooks: {
+        setup: {
+          hook: "setup",
+          outcome: "ok",
+          exitCode: 0,
+          incarnation: "0",
+          startedAt: "2026-08-25T00:00:00.000Z",
+          endedAt: "2026-08-25T00:00:10.000Z",
+          logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+        },
+      },
+    }).appendSystemPromptOverride;
+    expect(override?.([])).toEqual([environmentPrompt]);
+  });
+
+  it("tells the agent about a failed boot hook", () => {
+    const hooks = {
+      setup: {
+        hook: "setup" as const,
+        outcome: "failed" as const,
+        exitCode: 1,
+        incarnation: "0",
+        startedAt: "2026-08-25T00:00:00.000Z",
+        endedAt: "2026-08-25T00:00:10.000Z",
+        logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+      },
+    };
+    const override = orbResourceLoaderOptions({
+      ...base,
+      previewHost: null,
+      hooks,
+    }).appendSystemPromptOverride;
+    expect(override?.([])).toEqual([environmentPrompt, bootHookPrompt(hooks)]);
   });
 
   it("does not touch the system prompt itself", () => {

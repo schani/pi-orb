@@ -162,6 +162,74 @@ describe("orbView compute discard", () => {
   });
 });
 
+describe("orbView boot hooks", () => {
+  it("reports a running setup hook instead of a bare readiness wait", () => {
+    const control = new ControlState();
+    control.recordBootProbe("orb-1", {
+      hostState: "running",
+      hostRunningSinceWall: Date.now() - 30_000,
+      hostRunningSinceMono: 0,
+      answered: true,
+      setupRunning: true,
+      nowMono: 0,
+      nowWall: Date.now() - 30_000,
+    });
+    const view = orbView({ ...orb, state: "starting" }, control, {});
+    expect(view.stateDetail).toMatchObject({ type: "running_setup" });
+    expect(Check(OrbViewSchema, view)).toBe(true);
+  });
+
+  it("falls back to the readiness wait once setup has finished", () => {
+    const control = new ControlState();
+    for (const setupRunning of [true, false]) {
+      control.recordBootProbe("orb-1", {
+        hostState: "running",
+        hostRunningSinceWall: Date.now(),
+        hostRunningSinceMono: 0,
+        answered: true,
+        setupRunning,
+        nowMono: 0,
+        nowWall: Date.now(),
+      });
+    }
+    const view = orbView({ ...orb, state: "starting" }, control, {});
+    expect(view.stateDetail).toMatchObject({ type: "waiting_for_runtime" });
+  });
+
+  it("keeps a running orb's hook failure visible with its log path", () => {
+    const control = new ControlState();
+    control.noteHookFailure(orb.id, {
+      hook: "setup",
+      reason: "timeout",
+      logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+    });
+    const view = orbView(orb, control, {});
+    expect(view.stateDetail).toEqual({
+      type: "setup_failed",
+      hook: "setup",
+      reason: "timeout",
+      logPath: "/workspace/home/.cache/pi-orb/logs/setup.log",
+    });
+    expect(Check(OrbViewSchema, view)).toBe(true);
+  });
+
+  it("says nothing about hooks that succeeded", () => {
+    const control = new ControlState();
+    control.noteHookFailure(orb.id, null);
+    expect(orbView(orb, control, {}).stateDetail).toBeUndefined();
+  });
+
+  it("says nothing about a hook failure the orb is no longer running on", () => {
+    const control = new ControlState();
+    control.noteHookFailure(orb.id, {
+      hook: "resume",
+      reason: "failed",
+      logPath: "/workspace/home/.cache/pi-orb/logs/resume.log",
+    });
+    expect(orbView({ ...orb, state: "stopped" }, control, {}).stateDetail).toBeUndefined();
+  });
+});
+
 describe("orbView previewHost", () => {
   it("derives the MagicDNS host when a tailnet is configured", () => {
     const view = orbView(orb, new ControlState(), { tailnetDnsName: "tailabc123.ts.net" });

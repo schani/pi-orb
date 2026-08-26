@@ -1206,14 +1206,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };
-    }).andThen((outcome) =>
-      outcome.conflict
-        ? errAsync<OrbRow, StateConflict>({
-            type: "state_conflict",
-            ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
-          })
-        : okAsync(outcome.row),
-    );
+    }).andThen((outcome) => {
+      if (outcome.conflict) {
+        return errAsync<OrbRow, StateConflict>({
+          type: "state_conflict",
+          ...(outcome.currentState !== undefined ? { currentState: outcome.currentState } : {}),
+        });
+      }
+      return okAsync(outcome.row);
+    });
   }
 
   touchLastBusy(

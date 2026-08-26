@@ -32,6 +32,41 @@ export const RuntimeTurnResumeSchema = Type.Object(
 );
 export type RuntimeTurnResume = Static<typeof RuntimeTurnResumeSchema>;
 
+/**
+ * The outcome of one boot hook run (`docs/orb-setup-hook.md`). Deliberately
+ * carries no output: the log path points at the text, and the control plane
+ * must never log or store what a repository's script printed.
+ */
+export const RuntimeHookStatusSchema = Type.Object(
+  {
+    hook: Type.Union([Type.Literal("setup"), Type.Literal("resume")]),
+    outcome: Type.Union([
+      Type.Literal("ok"),
+      Type.Literal("failed"),
+      Type.Literal("timeout"),
+      Type.Literal("hook_not_executable"),
+    ]),
+    /** Null when the hook was killed, never spawned, or never executable. */
+    exitCode: Type.Union([Type.Integer(), Type.Null()]),
+    incarnation: Type.String(),
+    startedAt: Type.String(),
+    endedAt: Type.String(),
+    logPath: Type.String(),
+  },
+  closed,
+);
+export type RuntimeHookStatus = Static<typeof RuntimeHookStatusSchema>;
+
+/** Latest outcome per hook; absent members mean the hook has not run here. */
+export const RuntimeHooksSchema = Type.Object(
+  {
+    setup: Type.Optional(RuntimeHookStatusSchema),
+    resume: Type.Optional(RuntimeHookStatusSchema),
+  },
+  closed,
+);
+export type RuntimeHooks = Static<typeof RuntimeHooksSchema>;
+
 export const RuntimeHealthSchema = Type.Union([
   Type.Object(
     {
@@ -42,9 +77,14 @@ export const RuntimeHealthSchema = Type.Union([
       phase: Type.Union([
         Type.Literal("booting"),
         Type.Literal("cloning"),
+        // `.agents/setup` is holding readiness. The control plane holds its
+        // ordinary boot deadline while this phase is reported, so a hook that
+        // takes twenty minutes is not a boot failure.
+        Type.Literal("setup_running"),
         Type.Literal("loading_session"),
         Type.Literal("checking_auth"),
       ]),
+      hooks: Type.Optional(RuntimeHooksSchema),
     },
     closed,
   ),
@@ -59,6 +99,7 @@ export const RuntimeHealthSchema = Type.Union([
       activity: Type.Union([Type.Literal("idle"), Type.Literal("busy")]),
       operationId: Type.Optional(Type.String()),
       turnResume: Type.Optional(RuntimeTurnResumeSchema),
+      hooks: Type.Optional(RuntimeHooksSchema),
     },
     closed,
   ),

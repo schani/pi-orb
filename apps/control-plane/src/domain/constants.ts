@@ -18,6 +18,14 @@ export interface LifecycleConstants {
   /** Deadline for `creating`/`starting`, measured from `state_changed_at`. */
   readonly createStartDeadlineMs: number;
   /**
+   * How long the create/start deadline is held off while the runtime keeps
+   * reporting `setup_running` (docs/orb-setup-hook.md). It bounds the hold to
+   * the runtime's own 20-minute setup deadline plus room to kill the hook and
+   * finish booting — past that a runtime still claiming setup is stuck, and a
+   * runtime that stops reporting drops the hold on its next probe.
+   */
+  readonly setupHookHoldMs: number;
+  /**
    * Sub-deadline: the runtime health server starts before slow init, so a
    * host observed running whose runtime has never answered for this long is
    * a boot failure, not a slow clone (docs/lifecycle.md).
@@ -76,6 +84,7 @@ export const DEFAULT_LIFECYCLE_CONSTANTS: LifecycleConstants = {
   unreachableGraceMs: 30_000,
   postRestartGraceMs: 3 * 60_000,
   createStartDeadlineMs: 15 * 60_000,
+  setupHookHoldMs: 22 * 60_000,
   unreachableBootDeadlineMs: 3 * 60_000,
   historyPullIntervalMs: 10_000,
   reconcileTickMs: 1_000,

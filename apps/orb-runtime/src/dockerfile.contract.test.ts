@@ -22,6 +22,15 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toMatch(/apt-get install[^\n]*\bzip\b[^\n]*\bunzip\b/);
   });
 
+  it("installs sudo so Amp-style boot hooks run unchanged", () => {
+    expect(dockerfile).toMatch(/apt-get install[^\n]*\bsudo\b/);
+  });
+
+  it("marks every process in the orb with PI_ORB=1 and never sets AMP_ORB", () => {
+    expect(dockerfile).toMatch(/^ENV PI_ORB=1$/m);
+    expect(dockerfile).not.toMatch(/^ENV AMP_ORB/m);
+  });
+
   it("installs agent-browser with a system Chromium executable", () => {
     expect(runtimePackage.dependencies?.["agent-browser"]).toBe("0.33.2");
     expect(dockerfile).toContain("gh tailscale chromium");

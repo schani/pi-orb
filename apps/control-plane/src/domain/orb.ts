@@ -13,6 +13,9 @@ import type {
  */
 export type HostDiscardReason = "failed" | "host_spec_changed";
 
+export type BootHook = "setup" | "resume";
+export type BootHookFailureReason = "failed" | "timeout" | "hook_not_executable";
+
 export interface OrbRow {
   readonly id: string;
   readonly projectId: string;

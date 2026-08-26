@@ -1,4 +1,12 @@
+import type { BootHook, BootHookFailureReason } from "./orb.ts";
 import type { DeviceChallenge } from "./ports.ts";
+
+/** The boot-hook verdict the orb page reports (docs/orb-setup-hook.md). */
+export interface HookFailure {
+  readonly hook: BootHook;
+  readonly reason: BootHookFailureReason;
+  readonly logPath: string;
+}
 
 export interface LivenessEntry {
   /** Monotonic ms of the last successful pull (or seeded baseline). */
@@ -27,7 +35,50 @@ export interface BootProbe {
   attempts: number;
   /** Whether the runtime has answered health at all this boot. */
   everAnswered: boolean;
+  /**
+   * Monotonic ms of the first health report of this boot that said the
+   * repository's setup hook is running (docs/orb-setup-hook.md), or null if
+   * none did. It anchors the deadline hold and is deliberately sticky for the
+   * episode: the hold has to cover the hook *and* the boot that follows it,
+   * and its own bound — not the next probe — is what ends it, so a runtime
+   * that stops reporting is still a dead runtime, just on a longer clock.
+   */
+  setupRunningSinceMono: number | null;
+  /** Wall companion of the above, for the user-visible "running setup" detail. */
+  setupRunningSinceWall: number | null;
+  /** Whether the *latest* answered probe still said setup is running. */
+  setupRunning: boolean;
+  /** Whether the most recent probe got any answer at all. */
+  lastProbeAnswered: boolean;
+  /** Monotonic ms of the most recent answered probe; null before the first. */
+  lastAnswerMono: number | null;
   lastError?: string;
+}
+
+/**
+ * When this boot's setup hook started, in both clocks. An anchor already held
+ * wins; otherwise a live `setup_running` answer anchors at now, and a finished
+ * hook anchors at the start time the runtime persisted — the only evidence
+ * that survives a control-plane restart.
+ */
+function resolveSetupAnchor(
+  existing: BootProbe | undefined,
+  outcome: {
+    readonly setupRunning?: boolean;
+    readonly setupStartedAtWall?: number;
+    readonly nowMono?: number;
+    readonly nowWall?: number;
+  },
+): { readonly mono: number | null; readonly wall: number | null } {
+  if (existing?.setupRunningSinceMono != null) {
+    return { mono: existing.setupRunningSinceMono, wall: existing.setupRunningSinceWall };
+  }
+  const { nowMono, nowWall } = outcome;
+  if (nowMono === undefined || nowWall === undefined) return { mono: null, wall: null };
+  if (outcome.setupRunning === true) return { mono: nowMono, wall: nowWall };
+  const startedAt = outcome.setupStartedAtWall;
+  if (startedAt === undefined) return { mono: null, wall: null };
+  return { mono: nowMono - Math.max(0, nowWall - startedAt), wall: startedAt };
 }
 
 /**
@@ -69,6 +120,7 @@ export class ControlState {
     if (this.episodes.get(orbId) === stateChangedAt) return;
     this.episodes.set(orbId, stateChangedAt);
     this.bootProbes.delete(orbId);
+    this.bootEvidenceSince.delete(orbId);
     this.drainStatus.delete(orbId);
     this.restartPending.delete(orbId);
     this.liveness.delete(orbId);
@@ -250,13 +302,38 @@ export class ControlState {
       /** Monotonic ms companion for deadline math. */
       hostRunningSinceMono: number | null;
       answered: boolean;
+      /** The answer reported the `setup_running` readiness phase. */
+      setupRunning?: boolean;
+      /**
+       * Wall ms at which this incarnation's setup hook started, as the runtime
+       * itself reports it once the hook has finished. It reseeds the anchor
+       * after a control-plane restart, which is the one loss `noteStateEpisode`
+       * cannot call safe: without it a restart lands on a boot whose ordinary
+       * deadline the hook legitimately outlasted, and fails a healthy orb.
+       */
+      setupStartedAtWall?: number;
+      /** Clocks of this probe; required to time and display a setup hold. */
+      nowMono?: number;
+      nowWall?: number;
       lastError?: string;
     },
   ): void {
     const existing = this.bootProbes.get(orbId);
     const keepSince =
       existing?.hostRunningSinceMono != null && outcome.hostRunningSinceMono != null;
+    // Once set, the anchor stands for the episode: the hold has to cover the
+    // hook *and* the boot that follows it, so a later phase must not retire it
+    // and drop the orb straight past an already-expired ordinary deadline. The
+    // display flag is a level, not an edge, and follows the latest answer.
+    const anchor = resolveSetupAnchor(existing, outcome);
     this.bootProbes.set(orbId, {
+      setupRunningSinceMono: anchor.mono,
+      setupRunningSinceWall: anchor.wall,
+      setupRunning: outcome.setupRunning ?? existing?.setupRunning ?? false,
+      lastProbeAnswered: outcome.answered,
+      lastAnswerMono: outcome.answered
+        ? (outcome.nowMono ?? existing?.lastAnswerMono ?? null)
+        : (existing?.lastAnswerMono ?? null),
       hostState: outcome.hostState,
       hostRunningSinceWall: keepSince
         ? existing.hostRunningSinceWall
@@ -278,8 +355,44 @@ export class ControlState {
     return this.bootProbes.get(orbId) ?? null;
   }
 
+  /**
+   * The latest boot-hook verdict the runtime reported, relayed to the orb page
+   * and stored nowhere else (docs/orb-setup-hook.md). The fact is the
+   * runtime's: it lives in the orb's own status file and log, and every health
+   * report restates it, so this process only caches the last answer. It
+   * deliberately outlives the boot episode it was learned in — the orb it
+   * describes is the one running now — and is dropped with the orb's other
+   * per-orb state when the orb stops.
+   */
+  private readonly hookFailures = new Map<string, HookFailure>();
+
+  noteHookFailure(orbId: string, failure: HookFailure | null): void {
+    if (failure === null) this.hookFailures.delete(orbId);
+    else this.hookFailures.set(orbId, failure);
+  }
+
+  getHookFailure(orbId: string): HookFailure | null {
+    return this.hookFailures.get(orbId) ?? null;
+  }
+
   clearBootProbe(orbId: string): void {
     this.bootProbes.delete(orbId);
+    this.bootEvidenceSince.delete(orbId);
+  }
+
+  private readonly bootEvidenceSince = new Map<string, number>();
+
+  /**
+   * Monotonic ms at which this process first reconciled a booting `orbId`,
+   * recorded on the first call and returned unchanged afterwards. A process
+   * that has just started holds no boot probe at all, and the boot deadline
+   * must not be decided on that emptiness (docs/orb-setup-hook.md).
+   */
+  noteBootEvidenceStart(orbId: string, at: number): number {
+    const existing = this.bootEvidenceSince.get(orbId);
+    if (existing !== undefined) return existing;
+    this.bootEvidenceSince.set(orbId, at);
+    return at;
   }
 
   // -- host restart tracking --
@@ -351,6 +464,8 @@ export class ControlState {
   /** Drop all per-orb state after a terminal transition. */
   clearOrb(orbId: string): void {
     this.bootProbes.delete(orbId);
+    this.bootEvidenceSince.delete(orbId);
+    this.hookFailures.delete(orbId);
     this.episodes.delete(orbId);
     this.liveness.delete(orbId);
     ControlState.forgetOrb(this.nextAttemptAt, orbId);

@@ -8,7 +8,7 @@
 FROM node:24-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl zip unzip python3 python3-venv python-is-python3 build-essential pkg-config \
+  && apt-get install -y --no-install-recommends git ca-certificates ripgrep curl zip unzip sudo python3 python3-venv python-is-python3 build-essential pkg-config \
   && mkdir -p -m 755 /etc/apt/keyrings \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
        -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -77,6 +77,10 @@ VOLUME /workspace
 EXPOSE 8080
 
 ENV PI_ORB_WORK_DIR=/workspace
+# The platform marker every process in the orb sees, Amp's `AMP_ORB=1`
+# analogue (docs/orb-setup-hook.md). Set on the image, not only by the runtime,
+# so a `docker exec` shell — the thing a human debugs a hook from — sees it too.
+ENV PI_ORB=1
 ENV HOME=/workspace/home
 ENV RUSTUP_HOME=/workspace/home/.rustup
 ENV CARGO_HOME=/workspace/home/.cargo
