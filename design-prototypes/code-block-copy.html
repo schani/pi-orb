@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pi-orb · code block copy directions</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper:#f8f3e9; --paper-2:#f1eadb; --inset:#e9dfca; --ink:#221c12; --soft:#625846;
+      --faint:#8d816a; --rule:#ddd2bc; --rule-2:#c4b493; --accent:#a03e1c; --accent-soft:#f0ddd0;
+      --green:#287a50; --green-soft:#deebe0; --code:#27241f; --code-ink:#eee7d9; --code-soft:#aca28f;
+      --serif:Charter,"Bitstream Charter","Iowan Old Style",Georgia,serif;
+      --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+      --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    }
+    *{box-sizing:border-box} html{scroll-behavior:smooth} body{margin:0;color:var(--ink);background:var(--paper);font:14px/1.5 var(--sans)} button{font:inherit}
+    .study-header{position:sticky;z-index:30;top:0;min-height:58px;display:flex;align-items:center;gap:20px;padding:10px clamp(16px,4vw,58px);border-bottom:1px solid var(--rule);background:rgb(248 243 233/.94);backdrop-filter:blur(12px)}
+    .brand{font:700 17px var(--mono);letter-spacing:-.04em}.study-label{color:var(--faint);font:10px var(--mono);letter-spacing:.15em;text-transform:uppercase}.study-header nav{display:flex;gap:6px;margin-left:auto}.study-header a{min-width:30px;padding:3px 9px;color:var(--soft);border:1px solid var(--rule);border-radius:99px;text-align:center;text-decoration:none}.study-header a:hover{color:var(--accent);border-color:var(--accent)}
+    .intro,.direction{width:min(1120px,calc(100% - 32px));margin-inline:auto}.intro{padding:54px 0 38px}.eyebrow{color:var(--accent);font:700 10px var(--mono);letter-spacing:.18em;text-transform:uppercase}h1{max-width:820px;margin:8px 0 13px;font:500 clamp(36px,5vw,60px)/1.03 var(--serif)}.intro p{max-width:780px;margin:0;color:var(--soft);font-size:16px}.principles{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}.principles span{padding:5px 9px;color:var(--faint);border:1px solid var(--rule);border-radius:99px;font:10px var(--mono)}
+    .direction{padding:44px 0 68px;border-top:1px solid var(--rule);scroll-margin-top:58px}.direction-heading{display:grid;grid-template-columns:54px minmax(0,1fr);gap:14px;margin-bottom:20px}.number{color:var(--accent);font:500 29px var(--serif)}h2{margin:0;font:600 26px var(--serif)}.rationale{max-width:800px;margin:3px 0 0;color:var(--faint)}
+    .canvas{overflow:hidden;border:1px solid var(--rule);border-radius:14px;background:var(--paper-2);box-shadow:0 15px 45px rgb(83 61 24/.06)}.appbar{height:44px;display:flex;align-items:center;gap:10px;padding:0 18px;border-bottom:1px solid var(--rule);background:var(--paper)}.orb{font:600 13px var(--serif)}.project{padding:3px 6px;color:var(--faint);background:var(--paper-2);font:9px var(--mono)}.status{margin-left:auto;color:var(--green);font:9px var(--mono);letter-spacing:.1em;text-transform:uppercase}
+    .transcript{padding:clamp(23px,4vw,42px)}.turn{display:grid;grid-template-columns:27px minmax(0,740px);gap:12px}.gutter{position:relative}.gutter:after{content:"";position:absolute;top:20px;bottom:-30px;left:9px;width:1px;background:linear-gradient(var(--rule-2),transparent)}.mark{width:19px;height:19px;display:grid;place-items:center;border:1px solid var(--ink);background:var(--paper-2);font:9px var(--mono)}.speaker{display:block;margin:1px 0 10px;color:var(--faint);font:700 9px var(--mono);letter-spacing:.14em;text-transform:uppercase}.prose{max-width:700px;margin:0 0 16px;font:17px/1.68 var(--serif)}.prose.after{margin:16px 0 0}.code-block{position:relative;max-width:730px;margin:15px 0;overflow:hidden;border-radius:6px}.code-block pre{margin:0;overflow:auto;color:var(--code-ink);background:var(--code);font:12px/1.65 var(--mono);tab-size:2}.kw{color:#d9a078}.fn{color:#b9d49b}.str{color:#e1c38b}.comment{color:#8f887b}.copy{cursor:pointer}.copy:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.copy svg{width:14px;height:14px;display:block;fill:none;stroke:currentColor;stroke-width:1.7}.copy .success{display:none}.copy[data-state="copied"] .default{display:none}.copy[data-state="copied"] .success{display:block}.copy[data-state="copied"]{color:var(--green)!important;border-color:var(--green)!important}
+    .recommendation{display:inline-block;margin-left:8px;padding:3px 7px;vertical-align:3px;color:var(--green);border:1px solid #a8c9b2;border-radius:99px;background:var(--green-soft);font:700 8px var(--mono);letter-spacing:.1em;text-transform:uppercase}
+    /* 01 — bare icon */
+    .bare .code-block{border:1px solid #39352e}.bare pre{padding:17px 48px 17px 18px}.bare .copy{position:absolute;z-index:2;top:9px;right:9px;width:30px;height:30px;display:grid;place-items:center;color:var(--code-soft);border:1px solid #514c43;border-radius:4px;background:#302d27}.bare .copy:hover{color:var(--code-ink);background:#39352f}
+    /* 02 — labeled capsule */
+    .capsule .code-block{border:1px solid var(--rule-2);box-shadow:0 3px 9px rgb(34 28 18/.07)}.capsule pre{padding:18px 88px 18px 18px}.capsule .copy{position:absolute;z-index:2;top:10px;right:10px;display:flex;align-items:center;gap:6px;padding:5px 8px;color:var(--code-soft);border:1px solid #5b554a;border-radius:99px;background:#312e28;font:9px var(--mono);letter-spacing:.08em;text-transform:uppercase}.capsule .copy:hover{color:var(--code-ink);border-color:#81796b}.capsule .copy .copied-label{display:none}.capsule .copy[data-state="copied"] .copy-label{display:none}.capsule .copy[data-state="copied"] .copied-label{display:inline}
+    /* 03 — utility header */
+    .utility .code-block{border:1px solid var(--rule-2);background:var(--code)}.utility .code-head{height:34px;display:flex;align-items:center;padding:0 9px 0 14px;color:var(--code-soft);border-bottom:1px solid #464137;background:#302d27;font:9px var(--mono);letter-spacing:.1em;text-transform:uppercase}.utility pre{padding:14px 18px 17px}.utility .copy{margin-left:auto;display:flex;align-items:center;gap:6px;padding:3px 6px;color:var(--code-soft);border:0;border-radius:3px;background:transparent;font:9px var(--mono);text-transform:uppercase}.utility .copy:hover{color:var(--code-ink);background:#3d3931}.utility .copy .copied-label{display:none}.utility .copy[data-state="copied"] .copy-label{display:none}.utility .copy[data-state="copied"] .copied-label{display:inline}
+    /* 04 — paper tab */
+    .tab .code-block{overflow:visible;margin-top:24px;border:1px solid var(--rule-2);border-radius:0 0 5px 5px}.tab pre{padding:18px}.tab .copy{position:absolute;right:-1px;bottom:100%;display:flex;align-items:center;gap:7px;padding:6px 10px;color:var(--soft);border:1px solid var(--rule-2);border-bottom:0;border-radius:5px 5px 0 0;background:var(--inset);font:9px var(--mono);letter-spacing:.08em;text-transform:uppercase}.tab .copy:hover{color:var(--accent);background:var(--paper)}.tab .copy .copied-label{display:none}.tab .copy[data-state="copied"] .copy-label{display:none}.tab .copy[data-state="copied"] .copied-label{display:inline}
+    /* 05 — corner fold */
+    .fold .code-block{border:1px solid var(--rule-2);border-radius:2px}.fold pre{padding:18px 64px 18px 18px}.fold .copy{position:absolute;z-index:2;top:0;right:0;width:48px;height:48px;padding:0;color:var(--ink);border:0;background:linear-gradient(225deg,var(--paper-2) 0 49%,var(--rule-2) 50% 51%,transparent 52%);clip-path:polygon(0 0,100% 0,100% 100%);transition:background .15s}.fold .copy svg{position:absolute;top:8px;right:8px}.fold .copy:hover{color:var(--accent);background:linear-gradient(225deg,var(--accent-soft) 0 49%,var(--accent) 50% 51%,transparent 52%)}.fold .copy[data-state="copied"]{background:linear-gradient(225deg,var(--green-soft) 0 49%,var(--green) 50% 51%,transparent 52%)}
+    .footer{width:min(1120px,calc(100% - 32px));margin:-22px auto 60px;padding-top:22px;color:var(--faint);border-top:1px solid var(--rule);font:12px var(--mono)}
+    @media(max-width:620px){.study-label{display:none}.study-header{gap:8px}.intro{padding-top:38px}.direction-heading{grid-template-columns:35px minmax(0,1fr)}.transcript{padding:22px 14px}.turn{grid-template-columns:23px minmax(0,1fr);gap:8px}.code-block pre{font-size:10.5px}.utility .code-head{padding-left:10px}.prose{font-size:16px}.tab .code-block{margin-top:30px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  </style>
+</head>
+<body>
+<header class="study-header"><span class="brand">pi-orb</span><span class="study-label">code copy study</span><nav aria-label="Design options"><a href="#one">1</a><a href="#two">2</a><a href="#three">3</a><a href="#four">4</a><a href="#five">5</a></nav></header>
+<main>
+  <section class="intro"><span class="eyebrow">Five visual directions</span><h1>Take the code with you.</h1><p>Every proposal gives rendered Markdown code blocks a copy action in the top-right, while preserving horizontal scrolling, syntax contrast, keyboard access, and the Reading Room’s quiet editorial character.</p><div class="principles"><span>top-right placement</span><span>copies raw code only</span><span>visible success state</span><span>keyboard accessible</span><span>plain-HTTP fallback</span></div></section>
+  <div id="directions"></div>
+</main>
+<footer class="footer">All five buttons are functional. Click one to test its copied state; it resets after 1.6 seconds.</footer>
+<script>
+const code=`export async function connectOrb(orbId: string) {
+  const socket = new WebSocket(\`/api/v1/orbs/\${orbId}/live\`);
+  await once(socket, "open");
+  socket.send(JSON.stringify({ type: "snapshot.request" }));
+  return socket;
+}`;
+const highlighted=`<span class="kw">export async function</span> <span class="fn">connectOrb</span>(orbId: string) {
+  <span class="kw">const</span> socket = <span class="kw">new</span> WebSocket(<span class="str">\`/api/v1/orbs/\${orbId}/live\`</span>);
+  <span class="kw">await</span> once(socket, <span class="str">"open"</span>);
+  socket.send(JSON.stringify({ type: <span class="str">"snapshot.request"</span> }));
+  <span class="kw">return</span> socket;
+}`;
+const icon=`<svg class="default" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 5.5V3.7a1.2 1.2 0 0 0-1.2-1.2H3.7a1.2 1.2 0 0 0-1.2 1.2v5.6a1.2 1.2 0 0 0 1.2 1.2h1.8"/></svg><svg class="success" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.5 3.1 3.1L13.2 4.5"/></svg>`;
+function button(kind){
+  const labels=kind==='bare'||kind==='fold'?'':`<span class="copy-label">copy</span><span class="copied-label">copied</span>`;
+  return `<button class="copy" type="button" aria-label="Copy code to clipboard" data-code="${encodeURIComponent(code)}">${icon}${labels}</button>`;
+}
+function block(kind){
+  const head=kind==='utility'?`<div class="code-head"><span>typescript</span>${button(kind)}</div>`:'';
+  return `<div class="code-block">${head}<pre><code>${highlighted}</code></pre>${kind==='utility'?'':button(kind)}</div>`;
+}
+const designs=[
+  ['one','bare','01','Quiet icon','The least intrusive option. A compact outlined icon floats over the dark code field and reveals its purpose through tooltip, focus, and familiar shape.'],
+  ['two','capsule','02','Labeled capsule','A small “copy” pill favors immediate discoverability. Its width is reserved so the success label never shifts the code beneath it.'],
+  ['three','utility','03','Language rail','A slim utility header pairs the language label with the copy action. Strongest when code blocks may later gain filename or wrap controls.'],
+  ['four','tab','04','Paper index tab','The action sits on a warm-paper tab attached above the block. It stays unmistakably part of the code while echoing the product’s manuscript metaphor.'],
+  ['five','fold','05','Turned corner','A folded top-right corner makes copying feel like taking a page. It is expressive but icon-only, with a larger invisible click target than the glyph.']
+];
+document.querySelector('#directions').innerHTML=designs.map(([id,kind,n,name,why])=>`<section class="direction ${kind}" id="${id}"><div class="direction-heading"><span class="number">${n}</span><div><h2>${name}${kind==='utility'?'<span class="recommendation">recommended</span>':''}</h2><p class="rationale">${why}</p></div></div><div class="canvas"><div class="appbar"><span class="orb">Code Block Copy</span><span class="project">pi-orb</span><span class="status">idle</span></div><div class="transcript"><div class="turn"><div class="gutter"><span class="mark">O</span></div><div><span class="speaker">Orb</span><p class="prose">The live connection can stay small and explicit. This example waits for the socket before requesting an authoritative snapshot:</p>${block(kind)}<p class="prose after">The button copies only the source text—never the language label or surrounding transcript.</p></div></div></div></div></section>`).join('');
+function fallbackCopy(text){
+  const area=document.createElement('textarea'); area.value=text; area.setAttribute('readonly','');
+  Object.assign(area.style,{position:'fixed',opacity:'0',pointerEvents:'none'}); document.body.append(area); area.select();
+  const copied=document.execCommand('copy'); area.remove(); return copied;
+}
+async function copyText(text){
+  try { if(navigator.clipboard?.writeText){ await navigator.clipboard.writeText(text); return true; } } catch {}
+  try { return fallbackCopy(text); } catch { return false; }
+}
+document.addEventListener('click',async event=>{
+  const target=event.target instanceof Element?event.target.closest('.copy'):null; if(!target)return;
+  const ok=await copyText(decodeURIComponent(target.dataset.code));
+  target.dataset.state=ok?'copied':'failed'; target.setAttribute('aria-label',ok?'Copied to clipboard':'Copy failed');
+  clearTimeout(target._reset); target._reset=setTimeout(()=>{target.dataset.state='';target.setAttribute('aria-label','Copy code to clipboard')},1600);
+});
+</script>
+</body>
+</html>

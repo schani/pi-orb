@@ -1259,24 +1259,80 @@ button.project-orb-action.danger:hover:not(:disabled) {
   padding: 1px 5px;
 }
 
-.chat-markdown pre {
+.markdown-code-block {
+  position: relative;
   margin: 12px 0 4px;
-  padding: 10px 14px;
-  background: var(--inset);
-  border: 1px solid var(--rule);
-  border-left: 3px solid var(--ink-faint);
+  overflow: hidden;
+  border: 1px solid #39352e;
   border-radius: var(--r);
+}
+
+.chat-markdown .markdown-code-block pre {
+  margin: 0;
+  padding: 14px 48px 14px 16px;
   overflow-x: auto;
+  color: #eee7d9;
+  background: #27241f;
+  border: 0;
+  border-radius: 0;
 }
 
 .chat-markdown pre code {
   display: block;
   font-size: 11.5px;
   line-height: 1.65;
+  color: inherit;
   background: none;
   border: none;
   padding: 0;
   white-space: pre;
+}
+
+.markdown-code-copy {
+  position: absolute;
+  z-index: 1;
+  top: 9px;
+  right: 9px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #aca28f;
+  background: #302d27;
+  border: 1px solid #514c43;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.markdown-code-copy:hover {
+  color: #eee7d9;
+  background: #39352f;
+}
+
+.markdown-code-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.markdown-code-copy[data-state="copied"] {
+  color: #82b98b;
+  border-color: #5d8e66;
+}
+
+.markdown-code-copy[data-state="failed"] {
+  color: #e09172;
+  border-color: var(--accent);
+}
+
+.markdown-code-copy svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .chat-markdown blockquote {

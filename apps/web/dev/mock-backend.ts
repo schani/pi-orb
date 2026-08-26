@@ -107,7 +107,7 @@ function initialState(): MockState {
       content: [
         {
           type: "text",
-          text: "# Frontend playground\n\nThis conversation is supplied by the in-process fixture backend. Send a message and I will echo it with simulated streaming.",
+          text: '# Frontend playground\n\nThis conversation is supplied by the in-process fixture backend. Send a message and I will echo it with simulated streaming. Fenced code includes the top-right copy action:\n\n```ts\nconst orb = await connectOrb("frontend-playground");\n```',
         },
       ],
       overflow: {},
