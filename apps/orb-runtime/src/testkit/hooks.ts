@@ -138,6 +138,9 @@ export class FakeHookFileStore implements HookFileStore {
     this.files.delete(path);
   }
 
+  /** A map has no modes; the real store's `chmod` is covered against a real disk. */
+  hardenFile(_path: string): void {}
+
   /** Every path that currently exists, for whole-disk assertions. */
   paths(): readonly string[] {
     return [...this.files.keys()].sort();

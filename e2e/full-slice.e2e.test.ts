@@ -11,21 +11,31 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { RUNTIME_SUBPROTOCOL, type ServerFrame, TERMINAL_SUBPROTOCOL } from "@pi-orb/protocol";
+import {
+  DEFAULT_TTL_SECONDS,
+  ID_TOKEN_PATH,
+  RUNTIME_SUBPROTOCOL,
+  type ServerFrame,
+  TERMINAL_SUBPROTOCOL,
+} from "@pi-orb/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
   api,
+  type CommandOutcome,
   type ControlPlaneHandle,
   createFakeSession,
   deleteFakeSession,
   docker,
+  dockerOutcome,
   type FakeSession,
   FatalProbeError,
   fakeControl,
+  fetchIssuerKeys,
   orbContainerNames,
   removeOrbContainers,
   startControlPlane,
+  verifyIdToken,
   waitFor,
 } from "./harness.ts";
 
@@ -290,12 +300,69 @@ const SETUP_HOOK = [
   "",
 ].join("\n");
 
+/** What the resume hook hands the agent, quoted so the parser's one rule is exercised. */
+const HOOK_ENV_VALUE = "delivered-by-resume";
+
 const RESUME_HOOK = [
   "#!/bin/sh",
   'env > "$PI_ORB_WORK_DIR/hook-resume-env"',
   'echo resume >> "$PI_ORB_WORK_DIR/hook-order"',
+  // The only channel a hook has into the agent's shells and the terminal's
+  // PTYs (docs/orb-setup-hook.md). `PATH` is on the deny-list: a hook that
+  // could rewrite it would break every later boot.
+  `printf 'HOOK_ENV_E2E="${HOOK_ENV_VALUE}"\\nPATH=/attacker/bin\\n' > "$PI_ORB_HOOK_ENV_FILE"`,
   "",
 ].join("\n");
+
+/**
+ * Run one command in a real PTY — browser route → control-plane proxy →
+ * runtime — and return what the shell printed, up to and including `until`.
+ * `until` must be text the typed command itself cannot contain, because the
+ * PTY echoes what it is sent.
+ */
+async function terminalRun(orbId: string, command: string, until: string): Promise<string> {
+  const socket = new WebSocket(`ws://127.0.0.1:${CP_PORT}/api/v1/orbs/${orbId}/terminal`, [
+    TERMINAL_SUBPROTOCOL,
+  ]);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    let output = "";
+    const complete = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`terminal command timed out: ${command}`)),
+        30_000,
+      );
+      socket.on("message", (data, isBinary) => {
+        if (isBinary) {
+          output += data.toString();
+          if (output.includes(until)) {
+            clearTimeout(timer);
+            resolve();
+          }
+          return;
+        }
+        const control = JSON.parse(data.toString()) as {
+          type?: string;
+          error?: { message?: string };
+        };
+        if (control.type === "terminal.ready") {
+          socket.send(Buffer.from(`${command}\r`));
+        } else if (control.type === "terminal.error") {
+          clearTimeout(timer);
+          reject(new Error(control.error?.message ?? "terminal error"));
+        }
+      });
+    });
+    socket.send(JSON.stringify({ v: 1, type: "terminal.open", cols: 200, rows: 30 }));
+    await complete;
+    return output;
+  } finally {
+    socket.close();
+  }
+}
 
 /** Where the runtime writes a hook's log, in the orb's own filesystem terms. */
 function hookLogPath(id: string, hook: "setup" | "resume"): string {
@@ -320,6 +387,43 @@ async function readWorkspaceFile(id: string, incarnation: number, name: string):
     "process.stdout.write(require('fs').readFileSync('/workspace/'+process.argv[1],'utf8'))",
     name,
   ]);
+}
+
+/** The audience this suite's fake relying party accepts (docs/workload-identity.md). */
+const IDENTITY_AUDIENCE = "urn:pi-orb-e2e:rp";
+
+/**
+ * Mint through the in-orb CLI exactly as a workload would: the shim on the
+ * container's PATH, the provider-injected environment, and nothing else.
+ * Docker only — the process provider inherits host executables and installs no
+ * image shim, like every other `docker exec` step in this suite.
+ */
+function mintViaCli(
+  id: string,
+  incarnation: number,
+  args: readonly string[],
+): Promise<CommandOutcome> {
+  return dockerOutcome(["exec", `pi-orb-${id}-i${incarnation}`, "pi-orb", "id-token", ...args]);
+}
+
+/**
+ * A mint attempted with a bearer the *test* holds, bypassing the CLI. This is
+ * how revocation is proved: a bearer whose incarnation is gone, or whose orb
+ * is stopped, has no live compute left to run the CLI in.
+ */
+async function mintDirect(
+  bearer: string,
+  audience: string,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const response = await fetch(`${controlPlane.baseUrl}${ID_TOKEN_PATH}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+    body: JSON.stringify({ audience }),
+  });
+  return {
+    status: response.status,
+    body: (await response.json().catch(() => ({}))) as Record<string, unknown>,
+  };
 }
 
 /**
@@ -544,6 +648,90 @@ describe("full slice E2E", () => {
         const historyBefore = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
         expect(historyBefore.status).toBe(200);
 
+        // Workload identity end to end (docs/workload-identity.md): the orb
+        // mints through its own CLI and an outside verifier accepts it using
+        // nothing but the published discovery document and JWKS.
+        if (!PROCESS_BACKEND) {
+          const issuer = await fetchIssuerKeys(base);
+          expect(issuer.keys.length).toBeGreaterThan(0);
+          const minted = await mintViaCli(replacementOrbId, 0, ["--audience", IDENTITY_AUDIENCE]);
+          expect(minted.code, minted.stderr).toBe(0);
+          // The contract the credential-source protocols depend on: the JWT
+          // and one trailing newline are the entire stdout.
+          expect(minted.stdout).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\n$/);
+          const token = minted.stdout.slice(0, -1);
+
+          const verdict = verifyIdToken(token, {
+            keys: issuer.keys,
+            issuer: issuer.issuer,
+            audience: IDENTITY_AUDIENCE,
+          });
+          expect(verdict.ok ? "verified" : verdict.reason).toBe("verified");
+          if (verdict.ok) {
+            expect(verdict.claims["iss"]).toBe(issuer.issuer);
+            expect(verdict.claims["sub"]).toBe(replacementOrbId);
+            expect(verdict.claims["orb_id"]).toBe(replacementOrbId);
+            expect(verdict.claims["project_id"]).toBe(projectId);
+            expect(verdict.claims["host_incarnation"]).toBe(0);
+            expect(verdict.claims["token_use"]).toBe("exchanged");
+            expect(Number(verdict.claims["exp"]) - Number(verdict.claims["iat"])).toBe(
+              DEFAULT_TTL_SECONDS,
+            );
+          }
+          // The verifier is not a rubber stamp: audience, issuer, and
+          // signature each have to be able to fail.
+          expect(
+            verifyIdToken(token, {
+              keys: issuer.keys,
+              issuer: issuer.issuer,
+              audience: "urn:pi-orb-e2e:other",
+            }).ok,
+          ).toBe(false);
+          expect(
+            verifyIdToken(token, {
+              keys: issuer.keys,
+              issuer: "https://issuer.example",
+              audience: IDENTITY_AUDIENCE,
+            }).ok,
+          ).toBe(false);
+          expect(
+            verifyIdToken(token.slice(0, token.length - 8), {
+              keys: issuer.keys,
+              issuer: issuer.issuer,
+              audience: IDENTITY_AUDIENCE,
+            }).ok,
+          ).toBe(false);
+
+          // An explicit lifetime, and a lifetime the CLI must refuse locally.
+          const custom = await mintViaCli(replacementOrbId, 0, [
+            "--audience",
+            IDENTITY_AUDIENCE,
+            "--ttl-seconds",
+            "120",
+          ]);
+          expect(custom.code, custom.stderr).toBe(0);
+          const customVerdict = verifyIdToken(custom.stdout.trimEnd(), {
+            keys: issuer.keys,
+            issuer: issuer.issuer,
+            audience: IDENTITY_AUDIENCE,
+          });
+          expect(customVerdict.ok ? "verified" : customVerdict.reason).toBe("verified");
+          if (customVerdict.ok) {
+            expect(Number(customVerdict.claims["exp"]) - Number(customVerdict.claims["iat"])).toBe(
+              120,
+            );
+          }
+          const rejected = await mintViaCli(replacementOrbId, 0, [
+            "--audience",
+            IDENTITY_AUDIENCE,
+            "--ttl-seconds",
+            "10",
+          ]);
+          expect(rejected.code).not.toBe(0);
+          expect(rejected.stdout).toBe("");
+          expect(rejected.stderr).toContain("--ttl-seconds must be 60..3600");
+        }
+
         expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/stop`)).status).toBe(202);
         await waitFor(
           "replacement fixture stopped",
@@ -553,6 +741,15 @@ describe("full slice E2E", () => {
               : null,
           { timeoutMs: 120_000, intervalMs: 1_000 },
         );
+        // Stopping closes minting before the bearer changes: Docker keeps the
+        // container and therefore the same bearer across a stop, so this 403
+        // isolates the lifecycle gate from the 401 a rotated bearer gets after
+        // the replacement below (docs/workload-identity.md).
+        if (!PROCESS_BACKEND) {
+          const stoppedMint = await mintDirect(oldToken, IDENTITY_AUDIENCE);
+          expect(stoppedMint.status, JSON.stringify(stoppedMint.body)).toBe(403);
+          expect(stoppedMint.body["error"]).toBe("not_mintable");
+        }
         expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/start`)).status).toBe(
           202,
         );
@@ -579,6 +776,11 @@ describe("full slice E2E", () => {
           body: JSON.stringify({ reason: "startup" }),
         });
         expect(unauthorized.status).toBe(401);
+        // The same discarded bearer can no longer mint identity either, and
+        // the answer is indistinguishable from an unknown orb's.
+        const staleMint = await mintDirect(oldToken, IDENTITY_AUDIENCE);
+        expect(staleMint.status, JSON.stringify(staleMint.body)).toBe(401);
+        expect(staleMint.body["error"]).toBe("unauthorized");
 
         await observeNoAutonomousReplacement(replacementOrbId, "replacement-sentinel");
 
@@ -600,6 +802,27 @@ describe("full slice E2E", () => {
         );
         expect(await readRuntimeToken(replacementOrbId, 1)).not.toBe(oldToken);
         expect(await readWorkspaceFile(replacementOrbId, 1, "replacement-sentinel")).toBe(sentinel);
+        // The new incarnation mints with its own bearer, and the token names
+        // the incarnation that asked for it — the claim an incarnation-
+        // sensitive relying party authorizes on.
+        if (!PROCESS_BACKEND) {
+          const issuer = await fetchIssuerKeys(base);
+          const replacementMint = await mintViaCli(replacementOrbId, 1, [
+            "--audience",
+            IDENTITY_AUDIENCE,
+          ]);
+          expect(replacementMint.code, replacementMint.stderr).toBe(0);
+          const verdict = verifyIdToken(replacementMint.stdout.trimEnd(), {
+            keys: issuer.keys,
+            issuer: issuer.issuer,
+            audience: IDENTITY_AUDIENCE,
+          });
+          expect(verdict.ok ? "verified" : verdict.reason).toBe("verified");
+          if (verdict.ok) {
+            expect(verdict.claims["host_incarnation"]).toBe(1);
+            expect(verdict.claims["orb_id"]).toBe(replacementOrbId);
+          }
+        }
         // Exactly one compute identity exists for the orb, and it is the
         // replacement incarnation 1 — never the discarded incarnation 0 or a
         // duplicate.
@@ -653,6 +876,24 @@ describe("full slice E2E", () => {
         await waitForLifecycleEdges("setup-failed edge", replacementOrbId, (lines) =>
           lines.some((line) => line.includes("setup-failed") && line.includes("reason=failed")),
         );
+
+        // What resume wrote to `$PI_ORB_HOOK_ENV_FILE` is in the environment a
+        // real PTY inherits — the whole point of the mechanism, and the thing
+        // `/etc/profile.d` never delivered. `PATH` is printed first so seeing
+        // the hook's own value proves the whole line arrived.
+        const shellEnv = await terminalRun(
+          replacementOrbId,
+          `printf 'PATH<%s>HOOK<%s>\\n' "$PATH" "$HOOK_ENV_E2E"`,
+          HOOK_ENV_VALUE,
+        );
+        expect(shellEnv).toContain(`HOOK<${HOOK_ENV_VALUE}>`);
+        // The deny-list, end to end: a hook cannot take `PATH` from the runtime.
+        expect(shellEnv).not.toContain("/attacker/bin");
+        const envStatus = JSON.parse(
+          await readWorkspaceFile(replacementOrbId, 1, "home/.cache/pi-orb/logs/env.status.json"),
+        ) as { applied: string[]; ignored: string[] };
+        expect(envStatus.applied).toEqual(["HOOK_ENV_E2E"]);
+        expect(envStatus.ignored).toEqual(["PATH"]);
 
         // Stop/start of the retained incarnation runs resume only: the setup
         // stamp lives on the workspace and still names incarnation 1.

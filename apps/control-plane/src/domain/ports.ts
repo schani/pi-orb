@@ -16,6 +16,8 @@ import type {
   PointerConflict,
   ProjectConflict,
   RuntimeClientError,
+  SignerError,
+  SigningKeyConflict,
   StateConflict,
   StoreError,
 } from "./errors.ts";
@@ -356,6 +358,26 @@ export interface ControlPlaneStore {
   ): ResultAsync<void, StoreError>;
 
   /**
+   * Claims the orb's mint rate-limit slot: one atomic conditional write that
+   * moves `last_mint_at` to `at` only when the previous mint is at least
+   * `minIntervalMs` old (docs/workload-identity.md). Reading the floor and
+   * then advancing it would let N concurrent requests all pass the check, so
+   * the claim *is* the check — of any number of racing callers exactly one
+   * wins. Like `touchLastBusy` it is CAS-free: no `state_version` bump and no
+   * `state_changed_at` move, so it can never conflict with lifecycle CAS.
+   *
+   * The floor only moves forward, since a claim is admitted only from strictly
+   * below it. An orb id that resolves to no row cannot be throttled, so it is
+   * reported as not claimed with the full interval: the mint path calls this
+   * only after a bearer resolved to an orb, and denying is the fail-closed
+   * answer if that orb vanished in between.
+   */
+  claimMintSlot(
+    task: SimulationTask,
+    params: { orbId: string; at: number; minIntervalMs: number },
+  ): ResultAsync<MintSlotClaim, StoreError>;
+
+  /**
    * Same-state re-entry with a fresh `state_changed_at` (OAuth completion,
    * docs/lifecycle.md): user login time never consumes the create/start deadline.
    */
@@ -629,19 +651,37 @@ export interface StoredCredential {
   readonly expiresAt: number;
 }
 
+/**
+ * The issuer's private signing key (docs/workload-identity.md). Like a stored
+ * credential it exists only in the secret store, addressed by exact version,
+ * and never in PostgreSQL, an orb, an image, or a log. Only the public half
+ * lives in `oidc_signing_keys`.
+ */
+export interface StoredSigningKey {
+  /** PKCS#8 PEM. */
+  readonly privateKeyPem: string;
+}
+
+/**
+ * What the secret store holds. Each consumer writes and reads back exactly one
+ * of these shapes under its own provider name, so the store itself stays a
+ * dumb immutable-version keeper with no idea what a version means.
+ */
+export type StoredSecret = StoredCredential | StoredSigningKey;
+
 export interface CredentialSecretStore {
   /** Creates a new immutable version and returns its identifier. */
-  writeSecret(
+  writeSecret<T extends StoredSecret = StoredCredential>(
     task: SimulationTask,
     provider: string,
-    credential: StoredCredential,
+    credential: T,
   ): ResultAsync<{ version: string }, StoreError>;
   /** Reads one exact version; null when it does not exist or was destroyed. */
-  readSecret(
+  readSecret<T extends StoredSecret = StoredCredential>(
     task: SimulationTask,
     provider: string,
     version: string,
-  ): ResultAsync<StoredCredential | null, StoreError>;
+  ): ResultAsync<T | null, StoreError>;
   /** Best-effort cleanup of a superseded version. */
   destroySecret(
     task: SimulationTask,
@@ -665,6 +705,170 @@ export interface BrokerDeps {
   /** One refresher per provider; a provider with no entry cannot refresh. */
   readonly upstreams: Readonly<Record<string, UpstreamRefresher>>;
   readonly constants: import("./constants.ts").BrokerConstants;
+}
+
+// ---------------------------------------------------------------------------
+// Workload identity (docs/workload-identity.md)
+
+/** Outcome of one atomic `claimMintSlot` write. */
+export type MintSlotClaim =
+  | { readonly claimed: true }
+  | { readonly claimed: false; readonly retryAfterMs: number };
+
+/**
+ * The claim set of one issued identity token (docs/workload-identity.md). Every
+ * field is derived from the orb row and the deployment's configuration — none
+ * of it is ever supplied by the caller, which asks only for an audience and a
+ * lifetime. `iat`/`exp` are unix *seconds*, as JWT requires, while the rest of
+ * the control plane measures wall-clock milliseconds.
+ */
+export interface IdTokenClaims {
+  readonly iss: string;
+  readonly aud: string;
+  /** The orb ID: compact, immutable, and stable across compute replacement. */
+  readonly sub: string;
+  readonly iat: number;
+  readonly exp: number;
+  readonly jti: string;
+  readonly project_id: string;
+  readonly orb_id: string;
+  readonly host_incarnation: number;
+  /** Distinguishes workload exchange tokens from future token classes. */
+  readonly token_use: "exchanged";
+}
+
+/**
+ * Signs identity tokens. The mint path never sees key material — only the
+ * finished JWT and the `kid` it was signed with, so a caller can be told which
+ * published key verifies it. Key *management* is the one place that does
+ * handle a private key, because it has to hand a freshly generated one to the
+ * secret store (`domain/signing-keys.ts`).
+ */
+export interface TokenSigner {
+  signIdToken(
+    task: SimulationTask,
+    claims: IdTokenClaims,
+  ): ResultAsync<{ jwt: string; kid: string }, SignerError>;
+}
+
+/**
+ * Entropy for `jti`. Separate from the signer because it must be simulated
+ * independently: uniqueness across concurrent mints is a scheduling property.
+ */
+export interface MintIdSource {
+  newJti(task: SimulationTask): string;
+}
+
+/** Everything `mintIdToken` needs; the mint's counterpart to `BrokerDeps`. */
+export interface MintDeps {
+  readonly store: ControlPlaneStore;
+  readonly signer: TokenSigner;
+  readonly mintIds: MintIdSource;
+  readonly constants: import("./constants.ts").IssuerConstants;
+  /**
+   * Per-process edge dedup for denial log lines. Lives on the deps rather than
+   * inside `mintIdToken` because it is state that must survive across requests
+   * — and because a scenario can then assert on the edges it produced.
+   */
+  readonly denials: import("./workload-identity.ts").MintDenialLog;
+  /** The deployment's public issuer URL, validated at boot, never from a header. */
+  readonly issuerUrl: string;
+}
+
+export type SigningKeyState = "pending" | "active" | "retired";
+
+/**
+ * The public half of one issuer signing key. Nothing here is secret — JWKS is
+ * served straight from these rows — while the private key exists only in the
+ * secret store, addressed by the exact `secretVersion`. `rowVersion` is the
+ * CAS fence and bumps on every state change.
+ */
+export interface SigningKeyRow {
+  readonly kid: string;
+  readonly secretVersion: string;
+  /** RFC 7517 JWK of the public half; opaque to the store. */
+  readonly publicJwk: unknown;
+  readonly state: SigningKeyState;
+  /** Wall-clock ms. Set exactly when the state requires it. */
+  readonly createdAt: number;
+  readonly activatedAt: number | null;
+  readonly retiredAt: number | null;
+  readonly rowVersion: number;
+}
+
+export interface CasSigningKeyStateParams {
+  readonly kid: string;
+  readonly expectedRowVersion: number;
+  readonly state: SigningKeyState;
+  /** Required when entering `active`; the row keeps its value when omitted. */
+  readonly activatedAt?: number;
+  /** Required when entering `retired`. */
+  readonly retiredAt?: number;
+}
+
+/** A freshly generated key, before anything durable knows about it. */
+export interface GeneratedSigningKey {
+  /** The RFC 7638 thumbprint of the public JWK: derivable by any verifier. */
+  readonly kid: string;
+  /** PKCS#8 PEM, on its way to the secret store and nowhere else. */
+  readonly privateKeyPem: string;
+  /** The public JWK as JWKS will publish it; opaque to the domain. */
+  readonly publicJwk: unknown;
+}
+
+/**
+ * Makes signing keys. Separate from `TokenSigner` because key generation is
+ * expensive, happens on ops paths rather than per mint, and must be replaced
+ * by a deterministic fake in simulation — real RSA generation in a DST loop
+ * would be neither deterministic nor fast.
+ */
+export interface SigningKeyGenerator {
+  generate(task: SimulationTask): ResultAsync<GeneratedSigningKey, SignerError>;
+}
+
+export interface SigningKeyStore {
+  /** Every key, oldest first: JWKS publishes the active one plus retiring ones. */
+  listSigningKeys(task: SimulationTask): ResultAsync<SigningKeyRow[], StoreError>;
+  /**
+   * Inserts a key. A duplicate `kid` and a second `active` key are both
+   * refused by the schema, so they surface as a `corruption` StoreError rather
+   * than a conflict a caller could retry into.
+   */
+  insertSigningKey(
+    task: SimulationTask,
+    row: SigningKeyRow,
+  ): ResultAsync<SigningKeyRow, StoreError>;
+  /** Fenced state change: activation and retirement never race each other. */
+  casSigningKeyState(
+    task: SimulationTask,
+    params: CasSigningKeyStateParams,
+  ): ResultAsync<SigningKeyRow, StoreError | SigningKeyConflict>;
+}
+
+/**
+ * What reading the *current* signing material needs: the published rows plus
+ * the secret version one of them points at. Narrower than `SigningKeyDeps` so
+ * the signing path cannot generate a key by accident.
+ */
+export interface SigningKeyMaterialDeps {
+  readonly keys: SigningKeyStore;
+  readonly secrets: CredentialSecretStore;
+  /** `signingKeyMaterialTtlMs` bounds how long read material may be reused. */
+  readonly constants: import("./constants.ts").IssuerConstants;
+}
+
+/**
+ * What serving JWKS needs. Deliberately without a secret store: the published
+ * key set contains no secret, so the issuer role never gets secret access.
+ */
+export interface JwksDeps {
+  readonly keys: SigningKeyStore;
+  readonly constants: import("./constants.ts").IssuerConstants;
+}
+
+/** Everything key management needs (`domain/signing-keys.ts`). */
+export interface SigningKeyDeps extends SigningKeyMaterialDeps, JwksDeps {
+  readonly generator: SigningKeyGenerator;
 }
 
 // ---------------------------------------------------------------------------

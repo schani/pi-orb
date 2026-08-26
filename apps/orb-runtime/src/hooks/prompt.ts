@@ -1,4 +1,5 @@
 import type { RuntimeHookStatus, RuntimeHooks } from "@pi-orb/protocol";
+import type { HookEnvReport } from "./env-file.ts";
 
 const explain = (status: RuntimeHookStatus): string => {
   switch (status.outcome) {
@@ -14,15 +15,36 @@ const explain = (status: RuntimeHookStatus): string => {
 };
 
 /**
+ * A hook's env file the runtime could only partly use. Silent on a clean file:
+ * the variables that did apply are simply present in the environment, and
+ * naming them would spend context on a boot that went right.
+ */
+const envLines = (env: HookEnvReport | null): string[] => {
+  if (env === null) return [];
+  return [
+    ...env.malformed.map(
+      (reason) => `- \`${env.path}\` ${reason} — that line was skipped, the rest applied`,
+    ),
+    ...env.ignored.map(
+      (name) => `- \`${env.path}\` set \`${name}\`, which the runtime owns; it was ignored`,
+    ),
+  ];
+};
+
+/**
  * The agent cannot see a boot hook's outcome on its own, and a broken hook is
  * exactly the thing it should fix first. Only failures are appended: a healthy
  * boot must not spend context saying so (docs/orb-setup-hook.md).
  */
-export function bootHookPrompt(hooks: RuntimeHooks): string | null {
+export function bootHookPrompt(
+  hooks: RuntimeHooks,
+  env: HookEnvReport | null = null,
+): string | null {
   const failed = [hooks.setup, hooks.resume].filter(
     (status): status is RuntimeHookStatus => status !== undefined && status.outcome !== "ok",
   );
-  if (failed.length === 0) return null;
+  const envProblems = envLines(env);
+  if (failed.length === 0 && envProblems.length === 0) return null;
   return [
     "## Boot hooks",
     "",
@@ -32,6 +54,7 @@ export function bootHookPrompt(hooks: RuntimeHooks): string | null {
     ...failed.map(
       (status) => `- \`.agents/${status.hook}\` ${explain(status)}; log: \`${status.logPath}\``,
     ),
+    ...envProblems,
     "",
     "The orb started anyway, so the environment those hooks were supposed to prepare may be",
     "incomplete. Read the log before assuming a missing tool or credential is a platform problem,",

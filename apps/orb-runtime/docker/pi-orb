@@ -1,0 +1,18 @@
+#!/bin/sh
+# pi-orb CLI shim (docs/workload-identity.md): the product interface code in an
+# orb uses to mint a short-lived OIDC identity token. `id-token` execs the Node
+# entry point, which prints the JWT and a trailing newline to stdout and
+# nothing else; every other subcommand is a usage error.
+#
+# The printed token is a bearer credential: shell tracing around this command
+# (`set -x`) exposes it.
+case "${1:-}" in
+  id-token)
+    shift
+    exec node /app/apps/orb-runtime/src/id-token/cli.ts "$@"
+    ;;
+  *)
+    echo "usage: pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]" >&2
+    exit 2
+    ;;
+esac

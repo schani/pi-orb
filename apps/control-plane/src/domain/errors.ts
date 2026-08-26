@@ -135,3 +135,64 @@ export type TokenError =
       readonly message: string;
       readonly retryAfterMs?: number;
     };
+
+// ---------------------------------------------------------------------------
+// Workload identity (docs/workload-identity.md)
+
+/**
+ * Why one mint was denied, for the deduplicated operator log edge and nothing
+ * else (docs/workload-identity.md). Never the audience, the bearer, or the
+ * token, and never persisted. `unauthorized` has no code here: a bearer that
+ * does not resolve to an orb has no orb to log the denial against, and logging
+ * one would say that the bearer resolved to something.
+ */
+export type MintDenialCode =
+  | "invalid_request"
+  | "not_mintable"
+  | "rate_limited"
+  | "signer_failure"
+  | "store_unavailable";
+
+/** CAS on a signing key's `row_version` affected zero rows. */
+export interface SigningKeyConflict {
+  readonly type: "signing_key_conflict";
+}
+
+/**
+ * Signing failed. `retryable` is the literal `true` on purpose: the issuer
+ * fails closed (docs/workload-identity.md), so an unavailable key, an
+ * unreachable secret store, and a failed signature all mean "ask again" and
+ * never "here is a token signed some other way".
+ */
+export interface SignerError {
+  readonly type: "signer_error";
+  /** `unavailable`: no usable key material. `signing_failed`: the operation itself. */
+  readonly code: "unavailable" | "signing_failed";
+  readonly message: string;
+  readonly retryable: true;
+  readonly retryAfterMs?: number;
+}
+
+/**
+ * What one identity-mint attempt can fail with. Every variant mirrors a
+ * protocol error code exactly (`IdTokenErrorSchema`), so the HTTP layer is a
+ * fold with no decisions of its own beyond the status code; `unauthorized`
+ * deliberately carries no detail, because unknown, stale, and fenced bearers
+ * must be indistinguishable.
+ *
+ * `internal` is a store failure no retry can fix — `StoreError` code
+ * `invariant` (a deterministic bug of ours) or `corruption` (a row the schema
+ * refuses outright) — and must never be advertised as retryable
+ * (docs/lifecycle.md).
+ */
+export type MintError =
+  | { readonly type: "invalid_request"; readonly message: string }
+  | { readonly type: "unauthorized" }
+  | { readonly type: "not_mintable"; readonly state: OrbState }
+  | { readonly type: "rate_limited"; readonly retryAfterMs: number }
+  | {
+      readonly type: "retryable";
+      readonly message: string;
+      readonly retryAfterMs?: number;
+    }
+  | { readonly type: "internal"; readonly message: string };

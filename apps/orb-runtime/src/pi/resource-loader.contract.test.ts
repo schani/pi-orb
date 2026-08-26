@@ -36,9 +36,18 @@ import { createOrbResourceLoader } from "./resource-loader.ts";
  *     the port-exposure section is absent.
  *  5. `reload()` is mandatory: a freshly constructed loader has an empty
  *     append array and has never called the override.
+ *  6. `additionalSkillPaths` really discovers the image-baked skills directory
+ *     through `getSkills()`, and an absent directory stays harmless.
+ *
+ * Every control-equality test passes `skillsDir: null` explicitly: the
+ * production default is the image path `/opt/pi-orb/skills`, and this suite
+ * must compare the same skill set as the control loader whether or not it
+ * happens to run inside an orb image that has it.
  */
 
 const PREVIEW_HOST = "pi-orb-test.tailabc.ts.net";
+/** Repository source of what the Dockerfile bakes at `BAKED_SKILLS_DIR`. */
+const BAKED_SKILLS_SOURCE = join(import.meta.dirname, "../../skills");
 /** `CONFIG_DIR_NAME` in the SDK (`config.js`), i.e. the project-scoped `.pi/`. */
 const PROJECT_CONFIG_DIR = ".pi";
 const PROJECT_APPEND = "project-scoped APPEND_SYSTEM.md marker";
@@ -66,11 +75,15 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     return loader;
   };
 
-  const orbLoader = async (previewHost: string | null = PREVIEW_HOST): Promise<ResourceLoader> => {
+  const orbLoader = async (
+    previewHost: string | null = PREVIEW_HOST,
+    skillsDir: string | null = null,
+  ): Promise<ResourceLoader> => {
     const result = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
       previewHost,
+      skillsDir,
     });
     if (result.isErr()) throw new Error(`loader build failed: ${result.error}`);
     return result.value;
@@ -183,6 +196,53 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(loader.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt]);
     expect(composedAppendSection(loader)).not.toContain("## Port exposure");
     expect(composedAppendSection(loader)).not.toContain(PREVIEW_HOST);
+  });
+
+  it("discovers the image-baked skills through additionalSkillPaths", async () => {
+    // The directory the Dockerfile copies to /opt/pi-orb/skills, read from the
+    // repository so the shipped SKILL.md is what is actually exercised.
+    const loader = await orbLoader(PREVIEW_HOST, BAKED_SKILLS_SOURCE);
+    const { skills, diagnostics } = loader.getSkills();
+
+    for (const name of ["boot-hooks", "cloud-identity"]) {
+      const baked = skills.find((skill) => skill.name === name);
+      expect(baked, `discovered: ${skills.map((s) => s.name).join(", ")}`).toBeDefined();
+      // The description is the only part always in the agent's context, so an
+      // empty one would mean a silently undiscoverable skill.
+      expect(baked?.description.length).toBeGreaterThan(0);
+      expect(baked?.disableModelInvocation).toBe(false);
+      expect(baked?.filePath).toBe(join(BAKED_SKILLS_SOURCE, name, "SKILL.md"));
+    }
+    expect(diagnostics).toEqual([]);
+
+    // Adding skills must not disturb the rest of the loader's surface.
+    const control = await implicitLoader();
+    expect(loader.getSystemPrompt()).toBe(control.getSystemPrompt());
+    expect(loader.getAgentsFiles()).toEqual(control.getAgentsFiles());
+    expect(loader.getPrompts().prompts).toEqual(control.getPrompts().prompts);
+    // The skills are strictly additive on top of whatever the SDK discovered.
+    const controlNames = control.getSkills().skills.map((skill) => skill.name);
+    expect(skills.map((skill) => skill.name)).toEqual([
+      ...controlNames,
+      "boot-hooks",
+      "cloud-identity",
+    ]);
+  });
+
+  it("tolerates a missing skills directory, as on a provider with no image", async () => {
+    // The process host provider never has /opt/pi-orb/skills. `existsSync`
+    // filtering in the options builder is what keeps this quiet: passing the
+    // path anyway makes `reload()` record a `type: "error"` skill diagnostic.
+    const absent = join(workDir, "no-such-skills-dir");
+    const loader = await orbLoader(PREVIEW_HOST, absent);
+    const control = await implicitLoader();
+
+    expect(loader.getSkills().diagnostics).toEqual([]);
+    expect(loader.getSkills().skills.map((skill) => skill.name)).toEqual(
+      control.getSkills().skills.map((skill) => skill.name),
+    );
+    // The prompt sections are unaffected by the skills path either way.
+    expect(loader.getAppendSystemPrompt()).toContain(portExposurePrompt(PREVIEW_HOST));
   });
 
   it("requires the reload() that createOrbResourceLoader awaits", async () => {

@@ -1922,6 +1922,7 @@ export function createOrb(
       replicatedHeadId: null,
       lastBusyAt: null,
       stopReason: null,
+      lastMintAt: null,
       stateChangedAt: now,
       createdAt: now,
       updatedAt: now,

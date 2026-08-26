@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -59,6 +59,54 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain("--ignore-scripts");
     expect(dockerfile).toContain("rm -rf node_modules/node-pty/prebuilds");
     expect(dockerfile).toContain("npm rebuild node-pty");
+  });
+
+  it("installs every in-orb shim as an executable on PATH", () => {
+    // The three point-of-use helpers of docs/credentials.md and
+    // docs/workload-identity.md: an image that ships the source but not the
+    // shim leaves `gh`, git pushes, or `pi-orb id-token` broken inside the orb.
+    const shims = ["gh", "pi-orb-git-credential", "pi-orb"];
+    for (const shim of shims) {
+      expect(existsSync(join(repositoryRoot, "apps/orb-runtime/docker", shim))).toBe(true);
+      expect(dockerfile).toContain(`COPY apps/orb-runtime/docker/${shim} /usr/local/bin/${shim}`);
+    }
+    // Split into whole arguments before matching: `/usr/local/bin/pi-orb` is a
+    // prefix of `/usr/local/bin/pi-orb-git-credential`, so a substring check
+    // would call the `pi-orb` shim executable on the strength of a different
+    // shim's chmod.
+    const chmod = /RUN chmod 755 ([^\n\\]*)/.exec(dockerfile)?.[1] ?? "";
+    const chmodTargets = chmod.trim().split(/\s+/);
+    for (const shim of shims) {
+      expect(chmodTargets, `${shim} must be made executable`).toContain(`/usr/local/bin/${shim}`);
+    }
+    // Each shim dispatches to source the image actually carries.
+    const piOrbShim = readFileSync(join(repositoryRoot, "apps/orb-runtime/docker/pi-orb"), "utf8");
+    expect(piOrbShim).toContain("node /app/apps/orb-runtime/src/id-token/cli.ts");
+    expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/id-token/cli.ts"))).toBe(true);
+  });
+
+  it("installs the reviewed Google executable credential source", () => {
+    // The `cloud-identity` skill tells the agent to point an external-account
+    // credential file at this absolute path (docs/workload-identity-recipes.md).
+    // Without it the agent's only alternative is writing its own credential
+    // helper, which is exactly what "no unreviewed credential helper" forbids.
+    expect(existsSync(join(repositoryRoot, "scripts/pi-orb-gcp-identity"))).toBe(true);
+    expect(dockerfile).toContain(
+      "COPY scripts/pi-orb-gcp-identity /usr/local/bin/pi-orb-gcp-identity",
+    );
+    const chmod = /RUN chmod 755 ([^\n\\]*)/.exec(dockerfile)?.[1] ?? "";
+    expect(chmod.trim().split(/\s+/)).toContain("/usr/local/bin/pi-orb-gcp-identity");
+  });
+
+  it("bakes the agent skills outside the persistent volume", () => {
+    // /workspace is a VOLUME: anything the image places under it is shadowed
+    // by the orb's persistent filesystem at runtime, so the skills must live
+    // elsewhere. `BAKED_SKILLS_DIR` in the resource loader is the other half.
+    expect(dockerfile).toContain("COPY apps/orb-runtime/skills /opt/pi-orb/skills");
+    expect(
+      existsSync(join(repositoryRoot, "apps/orb-runtime/skills/cloud-identity/SKILL.md")),
+    ).toBe(true);
+    expect(dockerfile).not.toContain("/workspace/skills");
   });
 
   it("declares HOME on the persistent orb volume", () => {

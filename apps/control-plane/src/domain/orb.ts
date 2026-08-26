@@ -57,6 +57,8 @@ export interface OrbRow {
   readonly lastBusyAt: number | null;
   /** Why the orb last entered `stopping`; null for explicit stops. */
   readonly stopReason: StopReason | null;
+  /** Durable per-orb mint rate-limit floor; monotone, written outside the CAS. */
+  readonly lastMintAt: number | null;
   readonly stateChangedAt: number;
   readonly archivedAt?: number | null;
   readonly createdAt: number;

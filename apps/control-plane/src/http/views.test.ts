@@ -33,6 +33,7 @@ const orb: OrbRow = {
   replicatedHeadId: null,
   lastBusyAt: null,
   stopReason: null,
+  lastMintAt: null,
   stateChangedAt: 1_700_000_000_000,
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_000_000,
@@ -227,6 +228,19 @@ describe("orbView boot hooks", () => {
       logPath: "/workspace/home/.cache/pi-orb/logs/resume.log",
     });
     expect(orbView({ ...orb, state: "stopped" }, control, {}).stateDetail).toBeUndefined();
+  });
+});
+
+describe("orbView workload identity", () => {
+  it("says nothing about minting at all", () => {
+    // Mint outcomes are not durable state and never reach the browser
+    // (docs/workload-identity.md): the party who can act on a denial is the
+    // caller inside the orb, which got the typed error, and the operator's
+    // record is the deduplicated `identity-mint-denied` log edge.
+    const view = orbView({ ...orb, lastMintAt: 1_700_000_060_000 }, new ControlState(), {});
+    expect(Object.keys(view)).not.toContain("identity");
+    expect(JSON.stringify(view)).not.toContain("mint");
+    expect(Check(OrbViewSchema, view)).toBe(true);
   });
 });
 

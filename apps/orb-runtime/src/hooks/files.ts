@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { SimulationTask } from "determined";
 import { errAsync, okAsync, Result, type ResultAsync } from "neverthrow";
@@ -43,6 +43,13 @@ export class NodeHookFileStore implements HookFileStore {
   remove(path: string): void {
     Result.fromThrowable(
       () => rmSync(path, { force: true }),
+      () => undefined,
+    )();
+  }
+
+  hardenFile(path: string): void {
+    Result.fromThrowable(
+      () => chmodSync(path, 0o600),
       () => undefined,
     )();
   }

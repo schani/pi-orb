@@ -1,12 +1,31 @@
 import type { OrbState } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { okAsync } from "neverthrow";
-import { DEFAULT_LIFECYCLE_CONSTANTS, type LifecycleConstants } from "../domain/constants.ts";
+import {
+  DEFAULT_ISSUER_CONSTANTS,
+  DEFAULT_LIFECYCLE_CONSTANTS,
+  type IssuerConstants,
+  type LifecycleConstants,
+} from "../domain/constants.ts";
 import { ControlState } from "../domain/control-state.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
-import type { ControlPlaneDeps, OrbNameGenerator } from "../domain/ports.ts";
+import type {
+  ControlPlaneDeps,
+  MintDeps,
+  OrbNameGenerator,
+  SigningKeyDeps,
+} from "../domain/ports.ts";
+import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
+import { FakeSecretStore } from "./broker.ts";
+import { FAILPOINTS } from "./failpoints.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
+import {
+  FakeMintIdSource,
+  FakeSigningKeyGenerator,
+  FakeSigningKeyStore,
+  FakeTokenSigner,
+} from "./workload-identity.ts";
 import {
   type FakeOrbConfig,
   FakeOrbHostProvider,
@@ -78,6 +97,95 @@ export function makeHarness(options?: {
   return { world, store, authGate, deps };
 }
 
+/**
+ * The deployment's issuer identity in tests. It is part of the security
+ * identity of every minted token, so scenarios assert on it rather than
+ * accepting whatever the code happens to produce.
+ */
+export const TEST_ISSUER_URL = "https://issuer.pi-orb.test";
+
+/**
+ * Fast issuer constants: only the rate-limit floor is compressed, because the
+ * lifetime bounds and audience cap are the wire contract's own numbers and a
+ * scenario that changed them would stop testing the shipped behavior.
+ */
+export const TEST_ISSUER_CONSTANTS: IssuerConstants = {
+  ...DEFAULT_ISSUER_CONSTANTS,
+  minMintIntervalMs: 1_000,
+};
+
+export interface MintHarness extends TestHarness {
+  readonly signer: FakeTokenSigner;
+  readonly mintIds: FakeMintIdSource;
+  readonly mintDeps: MintDeps;
+}
+
+/** A `makeHarness` whose store is also wired into identity-mint dependencies. */
+export function makeMintHarness(options?: {
+  authMode?: FakeAuthMode;
+  constants?: Partial<LifecycleConstants>;
+  issuerConstants?: Partial<IssuerConstants>;
+  issuerUrl?: string;
+  kid?: string;
+}): MintHarness {
+  const harness = makeHarness(options);
+  const signer = new FakeTokenSigner(options?.kid);
+  const mintIds = new FakeMintIdSource();
+  return {
+    ...harness,
+    signer,
+    mintIds,
+    mintDeps: {
+      store: harness.store,
+      signer,
+      mintIds,
+      denials: new MintDenialLog(),
+      constants: { ...TEST_ISSUER_CONSTANTS, ...options?.issuerConstants },
+      issuerUrl: options?.issuerUrl ?? TEST_ISSUER_URL,
+    },
+  };
+}
+
+export interface SigningKeyHarness {
+  /** The durable key rows, shared by every instance in a scenario. */
+  readonly keys: FakeSigningKeyStore;
+  /** The private key material, likewise shared. */
+  readonly secrets: FakeSecretStore;
+  readonly generator: FakeSigningKeyGenerator;
+  readonly deps: SigningKeyDeps;
+}
+
+/**
+ * One control-plane instance's view of the issuer's signing keys. Passing the
+ * same `keys`/`secrets` to two harnesses models two instances over one
+ * database and one secret store, each with its own key generator — which is
+ * exactly the shape a boot race and a rotation crash have to survive.
+ */
+export function makeSigningKeyHarness(options?: {
+  keys?: FakeSigningKeyStore;
+  secrets?: FakeSecretStore;
+  /** Distinguishes this instance's generated `kid`s from another's. */
+  kidPrefix?: string;
+  issuerConstants?: Partial<IssuerConstants>;
+}): SigningKeyHarness {
+  const keys = options?.keys ?? new FakeSigningKeyStore();
+  const secrets =
+    options?.secrets ??
+    new FakeSecretStore({ read: FAILPOINTS.issuerSecretRead, write: FAILPOINTS.issuerSecretWrite });
+  const generator = new FakeSigningKeyGenerator(options?.kidPrefix ?? "kid");
+  return {
+    keys,
+    secrets,
+    generator,
+    deps: {
+      keys,
+      secrets,
+      generator,
+      constants: { ...TEST_ISSUER_CONSTANTS, ...options?.issuerConstants },
+    },
+  };
+}
+
 /** A fresh ControlState + auth flow, same store/world: a control-plane restart. */
 export function restartControlPlane(harness: TestHarness): TestHarness {
   harness.authGate.simulateProcessRestart();
@@ -135,6 +243,7 @@ export function makeOrbRow(
     replicatedHeadId: null,
     lastBusyAt: null,
     stopReason: null,
+    lastMintAt: null,
     stateChangedAt: 0,
     createdAt: 0,
     updatedAt: 0,
@@ -217,6 +326,44 @@ export function seedRunningOrb(
     }),
   );
   harness.deps.control.resetLivenessBaseline(orbId, task.monotonicNow());
+}
+
+/**
+ * Seed a project plus an orb in `state` whose per-incarnation runtime bearer is
+ * already durably committed, and return that bearer's stored hash — what the
+ * HTTP layer hands the domain after hashing the presented token. This is the
+ * precondition every identity mint has: possession of the live incarnation's
+ * bearer. A stopped or archiving orb keeps its committed hash exactly as the
+ * lifecycle leaves it; whether it may mint is the domain's decision, not the
+ * fixture's.
+ */
+export function seedOrbWithBearer(
+  task: SimulationTask,
+  harness: TestHarness,
+  orbId: string,
+  state: OrbState,
+  options?: { incarnation?: number; overrides?: Partial<OrbRow> },
+): string {
+  const projectId = `project-of-${orbId}`;
+  harness.store.seedProject(makeProjectRow(projectId));
+  harness.world.configureOrb(orbId, { initDurationMs: 0 });
+  const provisioned = seedProvisionedHost(task, harness, orbId, {
+    repositoryUrl: makeProjectRow(projectId).repositoryUrl,
+    ...(options?.incarnation === undefined ? {} : { incarnation: options.incarnation }),
+  });
+  harness.world.finishBoot(task, orbId);
+  harness.store.seedOrb(
+    makeOrbRow(orbId, projectId, state, {
+      hostRef: provisioned.ref.resourceId,
+      hostIncarnation: options?.incarnation ?? 0,
+      runtimeTokenHash: provisioned.runtimeTokenHash,
+      hostSpecFingerprint: provisioned.specFingerprint,
+      hostSpecGeneration: provisioned.specGeneration,
+      stateChangedAt: task.wallNow(),
+      ...options?.overrides,
+    }),
+  );
+  return provisioned.runtimeTokenHash;
 }
 
 /**

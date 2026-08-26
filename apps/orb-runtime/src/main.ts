@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import { readBrokerEnv } from "./broker/endpoint.ts";
-import { ORB_MARKER_ENV } from "./hooks/runner.ts";
+import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
 import { startTailscale } from "./tailscale/daemon.ts";
@@ -50,7 +50,10 @@ async function main(): Promise<void> {
   // The health server starts before slow initialization (docs/host-provider.md).
   // PTYs are admitted only after the checkout is ready, but their manager is
   // installed now so Fastify owns cleanup on every shutdown path.
-  const terminalManager = new TerminalManager({ cwd: join(workDir, "repo") });
+  const terminalManager = new TerminalManager({
+    cwd: join(workDir, "repo"),
+    hookEnv: agent.hookEnvSource(),
+  });
   const app = buildRuntimeServer(agent, terminalManager);
   const configuredPort = Number(env("PI_ORB_RUNTIME_PORT", "8080"));
   if (!Number.isInteger(configuredPort) || configuredPort < 1 || configuredPort > 65_535) {
