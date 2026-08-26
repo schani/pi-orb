@@ -208,7 +208,7 @@ and outcomes that affect the user must be visible in the product.
   carries three sentences naming both files, the once-per-incarnation / every-start split, the
   identity split, the idempotency and executable rules, and the log directory. Without it an agent
   that never hits a failure never learns it could write one. The baseline has room for the
-  convention only; an authoring guide belongs in a skill (`TODO.md`).
+  convention only; the authoring guide is the `boot-hooks` skill (below, 2026-08-26).
 
 ### Security and trust
 
@@ -240,9 +240,17 @@ With the hooks in place the `cloud-identity` skill's "future orbs" step becomes 
 `.agents/setup` ensures the client is installed (`gcloud` is already in the image; other clients
 install here), and `.agents/resume` writes the external-account file, exports the variables
 where the agent's shells read them, and runs `gcloud auth login --cred-file=…` — the step that
-needs the orb's identity and therefore cannot live in setup. `apps/orb-runtime/skills/cloud-identity/SKILL.md` is updated to emit exactly these two files
-when the hooks ship, replacing its current "commit a script the next orb's agent runs by hand"
-guidance and the note that automatic execution is pending.
+needs the orb's identity and therefore cannot live in setup.
+
+**Done 2026-08-26.** `apps/orb-runtime/skills/cloud-identity/SKILL.md` emits exactly those two
+files plus a committed, secret-free `.pi-orb/gcp-external-account.json` template, replacing the
+"commit a script the next orb's agent runs by hand" guidance and the note that automatic execution
+was pending. `apps/orb-runtime/skills/boot-hooks/SKILL.md` is the authoring guide for hooks in
+general — the split, the budgets, the idempotency pattern, the log and status paths, and worked
+examples — since the tool baseline has room for the convention only. Both are pinned by
+`apps/orb-runtime/src/pi/skills.test.ts`, which reads the paths, budgets, and scrubbed variable
+names out of `apps/orb-runtime/src/hooks/runner.ts` rather than restating them, and which requires
+that no setup example authenticates anything.
 
 ## Using the hooks
 

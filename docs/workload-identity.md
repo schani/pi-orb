@@ -245,12 +245,17 @@ pre-filled block for the human's own machine — survives as the documented **al
 for a human who declines an in-orb login. It produces the same configuration at the cost of a
 round trip.
 
-The skill's "future orbs" step reflects a real gap: the GCP-side trust is permanent and
+The skill's "future orbs" step used to reflect a real gap: the GCP-side trust is permanent and
 project-wide, but the in-orb half (credential file, three environment variables, `--cred-file`
-login) has to be repeated in every new orb, and pi-orb has no per-project boot hook to run it.
-The skill therefore has the agent commit the non-secret pieces and say plainly that automatic
-execution on boot does not exist yet; the hook itself is open question 41 in
-`docs/open-questions.md`.
+login) has to be repeated in every new orb, and pi-orb had no per-project boot hook to run it.
+**Closed 2026-08-26** by the orb boot hooks (`docs/orb-setup-hook.md`). Once federation is proven
+the skill now writes and commits, with the human's ok, `.agents/setup` (ensure the client is
+present, guarded on `command -v`), `.agents/resume` (restore the credential file, export the three
+variables where the agent's shells read them, `gcloud auth login --cred-file=…`, set the project),
+and a `.pi-orb/gcp-external-account.json` template — which holds no secret, so committing it is
+what makes the next orb's gcloud identity cost zero steps. The `--cred-file` login lives in resume
+because setup has no identity, and `apps/orb-runtime/src/pi/skills.test.ts` asserts that
+structurally. A second baked skill, `boot-hooks`, is the general authoring guide for those files.
 
 The CLI retries only outcomes a later attempt can change — the first-boot 401 before the bearer
 hash commits, the per-orb floor, and transient issuer/network failures — inside one 10-second
