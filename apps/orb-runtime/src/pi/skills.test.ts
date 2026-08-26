@@ -5,12 +5,17 @@ import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { RUNTIME_TOKEN_ENV } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import {
-  HOOK_DIRECTORY,
+  HOOK_ENV_DENIED,
+  HOOK_ENV_FILE_ENV,
   HOOK_NAME_ENV,
+  hookEnvPath,
+  ORB_MARKER_ENV,
+} from "../hooks/env-file.ts";
+import {
+  HOOK_DIRECTORY,
   hookLogDir,
   hookStampPath,
   hookStatusPath,
-  ORB_MARKER_ENV,
   RESUME_BLOCKING_WINDOW_MS,
   SETUP_DEADLINE_MS,
   SETUP_SCRUBBED_ENV,
@@ -166,6 +171,20 @@ describe("baked agent skills", () => {
       }
     });
 
+    it("names the env file as the only way to hand the agent a variable", () => {
+      expect(body).toContain(HOOK_ENV_FILE_ENV);
+      expect(body).toContain(hookEnvPath("$HOME"));
+      // Every name the merge refuses, so a hook author is never left guessing
+      // why the one variable they set is the one that vanished.
+      for (const name of HOOK_ENV_DENIED) {
+        expect(body, `the skill must say ${name} cannot be set from a hook`).toContain(name);
+      }
+      // The guidance this replaced (2026-08-26): neither shell the agent has
+      // reads a profile, so a hook writing there sets nothing anyone sees.
+      expect(body).toMatch(/bash -c/);
+      expect(body).toMatch(/--noprofile --norc/);
+    });
+
     it("quotes the runner's own budgets", () => {
       expect(body).toMatch(new RegExp(`\\b${SETUP_DEADLINE_MS / 60_000}[- ]minute`));
       expect(body).toMatch(new RegExp(`\\b${RESUME_BLOCKING_WINDOW_MS / 1_000}[- ]s(econd)?`));
@@ -223,6 +242,22 @@ describe("baked agent skills", () => {
         );
       }
       expect(hookFences(body, "resume").join("\n")).toContain("gcloud auth login --cred-file");
+    });
+
+    it("hands the three variables to the agent through the env file", () => {
+      const resume = hookFences(body, "resume").join("\n");
+      expect(resume, "the resume hook must write the env file").toContain(HOOK_ENV_FILE_ENV);
+      for (const name of [
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "PI_ORB_GCP_AUDIENCE",
+        "GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES",
+      ]) {
+        expect(resume, `${name} must reach the agent, not just the hook`).toContain(name);
+      }
+      // `/etc/profile.d` and `$HOME/.profile` are read by neither of the
+      // agent's shells: a hook writing there sets variables nothing ever sees.
+      expect(body).not.toContain("/etc/profile.d");
+      expect(body).not.toContain(".profile");
     });
 
     it("no longer says the hooks are pending", () => {

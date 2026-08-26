@@ -444,6 +444,12 @@ export class PiOrbAgent {
     // outcome is awaited only for the blocking window; a slower hook keeps
     // running and only the prompt fragment misses it (docs/orb-setup-hook.md).
     await this.hooks.runResume();
+    // Both hooks have had their say, so whatever they wrote to the env file is
+    // merged into the runtime's own environment here — the last moment before
+    // the agent exists, and what its `bash -c` tool shells and the terminal's
+    // PTYs inherit. Nothing a hook *exported* ever reaches either shell
+    // (docs/orb-setup-hook.md).
+    const hookEnv = await this.hooks.applyHookEnv(process.env);
 
     const agentDir = join(this.options.workDir, "pi-agent");
     // SSE keeps the first E2E deterministic; the fake refuses the WebSocket
@@ -458,6 +464,7 @@ export class PiOrbAgent {
       settingsManager,
       previewHost: this.options.previewHost ?? null,
       hooks: this.hooks.report(),
+      hookEnv,
     });
     if (loaderResult.isErr()) {
       return err(this.failed("session_init_failed", loaderResult.error, true));

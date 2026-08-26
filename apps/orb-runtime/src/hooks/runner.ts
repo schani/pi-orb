@@ -1,5 +1,5 @@
 import { statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   CONTROL_PLANE_URL_ENV,
   PREVIEW_HOST_ENV,
@@ -11,6 +11,14 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { Result } from "neverthrow";
+import {
+  HOOK_ENV_FILE_ENV,
+  HOOK_NAME_ENV,
+  type HookEnvReport,
+  hookEnvPath,
+  ORB_MARKER_ENV,
+  parseHookEnvFile,
+} from "./env-file.ts";
 import { NodeHookFileStore } from "./files.ts";
 import type { HookFileStore, HookName, HookProcess, HookSpawner } from "./ports.ts";
 
@@ -29,13 +37,12 @@ export const hookLogPath = (home: string, hook: HookName): string =>
   join(hookLogDir(home), `${hook}.log`);
 export const hookStatusPath = (home: string, hook: HookName): string =>
   join(hookLogDir(home), `${hook}.status.json`);
+/** What the runtime made of the env file, beside the hooks' own verdicts. */
+export const hookEnvStatusPath = (home: string): string =>
+  join(hookLogDir(home), "env.status.json");
 /** The "setup has run for this incarnation" marker, under the persistent workspace. */
 export const hookStampPath = (workDir: string): string =>
   join(workDir, ".pi-orb", "setup-incarnation");
-
-/** Set in every orb process so a script can branch on the platform (`PI_ORB=1`). */
-export const ORB_MARKER_ENV = "PI_ORB";
-export const HOOK_NAME_ENV = "PI_ORB_HOOK";
 
 /**
  * Removed from a hook's environment. `PI_ORB_RUNTIME_TOKEN` and
@@ -54,6 +61,7 @@ export const HOOK_SCRUBBED_ENV = [
 export function hookEnvironment(
   base: Readonly<Record<string, string | undefined>>,
   hook: HookName,
+  envFile: string,
 ): Record<string, string> {
   const scrubbed = new Set<string>([
     ...HOOK_SCRUBBED_ENV,
@@ -66,6 +74,7 @@ export function hookEnvironment(
   }
   env[ORB_MARKER_ENV] = "1";
   env[HOOK_NAME_ENV] = hook;
+  env[HOOK_ENV_FILE_ENV] = envFile;
   return env;
 }
 
@@ -156,6 +165,8 @@ export class BootHookRunner {
    * simulated owner can await until it has settled (docs/testing.md).
    */
   private lateVerdict: Promise<void> = Promise.resolve();
+  /** What the hooks' env file turned into, once it has been merged. */
+  private envApplied: HookEnvReport | null = null;
 
   constructor(options: BootHookRunnerOptions) {
     this.options = options;
@@ -232,6 +243,54 @@ export class BootHookRunner {
   }
 
   /**
+   * Merges what the hooks wrote to `$HOME/.pi-orb/env` into `target` — the
+   * runtime's own environment, which is what Pi's `bash -c` tool shells and
+   * the terminal's PTYs inherit. It is the only way a hook can hand the agent
+   * a variable: neither shell reads a profile (`docs/orb-setup-hook.md`).
+   *
+   * Call it once, after resume's blocking window and before the agent session
+   * exists. A resume that finishes in the background afterwards can still
+   * write the file; it takes effect on the next start.
+   *
+   * Returns null when no hook wrote one. A file the runtime cannot make sense
+   * of is reported, never fatal: the orb still starts, exactly as a failed
+   * hook does.
+   */
+  async applyHookEnv(target: Record<string, string | undefined>): Promise<HookEnvReport | null> {
+    const path = hookEnvPath(this.options.home);
+    const raw = this.files.readText(path);
+    if (raw === null) return null;
+    // The hook's umask decided the mode; the runtime owns it from here.
+    this.files.hardenFile(path);
+    const parsed = parseHookEnvFile(raw);
+    const applied: string[] = [];
+    for (const [name, value] of parsed.entries) {
+      target[name] = value;
+      applied.push(name);
+    }
+    for (const name of parsed.ignored) {
+      this.options.log?.(`hook env: ignored ${name}: the runtime owns it`);
+    }
+    for (const reason of parsed.malformed) {
+      this.options.log?.(`hook env: ${reason} (${path})`);
+    }
+    const report: HookEnvReport = {
+      path,
+      applied,
+      ignored: parsed.ignored,
+      malformed: parsed.malformed,
+    };
+    this.envApplied = report;
+    await this.writeEnvStatus(report);
+    return report;
+  }
+
+  /** What `applyHookEnv` did, for the agent's prompt fragment. Null before it ran. */
+  envReport(): HookEnvReport | null {
+    return this.envApplied;
+  }
+
+  /**
    * Terminates a hook still running when the orb stops — a resume past its
    * blocking window, or a setup a shutdown interrupted. Nothing a hook started
    * outlives the orb, and nothing the kill causes is recorded as the hook's
@@ -295,10 +354,18 @@ export class BootHookRunner {
       );
     }
 
+    // So a hook can simply append to `$PI_ORB_HOOK_ENV_FILE`. Failing to make
+    // the directory is not a reason to refuse to run the hook: it may not want
+    // to hand the agent anything at all.
+    const envDir = this.files.ensureDir(dirname(hookEnvPath(this.options.home)));
+    if (envDir.isErr()) {
+      this.options.log?.(`hook ${hook}: env directory unavailable: ${envDir.error.message}`);
+    }
+
     const spawned = this.options.spawner.spawn({
       executable: discovery.path,
       cwd: this.options.repoDir,
-      env: hookEnvironment(this.options.environment, hook),
+      env: hookEnvironment(this.options.environment, hook, hookEnvPath(this.options.home)),
       logPath,
       onLine: (line) => this.options.log?.(`hook ${hook}: ${line}`),
     });
@@ -426,6 +493,24 @@ export class BootHookRunner {
     );
     if (written.isErr()) {
       this.options.log?.(`hook ${status.hook}: status write failed: ${written.error.message}`);
+    }
+    await this.options.task.checkpoint("boot-hooks.status-written");
+  }
+
+  /**
+   * Written beside the hooks' own verdicts so "which variables did the agent
+   * actually get?" is answerable from inside the orb. Names only, never
+   * values: a hook's variable may itself be a credential.
+   */
+  private async writeEnvStatus(report: HookEnvReport): Promise<void> {
+    await this.options.task.checkpoint("boot-hooks.status-before-write");
+    const written = await this.files.writeText(
+      this.options.task,
+      hookEnvStatusPath(this.options.home),
+      `${JSON.stringify({ ...report, incarnation: this.options.incarnation }, null, 2)}\n`,
+    );
+    if (written.isErr()) {
+      this.options.log?.(`hook env: status write failed: ${written.error.message}`);
     }
     await this.options.task.checkpoint("boot-hooks.status-written");
   }

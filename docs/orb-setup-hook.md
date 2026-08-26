@@ -151,14 +151,41 @@ environment"). Rejected: a `pi-orb` subcommand to re-run hooks — executing the
 
 - Both hooks: the runtime's ordinary process environment (`PI_ORB_WORK_DIR`, `HOME`,
   `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`, `PI_ORB_REPOSITORY_URL`, `PATH` with the image's
-  toolchain) plus `PI_ORB=1` and `PI_ORB_HOOK=setup|resume`.
+  toolchain) plus `PI_ORB=1`, `PI_ORB_HOOK=setup|resume`, and `PI_ORB_HOOK_ENV_FILE` (below).
 - Setup additionally has `PI_ORB_RUNTIME_TOKEN` and `PI_ORB_CONTROL_PLANE_URL` removed
   (decision 3). Resume has them. Neither hook receives Tailscale material.
 - Network is available to both, subject to whatever egress the host provider allows the orb.
-- Nothing a hook exports persists into the agent's environment by itself. A hook that needs the
-  agent to see variables writes them where the agent's shells read them (the repository's own
-  convention, or `/etc/profile.d` as this repository's Amp script does) — matching Amp, where
-  setup writes files and the environment is not inherited.
+- Nothing a hook exports persists into the agent's environment by itself: the hook is its own
+  process, and its exports die with it.
+  **The runtime delivers variables through a file (decided 2026-08-26).** A hook that needs the
+  agent to see variables writes `$HOME/.pi-orb/env`, whose path it is handed as
+  `PI_ORB_HOOK_ENV_FILE`. After setup and after resume's blocking window — immediately before the
+  agent session is created — the runtime reads that file and merges its entries into its own
+  `process.env`, which is what Pi's tool shells and the terminal PTYs inherit. The file lives in
+  the persistent home, so it survives stop/start and compute replacement, and the runtime restricts
+  it to mode 600 when it reads it.
+  - Format, deliberately tiny: one `KEY=VALUE` per line; blank lines and lines whose first
+    non-blank character is `#` are ignored; the value is taken literally — no expansion, no escape
+    processing — apart from one optional pair of matching surrounding quotes; a repeated name keeps
+    its last value. A shell-compatible parser is rejected: the runtime reads this file into its own
+    process, and `$(…)` in a file a repository writes must not be a code path.
+  - Entries may not override the variables the runtime owns — `PI_ORB_RUNTIME_TOKEN`,
+    `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`, `PI_ORB_WORK_DIR`, `HOME`,
+    `PATH`, `PI_ORB`, and the Tailscale variables. Such an entry is ignored, and the runtime logs
+    one edge per refused name, because a hook that could rewrite `PATH` would break every later
+    boot in a way that looks like a platform bug.
+  - A line the runtime cannot use is reported the way a hook failure is — in a status file beside
+    the hook logs and in the agent's prompt fragment — never a crash, and never with the line's
+    content, which may be a credential. The line number alone is reported.
+  - A resume hook that finishes in the background *after* its blocking window can still write the
+    file; the merge has already happened, so its variables take effect on the next start.
+  - Rejected: `/etc/profile.d/*.sh` or `$HOME/.profile`, which is what Amp scripts and this
+    repository's own Amp-era `.agents/setup` use. Neither shell the agent has reads them — Pi's
+    bash tool runs `bash -c`, which reads no profile, and the terminal spawns
+    `bash --noprofile --norc` — so a hook writing there sets variables nothing in the orb ever sees.
+    That was the state of this document until 2026-08-26, and it made the cloud-identity resume
+    recipe silently useless: `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES` and `PI_ORB_GCP_AUDIENCE`
+    stayed unset and every `gcloud` call failed.
 
 ### Timing and blocking
 
@@ -184,6 +211,9 @@ and outcomes that affect the user must be visible in the product.
 - stdout and stderr of each hook go to `$HOME/.cache/pi-orb/logs/setup.log` and
   `resume.log` in the persistent home, overwritten per run, and mirrored to the runtime's own
   log stream so the operator can read them without an orb shell.
+- What the runtime made of `$HOME/.pi-orb/env` is recorded next to those logs as
+  `env.status.json`: the path, the names applied, the names refused, and one reason per unusable
+  line. Names only, never values — a hook's variable may itself be a credential.
 - The result of the latest setup run — outcome (`ok`, `failed` with exit code, `timeout`,
   `hook_not_executable`), incarnation, start and end time, and the last lines of output — is
   persisted next to the log as a small status file **in the orb**, and reported to the control
@@ -263,14 +293,38 @@ Put either file at the root of your repository, make it executable, and give it 
 | Identity | **none** — `PI_ORB_RUNTIME_TOKEN` and `PI_ORB_CONTROL_PLANE_URL` are removed, so `pi-orb id-token`, the brokered `gh`, and the git credential helper all fail | full: install the client in setup, authenticate it here |
 | cwd | repository root | repository root |
 | `$HOME` | the orb's persistent home; what you write there survives replacement, what you install into the image layer does not | same |
+| Variables for the agent | append `KEY=VALUE` lines to `$PI_ORB_HOOK_ENV_FILE` (`$HOME/.pi-orb/env`) | same; written here they reach this boot's agent |
 
 Both hooks get the runtime's environment (`PI_ORB_WORK_DIR`, `HOME`, `PI_ORB_ID`,
-`PI_ORB_HOST_INCARNATION`, `PI_ORB_REPOSITORY_URL`, the image's `PATH`) plus `PI_ORB=1` and
-`PI_ORB_HOOK=setup|resume`. Neither gets Tailscale material. `PI_ORB=1` is set for every process in
-the orb, so a script shared with Amp can branch on it; `AMP_ORB` is never set. Nothing a hook
-exports reaches the agent — write to `/etc/profile.d` or your project's own convention instead.
+`PI_ORB_HOST_INCARNATION`, `PI_ORB_REPOSITORY_URL`, the image's `PATH`) plus `PI_ORB=1`,
+`PI_ORB_HOOK=setup|resume`, and `PI_ORB_HOOK_ENV_FILE`. Neither gets Tailscale material.
+`PI_ORB=1` is set for every process in the orb, so a script shared with Amp can branch on it;
+`AMP_ORB` is never set.
 `sudo` is installed in the prescribed image (the runtime is root, so it elevates nothing); a
 process-provider orb inherits the developer's machine and may not have it.
+
+Nothing a hook `export`s reaches the agent, and neither does `/etc/profile.d` or `$HOME/.profile`:
+the agent's tool shells are `bash -c` and its terminal is `bash --noprofile --norc`, and no profile
+is read by either. Write `$PI_ORB_HOOK_ENV_FILE` instead:
+
+```sh
+umask 077
+{
+  printf 'GOOGLE_APPLICATION_CREDENTIALS=%s\n' "$HOME/.pi-orb-gcp.json"
+  printf 'GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1\n'
+} >> "$PI_ORB_HOOK_ENV_FILE"
+```
+
+One `KEY=VALUE` per line; `#` comments and blank lines are ignored; the value is literal apart from
+one optional pair of surrounding quotes — no expansion, no escapes — and a repeated name keeps its
+last value. The runtime merges the file into its own environment immediately before the agent
+session is created, so both the agent's shells and every terminal inherit it. It cannot override
+`PI_ORB_RUNTIME_TOKEN`, `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`,
+`PI_ORB_WORK_DIR`, `HOME`, `PATH`, `PI_ORB`, or the Tailscale variables; such a line is ignored and
+logged. An unusable line is skipped and reported by number, and the rest of the file still applies.
+The file is yours to maintain: it is never truncated for you, so rewrite rather than append if a
+value should change, and remember that a resume hook that runs past its 10-second window writes too
+late for this boot — its variables arrive on the next start.
 
 Output goes to `$HOME/.cache/pi-orb/logs/setup.log` and `resume.log`, overwritten on every run and
 mirrored into the runtime's log stream. Beside each log a `*.status.json` records the outcome
@@ -346,7 +400,10 @@ Three defects the coverage found, all fixed on the same branch:
   stamp (setup once per incarnation, resume every start), the 20-minute timeout with process
   group termination, the 10-second resume blocking window with background continuation, log
   capture and overwrite, the status file, and the health-report and prompt-fragment outputs for
-  every outcome. The tool baseline names both hooks, the identity split, the idempotency and
+  every outcome. For the env file: the parse matrix (comments, blank lines, literal values, one
+  optional quote pair, repeated names), the deny-list, mode 600, a missing file as a no-op,
+  malformed-line reporting that carries no content, and the merge happening after both hooks and
+  before the session exists. The tool baseline names both hooks, the identity split, the idempotency and
   executable rules, and the log directory.
 - Runtime DST (`apps/orb-runtime/src/hooks/runner.test.ts`): `setup-hook-timeout`,
   `resume-hook-background`, `resume-hook-shutdown`; a restart-within-the-incarnation sweep
@@ -376,5 +433,6 @@ Three defects the coverage found, all fixed on the same branch:
 - E2E (Docker backend): a fixture repository with both hooks proves the ordering
   (setup → resume → agent), that `pi-orb id-token` fails inside setup and succeeds inside resume,
   that a failing setup surfaces on the orb page and in the agent's context while the orb runs,
-  and that stop/start runs resume only while replacement runs both. `npm run test:e2e` gates the
+  that stop/start runs resume only while replacement runs both, and that a variable the resume
+  hook writes to `$PI_ORB_HOOK_ENV_FILE` is visible in a terminal PTY through the WebSocket. `npm run test:e2e` gates the
   change as usual, since it touches the runtime boot path.

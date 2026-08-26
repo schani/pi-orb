@@ -38,6 +38,7 @@ runs on every start, which is exactly when a credential needs refreshing.
 | `PI_ORB_HOST_INCARNATION` | the compute incarnation; it changes when compute is replaced |
 | `PI_ORB_WORK_DIR` | the persistent workspace root |
 | `HOME` | the orb's persistent home — what you write there survives compute replacement |
+| `PI_ORB_HOOK_ENV_FILE` | `$HOME/.pi-orb/env` — the only way to give the agent a variable |
 
 Plus the image's `PATH` and `PI_ORB_REPOSITORY_URL`. Neither hook gets Tailscale
 material. Network is available to both.
@@ -59,9 +60,10 @@ A present but non-executable hook is reported as a failure, not skipped.
   nothing). An orb on the process host provider inherits the developer's machine
   and may not have it — guard rather than assume:
   `if command -v sudo >/dev/null 2>&1; then sudo …; else …; fi`.
-- **Nothing a hook exports reaches your shells.** The hook is its own process. To
-  give the agent an environment variable, write it where shells read it —
-  `/etc/profile.d/<name>.sh` via `sudo`, or `$HOME/.profile`.
+- **Nothing a hook exports reaches your shells** — and neither does
+  `/etc/profile.d` or `$HOME/.profile`. Your bash tool runs `bash -c` and the
+  Terminal tab runs `bash --noprofile --norc`; no profile is read by either.
+  Write `$PI_ORB_HOOK_ENV_FILE` instead (below).
 - **Never write a secret into the repository.** Non-secret generated
   configuration (an external-account file naming a helper, a project ID) is fine
   to commit; anything that is itself a credential belongs under `$HOME`, which is
@@ -70,6 +72,40 @@ A present but non-executable hook is reported as a failure, not skipped.
   unattended, with your authority, on the next fresh orb of every project member,
   before anyone reads the diff.
 
+## Giving the agent environment variables
+
+Append `KEY=VALUE` lines to `$PI_ORB_HOOK_ENV_FILE`. Right before your session is
+created — after setup and after resume's 10-second window — the runtime merges
+that file into its own environment, which every bash tool call and every
+terminal inherits.
+
+```sh
+umask 077
+{
+  printf 'GOOGLE_APPLICATION_CREDENTIALS=%s\n' "$HOME/.pi-orb-gcp.json"
+  printf 'GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1\n'
+} >> "$PI_ORB_HOOK_ENV_FILE"
+```
+
+The format is the whole format: one `KEY=VALUE` per line, `#` comments and blank
+lines ignored, the value literal — no `$VAR` expansion, no escapes — apart from
+one optional pair of matching surrounding quotes, and a repeated name keeping its
+last value. Expand in the hook, as the `printf` above does, not in the file.
+
+- The file lives in `$HOME`, so it survives stop/start and compute replacement.
+  Nothing truncates it for you: rewrite it rather than appending if a value
+  should change, or a stale line will outlive the reason for it.
+- These names are the runtime's and a line naming one is ignored:
+  `PI_ORB_RUNTIME_TOKEN`, `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`,
+  `PI_ORB_HOST_INCARNATION`, `PI_ORB_WORK_DIR`, `HOME`, `PATH`, `PI_ORB`,
+  `PI_ORB_TAILSCALE_AUTH_KEY`, `PI_ORB_TAILSCALE_HOSTNAME`,
+  `PI_ORB_PREVIEW_HOST`.
+- An unusable line is skipped, reported by number in `env.status.json` and in
+  your own context, and the rest of the file still applies.
+- A resume hook still running past its 10-second window writes too late for this
+  boot. Its variables arrive on the next start — so keep anything the agent
+  needs immediately inside the window.
+
 ## Where the output goes
 
 ```text
@@ -77,6 +113,8 @@ $HOME/.cache/pi-orb/logs/setup.log           stdout+stderr, overwritten per run
 $HOME/.cache/pi-orb/logs/setup.status.json   outcome, incarnation, times, last lines
 $HOME/.cache/pi-orb/logs/resume.log
 $HOME/.cache/pi-orb/logs/resume.status.json
+$HOME/.cache/pi-orb/logs/env.status.json     which variables the env file gave you
+$HOME/.pi-orb/env                            the env file itself
 $PI_ORB_WORK_DIR/.pi-orb/setup-incarnation   the incarnation whose setup already ran
 ```
 

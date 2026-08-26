@@ -166,7 +166,7 @@ export class TerminalManager {
   private readonly options: TerminalManagerOptions;
   private readonly maxSessions: number;
   private readonly factory: PtyFactory;
-  private readonly environment: Readonly<Record<string, string>>;
+  private readonly environment: Readonly<Record<string, string>> | null;
   private readonly active = new Map<string, ManagedTerminal | null>();
   private closing = false;
 
@@ -174,7 +174,7 @@ export class TerminalManager {
     this.options = options;
     this.maxSessions = options.maxSessions ?? 4;
     this.factory = options.factory ?? new NodePtyFactory();
-    this.environment = options.environment ?? cleanEnvironment(process.env);
+    this.environment = options.environment ?? null;
   }
 
   get activeCount(): number {
@@ -200,8 +200,11 @@ export class TerminalManager {
     // Reserve synchronously before crossing the async native-module boundary.
     const id = randomUUID();
     this.active.set(id, null);
+    // Read per PTY, not once at construction: the manager is installed before
+    // the boot hooks run, and their env file is merged into `process.env`
+    // afterwards (docs/orb-setup-hook.md).
     return this.factory
-      .open(this.options.cwd, cols, rows, this.environment)
+      .open(this.options.cwd, cols, rows, this.environment ?? cleanEnvironment(process.env))
       .andThen((process) => {
         if (this.closing) {
           Result.fromThrowable(

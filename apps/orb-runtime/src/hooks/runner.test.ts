@@ -5,20 +5,23 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { RuntimeHookStatus } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import { afterEach, describe, expect, it } from "vitest";
 import { HOOK_FAILPOINTS } from "../testkit/failpoints.ts";
 import { FakeHookFileStore, FakeHookSpawner } from "../testkit/hooks.ts";
 import { runDst } from "../testkit/sim.ts";
+import { HOOK_ENV_FILE_ENV, hookEnvPath } from "./env-file.ts";
 import {
   BootHookRunner,
   discoverHook,
   hookEnvironment,
+  hookEnvStatusPath,
   RESUME_BLOCKING_WINDOW_MS,
   SETUP_DEADLINE_MS,
 } from "./runner.ts";
@@ -90,17 +93,25 @@ describe("boot hook environment", () => {
       PI_ORB_CONTROL_PLANE_URL: "http://cp",
       PI_ORB_HOST_INCARNATION: "3",
     };
-    const setup = hookEnvironment(base, "setup");
+    const setup = hookEnvironment(base, "setup", "/home/env");
     expect(setup["PI_ORB_RUNTIME_TOKEN"]).toBeUndefined();
     expect(setup["PI_ORB_CONTROL_PLANE_URL"]).toBeUndefined();
     expect(setup["PI_ORB_HOST_INCARNATION"]).toBe("3");
     expect(setup["PI_ORB"]).toBe("1");
     expect(setup["PI_ORB_HOOK"]).toBe("setup");
 
-    const resume = hookEnvironment(base, "resume");
+    const resume = hookEnvironment(base, "resume", "/home/env");
     expect(resume["PI_ORB_RUNTIME_TOKEN"]).toBe("secret");
     expect(resume["PI_ORB_CONTROL_PLANE_URL"]).toBe("http://cp");
     expect(resume["PI_ORB_HOOK"]).toBe("resume");
+  });
+
+  it("tells both hooks where to write variables for the agent", () => {
+    for (const hook of ["setup", "resume"] as const) {
+      expect(hookEnvironment({}, hook, "/workspace/home/.pi-orb/env")[HOOK_ENV_FILE_ENV]).toBe(
+        "/workspace/home/.pi-orb/env",
+      );
+    }
   });
 
   it("never hands Tailscale material to either hook", () => {
@@ -110,7 +121,7 @@ describe("boot hook environment", () => {
       PI_ORB_PREVIEW_HOST: "pi-orb-a.tail.ts.net",
     };
     for (const hook of ["setup", "resume"] as const) {
-      const env = hookEnvironment(base, hook);
+      const env = hookEnvironment(base, hook, "/home/env");
       expect(env["PI_ORB_TAILSCALE_AUTH_KEY"]).toBeUndefined();
       expect(env["PI_ORB_TAILSCALE_HOSTNAME"]).toBeUndefined();
       expect(env["PI_ORB_PREVIEW_HOST"]).toBeUndefined();
@@ -118,7 +129,7 @@ describe("boot hook environment", () => {
   });
 
   it("never sets AMP_ORB", () => {
-    expect(hookEnvironment({}, "setup")["AMP_ORB"]).toBeUndefined();
+    expect(hookEnvironment({}, "setup", "/home/env")["AMP_ORB"]).toBeUndefined();
   });
 });
 
@@ -355,6 +366,140 @@ describe("boot hook runner", () => {
     const second = makeRunner(orb, spawner, task);
     expect(await second.runSetup()).toBeNull();
     expect(second.report().setup).toMatchObject({ outcome: "failed", exitCode: 3 });
+  });
+});
+
+describe("the hook env file", () => {
+  const task = new NoSimulationTask("hook-env-test", false);
+
+  /** Write the env file the way a hook would, with the hook's own umask. */
+  const writeEnvFile = (orb: Orb, contents: string, mode = 0o644): void => {
+    const path = hookEnvPath(orb.home);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, contents, { mode });
+    chmodSync(path, mode);
+  };
+
+  it("is a no-op when no hook wrote one", async () => {
+    const orb = makeOrb();
+    const runner = makeRunner(orb, new FakeHookSpawner(), task);
+    const target: Record<string, string | undefined> = { PATH: "/usr/bin" };
+    expect(await runner.applyHookEnv(target)).toBeNull();
+    expect(target).toEqual({ PATH: "/usr/bin" });
+    expect(runner.envReport()).toBeNull();
+    expect(existsSync(hookEnvStatusPath(orb.home))).toBe(false);
+  });
+
+  it("merges only after both hooks have had their say", async () => {
+    const orb = makeOrb();
+    writeHook(orb, "setup");
+    writeHook(orb, "resume");
+    const spawner = new FakeHookSpawner();
+    const runner = makeRunner(orb, spawner, task);
+    const target: Record<string, string | undefined> = {};
+
+    const setup = runner.runSetup();
+    // The hook writes the file the runtime handed it, and nothing of it
+    // reaches the environment while the boot is still running hooks.
+    expect(spawner.runOf("setup").request.env[HOOK_ENV_FILE_ENV]).toBe(hookEnvPath(orb.home));
+    writeEnvFile(orb, "FROM_SETUP=installed\n");
+    spawner.runOf("setup").exit(0);
+    await setup;
+    expect(target).toEqual({});
+
+    const resume = runner.runResume();
+    writeEnvFile(orb, "FROM_SETUP=installed\nFROM_RESUME=authenticated\n");
+    spawner.runOf("resume").exit(0);
+    await resume;
+    expect(target).toEqual({});
+
+    const report = await runner.applyHookEnv(target);
+    expect(target).toEqual({ FROM_SETUP: "installed", FROM_RESUME: "authenticated" });
+    expect(report?.applied).toEqual(["FROM_SETUP", "FROM_RESUME"]);
+    expect(runner.envReport()).toBe(report);
+  });
+
+  it("restricts the file a hook's umask left readable", async () => {
+    const orb = makeOrb();
+    writeEnvFile(orb, "TOKEN_LOOKING=value\n", 0o644);
+    await makeRunner(orb, new FakeHookSpawner(), task).applyHookEnv({});
+    expect(statSync(hookEnvPath(orb.home)).mode & 0o777).toBe(0o600);
+  });
+
+  it("refuses to let a hook override what the runtime owns", async () => {
+    const orb = makeOrb();
+    writeEnvFile(orb, ["PATH=/attacker/bin", "HOME=/tmp", "SAFE=yes"].join("\n"));
+    const logged: string[] = [];
+    const runner = new BootHookRunner({
+      repoDir: orb.repoDir,
+      home: orb.home,
+      workDir: orb.workDir,
+      incarnation: "0",
+      task,
+      spawner: new FakeHookSpawner(),
+      environment: {},
+      log: (line) => logged.push(line),
+    });
+    const target: Record<string, string | undefined> = { PATH: "/usr/bin", HOME: orb.home };
+    const report = await runner.applyHookEnv(target);
+    expect(target).toEqual({ PATH: "/usr/bin", HOME: orb.home, SAFE: "yes" });
+    expect(report?.ignored).toEqual(["PATH", "HOME"]);
+    // One runtime edge per refused name, so "why is my variable missing?" is
+    // answerable from the runtime's log alone.
+    expect(logged).toContain("hook env: ignored PATH: the runtime owns it");
+    expect(logged).toContain("hook env: ignored HOME: the runtime owns it");
+  });
+
+  it("reports a line it cannot parse and still applies the rest", async () => {
+    const orb = makeOrb();
+    writeEnvFile(orb, ["GOOD=yes", "this is not an assignment", "ALSO_GOOD=yes"].join("\n"));
+    const logged: string[] = [];
+    const runner = new BootHookRunner({
+      repoDir: orb.repoDir,
+      home: orb.home,
+      workDir: orb.workDir,
+      incarnation: "4",
+      task,
+      spawner: new FakeHookSpawner(),
+      environment: {},
+      log: (line) => logged.push(line),
+    });
+    const target: Record<string, string | undefined> = {};
+    const report = await runner.applyHookEnv(target);
+    expect(target).toEqual({ GOOD: "yes", ALSO_GOOD: "yes" });
+    expect(report?.malformed).toEqual([`line 2: no "=" separator`]);
+    expect(logged.some((line) => line.startsWith(`hook env: line 2:`))).toBe(true);
+  });
+
+  it("records what it did beside the hooks' own verdicts, without any value", async () => {
+    const orb = makeOrb();
+    writeEnvFile(orb, ["SECRETISH=super-secret-value", "PATH=/attacker/bin", "junk"].join("\n"));
+    await makeRunner(orb, new FakeHookSpawner(), task, { incarnation: "2" }).applyHookEnv({});
+    const raw = readFileSync(hookEnvStatusPath(orb.home), "utf8");
+    expect(JSON.parse(raw)).toEqual({
+      path: hookEnvPath(orb.home),
+      applied: ["SECRETISH"],
+      ignored: ["PATH"],
+      malformed: [`line 3: no "=" separator`],
+      incarnation: "2",
+    });
+    expect(raw).not.toContain("super-secret-value");
+  });
+
+  it("takes a late resume's variables on the next start", async () => {
+    const orb = makeOrb();
+    writeHook(orb, "resume");
+    const spawner = new FakeHookSpawner();
+    const first = makeRunner(orb, spawner, task);
+    // The hook outlives its blocking window: nothing it writes afterwards can
+    // reach this boot's agent, because the merge has already happened.
+    const firstTarget: Record<string, string | undefined> = {};
+    expect(await first.applyHookEnv(firstTarget)).toBeNull();
+    writeEnvFile(orb, "LATE=arrived\n");
+
+    const secondTarget: Record<string, string | undefined> = {};
+    await makeRunner(orb, spawner, task).applyHookEnv(secondTarget);
+    expect(secondTarget).toEqual({ LATE: "arrived" });
   });
 });
 

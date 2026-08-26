@@ -73,4 +73,10 @@ export interface HookFileStore {
   writeText(task: SimulationTask, path: string, contents: string): ResultAsync<void, HookFileError>;
   /** Removes `path`; a missing file is success. */
   remove(path: string): void;
+  /**
+   * Restricts an existing `path` to its owner (mode 600). Best effort and
+   * never creates anything: it runs on the env file a hook wrote, whose mode
+   * is the hook's umask until the runtime tightens it.
+   */
+  hardenFile(path: string): void;
 }

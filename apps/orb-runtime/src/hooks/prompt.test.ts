@@ -33,4 +33,31 @@ describe("boot hook prompt", () => {
     const prompt = bootHookPrompt({ setup: status({ outcome: "hook_not_executable" }) });
     expect(prompt).toContain("chmod +x");
   });
+
+  it("says nothing about an env file the runtime used whole", () => {
+    expect(
+      bootHookPrompt(
+        {},
+        { path: "/workspace/home/.pi-orb/env", applied: ["FOO"], ignored: [], malformed: [] },
+      ),
+    ).toBeNull();
+  });
+
+  it("reports an env file's refused and unparsable lines, even on a clean boot", () => {
+    const prompt = bootHookPrompt(
+      {},
+      {
+        path: "/workspace/home/.pi-orb/env",
+        applied: ["FOO"],
+        ignored: ["PATH"],
+        malformed: [`line 3: no "=" separator`],
+      },
+    );
+    expect(prompt).toContain("/workspace/home/.pi-orb/env");
+    expect(prompt).toContain(`line 3: no "=" separator`);
+    expect(prompt).toContain("`PATH`, which the runtime owns");
+    // The variables that did apply are in the environment already; naming them
+    // would spend context on a boot that went right.
+    expect(prompt).not.toContain("FOO");
+  });
 });

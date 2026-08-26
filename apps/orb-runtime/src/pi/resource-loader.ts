@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { RuntimeHooks } from "@pi-orb/protocol";
 import { Result, ResultAsync } from "neverthrow";
+import type { HookEnvReport } from "../hooks/env-file.ts";
 import { bootHookPrompt } from "../hooks/prompt.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
@@ -28,6 +29,8 @@ export interface OrbResourceLoaderInput {
   readonly previewHost?: string | null;
   /** Latest boot-hook outcomes; only failures reach the prompt. */
   readonly hooks?: RuntimeHooks;
+  /** What the hooks' env file turned into; only its problems reach the prompt. */
+  readonly hookEnv?: HookEnvReport | null;
   /**
    * Overridden only by tests. `null` disables the baked skills entirely;
    * omitting it uses `BAKED_SKILLS_DIR`.
@@ -55,7 +58,7 @@ export interface OrbResourceLoaderInput {
  */
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
   const previewHost = input.previewHost ?? null;
-  const hookPrompt = bootHookPrompt(input.hooks ?? {});
+  const hookPrompt = bootHookPrompt(input.hooks ?? {}, input.hookEnv ?? null);
   const skillsDir = input.skillsDir === undefined ? BAKED_SKILLS_DIR : input.skillsDir;
   return {
     cwd: input.cwd,

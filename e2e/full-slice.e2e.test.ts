@@ -300,12 +300,69 @@ const SETUP_HOOK = [
   "",
 ].join("\n");
 
+/** What the resume hook hands the agent, quoted so the parser's one rule is exercised. */
+const HOOK_ENV_VALUE = "delivered-by-resume";
+
 const RESUME_HOOK = [
   "#!/bin/sh",
   'env > "$PI_ORB_WORK_DIR/hook-resume-env"',
   'echo resume >> "$PI_ORB_WORK_DIR/hook-order"',
+  // The only channel a hook has into the agent's shells and the terminal's
+  // PTYs (docs/orb-setup-hook.md). `PATH` is on the deny-list: a hook that
+  // could rewrite it would break every later boot.
+  `printf 'HOOK_ENV_E2E="${HOOK_ENV_VALUE}"\\nPATH=/attacker/bin\\n' > "$PI_ORB_HOOK_ENV_FILE"`,
   "",
 ].join("\n");
+
+/**
+ * Run one command in a real PTY — browser route → control-plane proxy →
+ * runtime — and return what the shell printed, up to and including `until`.
+ * `until` must be text the typed command itself cannot contain, because the
+ * PTY echoes what it is sent.
+ */
+async function terminalRun(orbId: string, command: string, until: string): Promise<string> {
+  const socket = new WebSocket(`ws://127.0.0.1:${CP_PORT}/api/v1/orbs/${orbId}/terminal`, [
+    TERMINAL_SUBPROTOCOL,
+  ]);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    let output = "";
+    const complete = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`terminal command timed out: ${command}`)),
+        30_000,
+      );
+      socket.on("message", (data, isBinary) => {
+        if (isBinary) {
+          output += data.toString();
+          if (output.includes(until)) {
+            clearTimeout(timer);
+            resolve();
+          }
+          return;
+        }
+        const control = JSON.parse(data.toString()) as {
+          type?: string;
+          error?: { message?: string };
+        };
+        if (control.type === "terminal.ready") {
+          socket.send(Buffer.from(`${command}\r`));
+        } else if (control.type === "terminal.error") {
+          clearTimeout(timer);
+          reject(new Error(control.error?.message ?? "terminal error"));
+        }
+      });
+    });
+    socket.send(JSON.stringify({ v: 1, type: "terminal.open", cols: 200, rows: 30 }));
+    await complete;
+    return output;
+  } finally {
+    socket.close();
+  }
+}
 
 /** Where the runtime writes a hook's log, in the orb's own filesystem terms. */
 function hookLogPath(id: string, hook: "setup" | "resume"): string {
@@ -819,6 +876,24 @@ describe("full slice E2E", () => {
         await waitForLifecycleEdges("setup-failed edge", replacementOrbId, (lines) =>
           lines.some((line) => line.includes("setup-failed") && line.includes("reason=failed")),
         );
+
+        // What resume wrote to `$PI_ORB_HOOK_ENV_FILE` is in the environment a
+        // real PTY inherits — the whole point of the mechanism, and the thing
+        // `/etc/profile.d` never delivered. `PATH` is printed first so seeing
+        // the hook's own value proves the whole line arrived.
+        const shellEnv = await terminalRun(
+          replacementOrbId,
+          `printf 'PATH<%s>HOOK<%s>\\n' "$PATH" "$HOOK_ENV_E2E"`,
+          HOOK_ENV_VALUE,
+        );
+        expect(shellEnv).toContain(`HOOK<${HOOK_ENV_VALUE}>`);
+        // The deny-list, end to end: a hook cannot take `PATH` from the runtime.
+        expect(shellEnv).not.toContain("/attacker/bin");
+        const envStatus = JSON.parse(
+          await readWorkspaceFile(replacementOrbId, 1, "home/.cache/pi-orb/logs/env.status.json"),
+        ) as { applied: string[]; ignored: string[] };
+        expect(envStatus.applied).toEqual(["HOOK_ENV_E2E"]);
+        expect(envStatus.ignored).toEqual(["PATH"]);
 
         // Stop/start of the retained incarnation runs resume only: the setup
         // stamp lives on the workspace and still names incarnation 1.

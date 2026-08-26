@@ -323,8 +323,11 @@ orb. Then say plainly what stays behind and offer to revoke it later.
 
 The federated login persists in `$HOME`, this orb's durable filesystem: it
 survives stop/start and compute replacement, so it is a one-time step. The three
-environment variables do **not** persist — re-export them in every new shell,
-including for gcloud, because the helper runs again on every refresh.
+environment variables do not survive a shell on their own — re-export them in
+every new one, including for gcloud, because the helper runs again on every
+refresh. Step 8's `.agents/resume` ends that: it writes them to
+`$PI_ORB_HOOK_ENV_FILE`, which the runtime merges into every shell of every
+later start.
 
 Client libraries that read Application Default Credentials (Python
 `google-cloud-*`, Node `google-auth-library`, Go, Java) need no login at all —
@@ -382,25 +385,30 @@ set -euo pipefail
 umask 077
 install -m 600 .pi-orb/gcp-external-account.json "$HOME/.pi-orb-gcp.json"
 
+# For this hook's own gcloud calls below.
 export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.pi-orb-gcp.json"
 export PI_ORB_GCP_AUDIENCE='urn:pi-orb:gcp:<gcp project>'
 export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
 
-# Nothing a hook exports reaches the agent's shells; write them where shells read.
-sudo tee /etc/profile.d/pi-orb-gcp.sh >/dev/null <<'PROFILE'
-export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.pi-orb-gcp.json"
-export PI_ORB_GCP_AUDIENCE='urn:pi-orb:gcp:<gcp project>'
-export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
-PROFILE
+# And for the agent's: nothing a hook exports reaches its shells, and neither
+# does a profile — this file is the channel. Rewritten, not appended, so a
+# changed project cannot leave a stale line behind.
+{
+  printf 'GOOGLE_APPLICATION_CREDENTIALS=%s\n' "$HOME/.pi-orb-gcp.json"
+  printf 'PI_ORB_GCP_AUDIENCE=urn:pi-orb:gcp:<gcp project>\n'
+  printf 'GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1\n'
+} > "$PI_ORB_HOOK_ENV_FILE"
 
 gcloud auth login --cred-file="$HOME/.pi-orb-gcp.json" --quiet
 gcloud config set project '<gcp project>' --quiet
 ```
 
 Substitute every `<…>`, `chmod +x` both files, and commit them with the
-executable bit. Drop the `sudo tee` block for a `$HOME/.profile` append if the
-orb has no `sudo`. The `boot-hooks` skill is the authoring guide for these files
-— read it before changing their shape.
+executable bit. The `boot-hooks` skill is the authoring guide for these files —
+read it before changing their shape, and note that this hook must finish inside
+resume's 10-second window: a slow federated login writes the env file too late
+for the boot it is running in, and the variables arrive on the next start
+instead.
 
 The trust side never needs redoing — the pool, provider, service account, and
 bindings are per GCP project, already there, and admit every orb of this pi-orb
@@ -429,6 +437,7 @@ project.
 | --- | --- |
 | `Executables need to be explicitly allowed` | `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1` not set for *this* process |
 | helper aborts on `PI_ORB_GCP_AUDIENCE` | the variable is unset in the process that loads the credential |
+| a fresh orb of this project has none of the three set | `.agents/resume` did not write `$PI_ORB_HOOK_ENV_FILE`, or wrote it past resume's 10-second window; read `$HOME/.cache/pi-orb/logs/env.status.json` and `resume.log` |
 | STS rejects the audience | the `audience` field or `PI_ORB_GCP_AUDIENCE` does not match `--allowed-audiences` |
 | `The mapped attribute must be of type STRING` | the provider's mapping lost `string(assertion.host_incarnation)`; re-run the provider command against the existing provider with `update-oidc` in place of `create-oidc` |
 | permission denied impersonating the service account | the `principalSet` binding does not cover this orb — re-run that line with the right `project_id`/`orb_id` |

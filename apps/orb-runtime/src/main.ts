@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
 import { readBrokerEnv } from "./broker/endpoint.ts";
-import { ORB_MARKER_ENV } from "./hooks/runner.ts";
+import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
 import { buildRuntimeServer } from "./http/server.ts";
 import { PiOrbAgent } from "./pi/agent.ts";
 import { startTailscale } from "./tailscale/daemon.ts";
