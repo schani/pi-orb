@@ -501,6 +501,19 @@ describe("the hook env file", () => {
     await makeRunner(orb, spawner, task).applyHookEnv(secondTarget);
     expect(secondTarget).toEqual({ LATE: "arrived" });
   });
+
+  it("hands a terminal opened later the current file, recording nothing", async () => {
+    const orb = makeOrb();
+    const runner = makeRunner(orb, new FakeHookSpawner(), task);
+    expect(runner.hookEnv()).toBeNull();
+
+    await runner.applyHookEnv({});
+    // Written after the boot merge: a new terminal gets it, and the verdict
+    // `applyHookEnv` already recorded for this boot stays the one on disk.
+    writeEnvFile(orb, ["AFTER_BOOT=yes", "PATH=/attacker/bin"].join("\n"));
+    expect([...(runner.hookEnv() ?? [])]).toEqual([["AFTER_BOOT", "yes"]]);
+    expect(existsSync(hookEnvStatusPath(orb.home))).toBe(false);
+  });
 });
 
 describe("boot hook deadlines", () => {

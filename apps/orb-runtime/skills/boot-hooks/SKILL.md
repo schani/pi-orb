@@ -77,7 +77,8 @@ A present but non-executable hook is reported as a failure, not skipped.
 Append `KEY=VALUE` lines to `$PI_ORB_HOOK_ENV_FILE`. Right before your session is
 created — after setup and after resume's 10-second window — the runtime merges
 that file into its own environment, which every bash tool call and every
-terminal inherits.
+terminal inherits. A line written after that merge takes effect in new terminals
+immediately, and in your tool shells at the next start.
 
 ```sh
 umask 077
@@ -103,7 +104,8 @@ last value. Expand in the hook, as the `printf` above does, not in the file.
 - An unusable line is skipped, reported by number in `env.status.json` and in
   your own context, and the rest of the file still applies.
 - A resume hook still running past its 10-second window writes too late for this
-  boot. Its variables arrive on the next start — so keep anything the agent
+  boot's merge. Its variables reach a terminal opened afterwards, but the
+  agent's own tool shells only on the next start — so keep anything the agent
   needs immediately inside the window.
 
 ## Where the output goes

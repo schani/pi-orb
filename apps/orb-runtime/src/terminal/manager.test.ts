@@ -109,6 +109,43 @@ describe("TerminalManager", () => {
     expect(after.isErr() && after.error.code).toBe("pty_unavailable");
   });
 
+  it("gives each new PTY the env file as it stands, not as it stood at boot", async () => {
+    const environments: Array<Readonly<Record<string, string>>> = [];
+    const factory: PtyFactory = {
+      open: (_cwd, _cols, _rows, environment) => {
+        environments.push(environment);
+        return okAsync(new FakeProcess());
+      },
+    };
+    // What the boot merge already put in `process.env`, plus what a hook wrote
+    // afterwards — the case a restart used to be the only way to pick up.
+    let file: ReadonlyMap<string, string> | null = new Map([["FROM_BOOT", "yes"]]);
+    const manager = new TerminalManager({
+      cwd: "/repo",
+      maxSessions: 4,
+      factory,
+      environment: { PATH: "/usr/bin" },
+      hookEnv: { hookEnv: () => file },
+    });
+
+    expect((await manager.open(80, 24)).isOk()).toBe(true);
+    file = new Map([
+      ["FROM_BOOT", "yes"],
+      ["GOOGLE_APPLICATION_CREDENTIALS", "/home/orb/.pi-orb-gcp.json"],
+    ]);
+    expect((await manager.open(80, 24)).isOk()).toBe(true);
+    file = null;
+    expect((await manager.open(80, 24)).isOk()).toBe(true);
+
+    expect(environments[0]).toEqual({ PATH: "/usr/bin", FROM_BOOT: "yes" });
+    expect(environments[1]).toEqual({
+      PATH: "/usr/bin",
+      FROM_BOOT: "yes",
+      GOOGLE_APPLICATION_CREDENTIALS: "/home/orb/.pi-orb-gcp.json",
+    });
+    expect(environments[2]).toEqual({ PATH: "/usr/bin" });
+  });
+
   it("releases a reservation when PTY creation fails", async () => {
     let attempts = 0;
     const factory: PtyFactory = {

@@ -285,6 +285,18 @@ export class BootHookRunner {
     return report;
   }
 
+  /**
+   * The env file as it stands now, parsed and deny-listed exactly as the boot
+   * merge parses it, but recorded nowhere: a terminal opened later merges this
+   * so a variable written after the boot merge reaches the new shell, and a
+   * second `env.status.json` for the same file would only contradict the first.
+   */
+  hookEnv(): ReadonlyMap<string, string> | null {
+    const raw = this.files.readText(hookEnvPath(this.options.home));
+    if (raw === null) return null;
+    return parseHookEnvFile(raw).entries;
+  }
+
   /** What `applyHookEnv` did, for the agent's prompt fragment. Null before it ran. */
   envReport(): HookEnvReport | null {
     return this.envApplied;

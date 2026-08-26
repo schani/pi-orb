@@ -61,6 +61,10 @@ budget, so treat whatever it returns as final rather than wrapping it in a loop.
   avoid, and unlike a login you cannot revoke it from here. A human who would
   rather keep every admin credential out of the orb gets a finished, pre-filled
   block for their own machine instead.
+- **Never ask the human to set environment variables, edit a shell profile, or
+  repeat any per-orb step by hand.** Persistence is the hook env file and the two
+  boot hooks, and you set both up yourself. A final report that instructs the
+  human to export anything is a defect, not a caveat.
 - **A stopped or replaced orb stops minting** (exit 3 or 4). That is by design:
   identity follows the orb's live authorization, not a stored key. An
   already-issued token cannot be revoked, so ask for the shortest lifetime that
@@ -242,19 +246,50 @@ the file in a later shell, quote the delimiter and paste the literal value
 instead. Drop the `service_account_impersonation_url` line entirely if the grant
 is direct federated access rather than impersonation.
 
-### 5. Export three variables, scoped to the federating process
+### 5. Make three variables persistent for this orb
+
+Export them for the commands you are about to run **and** write them to the
+runtime's hook env file, which is what makes them outlive this shell. Do both
+now; the file is one `KEY=VALUE` per line, mode 600.
 
 ```sh
 export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.pi-orb-gcp.json"
 export PI_ORB_GCP_AUDIENCE='urn:pi-orb:gcp:<gcp project>'
 export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
+
+# $PI_ORB_HOOK_ENV_FILE is set for hooks; in your own shell it is not, and the
+# documented path is $HOME/.pi-orb/env. Rewritten, not appended, so a changed
+# project cannot leave a stale line behind.
+env_file="${PI_ORB_HOOK_ENV_FILE:-$HOME/.pi-orb/env}"
+umask 077
+mkdir -p "$(dirname "$env_file")"
+{
+  printf 'GOOGLE_APPLICATION_CREDENTIALS=%s\n' "$HOME/.pi-orb-gcp.json"
+  printf 'PI_ORB_GCP_AUDIENCE=urn:pi-orb:gcp:<gcp project>\n'
+  printf 'GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1\n'
+} > "$env_file"
+chmod 600 "$env_file"
 ```
 
+The runtime loads that file into the agent's and the terminal's environment: a
+new terminal picks it up immediately, your own tool shells from the next start.
+It is deny-listed against the orb's contract variables — `PI_ORB_RUNTIME_TOKEN`,
+`PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`,
+`PI_ORB_WORK_DIR`, `HOME`, `PATH`, `PI_ORB`, and the Tailscale names are ignored
+if you write them — and it is **the only sanctioned persistence** for these
+three.
+
 `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1` is a global "credential files may
-execute programs they name" switch. Set it in the environment of the commands
-meant to federate — not in `~/.bashrc`, not in a systemd unit for everything.
-All three are needed on **every** invocation, including gcloud's, because the
-helper runs again on each credential refresh.
+execute programs they name" switch, so scope it: not `~/.bashrc`, not a systemd
+unit for everything — the env file is exactly the scoped place, this orb and
+these three names and nothing else on the machine. All three are needed on
+**every** invocation, including gcloud's, because the helper runs again on each
+credential refresh.
+
+Never tell the human to re-export these in each new shell: the env file is what
+makes that unnecessary, and saying it invites them to do your job by hand. If
+your own tool shells still lack the variables this session, say so in one line
+and prefix your own commands with the exports above.
 
 ### 6. Prove it — with an isolated, empty gcloud configuration
 
@@ -302,6 +337,9 @@ artifacts_writable=ok      gcloud artifacts repositories list
 admin_login_revoked=ok     step 7
 ```
 
+That message is also where step 8's one-sentence ask goes. Do not send the
+checklist without it, and do not end your turn on it.
+
 ### 7. Revoke the human's login
 
 Do this as soon as the checklist above is green. Their admin credential has no
@@ -323,24 +361,44 @@ orb. Then say plainly what stays behind and offer to revoke it later.
 
 The federated login persists in `$HOME`, this orb's durable filesystem: it
 survives stop/start and compute replacement, so it is a one-time step. The three
-environment variables do not survive a shell on their own — re-export them in
-every new one, including for gcloud, because the helper runs again on every
-refresh. Step 8's `.agents/resume` ends that: it writes them to
-`$PI_ORB_HOOK_ENV_FILE`, which the runtime merges into every shell of every
-later start.
+variables persist through the env file step 5 wrote, and step 8's
+`.agents/resume` rewrites that file on every start, so a fresh orb of this
+project needs neither step.
 
 Client libraries that read Application Default Credentials (Python
 `google-cloud-*`, Node `google-auth-library`, Go, Java) need no login at all —
 `GOOGLE_APPLICATION_CREDENTIALS` is enough.
 
-### 8. Make every future orb do this by itself
+### 8. Make every future orb do this by itself — before your turn ends
 
 Steps 4–6 have to happen again in every new orb of this project, and none of
 their pieces is a secret. pi-orb runs two repository-owned boot hooks —
 `.agents/setup` once per compute incarnation, `.agents/resume` on every start,
 before your first turn — so commit them and the next orb of this project gets
-its gcloud identity with zero steps. Ask the human's ok first: these files run
-unattended in every project member's orbs.
+its gcloud identity with zero steps.
+
+**The flow is not finished until these files are committed or the human has
+declined them. Do not end your turn after the checklist.** In the *same* message
+as step 6's checklist, ask in one sentence — "Shall I commit `.agents/setup`,
+`.agents/resume`, and `.pi-orb/gcp-external-account.json` so every future orb of
+this project federates by itself?" — because these files run unattended in every
+project member's orbs. When the answer is yes, do all of it in that same turn:
+
+1. write the three files below,
+2. `chmod +x .agents/setup .agents/resume`,
+3. run `./.agents/resume` once, to prove it is idempotent and writes the env file,
+4. commit them, and push if the human's workflow allows,
+5. report the file list.
+
+Restating the rule this step exists to satisfy: the report never asks the human
+to export a variable, edit a profile, or repeat a per-orb step. If they decline,
+say what a future orb will therefore need and stop.
+
+**Read the `boot-hooks` skill (`/opt/pi-orb/skills/boot-hooks/SKILL.md`) and
+follow it** for everything about how hooks work: where the files go, the
+executable bit, idempotency, the env file and its format, what runs when, the
+identity split between setup and resume, and how a failure surfaces. Below is
+only the GCP payload that goes inside them.
 
 Three committed files. The template holds **no secret** — it names the pool, the
 provider, the service account, and the reviewed helper that mints a fresh token
@@ -403,12 +461,9 @@ gcloud auth login --cred-file="$HOME/.pi-orb-gcp.json" --quiet
 gcloud config set project '<gcp project>' --quiet
 ```
 
-Substitute every `<…>`, `chmod +x` both files, and commit them with the
-executable bit. The `boot-hooks` skill is the authoring guide for these files —
-read it before changing their shape, and note that this hook must finish inside
-resume's 10-second window: a slow federated login writes the env file too late
-for the boot it is running in, and the variables arrive on the next start
-instead.
+Substitute every `<…>`. Keep the federated login the fast thing it is: it is the
+one part of this hook that can overrun resume's blocking window, and the
+`boot-hooks` skill says what happens then.
 
 The trust side never needs redoing — the pool, provider, service account, and
 bindings are per GCP project, already there, and admit every orb of this pi-orb

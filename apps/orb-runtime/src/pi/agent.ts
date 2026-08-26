@@ -38,6 +38,7 @@ import {
   TurnSummaryCoordinator,
 } from "../domain/turn-summary.ts";
 import type { HarnessSnapshot, LiveOperationView } from "../domain/types.ts";
+import type { HookEnvSource } from "../hooks/env-file.ts";
 import type { HookSpawner } from "../hooks/ports.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
@@ -204,6 +205,15 @@ export class PiOrbAgent {
       status: "initializing",
       phase,
     };
+  }
+
+  /**
+   * The env file, for a terminal opened later. Handed out before the runner
+   * exists — the terminal manager is installed while the orb is still cloning —
+   * so it resolves the runner per call and reports nothing until there is one.
+   */
+  hookEnvSource(): HookEnvSource {
+    return { hookEnv: () => this.hooks?.hookEnv() ?? null };
   }
 
   /** Read at report time, not at transition time: a backgrounded resume finishes late. */

@@ -43,6 +43,17 @@ export const HOOK_ENV_DENIED: readonly string[] = [
   "PATH",
 ];
 
+/**
+ * The env file as it stands right now, for a process started after the boot
+ * merge. A terminal PTY reads it through this so a variable written since then
+ * — by a late resume, or by the agent itself — reaches the next shell without
+ * an orb restart. It records nothing: `applyHookEnv` owns the status file.
+ */
+export interface HookEnvSource {
+  /** Entries the file currently holds, or null when there is none. */
+  hookEnv(): ReadonlyMap<string, string> | null;
+}
+
 /** What the runtime did with the env file, for the status file and the prompt. */
 export interface HookEnvReport {
   readonly path: string;

@@ -20,6 +20,7 @@ import {
   SETUP_DEADLINE_MS,
   SETUP_SCRUBBED_ENV,
 } from "../hooks/runner.ts";
+import { BAKED_SKILLS_DIR } from "./resource-loader.ts";
 
 /**
  * The skills the Dockerfile bakes at `/opt/pi-orb/skills` (docs/pi-adapter.md).
@@ -71,6 +72,18 @@ const skillNames = readdirSync(skillsDir, { withFileTypes: true })
   .map((entry) => entry.name);
 
 const skillBody = (name: string): string => readFileSync(join(skillsDir, name, "SKILL.md"), "utf8");
+
+/** One numbered step of a skill, from its heading to the next one at that level. */
+const section = (body: string, heading: string): string => {
+  const start = body.indexOf(heading);
+  if (start < 0) throw new Error(`the skill no longer has a "${heading}" section`);
+  const rest = body.slice(start + heading.length);
+  const end = rest.search(/^#{2,4} /m);
+  return heading + (end < 0 ? rest : rest.slice(0, end));
+};
+
+/** Prose split coarsely, so a prohibition can be told apart from an instruction. */
+const sentences = (body: string): string[] => body.split(/(?<=[.!?:])\s+/);
 
 /** Every shell fence in a skill body, innermost content only. */
 const shellFences = (body: string): string[] =>
@@ -258,6 +271,51 @@ describe("baked agent skills", () => {
       // agent's shells: a hook writing there sets variables nothing ever sees.
       expect(body).not.toContain("/etc/profile.d");
       expect(body).not.toContain(".profile");
+    });
+
+    /**
+     * A live run (2026-08-26) did steps 1–7, printed the checklist, told the
+     * human "for each new shell, export: …", and ended its turn. Both halves of
+     * that failure are the skill's: step 5 read as "persistence is not allowed
+     * here", and step 8 read as optional follow-up work.
+     */
+    it("makes step 5 write the env file rather than leave the variables in a shell", () => {
+      const step = section(body, "### 5.");
+      expect(step, "the agent must be told the file's path").toContain(hookEnvPath("$HOME"));
+      expect(step).toContain(HOOK_ENV_FILE_ENV);
+      expect(step, "and that it is where persistence belongs").toContain(
+        "the only sanctioned persistence",
+      );
+      expect(step).toMatch(/mode 600|chmod 600/);
+    });
+
+    it("never tells the human to carry the variables from shell to shell", () => {
+      // The rule, stated once where it cannot be missed and again at the step
+      // whose report broke it.
+      expect(body).toMatch(
+        /never ask the human to set environment variables, edit a shell profile, or\s+repeat any per-orb step by hand/i,
+      );
+      expect(section(body, "### 8.")).toMatch(/never asks the human\s+to export a variable/i);
+      expect(body).not.toMatch(/for each new shell/i);
+      // Anything left saying "re-export" or "in each/every new shell" has to be
+      // the prohibition itself, never an instruction.
+      for (const sentence of sentences(body)) {
+        if (!/re-export|in (each|every) new shell/i.test(sentence)) continue;
+        expect(sentence, `"${sentence.trim()}" reads as an instruction`).toMatch(
+          /\bnever\b|\bnot\b|\bno\b/i,
+        );
+      }
+    });
+
+    it("makes step 8 the end of the same turn, not a follow-up", () => {
+      const step = section(body, "### 8.");
+      expect(step).toContain("not finished until");
+      expect(step).toMatch(/do not end your turn/i);
+      expect(step).toMatch(/same turn/i);
+      // Mechanics belong to the authoring guide; this step carries the GCP
+      // payload only, so the two cannot drift apart.
+      expect(step, "step 8 must send the agent to the boot-hooks skill").toContain("boot-hooks");
+      expect(step).toContain(`${BAKED_SKILLS_DIR}/boot-hooks/SKILL.md`);
     });
 
     it("no longer says the hooks are pending", () => {

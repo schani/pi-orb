@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { errAsync, okAsync, Result, ResultAsync, type Result as ResultType } from "neverthrow";
 import type { IPty } from "node-pty";
+import type { HookEnvSource } from "../hooks/env-file.ts";
 
 export interface TerminalManagerError {
   readonly code: "limit_reached" | "pty_unavailable" | "pty_failed";
@@ -159,6 +160,8 @@ export interface TerminalManagerOptions {
   readonly maxSessions?: number;
   readonly environment?: Readonly<Record<string, string>>;
   readonly factory?: PtyFactory;
+  /** Re-read per PTY, so a variable a hook wrote after boot needs no restart. */
+  readonly hookEnv?: HookEnvSource;
 }
 
 /** Runtime-wide admission and cleanup for ephemeral, per-WebSocket PTYs. */
@@ -204,7 +207,7 @@ export class TerminalManager {
     // the boot hooks run, and their env file is merged into `process.env`
     // afterwards (docs/orb-setup-hook.md).
     return this.factory
-      .open(this.options.cwd, cols, rows, this.environment ?? cleanEnvironment(process.env))
+      .open(this.options.cwd, cols, rows, this.ptyEnvironment())
       .andThen((process) => {
         if (this.closing) {
           Result.fromThrowable(
@@ -232,6 +235,19 @@ export class TerminalManager {
         this.active.delete(id);
         return errAsync(error);
       });
+  }
+
+  /**
+   * The boot merge only covers what the env file held before the agent session
+   * existed. Re-reading it here is what makes a variable written afterwards —
+   * by a resume that overran its window, or by the agent itself — reach the
+   * next terminal without stopping and starting the orb.
+   */
+  private ptyEnvironment(): Readonly<Record<string, string>> {
+    const base = this.environment ?? cleanEnvironment(process.env);
+    const hookEnv = this.options.hookEnv?.hookEnv();
+    if (hookEnv === undefined || hookEnv === null) return base;
+    return { ...base, ...Object.fromEntries(hookEnv) };
   }
 
   closeAll(): void {

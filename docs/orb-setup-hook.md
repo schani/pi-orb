@@ -164,6 +164,12 @@ environment"). Rejected: a `pi-orb` subcommand to re-run hooks — executing the
   `process.env`, which is what Pi's tool shells and the terminal PTYs inherit. The file lives in
   the persistent home, so it survives stop/start and compute replacement, and the runtime restricts
   it to mode 600 when it reads it.
+  A terminal re-reads the file when its PTY is spawned (added 2026-08-26), so a variable written
+  after that merge — by a late resume, or by the agent itself — reaches **new terminals
+  immediately; the agent's own tool shells at the next start**, since they inherit the runtime's
+  `process.env` as it stood when the session was created. The PTY read applies the same parser and
+  the same deny-list and records nothing: `env.status.json` is the boot merge's verdict, and a
+  second one for the same file could only contradict it.
   - Format, deliberately tiny: one `KEY=VALUE` per line; blank lines and lines whose first
     non-blank character is `#` are ignored; the value is taken literally — no expansion, no escape
     processing — apart from one optional pair of matching surrounding quotes; a repeated name keeps
@@ -178,7 +184,8 @@ environment"). Rejected: a `pi-orb` subcommand to re-run hooks — executing the
     the hook logs and in the agent's prompt fragment — never a crash, and never with the line's
     content, which may be a credential. The line number alone is reported.
   - A resume hook that finishes in the background *after* its blocking window can still write the
-    file; the merge has already happened, so its variables take effect on the next start.
+    file; the boot merge has already happened, so its variables reach a terminal opened afterwards
+    and the agent's own shells only on the next start.
   - Rejected: `/etc/profile.d/*.sh` or `$HOME/.profile`, which is what Amp scripts and this
     repository's own Amp-era `.agents/setup` use. Neither shell the agent has reads them — Pi's
     bash tool runs `bash -c`, which reads no profile, and the terminal spawns
@@ -318,7 +325,8 @@ umask 077
 One `KEY=VALUE` per line; `#` comments and blank lines are ignored; the value is literal apart from
 one optional pair of surrounding quotes — no expansion, no escapes — and a repeated name keeps its
 last value. The runtime merges the file into its own environment immediately before the agent
-session is created, so both the agent's shells and every terminal inherit it. It cannot override
+session is created, so both the agent's shells and every terminal inherit it; a line added later
+reaches new terminals immediately and the agent's tool shells at the next start. It cannot override
 `PI_ORB_RUNTIME_TOKEN`, `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`,
 `PI_ORB_WORK_DIR`, `HOME`, `PATH`, `PI_ORB`, or the Tailscale variables; such a line is ignored and
 logged. An unusable line is skipped and reported by number, and the rest of the file still applies.
