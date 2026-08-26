@@ -22,6 +22,18 @@ describe("orb workspace layout contract", () => {
     expect(rule(".composer")).toContain("bottom: 0");
   });
 
+  it("adapts dashboard age from inline metadata to a shelf-local subline", () => {
+    expect(rule(".project-orb-shelf")).toContain("container-type: inline-size");
+    expect(rule(".project-orb-details")).toContain("display: flex");
+    expect(css).toContain("@container project-orb-shelf (max-width: 520px)");
+    expect(css).toMatch(
+      /@container project-orb-shelf[\s\S]*?\.project-orb-details\s*\{\s*display: block/,
+    );
+    expect(css).toMatch(
+      /@container project-orb-shelf[\s\S]*?\.project-orb-age[\s\S]*?display: block/,
+    );
+  });
+
   it("stacks the approved terminal header above the emulator", () => {
     expect(rule(".orb-terminal-window")).toContain("display: flex");
     expect(rule(".orb-terminal-window")).toContain("flex-direction: column");

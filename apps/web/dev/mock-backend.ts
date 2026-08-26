@@ -38,6 +38,9 @@ interface MockState {
 
 function initialState(): MockState {
   const createdAt = now();
+  const runningOrbCreatedAt = new Date(Date.now() - 14 * 60_000).toISOString();
+  const authOrbCreatedAt = new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString();
+  const archivedOrbCreatedAt = new Date(Date.now() - 60 * 24 * 60 * 60_000).toISOString();
   const project: ProjectView = {
     id: PROJECT_ID,
     name: "Frontend playground",
@@ -54,8 +57,8 @@ function initialState(): MockState {
     stateVersion: 1,
     checkoutCommit: "fixture123",
     previewHost: "frontend-fixture.tailnet.ts.net",
-    stateChangedAt: createdAt,
-    createdAt,
+    stateChangedAt: runningOrbCreatedAt,
+    createdAt: runningOrbCreatedAt,
     updatedAt: createdAt,
   };
   const authOrb: OrbView = {
@@ -70,8 +73,8 @@ function initialState(): MockState {
       userCode: "COPY-2468",
       expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
     },
-    stateChangedAt: createdAt,
-    createdAt,
+    stateChangedAt: authOrbCreatedAt,
+    createdAt: authOrbCreatedAt,
     updatedAt: createdAt,
   };
   const archivedOrb: OrbView = {
@@ -82,7 +85,7 @@ function initialState(): MockState {
     stateVersion: 2,
     archivedAt: createdAt,
     stateChangedAt: createdAt,
-    createdAt,
+    createdAt: archivedOrbCreatedAt,
     updatedAt: createdAt,
   };
   const welcomeId = randomUUID();

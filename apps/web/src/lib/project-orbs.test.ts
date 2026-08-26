@@ -1,6 +1,7 @@
 import type { OrbState, OrbView } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  formatProjectOrbAge,
   projectOrbActions,
   projectOrbFaviconStatus,
   projectOrbShelf,
@@ -19,6 +20,18 @@ const orb = (id: string, state: OrbState): OrbView => ({
 });
 
 describe("project orb presentation", () => {
+  it("formats age as one number and the largest useful unit", () => {
+    const now = Date.parse("2026-08-26T12:00:00.000Z");
+    const before = (milliseconds: number) => new Date(now - milliseconds).toISOString();
+
+    expect(formatProjectOrbAge(before(14 * 60_000), now)).toBe("14 minutes");
+    expect(formatProjectOrbAge(before(3 * 24 * 60 * 60_000), now)).toBe("3 days");
+    expect(formatProjectOrbAge(before(35 * 24 * 60 * 60_000), now)).toBe("1 month");
+    expect(formatProjectOrbAge(before(365 * 24 * 60 * 60_000), now)).toBe("1 year");
+    expect(formatProjectOrbAge(new Date(now).toISOString(), now)).toBe("1 minute");
+    expect(formatProjectOrbAge("not-a-date", now)).toBeNull();
+  });
+
   it("uses current activity for running orbs and lifecycle state otherwise", () => {
     expect(projectOrbFaviconStatus("running", "busy")).toBe("busy");
     expect(projectOrbFaviconStatus("running", "idle")).toBe("running");

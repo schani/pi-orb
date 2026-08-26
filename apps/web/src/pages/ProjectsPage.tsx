@@ -16,6 +16,7 @@ import {
   projectDeletionProgressText,
 } from "../lib/project-deletion.ts";
 import {
+  formatProjectOrbAge,
   projectOrbActions,
   projectOrbFaviconStatus,
   splitProjectOrbs,
@@ -49,6 +50,7 @@ function NewOrbLink({ projectId, disabled }: NewOrbLinkProps) {
 
 interface ProjectOrbShelvesProps {
   items: OrbView[];
+  now: number;
   archivingOrb: string | null;
   deletingOrb: string | null;
   onArchive(orb: OrbView): Promise<void>;
@@ -57,6 +59,7 @@ interface ProjectOrbShelvesProps {
 
 function ProjectOrbRow({
   orb,
+  now,
   archivingOrb,
   deletingOrb,
   onArchive,
@@ -65,6 +68,7 @@ function ProjectOrbRow({
   const actions = projectOrbActions(orb.state);
   const favicon = projectOrbFaviconStatus(orb.state, orb.activity);
   const displayedState = orb.state === "running" && orb.activity === "busy" ? "busy" : orb.state;
+  const age = formatProjectOrbAge(orb.createdAt, now);
   const blocker =
     orb.state === "deleting" &&
     orb.stateDetail?.type === "deleting_resources" &&
@@ -87,9 +91,9 @@ function ProjectOrbRow({
               {displayedState}
             </span>
           </span>
-          <span className="project-orb-name">
-            {orb.name ?? "untitled orb"}
-            <span className="muted mono"> · {orb.id.slice(0, 8)}</span>
+          <span className="project-orb-details">
+            <span className="project-orb-name">{orb.name ?? "untitled orb"}</span>
+            {age !== null && <span className="project-orb-age">{age}</span>}
           </span>
         </a>
       </div>
@@ -168,6 +172,7 @@ export function ProjectsPage() {
   const projectRenameInputRef = useRef<HTMLInputElement>(null);
   const [deletingOrb, setDeletingOrb] = useState<string | null>(null);
   const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
+  const [ageNow, setAgeNow] = useState(() => Date.now());
   const [orbCreateError, setOrbCreateError] = useState<{
     projectId: string;
     message: string;
@@ -210,6 +215,11 @@ export function ProjectsPage() {
   useEffect(() => {
     if (renamingProject !== null) projectRenameInputRef.current?.focus();
   }, [renamingProject]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setAgeNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // A deleting row remains visible through the race-fencing quarantine. Poll
   // until finalization removes it instead of requiring a manual page reload.
@@ -435,6 +445,7 @@ export function ProjectsPage() {
               ) : (
                 <ProjectOrbShelves
                   items={orbList.items}
+                  now={ageNow}
                   archivingOrb={archivingOrb}
                   deletingOrb={deletingOrb}
                   onArchive={onArchiveOrb}

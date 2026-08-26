@@ -50,6 +50,12 @@ For an orb route, `stopped` gets the stopped variant; `running` gets the running
 
 The marks remain distinguishable at 16px by glyph/fill as well as color and avoid animation. Running/idle uses light green to suggest that the orb is ready for the user; busy uses the darker UI green, not the error-associated terracotta. `index.html` installs the neutral icon before React loads. Mounting an orb page updates that one icon link rather than accumulating links; leaving the route restores neutral. The pure status mapping and link replacement are unit-tested in `apps/web/src/lib/favicon.test.ts`; the SVG assets live under `apps/web/public/favicons/`.
 
+## Dashboard orb age (decided and implemented 2026-08-26)
+
+The dashboard working set and archive shelf show each orb's creation age in a compact human form containing exactly one number and one unit (for example, `14 minutes` or `3 days`), without a timestamp, leading separator, or `ago` suffix. The largest whole useful unit is selected from minutes, hours, days, weeks, months, and years; an orb less than a minute old reads `1 minute`. Ages refresh once per minute while the dashboard remains open. Abbreviated orb hashes are removed from the dashboard.
+
+Placement adapts to the space available to each shelf rather than only to the viewport: a sufficiently wide shelf uses the selected **Inline chronicle** treatment, placing age after the title; a narrow shelf uses the selected **Editorial subline** treatment beneath the title. A CSS container query makes this compose with the existing side-by-side shelves, their stacked tablet layout, row/action wrapping on phones, and unequal working/archive column widths. The decision was selected from the eight directions in [`design-prototypes/orb-age.html`](../design-prototypes/orb-age.html).
+
 ## Visual design (decided)
 
 The UI uses the "Reading Room" variant of the Manuscript × Gutter design, chosen from a design exploration (five initial directions, then a Manuscript × Gutter hybrid, then five typography variations). Decisions:

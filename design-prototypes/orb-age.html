@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pi-orb · dashboard age directions</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper:#f8f3e9; --paper-2:#f1eadb; --inset:#ebe1cd; --ink:#221c12; --soft:#625846;
+      --faint:#8d816a; --rule:#ddd2bc; --rule-2:#c9baa0; --accent:#a03e1c; --green:#2f7136;
+      --serif:Charter,"Bitstream Charter","Iowan Old Style",Georgia,serif;
+      --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+      --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    }
+    *{box-sizing:border-box} html{scroll-behavior:smooth} body{margin:0;color:var(--ink);background:var(--paper);font:14px/1.5 var(--sans)}
+    button{font:inherit}.prototype-header{position:sticky;z-index:20;top:0;display:flex;align-items:center;gap:24px;min-height:58px;padding:10px clamp(16px,4vw,58px);background:rgb(248 243 233/.94);border-bottom:1px solid var(--rule);backdrop-filter:blur(12px)}
+    .brand{font:700 17px var(--mono);letter-spacing:-.04em}.eyebrow{color:var(--accent);font:700 10px var(--mono);letter-spacing:.18em;text-transform:uppercase}.prototype-header nav{display:flex;gap:6px;margin-left:auto}.prototype-header nav a{min-width:29px;padding:3px 9px;color:var(--soft);border:1px solid var(--rule);border-radius:99px;text-align:center;text-decoration:none}.prototype-header nav a:hover{color:var(--accent);border-color:var(--accent)}
+    .intro,.direction{width:min(1480px,calc(100% - 32px));margin-inline:auto}.intro{padding:54px 0 32px}h1{max-width:980px;margin:8px 0 12px;font:500 clamp(34px,5vw,62px)/1.04 var(--serif)}.intro p{max-width:820px;margin:0;color:var(--soft);font-size:16px}.intro .rule-note{margin-top:16px;color:var(--faint);font:12px var(--mono)}
+    .direction{padding:44px 0 66px;border-top:1px solid var(--rule);scroll-margin-top:58px}.direction-heading{display:grid;grid-template-columns:52px minmax(0,1fr);gap:14px;margin-bottom:20px}.number{color:var(--accent);font:500 28px var(--serif)}h2{margin:0;font:600 25px var(--serif)}.rationale{max-width:850px;margin:3px 0 0;color:var(--faint)}
+    .canvas{overflow:hidden;background:var(--paper-2);border:1px solid var(--rule);border-radius:14px;box-shadow:0 15px 45px rgb(83 61 24/.06)}
+    .dash{padding:24px 28px 30px}.project-top{display:flex;align-items:center;gap:16px;padding-bottom:27px}.project-name{font:700 19px var(--serif);font-variant-caps:small-caps;letter-spacing:.08em}.pen{color:var(--faint);font:20px var(--serif)}.repo{color:var(--faint);font:15px var(--mono)}.active{padding:4px 14px;color:var(--faint);border:1px solid var(--rule-2);border-radius:99px;font:700 10px var(--mono);letter-spacing:.13em}.project-actions{display:flex;gap:10px;margin-left:auto}.project-action{padding:9px 14px;color:var(--soft);background:transparent;border:1px solid var(--faint);border-radius:5px;font:700 10px var(--serif);font-variant-caps:small-caps;letter-spacing:.07em}.project-action.danger{color:var(--accent);border-color:var(--accent)}
+    .split{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(390px,.95fr);gap:28px}.archive{padding:0 16px 5px;background:var(--inset);border-radius:8px}.shelf-title{display:flex;justify-content:space-between;margin:0;padding:0 0 9px;color:var(--faint);border-bottom:1px solid var(--faint);font:700 10px var(--mono);letter-spacing:.17em;text-transform:uppercase}.archive .shelf-title{padding-top:10px}.row{min-height:61px;border-bottom:1px solid var(--rule)}.archive .row{border-color:var(--rule-2)}.identity{min-width:0;display:flex;align-items:center;gap:12px}.state{flex:0 0 22px;width:22px;height:22px}.state img{display:block;width:22px;height:22px}.name{min-width:0;color:var(--accent);font:17px var(--sans);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.age{color:var(--faint);font:12px var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}.actions{display:flex;justify-content:flex-end;gap:18px}.action{padding:4px 0;color:var(--soft);background:none;border:0;border-bottom:1px solid var(--rule-2);font:700 10px var(--serif);font-variant-caps:small-caps;letter-spacing:.05em}.action.delete{color:var(--accent);border-color:#ca9985}
+
+    /* 01 — inline, now that the hash is gone */
+    .inline .row{display:flex;align-items:center;gap:16px}.inline .identity{flex:1}.inline .age::before{content:"·";margin-right:9px}
+    /* 02 — explicit comparison column */
+    .ledger-head,.ledger .row{display:grid;grid-template-columns:minmax(240px,1fr) 100px 142px;align-items:center;gap:16px}.ledger-head{height:29px;color:var(--faint);border-bottom:1px solid var(--rule-2);font:700 9px var(--mono);letter-spacing:.14em;text-transform:uppercase}.ledger-head span:nth-child(n+2){text-align:right}.ledger .age{text-align:right;color:var(--soft)}
+    /* 03 — subline */
+    .subtitle .row{display:flex;align-items:center;gap:16px;min-height:68px}.subtitle .identity{flex:1}.identity-copy{min-width:0;display:flex;flex-direction:column}.subtitle .age{margin-top:3px;color:var(--soft)}.subtitle .age::before{content:"age ";color:var(--faint)}
+    /* 04 — left stamp */
+    .stamp .row{display:grid;grid-template-columns:92px minmax(0,1fr) 142px;align-items:center;gap:14px}.stamp .age{width:fit-content;padding:4px 8px;color:var(--soft);background:var(--paper);border:1px solid var(--rule);border-radius:3px;font-family:var(--serif)}.stamp .archive .age{background:var(--paper-2);border-color:var(--rule-2)}
+    /* 05 — right edge */
+    .edge .row{display:grid;grid-template-columns:minmax(0,1fr) 142px 91px;align-items:center;gap:14px}.edge .age{justify-self:end;color:var(--soft)}.edge .age::before{content:"↳ ";color:var(--rule-2)}.edge .actions{padding-right:12px;border-right:1px solid var(--rule-2)}
+
+    /* 06 — index-room redesign */
+    .index-room{padding:28px;background:linear-gradient(90deg,var(--paper-2) 0 67%,var(--inset) 67%)}.index-mast{display:grid;grid-template-columns:1fr auto;gap:20px;align-items:end;padding-bottom:26px;border-bottom:3px double var(--ink)}.index-mast h3{margin:0;font:500 clamp(34px,5vw,68px)/.9 var(--serif);letter-spacing:-.04em}.index-mast p{margin:8px 0 0;color:var(--faint);font:12px var(--mono)}.index-mast .project-actions{align-self:center}.index-layout{display:grid;grid-template-columns:2fr 1fr;gap:34px;padding-top:24px}.index-label{display:flex;justify-content:space-between;margin-bottom:14px;font:700 10px var(--mono);letter-spacing:.17em;text-transform:uppercase}.card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.orb-card{min-height:142px;display:flex;flex-direction:column;padding:16px;background:var(--paper);border:1px solid var(--rule-2);box-shadow:3px 3px 0 var(--rule)}.orb-card .identity{align-items:flex-start}.orb-card .name{font:600 18px/1.25 var(--serif);white-space:normal}.orb-card .age{margin:14px 0 0 34px;color:var(--accent);font:500 25px var(--serif)}.orb-card .actions{justify-content:flex-start;margin:auto 0 0 34px;padding-top:16px}.archive-catalog{padding-left:20px;border-left:1px solid var(--rule-2)}.catalog-row{display:grid;grid-template-columns:1fr auto;gap:12px;padding:14px 0;border-top:1px solid var(--rule-2)}.catalog-row .name{font:15px var(--serif);white-space:normal}.catalog-row .age{grid-column:1;color:var(--soft)}.catalog-row .action{grid-column:2;grid-row:1/3;align-self:center}
+
+    /* 07 — chronology redesign */
+    .chronology{padding:0;background:var(--paper)}.chrono-mast{display:flex;align-items:center;gap:22px;padding:24px 28px;color:var(--paper);background:var(--ink)}.chrono-mast strong{font:600 28px var(--serif)}.chrono-mast .repo{color:#c8bda9}.chrono-mast .active{color:#d8cdb8;border-color:#746b5e}.chrono-mast .project-actions{margin-left:auto}.chrono-mast .project-action{color:var(--paper);border-color:#a49884}.chrono-mast .danger{color:#f0a488;border-color:#cb6742}.chrono-body{padding:25px 28px 31px;background-image:linear-gradient(var(--rule) 1px,transparent 1px);background-size:100% 62px}.chrono-key{display:grid;grid-template-columns:112px minmax(0,1.5fr) minmax(290px,.8fr);gap:20px;padding-bottom:9px;color:var(--faint);font:700 9px var(--mono);letter-spacing:.15em;text-transform:uppercase}.chrono-row{display:grid;grid-template-columns:112px minmax(0,1.5fr) minmax(290px,.8fr);gap:20px;align-items:center;min-height:62px}.chrono-age{color:var(--accent);font:600 18px var(--serif)}.chrono-work,.chrono-archive-item{display:flex;align-items:center;gap:10px}.chrono-work{width:var(--width);padding:10px 12px;background:var(--paper-2);border-left:4px solid var(--green)}.chrono-archive-item{padding:10px 12px;background:var(--inset);border-left:4px solid var(--faint)}.chrono-row .name{font-size:15px}.chrono-row .action{margin-left:auto}.chrono-empty{color:var(--rule-2);font:italic 13px var(--serif)}
+
+    /* 08 — signal-field redesign */
+    .signal{position:relative;min-height:700px;overflow:hidden;padding:28px;background-color:var(--paper-2);background-image:radial-gradient(var(--rule-2) .8px,transparent .8px);background-size:18px 18px}.signal::before,.signal::after{content:"";position:absolute;left:50%;top:53%;border:1px solid var(--rule-2);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}.signal::before{width:760px;height:420px}.signal::after{width:1120px;height:610px}.signal-mast{position:relative;z-index:3;display:flex;align-items:flex-start}.signal-title{display:flex;flex-direction:column}.signal-title strong{font:700 13px var(--mono);letter-spacing:.16em;text-transform:uppercase}.signal-title span{color:var(--faint);font:12px var(--mono)}.signal-center{position:absolute;z-index:2;left:50%;top:53%;width:190px;height:190px;display:grid;place-content:center;text-align:center;color:var(--paper);background:var(--ink);border:12px solid var(--paper);border-radius:50%;box-shadow:0 0 0 1px var(--ink)}.signal-center strong{font:600 27px var(--serif)}.signal-center span{color:#c9bca7;font:10px var(--mono);letter-spacing:.15em;text-transform:uppercase}.beacon{position:absolute;z-index:2;width:205px;min-height:105px;padding:13px 14px;background:var(--paper);border:1px solid var(--rule-2);box-shadow:4px 4px 0 rgb(160 62 28/.12)}.beacon .name{display:block;font:600 16px/1.2 var(--serif);white-space:normal}.beacon .age{display:block;margin-top:8px;color:var(--accent);font:600 21px var(--serif)}.beacon .state{position:absolute;right:10px;top:10px}.beacon .actions{justify-content:flex-start;margin-top:9px}.beacon.b1{left:5%;top:19%;transform:rotate(-2deg)}.beacon.b2{left:7%;bottom:13%;transform:rotate(2deg)}.beacon.b3{right:5%;top:16%;transform:rotate(2deg)}.beacon.b4{right:5%;bottom:12%;transform:rotate(-2deg)}.vault{position:absolute;z-index:3;right:27%;bottom:28px;display:flex;gap:8px}.vault-card{width:145px;padding:11px;color:var(--paper);background:var(--accent)}.vault-card .name{color:var(--paper);font:14px/1.15 var(--serif);white-space:normal}.vault-card .age{display:block;margin-top:9px;color:#f7c6b3}.signal-legend{position:absolute;z-index:3;left:28px;bottom:25px;color:var(--faint);font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase}
+
+    @media(max-width:900px){.split,.index-layout{grid-template-columns:1fr}.archive{margin-top:8px}.index-room{background:var(--paper-2)}.archive-catalog{padding-left:0;border-left:0}.signal{min-height:930px}.signal::before,.signal::after{display:none}.signal-center{position:relative;left:auto;top:auto;margin:70px auto 25px;transform:none}.beacon{position:relative!important;inset:auto!important;display:inline-block;vertical-align:top;margin:6px;transform:none!important}.vault{position:relative;right:auto;bottom:auto;margin-top:20px;justify-content:center;flex-wrap:wrap}}
+    @media(max-width:650px){.prototype-header{gap:8px}.prototype-header>.eyebrow{display:none}.direction-heading{grid-template-columns:34px 1fr}.dash{padding-inline:15px}.project-top{gap:8px;flex-wrap:wrap}.repo,.active{display:none}.project-actions{width:100%;margin-left:0}.split{gap:18px}.name{font-size:14px}.actions{gap:8px}.inline .row{gap:8px}.inline .identity{flex-wrap:wrap}.inline .age{width:100%;margin-left:34px}.ledger-head{display:none}.ledger .row{grid-template-columns:minmax(0,1fr) 76px}.ledger .actions,.stamp .actions,.edge .actions{display:none}.subtitle .row{gap:8px}.stamp .row{grid-template-columns:78px minmax(0,1fr)}.edge .row{grid-template-columns:minmax(0,1fr) 76px}.card-grid{grid-template-columns:1fr}.chrono-key{display:none}.chrono-row{grid-template-columns:82px 1fr}.chrono-archive-item{grid-column:2}.chrono-mast .repo,.chrono-mast .active,.chrono-mast .project-actions{display:none}}
+  </style>
+</head>
+<body>
+<header class="prototype-header"><span class="brand">pi-orb</span><span class="eyebrow">dashboard age study</span><nav aria-label="Design options"><a href="#one">1</a><a href="#two">2</a><a href="#three">3</a><a href="#four">4</a><a href="#five">5</a><a href="#six">6</a><a href="#seven">7</a><a href="#eight">8</a></nav></header>
+<main>
+  <section class="intro"><span class="eyebrow">Eight directions · side-by-side shelves · no hashes</span><h1>How old is this work?</h1><p>Five evolutions of the current dashboard, followed by three increasingly radical redesigns. Every direction places the working set and archive shelf side by side on desktop, removes abbreviated hashes, and expresses age with exactly one number and one unit.</p><p class="rule-note">Examples: 14 minutes · 3 days · 2 months · 1 year</p></section>
+  <div id="studies"></div>
+</main>
+<script>
+const working=[
+  {name:'Fix terminal copy width behavior',age:'14 minutes',icon:'busy'},
+  {name:'System Inspection',age:'3 days',icon:'stopped'},
+  {name:'Dashboard Find Architecture Proposals',age:'2 weeks',icon:'busy'},
+  {name:'Run PR 20 Locally with Process Host',age:'1 month',icon:'running'}
+];
+const archived=[
+  {name:'Review Compute Replacement Stage 2',age:'2 months',icon:'stopped'},
+  {name:'Configure Default Pi Extensions',age:'1 year',icon:'stopped'},
+  {name:'Deploy via GitHub Actions',age:'1 year',icon:'stopped'}
+];
+const icon=o=>`<span class="state"><img src="../apps/web/public/favicons/${o.icon}.svg" alt="${o.icon}"></span>`;
+const buttons=archived=>`<div class="actions">${archived?'':'<button class="action">archive</button>'}<button class="action delete">delete</button></div>`;
+const mast=()=>`<div class="project-top"><span class="project-name">pi-orb</span><span class="pen" aria-hidden="true">✎</span><span class="repo">https://github.com/schani/pi-orb</span><span class="active">active</span><div class="project-actions"><button class="project-action">new orb</button><button class="project-action danger">delete project</button></div></div>`;
+const title=(label,n)=>`<h3 class="shelf-title"><span>${label}</span><span>${n}</span></h3>`;
+const section=(id,n,name,rationale,body)=>`<section class="direction" id="${id}"><div class="direction-heading"><span class="number">0${n}</span><div><h2>${name}</h2><p class="rationale">${rationale}</p></div></div><div class="canvas">${body}</div></section>`;
+function standard(kind){
+  const row=(o,isArchive)=>{
+    const identity=`<div class="identity">${icon(o)}<a class="name" href="#">${o.name}</a></div>`;
+    if(kind==='inline') return `<div class="row">${identity}<span class="age">${o.age}</span>${buttons(isArchive)}</div>`;
+    if(kind==='ledger') return `<div class="row">${identity}<span class="age">${o.age}</span>${buttons(isArchive)}</div>`;
+    if(kind==='subtitle') return `<div class="row"><div class="identity">${icon(o)}<div class="identity-copy"><a class="name" href="#">${o.name}</a><span class="age">${o.age}</span></div></div>${buttons(isArchive)}</div>`;
+    if(kind==='stamp') return `<div class="row"><span class="age">${o.age}</span>${identity}${buttons(isArchive)}</div>`;
+    return `<div class="row">${identity}${buttons(isArchive)}<span class="age">${o.age}</span></div>`;
+  };
+  const heads=kind==='ledger'?`<div class="ledger-head"><span>Orb</span><span>Age</span><span>Actions</span></div>`:'';
+  return `<div class="dash ${kind}">${mast()}<div class="split"><div>${title('Working set',working.length)}${heads}${working.map(o=>row(o,false)).join('')}</div><div class="archive">${title('Archive shelf',archived.length)}${heads}${archived.map(o=>row(o,true)).join('')}</div></div></div>`;
+}
+function indexRoom(){
+  const cards=working.map(o=>`<article class="orb-card"><div class="identity">${icon(o)}<a class="name" href="#">${o.name}</a></div><span class="age">${o.age}</span>${buttons(false)}</article>`).join('');
+  const catalog=archived.map(o=>`<div class="catalog-row"><a class="name" href="#">${o.name}</a><span class="age">${o.age}</span><button class="action delete">delete</button></div>`).join('');
+  return `<div class="index-room"><div class="index-mast"><div><h3>pi-orb</h3><p>github.com/schani/pi-orb · active</p></div><div class="project-actions"><button class="project-action">new orb</button><button class="project-action danger">delete project</button></div></div><div class="index-layout"><div><div class="index-label"><span>Working cards</span><span>${working.length}</span></div><div class="card-grid">${cards}</div></div><aside class="archive-catalog"><div class="index-label"><span>Archive catalog</span><span>${archived.length}</span></div>${catalog}</aside></div></div>`;
+}
+function chronology(){
+  const rows=[
+    [working[0],null,'92%'],[working[1],archived[0],'76%'],[working[2],null,'62%'],[working[3],archived[1],'48%'],[null,archived[2],'35%']
+  ].map(([w,a,width])=>`<div class="chrono-row"><span class="chrono-age">${(w||a).age}</span>${w?`<div class="chrono-work" style="--width:${width}">${icon(w)}<a class="name" href="#">${w.name}</a></div>`:'<span class="chrono-empty">no active work</span>'}${a?`<div class="chrono-archive-item">${icon(a)}<a class="name" href="#">${a.name}</a><button class="action delete">delete</button></div>`:'<span class="chrono-empty">—</span>'}</div>`).join('');
+  return `<div class="chronology"><div class="chrono-mast"><strong>pi-orb</strong><span class="repo">github.com/schani/pi-orb</span><span class="active">active</span><div class="project-actions"><button class="project-action">new orb</button><button class="project-action danger">delete project</button></div></div><div class="chrono-body"><div class="chrono-key"><span>Age</span><span>Working now</span><span>Archived</span></div>${rows}</div></div>`;
+}
+function signal(){
+  const positions=['b1','b2','b3','b4'];
+  const beacons=working.map((o,i)=>`<article class="beacon ${positions[i]}">${icon(o)}<a class="name" href="#">${o.name}</a><span class="age">${o.age}</span>${buttons(false)}</article>`).join('');
+  const vault=archived.map(o=>`<article class="vault-card"><a class="name" href="#">${o.name}</a><span class="age">${o.age}</span></article>`).join('');
+  return `<div class="signal"><div class="signal-mast"><div class="signal-title"><strong>Orbital work field</strong><span>pi-orb · active</span></div><div class="project-actions"><button class="project-action">new signal</button><button class="project-action danger">delete project</button></div></div><div class="signal-center"><strong>pi-orb</strong><span>project core</span></div>${beacons}<div class="vault">${vault}</div><span class="signal-legend">working orbits · archive vault</span></div>`;
+}
+document.querySelector('#studies').innerHTML=[
+  section('one',1,'Inline chronicle','With hashes gone, age naturally inherits their old inline position. The cleanest and smallest change.',standard('inline')),
+  section('two',2,'Age ledger','A dedicated aligned column makes a long two-shelf dashboard easy to compare vertically.',standard('ledger')),
+  section('three',3,'Editorial subline','Age sits beneath the title, giving long orb names all available horizontal space.',standard('subtitle')),
+  section('four',4,'Date-stamp margin','A paper-like stamp begins each row and turns age into the primary scanning landmark.',standard('stamp')),
+  section('five',5,'Right-edge annotation','Age occupies the outer margin beyond the actions, consistent across working and archived rows.',standard('edge')),
+  section('six',6,'The index room','A complete card-catalog redesign: active work becomes tactile index cards while the archive becomes a dense finding aid.',indexRoom()),
+  section('seven',7,'Chronological field','The dashboard becomes an age-first comparative timeline. Working and archived items share horizontal time bands.',chronology()),
+  section('eight',8,'Orbital signal board','The wildest direction: the project is a core, active work occupies an orbital field, and archived work drops into a terracotta vault.',signal())
+].join('');
+</script>
+</body>
+</html>

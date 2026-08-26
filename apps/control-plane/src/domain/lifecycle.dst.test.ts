@@ -2582,6 +2582,42 @@ describe("orb lifecycle (DST)", () => {
       { name: "preemption-mid-turn-resumes", iterations: 15, logCapture: capture },
       async (sim) => {
         const harness = makeHarness();
+        let busyBeforePreemption = 0;
+        const setup = await sim.runTasks([
+          {
+            name: "setup",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              // Establish the scenario's premise in a separate deterministic
+              // phase. Waiting for the background poller here made an allowed
+              // run of late operation-deadline callbacks look like a product
+              // failure before the preemption under test had even happened.
+              harness.world.beginTurn(ORB);
+              const record = harness.world.entriesOf(ORB)[0];
+              const session = harness.world.sessionHeaderOf(ORB);
+              expect(record).toBeDefined();
+              expect(session).not.toBeNull();
+              if (record === undefined || session === null) return;
+              const committed = await harness.store.commitPullBatch(task, {
+                orbId: ORB,
+                expectedCursor: null,
+                session,
+                records: [record],
+                nextCursor: record.id,
+                nextHeadId: record.id,
+              });
+              expect(committed.isOk()).toBe(true);
+              const touched = await harness.store.touchLastBusy(task, {
+                orbId: ORB,
+                now: task.wallNow(),
+              });
+              expect(touched.isOk()).toBe(true);
+              busyBeforePreemption = harness.store.orbSnapshot(ORB)?.lastBusyAt ?? 0;
+            },
+          },
+        ]);
+        expect(setup.isOk(), setup.isErr() ? setup.error.message : "").toBe(true);
+
         const stop = new AbortController();
         const result = await sim.runTasks([
           { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
@@ -2589,24 +2625,6 @@ describe("orb lifecycle (DST)", () => {
           {
             name: "driver",
             f: async (task) => {
-              seedRunningOrb(task, harness, ORB);
-              // Keep setup's unrelated idle timer out until the first busy
-              // pull is durable; adversarial late timers may otherwise let the
-              // reaper beat the poll that establishes this scenario's premise.
-              harness.deps.control.registerBrowserConnection(ORB, "setup-tab");
-              harness.deps.control.setBrowserVisibility(ORB, "setup-tab", true, task.wallNow());
-              // A turn in flight: its user message is flushed and the runtime
-              // is busy working on it.
-              harness.world.beginTurn(ORB);
-              await waitUntil(
-                task,
-                "the turn is replicated and observed busy",
-                () =>
-                  harness.store.replicaRecords(ORB).length === 1 &&
-                  harness.store.orbSnapshot(ORB)?.lastBusyAt !== null,
-              );
-              harness.deps.control.unregisterBrowserConnection(ORB, "setup-tab", task.wallNow());
-              const busyBeforePreemption = harness.store.orbSnapshot(ORB)?.lastBusyAt ?? 0;
               const stopsBefore = harness.world.hostStopCountOf(ORB);
               // The Spot preemption, mid-turn.
               harness.world.preemptHost(task, ORB);
