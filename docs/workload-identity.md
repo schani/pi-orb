@@ -35,9 +35,9 @@
 > found (the agent ending its turn before emitting the hooks, and instructing per-shell exports)
 > was fixed in the skill the same day. Trust resources were deleted afterwards.
 >
-> **Remaining release gate:** the cloud composition only — the `pi-orb-issuer` Cloud Run service
-> and its deterministic-URL postcondition, the GSM-backed signing keys, the bootstrap script
-> against a real project, and the smoke's `gcloud compute ssh` and STS legs. Tracked in `TODO.md`.
+> **Remaining release gate:** the separately bootstrapped GCP federation tier only — configure a
+> real project-scoped grant and run the smoke's STS exchange, impersonated read-only API call, and
+> wrong-audience rejection. Tracked in `TODO.md`.
 > The first cloud attempt on 2026-08-26 deployed the four serving revisions and proved public
 > discovery/JWKS after a same-image runtime recovery, but did not clear the gate: the postcondition
 > compared the working deterministic URL with Cloud Run's different canonical `.uri`; the runtime
@@ -49,9 +49,12 @@
 > first attempt, and a token minted in a real orb verified against the public issuer. That release
 > then exposed a smoke-only defect before the stopped-orb assertion: its singleton `gcloud compute
 > instances describe` command incorrectly used the list-only `--filter` flag. The smoke now requests
-> JSON and selects the metadata key locally; a complete fresh release remains the gate. The
-> migration race was one-time for this production database; general schema-before-consumer ordering
-> remains tracked separately in `TODO.md`.
+> JSON and selects the metadata key locally. Commit `f36914e` then passed the complete
+> provider-neutral cloud release: lifecycle in 455 seconds and workload identity in 204 seconds,
+> including mint, public verification, running-bearer baseline, stopped-orb `403 not_mintable`,
+> unknown-bearer `401`, and cleanup. The GCP federation legs were explicitly skipped because that
+> separate tier is not configured. The migration race was one-time for this production database;
+> general schema-before-consumer ordering remains tracked separately in `TODO.md`.
 >
 > This document defines a provider-neutral OIDC identity that code running inside a pi-orb can
 > exchange for short-lived credentials from cloud providers and private services. It does not grant
@@ -589,12 +592,12 @@ Reconciled 2026-08-21 against what stage 4 leaves true:
 
 | # | Status |
 | --- | --- |
-| 1 | **Met in the E2E slice, unverified live.** `e2e/full-slice.e2e.test.ts` mints through the shim in a Docker orb and verifies against the served JWKS. `infra/smoke-workload-identity.sh` is the same proof against real GCE and the deployed issuer, and has not been run. |
+| 1 | **Met in E2E and live.** `e2e/full-slice.e2e.test.ts` mints through the shim in a Docker orb and verifies against the served JWKS. On 2026-08-26, `infra/smoke-workload-identity.sh` passed the same proof against real GCE and the deployed issuer. |
 | 2 | **Written, not demonstrated.** The configuration generator, the reviewed helper `scripts/pi-orb-gcp-identity`, and the recipe are in `docs/workload-identity-recipes.md`; the smoke performs the equivalent exchange explicitly (STS → impersonation → a read-only API). No live STS has yet accepted a pi-orb token. This is the criterion the release gate exists for. |
-| 3 | **Met except live.** Wrong audience, wrong issuer, tampered signature, stopped-orb `403 not_mintable`, discarded-incarnation `401`, and an out-of-range TTL are all covered in the E2E suite and the DST scenarios; the smoke re-proves wrong-audience (at STS), stopped-orb 403, and unknown-bearer 401 on real infrastructure. |
+| 3 | **Met live except the unconfigured STS leg.** Wrong issuer, tampered signature, discarded-incarnation authorization, and out-of-range TTL are covered in E2E and DST. The 2026-08-26 cloud smoke proved stopped-orb `403 not_mintable` and unknown-bearer `401` on real infrastructure. Wrong-audience rejection at GCP STS remains unrun. |
 | 4 | **Met, and the deployment tier preserves it.** Private keys exist only as Secret Manager versions under `pi-orb-credential-oidc-signing-key`; the public issuer service runs as its own service account with no access to them. The smoke moves tokens through pipes and mode-0600 files in a mode-0700 directory removed on exit, and prints claims, never tokens. |
 | 5 | **Met.** The CLI's typed error and exit code, plus the edge-deduplicated `identity-mint-denied` lifecycle line (2026-08-25; it replaced the persisted status and the orb page banner). |
-| 6 | **Met for provider unawareness, partial for test parity.** No provider knows about OIDC; the four launch inputs were already injected before stage 1. But the identity E2E legs go through `docker exec`, so they run only on the Docker backend — the process backend has no exec seam (its CLI path is covered by unit tests only), and the GCE composition is exercised solely by the unrun live smoke. "All supported host providers pass the same contract tests" is not yet demonstrated for the identity path (noted 2026-08-22). |
+| 6 | **Met for provider unawareness, partial for test parity.** No provider knows about OIDC; the four launch inputs were already injected before stage 1. The identity E2E legs go through `docker exec`, so they run only on the Docker backend — the process backend has no exec seam (its CLI path is covered by unit tests only). The GCE composition passed its live smoke on 2026-08-26, but "all supported host providers pass the same contract tests" is still not demonstrated for the identity path (noted 2026-08-22). |
 | 7 | **Met at the last full run.** Re-run both before the live gate. |
 
 ## Implementation plan
@@ -893,7 +896,8 @@ suite's other container-shell steps.
 Stage 4 was implemented 2026-08-21 (`infra/oidc.tf`, `infra/run.tf`, `infra/outputs.tf`,
 `infra/bootstrap-pi-orb-oidc.sh`, `infra/smoke-workload-identity.sh`, `infra/release.sh`,
 `infra/api.sh`, `scripts/pi-orb-gcp-identity`, `docs/workload-identity-recipes.md`). It was first
-applied to GCP on 2026-08-26; the release gate remains open as recorded above. Six decisions taken
+applied to GCP on 2026-08-26; its provider-neutral cloud smoke passed later that day, while the
+separately bootstrapped GCP federation gate remains open as recorded above. Six decisions taken
 while implementing it:
 
 - **The issuer URL is computed, not configured.** A Cloud Run service cannot reference its own

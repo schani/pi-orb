@@ -52,9 +52,22 @@ product rejection: the command exited before it read the stopped orb's bearer. T
 not repeated. Its disposable VMs and project were deleted, the release lock was released, all four
 new revisions remained at 100% traffic, and discovery and JWKS both returned HTTP 200.
 
-No live release has yet completed the stopped-orb revocation assertion, and the separately
-bootstrapped GCP WIF tier remains unconfigured, so no live GCP STS has accepted a token from this
-cloud issuer.
+At the end of that attempt, no live release had completed the stopped-orb revocation assertion.
+
+## Successful release
+
+Commit `f36914e5068ac7b44f2bb062f04192568681fab0` replaced the invalid metadata command with local
+selection from the singleton instance's JSON and shipped through the complete supported release on
+2026-08-26. OpenTofu updated all four Cloud Run services with zero destroys; the lifecycle smoke
+passed in 455 seconds; and the workload-identity smoke passed in 204 seconds. The identity smoke
+proved a real in-orb mint and public issuer verification, a running bearer's HTTP 200 baseline, a
+stopped orb's `403 not_mintable`, and an unknown bearer's `401 unauthorized`. IAP SSH was ready on
+its first attempt. Cleanup deleted both identity-smoke orbs and their disposable project.
+
+The separately bootstrapped GCP WIF tier remains unconfigured. Its STS exchange, impersonated
+read-only API call, and wrong-audience rejection were explicitly skipped, so no live GCP STS has
+yet accepted a token from this cloud issuer. That is the remaining federation gate; it does not
+invalidate the now-passing provider-neutral cloud composition.
 
 ## Timeline (UTC)
 
@@ -78,6 +91,12 @@ cloud issuer.
   token minted and verified; then the unsupported `describe --filter` invocation failed step 6.
 - 22:57–22:58: cleanup deleted both disposable VMs and their project, and the release lock was
   released. The failed gate was not rerun.
+- 23:18–23:20: commit `f36914e` built and boot-gated; OpenTofu updated all four services with zero
+  destroys; IAP was reconciled; and the drained browser revision was deleted.
+- 23:20–23:27: the lifecycle smoke passed in 455 seconds, including stop, restart, and final stop.
+- 23:27–23:31: the identity smoke passed in 204 seconds, including mint, public verification,
+  running-bearer baseline, stopped-orb denial, unknown-bearer denial, and disposable cleanup. The
+  unconfigured GCP WIF tier was explicitly skipped.
 
 ## Resulting rules
 
@@ -99,9 +118,9 @@ Actionable fixes are tracked in `TODO.md`; the deployment contract is updated in
 
 Live-validated on 2026-08-26: the issuer postcondition checks the deterministic origin's membership
 in Cloud Run's complete URL set, `issuer_url` exports that trust anchor rather than the hashed
-canonical URI, and the smoke reaches orb SSH through the targeted IAP-only firewall. The next source
-fix makes `instance_metadata` request plain JSON from `describe` and select the requested key
-locally, with contract coverage forbidding the unsupported flag. A complete fresh release remains
-the acceptance gate. The migration-011 race was repaired in production and cannot recur for that
-durable schema; the general schema-before-consumer release-ordering problem remains in `TODO.md`
-for the next cross-role schema change.
+canonical URI, the smoke reaches orb SSH through the targeted IAP-only firewall, and
+`instance_metadata` selects its key locally from `describe` JSON. The provider-neutral cloud smoke
+now passes through revocation and cleanup. The optional GCP WIF tier remains to be bootstrapped and
+live-validated. The migration-011 race was repaired in production and cannot recur for that durable
+schema; the general schema-before-consumer release-ordering problem remains in `TODO.md` for the
+next cross-role schema change.
