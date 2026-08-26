@@ -1922,8 +1922,6 @@ export function createOrb(
       replicatedHeadId: null,
       lastBusyAt: null,
       stopReason: null,
-      mintFailureCode: null,
-      mintFailureAt: null,
       lastMintAt: null,
       stateChangedAt: now,
       createdAt: now,

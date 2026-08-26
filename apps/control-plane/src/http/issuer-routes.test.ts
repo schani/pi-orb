@@ -14,6 +14,7 @@ import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "../domain/co
 import type { StoreError } from "../domain/errors.ts";
 import type { OrbNameGenerator, SigningKeyRow, SigningKeyStore } from "../domain/ports.ts";
 import { ensureActiveSigningKey } from "../domain/signing-keys.ts";
+import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakePointerStore, FakeSecretStore, FakeUpstream } from "../testkit/broker.ts";
 import {
   makeOrbRow,
@@ -318,6 +319,7 @@ describe("minted tokens verify against the served JWKS", () => {
         store,
         signer: new OidcTokenSigner({ keys, secrets, constants: DEFAULT_ISSUER_CONSTANTS }),
         mintIds: new CryptoMintIdSource(),
+        denials: new MintDenialLog(),
         constants: TEST_ISSUER_CONSTANTS,
         issuerUrl: TEST_ISSUER_URL,
       },

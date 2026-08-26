@@ -14,6 +14,7 @@ import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
 import type { BrokerDeps, OrbNameGenerator } from "../domain/ports.ts";
+import { MintDenialLog } from "../domain/workload-identity.ts";
 import {
   FakePointerStore,
   FakeSecretStore,
@@ -70,6 +71,7 @@ describe("runtime broker routes", () => {
         store,
         signer,
         mintIds: new FakeMintIdSource(),
+        denials: new MintDenialLog(),
         constants: issuerConstants,
         issuerUrl: TEST_ISSUER_URL,
       },
@@ -454,7 +456,6 @@ describe("runtime broker routes", () => {
       expect(decodeFakeIdTokenKid(body.token)).toBe("route-key-1");
       // Nothing durable records the token itself; only the rate-limit stamp.
       expect(store.orbSnapshot(ORB)?.lastMintAt).not.toBeNull();
-      expect(store.orbSnapshot(ORB)?.mintFailureCode).toBeNull();
     });
 
     it("defaults the lifetime when the caller asks for none", async () => {
@@ -491,11 +492,9 @@ describe("runtime broker routes", () => {
         expect(response.json()).toEqual({ error: "unauthorized" });
         expect(Check(IdTokenErrorSchema, response.json())).toBe(true);
       }
-      // A bearer that resolves to no orb has no row to record a failure on.
-      expect(store.orbSnapshot(ORB)?.mintFailureCode).toBeNull();
     });
 
-    it("refuses a stopped orb with 403 and leaves the user a durable reason", async () => {
+    it("refuses a stopped orb with 403", async () => {
       seedOrb("stopped");
       const response = await mint({ audience: "urn:example:service" });
 
@@ -503,7 +502,6 @@ describe("runtime broker routes", () => {
       expect(response.json().error).toBe("not_mintable");
       expect(Check(IdTokenErrorSchema, response.json())).toBe(true);
       expect(signer.calls).toBe(0);
-      expect(store.orbSnapshot(ORB)?.mintFailureCode).toBe("not_mintable");
     });
 
     it("throttles a second mint inside the per-orb floor with 429 and a delay", async () => {
@@ -525,7 +523,6 @@ describe("runtime broker routes", () => {
       // before the floor has actually passed.
       expect(Number(response.headers["retry-after"])).toBe(Math.ceil(body.retryAfterMs / 1000));
       expect(signer.calls).toBe(1);
-      expect(store.orbSnapshot(ORB)?.mintFailureCode).toBe("rate_limited");
     });
 
     it("answers a signer outage with a retryable 503 and never an unsigned token", async () => {
@@ -538,7 +535,6 @@ describe("runtime broker routes", () => {
       expect(Check(IdTokenErrorSchema, response.json())).toBe(true);
       // Failing closed means no token at all, not a token signed some other way.
       expect(response.json().token).toBeUndefined();
-      expect(store.orbSnapshot(ORB)?.mintFailureCode).toBe("signer_failure");
     });
 
     it("answers a non-retryable 500 when the bearer lookup hits a store invariant", async () => {

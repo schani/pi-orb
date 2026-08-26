@@ -6,7 +6,6 @@ import type {
   ProjectState,
   StopReason,
 } from "@pi-orb/protocol";
-import type { MintFailureCode } from "./errors.ts";
 
 /**
  * Domain view of an orb row (docs/history-replication.md). Timestamps are wall-clock
@@ -58,13 +57,6 @@ export interface OrbRow {
   readonly lastBusyAt: number | null;
   /** Why the orb last entered `stopping`; null for explicit stops. */
   readonly stopReason: StopReason | null;
-  /**
-   * Latest identity-mint denial, shown to the orb user when identity is
-   * unavailable (docs/workload-identity.md). Advisory and always paired: both
-   * columns are set together or both are null.
-   */
-  readonly mintFailureCode: MintFailureCode | null;
-  readonly mintFailureAt: number | null;
   /** Durable per-orb mint rate-limit floor; monotone, written outside the CAS. */
   readonly lastMintAt: number | null;
   readonly stateChangedAt: number;

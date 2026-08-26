@@ -1,7 +1,8 @@
 import type { OrbState } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
-import type { MintError, MintFailureCode, StoreError } from "./errors.ts";
+import type { MintDenialCode, MintError, StoreError } from "./errors.ts";
+import { logOrbEvent } from "./log.ts";
 import type { IdTokenClaims, MintDeps } from "./ports.ts";
 
 /**
@@ -23,6 +24,52 @@ import type { IdTokenClaims, MintDeps } from "./ports.ts";
  * `running`.
  */
 export const MINT_STATES: readonly OrbState[] = ["creating", "starting", "running"];
+
+/**
+ * How many orbs one process remembers a denial for. Entries are added only for
+ * a denied orb and dropped on its next successful mint, so this bounds what a
+ * long-lived process accumulates from orbs that were denied and then deleted.
+ * Overflowing clears the whole map, which costs at most one repeated line per
+ * still-failing orb.
+ */
+const MAX_TRACKED_DENIALS = 1_024;
+
+/**
+ * Edge-deduplicated operator log for mint denials (docs/workload-identity.md).
+ * Nothing durable records a denial — the party who can act on it is the caller
+ * inside the orb, which gets the typed error and the CLI's exit code — so this
+ * line is what an operator has, and it must stay an edge. `not_mintable` and
+ * `invalid_request` are decided before the rate-limit slot is claimed, so a
+ * caller holding a stopped orb's bearer would otherwise write one line per
+ * request forever.
+ *
+ * One line per orb per code, until that orb mints successfully or the code
+ * changes. The state is per process and per instance on purpose: each control
+ * plane reports the decisions it took, and there is nothing to reconcile.
+ */
+export class MintDenialLog {
+  private readonly lastCode = new Map<string, MintDenialCode>();
+
+  /** Logs the edge into a new code; a repeat of the same code is silent. */
+  denied(
+    task: SimulationTask,
+    orb: { readonly id: string; readonly hostIncarnation: number },
+    code: MintDenialCode,
+  ): void {
+    if (this.lastCode.get(orb.id) === code) return;
+    if (this.lastCode.size >= MAX_TRACKED_DENIALS) this.lastCode.clear();
+    this.lastCode.set(orb.id, code);
+    logOrbEvent(task, orb.id, "identity-mint-denied", {
+      incarnation: orb.hostIncarnation,
+      code,
+    });
+  }
+
+  /** A healthy mint logs nothing and re-arms the edge for the next denial. */
+  succeeded(orbId: string): void {
+    this.lastCode.delete(orbId);
+  }
+}
 
 export interface MintRequest {
   /** SHA-256 hex of the presented bearer; hashing stays at the HTTP boundary. */
@@ -78,9 +125,10 @@ function mapStoreError(error: StoreError): MintError {
  * Mints one identity token for the orb the bearer hash resolves to. The
  * decisions run in the order of docs/workload-identity.md's request path:
  * authenticate, then check the lifecycle state, then validate the request,
- * then claim the rate-limit slot, then sign. Everything after authentication
- * records a durable typed denial, so a user asking "why can my orb not get
- * credentials?" has an answer that outlives the request.
+ * then claim the rate-limit slot, then sign. A denial is reported to the
+ * caller as a typed error and nowhere else: `deps.denials` turns the ones that
+ * belong to a resolved orb into a deduplicated operator log edge, and the
+ * control plane keeps no record of the attempt.
  */
 export function mintIdToken(
   task: SimulationTask,
@@ -92,8 +140,9 @@ export function mintIdToken(
     if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
     const orb = orbResult.value;
     // Unknown, stale, and discard-fenced bearers are one indistinguishable
-    // answer, and none of them is recorded: there is no orb identity to record
-    // it on, and answering differently would reveal that another orb exists.
+    // answer, and none of them is logged: there is no orb identity to log it
+    // against, and a per-orb line would reveal that the bearer resolved to
+    // something.
     if (
       orb === null ||
       orb.runtimeTokenHash === null ||
@@ -104,51 +153,17 @@ export function mintIdToken(
     }
     const orbId = orb.id;
 
-    /**
-     * Best-effort: the status is advisory, so a failed status write must never
-     * replace the real denial with a store error the caller cannot act on.
-     *
-     * Deduplicated against the code already on the orb row, because two of the
-     * denials below — `not_mintable` and `invalid_request` — are decided
-     * *before* the rate-limit slot is claimed. Without this, nothing throttles
-     * them at all: a caller holding a stopped orb's bearer drives one UPDATE
-     * per request, forever. The dedup lives here rather than at each call site
-     * so every path gets the same floor, and a *different* code still writes —
-     * `rate_limited` becoming `not_mintable` is a state change the user needs
-     * to see.
-     *
-     * The price is a stale `mintFailureAt`: through a run of identical denials
-     * the timestamp stays at the first one instead of tracking the latest, and
-     * that staleness is accepted deliberately in exchange for not writing per
-     * request. The product reads this status as "the last identity mint attempt
-     * failed" — a *last failure*, not a *latest timestamp*
-     * (docs/workload-identity.md).
-     */
-    const record = async (code: MintFailureCode): Promise<void> => {
-      // Skipped only while the row already says this *and* still says it
-      // visibly. Currency is decided on read (`http/views.ts`): a failure older
-      // than `lastMintAt` is hidden as superseded by the later success. So a
-      // bare code comparison would keep deduplicating against a status the user
-      // can no longer see, and an orb that starts failing again after a healthy
-      // stretch would go silent forever.
-      const visible =
-        orb.mintFailureAt !== null &&
-        (orb.lastMintAt === null || orb.mintFailureAt >= orb.lastMintAt);
-      if (orb.mintFailureCode === code && visible) return;
-      await deps.store.recordMintFailure(task, { orbId, code, at: task.wallNow() });
-    };
-
     if (!MINT_STATES.includes(orb.state)) {
-      await record("not_mintable");
+      deps.denials.denied(task, orb, "not_mintable");
       return err({ type: "not_mintable", state: orb.state });
     }
 
-    // Validated after the orb resolves so the denial is recordable; the
+    // Validated after the orb resolves so the denial names an orb; the
     // protocol schema and the CLI reject these shapes earlier anyway.
     const constants = deps.constants;
     const audienceBytes = utf8Bytes(request.audience);
     if (audienceBytes === 0 || audienceBytes > constants.maxAudienceBytes) {
-      await record("invalid_request");
+      deps.denials.denied(task, orb, "invalid_request");
       return err({
         type: "invalid_request",
         message: `audience must be 1..${constants.maxAudienceBytes} UTF-8 bytes`,
@@ -156,7 +171,7 @@ export function mintIdToken(
     }
     const ttlSeconds = request.ttlSeconds ?? constants.defaultTtlSeconds;
     if (ttlSeconds < constants.minTtlSeconds || ttlSeconds > constants.maxTtlSeconds) {
-      await record("invalid_request");
+      deps.denials.denied(task, orb, "invalid_request");
       return err({
         type: "invalid_request",
         message: `ttlSeconds must be ${constants.minTtlSeconds}..${constants.maxTtlSeconds}`,
@@ -171,14 +186,11 @@ export function mintIdToken(
     });
     if (claim.isErr()) {
       if (isNonRetryable(claim.error)) return err(mapStoreError(claim.error));
-      // A store outage is what the user sees as "identity unavailable"; the
-      // status write goes to the same store and may well fail too, which is
-      // exactly what best-effort recording is for.
-      await record("store_unavailable");
+      deps.denials.denied(task, orb, "store_unavailable");
       return err({ type: "retryable", message: claim.error.message });
     }
     if (!claim.value.claimed) {
-      await record("rate_limited");
+      deps.denials.denied(task, orb, "rate_limited");
       return err({ type: "rate_limited", retryAfterMs: claim.value.retryAfterMs });
     }
 
@@ -200,7 +212,7 @@ export function mintIdToken(
     if (signed.isErr()) {
       // The claimed slot is deliberately not refunded: a signer outage under
       // load must not become an unthrottled retry loop against the signer.
-      await record("signer_failure");
+      deps.denials.denied(task, orb, "signer_failure");
       return err({
         type: "retryable",
         message: signed.error.message,
@@ -209,6 +221,7 @@ export function mintIdToken(
           : { retryAfterMs: signed.error.retryAfterMs }),
       });
     }
+    deps.denials.succeeded(orbId);
     return ok({ token: signed.value.jwt });
   };
   return new ResultAsync(run());

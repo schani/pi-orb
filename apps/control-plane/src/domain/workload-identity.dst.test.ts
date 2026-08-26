@@ -12,11 +12,12 @@ import {
   seedRunningOrb,
   TEST_ISSUER_URL,
 } from "../testkit/fixtures.ts";
-import { runDst, waitUntil } from "../testkit/sim.ts";
+import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import { decodeFakeIdToken } from "../testkit/workload-identity.ts";
 import { fakeTokenHash } from "../testkit/world.ts";
 import type { MintError } from "./errors.ts";
 import { requestOrbArchive, requestOrbDeletion, requestOrbStop } from "./lifecycle.ts";
+import { LIFECYCLE_LOG_PREFIX } from "./log.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 import { mintIdToken } from "./workload-identity.ts";
 
@@ -57,6 +58,22 @@ function tokenOf(outcome: MintOutcome, label: string): string {
   return outcome.value.token;
 }
 
+/**
+ * The operator's whole record of one denial (docs/workload-identity.md): the
+ * orb, its incarnation, and the typed code — never the audience, never a
+ * token.
+ */
+function deniedLine(code: string, incarnation = 0): string {
+  return `${LIFECYCLE_LOG_PREFIX} orb=${ORB} identity-mint-denied incarnation=${incarnation} code=${code}`;
+}
+
+/** Those lines as the operator reads them, without the emitting task's name. */
+function deniedLines(log: LogCapture): readonly string[] {
+  return log
+    .matching("identity-mint-denied")
+    .map((line) => line.slice(line.indexOf(LIFECYCLE_LOG_PREFIX)));
+}
+
 /** The bearer hash the lifecycle committed for the seeded running orb. */
 function committedBearer(harness: MintHarness): string {
   const hash = harness.store.orbSnapshot(ORB)?.runtimeTokenHash;
@@ -67,7 +84,9 @@ function committedBearer(harness: MintHarness): string {
 describe("identity minting across lifecycle states (DST)", () => {
   for (const state of ["creating", "starting", "running"] as const) {
     it(`mints from ${state} with the identity of that orb's live incarnation`, async () => {
-      await runDst({ name: `mint-allowed-${state}`, iterations: 20 }, async (sim) => {
+      const log = new LogCapture();
+      const options = { name: `mint-allowed-${state}`, iterations: 20, logCapture: log };
+      await runDst(options, async (sim) => {
         const harness = makeMintHarness();
         const result = await sim.runTasks([
           {
@@ -93,7 +112,9 @@ describe("identity minting across lifecycle states (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBeNull();
+        // A healthy mint is silent: nothing durable beyond the rate-limit
+        // floor, and no operator line (docs/lifecycle.md).
+        expect(log.lines()).toEqual([]);
       });
     });
   }
@@ -107,8 +128,10 @@ describe("identity minting across lifecycle states (DST)", () => {
     "deleting",
   ];
   for (const state of denied) {
-    it(`refuses to mint from ${state} and records the denial`, async () => {
-      await runDst({ name: `mint-denied-${state}`, iterations: 15 }, async (sim) => {
+    it(`refuses to mint from ${state} and logs one denial edge`, async () => {
+      const log = new LogCapture();
+      const options = { name: `mint-denied-${state}`, iterations: 15, logCapture: log };
+      await runDst(options, async (sim) => {
         const harness = makeMintHarness();
         const result = await sim.runTasks([
           {
@@ -121,19 +144,19 @@ describe("identity minting across lifecycle states (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        // The user-visible answer to "why is identity unavailable?" outlives
-        // the request, and the rate-limit slot was never consumed.
-        expect(harness.store.orbSnapshot(ORB)).toMatchObject({
-          mintFailureCode: "not_mintable",
-          lastMintAt: null,
-        });
+        // The caller got the typed error; the operator gets exactly one line,
+        // and the rate-limit slot was never consumed.
+        expect(deniedLines(log)).toEqual([deniedLine("not_mintable")]);
+        expect(harness.store.orbSnapshot(ORB)?.lastMintAt).toBeNull();
         expect(harness.signer.calls).toBe(0);
       });
     });
   }
 
-  it("a hostile stream of identical denials costs one status write, not one per request", async () => {
-    await runDst({ name: "mint-denial-write-storm", iterations: 20 }, async (sim) => {
+  it("a hostile stream of identical denials costs one log line, not one per request", async () => {
+    const log = new LogCapture();
+    const options = { name: "mint-denial-log-storm", iterations: 20, logCapture: log };
+    await runDst(options, async (sim) => {
       const harness = makeMintHarness();
       let bearer = "";
       const seed = await sim.runTasks([
@@ -147,9 +170,9 @@ describe("identity minting across lifecycle states (DST)", () => {
       expect(seed.isOk(), seed.isErr() ? seed.error.message : "").toBe(true);
 
       // `not_mintable` is decided before the rate-limit slot is claimed, so
-      // nothing downstream throttles this: the dedup against the code already
-      // on the row is the only floor a caller holding a stopped orb's bearer
-      // ever meets, whatever the interleaving of the eight callers.
+      // nothing downstream throttles this: the edge dedup is the only floor a
+      // caller holding a stopped orb's bearer ever meets, whatever the
+      // interleaving of the eight callers.
       const storm = await sim.runTasks(
         Array.from({ length: 8 }, (_, index) => ({
           name: `attacker-${index}`,
@@ -163,17 +186,17 @@ describe("identity minting across lifecycle states (DST)", () => {
       );
       expect(storm.isOk(), storm.isErr() ? storm.error.message : "").toBe(true);
 
-      // Concurrent callers may each read the row before the first write lands,
-      // so the bound is "a handful", not exactly one — but it is a constant,
-      // not the 80 requests that arrived.
-      expect(harness.store.mintFailureWrites).toBeGreaterThan(0);
-      expect(harness.store.mintFailureWrites).toBeLessThanOrEqual(8);
-      expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("not_mintable");
+      // Exactly one, not "a handful": the dedup is a synchronous decision on
+      // in-process state, so no interleaving of the 80 requests can slip a
+      // second line past it.
+      expect(deniedLines(log)).toEqual([deniedLine("not_mintable")]);
     });
   });
 
-  it("keeps a repeated denial visible after a healthy stretch superseded the last one", async () => {
-    await runDst({ name: "mint-denial-after-success", iterations: 20 }, async (sim) => {
+  it("logs the denial edge again once a successful mint has re-armed it", async () => {
+    const log = new LogCapture();
+    const options = { name: "mint-denial-after-success", iterations: 20, logCapture: log };
+    await runDst(options, async (sim) => {
       const harness = makeMintHarness();
       const result = await sim.runTasks([
         {
@@ -182,9 +205,8 @@ describe("identity minting across lifecycle states (DST)", () => {
             const bearer = seedOrbWithBearer(task, harness, ORB, "stopped");
             expect(errorType(await mint(task, harness, bearer))).toBe("not_mintable");
 
-            // The orb comes back and mints successfully: the failure is now
-            // older than `lastMintAt`, so `http/views.ts` hides it as
-            // superseded even though the row still carries the code.
+            // The orb comes back and mints successfully. A success is silent,
+            // and it re-arms the edge.
             const stopped = harness.store.orbSnapshot(ORB);
             if (stopped === null) throw new Error("seed missing");
             harness.store.seedOrb({ ...stopped, state: "running" });
@@ -192,11 +214,10 @@ describe("identity minting across lifecycle states (DST)", () => {
             expect((await mint(task, harness, bearer)).isOk()).toBe(true);
             const healthy = harness.store.orbSnapshot(ORB);
             if (healthy === null) throw new Error("orb missing");
-            expect(healthy.mintFailureAt).toBeLessThan(healthy.lastMintAt ?? 0);
 
-            // It stops again. The denial-write dedup must not suppress this on
-            // the grounds that the row already says `not_mintable`: that status
-            // is invisible now, so the user would be shown nothing at all.
+            // It stops again. The dedup must not suppress this on the grounds
+            // that it already logged `not_mintable` once: the orb has been
+            // healthy since, so this is a fresh edge the operator has to see.
             harness.store.seedOrb({ ...healthy, state: "stopped" });
             await task.sleep(1, "a moment later");
             expect(errorType(await mint(task, harness, bearer))).toBe("not_mintable");
@@ -204,15 +225,14 @@ describe("identity minting across lifecycle states (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      const current = harness.store.orbSnapshot(ORB);
-      expect(current?.mintFailureCode).toBe("not_mintable");
-      // Visible again, which is the whole point of writing rather than deduping.
-      expect(current?.mintFailureAt).toBeGreaterThanOrEqual(current?.lastMintAt ?? 0);
+      expect(deniedLines(log)).toEqual([deniedLine("not_mintable"), deniedLine("not_mintable")]);
     });
   });
 
   it("treats an unknown, mismatched, or fenced bearer as one indistinguishable denial", async () => {
-    await runDst({ name: "mint-unauthorized", iterations: 20 }, async (sim) => {
+    const log = new LogCapture();
+    const options = { name: "mint-unauthorized", iterations: 20, logCapture: log };
+    await runDst(options, async (sim) => {
       const harness = makeMintHarness();
       const result = await sim.runTasks([
         {
@@ -237,14 +257,11 @@ describe("identity minting across lifecycle states (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      // Nothing is recorded for an unauthenticated caller: there is no orb
-      // identity to record it on, and a durable trace would reveal that this
-      // bearer resolved to something.
-      expect(harness.store.orbSnapshot(ORB)).toMatchObject({
-        mintFailureCode: null,
-        mintFailureAt: null,
-        lastMintAt: null,
-      });
+      // Nothing at all for an unauthenticated caller: there is no orb identity
+      // to log it against, and a per-orb line would say that this bearer
+      // resolved to something.
+      expect(deniedLines(log)).toEqual([]);
+      expect(harness.store.orbSnapshot(ORB)?.lastMintAt).toBeNull();
     });
   });
 
@@ -306,7 +323,6 @@ describe("identity minting across lifecycle states (DST)", () => {
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("not_mintable");
       }
     });
   });
@@ -620,12 +636,11 @@ describe("identity minting racing lifecycle transitions (DST)", () => {
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBeNull();
     });
   });
 
-  it("mint status writes interleave a live reconciler without disturbing it", async () => {
-    await runDst({ name: "mint-status-vs-lifecycle", iterations: 25 }, async (sim) => {
+  it("mint slot claims interleave a live reconciler without disturbing it", async () => {
+    await runDst({ name: "mint-slot-vs-lifecycle", iterations: 25 }, async (sim) => {
       const harness = makeMintHarness({
         constants: { idleStopAfterMs: 3_600_000 },
         issuerConstants: { minMintIntervalMs: 50 },
@@ -645,9 +660,9 @@ describe("identity minting racing lifecycle transitions (DST)", () => {
         {
           name: "denied-minter",
           f: async (task) => {
-            // A stream of denials, each one a status write landing between the
-            // reconciler's reads and its CAS transitions. Once the stop
-            // commits the answer becomes `not_mintable` instead: the lifecycle
+            // A stream of denials interleaving the reconciler's reads and its
+            // CAS transitions. Once the stop commits the answer becomes
+            // `not_mintable` instead: the lifecycle
             // gate deliberately runs before request validation, so a stopping
             // orb never has its request inspected at all.
             for (let attempt = 0; attempt < 12; attempt++) {
@@ -710,7 +725,6 @@ describe("identity minting under throttling and signer failure (DST)", () => {
               expect(throttled.error.retryAfterMs).toBeGreaterThan(0);
               expect(throttled.error.retryAfterMs).toBeLessThanOrEqual(floor);
             }
-            expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("rate_limited");
 
             await task.sleep(floor + 1, "past the rate-limit floor");
             expect((await mint(task, harness, bearer)).isOk()).toBe(true);
@@ -780,11 +794,13 @@ describe("identity minting under throttling and signer failure (DST)", () => {
   });
 
   it("a signer outage denies with a typed retryable error and never an unsigned token", async () => {
+    const log = new LogCapture();
     await runDst(
       {
         name: "mint-signer-failpoint",
         iterations: 30,
         failpointProbabilities: { [FAILPOINTS.signerSign]: 0.4 },
+        logCapture: log,
       },
       async (sim) => {
         const harness = makeMintHarness({ issuerConstants: { minMintIntervalMs: 50 } });
@@ -824,17 +840,19 @@ describe("identity minting under throttling and signer failure (DST)", () => {
             true,
           );
         }
-        const failures = outcomes.filter((outcome) => outcome === "retryable").length;
-        const status = harness.store.orbSnapshot(ORB)?.mintFailureCode;
-        if (failures > 0) {
-          expect(["signer_failure", "rate_limited"]).toContain(status);
+        // Whatever the failpoint chose, the operator only ever learns which
+        // of the two expected denials happened — never an audience or a token.
+        for (const line of deniedLines(log)) {
+          expect([deniedLine("signer_failure"), deniedLine("rate_limited")]).toContain(line);
         }
       },
     );
   });
 
   it("recovers as soon as signing works again, without refunding the consumed slot", async () => {
-    await runDst({ name: "mint-signer-recovery", iterations: 20 }, async (sim) => {
+    const log = new LogCapture();
+    const options = { name: "mint-signer-recovery", iterations: 20, logCapture: log };
+    await runDst(options, async (sim) => {
       const harness = makeMintHarness();
       const floor = harness.mintDeps.constants.minMintIntervalMs;
       const result = await sim.runTasks([
@@ -846,7 +864,6 @@ describe("identity minting under throttling and signer failure (DST)", () => {
 
             const failed = await mint(task, harness, bearer);
             expect(errorType(failed)).toBe("retryable");
-            expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("signer_failure");
             // The slot the failed mint claimed is deliberately not refunded:
             // an immediate retry is throttled like any other second mint.
             expect(harness.store.orbSnapshot(ORB)?.lastMintAt).not.toBeNull();
@@ -855,14 +872,14 @@ describe("identity minting under throttling and signer failure (DST)", () => {
             await task.sleep(floor + 1, "past the rate-limit floor");
             const recovered = await mint(task, harness, bearer);
             expect(decodeFakeIdToken(tokenOf(recovered, "post-outage mint")).orb_id).toBe(ORB);
-            // The stale failure status stays until the view layer compares it
-            // against the newer successful mint.
-            expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("rate_limited");
           },
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.signer.calls).toBe(1);
+      // One line per code change and nothing for the recovery: a changed code
+      // is news, a repeat is not, and a success is silent.
+      expect(deniedLines(log)).toEqual([deniedLine("signer_failure"), deniedLine("rate_limited")]);
     });
   });
 });

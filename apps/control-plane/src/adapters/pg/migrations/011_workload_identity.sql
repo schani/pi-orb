@@ -1,21 +1,9 @@
--- Orb workload identity (docs/workload-identity.md). The orb columns are
--- advisory: the mint status is what the user is shown when identity is
--- unavailable, and last_mint_at is the durable per-orb rate-limit floor. Both
--- are written outside the state_version CAS, so a denial can never conflict
--- with a lifecycle transition. Neither ever holds a token, a bearer, or a raw
--- audience.
+-- Orb workload identity (docs/workload-identity.md). last_mint_at is the
+-- durable per-orb rate-limit floor, and it is advisory: it is written outside
+-- the state_version CAS, so claiming a mint slot can never conflict with a
+-- lifecycle transition. It never holds a token, a bearer, or a raw audience.
 ALTER TABLE orbs
-  ADD COLUMN mint_failure_code text,
-  ADD COLUMN mint_failure_at timestamptz,
-  ADD COLUMN last_mint_at timestamptz,
-  ADD CONSTRAINT orbs_mint_failure_code_valid CHECK (
-    mint_failure_code IS NULL OR mint_failure_code IN (
-      'invalid_request', 'not_mintable', 'rate_limited', 'signer_failure', 'store_unavailable'
-    )
-  ),
-  ADD CONSTRAINT orbs_mint_failure_complete CHECK (
-    (mint_failure_code IS NULL) = (mint_failure_at IS NULL)
-  );
+  ADD COLUMN last_mint_at timestamptz;
 
 -- Public halves of the issuer's signing keys. A JWK is not a secret, so JWKS
 -- is served straight from these rows; the private key exists only in the

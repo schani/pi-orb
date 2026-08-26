@@ -191,8 +191,6 @@ describe("OidcTokenSigner composed with real key material", () => {
   it("refuses to sign when no key is active", async () => {
     const minted = await mintIdToken(task, mintDeps, { tokenHash: bearer, audience: AUDIENCE });
     expect(minted.isErr() && minted.error.type).toBe("retryable");
-    // The user-visible reason survives the request.
-    expect(mintHarness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("signer_failure");
   });
 
   it("refuses to sign when the active key's material was destroyed", async () => {

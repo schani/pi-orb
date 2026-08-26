@@ -9,7 +9,6 @@ import {
   MAX_AUDIENCE_BYTES,
   MAX_TTL_SECONDS,
   MIN_TTL_SECONDS,
-  MintFailureCodeSchema,
 } from "./workload-identity.ts";
 
 describe("workload identity contract", () => {
@@ -73,20 +72,5 @@ describe("workload identity contract", () => {
     expect(Check(IdTokenErrorSchema, { error: "internal" })).toBe(true);
     expect(Check(IdTokenErrorSchema, { error: "internal", message: "bad parameter" })).toBe(true);
     expect(Check(IdTokenErrorSchema, { error: "internal", retryAfterMs: 100 })).toBe(false);
-  });
-
-  it("names every durable mint failure without naming what the caller asked for", () => {
-    for (const code of [
-      "invalid_request",
-      "not_mintable",
-      "rate_limited",
-      "signer_failure",
-      "store_unavailable",
-    ]) {
-      expect(Check(MintFailureCodeSchema, code)).toBe(true);
-    }
-    // An unresolvable bearer has no orb row to record anything on.
-    expect(Check(MintFailureCodeSchema, "unauthorized")).toBe(false);
-    expect(Check(MintFailureCodeSchema, "urn:example:service")).toBe(false);
   });
 });

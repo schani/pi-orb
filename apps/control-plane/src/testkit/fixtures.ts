@@ -15,6 +15,7 @@ import type {
   OrbNameGenerator,
   SigningKeyDeps,
 } from "../domain/ports.ts";
+import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
 import { FakeSecretStore } from "./broker.ts";
 import { FAILPOINTS } from "./failpoints.ts";
@@ -138,6 +139,7 @@ export function makeMintHarness(options?: {
       store: harness.store,
       signer,
       mintIds,
+      denials: new MintDenialLog(),
       constants: { ...TEST_ISSUER_CONSTANTS, ...options?.issuerConstants },
       issuerUrl: options?.issuerUrl ?? TEST_ISSUER_URL,
     },
@@ -241,8 +243,6 @@ export function makeOrbRow(
     replicatedHeadId: null,
     lastBusyAt: null,
     stopReason: null,
-    mintFailureCode: null,
-    mintFailureAt: null,
     lastMintAt: null,
     stateChangedAt: 0,
     createdAt: 0,

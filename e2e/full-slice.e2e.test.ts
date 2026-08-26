@@ -692,11 +692,6 @@ describe("full slice E2E", () => {
           const stoppedMint = await mintDirect(oldToken, IDENTITY_AUDIENCE);
           expect(stoppedMint.status, JSON.stringify(stoppedMint.body)).toBe(403);
           expect(stoppedMint.body["error"]).toBe("not_mintable");
-          // The refusal is visible in the product, not only in the response.
-          const identity = (await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`)).body[
-            "identity"
-          ] as { failureCode?: string } | undefined;
-          expect(identity?.failureCode).toBe("not_mintable");
         }
         expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/start`)).status).toBe(
           202,

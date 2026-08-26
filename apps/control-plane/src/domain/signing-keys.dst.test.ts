@@ -15,6 +15,7 @@ import {
   FakeSigningKeyStore,
   KeyStoreBackedTokenSigner,
 } from "../testkit/workload-identity.ts";
+import { LIFECYCLE_LOG_PREFIX } from "./log.ts";
 import type { MintDeps, SigningKeyRow } from "./ports.ts";
 import {
   assembleJwks,
@@ -775,7 +776,6 @@ describe("minting across a key rotation (DST)", () => {
               audience: AUDIENCE,
             });
             expect(refused.isErr() && refused.error.type).toBe("retryable");
-            expect(mintHarness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("signer_failure");
             expect(signer.calls).toBe(0);
 
             await task.sleep(1_000, "past the rate-limit floor");
@@ -802,7 +802,9 @@ describe("minting across a key rotation (DST)", () => {
   });
 
   it("stops a warm signer within the material TTL once its version is destroyed", async () => {
-    await runDst({ name: "signing-key-material-revoked-warm", iterations: 20 }, async (sim) => {
+    const log = new LogCapture();
+    const options = { name: "signing-key-material-revoked-warm", iterations: 20, logCapture: log };
+    await runDst(options, async (sim) => {
       const substrate = makeSubstrate();
       const ttlMs = 5_000;
       const keyHarness = makeSigningKeyHarness({
@@ -866,11 +868,18 @@ describe("minting across a key rotation (DST)", () => {
               await task.sleep(1, "again");
             }
             expect(signer.calls).toBe(2);
-            expect(mintHarness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("signer_failure");
           },
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      // The warm mint logged nothing, and the three refusals that followed are
+      // one edge, not three lines (docs/workload-identity.md).
+      const denied = log
+        .matching("identity-mint-denied")
+        .map((line) => line.slice(line.indexOf(LIFECYCLE_LOG_PREFIX)));
+      expect(denied).toEqual([
+        `${LIFECYCLE_LOG_PREFIX} orb=${ORB} identity-mint-denied incarnation=0 code=signer_failure`,
+      ]);
     });
   });
 

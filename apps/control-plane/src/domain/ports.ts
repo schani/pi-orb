@@ -12,7 +12,6 @@ import type { ResultAsync } from "neverthrow";
 import type {
   AuthGateError,
   CommitPullError,
-  MintFailureCode,
   OrbHostProviderError,
   PointerConflict,
   ProjectConflict,
@@ -356,24 +355,6 @@ export interface ControlPlaneStore {
   touchLastBusy(
     task: SimulationTask,
     params: { orbId: string; now: number },
-  ): ResultAsync<void, StoreError>;
-
-  /**
-   * Latest typed identity-mint denial, for the user-visible identity status
-   * (docs/workload-identity.md). Advisory like `touchLastBusy`: it replaces
-   * both columns together, bumps no `state_version` and moves no
-   * `state_changed_at`, so a denial can never conflict with lifecycle CAS. An
-   * unknown orb is a silent no-op.
-   *
-   * A successful mint deliberately does not clear it: the status is "the last
-   * denial", and whether it is still current is decided by the view layer
-   * comparing `mintFailureAt` against `lastMintAt`. Clearing it on success
-   * would instead make the status vanish the moment a retry succeeded, which
-   * is exactly when the user is looking for it.
-   */
-  recordMintFailure(
-    task: SimulationTask,
-    params: { orbId: string; code: MintFailureCode; at: number },
   ): ResultAsync<void, StoreError>;
 
   /**
@@ -784,6 +765,12 @@ export interface MintDeps {
   readonly signer: TokenSigner;
   readonly mintIds: MintIdSource;
   readonly constants: import("./constants.ts").IssuerConstants;
+  /**
+   * Per-process edge dedup for denial log lines. Lives on the deps rather than
+   * inside `mintIdToken` because it is state that must survive across requests
+   * — and because a scenario can then assert on the edges it produced.
+   */
+  readonly denials: import("./workload-identity.ts").MintDenialLog;
   /** The deployment's public issuer URL, validated at boot, never from a header. */
   readonly issuerUrl: string;
 }

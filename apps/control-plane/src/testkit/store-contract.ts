@@ -53,8 +53,6 @@ const orb: OrbRow = {
   replicatedHeadId: null,
   lastBusyAt: null,
   stopReason: null,
-  mintFailureCode: null,
-  mintFailureAt: null,
   lastMintAt: null,
   stateChangedAt: 1_000,
   createdAt: 1_000,
@@ -637,60 +635,6 @@ export function storeSemanticsContractTests(
       });
     });
 
-    it("records the latest mint failure without disturbing lifecycle state", async () => {
-      await seed();
-      const running = await store.casTransition(task, {
-        orbId: orb.id,
-        expectedStateVersion: 0,
-        toState: "running",
-        now: 2_000,
-      });
-      expect(running.isOk() && running.value.stateVersion).toBe(1);
-
-      expect(
-        (
-          await store.recordMintFailure(task, {
-            orbId: orb.id,
-            code: "not_mintable",
-            at: 3_000,
-          })
-        ).isOk(),
-      ).toBe(true);
-      // The whole point of the advisory write: identity status is durable, but
-      // it must not consume a lifecycle version or restart a state deadline.
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
-        mintFailureCode: "not_mintable",
-        mintFailureAt: 3_000,
-        stateVersion: 1,
-        stateChangedAt: 2_000,
-      });
-
-      // The columns move together: the latest failure replaces the previous
-      // one whole, never leaving a code without its timestamp.
-      expect(
-        (
-          await store.recordMintFailure(task, {
-            orbId: orb.id,
-            code: "rate_limited",
-            at: 4_000,
-          })
-        ).isOk(),
-      ).toBe(true);
-      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
-        mintFailureCode: "rate_limited",
-        mintFailureAt: 4_000,
-      });
-
-      // A bearer that resolves to nothing has no row to write: silently inert,
-      // never an error the mint path would have to classify.
-      const unknown = await store.recordMintFailure(task, {
-        orbId: "00000000-0000-4000-8000-0000000000cc",
-        code: "signer_failure",
-        at: 5_000,
-      });
-      expect(unknown.isOk()).toBe(true);
-    });
-
     it("claims the mint rate-limit slot atomically and only moves it forward", async () => {
       await seed();
       const running = await store.casTransition(task, {
@@ -767,19 +711,14 @@ export function storeSemanticsContractTests(
       expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.lastMintAt).toBe(10_000);
     });
 
-    it("lets mint status writes interleave a lifecycle read and its CAS", async () => {
+    it("lets a mint slot claim interleave a lifecycle read and its CAS", async () => {
       await seed();
       const before = (await store.getOrb(task, orb.id))._unsafeUnwrap();
       if (before === null) return;
 
-      // A mint racing a stop is the schedule that matters: both mint writes
-      // land between the reconciler's read and its transition, and the
-      // transition must still commit against the version it read.
-      expect(
-        (
-          await store.recordMintFailure(task, { orbId: orb.id, code: "rate_limited", at: 2_500 })
-        ).isOk(),
-      ).toBe(true);
+      // A mint racing a stop is the schedule that matters: the claim lands
+      // between the reconciler's read and its transition, and the transition
+      // must still commit against the version it read.
       const claim = await store.claimMintSlot(task, {
         orbId: orb.id,
         at: 2_600,
@@ -794,11 +733,7 @@ export function storeSemanticsContractTests(
         now: 3_000,
       });
       expect(stopping.isOk() && stopping.value.state).toBe("stopping");
-      expect(stopping.isOk() && stopping.value).toMatchObject({
-        mintFailureCode: "rate_limited",
-        mintFailureAt: 2_500,
-        lastMintAt: 2_600,
-      });
+      expect(stopping.isOk() && stopping.value).toMatchObject({ lastMintAt: 2_600 });
     });
 
     it("coordinates auto-naming and preserves a manual name", async () => {

@@ -3,12 +3,15 @@
 > **Status:** Requirements accepted 2026-08-21; implementation plan added 2026-08-21 (see
 > "Implementation plan" below). **Implemented through stage 4 locally as of 2026-08-21**: the
 > domain core, the crypto adapter and key management, the mint route, the `issuer` role's
-> discovery/JWKS endpoints, the boot key hook, the per-orb identity status in the product, the
+> discovery/JWKS endpoints, the boot key hook, the
 > in-orb `pi-orb id-token` CLI with its image shim and end-to-end coverage, and the cloud tier —
 > the public `pi-orb-issuer` Cloud Run service, `PI_ORB_OIDC_ISSUER_URL` on both roles that need
 > it, the signing-key parent secret, the separately invoked federation bootstrap
 > (`infra/bootstrap-pi-orb-oidc.sh`), the release smoke (`infra/smoke-workload-identity.sh`), and
-> the integration recipes (`docs/workload-identity-recipes.md`). **Hardened 2026-08-22** after a
+> the integration recipes (`docs/workload-identity-recipes.md`). **Changed 2026-08-25**: mint
+> failures are no longer persisted or shown in the product — the caller inside the orb gets the
+> typed error, and the operator gets a deduplicated `identity-mint-denied` log edge (see
+> "Observability and failure visibility"). **Hardened 2026-08-22** after a
 > review of all four stages: see "Issuer hardening (2026-08-22)" below for the JWKS first-deploy
 > window, the signing-material revocation window, the staged operator rotation, the fenced
 > retirement, and the boot hook that no longer gates `listen`.
@@ -299,8 +302,8 @@ existing internal runtime-authentication boundary:
    at least the minimum interval old. The floor cannot be part of the snapshot read (decided
    2026-08-21): reading it and then advancing it lets N concurrent requests all pass the same
    stale check and all mint, so the claim has to be the check, and of any number of racing callers
-   exactly one wins. Like the failure status the claim bumps no lifecycle state version, so it
-   never conflicts with lifecycle CAS. A claim consumed by a mint that then fails at the signer is
+   exactly one wins. The claim bumps no lifecycle state version, so it never conflicts with
+   lifecycle CAS. A claim consumed by a mint that then fails at the signer is
    deliberately not refunded: a signer outage under load must not become an unthrottled retry
    loop, and the cost of a lost slot is one delayed token.
 6. It signs and returns a token with `Cache-Control: no-store`.
@@ -433,43 +436,52 @@ preserve exact-orb tags, ephemeral nodes, lifecycle cleanup, and current user-vi
 
 ## Observability and failure visibility
 
-Workload identity is security-sensitive, and its failures must be visible to the orb user without
-recording tokens.
+Workload identity is security-sensitive, and its failures must reach whoever can act on them
+without recording tokens.
 
-- Persist the latest mint failure per orb as durable columns: a typed denial/error code and a
-  timestamp, nothing else. The write must not bump the lifecycle state version, so failure status
-  never conflicts with lifecycle CAS. Raw audience values do not enter this status.
+**Decided 2026-08-25: the control plane persists nothing about a mint failure.** A denial reaches
+the one party who can do something about it — the caller inside the orb — as the CLI's typed error
+and exit code, which lands in the agent's transcript where the agent, and the user reading it, see
+it in context. Nothing in the product needs to remember it afterwards. So `mint_failure_code`,
+`mint_failure_at`, `ControlPlaneStore.recordMintFailure`, `OrbView.identity`, and the orb page's
+identity banner are all gone; `last_mint_at` stays, because it is the rate-limit floor and not a
+status.
 
-  The columns are never cleared, and the only thing that retires a failure is a *later successful
-  mint*, decided on read (`mintFailureAt >= lastMintAt`). **Decided 2026-08-22: the status is
-  therefore a historical report, not a statement about the orb's present ability to mint, and every
-  consumer must present it in the past tense.** Most orbs never call `pi-orb id-token` at all, so a
-  `not_mintable` denial recorded during an ordinary stop window is never superseded: the orb
-  restarts healthy and the denial is still the latest recorded outcome. A present-tense banner
-  ("Workload identity unavailable") would then be a standing lie on a perfectly good orb. Rejected:
-  clearing the columns on start or on a lifecycle transition — that puts identity status back on the
-  lifecycle CAS path, which is exactly what the no-clearing-write design buys. The product renders
-  it as "Last workload-identity mint failed: `<code>` (at `<time>`)"; the code and the timestamp are
-  what make it actionable, since they let the user judge whether the attempt predates whatever they
-  last changed.
+This reverses the earlier design, which persisted the latest typed denial per orb and rendered it
+as "Last workload-identity mint failed: `<code>` (at `<time>`)". What that design kept running into
+is that the columns were never cleared and only a *later successful mint* superseded them, so the
+status was a historical report that most orbs never superseded at all: a `not_mintable` recorded
+during an ordinary stop window survived the restart that made the orb healthy again. Every
+consumer then had to be told to read it in the past tense, and the denial write needed its own
+dedup — conditioned on the status still being *visible* — to stop a caller holding a stopped orb's
+bearer from driving one `UPDATE` per request. That is a lot of machinery, and a stale row, for a
+fact the caller already has.
 
-  **Denial status writes are deduplicated against the code already on the orb row (decided
-  2026-08-22).** `not_mintable` and `invalid_request` are decided *before* the rate-limit slot is
-  claimed, so without dedup a caller holding a stopped orb's bearer drove one `UPDATE` per request
-  against no floor at all. The consequence is a deliberately stale `mintFailureAt`: through a run of
-  identical denials it stamps the first request, not the latest, which is why the product surfaces
-  this as a *last failure* rather than a *latest timestamp*. The dedup is conditioned on the
-  existing status still being *visible*: `http/views.ts` hides a failure older than `lastMintAt`, so
-  a repeat denial after a healthy stretch writes again rather than deduplicating against a status
-  the user can no longer see. Without that condition an orb that starts failing again after a
-  successful mint would go silent permanently.
+- **A denial the operator should see is a `lifecycle:` edge, not a row.** `mintIdToken` logs
+  `identity-mint-denied` with the orb id, its incarnation, and the typed code — `not_mintable`,
+  `rate_limited`, `invalid_request`, `signer_failure`, `store_unavailable` — and never the
+  audience, the bearer, or a token. It is edge-deduplicated per process: one line per orb per code,
+  until that orb mints successfully or the code changes. `not_mintable` and `invalid_request` are
+  decided before the rate-limit slot is claimed, so without the edge nothing throttles them at all.
+  The dedup state lives on `MintDeps` (`MintDenialLog`, `domain/workload-identity.ts`) so the
+  deterministic scenarios can assert the edges a schedule produced. It is per process and per
+  instance on purpose: each control plane reports what it decided, and there is nothing to
+  reconcile.
+
+  `unauthorized` is never logged per orb: an unknown, stale, or discard-fenced bearer resolves to
+  no orb, so there is nothing to log it against, and a per-orb line would say that the bearer
+  resolved to something. Signer failures keep the durable `issuer-key-unusable` edge the signer
+  path already logs. Healthy minting logs nothing at all.
+- Rejected for now (2026-08-25): a generic control-plane notices mechanism — a durable,
+  user-visible feed of things the control plane decided about an orb. It is the right shape for
+  facts the agent cannot relay, and it should wait for the first such fact rather than be built for
+  this one, which the agent relays perfectly well.
 - Never persist the JWT, runtime bearer, private key, or downstream cloud credential.
-- The CLI reports actionable failures to the orb user. A dashboard/API identity status must expose
-  issuer readiness and the latest non-secret mint failure for that orb; a silent refusal is not
+- The CLI reports actionable failures to the orb user: a typed error and a distinct exit code, so
+  the caller can tell a stopped orb from a throttle from a signer outage. A silent refusal is not
   acceptable.
-- Healthy minting is silent: successful mints produce no lifecycle events and no durable pi-orb
-  record beyond the rate-limit timestamp. Denials caused by expected stale/stopped callers are
-  edge-deduplicated in operational logs.
+- Healthy minting is silent: successful mints produce no lifecycle events, no operator log line,
+  and no durable pi-orb record beyond the rate-limit timestamp.
 - Key activation/retirement, signer unavailability edges, sustained throttling, and policy/config
   changes produce durable operator-visible security events.
 - Downstream provider audit logs are the forensic trail for issued tokens: federation recipes must
@@ -495,8 +507,9 @@ signer, and orb-store ports. Deterministic scheduling tests must cover at least:
 - archive/delete and discard-fence races;
 - first-boot request before bearer-hash commit followed by bounded successful retry;
 - signer failure and recovery, never returning an unsigned token;
-- failure-status and rate-limit-timestamp writes racing lifecycle CAS without state-version
-  conflicts;
+- rate-limit-timestamp writes racing lifecycle CAS without state-version conflicts;
+- denial edges: N identical denials produce one log line, a success then a new denial produces a
+  new one, and a successful mint produces none;
 - per-orb rate-limit enforcement under concurrent requests across control-plane instances;
 - key rotation with old/new verifier caches and retirement after the overlap window;
 - clock boundaries, skew, minimum/maximum lifetime, malformed audiences, and unique `jti` values;
@@ -527,8 +540,9 @@ The feature is complete only when:
 4. No private signing key, runtime bearer, JWT, or downstream access token is present in the
    repository, image, PostgreSQL rows other than permitted one-way hashes, normal logs, or orb
    persistent filesystem.
-5. User-visible failures explain why identity is unavailable: the latest typed non-secret mint
-   failure for an orb is durably persisted and exposed in the product.
+5. A denied mint explains itself to whoever can act on it: the in-orb caller gets a typed
+   non-secret error and a distinct CLI exit code, and the operator gets a deduplicated
+   `identity-mint-denied` edge in the lifecycle log.
 6. Provider implementations remain unaware of OIDC and all supported host providers pass the same
    contract tests.
 7. The deterministic race suite and full runtime E2E pass, including stop/replacement revocation
@@ -542,7 +556,7 @@ Reconciled 2026-08-21 against what stage 4 leaves true:
 | 2 | **Written, not demonstrated.** The configuration generator, the reviewed helper `scripts/pi-orb-gcp-identity`, and the recipe are in `docs/workload-identity-recipes.md`; the smoke performs the equivalent exchange explicitly (STS → impersonation → a read-only API). No live STS has yet accepted a pi-orb token. This is the criterion the release gate exists for. |
 | 3 | **Met except live.** Wrong audience, wrong issuer, tampered signature, stopped-orb `403 not_mintable`, discarded-incarnation `401`, and an out-of-range TTL are all covered in the E2E suite and the DST scenarios; the smoke re-proves wrong-audience (at STS), stopped-orb 403, and unknown-bearer 401 on real infrastructure. |
 | 4 | **Met, and the deployment tier preserves it.** Private keys exist only as Secret Manager versions under `pi-orb-credential-oidc-signing-key`; the public issuer service runs as its own service account with no access to them. The smoke moves tokens through pipes and mode-0600 files in a mode-0700 directory removed on exit, and prints claims, never tokens. |
-| 5 | **Met.** `OrbView.identity` plus the orb page banner (stage 2B). |
+| 5 | **Met.** The CLI's typed error and exit code, plus the edge-deduplicated `identity-mint-denied` lifecycle line (2026-08-25; it replaced the persisted status and the orb page banner). |
 | 6 | **Met for provider unawareness, partial for test parity.** No provider knows about OIDC; the four launch inputs were already injected before stage 1. But the identity E2E legs go through `docker exec`, so they run only on the Docker backend — the process backend has no exec seam (its CLI path is covered by unit tests only), and the GCE composition is exercised solely by the unrun live smoke. "All supported host providers pass the same contract tests" is not yet demonstrated for the identity path (noted 2026-08-22). |
 | 7 | **Met at the last full run.** Re-run both before the live gate. |
 
@@ -564,17 +578,17 @@ perturbing the immutable host-spec fingerprint (`docs/compute-replacement.md`).
   `retryAfterMs`). `unauthorized` covers unknown, stale, and fenced bearers identically, so the
   response never reveals whether another orb exists. Discovery/JWKS document shapes stay inside
   the control plane: they have one producer and no first-party consumer.
-- Migration `011_workload_identity.sql`: on `orbs`, the columns `mint_failure_code`,
-  `mint_failure_at`, and `last_mint_at`; a new `oidc_signing_keys` table (`kid` primary key,
+- Migration `011_workload_identity.sql`: on `orbs`, the column `last_mint_at`; a new
+  `oidc_signing_keys` table (`kid` primary key,
   secret-store version reference, public JWK JSON, state `pending | active | retired`,
   timestamps, row-version CAS). Public JWKs are not secrets and may live in PostgreSQL; private
   keys exist only in the secret store, addressed by exact version.
 - Ports in `domain/ports.ts`: `TokenSigner` (claims in, `{jwt, kid}` out, typed retryable signer
   errors), `SigningKeyStore` (create/activate/retire/list, CAS-fenced), and a mint-ID entropy
-  port for `jti`. New `ControlPlaneStore` methods: `recordMintFailure` (no state-version bump,
-  following `recordHostDiscardStatus`/`touchLastBusy`), `claimMintSlot` (the atomic conditional
-  floor write of request-path step 5), and the signing-key operations — each implemented in the
-  PostgreSQL adapter, the in-memory store, and the shared store contract suite.
+  port for `jti`. New `ControlPlaneStore` methods: `claimMintSlot` (the atomic conditional floor
+  write of request-path step 5, no state-version bump, following `touchLastBusy`) and the
+  signing-key operations — each implemented in the PostgreSQL adapter, the in-memory store, and
+  the shared store contract suite.
 - `domain/workload-identity.ts`: `MINT_STATES = creating | starting | running` — deliberately
   narrower than the broker's `RUNTIME_TOKEN_STATES`, which admits `stopping` and `archiving` —
   and a `mintIdToken` function implementing the request-path steps above, with `IssuerConstants`
@@ -635,8 +649,6 @@ perturbing the immutable host-spec fingerprint (`docs/compute-replacement.md`).
   cacheable, secret-free, so the issuer service needs no secret-store access. The issuer URL
   comes from a required `PI_ORB_OIDC_ISSUER_URL` validated at boot, never from request headers;
   `role=all` serves the same routes locally.
-- The persisted mint failure surfaces through `http/views.ts` and the web UI as per-orb identity
-  status alongside issuer readiness.
 - Tests: route tests via injection, discovery-document conformance, and signature verification of
   minted JWTs against the served JWKS using `node:crypto` verify.
 
@@ -648,11 +660,10 @@ and RFC 7638 thumbprints checked against the RFC's own published vector), `adapt
 `domain/signing-keys.dst.test.ts`. The signer holds the private PEM in memory keyed by `kid` *and*
 secret version, so the active row is still read per signature and a rotation is a cache miss by
 construction. **2B** is the wiring: the shared bearer-authentication helper, the mint route, the
-`issuer` role with discovery and JWKS, the boot hook, and the per-orb identity status in
-`http/views.ts`.
+`issuer` role with discovery and JWKS, and the boot hook.
 
-Stage 2B landed 2026-08-21 (`http/runtime-routes.ts`, `http/issuer-routes.ts`, `main.ts`,
-`http/views.ts`, `apps/web/src/pages/OrbPage.tsx`). Five decisions taken while implementing it:
+Stage 2B landed 2026-08-21 (`http/runtime-routes.ts`, `http/issuer-routes.ts`, `main.ts`). Five
+decisions taken while implementing it:
 
 - **The mint route does not pre-authenticate.** The two older runtime routes resolve the bearer at
   the HTTP boundary through the now-shared helper; the mint route hashes the bearer and hands the
@@ -693,11 +704,6 @@ Stage 2B landed 2026-08-21 (`http/runtime-routes.ts`, `http/issuer-routes.ts`, `
   closed at boot would trade a feature outage for a fleet outage. Minting then fails closed per
   request with typed retryable errors, and the next boot or an operator rotation repairs it.
   Migrations remain the browser role's job alone.
-
-The per-orb identity status is `OrbView.identity` (`{failureCode, failureAt}`, absent when there is
-nothing to report). Currency is decided on read: the failure is exposed only while
-`mintFailureAt >= lastMintAt`, so a later successful mint supersedes it with no clearing write and
-the status stays off the lifecycle CAS path. The orb page renders it as a compact banner.
 
 ### Issuer hardening (2026-08-22)
 
@@ -821,8 +827,8 @@ discovery document's advertised `jwks_uri`, matching the JWK by `kid`, and check
 audience, `token_use`, and expiry — with wrong-audience, wrong-issuer, and truncated-signature
 rejections proving the verifier is not a rubber stamp. The same leg then covers a custom
 `--ttl-seconds`, the locally rejected `--ttl-seconds 10` (nonzero exit, empty stdout), a stopped
-orb's 403 `not_mintable` with the retained bearer plus the resulting user-visible identity status,
-the discarded incarnation's 401 beside the existing broker 401, and the replacement incarnation's
+orb's 403 `not_mintable` with the retained bearer, the discarded incarnation's 401 beside the
+existing broker 401, and the replacement incarnation's
 successful mint carrying `host_incarnation=1`. The `docker exec` legs are Docker-only, like the
 suite's other container-shell steps.
 

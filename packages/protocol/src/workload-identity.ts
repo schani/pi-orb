@@ -86,19 +86,3 @@ export const IdTokenErrorSchema = Type.Union([
 ]);
 export type IdTokenErrorBody = Static<typeof IdTokenErrorSchema>;
 export type IdTokenErrorCode = IdTokenErrorBody["error"];
-
-/**
- * The durable per-orb mint failure status (docs/workload-identity.md,
- * "Observability and failure visibility"): a typed code and a timestamp, never
- * the audience, the bearer, or the token. Shared with the browser because the
- * orb view exposes it — a silent refusal is not acceptable. `unauthorized` has
- * no code here: a bearer that resolves to no orb has no row to record it on.
- */
-export const MintFailureCodeSchema = Type.Union([
-  Type.Literal("invalid_request"),
-  Type.Literal("not_mintable"),
-  Type.Literal("rate_limited"),
-  Type.Literal("signer_failure"),
-  Type.Literal("store_unavailable"),
-]);
-export type MintFailureCode = Static<typeof MintFailureCodeSchema>;

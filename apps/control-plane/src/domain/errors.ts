@@ -1,4 +1,4 @@
-import type { OrbState, MintFailureCode as WireMintFailureCode } from "@pi-orb/protocol";
+import type { OrbState } from "@pi-orb/protocol";
 
 /**
  * Storage failure. `retryable` distinguishes outages from corruption.
@@ -140,16 +140,18 @@ export type TokenError =
 // Workload identity (docs/workload-identity.md)
 
 /**
- * Typed values recorded in `orbs.mint_failure_code`. The whole durable failure
- * status is this code plus its timestamp: never the audience, the bearer, or
- * the token. `unauthorized` has no code here — a bearer that does not resolve
- * to an orb has no orb row to record it on.
- *
- * The vocabulary lives in `@pi-orb/protocol` because the orb view publishes it
- * to the browser; this alias keeps domain code from importing the wire module
- * for a type it treats as its own.
+ * Why one mint was denied, for the deduplicated operator log edge and nothing
+ * else (docs/workload-identity.md). Never the audience, the bearer, or the
+ * token, and never persisted. `unauthorized` has no code here: a bearer that
+ * does not resolve to an orb has no orb to log the denial against, and logging
+ * one would say that the bearer resolved to something.
  */
-export type MintFailureCode = WireMintFailureCode;
+export type MintDenialCode =
+  | "invalid_request"
+  | "not_mintable"
+  | "rate_limited"
+  | "signer_failure"
+  | "store_unavailable";
 
 /** CAS on a signing key's `row_version` affected zero rows. */
 export interface SigningKeyConflict {

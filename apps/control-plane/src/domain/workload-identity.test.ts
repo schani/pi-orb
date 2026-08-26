@@ -72,7 +72,6 @@ describe("identity claim construction", () => {
     // The caller must be able to find the verifying key.
     expect(decodeFakeIdTokenKid(minted.value.token)).toBe("fake-key-1");
     // A success is silent: no durable record beyond the rate-limit floor.
-    expect(orb?.mintFailureCode).toBeNull();
     expect(orb?.lastMintAt).not.toBeNull();
   });
 
@@ -87,12 +86,11 @@ describe("identity claim construction", () => {
     }
   });
 
-  it("rejects a lifetime outside the accepted range and records the denial", async () => {
+  it("rejects a lifetime outside the accepted range", async () => {
     for (const ttlSeconds of [59, 3601, 0, -60]) {
       const seeded = seed();
       const minted = await mint(seeded, { ttlSeconds });
       expect(errorOf(minted).type).toBe("invalid_request");
-      expect(seeded.harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("invalid_request");
       // A denied request consumes no rate-limit slot: validation runs first.
       expect(seeded.harness.store.orbSnapshot(ORB)?.lastMintAt).toBeNull();
       expect(seeded.harness.signer.calls).toBe(0);
@@ -110,7 +108,6 @@ describe("audience validation", () => {
     const overCap = seed();
     const denied = await mint(overCap, { audience: "a".repeat(cap + 1) });
     expect(errorOf(denied).type).toBe("invalid_request");
-    expect(overCap.harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("invalid_request");
   });
 
   it("counts the cap in UTF-8 bytes, not characters", async () => {
@@ -136,89 +133,16 @@ describe("audience validation", () => {
     const seeded = seed();
     const denied = await mint(seeded, { audience: "" });
     expect(errorOf(denied).type).toBe("invalid_request");
-    expect(seeded.harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("invalid_request");
     expect(seeded.harness.signer.calls).toBe(0);
   });
 });
 
 describe("bearer authentication", () => {
-  it("denies an unknown bearer without recording anything on any orb", async () => {
+  it("denies an unknown bearer without touching any orb", async () => {
     const seeded = seed();
     const denied = await mint(seeded, { tokenHash: "sha256(some-other-token)" });
     expect(errorOf(denied).type).toBe("unauthorized");
-    expect(seeded.harness.store.orbSnapshot(ORB)?.mintFailureCode).toBeNull();
     expect(seeded.harness.store.orbSnapshot(ORB)?.lastMintAt).toBeNull();
-  });
-});
-
-describe("denial-path status writes", () => {
-  it("writes once for a run of identical denials, and again when the code changes", async () => {
-    // `not_mintable` and `invalid_request` are both recorded *before* the
-    // rate-limit slot is claimed, so without dedup a caller holding a stopped
-    // orb's bearer drives one UPDATE per request against no floor at all.
-    const task = new NoSimulationTask("denial dedup test", false);
-    const harness = makeMintHarness();
-    const bearer = seedOrbWithBearer(task, harness, ORB, "stopped");
-
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const denied = await mintIdToken(task, harness.mintDeps, {
-        tokenHash: bearer,
-        audience: AUDIENCE,
-      });
-      expect(errorOf(denied).type).toBe("not_mintable");
-    }
-    expect(harness.store.mintFailureWrites).toBe(1);
-    const stamped = harness.store.orbSnapshot(ORB)?.mintFailureAt;
-    expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("not_mintable");
-
-    // A different code is real news — the user needs to see the state change,
-    // not the previous run's verdict — so it always writes.
-    const running = harness.store.orbSnapshot(ORB);
-    if (running === null) throw new Error("seed missing");
-    harness.store.seedOrb({ ...running, state: "running" });
-    const invalid = await mintIdToken(task, harness.mintDeps, {
-      tokenHash: bearer,
-      audience: "",
-    });
-    expect(errorOf(invalid).type).toBe("invalid_request");
-    expect(harness.store.mintFailureWrites).toBe(2);
-    expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("invalid_request");
-    // The stamp the dedup deliberately lets go stale: it belongs to the *first*
-    // request of a run of identical denials, not the latest one.
-    expect(stamped).not.toBeNull();
-  });
-
-  it("records again once a later successful mint has superseded the same denial", async () => {
-    // The dedup must not outlive the status it is deduplicating against.
-    // `http/views.ts` hides a failure older than `lastMintAt`, so after a
-    // successful mint the row still *says* `not_mintable` while showing the
-    // user nothing — and a plain code comparison would then skip the write for
-    // the next real denial forever, leaving the orb silently failing.
-    const task = new NoSimulationTask("denial supersession test", false);
-    const harness = makeMintHarness();
-    const bearer = seedOrbWithBearer(task, harness, ORB, "stopped");
-
-    const first = await mintIdToken(task, harness.mintDeps, {
-      tokenHash: bearer,
-      audience: AUDIENCE,
-    });
-    expect(errorOf(first).type).toBe("not_mintable");
-    expect(harness.store.mintFailureWrites).toBe(1);
-
-    // A later successful mint, as the rate-limit slot would have recorded it.
-    const denied = harness.store.orbSnapshot(ORB);
-    if (denied === null) throw new Error("seed missing");
-    if (denied.mintFailureAt === null) throw new Error("denial was not recorded");
-    const supersededBy = denied.mintFailureAt + 1;
-    harness.store.seedOrb({ ...denied, lastMintAt: supersededBy });
-
-    const again = await mintIdToken(task, harness.mintDeps, {
-      tokenHash: bearer,
-      audience: AUDIENCE,
-    });
-    expect(errorOf(again).type).toBe("not_mintable");
-    expect(harness.store.mintFailureWrites).toBe(2);
-    expect(harness.store.orbSnapshot(ORB)?.mintFailureCode).toBe("not_mintable");
   });
 });
 
@@ -248,7 +172,7 @@ describe("store failures the caller cannot retry away", () => {
       const store = storeFailingLookup(seeded.harness.store, {
         type: "store_error",
         code,
-        message: "orbs.mint_failure_code holds an unknown value",
+        message: "orbs.state holds an unknown value",
         retryable: false,
       });
       const denied = await mintIdToken(

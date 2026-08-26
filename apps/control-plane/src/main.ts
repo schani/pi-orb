@@ -57,6 +57,7 @@ import {
 } from "./domain/loops.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { ensureActiveSigningKey } from "./domain/signing-keys.ts";
+import { MintDenialLog } from "./domain/workload-identity.ts";
 import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
@@ -419,6 +420,7 @@ async function main(): Promise<void> {
           constants: DEFAULT_ISSUER_CONSTANTS,
         }),
         mintIds: new CryptoMintIdSource(),
+        denials: new MintDenialLog(),
         constants: DEFAULT_ISSUER_CONSTANTS,
         issuerUrl,
       },
