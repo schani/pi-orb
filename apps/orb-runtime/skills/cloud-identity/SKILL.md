@@ -330,9 +330,6 @@ Client libraries that read Application Default Credentials (Python
 `google-cloud-*`, Node `google-auth-library`, Go, Java) need no login at all —
 `GOOGLE_APPLICATION_CREDENTIALS` is enough.
 
-The image ships `gcloud`. In the unlikely case `command -v gcloud` finds
-nothing, skip straight to an ADC client library; the credential file is the same.
-
 ### 8. Leave the next orb something to run
 
 Steps 4–6 have to happen again in every new orb of this project, and none of
