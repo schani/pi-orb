@@ -199,6 +199,40 @@ describe("baked agent skills", () => {
     });
   });
 
+  describe("the cloud identity skill's boot hooks", () => {
+    const body = skillBody("cloud-identity");
+
+    it("emits both hook files for future orbs", () => {
+      for (const hook of ["setup", "resume"] as const) {
+        expect(body, `the skill must emit ${HOOK_DIRECTORY}/${hook}`).toContain(
+          `${HOOK_DIRECTORY}/${hook}`,
+        );
+        expect(hookFences(body, hook).length, `${hook} needs a complete example`).toBeGreaterThan(
+          0,
+        );
+      }
+    });
+
+    it("federates in resume and never in setup", () => {
+      // `gcloud auth login --cred-file` needs `pi-orb id-token` on every
+      // refresh, and setup has no identity: the split is the whole point of
+      // emitting two files rather than one.
+      for (const fence of hookFences(body, "setup")) {
+        expect(fence, "setup installs the client; it does not authenticate it").not.toContain(
+          "gcloud auth",
+        );
+      }
+      expect(hookFences(body, "resume").join("\n")).toContain("gcloud auth login --cred-file");
+    });
+
+    it("no longer says the hooks are pending", () => {
+      expect(body).not.toMatch(/does not emit|does not exist yet|pending/i);
+      expect(body, "the committed configuration must be stated to hold no secret").toMatch(
+        /no secret/i,
+      );
+    });
+  });
+
   describe("the cloud identity skill's GCP bootstrap block", () => {
     const body = readFileSync(join(skillsDir, "cloud-identity", "SKILL.md"), "utf8");
 

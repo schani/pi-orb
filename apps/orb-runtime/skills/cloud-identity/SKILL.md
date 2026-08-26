@@ -330,24 +330,77 @@ Client libraries that read Application Default Credentials (Python
 `google-cloud-*`, Node `google-auth-library`, Go, Java) need no login at all —
 `GOOGLE_APPLICATION_CREDENTIALS` is enough.
 
-### 8. Leave the next orb something to run
+### 8. Make every future orb do this by itself
 
 Steps 4–6 have to happen again in every new orb of this project, and none of
-their pieces is a secret. Commit them, so the next orb is one command rather
-than one conversation:
+their pieces is a secret. pi-orb runs two repository-owned boot hooks —
+`.agents/setup` once per compute incarnation, `.agents/resume` on every start,
+before your first turn — so commit them and the next orb of this project gets
+its gcloud identity with zero steps. Ask the human's ok first: these files run
+unattended in every project member's orbs.
 
-- `.pi-orb-gcp.json` as a checked-in template — the external-account
-  configuration from step 4 with nothing redacted, since it holds no secret;
-- a small `scripts/pi-orb-gcp-setup.sh` that copies it into `$HOME`, `chmod
-  600`s it, exports the three variables of step 5, and runs the `--cred-file`
-  login of step 6.
+Three committed files. The template holds **no secret** — it names the pool, the
+provider, the service account, and the reviewed helper that mints a fresh token
+on each refresh — so committing it is fine and is what makes the hooks work
+without a per-orb conversation.
 
-Say clearly what this is and is not: a repository script the next agent or human
-runs deliberately. pi-orb does run per-project boot hooks — `.agents/setup` on
-the first boot of every compute incarnation and `.agents/resume` on every start
-(`docs/orb-setup-hook.md`) — but this skill does not emit them yet, so nothing
-runs the script automatically when an orb starts; emitting them is tracked in
-`TODO.md`. Do not promise it happens by itself.
+```sh
+mkdir -p .pi-orb .agents
+cp "$HOME/.pi-orb-gcp.json" .pi-orb/gcp-external-account.json
+chmod 644 .pi-orb/gcp-external-account.json
+```
+
+`.agents/setup` — the client only. It has no identity, so nothing here may
+authenticate:
+
+```sh
+#!/usr/bin/env bash
+# .agents/setup
+set -euo pipefail
+
+# gcloud ships in the pi-orb image; the guard keeps this file correct elsewhere.
+if ! command -v gcloud >/dev/null 2>&1; then
+  sudo apt-get update
+  sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
+  curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+    | gpg --dearmor | sudo tee /usr/share/keyrings/cloud.google.gpg >/dev/null
+  echo 'deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main' \
+    | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
+  sudo apt-get update
+  sudo apt-get install -y google-cloud-cli
+fi
+```
+
+`.agents/resume` — the identity half, idempotent and cheap enough for the
+10-second window:
+
+```sh
+#!/usr/bin/env bash
+# .agents/resume
+set -euo pipefail
+
+umask 077
+install -m 600 .pi-orb/gcp-external-account.json "$HOME/.pi-orb-gcp.json"
+
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.pi-orb-gcp.json"
+export PI_ORB_GCP_AUDIENCE='urn:pi-orb:gcp:<gcp project>'
+export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
+
+# Nothing a hook exports reaches the agent's shells; write them where shells read.
+sudo tee /etc/profile.d/pi-orb-gcp.sh >/dev/null <<'PROFILE'
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.pi-orb-gcp.json"
+export PI_ORB_GCP_AUDIENCE='urn:pi-orb:gcp:<gcp project>'
+export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
+PROFILE
+
+gcloud auth login --cred-file="$HOME/.pi-orb-gcp.json" --quiet
+gcloud config set project '<gcp project>' --quiet
+```
+
+Substitute every `<…>`, `chmod +x` both files, and commit them with the
+executable bit. Drop the `sudo tee` block for a `$HOME/.profile` append if the
+orb has no `sudo`. The `boot-hooks` skill is the authoring guide for these files
+— read it before changing their shape.
 
 The trust side never needs redoing — the pool, provider, service account, and
 bindings are per GCP project, already there, and admit every orb of this pi-orb
