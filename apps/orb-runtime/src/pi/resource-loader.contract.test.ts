@@ -204,13 +204,15 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     const loader = await orbLoader(PREVIEW_HOST, BAKED_SKILLS_SOURCE);
     const { skills, diagnostics } = loader.getSkills();
 
-    const cloudIdentity = skills.find((skill) => skill.name === "cloud-identity");
-    expect(cloudIdentity, `discovered: ${skills.map((s) => s.name).join(", ")}`).toBeDefined();
-    // The description is the only part always in the agent's context, so an
-    // empty one would mean a silently undiscoverable skill.
-    expect(cloudIdentity?.description.length).toBeGreaterThan(0);
-    expect(cloudIdentity?.disableModelInvocation).toBe(false);
-    expect(cloudIdentity?.filePath).toBe(join(BAKED_SKILLS_SOURCE, "cloud-identity", "SKILL.md"));
+    for (const name of ["boot-hooks", "cloud-identity"]) {
+      const baked = skills.find((skill) => skill.name === name);
+      expect(baked, `discovered: ${skills.map((s) => s.name).join(", ")}`).toBeDefined();
+      // The description is the only part always in the agent's context, so an
+      // empty one would mean a silently undiscoverable skill.
+      expect(baked?.description.length).toBeGreaterThan(0);
+      expect(baked?.disableModelInvocation).toBe(false);
+      expect(baked?.filePath).toBe(join(BAKED_SKILLS_SOURCE, name, "SKILL.md"));
+    }
     expect(diagnostics).toEqual([]);
 
     // Adding skills must not disturb the rest of the loader's surface.
@@ -220,7 +222,11 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(loader.getPrompts().prompts).toEqual(control.getPrompts().prompts);
     // The skills are strictly additive on top of whatever the SDK discovered.
     const controlNames = control.getSkills().skills.map((skill) => skill.name);
-    expect(skills.map((skill) => skill.name)).toEqual([...controlNames, "cloud-identity"]);
+    expect(skills.map((skill) => skill.name)).toEqual([
+      ...controlNames,
+      "boot-hooks",
+      "cloud-identity",
+    ]);
   });
 
   it("tolerates a missing skills directory, as on a provider with no image", async () => {

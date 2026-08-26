@@ -23,6 +23,16 @@ export const STATUS_TAIL_LINES = 20;
 
 export const HOOK_DIRECTORY = ".agents";
 
+/** Both hooks' output and status files, under the persistent `$HOME`. */
+export const hookLogDir = (home: string): string => join(home, ".cache", "pi-orb", "logs");
+export const hookLogPath = (home: string, hook: HookName): string =>
+  join(hookLogDir(home), `${hook}.log`);
+export const hookStatusPath = (home: string, hook: HookName): string =>
+  join(hookLogDir(home), `${hook}.status.json`);
+/** The "setup has run for this incarnation" marker, under the persistent workspace. */
+export const hookStampPath = (workDir: string): string =>
+  join(workDir, ".pi-orb", "setup-incarnation");
+
 /** Set in every orb process so a script can branch on the platform (`PI_ORB=1`). */
 export const ORB_MARKER_ENV = "PI_ORB";
 export const HOOK_NAME_ENV = "PI_ORB_HOOK";
@@ -392,15 +402,15 @@ export class BootHookRunner {
   }
 
   private logDir(): string {
-    return join(this.options.home, ".cache", "pi-orb", "logs");
+    return hookLogDir(this.options.home);
   }
 
   private logPath(hook: HookName): string {
-    return join(this.logDir(), `${hook}.log`);
+    return hookLogPath(this.options.home, hook);
   }
 
   private statusPath(hook: HookName): string {
-    return join(this.logDir(), `${hook}.status.json`);
+    return hookStatusPath(this.options.home, hook);
   }
 
   /**
@@ -438,7 +448,7 @@ export class BootHookRunner {
   }
 
   private stampPath(): string {
-    return join(this.options.workDir, ".pi-orb", "setup-incarnation");
+    return hookStampPath(this.options.workDir);
   }
 
   /**
