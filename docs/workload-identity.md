@@ -27,6 +27,14 @@
 > bearer `401`. The in-orb agent drove the whole flow from the skill. Everything created for the
 > validation was deleted afterwards; a tunnel issuer must never remain trusted.
 >
+> **Product-level acceptance 2026-08-26:** with the boot hooks merged (`docs/orb-setup-hook.md`),
+> the in-orb agent ran the whole GCP flow from the `cloud-identity` skill in one orb of a real
+> repository — login in the Terminal tab, trust registration, isolated verification, revoke — and
+> committed `.agents/setup`, `.agents/resume`, and the non-secret template; a second orb of the
+> same project then answered `gcloud projects describe` with zero setup steps. The one defect
+> found (the agent ending its turn before emitting the hooks, and instructing per-shell exports)
+> was fixed in the skill the same day. Trust resources were deleted afterwards.
+>
 > **Remaining release gate:** the cloud composition only — the `pi-orb-issuer` Cloud Run service
 > and its deterministic-URL postcondition, the GSM-backed signing keys, the bootstrap script
 > against a real project, and the smoke's `gcloud compute ssh` and STS legs. Tracked in `TODO.md`.
