@@ -1,6 +1,6 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import type { AppSearchItem, AppSearchSource } from "./app-search.ts";
-import { splitProjectOrbs } from "./project-orbs.ts";
+import { formatProjectOrbAge, splitProjectOrbs } from "./project-orbs.ts";
 
 export type DashboardOrbListSnapshot =
   | { type: "loading" }
@@ -12,6 +12,7 @@ export interface DashboardSearchSnapshot {
   projectsLoading: boolean;
   projectsFailed: boolean;
   orbLists: Readonly<Record<string, DashboardOrbListSnapshot | undefined>>;
+  now: number;
 }
 
 function githubRepositoryAlias(repositoryUrl: string): string | null {
@@ -38,13 +39,20 @@ function projectItem(project: ProjectView): AppSearchItem {
   };
 }
 
-function orbItem(project: ProjectView, orb: OrbView, archived: boolean): AppSearchItem {
+function orbItem(
+  project: ProjectView,
+  orb: OrbView,
+  archived: boolean,
+  now: number,
+): AppSearchItem {
   const name = orb.name ?? "untitled orb";
+  const age = formatProjectOrbAge(orb.createdAt, now);
+  const shelf = archived ? "archive shelf" : "working set";
   return {
     key: `dashboard:orb:${orb.id}`,
     kindLabel: archived ? "archived orb" : "orb",
     title: name,
-    context: `${project.name} · ${archived ? "archive shelf" : "working set"}`,
+    context: age === null ? `${project.name} · ${shelf}` : `${project.name} · ${shelf} · ${age}`,
     keywords: [name],
     href: `#/orbs/${encodeURIComponent(orb.id)}`,
   };
@@ -67,8 +75,8 @@ export function buildDashboardSearchSource(snapshot: DashboardSearchSnapshot): A
       continue;
     }
     const shelves = splitProjectOrbs(orbList.items);
-    items.push(...shelves.working.map((orb) => orbItem(project, orb, false)));
-    items.push(...shelves.archive.map((orb) => orbItem(project, orb, true)));
+    items.push(...shelves.working.map((orb) => orbItem(project, orb, false, snapshot.now)));
+    items.push(...shelves.archive.map((orb) => orbItem(project, orb, true, snapshot.now)));
   }
 
   const status = snapshot.projectsFailed

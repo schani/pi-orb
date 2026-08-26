@@ -197,8 +197,9 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
         projectsLoading: projects === null && loadError === null,
         projectsFailed: projects === null && loadError !== null,
         orbLists,
+        now: ageNow,
       }),
-    [loadError, orbLists, projects],
+    [ageNow, loadError, orbLists, projects],
   );
   useAppSearchSource(focusedProjectMissing ? null : searchSource);
 

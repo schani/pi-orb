@@ -23,12 +23,15 @@ const orb = (id: string, name: string | null, state: OrbState): OrbView => ({
   updatedAt: "2026-08-26T00:00:00.000Z",
 });
 
+const now = Date.parse("2026-08-26T00:14:00.000Z");
+
 describe("dashboard search source", () => {
   it("maps projects and shelf-ordered orbs to canonical native links", () => {
     const source = buildDashboardSearchSource({
       projects: [project("project/1", "Atlas", "https://github.com/acme/atlas.git")],
       projectsLoading: false,
       projectsFailed: false,
+      now,
       orbLists: {
         "project/1": {
           type: "loaded",
@@ -37,10 +40,32 @@ describe("dashboard search source", () => {
       },
     });
 
-    expect(source.items.map(({ kindLabel, title, href }) => ({ kindLabel, title, href }))).toEqual([
-      { kindLabel: "project", title: "Atlas", href: "#/projects/project%2F1" },
-      { kindLabel: "orb", title: "untitled orb", href: "#/orbs/working%2F1" },
-      { kindLabel: "archived orb", title: "Old plan", href: "#/orbs/archived%2F1" },
+    expect(
+      source.items.map(({ kindLabel, title, context, href }) => ({
+        kindLabel,
+        title,
+        context,
+        href,
+      })),
+    ).toEqual([
+      {
+        kindLabel: "project",
+        title: "Atlas",
+        context: "https://github.com/acme/atlas.git",
+        href: "#/projects/project%2F1",
+      },
+      {
+        kindLabel: "orb",
+        title: "untitled orb",
+        context: "Atlas · working set · 14 minutes",
+        href: "#/orbs/working%2F1",
+      },
+      {
+        kindLabel: "archived orb",
+        title: "Old plan",
+        context: "Atlas · archive shelf · 14 minutes",
+        href: "#/orbs/archived%2F1",
+      },
     ]);
     expect(matchAppSearchItems(source.items, "github.com/acme/atlas")[0]?.key).toBe(
       "dashboard:project:project/1",
@@ -52,6 +77,7 @@ describe("dashboard search source", () => {
       projects: [project("secret-project-id", "Atlas", "https://github.com/acme/atlas")],
       projectsLoading: false,
       projectsFailed: false,
+      now,
       orbLists: {
         "secret-project-id": {
           type: "loaded",
@@ -75,6 +101,7 @@ describe("dashboard search source", () => {
       projects,
       projectsLoading: false,
       projectsFailed: false,
+      now,
       orbLists: {
         loaded: { type: "loaded", items: [orb("orb", "Visible orb", "running")] },
         failed: { type: "failed" },

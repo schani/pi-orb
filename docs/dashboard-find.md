@@ -57,7 +57,7 @@ Orb results use `#/orbs/:orbId`. Project results use the canonical focused-dashb
 
 The generic layer is deliberately synchronous and transport-free. A future server-backed search surface owns its request, cancellation, typed errors, and result state in its route adapter, then supplies an ordinary source snapshot. The shell must not grow resource-specific fetching or caching policy.
 
-`ProjectsPage` already owns the complete project list and independently loaded orb lists. Its dashboard adapter derives `AppSearchItem[]` with `useMemo`; it introduces no control-plane API or persistence change. Project names and repository URL aliases become project `keywords`; orb names become orb `keywords`. Dashboard ordering and partial-load status are likewise computed by this adapter.
+`ProjectsPage` already owns the complete project list, independently loaded orb lists, and the once-per-minute dashboard age clock. Its dashboard adapter derives `AppSearchItem[]` with `useMemo`; it introduces no control-plane API or persistence change. Project names and repository URL aliases become project `keywords`; orb names become orb `keywords`. Orb result context follows the current dashboard identity treatment by showing parent project, shelf, and formatted creation age—never the removed abbreviated orb hash. Age is presentation context, not a searchable keyword. Dashboard ordering and partial-load status are likewise computed by this adapter.
 
 ### Normalization and matching
 
