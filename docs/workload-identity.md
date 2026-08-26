@@ -16,10 +16,20 @@
 > window, the signing-material revocation window, the staged operator rotation, the fenced
 > retirement, and the boot hook that no longer gates `listen`.
 >
-> **Remaining release gate:** the live GCP federation validation. Nothing in stage 4 has been
-> applied to a real project or exchanged through a real STS; the deterministic-URL assumption, the
-> deployed issuer's public reachability, the pool/provider bootstrap, and the smoke's ssh and STS
-> legs are all unverified until that runs. Tracked in `TODO.md`.
+> **Validated live 2026-08-25, without the cloud tier:** running the control plane locally with
+> the Docker host provider, the `issuer` role on its own port published through a Tailscale Funnel
+> (`https://emwon.tail8fb2d0.ts.net`; only the issuer port was ever exposed), a real Google STS
+> exchange accepted a token minted inside an orb by the `pi-orb` shim, impersonated the service
+> account the `cloud-identity` skill's block had created in a real GCP project, and served
+> `gcloud projects describe` — exercising the published discovery/JWKS, the
+> `string(host_incarnation)` mapping, and the project-scoped condition. From outside the orb, the
+> retained bearer of a stopped orb answered `403 not_mintable` and the discarded incarnation's
+> bearer `401`. The in-orb agent drove the whole flow from the skill. Everything created for the
+> validation was deleted afterwards; a tunnel issuer must never remain trusted.
+>
+> **Remaining release gate:** the cloud composition only — the `pi-orb-issuer` Cloud Run service
+> and its deterministic-URL postcondition, the GSM-backed signing keys, the bootstrap script
+> against a real project, and the smoke's `gcloud compute ssh` and STS legs. Tracked in `TODO.md`.
 >
 > This document defines a provider-neutral OIDC identity that code running inside a pi-orb can
 > exchange for short-lived credentials from cloud providers and private services. It does not grant
