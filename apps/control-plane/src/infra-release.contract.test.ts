@@ -172,6 +172,32 @@ describe("infra/deploy.sh", () => {
   });
 });
 
+describe("workload-identity cloud release configuration", () => {
+  it("uses the deterministic issuer origin as the trust anchor", () => {
+    const run = readFileSync(resolve("infra/run.tf"), "utf8");
+    const outputs = readFileSync(resolve("infra/outputs.tf"), "utf8");
+
+    expect(run).toMatch(/condition\s+=\s+contains\(self\.urls, local\.oidc_issuer_url\)/);
+    expect(run).not.toContain("self.uri == local.oidc_issuer_url");
+    expect(outputs).toMatch(/output "issuer_url"[\s\S]*value\s+=\s+local\.oidc_issuer_url/);
+    expect(outputs).not.toMatch(
+      /output "issuer_url"[\s\S]*value\s+=\s+google_cloud_run_v2_service\.issuer\.uri/,
+    );
+  });
+
+  it("owns an IAP-only SSH path for the live smoke", () => {
+    const network = readFileSync(resolve("infra/network.tf"), "utf8");
+    const smoke = readFileSync(resolve("infra/smoke-workload-identity.sh"), "utf8");
+
+    expect(network).toMatch(
+      /resource "google_compute_firewall" "iap_to_orb_ssh"[\s\S]*source_ranges\s+=\s+\["35\.235\.240\.0\/20"\][\s\S]*target_service_accounts\s+=\s+\[google_service_account\.orb_vm\.email\][\s\S]*ports\s+=\s+\["22"\]/,
+    );
+    expect(smoke).toContain("--tunnel-through-iap --quiet");
+    expect(smoke).toContain('wait_for_ssh "$MINT_INSTANCE"');
+    expect(smoke).toContain("sed 's/^/  /' \"$WORK_DIR/mint.err\"");
+  });
+});
+
 describe("infra/release.sh", () => {
   it("runs the complete release in order and clamps the generation forward", () => {
     const { root, log } = makeFixture();

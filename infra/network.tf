@@ -46,6 +46,22 @@ resource "google_compute_firewall" "control_plane_to_runtime" {
   }
 }
 
+# Release smoke reaches disposable orb VMs through Identity-Aware Proxy, never
+# over their public address. The source range is Google's fixed TCP-forwarding
+# range, and the target service account limits the rule to pi-orb hosts rather
+# than every VM attached to this VPC.
+resource "google_compute_firewall" "iap_to_orb_ssh" {
+  name                    = "pi-orb-iap-to-orb-ssh"
+  network                 = google_compute_network.pi_orb.id
+  direction               = "INGRESS"
+  source_ranges           = ["35.235.240.0/20"]
+  target_service_accounts = [google_service_account.orb_vm.email]
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
 # Private services access for Cloud SQL private IP.
 resource "google_compute_global_address" "private_services" {
   name          = "pi-orb-private-services"

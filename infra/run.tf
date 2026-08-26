@@ -345,13 +345,14 @@ resource "google_cloud_run_v2_service" "issuer" {
   }
 
   # The deterministic-URL assumption in oidc.tf, checked against reality on
-  # every apply. If this ever fails, the deployment is advertising an issuer URL
-  # that does not resolve and every minted token names an unverifiable issuer:
-  # fail the release rather than ship it.
+  # every apply. Cloud Run reports the hashed canonical origin in `.uri`; `.urls`
+  # contains every assigned origin, including the deterministic project-number
+  # form that tokens advertise. If that origin disappears, fail the release
+  # rather than mint tokens naming an unverifiable issuer.
   lifecycle {
     postcondition {
-      condition     = self.uri == local.oidc_issuer_url
-      error_message = "Cloud Run assigned ${self.uri}, but tokens are being minted with iss=${local.oidc_issuer_url}. Reconcile local.oidc_issuer_url in infra/oidc.tf before releasing."
+      condition     = contains(self.urls, local.oidc_issuer_url)
+      error_message = "Cloud Run assigned ${join(", ", self.urls)}, but tokens are being minted with iss=${local.oidc_issuer_url}. Reconcile local.oidc_issuer_url in infra/oidc.tf before releasing."
     }
   }
 

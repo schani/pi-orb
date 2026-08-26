@@ -21,8 +21,8 @@
 #                                         Creation is idempotent for identical
 #                                         content, and a reused project is left
 #                                         in place; a generated one is deleted.
-#   PI_ORB_SMOKE_SSH_FLAGS                extra `gcloud compute ssh` flags,
-#                                         e.g. --tunnel-through-iap
+#   PI_ORB_SMOKE_SSH_FLAGS                extra `gcloud compute ssh` flags; the
+#                                         required IAP tunnel is always enabled
 #
 # Federation legs (all three, or the script degrades to mint + verify with a
 # loud notice — that is the mode to expect before the WIF tier is bootstrapped
@@ -44,6 +44,7 @@ API="$DIR/api.sh"
 OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-1800} # 30 minutes, whole run
 RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-600}  # 10 minutes per boot
 STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}  # 5 minutes per stop
+SSH_READY_TIMEOUT=${SSH_READY_TIMEOUT:-180} # SSH daemon + metadata key propagation
 POLL_INTERVAL=${POLL_INTERVAL:-5}
 
 START_TS=$(date +%s)
@@ -392,7 +393,37 @@ instance_metadata() { # instance_metadata <instance> <key>
 orb_ssh() { # orb_ssh <instance> <remote command>; stdin is forwarded
   # shellcheck disable=SC2086  # PI_ORB_SMOKE_SSH_FLAGS is a deliberate word list
   gcloud compute ssh "$1" --project "$PI_ORB_GCP_PROJECT" \
-    --zone "$PI_ORB_GCE_ZONE" ${PI_ORB_SMOKE_SSH_FLAGS:-} -- "$2"
+    --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap --quiet \
+    ${PI_ORB_SMOKE_SSH_FLAGS:-} -- "$2"
+}
+
+wait_for_ssh() { # wait_for_ssh <instance>
+  local instance=$1
+  local limit=$(( $(date +%s) + SSH_READY_TIMEOUT ))
+  local attempt=0
+  local attempt_error="$WORK_DIR/ssh-ready-attempt.err"
+  local first_error="$WORK_DIR/ssh-ready-first.err"
+  local last_error="$WORK_DIR/ssh-ready-last.err"
+
+  say "waiting for SSH through IAP on $instance (<= ${SSH_READY_TIMEOUT}s)"
+  while :; do
+    check_deadline "ssh-ready"
+    attempt=$((attempt + 1))
+    if orb_ssh "$instance" true </dev/null >/dev/null 2> "$attempt_error"; then
+      say "  SSH ready after $attempt attempt(s)"
+      return 0
+    fi
+    if [ "$attempt" -eq 1 ]; then cp "$attempt_error" "$first_error"; fi
+    cp "$attempt_error" "$last_error"
+    if [ "$(date +%s)" -ge "$limit" ]; then
+      echo "first SSH attempt diagnostic:" >&2
+      sed 's/^/  /' "$first_error" >&2
+      echo "last SSH attempt diagnostic:" >&2
+      sed 's/^/  /' "$last_error" >&2
+      fail "ssh-ready" "SSH through IAP did not become ready after ${SSH_READY_TIMEOUT}s"
+    fi
+    sleep "$POLL_INTERVAL"
+  done
 }
 
 # --- run --------------------------------------------------------------------
@@ -450,6 +481,7 @@ case "$MINT_INCARNATION" in
   "" | *[!0-9]*) fail "locate-instance" "cannot read an incarnation from '$MINT_INSTANCE'" ;;
 esac
 say "  minting from $MINT_INSTANCE (incarnation $MINT_INCARNATION)"
+wait_for_ssh "$MINT_INSTANCE"
 
 mint() { # mint <audience> <out-file>
   local audience=$1 out=$2
@@ -469,8 +501,11 @@ mint() { # mint <audience> <out-file>
 }
 
 say "step 4/7: mint through the in-orb CLI and verify against the live issuer"
-mint "$AUDIENCE" "$WORK_DIR/token" ||
-  fail "mint" "the in-orb CLI produced no JWT: $(tail -n 3 "$WORK_DIR/mint.err")"
+if ! mint "$AUDIENCE" "$WORK_DIR/token"; then
+  echo "in-orb mint diagnostic:" >&2
+  sed 's/^/  /' "$WORK_DIR/mint.err" >&2
+  fail "mint" "the in-orb CLI produced no JWT"
+fi
 CLAIMS=$(node "$WORK_DIR/verify.js" "$ISSUER_URL" "$AUDIENCE" \
   "$PROJECT_ID" "$MINT_ORB" "$MINT_INCARNATION" \
   < "$WORK_DIR/token") || fail "verify" "the minted token did not verify against $ISSUER_URL"

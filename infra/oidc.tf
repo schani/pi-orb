@@ -25,10 +25,12 @@ locals {
   # runtime and issuer services agree by construction rather than by discipline.
   # The three older services predate that scheme and still carry hashed URLs,
   # which is why this is only safe for a service being created now — so the
-  # issuer service asserts the assumption against its real `.uri` in a
-  # `lifecycle.postcondition`. A platform that stopped assigning this form would
-  # fail the release loudly rather than deploy an issuer advertising a URL that
-  # does not resolve.
+  # issuer service asserts that the computed origin appears in its complete
+  # `.urls` set. Cloud Run's canonical `.uri` is the older hashed form even when
+  # the deterministic origin is assigned too (validated live 2026-08-26).
+  # A platform that stopped assigning the deterministic form would fail the
+  # release loudly rather than deploy an issuer advertising a URL that does not
+  # resolve.
   oidc_issuer_url = "https://${local.issuer_service_name}-${data.google_project.pi_orb.number}.${var.region}.run.app"
 }
 
