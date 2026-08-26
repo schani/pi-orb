@@ -132,6 +132,26 @@ function holdingForSetupHook(task: SimulationTask, deps: ControlPlaneDeps, orbId
   );
 }
 
+/**
+ * Whether this process is still gathering the evidence the create/start
+ * deadline needs. A process that has just started holds no boot probe, so it
+ * cannot see a setup hook holding the boot open — and deciding the deadline on
+ * that emptiness kills a healthy orb whose twenty-minute hook is still working
+ * (docs/orb-setup-hook.md). The reprieve lasts until the runtime has actually
+ * answered this process — a probe that was cancelled or refused carries no
+ * setup evidence either — and is bounded by the boot-evidence budget, so an
+ * orb whose runtime is genuinely gone still fails on its own deadlines.
+ */
+function awaitingBootEvidence(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+): boolean {
+  if (deps.control.getBootProbe(orbId)?.everAnswered === true) return false;
+  const since = deps.control.noteBootEvidenceStart(orbId, task.monotonicNow());
+  return task.monotonicNow() - since <= deps.constants.unreachableBootDeadlineMs;
+}
+
 /** Fold the boot probe's live picture into a terminal error message. */
 function deadlineEvidence(deps: ControlPlaneDeps, orbId: string, base: string): string {
   const probe = deps.control.getBootProbe(orbId);
@@ -657,6 +677,7 @@ async function reconcileCreateStart(
   // properly silent. See `holdingForSetupHook`.
   if (
     !holdingForSetupHook(task, deps, orb.id) &&
+    !awaitingBootEvidence(task, deps, orb.id) &&
     task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs
   ) {
     return failOrb(
@@ -925,14 +946,21 @@ async function reconcileCreateStart(
         reportedSetup !== undefined && reportedSetup.incarnation === String(orb.hostIncarnation)
           ? Date.parse(reportedSetup.startedAt)
           : Number.NaN;
+      const setupRunning = status.status === "initializing" && status.phase === "setup_running";
+      // Crash window: the hold anchor lives only in this process, so a death
+      // between these two checkpoints is the death that loses it and has to
+      // rebuild it from the runtime's next answer (docs/orb-setup-hook.md).
+      const anchoring = setupRunning || Number.isFinite(setupStartedAt);
+      if (anchoring) await task.checkpoint("boot-hooks.hold-before-anchor");
       deps.control.recordBootProbe(orb.id, {
         ...probeBase,
         answered: true,
-        setupRunning: status.status === "initializing" && status.phase === "setup_running",
+        setupRunning,
         ...(Number.isFinite(setupStartedAt) ? { setupStartedAtWall: setupStartedAt } : {}),
         nowMono: task.monotonicNow(),
         nowWall: task.wallNow(),
       });
+      if (anchoring) await task.checkpoint("boot-hooks.hold-anchored");
       if (status.status === "initializing") return waiting("readiness");
       if (status.status === "failed") {
         return failOrb(
@@ -956,6 +984,11 @@ async function reconcileCreateStart(
       // together with this boot's boot-hook verdict — written on every ready
       // transition, so a clean boot clears the previous one's failure.
       const hookFailure = firstHookFailure(status.hooks);
+      // Crash window: the three hook-failure columns move together or not at
+      // all, so a death on either side of this write must leave the row
+      // consistent (docs/orb-setup-hook.md).
+      const persistingHookVerdict = status.hooks !== undefined || orb.hookFailureHook !== null;
+      if (persistingHookVerdict) await task.checkpoint("boot-hooks.failure-before-persist");
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
         expectedStateVersion: orb.stateVersion,
@@ -970,6 +1003,13 @@ async function reconcileCreateStart(
         return updated.error.type === "state_conflict"
           ? { type: "conflict" }
           : retryable(updated.error);
+      }
+      if (persistingHookVerdict) await task.checkpoint("boot-hooks.failure-persisted");
+      // Crash window: the boot a setup hook held open is about to end. A death
+      // here leaves durable identity written and the orb still `starting`, and
+      // the restarted process has to finish it without the lost anchor.
+      if (deps.control.getBootProbe(orb.id)?.setupRunningSinceMono != null) {
+        await task.checkpoint("boot-hooks.before-ready-after-setup");
       }
       deps.control.clearBootProbe(orb.id);
       const transitioned = await transitionTo(task, deps, updated.value, "running", {

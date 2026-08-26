@@ -112,6 +112,7 @@ export class ControlState {
     if (this.episodes.get(orbId) === stateChangedAt) return;
     this.episodes.set(orbId, stateChangedAt);
     this.bootProbes.delete(orbId);
+    this.bootEvidenceSince.delete(orbId);
     this.drainStatus.delete(orbId);
     this.restartPending.delete(orbId);
     this.liveness.delete(orbId);
@@ -348,6 +349,22 @@ export class ControlState {
 
   clearBootProbe(orbId: string): void {
     this.bootProbes.delete(orbId);
+    this.bootEvidenceSince.delete(orbId);
+  }
+
+  private readonly bootEvidenceSince = new Map<string, number>();
+
+  /**
+   * Monotonic ms at which this process first reconciled a booting `orbId`,
+   * recorded on the first call and returned unchanged afterwards. A process
+   * that has just started holds no boot probe at all, and the boot deadline
+   * must not be decided on that emptiness (docs/orb-setup-hook.md).
+   */
+  noteBootEvidenceStart(orbId: string, at: number): number {
+    const existing = this.bootEvidenceSince.get(orbId);
+    if (existing !== undefined) return existing;
+    this.bootEvidenceSince.set(orbId, at);
+    return at;
   }
 
   // -- host restart tracking --
@@ -419,6 +436,7 @@ export class ControlState {
   /** Drop all per-orb state after a terminal transition. */
   clearOrb(orbId: string): void {
     this.bootProbes.delete(orbId);
+    this.bootEvidenceSince.delete(orbId);
     this.episodes.delete(orbId);
     this.liveness.delete(orbId);
     ControlState.forgetOrb(this.nextAttemptAt, orbId);

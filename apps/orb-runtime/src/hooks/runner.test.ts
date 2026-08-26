@@ -12,7 +12,8 @@ import { join } from "node:path";
 import type { RuntimeHookStatus } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import { afterEach, describe, expect, it } from "vitest";
-import { FakeHookSpawner } from "../testkit/hooks.ts";
+import { HOOK_FAILPOINTS } from "../testkit/failpoints.ts";
+import { FakeHookFileStore, FakeHookSpawner } from "../testkit/hooks.ts";
 import { runDst } from "../testkit/sim.ts";
 import {
   BootHookRunner,
@@ -55,7 +56,11 @@ function makeRunner(
   orb: Orb,
   spawner: FakeHookSpawner,
   task: SimulationTask,
-  overrides: { incarnation?: string; environment?: Record<string, string> } = {},
+  overrides: {
+    incarnation?: string;
+    environment?: Record<string, string>;
+    files?: FakeHookFileStore;
+  } = {},
 ): BootHookRunner {
   return new BootHookRunner({
     repoDir: orb.repoDir,
@@ -64,14 +69,18 @@ function makeRunner(
     incarnation: overrides.incarnation ?? "0",
     task,
     spawner,
+    ...(overrides.files !== undefined ? { files: overrides.files } : {}),
     environment: overrides.environment ?? { PATH: "/usr/bin", PI_ORB_ID: "orb-a" },
   });
 }
 
+const statusPath = (orb: Orb, hook: string): string =>
+  join(orb.home, ".cache", "pi-orb", "logs", `${hook}.status.json`);
+
+const stampPath = (orb: Orb): string => join(orb.workDir, ".pi-orb", "setup-incarnation");
+
 const readStatusFile = (orb: Orb, hook: string): Record<string, unknown> =>
-  JSON.parse(
-    readFileSync(join(orb.home, ".cache", "pi-orb", "logs", `${hook}.status.json`), "utf8"),
-  );
+  JSON.parse(readFileSync(statusPath(orb, hook), "utf8"));
 
 describe("boot hook environment", () => {
   it("removes identity from setup and keeps it for resume", () => {
@@ -398,6 +407,10 @@ describe("boot hook deadlines", () => {
             expect(spawner.runOf("resume").killed).toBe(false);
             // Only now does the hook finish, well past the window it outlasted.
             spawner.runOf("resume").exit(1);
+            // The late verdict is recorded by a native-promise continuation,
+            // which needs a simulated owner until it has settled
+            // (docs/testing.md); this task is that owner.
+            await runner.whenLateVerdictSettled();
           },
         },
       ]);
@@ -428,5 +441,225 @@ describe("boot hook deadlines", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(spawner.runOf("resume").killed).toBe(true);
     });
+  });
+});
+
+describe("boot hook crash windows", () => {
+  interface RuntimeCrashWindow {
+    readonly name: string;
+    /** Drive one runtime process to the durable state a death there leaves. */
+    readonly arrange: (
+      task: SimulationTask,
+      orb: Orb,
+      spawner: FakeHookSpawner,
+      files: FakeHookFileStore,
+    ) => Promise<void>;
+    /** What the persistent workspace and home hold while nothing is running. */
+    readonly durablePaths: (orb: Orb) => readonly string[];
+    /** Whether the next process of the same incarnation must run setup again. */
+    readonly setupRerun: boolean;
+  }
+
+  const bootSetup = async (
+    task: SimulationTask,
+    orb: Orb,
+    spawner: FakeHookSpawner,
+    files: FakeHookFileStore,
+  ): Promise<BootHookRunner> => {
+    const runner = makeRunner(orb, spawner, task, { files });
+    const setup = runner.runSetup();
+    spawner.runs.at(-1)?.exit(0);
+    await setup;
+    return runner;
+  };
+
+  const windows: readonly RuntimeCrashWindow[] = [
+    {
+      // boot-hooks.status-before-write: the hook reached a verdict and nothing
+      // on disk knows it.
+      name: "status-before-write",
+      arrange: async (task, orb, spawner, files) => {
+        files.failNextStatusWrites(1);
+        files.failNextStampWrites(1);
+        await bootSetup(task, orb, spawner, files);
+      },
+      durablePaths: () => [],
+      setupRerun: true,
+    },
+    {
+      // boot-hooks.status-written / stamp-before-write: the verdict is durable
+      // and nothing claims this compute has had its setup.
+      name: "status-written",
+      arrange: async (task, orb, spawner, files) => {
+        files.failNextStampWrites(1);
+        await bootSetup(task, orb, spawner, files);
+      },
+      durablePaths: (orb) => [statusPath(orb, "setup")],
+      setupRerun: true,
+    },
+    {
+      // boot-hooks.stamp-written: this incarnation has spent its setup.
+      name: "stamp-written",
+      arrange: async (task, orb, spawner, files) => {
+        await bootSetup(task, orb, spawner, files);
+      },
+      durablePaths: (orb) => [stampPath(orb), statusPath(orb, "setup")],
+      setupRerun: false,
+    },
+    {
+      // boot-hooks.setup-deadline-kill: the hook outlasted its deadline, its
+      // group was killed, and the incarnation is spent all the same.
+      name: "setup-deadline-kill",
+      arrange: async (task, orb, spawner, files) => {
+        const runner = makeRunner(orb, spawner, task, { files });
+        expect((await runner.runSetup())?.outcome).toBe("timeout");
+        expect(spawner.runs.at(-1)?.killed).toBe(true);
+      },
+      durablePaths: (orb) => [stampPath(orb), statusPath(orb, "setup")],
+      setupRerun: false,
+    },
+    {
+      // boot-hooks.resume-window-expired: the agent proceeded, and the resume
+      // hook died with the process before it could record anything.
+      name: "resume-window-expired",
+      arrange: async (task, orb, spawner, files) => {
+        const runner = await bootSetup(task, orb, spawner, files);
+        // The hook never exits, so only the blocking window can end the wait.
+        expect(await runner.runResume()).toBeNull();
+      },
+      durablePaths: (orb) => [stampPath(orb), statusPath(orb, "setup")],
+      setupRerun: false,
+    },
+  ];
+
+  for (const window of windows) {
+    it(`resumes within the incarnation after death at ${window.name}`, async () => {
+      await runDst(
+        { name: `boot-hooks-runtime-crash-${window.name}`, iterations: 20 },
+        async (sim) => {
+          const orb = makeOrb();
+          writeHook(orb, "setup");
+          writeHook(orb, "resume");
+          const spawner = new FakeHookSpawner();
+          // One disk across both processes: that is what a runtime restart
+          // inside an incarnation keeps (docs/orb-setup-hook.md).
+          const files = new FakeHookFileStore();
+          const result = await sim.runTasks([
+            {
+              name: "boot",
+              f: async (task) => {
+                await window.arrange(task, orb, spawner, files);
+                expect(files.paths()).toEqual([...window.durablePaths(orb)].sort());
+
+                const next = makeRunner(orb, spawner, task, { files });
+                const beforeSetup = spawner.runs.length;
+                const setup = next.runSetup();
+                const reran = spawner.runs.length > beforeSetup;
+                if (reran) spawner.runs.at(-1)?.exit(0);
+                await setup;
+                expect(reran).toBe(window.setupRerun);
+
+                // Resume runs on every start, whatever setup did.
+                const beforeResume = spawner.runs.length;
+                const resume = next.runResume();
+                expect(spawner.runs.length).toBe(beforeResume + 1);
+                spawner.runs.at(-1)?.exit(0);
+                await resume;
+
+                // Stamp and status agree with the report the control plane reads.
+                expect(files.readText(stampPath(orb))?.trim()).toBe("0");
+                const persisted = files.readText(statusPath(orb, "setup"));
+                expect(persisted).not.toBeNull();
+                expect(JSON.parse(persisted ?? "{}")).toMatchObject({
+                  hook: "setup",
+                  incarnation: "0",
+                  outcome: next.report().setup?.outcome,
+                });
+                expect(next.report().resume).toMatchObject({ outcome: "ok", incarnation: "0" });
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        },
+      );
+    });
+  }
+});
+
+describe("boot hook writes under disk failures", () => {
+  it("never skips a setup its stamp did not record", async () => {
+    // Counted across schedules, so a run in which the disk never actually
+    // refused anything cannot pass as coverage.
+    const refused = { stamp: 0, status: 0 };
+    await runDst(
+      {
+        name: "hook-writes-under-fs-failpoints",
+        iterations: 30,
+        failpointProbabilities: {
+          [HOOK_FAILPOINTS.stampWrite]: 0.3,
+          [HOOK_FAILPOINTS.statusWrite]: 0.3,
+        },
+      },
+      async (sim) => {
+        const orb = makeOrb();
+        writeHook(orb, "setup");
+        writeHook(orb, "resume");
+        const spawner = new FakeHookSpawner();
+        const files = new FakeHookFileStore();
+        const result = await sim.runTasks([
+          {
+            name: "boot",
+            f: async (task) => {
+              const first = makeRunner(orb, spawner, task, { files });
+              const setup = first.runSetup();
+              spawner.runs.at(-1)?.exit(0);
+              expect((await setup)?.outcome).toBe("ok");
+              // A disk that refused the status file must not cost the health
+              // report its verdict: memory is what the control plane reads.
+              expect(first.report().setup).toMatchObject({ outcome: "ok", incarnation: "0" });
+              const resume = first.runResume();
+              spawner.runs.at(-1)?.exit(0);
+              await resume;
+              expect(first.report().resume).toMatchObject({ outcome: "ok" });
+
+              const stamped = files.readText(stampPath(orb)) !== null;
+              if (!stamped) refused.stamp += 1;
+              if (files.readText(statusPath(orb, "setup")) === null) refused.status += 1;
+              const beforeSetup = spawner.runs.length;
+
+              // Runtime restart inside the same incarnation.
+              const second = makeRunner(orb, spawner, task, { files });
+              const secondSetup = second.runSetup();
+              const reran = spawner.runs.length > beforeSetup;
+              if (reran) spawner.runs.at(-1)?.exit(0);
+              await secondSetup;
+              // The stamp is the only authority: it landed and setup is
+              // skipped, or it did not and an idempotent hook runs again.
+              // "Skipped without a stamp" is the one outcome that is not
+              // recoverable, and it must never happen.
+              expect(reran).toBe(!stamped);
+
+              const beforeResume = spawner.runs.length;
+              const secondResume = second.runResume();
+              expect(spawner.runs.length).toBe(beforeResume + 1);
+              spawner.runs.at(-1)?.exit(0);
+              await secondResume;
+
+              // Whatever survived is whole and describes this incarnation.
+              const persisted = files.readText(statusPath(orb, "setup"));
+              if (persisted !== null) {
+                expect(JSON.parse(persisted)).toMatchObject({
+                  hook: "setup",
+                  incarnation: "0",
+                });
+              }
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      },
+    );
+    expect(refused.stamp).toBeGreaterThan(0);
+    expect(refused.status).toBeGreaterThan(0);
   });
 });

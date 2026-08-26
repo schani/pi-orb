@@ -151,6 +151,15 @@ interface FakeFilesystem {
   setupIncarnation: number | null;
   /** The persisted status file beside each hook's log: the latest outcome. */
   hooks: { setup?: RuntimeHookStatus; resume?: RuntimeHookStatus };
+  /**
+   * The incarnation of every setup run that reached a verdict, in order. The
+   * once-per-incarnation rule is a property of this list, not of a boolean:
+   * `[0, 1]` is a replacement done right, `[0, 0]` is the hook re-run on
+   * compute that already paid for it (docs/orb-setup-hook.md).
+   */
+  setupRuns: number[];
+  /** How many times `.agents/resume` reached a verdict; once per runtime process. */
+  resumeRuns: number;
 }
 
 interface FakeRuntimeInstance {
@@ -375,6 +384,8 @@ export class FakeWorld {
         turnInFlight: false,
         setupIncarnation: null,
         hooks: {},
+        setupRuns: [],
+        resumeRuns: 0,
       },
       host: null,
       runtimeInstanceCounter: 0,
@@ -964,6 +975,16 @@ export class FakeWorld {
     return { ...this.orbState(orbId).filesystem.hooks };
   }
 
+  /** The incarnation of every completed setup run, in order. */
+  setupRunsOf(orbId: string): readonly number[] {
+    return [...this.orbState(orbId).filesystem.setupRuns];
+  }
+
+  /** How many times `.agents/resume` has run for this orb. */
+  resumeRunsOf(orbId: string): number {
+    return this.orbState(orbId).filesystem.resumeRuns;
+  }
+
   /**
    * Rewrite the live host's stamp behind the control plane's back: the durable
    * row now describes compute that does not exist as recorded. That is the
@@ -1231,7 +1252,7 @@ export class FakeWorld {
         ...hooks(),
       };
     }
-    this.settleBootHooks(task, state, host.incarnation, setupPending);
+    this.settleBootHooks(task, state, host.incarnation, setupPending, setupWindowMs);
     const initializing: RuntimeHealth = {
       v: 1,
       orbId,
@@ -1289,30 +1310,47 @@ export class FakeWorld {
     state: OrbWorldState,
     incarnation: number,
     setupPending: boolean,
+    setupWindowMs: number,
   ): void {
     const fs = state.filesystem;
     const config = state.config.hooks;
+    // The real runtime timestamps a hook from when it spawned it, not from the
+    // health poll that noticed it finished — and the control plane's hold
+    // reseeds itself from exactly that number after a process restart
+    // (docs/orb-setup-hook.md), so the model has to be honest about it.
+    const runtimeStartedAtWall =
+      task.wallNow() - (task.monotonicNow() - (state.host?.runtime?.startedAtMonotonic ?? 0));
     const status = (
       hook: "setup" | "resume",
       outcome: Exclude<FakeHookConfig["setupOutcome"], "absent" | undefined>,
+      startedAtWall: number,
+      endedAtWall: number,
     ): RuntimeHookStatus => ({
       hook,
       outcome,
       exitCode: outcome === "failed" ? 1 : null,
       incarnation: String(incarnation),
-      startedAt: new Date(task.wallNow()).toISOString(),
-      endedAt: new Date(task.wallNow()).toISOString(),
+      startedAt: new Date(startedAtWall).toISOString(),
+      endedAt: new Date(endedAtWall).toISOString(),
       logPath: `/workspace/home/.cache/pi-orb/logs/${hook}.log`,
     });
     if (setupPending && config.setupOutcome !== "absent") {
       fs.setupIncarnation = incarnation;
-      fs.hooks.setup = status("setup", config.setupOutcome);
+      fs.setupRuns.push(incarnation);
+      fs.hooks.setup = status(
+        "setup",
+        config.setupOutcome,
+        runtimeStartedAtWall,
+        runtimeStartedAtWall + setupWindowMs,
+      );
     }
     const runtime = state.host?.runtime ?? null;
     if (runtime === null || runtime.resumeRan) return;
     runtime.resumeRan = true;
     if (config.resumeOutcome !== "absent") {
-      fs.hooks.resume = status("resume", config.resumeOutcome);
+      fs.resumeRuns += 1;
+      const resumeStartedAt = runtimeStartedAtWall + setupWindowMs;
+      fs.hooks.resume = status("resume", config.resumeOutcome, resumeStartedAt, resumeStartedAt);
     }
   }
 }

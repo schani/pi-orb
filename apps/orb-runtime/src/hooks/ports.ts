@@ -1,4 +1,5 @@
-import type { Result } from "neverthrow";
+import type { SimulationTask } from "determined";
+import type { Result, ResultAsync } from "neverthrow";
 
 /** The two repository-owned boot hooks (`docs/orb-setup-hook.md`). */
 export type HookName = "setup" | "resume";
@@ -45,4 +46,31 @@ export interface HookSpawnError {
  */
 export interface HookSpawner {
   spawn(request: HookSpawnRequest): Result<HookProcess, HookSpawnError>;
+}
+
+export interface HookFileError {
+  readonly type: "hook_file_error";
+  readonly message: string;
+}
+
+/**
+ * The two durable files a hook run leaves behind — the status beside the log
+ * and the incarnation stamp on the workspace. It is a port for the same reason
+ * the spawner is: a disk that refuses one of these writes is a schedule a
+ * scenario has to be able to choose (docs/testing.md), and neither failure may
+ * take the boot with it.
+ */
+export interface HookFileStore {
+  /** File contents, or null when it is missing or unreadable. */
+  readText(path: string): string | null;
+  /**
+   * Creates `path` and its parents. Synchronous on purpose: it runs before the
+   * hook is spawned, and the spawn must stay in the same turn as the call that
+   * asked for it.
+   */
+  ensureDir(path: string): Result<void, HookFileError>;
+  /** Writes `path` in full, creating its parents and truncating what was there. */
+  writeText(task: SimulationTask, path: string, contents: string): ResultAsync<void, HookFileError>;
+  /** Removes `path`; a missing file is success. */
+  remove(path: string): void;
 }

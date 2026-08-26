@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 import {
   CONTROL_PLANE_URL_ENV,
@@ -11,7 +11,8 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { Result } from "neverthrow";
-import type { HookName, HookProcess, HookSpawner } from "./ports.ts";
+import { NodeHookFileStore } from "./files.ts";
+import type { HookFileStore, HookName, HookProcess, HookSpawner } from "./ports.ts";
 
 /** Amp's value (`docs/orb-setup-hook.md`); setup blocks readiness for at most this long. */
 export const SETUP_DEADLINE_MS = 20 * 60_000;
@@ -90,6 +91,8 @@ export interface BootHookRunnerOptions {
   readonly incarnation: string;
   readonly task: SimulationTask;
   readonly spawner: HookSpawner;
+  /** Where the status files and the incarnation stamp land; the real disk by default. */
+  readonly files?: HookFileStore;
   /** The runtime's own environment, the base both hook environments derive from. */
   readonly environment: Readonly<Record<string, string | undefined>>;
   /** The runtime's log stream; hook output is mirrored here line by line. */
@@ -100,6 +103,16 @@ export interface BootHookRunnerOptions {
    * skipped or absent hook must not flicker that phase past the control plane.
    */
   readonly onSetupStart?: () => void;
+}
+
+/** Everything one finished hook run hands to `record`. */
+interface HookRunRecord {
+  readonly outcome: RuntimeHookStatus["outcome"];
+  readonly exitCode: number | null;
+  readonly startedAt: number;
+  readonly endedAt: number;
+  readonly logPath: string;
+  readonly tail: readonly string[];
 }
 
 /**
@@ -120,14 +133,23 @@ type HookRunOutcome =
  */
 export class BootHookRunner {
   private readonly options: BootHookRunnerOptions;
+  private readonly files: HookFileStore;
   private readonly statuses = new Map<HookName, RuntimeHookStatus>();
   /** Whichever hook process is alive right now; terminated with the orb. */
   private inFlight: HookProcess | null = null;
   /** Set by `shutdown`, so a killed hook is never mistaken for a failed one. */
   private shuttingDown = false;
+  /**
+   * The still-unfinished verdict of a backgrounded resume. Boot deliberately
+   * does not wait for it — that is what "backgrounded" means — but it is a
+   * native-promise continuation that writes files, so it needs a handle a
+   * simulated owner can await until it has settled (docs/testing.md).
+   */
+  private lateVerdict: Promise<void> = Promise.resolve();
 
   constructor(options: BootHookRunnerOptions) {
     this.options = options;
+    this.files = options.files ?? new NodeHookFileStore();
     for (const hook of ["setup", "resume"] as const) {
       const persisted = this.readStatus(hook);
       // The status files live in the persistent home and therefore outlive the
@@ -165,7 +187,7 @@ export class BootHookRunner {
       // not re-scan for a hook the agent added after boot. Any verdict on
       // disk describes a hook this checkout no longer has.
       this.clearStatus("setup");
-      this.stampIncarnation();
+      await this.stampIncarnation();
       return null;
     }
     this.options.onSetupStart?.();
@@ -175,7 +197,7 @@ export class BootHookRunner {
     // they will fix in place; a spawn or log-directory failure means the hook
     // never ran at all; a shutdown killed it mid-flight. Stamping any of those
     // would deny this compute its single setup forever.
-    if (outcome.kind === "settled" && outcome.ranHook) this.stampIncarnation();
+    if (outcome.kind === "settled" && outcome.ranHook) await this.stampIncarnation();
     return outcome.kind === "settled" ? outcome.status : null;
   }
 
@@ -211,6 +233,15 @@ export class BootHookRunner {
     this.inFlight = null;
   }
 
+  /**
+   * Settles once a backgrounded resume has recorded whatever it ended up
+   * doing. Nothing in the boot path waits for this; it exists so a simulated
+   * owner can (docs/testing.md).
+   */
+  async whenLateVerdictSettled(): Promise<void> {
+    await this.lateVerdict;
+  }
+
   private async run(
     hook: HookName,
     discovery: Exclude<HookDiscovery, { kind: "absent" }>,
@@ -219,40 +250,37 @@ export class BootHookRunner {
   ): Promise<HookRunOutcome> {
     const startedAt = this.options.task.wallNow();
     const logPath = this.logPath(hook);
-    const settled = (status: RuntimeHookStatus, ranHook: boolean): HookRunOutcome => ({
+    const settled = async (partial: HookRunRecord, ranHook: boolean): Promise<HookRunOutcome> => ({
       kind: "settled",
-      status,
+      status: await this.record(hook, partial),
       ranHook,
     });
 
     if (discovery.kind !== "executable") {
       return settled(
-        this.record(hook, {
+        {
           outcome: "hook_not_executable",
           exitCode: null,
           startedAt,
           endedAt: startedAt,
           logPath,
           tail: [`${discovery.path} is present but not executable (chmod +x it)`],
-        }),
+        },
         false,
       );
     }
 
-    const prepared = Result.fromThrowable(
-      () => mkdirSync(this.logDir(), { recursive: true }),
-      (error) => (error instanceof Error ? error.message : String(error)),
-    )();
+    const prepared = this.files.ensureDir(this.logDir());
     if (prepared.isErr()) {
       return settled(
-        this.record(hook, {
+        {
           outcome: "failed",
           exitCode: null,
           startedAt,
           endedAt: this.options.task.wallNow(),
           logPath,
-          tail: [`could not prepare the hook log directory: ${prepared.error}`],
-        }),
+          tail: [`could not prepare the hook log directory: ${prepared.error.message}`],
+        },
         false,
       );
     }
@@ -266,14 +294,14 @@ export class BootHookRunner {
     });
     if (spawned.isErr()) {
       return settled(
-        this.record(hook, {
+        {
           outcome: "failed",
           exitCode: null,
           startedAt,
           endedAt: this.options.task.wallNow(),
           logPath,
           tail: [spawned.error.message],
-        }),
+        },
         false,
       );
     }
@@ -299,9 +327,10 @@ export class BootHookRunner {
       if (onDeadline === "background") {
         // The agent proceeds; the hook keeps running with its output captured
         // and records its own outcome when it exits (docs/orb-setup-hook.md).
-        void process.exited.then((exit) => {
+        await this.options.task.checkpoint("boot-hooks.resume-window-expired");
+        this.lateVerdict = process.exited.then(async (exit) => {
           if (this.shuttingDown) return;
-          this.record(hook, {
+          await this.record(hook, {
             outcome: exit.code === 0 ? "ok" : "failed",
             exitCode: exit.code,
             startedAt,
@@ -312,44 +341,35 @@ export class BootHookRunner {
         });
         return { kind: "backgrounded" };
       }
+      await this.options.task.checkpoint("boot-hooks.setup-deadline-kill");
       process.killGroup();
       return settled(
-        this.record(hook, {
+        {
           outcome: "timeout",
           exitCode: null,
           startedAt,
           endedAt: this.options.task.wallNow(),
           logPath,
           tail: process.tail(),
-        }),
+        },
         true,
       );
     }
 
     return settled(
-      this.record(hook, {
+      {
         outcome: raced.exit.code === 0 ? "ok" : "failed",
         exitCode: raced.exit.code,
         startedAt,
         endedAt: this.options.task.wallNow(),
         logPath,
         tail: process.tail(),
-      }),
+      },
       true,
     );
   }
 
-  private record(
-    hook: HookName,
-    partial: {
-      readonly outcome: RuntimeHookStatus["outcome"];
-      readonly exitCode: number | null;
-      readonly startedAt: number;
-      readonly endedAt: number;
-      readonly logPath: string;
-      readonly tail: readonly string[];
-    },
-  ): RuntimeHookStatus {
+  private async record(hook: HookName, partial: HookRunRecord): Promise<RuntimeHookStatus> {
     const status: RuntimeHookStatus = {
       hook,
       outcome: partial.outcome,
@@ -359,8 +379,10 @@ export class BootHookRunner {
       endedAt: new Date(partial.endedAt).toISOString(),
       logPath: partial.logPath,
     };
+    // In memory first: the health report is what the user and the control
+    // plane read, and it must carry the verdict even when the disk refuses it.
     this.statuses.set(hook, status);
-    this.writeStatus(status, partial.tail.slice(-STATUS_TAIL_LINES));
+    await this.writeStatus(status, partial.tail.slice(-STATUS_TAIL_LINES));
     if (status.outcome !== "ok") {
       this.options.log?.(
         `hook ${hook}: ${status.outcome} exit_code=${status.exitCode ?? "none"} log=${status.logPath}`,
@@ -385,33 +407,30 @@ export class BootHookRunner {
    * Written beside the log so the outcome survives the runtime process and can
    * be read from an orb shell without the control plane.
    */
-  private writeStatus(status: RuntimeHookStatus, tail: readonly string[]): void {
-    Result.fromThrowable(
-      () => {
-        mkdirSync(this.logDir(), { recursive: true });
-        writeFileSync(
-          this.statusPath(status.hook),
-          `${JSON.stringify({ ...status, tail }, null, 2)}\n`,
-        );
-      },
-      (error) => (error instanceof Error ? error.message : String(error)),
-    )().mapErr((message) =>
-      this.options.log?.(`hook ${status.hook}: status write failed: ${message}`),
+  private async writeStatus(status: RuntimeHookStatus, tail: readonly string[]): Promise<void> {
+    await this.options.task.checkpoint("boot-hooks.status-before-write");
+    const written = await this.files.writeText(
+      this.options.task,
+      this.statusPath(status.hook),
+      `${JSON.stringify({ ...status, tail }, null, 2)}\n`,
     );
+    if (written.isErr()) {
+      this.options.log?.(`hook ${status.hook}: status write failed: ${written.error.message}`);
+    }
+    await this.options.task.checkpoint("boot-hooks.status-written");
   }
 
   /** Retire a verdict that no longer describes anything this boot could run. */
   private clearStatus(hook: HookName): void {
     this.statuses.delete(hook);
-    Result.fromThrowable(
-      () => rmSync(this.statusPath(hook), { force: true }),
-      () => undefined,
-    )();
+    this.files.remove(this.statusPath(hook));
   }
 
   private readStatus(hook: HookName): RuntimeHookStatus | null {
+    const raw = this.files.readText(this.statusPath(hook));
+    if (raw === null) return null;
     return Result.fromThrowable(
-      () => JSON.parse(readFileSync(this.statusPath(hook), "utf8")) as unknown,
+      () => JSON.parse(raw) as unknown,
       () => undefined,
     )()
       .map((parsed) => asHookStatus(parsed, hook))
@@ -428,20 +447,25 @@ export class BootHookRunner {
    * not re-run a twenty-minute hook while a new incarnation always does.
    */
   private stampedIncarnation(): string | null {
-    return Result.fromThrowable(
-      () => readFileSync(this.stampPath(), "utf8").trim(),
-      () => undefined,
-    )().unwrapOr(null);
+    return this.files.readText(this.stampPath())?.trim() ?? null;
   }
 
-  private stampIncarnation(): void {
-    Result.fromThrowable(
-      () => {
-        mkdirSync(join(this.options.workDir, ".pi-orb"), { recursive: true });
-        writeFileSync(this.stampPath(), `${this.options.incarnation}\n`);
-      },
-      (error) => (error instanceof Error ? error.message : String(error)),
-    )().mapErr((message) => this.options.log?.(`hook setup: stamp write failed: ${message}`));
+  /**
+   * A stamp that never lands costs this incarnation a re-run of an idempotent
+   * hook on the next runtime start, which is the safe direction: the opposite
+   * — claiming a setup that did not happen — is not recoverable.
+   */
+  private async stampIncarnation(): Promise<void> {
+    await this.options.task.checkpoint("boot-hooks.stamp-before-write");
+    const written = await this.files.writeText(
+      this.options.task,
+      this.stampPath(),
+      `${this.options.incarnation}\n`,
+    );
+    if (written.isErr()) {
+      this.options.log?.(`hook setup: stamp write failed: ${written.error.message}`);
+    }
+    await this.options.task.checkpoint("boot-hooks.stamp-written");
   }
 }
 
