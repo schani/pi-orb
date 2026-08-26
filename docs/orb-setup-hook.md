@@ -184,6 +184,12 @@ and outcomes that affect the user must be visible in the product.
   short system-prompt fragment (the mechanism `docs/pi-adapter.md` uses for the tool baseline and
   port exposure) naming the hook, the outcome, and the log path, so the first thing the agent can
   do is fix its own environment. A healthy boot appends nothing.
+- The agent is also told that the convention *exists*, which is a different requirement (added
+  2026-08-25): the always-appended tool baseline (`apps/orb-runtime/src/pi/environment-prompt.ts`)
+  carries three sentences naming both files, the once-per-incarnation / every-start split, the
+  identity split, the idempotency and executable rules, and the log directory. Without it an agent
+  that never hits a failure never learns it could write one. The baseline has room for the
+  convention only; an authoring guide belongs in a skill (`TODO.md`).
 
 ### Security and trust
 
@@ -263,6 +269,51 @@ agent's authority, on the next fresh orb of every project member, before anyone 
 - Running the runtime as an unprivileged user (open question 42).
 - Re-running setup automatically when the checkout or the script changes.
 
+## Deterministic coverage (2026-08-25)
+
+Named checkpoints mark the crash boundaries, following the `compute-replacement.*` convention in
+`docs/compute-replacement.md`:
+
+```
+boot-hooks.hold-before-anchor        control plane, before the setup hold anchor is (re)seeded
+boot-hooks.hold-anchored             control plane, after it
+boot-hooks.failure-before-persist    control plane, before the three hook-failure columns are written
+boot-hooks.failure-persisted         control plane, after they are
+boot-hooks.before-ready-after-setup  control plane, before the ready transition that ends a held boot
+boot-hooks.status-before-write       runtime, before a hook's status file is written
+boot-hooks.status-written            runtime, after it
+boot-hooks.stamp-before-write        runtime, before the incarnation stamp is written
+boot-hooks.stamp-written             runtime, after it
+boot-hooks.setup-deadline-kill       runtime, before setup's process group is killed at its deadline
+boot-hooks.resume-window-expired     runtime, when resume outlasts its blocking window
+```
+
+Failpoints: `store.write` / `store.read` (control plane, existing vocabulary), `runtime.health`
+(control plane, existing), and `hooks.status.write` / `hooks.stamp.write` — a new group in the
+runtime's own testkit (`apps/orb-runtime/src/testkit/failpoints.ts`) behind the `HookFileStore`
+port, which exists so a refused disk is a schedule a scenario can choose.
+
+Three defects the coverage found, all fixed on the same branch:
+
+1. **The create/start deadline was decided on evidence the process did not have.** A control-plane
+   restart during a running setup hook lost the in-memory hold anchor, and the ordinary deadline was
+   evaluated at the top of the very first reconcile pass — before any probe. A healthy orb whose
+   twenty-minute hook was still working was failed `deadline_exceeded` immediately. Fixed: the
+   deadline waits until the runtime has actually *answered* this process (a cancelled or refused
+   probe is not evidence either — the first fix, which waited only for any recorded probe, still
+   failed under a schedule where a late-firing operation deadline cancelled the first health call),
+   bounded by `unreachableBootDeadlineMs` so an orb whose runtime is genuinely gone still fails on
+   its own deadlines.
+2. **A backgrounded resume's late verdict had no owner.** The continuation that records the outcome
+   of a resume hook that outlived its blocking window was a detached `void promise.then(...)`
+   writing files after the boot coroutine had ended — the native-promise hazard in `docs/testing.md`.
+   It now has a handle (`BootHookRunner.whenLateVerdictSettled`) that a simulated owner awaits;
+   nothing in the boot path waits for it.
+3. **The world modeled a dishonest setup start time.** `FakeWorld` timestamped a finished hook at
+   the health poll that noticed it, not at the moment the runtime spawned it — and that number is
+   exactly what the hold reseeds from after a process restart, so the reseed path was never really
+   exercised. The model now derives both timestamps from the runtime's own start.
+
 ## Verification requirements
 
 - Runtime unit tests behind a process-spawner port and an injected clock: discovery
@@ -270,11 +321,31 @@ agent's authority, on the next fresh orb of every project member, before anyone 
   stamp (setup once per incarnation, resume every start), the 20-minute timeout with process
   group termination, the 10-second resume blocking window with background continuation, log
   capture and overwrite, the status file, and the health-report and prompt-fragment outputs for
-  every outcome.
-- Control-plane DST: `setup_running` readiness holds the boot deadline off and is distinguishable
-  from a silent runtime; `setup-failed`/`resume-failed` edges fire once per outcome; the orb
-  still reaches `running` after a failed or timed-out setup; compute replacement re-runs setup
-  on the new incarnation.
+  every outcome. The tool baseline names both hooks, the identity split, the idempotency and
+  executable rules, and the log directory.
+- Runtime DST (`apps/orb-runtime/src/hooks/runner.test.ts`): `setup-hook-timeout`,
+  `resume-hook-background`, `resume-hook-shutdown`; a restart-within-the-incarnation sweep
+  `boot-hooks-runtime-crash-{status-before-write, status-written, stamp-written,
+  setup-deadline-kill, resume-window-expired}` — the next runtime process re-runs setup exactly
+  when the stamp did not land, always re-runs resume, and ends with stamp, status file, and health
+  report agreeing; and `hook-writes-under-fs-failpoints`, which runs two boots of one incarnation
+  with both durable writes failing at random and requires that a setup is never skipped without a
+  stamp and that the health report carries the verdict a refused disk did not.
+- Control-plane DST (`apps/control-plane/src/domain/boot-hooks.dst.test.ts`): `setup_running`
+  readiness holds the boot deadline off (`setup-holds-boot-deadline`), is bounded
+  (`setup-hold-is-bounded`), and is distinguishable from a silent runtime
+  (`setup-then-silence-fails`); `setup-failed`/`resume-failed` edges fire once per outcome
+  (`setup-failed-still-runs`, `setup-failed-per-incarnation`); the orb still reaches `running`
+  after a failed or timed-out setup (`setup-timeout-still-runs`); compute replacement re-runs
+  setup on the new incarnation (`setup-per-incarnation`). Races: `setup-hold-across-restart`,
+  `stop-during-setup`, `spec-change-during-setup`, `idle-stop-never-preempts-setup`,
+  `runtime-restart-runs-resume-only`. Crash windows, each restarting the control plane on the
+  durable state a death at the named checkpoint leaves behind:
+  `boot-hooks-crash-{hold-anchored, hold-reseeded, failure-before-persist, failure-persisted}`.
+  Failpoints: `setup-hold-under-store-failpoints` (`store.write`/`store.read`) and
+  `setup-hold-under-health-failpoints` (`runtime.health`), both requiring that no orb is failed
+  while a live runtime keeps reporting setup inside the hold, that the three hook-failure columns
+  are never half-written, and that each edge still fires exactly once.
 - E2E (Docker backend): a fixture repository with both hooks proves the ordering
   (setup → resume → agent), that `pi-orb id-token` fails inside setup and succeeds inside resume,
   that a failing setup surfaces on the orb page and in the agent's context while the orb runs,
