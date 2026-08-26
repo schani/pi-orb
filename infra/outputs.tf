@@ -16,10 +16,12 @@ output "ops_url" {
 
 # The public OIDC issuer origin: the exact `iss` of every minted token, the
 # `--issuer-uri` the workload-identity bootstrap must register, and the base the
-# federation smoke fetches discovery and JWKS from. The service's postcondition
-# guarantees this equals `local.oidc_issuer_url`.
+# federation smoke fetches discovery and JWKS from. Cloud Run's canonical
+# `.uri` is a different, hashed origin; the service postcondition proves the
+# deterministic trust anchor below is one of the origins Cloud Run assigned.
 output "issuer_url" {
-  value = google_cloud_run_v2_service.issuer.uri
+  value      = local.oidc_issuer_url
+  depends_on = [google_cloud_run_v2_service.issuer]
 }
 
 # The zone orb VMs are actually created in — `var.zone`, which is its own

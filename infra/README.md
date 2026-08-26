@@ -88,8 +88,9 @@ Nothing sets that URL by hand. OpenTofu computes it from the Cloud Run v2
 deterministic URL scheme and hands the identical string to the `runtime` service
 (which mints) and the `issuer` service (which publishes) — so a deploy cannot
 ship one without the other, and there is no release step to forget. The issuer
-service asserts the computed value against its real `.uri` on every apply; if
-that postcondition ever fails, stop and reconcile `local.oidc_issuer_url` in
+service asserts that the computed value appears in its complete `.urls` set on
+every apply; Cloud Run's canonical `.uri` is the separate hashed origin. If that
+postcondition ever fails, stop and reconcile `local.oidc_issuer_url` in
 `infra/oidc.tf` before releasing, because every token in flight names the value
 that failed.
 

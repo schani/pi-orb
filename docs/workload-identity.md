@@ -38,6 +38,18 @@
 > **Remaining release gate:** the cloud composition only — the `pi-orb-issuer` Cloud Run service
 > and its deterministic-URL postcondition, the GSM-backed signing keys, the bootstrap script
 > against a real project, and the smoke's `gcloud compute ssh` and STS legs. Tracked in `TODO.md`.
+> The first cloud attempt on 2026-08-26 deployed the four serving revisions and proved public
+> discovery/JWKS after a same-image runtime recovery, but did not clear the gate: the postcondition
+> compared the working deterministic URL with Cloud Run's different canonical `.uri`; the runtime
+> boot hook raced migration 011 and initially left no key; and the smoke's SSH path was blocked by
+> the VPC's lack of any port-22 ingress rule. The ordinary lifecycle smoke passed, while the
+> identity smoke stopped at its first SSH mint and was not rerun. See
+> `docs/postmortems/2026-08-26-workload-identity-cloud-release-gates.md`.
+> The resulting URL fix validates membership in Cloud Run's complete URL set and exports that same
+> deterministic trust anchor; the SSH fix adds an IAP-only port-22 rule targeted to orb service
+> accounts and makes the smoke wait through the IAP tunnel with complete failure diagnostics.
+> Both await live revalidation. The migration race was one-time for this production database;
+> general schema-before-consumer ordering remains tracked separately in `TODO.md`.
 >
 > This document defines a provider-neutral OIDC identity that code running inside a pi-orb can
 > exchange for short-lived credentials from cloud providers and private services. It does not grant
@@ -878,8 +890,9 @@ suite's other container-shell steps.
 
 Stage 4 was implemented 2026-08-21 (`infra/oidc.tf`, `infra/run.tf`, `infra/outputs.tf`,
 `infra/bootstrap-pi-orb-oidc.sh`, `infra/smoke-workload-identity.sh`, `infra/release.sh`,
-`infra/api.sh`, `scripts/pi-orb-gcp-identity`, `docs/workload-identity-recipes.md`). It has not
-been applied to GCP. Six decisions taken while implementing it:
+`infra/api.sh`, `scripts/pi-orb-gcp-identity`, `docs/workload-identity-recipes.md`). It was first
+applied to GCP on 2026-08-26; the release gate remains open as recorded above. Six decisions taken
+while implementing it:
 
 - **The issuer URL is computed, not configured.** A Cloud Run service cannot reference its own
   `.uri`, so the runtime service — which mints and therefore needs `iss` at boot — cannot be handed
@@ -891,10 +904,12 @@ been applied to GCP. Six decisions taken while implementing it:
   checklist item. Rejected: an operator-supplied variable (a hand-copied trust anchor whose drift
   is silent, and one more thing a release can forget) and a two-phase apply (machinery, plus a
   window in which the two services disagree about who the issuer is). The assumption is not taken
-  on faith: the issuer service carries a `lifecycle.postcondition` asserting `self.uri` equals the
-  computed local, so a platform that stopped assigning that URL form fails the release instead of
-  deploying an issuer nobody can resolve. The three older services predate the deterministic scheme
-  and still carry hashed URLs, which is why this is only sound for a service created now.
+  on faith: the issuer service carries a `lifecycle.postcondition` asserting that the computed local
+  appears in `self.urls`, so a platform that stopped assigning that URL form fails the release
+  instead of deploying an issuer nobody can resolve. Live validation on 2026-08-26 corrected the
+  original `.uri` equality assumption: `.uri` is the hashed canonical origin while `.urls` contains
+  both origins. The three older services predate the deterministic scheme and still carry hashed
+  canonical URLs, which is why this is only sound for a service created now.
 - **The public issuer runs as its own service account.** The requirement is that the issuer holds
   no signing material, but all three existing services share one `pi-orb-control-plane` account
   that can read every brokered credential — so simply not granting the new secret to "the control
@@ -929,6 +944,11 @@ been applied to GCP. Six decisions taken while implementing it:
   non-mintable and still running is a race, and a live smoke may not be flaky), and probing the
   runtime service directly from the release machine (internal ingress makes it unreachable, and a
   reachability flag would have gated a required check behind an environment variable).
+- **The smoke owns its SSH path.** The release machine reaches orb VMs only through IAP TCP
+  forwarding: OpenTofu admits Google's fixed `35.235.240.0/20` range to port 22 only on VMs using
+  the orb service account, and the smoke always passes `--tunnel-through-iap`. Runtime readiness
+  does not imply sshd or metadata-key readiness, so the smoke polls SSH under its own deadline and
+  prints the complete first and last diagnostics if readiness never arrives.
 - **The federation legs degrade, the mint and revocation legs do not.** `PI_ORB_SMOKE_WIF_*` unset
   means the WIF tier has not been bootstrapped, which is the expected state before
   `infra/bootstrap-pi-orb-oidc.sh` runs; the smoke then still mints in a real orb, still verifies
