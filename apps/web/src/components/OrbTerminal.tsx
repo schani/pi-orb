@@ -10,6 +10,7 @@ import { Terminal, useTerminal } from "@wterm/react";
 import { ResultAsync } from "neverthrow";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check } from "typebox/value";
+import { normalizeTerminalSelection } from "../lib/terminal-copy.ts";
 import {
   snapTerminalSize,
   type TerminalGridMetrics,
@@ -59,6 +60,22 @@ function visibleGrid(wt: WTerm, metrics: TerminalGridMetrics): { cols: number; r
     ),
     rows: Math.max(5, Math.floor((wt.element.clientHeight - verticalPadding) / metrics.cellHeight)),
   };
+}
+
+function copySelection(event: React.ClipboardEvent<HTMLDivElement>): void {
+  const grid = event.currentTarget.querySelector(".term-grid");
+  const selection = window.getSelection();
+  if (
+    grid === null ||
+    selection === null ||
+    selection.isCollapsed ||
+    !grid.contains(selection.anchorNode) ||
+    !grid.contains(selection.focusNode)
+  ) {
+    return;
+  }
+  event.clipboardData.setData("text/plain", normalizeTerminalSelection(selection.toString()));
+  event.preventDefault();
 }
 
 export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolean }) {
@@ -338,6 +355,7 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
             onReady={onReady}
             onData={sendInput}
             onResize={sendResize}
+            onCopy={copySelection}
             className="orb-terminal-emulator"
           />
         )}
