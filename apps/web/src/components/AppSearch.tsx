@@ -13,6 +13,7 @@ import {
 import {
   APP_SEARCH_RESULT_LIMIT,
   type AppSearchSource,
+  didAppSearchPointerMove,
   matchAppSearchItems,
   moveAppSearchSelection,
   selectedAppSearchIndex,
@@ -82,6 +83,7 @@ export function AppSearchDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const resultRefs = useRef(new Map<string, HTMLAnchorElement>());
+  const lastPointerPosition = useRef<{ x: number; y: number } | null>(null);
   const matches = useMemo(() => matchAppSearchItems(source.items, query), [query, source.items]);
   const visibleMatches = matches.slice(0, APP_SEARCH_RESULT_LIMIT);
   const selectedIndex = selectedAppSearchIndex(visibleMatches, activeKey);
@@ -154,6 +156,9 @@ export function AppSearchDialog({
         aria-modal="true"
         aria-label={source.label}
         onKeyDown={containFocus}
+        onPointerLeave={() => {
+          lastPointerPosition.current = null;
+        }}
       >
         <search className="app-search-query-row">
           <span className="app-search-query-icon" aria-hidden="true" />
@@ -199,7 +204,15 @@ export function AppSearchDialog({
                 className={`app-search-result${item.key === selectedKey ? " active" : ""}`}
                 href={item.href}
                 aria-label={`${item.kindLabel}: ${item.title}${item.context === undefined ? "" : `, ${item.context}`}`}
-                onMouseEnter={() => onActiveKeyChange(item.key)}
+                onPointerMove={(event) => {
+                  const nextPosition = { x: event.clientX, y: event.clientY };
+                  const pointerMoved = didAppSearchPointerMove(
+                    lastPointerPosition.current,
+                    nextPosition,
+                  );
+                  lastPointerPosition.current = nextPosition;
+                  if (pointerMoved) onActiveKeyChange(item.key);
+                }}
                 onClick={onResultClick}
               >
                 <span className="app-search-kind">{item.kindLabel}</span>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppSearchItem } from "./app-search.ts";
 import {
+  didAppSearchPointerMove,
   matchAppSearchItems,
   moveAppSearchSelection,
   normalizeAppSearchText,
@@ -35,6 +36,13 @@ describe("app search core", () => {
 
   it("returns no invented recents for an empty query", () => {
     expect(matchAppSearchItems([item("first", ["anything"])], "  ")).toEqual([]);
+  });
+
+  it("ignores stationary-pointer events caused by a result redraw", () => {
+    const point = { x: 420, y: 240 };
+    expect(didAppSearchPointerMove(null, point)).toBe(false);
+    expect(didAppSearchPointerMove(point, { ...point })).toBe(false);
+    expect(didAppSearchPointerMove(point, { x: 421, y: 240 })).toBe(true);
   });
 
   it("moves one shared pointer/keyboard selection without parallel active rows", () => {

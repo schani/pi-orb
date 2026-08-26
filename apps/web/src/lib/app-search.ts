@@ -27,6 +27,19 @@ export interface AppSearchSource {
 
 export const APP_SEARCH_RESULT_LIMIT = 50;
 
+export interface AppSearchPointerPosition {
+  x: number;
+  y: number;
+}
+
+/** Browser redraws may dispatch pointer events without physical pointer movement. */
+export function didAppSearchPointerMove(
+  previous: AppSearchPointerPosition | null,
+  next: AppSearchPointerPosition,
+): boolean {
+  return previous !== null && (previous.x !== next.x || previous.y !== next.y);
+}
+
 export interface AppSearchActivationModifiers {
   button: number;
   metaKey: boolean;
