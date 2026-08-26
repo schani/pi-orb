@@ -343,9 +343,11 @@ than one conversation:
   login of step 6.
 
 Say clearly what this is and is not: a repository script the next agent or human
-runs deliberately. pi-orb has **no per-project boot hook yet**, so nothing runs
-it automatically when an orb starts; that is a pending pi-orb feature, tracked in
-`docs/open-questions.md`. Do not promise it happens by itself.
+runs deliberately. pi-orb does run per-project boot hooks — `.agents/setup` on
+the first boot of every compute incarnation and `.agents/resume` on every start
+(`docs/orb-setup-hook.md`) — but this skill does not emit them yet, so nothing
+runs the script automatically when an orb starts; emitting them is tracked in
+`TODO.md`. Do not promise it happens by itself.
 
 The trust side never needs redoing — the pool, provider, service account, and
 bindings are per GCP project, already there, and admit every orb of this pi-orb

@@ -147,7 +147,11 @@ describe("id-token HTTP endpoint", () => {
     // half-dead control plane will never write to. The upper bound is enforced
     // by the suite's own test timeout — if the request were unbounded this test
     // could not pass at all — so nothing here is asserted against wall time
-    // except the lower bound, which no clock can cross early.
+    // except the lower bound. That bound carries one millisecond of slack: the
+    // deadline is armed on libuv's event-loop clock, whose start time is
+    // truncated to whole milliseconds, while `Date.now()` reads the wall clock,
+    // so a correctly armed timer can legitimately measure one millisecond
+    // short (observed under full-suite load: 2999 for a 3000 ms deadline).
     const sockets: Socket[] = [];
     const silent = createServer(() => {
       // Accepted, parsed, and deliberately never answered.
@@ -168,7 +172,7 @@ describe("id-token HTTP endpoint", () => {
       kind: "retryable",
       message: `control plane did not answer within ${MINT_REQUEST_TIMEOUT_MS}ms`,
     });
-    expect(elapsedMs).toBeGreaterThanOrEqual(MINT_REQUEST_TIMEOUT_MS);
+    expect(elapsedMs).toBeGreaterThanOrEqual(MINT_REQUEST_TIMEOUT_MS - 1);
 
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => silent.close(() => resolve()));
