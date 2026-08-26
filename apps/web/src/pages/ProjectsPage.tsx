@@ -1,5 +1,6 @@
 import { type OrbView, type ProjectView, validateRepositoryUrl } from "@pi-orb/protocol";
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAppSearchSource } from "../components/AppSearch.tsx";
 import {
   type ApiError,
   archiveOrb,
@@ -11,6 +12,7 @@ import {
   listProjects,
   updateProject,
 } from "../lib/api.ts";
+import { buildDashboardSearchSource } from "../lib/dashboard-search-source.ts";
 import {
   projectDeletionConfirmation,
   projectDeletionProgressText,
@@ -154,7 +156,11 @@ function ProjectOrbShelves(props: ProjectOrbShelvesProps) {
   );
 }
 
-export function ProjectsPage() {
+interface ProjectsPageProps {
+  focusedProjectId?: string | null;
+}
+
+export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [orbLists, setOrbLists] = useState<Record<string, OrbListState | undefined>>({});
@@ -177,6 +183,24 @@ export function ProjectsPage() {
     projectId: string;
     message: string;
   } | null>(null);
+  const focusedProjectRef = useRef<HTMLElement>(null);
+  const lastFocusedProjectIdRef = useRef<string | null>(null);
+
+  const focusedProjectMissing =
+    focusedProjectId !== null &&
+    projects !== null &&
+    !projects.some((project) => project.id === focusedProjectId);
+  const searchSource = useMemo(
+    () =>
+      buildDashboardSearchSource({
+        projects: projects ?? [],
+        projectsLoading: projects === null && loadError === null,
+        projectsFailed: projects === null && loadError !== null,
+        orbLists,
+      }),
+    [loadError, orbLists, projects],
+  );
+  useAppSearchSource(focusedProjectMissing ? null : searchSource);
 
   const refresh = useCallback(async () => {
     const result = await listProjects();
@@ -220,6 +244,23 @@ export function ProjectsPage() {
     const timer = window.setInterval(() => setAgeNow(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (focusedProjectId === null) {
+      lastFocusedProjectIdRef.current = null;
+      return;
+    }
+    if (
+      projects === null ||
+      !projects.some((project) => project.id === focusedProjectId) ||
+      lastFocusedProjectIdRef.current === focusedProjectId
+    ) {
+      return;
+    }
+    lastFocusedProjectIdRef.current = focusedProjectId;
+    focusedProjectRef.current?.scrollIntoView({ block: "center" });
+    focusedProjectRef.current?.querySelector<HTMLElement>("[data-project-heading]")?.focus();
+  }, [focusedProjectId, projects]);
 
   // A deleting row remains visible through the race-fencing quarantine. Poll
   // until finalization removes it instead of requiring a manual page reload.
@@ -335,6 +376,16 @@ export function ProjectsPage() {
     await refresh();
   };
 
+  if (focusedProjectMissing) {
+    return (
+      <main className="page not-found-page">
+        <h1>Project doesn't exist</h1>
+        <p>The project may have been deleted, or the URL may be incorrect.</p>
+        <a href="#/">Go to dashboard</a>
+      </main>
+    );
+  }
+
   return (
     <main className="page projects-page">
       {loadError !== null && (
@@ -346,7 +397,12 @@ export function ProjectsPage() {
       {projects?.map((project) => {
         const orbList = orbLists[project.id] ?? { type: "loading" as const };
         return (
-          <section className="panel project" key={project.id}>
+          <section
+            id={`project-${project.id}`}
+            ref={project.id === focusedProjectId ? focusedProjectRef : undefined}
+            className={`panel project${project.id === focusedProjectId ? " project-focused" : ""}`}
+            key={project.id}
+          >
             <div className="project-header">
               {renamingProject === project.id ? (
                 <form
@@ -379,7 +435,12 @@ export function ProjectsPage() {
                 </form>
               ) : (
                 <div className="project-name">
-                  <h2>{project.name}</h2>
+                  <h2
+                    data-project-heading
+                    tabIndex={project.id === focusedProjectId ? -1 : undefined}
+                  >
+                    {project.name}
+                  </h2>
                   <button
                     type="button"
                     className="project-rename-button"

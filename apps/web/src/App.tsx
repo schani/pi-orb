@@ -1,21 +1,25 @@
 import { useSyncExternalStore } from "react";
+import { AppSearchButton, AppSearchProvider } from "./components/AppSearch.tsx";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage.tsx";
 
 export type Route =
-  | { page: "projects" }
+  | { page: "projects"; focusedProjectId: string | null }
   | { page: "create_orb"; projectId: string }
   | { page: "orb"; orbId: string }
   | { page: "not_found" };
 
 export function parseRoute(hash: string): Route {
   const path = hash.startsWith("#") ? hash.slice(1) : hash;
-  if (path === "" || path === "/") return { page: "projects" };
+  if (path === "" || path === "/") return { page: "projects", focusedProjectId: null };
   const createMatch = /^\/projects\/([^/]+)\/orbs\/new$/.exec(path);
   const projectId = createMatch?.[1];
   if (projectId !== undefined) return { page: "create_orb", projectId };
+  const focusedProjectMatch = /^\/projects\/([^/]+)$/.exec(path);
+  const focusedProjectId = focusedProjectMatch?.[1];
+  if (focusedProjectId !== undefined) return { page: "projects", focusedProjectId };
   const orbMatch = /^\/orbs\/([^/]+)$/.exec(path);
   const orbId = orbMatch?.[1];
   if (orbId !== undefined) return { page: "orb", orbId };
@@ -31,7 +35,7 @@ function readHash(): string {
   return window.location.hash;
 }
 
-export function App() {
+function AppRoutes() {
   const hash = useSyncExternalStore(subscribeToHash, readHash);
   const route = parseRoute(hash);
   return (
@@ -42,9 +46,10 @@ export function App() {
             <a href="#/" className="app-title">
               pi-orb
             </a>
+            <AppSearchButton />
           </header>
           <div className="app-main">
-            <ProjectsPage />
+            <ProjectsPage focusedProjectId={route.focusedProjectId} />
           </div>
         </>
       ) : route.page === "create_orb" ? (
@@ -55,5 +60,13 @@ export function App() {
         <NotFoundPage />
       )}
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <AppSearchProvider>
+      <AppRoutes />
+    </AppSearchProvider>
   );
 }

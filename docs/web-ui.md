@@ -56,6 +56,10 @@ The dashboard working set and archive shelf show each orb's creation age in a co
 
 Placement adapts to the space available to each shelf rather than only to the viewport: a sufficiently wide shelf uses the selected **Inline chronicle** treatment, placing age after the title; a narrow shelf uses the selected **Editorial subline** treatment beneath the title. A CSS container query makes this compose with the existing side-by-side shelves, their stacked tablet layout, row/action wrapping on phones, and unequal working/archive column widths. The decision was selected from the eight directions in [`design-prototypes/orb-age.html`](../design-prototypes/orb-age.html).
 
+## Dashboard Find (decided and implemented 2026-08-26)
+
+The dashboard provides a route-scoped Command-K / Control-K Find for project names, GitHub repository URLs, and working or archived orb names. Find uses the selected centered **Index card** presentation and generic app-search shell/core/source contracts so other routes can add their own Command-K sources without coupling to dashboard resources. Every result is a real anchor: orb results use `#/orbs/:orbId`, while project results use `#/projects/:projectId`, an addressable focused-dashboard route that scrolls to and focuses that project. Ordinary click, Command/Ctrl-click, middle-click, copy-link, and context-menu behavior remain native. A missing focused project stays at its URL and renders “Project doesn't exist” with a dashboard link. The complete architecture is specified in `docs/dashboard-find.md`; the selected design and four rejected presentation alternatives remain in `design-prototypes/dashboard-find.html`, with a formatted architecture at `design-prototypes/dashboard-find-architecture.html`.
+
 ## Visual design (decided)
 
 The UI uses the "Reading Room" variant of the Manuscript × Gutter design, chosen from a design exploration (five initial directions, then a Manuscript × Gutter hybrid, then five typography variations). Decisions:
