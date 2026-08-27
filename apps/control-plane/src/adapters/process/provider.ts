@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   CONTROL_PLANE_URL_ENV,
   PREVIEW_HOST_ENV,
@@ -39,6 +39,8 @@ export interface ProcessOrbHostProviderOptions {
   readonly stateDirectory: string;
   readonly runtimeEntryPoint: string;
   readonly controlPlaneUrl: string;
+  /** Image-installed commands exposed from the source tree in process-host development. */
+  readonly commandDirectory?: string;
   readonly nodeExecutable?: string;
   readonly extraEnv?: Readonly<Record<string, string>>;
   readonly restartDelayMs?: number;
@@ -145,6 +147,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       runtimeEntryPoint: this.options.runtimeEntryPoint,
       nodeExecutable: this.options.nodeExecutable ?? process.execPath,
       controlPlaneUrl: this.options.controlPlaneUrl,
+      commandDirectory: this.options.commandDirectory ?? null,
       extraEnv: this.options.extraEnv ?? {},
       repositoryUrl: input.repositoryUrl,
     });
@@ -307,6 +310,9 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       [RUNTIME_TOKEN_ENV]: metadata.runtimeToken,
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
     });
+    if (this.options.commandDirectory !== undefined) {
+      environment.PATH = `${this.options.commandDirectory}${delimiter}${environment.PATH ?? ""}`;
+    }
     return environment;
   }
 

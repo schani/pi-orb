@@ -29,6 +29,7 @@ apps/
     src/
       pi/               # Pi SDK integration and history mapping
       http/             # history pull and live WebSocket endpoints
+      inspection/       # in-orb sibling listing and replicated-transcript CLI
   web/                  # React browser UI
 
 packages/

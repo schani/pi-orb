@@ -205,12 +205,13 @@ The CLI name describes the product interface. It may be implemented as a small e
 runtime image or as an orb-runtime subcommand, but repository setup must not download an
 unreviewed credential helper.
 
-Implemented 2026-08-21 as `apps/orb-runtime/src/id-token/` behind the POSIX-`sh` shim
+Implemented 2026-08-21 as `apps/orb-runtime/src/id-token/` behind the POSIX-`sh` dispatcher
 `apps/orb-runtime/docker/pi-orb` at `/usr/local/bin/pi-orb`, beside the existing `gh` and
 git-credential helpers (`docs/host-provider.md`). Both `--flag value` and `--flag=value` forms are
-accepted, and the entry point also accepts the leading `id-token` word the shim consumes, so the
-process host provider — which has no image and therefore no shim — invokes the same CLI as
-`node apps/orb-runtime/src/id-token/cli.ts id-token …`. The exit codes are part of the interface,
+accepted. Since 2026-08-27 the same dispatcher also owns the read-only `orbs` and `transcript`
+commands (`docs/control-plane-api.md`); this does not change `id-token` stdout or exit semantics.
+The process provider exposes the repository copy of the dispatcher on `PATH`, so both provider
+compositions invoke the same command surface. The exit codes are part of the identity interface,
 because an executable credential source has only the code to decide with:
 
 | Code | Class |

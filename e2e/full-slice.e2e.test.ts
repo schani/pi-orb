@@ -1513,6 +1513,25 @@ describe("full slice E2E", () => {
       { timeoutMs: 300_000, intervalMs: 2_000 },
     );
 
+    // A running sibling can discover this stopped orb and read its replicated
+    // transcript through the authenticated in-orb CLI. Run through the real
+    // terminal so this covers the image/process PATH, shim, runtime-only
+    // control-plane routes, bearer auth, and CLI rendering in one leg.
+    const listedFromSibling = await terminalRun(
+      secondOrbId,
+      "pi-orb orbs 'Run E2E Tool Check' --json; printf '\\117\\122\\102\\137\\111\\116\\123\\120\\105\\103\\124\\137\\114\\111\\123\\124\\137\\104\\117\\116\\105\\012'",
+      "ORB_INSPECT_LIST_DONE",
+    );
+    expect(listedFromSibling).toContain(orbId);
+    expect(listedFromSibling).toContain("Run E2E Tool Check");
+
+    const transcriptFromSibling = await terminalRun(
+      secondOrbId,
+      `pi-orb transcript ${orbId}; printf '\\117\\122\\102\\137\\111\\116\\123\\120\\105\\103\\124\\137\\124\\122\\101\\116\\123\\103\\122\\111\\120\\124\\137\\104\\117\\116\\105\\012'`,
+      "ORB_INSPECT_TRANSCRIPT_DONE",
+    );
+    expect(transcriptFromSibling).toContain("The check succeeded: E2E_TOOL_OK.");
+
     const deletion = await api(base, "DELETE", `/api/v1/projects/${projectId}`);
     expect(deletion.status, JSON.stringify(deletion.body)).toBe(202);
     expect(deletion.body["state"]).toBe("deleting");
