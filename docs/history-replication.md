@@ -236,6 +236,8 @@ In cloud deployment, at least one Cloud Run instance remains provisioned with CP
 
 ### Database-first history loading and content-agnostic live handoff
 
+**In-orb transcript inspection (decided and implemented 2026-08-27).** A running orb may read another orb's same consistent database snapshot through the bearer-authenticated `GET /runtime/v1/orbs/:orbId/transcript` route and `pi-orb transcript <orb-id>` (`docs/control-plane-api.md`). This is replica-only: it never starts or contacts the target runtime. The command therefore sees a sealed complete archive, but for an active target it may lag by the ordinary pull interval and omits partial streaming output. Default text rendering removes only the duplicated lossless native overflow; `--json` preserves the complete `OrbHistoryView`-equivalent snapshot. No second transcript representation or persistence path is introduced.
+
 Opening an active orb should behave as follows:
 
 1. The UI requests history from the control plane.

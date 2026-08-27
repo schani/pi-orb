@@ -18,6 +18,14 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("agent-browser snapshot");
   });
 
+  it("documents sibling-orb discovery and replicated transcripts", () => {
+    expect(environmentPrompt).toContain("pi-orb orbs [query]");
+    expect(environmentPrompt).toContain("pi-orb transcript <orb-id>");
+    expect(environmentPrompt).toContain("Beware: orb transcripts can be very long!");
+    expect(environmentPrompt).toContain("replicated snapshot");
+    expect(environmentPrompt).toContain("briefly lag");
+  });
+
   it("documents the boot hooks the repository may own", () => {
     // The failure fragment (`hooks/prompt.ts`) is appended only when a hook
     // broke; an agent that never sees one must still know the convention

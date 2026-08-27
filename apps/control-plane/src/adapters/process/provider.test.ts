@@ -46,6 +46,7 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   home: process.env.HOME,
   controlPlaneUrl: process.env.PI_ORB_CONTROL_PLANE_URL,
   port: process.env.PI_ORB_RUNTIME_PORT,
+  path: process.env.PATH,
   pid: process.pid,
 }));
 const server = createServer((_req, res) => { res.end("ok"); });
@@ -149,6 +150,23 @@ describe("ProcessOrbHostProvider", () => {
     expect(observed.isOk() && observed.value?.runtimeAddress?.baseUrl).toBe(
       `http://127.0.0.1:${values.port}`,
     );
+    rmSync(observedEnv, { force: true });
+  });
+
+  it("prepends an explicitly configured in-orb command directory to PATH", async () => {
+    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+    const commandDirectory = join(tmpdir(), `pi-orb-commands-${crypto.randomUUID()}`);
+    const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv }, { commandDirectory });
+    const provisioned = await provider.provision(task, request, context);
+    expect(provisioned.isOk()).toBe(true);
+    const values = await eventually(() => {
+      try {
+        return JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>;
+      } catch {
+        return null;
+      }
+    });
+    expect(values.path?.split(":")[0]).toBe(commandDirectory);
     rmSync(observedEnv, { force: true });
   });
 
@@ -565,6 +583,7 @@ describe("ProcessOrbHostProvider host specification", () => {
     );
     expect(fingerprint({ runtimeEntryPoint: join(root, "other-runtime.mjs") })).not.toBe(original);
     expect(fingerprint({ controlPlaneUrl: "http://127.0.0.1:7200" })).not.toBe(original);
+    expect(fingerprint({ commandDirectory: join(root, "commands") })).not.toBe(original);
     expect(
       new ProcessOrbHostProvider(base).desiredSpecFingerprint({
         ...specInput,

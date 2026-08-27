@@ -1,18 +1,26 @@
 #!/bin/sh
-# pi-orb CLI shim (docs/workload-identity.md): the product interface code in an
-# orb uses to mint a short-lived OIDC identity token. `id-token` execs the Node
-# entry point, which prints the JWT and a trailing newline to stdout and
-# nothing else; every other subcommand is a usage error.
-#
-# The printed token is a bearer credential: shell tracing around this command
-# (`set -x`) exposes it.
+# In-orb pi-orb CLI dispatcher. The image carries application source at /app;
+# the process host puts this repository copy on PATH, so derive its root there.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "$script_dir" = /usr/local/bin ]; then
+  app_root=/app
+else
+  app_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+fi
+
 case "${1:-}" in
   id-token)
     shift
-    exec node /app/apps/orb-runtime/src/id-token/cli.ts "$@"
+    exec node "$app_root/apps/orb-runtime/src/id-token/cli.ts" "$@"
+    ;;
+  orbs|transcript)
+    exec node "$app_root/apps/orb-runtime/src/inspection/cli.ts" "$@"
     ;;
   *)
-    echo "usage: pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]" >&2
+    echo "usage:" >&2
+    echo "  pi-orb orbs [query] [--json]" >&2
+    echo "  pi-orb transcript <orb-id> [--json]" >&2
+    echo "  pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]" >&2
     exit 2
     ;;
 esac

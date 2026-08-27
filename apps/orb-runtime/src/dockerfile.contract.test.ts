@@ -81,8 +81,11 @@ describe("orb runtime Dockerfile contract", () => {
     }
     // Each shim dispatches to source the image actually carries.
     const piOrbShim = readFileSync(join(repositoryRoot, "apps/orb-runtime/docker/pi-orb"), "utf8");
-    expect(piOrbShim).toContain("node /app/apps/orb-runtime/src/id-token/cli.ts");
+    expect(piOrbShim).toContain("apps/orb-runtime/src/id-token/cli.ts");
+    expect(piOrbShim).toContain("apps/orb-runtime/src/inspection/cli.ts");
+    expect(piOrbShim).toContain("orbs|transcript");
     expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/id-token/cli.ts"))).toBe(true);
+    expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/inspection/cli.ts"))).toBe(true);
   });
 
   it("installs the reviewed Google executable credential source", () => {

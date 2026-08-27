@@ -4,9 +4,12 @@ import {
   type IdTokenErrorBody,
   IdTokenRequestSchema,
   type IdTokenResponseBody,
+  ORB_INSPECTION_LIST_PATH,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
   ORB_NAME_TRIGGER_PATH,
+  type OrbInspectionError,
+  type OrbInspectionItem,
   type OrbNameTriggerResponse,
   OrbNameTriggerSchema,
   RUNTIME_TOKENS_PREFIX,
@@ -24,7 +27,7 @@ import {
   TOKEN_PROVIDERS,
   type TokenRequest,
 } from "../domain/broker.ts";
-import type { MintError } from "../domain/errors.ts";
+import type { MintError, StoreError } from "../domain/errors.ts";
 import type { OrbRow } from "../domain/orb.ts";
 import { generateOrbName } from "../domain/orb-naming.ts";
 import type { BrokerDeps, ControlPlaneStore, MintDeps, OrbNameGenerator } from "../domain/ports.ts";
@@ -40,6 +43,36 @@ export interface RuntimeRouteDeps {
 }
 
 const unauthorized: TokenErrorBody = { error: "unauthorized" };
+
+const inspectionError = (
+  code: OrbInspectionError["error"]["code"],
+  message: string,
+  retryable: boolean,
+): OrbInspectionError => ({ v: 1, error: { code, message, retryable } });
+
+const inspectionItem = (
+  orb: OrbRow,
+  project: { id: string; name: string; repositoryUrl: string },
+): OrbInspectionItem => ({
+  id: orb.id,
+  name: orb.name,
+  state: orb.state,
+  updatedAt: new Date(orb.updatedAt).toISOString(),
+  project,
+});
+
+function sendInspectionStoreError(reply: FastifyReply, error: StoreError): FastifyReply {
+  const internal = error.code === "invariant" || error.code === "corruption";
+  return reply
+    .status(internal ? 500 : 503)
+    .send(
+      inspectionError(
+        internal ? "internal" : "unavailable",
+        internal ? "orb inspection failed" : "orb inspection unavailable",
+        !internal,
+      ),
+    );
+}
 
 function sendUnauthorized(reply: FastifyReply): FastifyReply {
   return reply.status(401).send(unauthorized);
@@ -124,12 +157,12 @@ function idTokenFailure(error: MintError): IdTokenFailure {
 }
 
 /**
- * The runtime-facing broker surface (docs/credentials.md, docs/credentials.md). One
- * parameterized route serves every token name; the name → provider mapping
- * is internal. Registered only when the deployment role includes runtime
- * routes — a hard allowlist, not a hidden path. Authentication is the
- * per-host-incarnation orb token, honored only while the orb's lifecycle
- * state says the host should be up.
+ * The runtime-facing surface (`docs/credentials.md`, `docs/control-plane-api.md`).
+ * It contains the parameterized credential broker, workload identity, naming,
+ * and read-only sibling inspection. Registered only when the deployment role
+ * includes runtime routes — a hard allowlist, not a hidden path.
+ * Authentication is the per-host-incarnation orb token, honored only while
+ * the calling orb's lifecycle state says its host should be up.
  */
 export function registerRuntimeRoutes(
   app: FastifyInstance,
@@ -161,6 +194,77 @@ export function registerRuntimeRoutes(
     }
     return { kind: "orb", orb };
   };
+
+  app.get(ORB_INSPECTION_LIST_PATH, async (request, reply) => {
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable") {
+      return reply
+        .status(503)
+        .send(inspectionError("unavailable", "orb inspection unavailable", true));
+    }
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+
+    const projects = await deps.store.listProjects(task);
+    if (projects.isErr()) return sendInspectionStoreError(reply, projects.error);
+    const items: OrbInspectionItem[] = [];
+    for (const project of projects.value) {
+      const orbs = await deps.store.listOrbsByProject(task, project.id);
+      if (orbs.isErr()) return sendInspectionStoreError(reply, orbs.error);
+      const projectIdentity = {
+        id: project.id,
+        name: project.name,
+        repositoryUrl: project.repositoryUrl,
+      };
+      for (const orb of orbs.value) items.push(inspectionItem(orb, projectIdentity));
+    }
+    items.sort(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id),
+    );
+    reply.header("cache-control", "no-store");
+    return reply.send({ v: 1, currentOrbId: auth.orb.id, items });
+  });
+
+  app.get<{ Params: { orbId: string } }>(
+    `${ORB_INSPECTION_LIST_PATH}/:orbId/transcript`,
+    async (request, reply) => {
+      const auth = await authenticate(request.headers.authorization);
+      if (auth.kind === "unavailable") {
+        return reply
+          .status(503)
+          .send(inspectionError("unavailable", "orb transcript unavailable", true));
+      }
+      if (auth.kind !== "orb") return sendUnauthorized(reply);
+
+      const orb = await deps.store.getOrb(task, request.params.orbId);
+      if (orb.isErr()) return sendInspectionStoreError(reply, orb.error);
+      if (orb.value === null) {
+        return reply.status(404).send(inspectionError("not_found", "orb not found", false));
+      }
+      if (orb.value.state === "deleting") {
+        return reply
+          .status(409)
+          .send(inspectionError("conflict", "orb is being permanently deleted", false));
+      }
+      const project = await deps.store.getProject(task, orb.value.projectId);
+      if (project.isErr()) return sendInspectionStoreError(reply, project.error);
+      if (project.value === null) {
+        return reply.status(500).send(inspectionError("internal", "orb project not found", false));
+      }
+      const snapshot = await deps.store.readHistorySnapshot(task, orb.value.id);
+      if (snapshot.isErr()) return sendInspectionStoreError(reply, snapshot.error);
+      reply.header("cache-control", "no-store");
+      return reply.send({
+        v: 1,
+        orb: inspectionItem(orb.value, {
+          id: project.value.id,
+          name: project.value.name,
+          repositoryUrl: project.value.repositoryUrl,
+        }),
+        ...snapshot.value,
+      });
+    },
+  );
 
   app.post<{ Params: { name: string } }>(
     `${RUNTIME_TOKENS_PREFIX}/:name`,

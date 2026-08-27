@@ -2,7 +2,7 @@
 
 ## Project model
 
-The first version is fully web-driven and does not require a local checkout or CLI.
+The first version requires no local checkout or user-operated CLI: lifecycle and conversation input are web-driven. A narrow CLI inside each running orb can read sibling-orb metadata and replicated transcripts so the agent can coordinate with prior work.
 
 A user registers a project in the web UI with:
 
@@ -62,6 +62,21 @@ GET  /api/v1/orbs/:orbId/messages
 WS   /api/v1/orbs/:orbId/live
 WS   /api/v1/orbs/:orbId/terminal
 ```
+
+### In-orb inspection API (decided and implemented 2026-08-27)
+
+The production URL injected into an orb points at the runtime-only Cloud Run role, not at the browser API. The `pi-orb` CLI therefore uses two dedicated runtime-facing reads:
+
+```text
+GET /runtime/v1/orbs
+GET /runtime/v1/orbs/:orbId/transcript
+```
+
+Both require the existing per-incarnation runtime bearer and are available only while the calling orb's lifecycle authorizes that bearer. In the current single-account product, a valid running orb may read every sibling orb in that account, including archived or stopped orbs; this deliberate cross-orb authority is what lets an agent find and reuse prior work. The list response is one non-cacheable aggregate snapshot containing `currentOrbId` plus each orb's ID, nullable name, state, update time, and parent project ID/name/repository URL. `pi-orb orbs [query]` performs NFKC case-insensitive substring filtering locally across those identity fields, so there is no server search index, request per keystroke, or transcript-content search.
+
+The transcript route returns the exact consistent replicated-history snapshot used by the browser, plus the same compact orb/project identity. It does not start the target orb or contact its runtime. Archived transcripts are sealed and complete; stopped/running transcripts have the completeness and lag semantics of `docs/history-replication.md`, so an active turn may briefly be newer than the returned replica. Missing targets return a typed `404`; deleting targets return a typed `409`, never another resource or a dashboard redirect. Both successful responses set `Cache-Control: no-store`. The default CLI renderer omits lossless `overflow.native` duplication while retaining normalized messages, reasoning, tool calls/results, compactions, and events; `--json` returns the lossless wire response.
+
+This is intentionally not implemented by calling `/api/v1/*`: the cloud runtime role hard-registers only `/runtime/v1/*`. It adds no table, migration, search cache, pagination, or mutable operation. Because these reads make no autonomous decision and write no state, durable lifecycle events would be noise; typed CLI errors are the user-visible observability, and route logging must never include transcript content. Conventional boundary tests cover protocol validation, CLI stdout/stderr and exit classes, bearer authorization, sanitized retryable/non-retryable store failures, and missing/deleting targets; the full-slice E2E covers one real sibling reading another. DST was rejected for this read path: it has no retry loop, lease, CAS, durable mutation, or concurrent state machine whose interleavings define correctness. If a stronger cross-row snapshot contract is later required during concurrent project/orb deletion, define that transaction boundary first and test it at the store/route concurrency boundary rather than adding schedule permutations to the current sequential reads.
 
 `PATCH /api/v1/projects/:projectId` renames an active project. Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters; renaming a deleting project conflicts. This narrow update keeps the repository URL immutable. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
 

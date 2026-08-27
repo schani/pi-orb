@@ -3,17 +3,23 @@ import {
   ID_TOKEN_PATH,
   IdTokenErrorSchema,
   IdTokenResponseSchema,
+  ORB_INSPECTION_LIST_PATH,
   ORB_NAME_TRIGGER_PATH,
+  OrbInspectionErrorSchema,
+  OrbInspectionListSchema,
+  OrbTranscriptSchema,
+  orbTranscriptPath,
   runtimeTokenPath,
   type TokenName,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { okAsync } from "neverthrow";
+import { errAsync, okAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
-import type { BrokerDeps, OrbNameGenerator } from "../domain/ports.ts";
+import type { StoreError } from "../domain/errors.ts";
+import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
 import {
   FakePointerStore,
@@ -60,10 +66,13 @@ describe("runtime broker routes", () => {
    * hook so a describe block can rebuild the routes with its own issuer
    * constants without duplicating the wiring.
    */
-  async function startApp(issuerConstants = TEST_ISSUER_CONSTANTS): Promise<void> {
+  async function startApp(
+    issuerConstants = TEST_ISSUER_CONSTANTS,
+    routeStore: ControlPlaneStore = store,
+  ): Promise<void> {
     app = Fastify();
     registerRuntimeRoutes(app, task, {
-      store,
+      store: routeStore,
       broker,
       nameGenerator,
       nameLeaseMs: 30_000,
@@ -100,6 +109,19 @@ describe("runtime broker routes", () => {
   afterEach(async () => {
     await app.close();
   });
+
+  function storeFailing(
+    operation: "listProjects" | "readHistorySnapshot",
+    error: StoreError,
+  ): ControlPlaneStore {
+    return new Proxy(store, {
+      get(target, property) {
+        if (property === operation) return () => errAsync(error);
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
 
   function seedOrb(
     state: "creating" | "running" | "stopped",
@@ -394,6 +416,157 @@ describe("runtime broker routes", () => {
     const response = await request({ reason: "startup" });
     expect(response.statusCode).toBe(200);
     expect(response.body).not.toContain("refresh");
+  });
+
+  describe("cross-orb inspection", () => {
+    const OTHER_PROJECT = "project-b";
+    const OTHER_ORB = "orb-b";
+
+    beforeEach(() => {
+      seedOrb("running");
+      store.seedProject({
+        ...makeProjectRow(OTHER_PROJECT),
+        name: "Client App",
+        repositoryUrl: "https://github.com/example/client",
+        updatedAt: 20,
+      });
+      store.seedOrb(
+        makeOrbRow(OTHER_ORB, OTHER_PROJECT, "archived", {
+          name: "Résumé parser",
+          updatedAt: 30,
+        }),
+      );
+    });
+
+    function inspect(url: string, token: string | null = TOKEN) {
+      return app.inject({
+        method: "GET",
+        url,
+        ...(token === null ? {} : { headers: { authorization: `Bearer ${token}` } }),
+      });
+    }
+
+    it("lists sibling orbs with project context and identifies the caller", async () => {
+      const response = await inspect(ORB_INSPECTION_LIST_PATH);
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(Check(OrbInspectionListSchema, response.json())).toBe(true);
+      expect(response.json()).toMatchObject({
+        v: 1,
+        currentOrbId: ORB,
+        items: expect.arrayContaining([
+          {
+            id: OTHER_ORB,
+            name: "Résumé parser",
+            state: "archived",
+            updatedAt: new Date(30).toISOString(),
+            project: {
+              id: OTHER_PROJECT,
+              name: "Client App",
+              repositoryUrl: "https://github.com/example/client",
+            },
+          },
+        ]),
+      });
+    });
+
+    it("returns the same lossless replicated snapshot used by the browser", async () => {
+      const session = { id: "session-b", overflow: { native: { id: "session-b" } } };
+      const record = {
+        id: "record-b-1",
+        parentId: null,
+        timestamp: "2026-08-27T00:00:00.000Z",
+        type: "message" as const,
+        role: "user" as const,
+        content: [{ type: "text" as const, text: "Fix parsing" }],
+        overflow: { native: { preserved: true } },
+      };
+      const committed = await store.commitPullBatch(task, {
+        orbId: OTHER_ORB,
+        expectedCursor: null,
+        session,
+        records: [record],
+        nextCursor: record.id,
+        nextHeadId: record.id,
+      });
+      expect(committed.isOk()).toBe(true);
+
+      const response = await inspect(orbTranscriptPath(OTHER_ORB));
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(Check(OrbTranscriptSchema, response.json())).toBe(true);
+      expect(response.json()).toMatchObject({
+        v: 1,
+        orb: { id: OTHER_ORB, project: { id: OTHER_PROJECT } },
+        session,
+        cursor: record.id,
+        headId: record.id,
+        records: [record],
+      });
+    });
+
+    it("uses typed missing/deleting answers and never silently substitutes another orb", async () => {
+      const missing = await inspect(orbTranscriptPath("missing-orb"));
+      expect(missing.statusCode).toBe(404);
+      expect(missing.json().error.code).toBe("not_found");
+      expect(Check(OrbInspectionErrorSchema, missing.json())).toBe(true);
+
+      store.seedOrb(makeOrbRow("orb-deleting", OTHER_PROJECT, "deleting"));
+      const deleting = await inspect(orbTranscriptPath("orb-deleting"));
+      expect(deleting.statusCode).toBe(409);
+      expect(deleting.json().error.code).toBe("conflict");
+      expect(Check(OrbInspectionErrorSchema, deleting.json())).toBe(true);
+    });
+
+    it("requires a live incarnation bearer for every inspection", async () => {
+      for (const token of ["wrong-token", null]) {
+        const response = await inspect(ORB_INSPECTION_LIST_PATH, token);
+        expect(response.statusCode).toBe(401);
+        expect(response.json()).toEqual({ error: "unauthorized" });
+      }
+    });
+
+    it("sanitizes a retryable list-store outage as a typed 503", async () => {
+      await app.close();
+      await startApp(
+        TEST_ISSUER_CONSTANTS,
+        storeFailing("listProjects", {
+          type: "store_error",
+          code: "unavailable",
+          message: "raw database host and SQL must not escape",
+          retryable: true,
+        }),
+      );
+
+      const response = await inspect(ORB_INSPECTION_LIST_PATH);
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: { code: "unavailable", message: "orb inspection unavailable", retryable: true },
+      });
+      expect(response.body).not.toContain("raw database");
+    });
+
+    it("sanitizes a transcript-store invariant as a non-retryable 500", async () => {
+      await app.close();
+      await startApp(
+        TEST_ISSUER_CONSTANTS,
+        storeFailing("readHistorySnapshot", {
+          type: "store_error",
+          code: "invariant",
+          message: "raw SQL placeholder failure must not escape",
+          retryable: false,
+        }),
+      );
+
+      const response = await inspect(orbTranscriptPath(OTHER_ORB));
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({
+        v: 1,
+        error: { code: "internal", message: "orb inspection failed", retryable: false },
+      });
+      expect(response.body).not.toContain("raw SQL");
+    });
   });
 
   /**
