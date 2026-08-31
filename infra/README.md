@@ -44,12 +44,19 @@ loudly, but nothing downstream ever verifies the runtime artifact.
 
 ## Tooling access
 
-Project orbs install the Google Cloud CLI and configure keyless authentication
-via `.agents/setup`. The setup exchanges a short-lived Amp OIDC token for the
-dedicated `pi-orb-amp-deployer` service account; there is no stored service
-account key or recurring browser login. Trust is restricted to this immutable
-Amp project ID and the approved Amp user ID. Verify the active identity and
-project before using the tooling:
+Project orbs configure keyless GCP authentication through `.agents/setup` and
+`.agents/resume`. The committed `.pi-orb/gcp-external-account.json` contains no
+secret: its reviewed executable source, `/usr/local/bin/pi-orb-gcp-identity`,
+mints a short-lived pi-orb OIDC token and exchanges it for the existing
+`pi-orb-amp-deployer` service account. The service account keeps its historical
+name, but the active repository boot path is pi-orb's `pi-orb-orbs` pool and
+`pi-orb-oidc` provider. Admission is restricted to immutable pi-orb project ID
+`eacd1d25-2825-4c3a-a26b-3923baa86801`; there is no stored service-account key
+or recurring browser login.
+
+Setup installs the client without identity. Resume registers the credential on
+every start and writes its required variables through the hook environment
+file. Verify the active identity and project before using the tooling:
 
     gcloud auth list
     gcloud config get-value project
@@ -57,24 +64,23 @@ project before using the tooling:
     ./infra/api.sh /api/v1/projects
     ./infra/api.sh /api/v1/orbs/<id>/start '{}'
 
-Impersonates `pi-orb-debug@...` against the ops service — no IAP involved.
+The API helper impersonates `pi-orb-debug@...` against the ops service — no IAP
+is involved.
 
 The federation pool/provider and deployer permissions are a separately
 bootstrapped trust boundary, intentionally outside the recurring OpenTofu root.
-`infra/bootstrap-amp-oidc.sh` records and idempotently applies that bootstrap
-from an existing administrator identity; ordinary releases never invoke it.
-The deployer has functional roles for the root's static-plane resources rather
-than Owner or Editor, object access only on the static-plane state bucket, and
-token creation only on the debug service account. `.agents/setup` writes the
-non-secret external-account configuration under the gitignored `.amp/`
-directory; its reviewed executable credential source is
-`scripts/amp-gcp-identity`.
+The older Amp trust path and `infra/bootstrap-amp-oidc.sh` remain independently
+scoped adoption records, but repository hooks no longer configure Amp
+credentials. The deployer has functional roles for the root's static-plane
+resources rather than Owner or Editor, object access only on the static-plane
+state bucket, and token creation only on the debug service account.
 
 The current OpenTofu root manages project IAM, so full deployment access is
-necessarily escalation-capable even without Owner or Editor: a compromised
-deployer could alter project bindings. Moving stable IAM/bootstrap resources
-out of the recurring root is required before this becomes a least-privilege
-production deployment identity.
+necessarily escalation-capable even without Owner or Editor: arbitrary code in
+any admitted project orb can obtain the deployer's short-lived authority and
+could alter project bindings. Moving stable IAM/bootstrap resources out of the
+recurring root is required before this becomes a least-privilege production
+deployment identity.
 
 ## Workload identity (docs/workload-identity.md)
 

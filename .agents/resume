@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Configure short-lived, project-scoped GCP deployment credentials on every
+# orb start. The committed credential file contains no secret; its executable
+# source mints a fresh pi-orb identity token for each exchange.
+set -euo pipefail
+
+umask 077
+install -m 600 .pi-orb/gcp-external-account.json "$HOME/.pi-orb-gcp.json"
+
+export GOOGLE_APPLICATION_CREDENTIALS="$HOME/.pi-orb-gcp.json"
+export PI_ORB_GCP_AUDIENCE='urn:pi-orb:gcp:playground-dev-6ae7'
+export GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1
+export CLOUDSDK_CORE_PROJECT='playground-dev-6ae7'
+
+{
+  printf 'GOOGLE_APPLICATION_CREDENTIALS=%s\n' "$HOME/.pi-orb-gcp.json"
+  printf 'PI_ORB_GCP_AUDIENCE=urn:pi-orb:gcp:playground-dev-6ae7\n'
+  printf 'GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1\n'
+  printf 'CLOUDSDK_CORE_PROJECT=playground-dev-6ae7\n'
+} > "$PI_ORB_HOOK_ENV_FILE"
+
+gcloud auth login --cred-file="$HOME/.pi-orb-gcp.json" --quiet
+gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
