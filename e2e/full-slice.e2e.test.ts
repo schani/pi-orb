@@ -302,6 +302,8 @@ const SETUP_HOOK = [
 
 /** What the resume hook hands the agent, quoted so the parser's one rule is exercised. */
 const HOOK_ENV_VALUE = "delivered-by-resume";
+const PROJECT_SECRET_NAME = "E2E_PROJECT_SECRET";
+const PROJECT_SECRET_VALUE = "delivered-by-project-snapshot";
 
 const RESUME_HOOK = [
   "#!/bin/sh",
@@ -310,7 +312,7 @@ const RESUME_HOOK = [
   // The only channel a hook has into the agent's shells and the terminal's
   // PTYs (docs/orb-setup-hook.md). `PATH` is on the deny-list: a hook that
   // could rewrite it would break every later boot.
-  `printf 'HOOK_ENV_E2E="${HOOK_ENV_VALUE}"\\nPATH=/attacker/bin\\n' > "$PI_ORB_HOOK_ENV_FILE"`,
+  `printf 'HOOK_ENV_E2E="${HOOK_ENV_VALUE}"\\nPATH=/attacker/bin\\n${PROJECT_SECRET_NAME}=shadowed-by-hook\\n' > "$PI_ORB_HOOK_ENV_FILE"`,
   "",
 ].join("\n");
 
@@ -608,6 +610,14 @@ describe("full slice E2E", () => {
           repositoryUrl: REPOSITORY_URL,
         });
         expect(project.status, JSON.stringify(project.body)).toBe(201);
+        const configuredSecret = await api(
+          base,
+          "PUT",
+          `/api/v1/projects/${projectId}/secrets/${PROJECT_SECRET_NAME}`,
+          { value: PROJECT_SECRET_VALUE },
+        );
+        expect(configuredSecret.status, JSON.stringify(configuredSecret.body)).toBe(200);
+        expect(JSON.stringify(configuredSecret.body)).not.toContain(PROJECT_SECRET_VALUE);
         const created = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
           id: replacementOrbId,
         });
@@ -856,9 +866,12 @@ describe("full slice E2E", () => {
         expect(setupEnv).toContain("PI_ORB=1");
         expect(setupEnv).toContain("PI_ORB_HOOK=setup");
         expect(setupEnv).toContain("PI_ORB_HOST_INCARNATION=1");
+        expect(setupEnv).not.toContain(PROJECT_SECRET_NAME);
+        expect(setupEnv).not.toContain(PROJECT_SECRET_VALUE);
         const resumeEnv = await readWorkspaceFile(replacementOrbId, 1, "hook-resume-env");
         expect(resumeEnv).toContain("PI_ORB_RUNTIME_TOKEN=");
         expect(resumeEnv).toContain("PI_ORB_HOOK=resume");
+        expect(resumeEnv).toContain(`${PROJECT_SECRET_NAME}=${PROJECT_SECRET_VALUE}`);
 
         // The failing setup is durable and user-visible while the orb runs.
         const status = JSON.parse(
@@ -883,17 +896,19 @@ describe("full slice E2E", () => {
         // the hook's own value proves the whole line arrived.
         const shellEnv = await terminalRun(
           replacementOrbId,
-          `printf 'PATH<%s>HOOK<%s>\\n' "$PATH" "$HOOK_ENV_E2E"`,
-          HOOK_ENV_VALUE,
+          `printf 'PATH<%s>HOOK<%s>SECRET<%s>\\n' "$PATH" "$HOOK_ENV_E2E" "$${PROJECT_SECRET_NAME}"`,
+          PROJECT_SECRET_VALUE,
         );
         expect(shellEnv).toContain(`HOOK<${HOOK_ENV_VALUE}>`);
+        expect(shellEnv).toContain(`SECRET<${PROJECT_SECRET_VALUE}>`);
+        expect(shellEnv).not.toContain("shadowed-by-hook");
         // The deny-list, end to end: a hook cannot take `PATH` from the runtime.
         expect(shellEnv).not.toContain("/attacker/bin");
         const envStatus = JSON.parse(
           await readWorkspaceFile(replacementOrbId, 1, "home/.cache/pi-orb/logs/env.status.json"),
         ) as { applied: string[]; ignored: string[] };
         expect(envStatus.applied).toEqual(["HOOK_ENV_E2E"]);
-        expect(envStatus.ignored).toEqual(["PATH"]);
+        expect(envStatus.ignored).toEqual(["PATH", PROJECT_SECRET_NAME]);
 
         // Stop/start of the retained incarnation runs resume only: the setup
         // stamp lives on the workspace and still names incarnation 1.
@@ -1115,6 +1130,14 @@ describe("full slice E2E", () => {
         expect(
           (await api(controlPlane.baseUrl, "DELETE", `/api/v1/projects/${projectId}`)).status,
         ).toBe(202);
+        await waitFor(
+          "host-spec project fully deleted",
+          async () =>
+            (await api(controlPlane.baseUrl, "GET", `/api/v1/projects/${projectId}`)).status === 404
+              ? true
+              : null,
+          { timeoutMs: 120_000, intervalMs: 1_000 },
+        );
       },
     );
   }, 600_000);

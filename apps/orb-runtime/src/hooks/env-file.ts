@@ -97,11 +97,14 @@ const unquote = (value: string): string => {
  * A malformed line is reported by number only: a value may be a credential,
  * and the report reaches a status file and the agent's context.
  */
-export function parseHookEnvFile(text: string): HookEnvFile {
+export function parseHookEnvFile(
+  text: string,
+  additionalDenied: ReadonlySet<string> = new Set(),
+): HookEnvFile {
   const entries = new Map<string, string>();
   const ignored: string[] = [];
   const malformed: string[] = [];
-  const denied = new Set(HOOK_ENV_DENIED);
+  const denied = new Set([...HOOK_ENV_DENIED, ...additionalDenied]);
   text.split("\n").forEach((line, index) => {
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith("#")) return;

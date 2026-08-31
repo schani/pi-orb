@@ -88,6 +88,12 @@ describe("parsing the hook env file", () => {
     expect([...parsed.entries.keys()]).toEqual(["MINE"]);
   });
 
+  it("also refuses dashboard-managed project-secret names for this boot", () => {
+    const parsed = parseHookEnvFile("NPM_TOKEN=shadow\nLOCAL_ONLY=ok", new Set(["NPM_TOKEN"]));
+    expect(parsed.ignored).toEqual(["NPM_TOKEN"]);
+    expect([...parsed.entries]).toEqual([["LOCAL_ONLY", "ok"]]);
+  });
+
   it("owns the variables that would break the runtime's own contract", () => {
     for (const name of [
       "PI_ORB_RUNTIME_TOKEN",

@@ -4,6 +4,7 @@ import type { StoreError } from "./errors.ts";
 import { logProjectEvent } from "./log.ts";
 import type { ProjectRow } from "./orb.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
+import { deleteAllProjectSecrets } from "./project-secrets.ts";
 
 export interface ProjectCommandError {
   readonly type: "command_error";
@@ -134,6 +135,21 @@ export async function reconcileProjectDeletionOnce(
     );
   }
   if (progress.value.remaining > 0) return { type: "waiting" };
+  // A secret update may have written an immutable version immediately before
+  // the project row was fenced and still be on its way to the pointer CAS.
+  // Reuse the deletion quarantine before the final enumeration so that every
+  // bounded pre-fence request has either committed or cleaned up its version.
+  const secretsCleanupAfter =
+    (repaired.value.project.deletionRequestedAt ?? now) + deps.constants.deletionQuarantineMs;
+  if (now < secretsCleanupAfter) return { type: "waiting" };
+  const secretsDeleted = await deleteAllProjectSecrets(task, deps.projectSecrets, projectId);
+  if (secretsDeleted.isErr()) {
+    return {
+      type: "retryable",
+      message: secretsDeleted.error.message,
+      ...(secretsDeleted.error.type === "project_secret_corruption" ? { invariant: true } : {}),
+    };
+  }
   const finalized = await deps.store.finalizeProjectDeletion(task, {
     projectId,
     expectedStateVersion: repaired.value.project.stateVersion,

@@ -9,6 +9,7 @@ import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
   ControlPlaneStore,
   CredentialPointerStore,
+  ProjectSecretPointerStore,
   SigningKeyRow,
   SigningKeyStore,
 } from "../domain/ports.ts";
@@ -1640,6 +1641,7 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
     let client: PostgreSQLClient;
     let store: ControlPlaneStore;
     let pointers: CredentialPointerStore;
+    let projectSecrets: ProjectSecretPointerStore;
 
     beforeEach(async () => {
       const subject = await open();
@@ -1649,6 +1651,7 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       expect(migrated.isOk()).toBe(true);
       store = database.store;
       pointers = database.pointers;
+      projectSecrets = database.projectSecrets;
     });
 
     afterEach(async () => {
@@ -1723,6 +1726,39 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       // A genuine SQL/schema mistake classifies the same way.
       const missingColumn = await client.query("SELECT no_such_column FROM orbs");
       expect(missingColumn.isErr() && missingColumn.error.code).toBe("invariant");
+    });
+
+    it("implements project-secret pointer CAS and the deletion fence", async () => {
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      const inserted = await projectSecrets.casWriteProjectSecretPointer(task, project.id, null, {
+        revision: 1,
+        entries: { NPM_TOKEN: 2_000 },
+        secretVersion: "v1",
+        updatedAt: 2_000,
+      });
+      expect(inserted.isOk() && inserted.value).toMatchObject({
+        projectId: project.id,
+        rowVersion: 1,
+        revision: 1,
+        entries: { NPM_TOKEN: 2_000 },
+        secretVersion: "v1",
+      });
+      const stale = await projectSecrets.casWriteProjectSecretPointer(task, project.id, null, {
+        revision: 2,
+        entries: { NPM_TOKEN: 3_000 },
+        secretVersion: "v2",
+        updatedAt: 3_000,
+      });
+      expect(stale.isErr() && stale.error.type).toBe("project_secret_pointer_conflict");
+      const deleting = await store.requestProjectDeletion(task, {
+        projectId: project.id,
+        now: 4_000,
+        cleanupAfter: 5_000,
+      });
+      expect(deleting.isOk()).toBe(true);
+      const readFenced = await projectSecrets.readProjectSecretPointer(task, project.id);
+      expect(readFenced.isErr() && readFenced.error.type).toBe("project_conflict");
+      expect((await projectSecrets.deleteProjectSecretPointer(task, project.id)).isOk()).toBe(true);
     });
 
     it("implements credential pointer CAS", async () => {

@@ -13,12 +13,13 @@ Project deletion is permanent deletion, not archival. Archived or archiving orbs
 A project currently owns only:
 
 - its `projects` database row, including repository URL, display name, deletion intent, and timestamps;
+- its `project_secret_pointers` metadata row and every immutable secret-store bundle version whose payload names the project, including unreferenced crash residue (`docs/credentials.md`);
 - every `orbs` row whose `project_id` names it;
 - transitively, every resource owned by those orbs in the complete inventory in `docs/orb-deletion.md`: history records and cleanup intents; live proxies and in-process work; Docker/GCE/process compute and persistent filesystems; runtime processes, logs stored in process-provider directories, host metadata and bearer tokens; and exact-match Tailscale keys/devices.
 
 Project deletion does **not** delete or mutate the remote Git repository. It also retains shared model/GitHub credentials and credential pointers, control-plane infrastructure, provider images/networks, deployment-level Tailscale configuration, audit/Cloud Logging records, billing records, and database backups/PITR governed by their own retention. Product copy must not promise erasure from those retained systems.
 
-There are currently no project-scoped clone caches, snapshots, credentials, ports, or provider resources. If one is introduced later, it must be added to this inventory and the project finalization gate before shipping.
+There are currently no project-scoped clone caches, snapshots, ports, or provider resources. Project-secret cleanup is implemented in the finalizer: accepting deletion immediately makes pointer reads/writes conflict; after child cleanup and the existing deletion quarantine, finalization enumerates the shared project-secret namespace, destroys every matching bundle version before removing the pointer, and only then removes the project row. The quarantine is longer than the cloud adapter's bounded secret write, so a write admitted before the project fence cannot appear after the destructive scan. Typed uncertainty retries and definitive absence succeeds. Any later project-scoped resource must likewise enter this inventory and finalization gate before shipping.
 
 ## API and user experience
 
@@ -77,6 +78,8 @@ Migration `008_project_deletion.sql`:
 - indexes deleting projects for the finalizer scan;
 - keeps `orbs.project_id` restrictive.
 
+Migration `012_project_secrets.sql` adds the restrictive project-owned secret pointer. The project-secret domain service removes it only after enumerated secret-store cleanup; the restrictive foreign key is an additional finalization guard against deleting a project while secret metadata remains.
+
 `ControlPlaneStore` and its PostgreSQL/PGlite/fake implementations expose transactional operations for atomic project-delete request/fan-out, active-project-checked orb insertion, deleting-project scans/progress, fan-out repair, and zero-child project finalization. Both individual and project deletion produce the same delete-kind `orb_deletions` invariant, covered by the shared store contract; provider cleanup remains exclusively in the existing orb reconciler so external deletion behavior cannot fork.
 
 No in-memory project job is authoritative: the periodic finalizer discovers the durable project row after a restart, while the accepted command immediately wakes child reconciliation through the existing per-orb scheduling path. Child cancellation/connection closure also continues to use those per-orb paths. The credential broker requires no project-specific cleanup: authorization is revoked by each child's `deleting` state, and the shared credentials are intentionally retained.
@@ -88,9 +91,9 @@ Implementation landed in this order: migration/project/domain/protocol types and
 Coverage includes:
 
 - the shared PGlite/PostgreSQL store contract for atomic fan-out, archive-to-delete upgrade, idempotent repair with blocker preservation, the active-project insertion fence, progress counts, restrictive early finalization, and final removal;
-- deterministic simulation schedules for create racing delete, mixed running/stopped/archived children, two competing finalizers, provider-destroy/store failures, and control-plane restart recovery, asserting final row/intent/replica/host/filesystem absence;
+- deterministic simulation schedules for create racing delete, mixed running/stopped/archived children, two competing finalizers, provider-destroy/store failures, control-plane restart recovery, and project-secret update/delete plus orphan-version races, asserting final row/intent/replica/host/filesystem/secret absence;
 - HTTP tests for first and repeated `202`, progress, late-child `409`, and a missing project's `404`;
 - pure web presentation tests pinning the full destructive confirmation scope and remaining/blocked progress copy; the frontend fixture implements asynchronous project deletion through the production `ProjectView` contract;
 - the full-slice E2E with one stopped orb containing committed history and one running orb, proving late creation conflicts, every project/orb/history endpoint reaches `404`, the project list drops the row, and process-provider state directories are absent.
 
-No provider-specific implementation changed: project deletion delegates every child to the already-tested orb `destroy` path in `docs/orb-deletion.md`. `npm test`, typecheck, lint, and `PI_ORB_E2E_BACKEND=process npm run test:e2e` passed on 2026-08-09; the E2E deleted one stopped child with replicated history and one running child, rejected a late create, and proved final project/orb/history/process-provider absence. Docker/GCE/Tailscale destructive behavior remains covered by the existing orb-deletion adapter suites and the live cloud smoke follow-up in `TODO.md`.
+No host-provider implementation changed: project deletion delegates every child to the already-tested orb `destroy` path in `docs/orb-deletion.md`, then performs provider-independent project-secret cleanup through the control-plane secret-store port. `npm test`, typecheck, lint, and `PI_ORB_E2E_BACKEND=process npm run test:e2e` passed on 2026-08-09; the E2E deleted one stopped child with replicated history and one running child, rejected a late create, and proved final project/orb/history/process-provider absence. Docker/GCE/Tailscale destructive behavior remains covered by the existing orb-deletion adapter suites and the live cloud smoke follow-up in `TODO.md`.

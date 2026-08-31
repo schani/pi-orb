@@ -46,6 +46,9 @@ POST /api/v1/projects
 GET  /api/v1/projects/:projectId
 PATCH /api/v1/projects/:projectId
 DELETE /api/v1/projects/:projectId
+GET  /api/v1/projects/:projectId/secrets
+PUT  /api/v1/projects/:projectId/secrets/:name
+DELETE /api/v1/projects/:projectId/secrets/:name
 
 GET  /api/v1/projects/:projectId/orbs
 POST /api/v1/projects/:projectId/orbs
@@ -173,6 +176,10 @@ interface OrbHistoryView {
   records: HistoryRecord[];
 }
 ```
+
+### Project secrets (decided and implemented 2026-08-28)
+
+Projects gain one write-only secret inventory inherited by every current and future orb. `GET .../secrets` returns revision, names, and update timestamps only; `PUT .../secrets/:name` accepts `{ value }` to create or replace a POSIX-named entry; `DELETE` removes it. No browser response reveals a current value or value-derived fingerprint. Mutations conflict once project deletion starts. The runtime receives the complete resolved set through the separate bearer-authenticated boot snapshot in `docs/credentials.md`; browser APIs never call that route. Missing projects preserve the requested URL and return the ordinary project-specific `404`.
 
 ### Send-anytime messages (decided and implemented 2026-08-10)
 

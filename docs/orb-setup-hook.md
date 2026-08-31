@@ -154,6 +154,7 @@ environment"). Rejected: a `pi-orb` subcommand to re-run hooks — executing the
   toolchain) plus `PI_ORB=1`, `PI_ORB_HOOK=setup|resume`, and `PI_ORB_HOOK_ENV_FILE` (below).
 - Setup additionally has `PI_ORB_RUNTIME_TOKEN` and `PI_ORB_CONTROL_PLANE_URL` removed
   (decision 3). Resume has them. Neither hook receives Tailscale material.
+- Control-plane-managed project secrets (`docs/credentials.md`, implemented 2026-08-28) are fetched only after setup returns and before resume starts. Setup therefore cannot see them; resume, the Pi session, and terminals can. Their names join the env-file deny-list for that boot, so `$PI_ORB_HOOK_ENV_FILE` cannot accidentally shadow the dashboard-managed value.
 - Network is available to both, subject to whatever egress the host provider allows the orb.
 - Nothing a hook exports persists into the agent's environment by itself: the hook is its own
   process, and its exports die with it.

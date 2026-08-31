@@ -30,6 +30,13 @@ export const FAILPOINTS = {
   brokerPointerWriteAfter: "broker.pointer.write.after",
   brokerSecretRead: "broker.secret.read",
   brokerSecretWrite: "broker.secret.write",
+  projectSecretPointerRead: "project-secrets.pointer.read",
+  projectSecretPointerWriteBefore: "project-secrets.pointer.write.before",
+  projectSecretPointerWriteAfter: "project-secrets.pointer.write.after",
+  projectSecretRead: "project-secrets.secret.read",
+  projectSecretWrite: "project-secrets.secret.write",
+  projectSecretDestroy: "project-secrets.secret.destroy",
+  projectSecretList: "project-secrets.secret.list",
   /** Issuer signing-key table: public JWK rows, not the private key material. */
   signingKeyRead: "issuer.signing-key.read",
   signingKeyWrite: "issuer.signing-key.write",

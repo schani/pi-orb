@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SimulationTask } from "determined";
 import { ResultAsync } from "neverthrow";
@@ -62,6 +62,23 @@ export class FileSecretStore implements CredentialSecretStore {
           (error as NodeJS.ErrnoException).code === "ENOENT" ? null : Promise.reject(error),
       ),
       toStoreError("read secret"),
+    );
+  }
+
+  listSecretVersions(_task: SimulationTask, provider: string): ResultAsync<string[], StoreError> {
+    return ResultAsync.fromPromise(
+      readdir(this.dir).then(
+        (names) => {
+          const prefix = `${provider}-`;
+          return names
+            .filter((name) => name.startsWith(prefix) && name.endsWith(".json"))
+            .map((name) => name.slice(prefix.length, -".json".length))
+            .sort();
+        },
+        (error: unknown) =>
+          (error as NodeJS.ErrnoException).code === "ENOENT" ? [] : Promise.reject(error),
+      ),
+      toStoreError("list secret versions"),
     );
   }
 

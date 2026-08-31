@@ -22,6 +22,7 @@ import {
   TEST_ISSUER_CONSTANTS,
   TEST_ISSUER_URL,
 } from "../testkit/fixtures.ts";
+import { FakeProjectSecretPointerStore } from "../testkit/project-secrets.ts";
 import { InMemoryControlPlaneStore } from "../testkit/store.ts";
 import { FakeSigningKeyStore } from "../testkit/workload-identity.ts";
 import {
@@ -315,6 +316,7 @@ describe("minted tokens verify against the served JWKS", () => {
       },
       nameGenerator,
       nameLeaseMs: 30_000,
+      projectSecrets: { pointers: new FakeProjectSecretPointerStore(PROJECT), secrets },
       mint: {
         store,
         signer: new OidcTokenSigner({ keys, secrets, constants: DEFAULT_ISSUER_CONSTANTS }),

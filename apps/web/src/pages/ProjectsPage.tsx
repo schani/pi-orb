@@ -1,6 +1,7 @@
 import { type OrbView, type ProjectView, validateRepositoryUrl } from "@pi-orb/protocol";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
+import { ProjectSecretsModal } from "../components/ProjectSecretsModal.tsx";
 import {
   type ApiError,
   archiveOrb,
@@ -171,6 +172,7 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
+  const [secretsProject, setSecretsProject] = useState<ProjectView | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameText, setProjectRenameText] = useState("");
   const [projectRenameError, setProjectRenameError] = useState<string | null>(null);
@@ -472,6 +474,13 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
               <span className="muted mono">{project.repositoryUrl}</span>
               <span className={`state-badge state-${project.state}`}>{project.state}</span>
               <div className="project-header-actions">
+                <button
+                  type="button"
+                  disabled={project.state === "deleting"}
+                  onClick={() => setSecretsProject(project)}
+                >
+                  secrets
+                </button>
                 <NewOrbLink projectId={project.id} disabled={project.state === "deleting"} />
                 <button
                   type="button"
@@ -520,6 +529,10 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
           </section>
         );
       })}
+
+      {secretsProject !== null && (
+        <ProjectSecretsModal project={secretsProject} onClose={() => setSecretsProject(null)} />
+      )}
 
       <section className="panel new-project-panel">
         <div className="project-form-heading">

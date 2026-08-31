@@ -1,6 +1,6 @@
 import type { OrbState } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { okAsync } from "neverthrow";
+import { errAsync, okAsync } from "neverthrow";
 import {
   DEFAULT_ISSUER_CONSTANTS,
   DEFAULT_LIFECYCLE_CONSTANTS,
@@ -13,6 +13,7 @@ import type {
   ControlPlaneDeps,
   MintDeps,
   OrbNameGenerator,
+  ProjectSecretPointerStore,
   SigningKeyDeps,
 } from "../domain/ports.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
@@ -83,6 +84,12 @@ export function makeHarness(options?: {
   const nameGenerator: OrbNameGenerator = {
     generate: (_task, input) => okAsync(`Work on ${input.projectName}`),
   };
+  const projectSecretPointers: ProjectSecretPointerStore = {
+    readProjectSecretPointer: () => okAsync(null),
+    casWriteProjectSecretPointer: () =>
+      errAsync({ type: "project_secret_pointer_conflict" as const }),
+    deleteProjectSecretPointer: () => okAsync(undefined),
+  };
   const deps: ControlPlaneDeps = {
     store,
     hostProvider: new FakeOrbHostProvider(world),
@@ -93,6 +100,7 @@ export function makeHarness(options?: {
     nameLeaseMs: 30_000,
     control: new ControlState(),
     constants: { ...TEST_CONSTANTS, ...options?.constants },
+    projectSecrets: { pointers: projectSecretPointers, secrets: new FakeSecretStore() },
   };
   return { world, store, authGate, deps };
 }

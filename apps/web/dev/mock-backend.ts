@@ -34,6 +34,8 @@ interface MockState {
   messages: Map<string, OrbMessageView[]>;
   liveSessions: Map<string, Set<LiveSession>>;
   startupTimers: Map<string, NodeJS.Timeout>;
+  projectSecrets: Map<string, Map<string, { value: string; updatedAt: string }>>;
+  projectSecretRevisions: Map<string, number>;
 }
 
 function initialState(): MockState {
@@ -284,6 +286,16 @@ function initialState(): MockState {
     ]),
     liveSessions: new Map(),
     startupTimers: new Map(),
+    projectSecrets: new Map([
+      [
+        PROJECT_ID,
+        new Map([
+          ["NPM_TOKEN", { value: "fixture-npm-secret", updatedAt: createdAt }],
+          ["SENTRY_AUTH_TOKEN", { value: "fixture-sentry-secret", updatedAt: createdAt }],
+        ]),
+      ],
+    ]),
+    projectSecretRevisions: new Map([[PROJECT_ID, 1]]),
   };
 }
 
@@ -332,6 +344,72 @@ async function handleApi(
   if (method === "GET" && path === "/api/v1/projects") {
     sendJson(response, 200, { items: [...state.projects.values()] });
     return true;
+  }
+  const projectSecretsRoute = /^\/api\/v1\/projects\/([^/]+)\/secrets(?:\/([^/]+))?$/.exec(path);
+  if (projectSecretsRoute !== null) {
+    const projectId = decodeURIComponent(projectSecretsRoute[1] ?? "");
+    const secretName =
+      projectSecretsRoute[2] === undefined ? null : decodeURIComponent(projectSecretsRoute[2]);
+    const project = state.projects.get(projectId);
+    if (project === undefined) {
+      notFound(response);
+      return true;
+    }
+    if (project.state === "deleting" && method !== "GET") {
+      sendJson(response, 409, {
+        error: {
+          code: "conflict",
+          message: "project is being permanently deleted",
+          retryable: false,
+        },
+      });
+      return true;
+    }
+    const secrets = state.projectSecrets.get(projectId) ?? new Map();
+    const view = () => ({
+      revision: state.projectSecretRevisions.get(projectId) ?? 0,
+      items: [...secrets.entries()]
+        .map(([name, entry]) => ({ name, updatedAt: entry.updatedAt }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    });
+    if (method === "GET" && secretName === null) {
+      sendJson(response, 200, view());
+      return true;
+    }
+    if (method === "PUT" && secretName !== null) {
+      const body = await readJson(request);
+      if (
+        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(secretName) ||
+        body === null ||
+        typeof body !== "object" ||
+        !("value" in body) ||
+        typeof body.value !== "string" ||
+        body.value === ""
+      ) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "invalid secret", retryable: false },
+        });
+        return true;
+      }
+      secrets.set(secretName, { value: body.value, updatedAt: now() });
+      state.projectSecrets.set(projectId, secrets);
+      state.projectSecretRevisions.set(
+        projectId,
+        (state.projectSecretRevisions.get(projectId) ?? 0) + 1,
+      );
+      sendJson(response, 200, view());
+      return true;
+    }
+    if (method === "DELETE" && secretName !== null) {
+      if (secrets.delete(secretName)) {
+        state.projectSecretRevisions.set(
+          projectId,
+          (state.projectSecretRevisions.get(projectId) ?? 0) + 1,
+        );
+      }
+      sendJson(response, 200, view());
+      return true;
+    }
   }
   const projectRoute = /^\/api\/v1\/projects\/([^/]+)$/.exec(path);
   if (projectRoute !== null) {
@@ -389,6 +467,8 @@ async function handleApi(
           state.messages.delete(orb.id);
         }
         state.projects.delete(projectId);
+        state.projectSecrets.delete(projectId);
+        state.projectSecretRevisions.delete(projectId);
       }, 1_000);
       sendJson(response, 202, deleting);
       return true;

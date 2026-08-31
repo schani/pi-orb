@@ -11,8 +11,12 @@ import {
   OrbMessageViewSchema,
   type OrbView,
   OrbViewSchema,
+  type ProjectSecretList,
+  ProjectSecretListSchema,
   type ProjectView,
   ProjectViewSchema,
+  projectSecretPath,
+  projectSecretsPath,
   type UpdateOrbRequest,
   type UpdateProjectRequest,
 } from "@pi-orb/protocol";
@@ -127,6 +131,33 @@ export function updateProject(
 
 export function deleteProject(projectId: string): Promise<Result<ProjectView, ApiError>> {
   return apiFetch(ProjectViewSchema, `/api/v1/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function listProjectSecrets(
+  projectId: string,
+): Promise<Result<ProjectSecretList, ApiError>> {
+  return apiFetch(ProjectSecretListSchema, projectSecretsPath(projectId), { cache: "no-store" });
+}
+
+export function putProjectSecret(
+  projectId: string,
+  name: string,
+  value: string,
+): Promise<Result<ProjectSecretList, ApiError>> {
+  return apiFetch(ProjectSecretListSchema, projectSecretPath(projectId, name), {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ value }),
+  });
+}
+
+export function deleteProjectSecret(
+  projectId: string,
+  name: string,
+): Promise<Result<ProjectSecretList, ApiError>> {
+  return apiFetch(ProjectSecretListSchema, projectSecretPath(projectId, name), {
     method: "DELETE",
   });
 }

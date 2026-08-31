@@ -4,6 +4,8 @@ import {
   CreateProjectRequestSchema,
   EnqueueOrbMessageRequestSchema,
   PROJECT_NAME_MAX_CHARS,
+  ProjectSecretNameSchema,
+  PutProjectSecretRequestSchema,
   UpdateOrbRequestSchema,
   UpdateProjectRequestSchema,
   validateRepositoryUrl,
@@ -12,7 +14,7 @@ import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import type { StoreError } from "../domain/errors.ts";
+import type { ProjectSecretError, StoreError } from "../domain/errors.ts";
 import {
   type CommandError,
   createOrb,
@@ -26,6 +28,11 @@ import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import type { ControlPlaneDeps, SigningKeyDeps, SigningKeyRow } from "../domain/ports.ts";
 import { type ProjectCommandError, requestProjectDeletion } from "../domain/project-deletion.ts";
+import {
+  deleteProjectSecret,
+  listProjectSecrets,
+  putProjectSecret,
+} from "../domain/project-secrets.ts";
 import {
   activatePublishedSigningKey,
   publishSigningKey,
@@ -73,6 +80,21 @@ function sendStoreError(reply: FastifyReply, error: StoreError): FastifyReply {
   return error.code === "invariant"
     ? reply.status(500).send(httpError("internal", error.message, false))
     : reply.status(503).send(httpError("unavailable", error.message, true));
+}
+
+function sendProjectSecretError(reply: FastifyReply, error: ProjectSecretError): FastifyReply {
+  switch (error.type) {
+    case "project_secret_not_found":
+      return reply.status(404).send(httpError("not_found", error.message, false));
+    case "project_secret_conflict":
+      return reply.status(409).send(httpError("conflict", error.message, false));
+    case "project_secret_invalid":
+      return reply.status(400).send(httpError("invalid_request", error.message, false));
+    case "project_secret_retryable":
+      return reply.status(503).send(httpError("unavailable", error.message, true));
+    case "project_secret_corruption":
+      return reply.status(500).send(httpError("internal", error.message, false));
+  }
 }
 
 function sendCommandError(
@@ -301,6 +323,56 @@ export function registerRoutes(
               .send(httpError("unavailable", "project deletion progress unavailable", true));
       }
       return reply.send(projectView(project.value, progress.value));
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>(
+    "/api/v1/projects/:projectId/secrets",
+    async (request, reply) => {
+      const listed = await listProjectSecrets(task, deps.projectSecrets, request.params.projectId);
+      if (listed.isErr()) return sendProjectSecretError(reply, listed.error);
+      reply.header("cache-control", "no-store");
+      return reply.send(listed.value);
+    },
+  );
+
+  app.put<{ Params: { projectId: string; name: string } }>(
+    "/api/v1/projects/:projectId/secrets/:name",
+    async (request, reply) => {
+      if (!Check(ProjectSecretNameSchema, request.params.name)) {
+        return reply.status(400).send(httpError("invalid_request", "invalid secret name", false));
+      }
+      if (!Check(PutProjectSecretRequestSchema, request.body)) {
+        return reply.status(400).send(httpError("invalid_request", "invalid secret body", false));
+      }
+      const written = await putProjectSecret(
+        task,
+        deps.projectSecrets,
+        request.params.projectId,
+        request.params.name,
+        request.body.value,
+      );
+      if (written.isErr()) return sendProjectSecretError(reply, written.error);
+      reply.header("cache-control", "no-store");
+      return reply.send(written.value);
+    },
+  );
+
+  app.delete<{ Params: { projectId: string; name: string } }>(
+    "/api/v1/projects/:projectId/secrets/:name",
+    async (request, reply) => {
+      if (!Check(ProjectSecretNameSchema, request.params.name)) {
+        return reply.status(400).send(httpError("invalid_request", "invalid secret name", false));
+      }
+      const removed = await deleteProjectSecret(
+        task,
+        deps.projectSecrets,
+        request.params.projectId,
+        request.params.name,
+      );
+      if (removed.isErr()) return sendProjectSecretError(reply, removed.error);
+      reply.header("cache-control", "no-store");
+      return reply.send(removed.value);
     },
   );
 

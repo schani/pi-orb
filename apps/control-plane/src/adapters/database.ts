@@ -5,18 +5,21 @@ import type { StoreError } from "../domain/errors.ts";
 import type {
   ControlPlaneStore,
   CredentialPointerStore,
+  ProjectSecretPointerStore,
   SigningKeyStore,
 } from "../domain/ports.ts";
 import { PgClient, type PostgreSQLClient } from "./pg/client.ts";
 import { PostgreSQLCredentialPointerStore } from "./pg/credential-pointers.ts";
 import { runMigrations } from "./pg/migrate.ts";
 import { PGliteClient } from "./pg/pglite-client.ts";
+import { PostgreSQLProjectSecretPointerStore } from "./pg/project-secrets.ts";
 import { PostgreSQLSigningKeyStore } from "./pg/signing-keys.ts";
 import { PostgreSQLControlPlaneStore } from "./pg/store.ts";
 
 export interface ControlPlaneDatabase {
   readonly store: ControlPlaneStore;
   readonly pointers: CredentialPointerStore;
+  readonly projectSecrets: ProjectSecretPointerStore;
   readonly signingKeys: SigningKeyStore;
   migrate(): ResultAsync<string[], StoreError>;
   close(): ResultAsync<void, StoreError>;
@@ -31,6 +34,7 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
   return {
     store: new PostgreSQLControlPlaneStore(client),
     pointers: new PostgreSQLCredentialPointerStore(client),
+    projectSecrets: new PostgreSQLProjectSecretPointerStore(client),
     signingKeys: new PostgreSQLSigningKeyStore(client),
     migrate: () => runMigrations(client),
     close: () => client.end(),

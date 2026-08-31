@@ -81,6 +81,7 @@ export const RuntimeHealthSchema = Type.Union([
         // ordinary boot deadline while this phase is reported, so a hook that
         // takes twenty minutes is not a boot failure.
         Type.Literal("setup_running"),
+        Type.Literal("checking_project_secrets"),
         Type.Literal("loading_session"),
         Type.Literal("checking_auth"),
       ]),

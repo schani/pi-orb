@@ -50,10 +50,13 @@ export class GsmSecretStore implements CredentialSecretStore {
   ): ResultAsync<{ version: string }, StoreError> {
     return ResultAsync.fromPromise(
       this.client
-        .addSecretVersion({
-          parent: this.parent(provider),
-          payload: { data: Buffer.from(JSON.stringify(credential), "utf8") },
-        })
+        .addSecretVersion(
+          {
+            parent: this.parent(provider),
+            payload: { data: Buffer.from(JSON.stringify(credential), "utf8") },
+          },
+          { timeout: 30_000 },
+        )
         .then(([version]) => {
           const name = version.name ?? "";
           const numeric = name.split("/").at(-1) ?? "";
@@ -84,6 +87,22 @@ export class GsmSecretStore implements CredentialSecretStore {
           return Promise.reject(error);
         }),
       toStoreError("access secret version"),
+    );
+  }
+
+  listSecretVersions(_task: SimulationTask, provider: string): ResultAsync<string[], StoreError> {
+    return ResultAsync.fromPromise(
+      (async () => {
+        const versions: string[] = [];
+        for await (const version of this.client.listSecretVersionsAsync({
+          parent: this.parent(provider),
+        })) {
+          const numeric = version.name?.split("/").at(-1);
+          if (numeric !== undefined && numeric !== "") versions.push(numeric);
+        }
+        return versions.sort((left, right) => Number(left) - Number(right));
+      })(),
+      toStoreError("list secret versions"),
     );
   }
 

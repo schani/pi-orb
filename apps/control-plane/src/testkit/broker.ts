@@ -136,10 +136,14 @@ export class FakeSecretStore implements CredentialSecretStore {
   failWrites = false;
   private readonly readFailpoint: string;
   private readonly writeFailpoint: string;
+  private readonly destroyFailpoint: string;
+  private readonly listFailpoint: string;
 
-  constructor(failpoints?: { read: string; write: string }) {
+  constructor(failpoints?: { read: string; write: string; destroy?: string; list?: string }) {
     this.readFailpoint = failpoints?.read ?? FAILPOINTS.brokerSecretRead;
     this.writeFailpoint = failpoints?.write ?? FAILPOINTS.brokerSecretWrite;
+    this.destroyFailpoint = failpoints?.destroy ?? this.writeFailpoint;
+    this.listFailpoint = failpoints?.list ?? this.readFailpoint;
   }
 
   seedSecret(provider: string, credential: StoredSecret): string {
@@ -184,12 +188,18 @@ export class FakeSecretStore implements CredentialSecretStore {
     });
   }
 
+  listSecretVersions(task: SimulationTask, provider: string): ResultAsync<string[], StoreError> {
+    return accessGate(task, this.listFailpoint, "list secret versions", 5, () =>
+      this.liveVersions(provider),
+    );
+  }
+
   destroySecret(
     task: SimulationTask,
     provider: string,
     version: string,
   ): ResultAsync<void, StoreError> {
-    return accessGate(task, this.writeFailpoint, "destroy secret", 5, () => {
+    return accessGate(task, this.destroyFailpoint, "destroy secret", 5, () => {
       this.destroyed.add(`${provider}/${version}`);
     });
   }
