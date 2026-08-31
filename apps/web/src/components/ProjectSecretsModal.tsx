@@ -14,12 +14,13 @@ import {
 
 export interface ProjectSecretsModalProps {
   readonly project: ProjectView;
+  readonly onCountChange?: (projectId: string, count: number) => void;
   readonly onClose: () => void;
 }
 
 const EMPTY: ProjectSecretList = { revision: 0, items: [] };
 
-export function ProjectSecretsModal({ project, onClose }: ProjectSecretsModalProps) {
+export function ProjectSecretsModal({ project, onCountChange, onClose }: ProjectSecretsModalProps) {
   const [snapshot, setSnapshot] = useState<ProjectSecretList>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
@@ -35,12 +36,15 @@ export function ProjectSecretsModal({ project, onClose }: ProjectSecretsModalPro
       if (!active) return;
       setLoading(false);
       if (result.isErr()) setError(describeApiError(result.error));
-      else setSnapshot(result.value);
+      else {
+        setSnapshot(result.value);
+        onCountChange?.(project.id, result.value.items.length);
+      }
     });
     return () => {
       active = false;
     };
-  }, [project.id]);
+  }, [onCountChange, project.id]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -75,6 +79,7 @@ export function ProjectSecretsModal({ project, onClose }: ProjectSecretsModalPro
       return;
     }
     setSnapshot(result.value);
+    onCountChange?.(project.id, result.value.items.length);
     setName("");
     setValue("");
     nameInput.current?.focus();
@@ -89,7 +94,10 @@ export function ProjectSecretsModal({ project, onClose }: ProjectSecretsModalPro
     const result = await deleteProjectSecret(project.id, secretName);
     setSaving(false);
     if (result.isErr()) setError(describeApiError(result.error));
-    else setSnapshot(result.value);
+    else {
+      setSnapshot(result.value);
+      onCountChange?.(project.id, result.value.items.length);
+    }
   };
 
   return (

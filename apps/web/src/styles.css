@@ -529,10 +529,45 @@ textarea:focus {
 
 .project-header {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 0.75rem;
   flex-wrap: wrap;
   margin-bottom: 0.5rem;
+}
+
+.project-identity {
+  display: grid;
+  min-width: 0;
+  gap: 0.12rem;
+}
+
+.project-repository {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-secrets-metadata {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 1px 0;
+  color: var(--green);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-caps: normal;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.project-secrets-metadata:hover:not(:disabled) {
+  border-bottom-color: var(--green);
 }
 
 .project-name,
@@ -572,6 +607,7 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  margin-top: 0.15rem;
   margin-left: auto;
 }
 
