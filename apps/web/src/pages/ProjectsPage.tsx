@@ -1,6 +1,7 @@
 import { type OrbView, type ProjectView, validateRepositoryUrl } from "@pi-orb/protocol";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
+import { ProjectSecretKeyIcon } from "../components/ProjectSecretKeyIcon.tsx";
 import { ProjectSecretsModal } from "../components/ProjectSecretsModal.tsx";
 import {
   type ApiError,
@@ -505,7 +506,7 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
                   disabled={project.state === "deleting"}
                   onClick={() => setSecretsProject(project)}
                 >
-                  <span aria-hidden="true">⌁</span>
+                  <ProjectSecretKeyIcon className="project-secrets-metadata-icon" />
                   {formatProjectSecretCount(projectSecretCounts[project.id])}
                 </button>
               </div>

@@ -551,7 +551,8 @@ textarea:focus {
   width: fit-content;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
+  margin: 0.3rem 0 0.15rem;
   padding: 1px 0;
   color: var(--green);
   background: transparent;
@@ -564,6 +565,12 @@ textarea:focus {
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.project-secrets-metadata-icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
 }
 
 .project-secrets-metadata:hover:not(:disabled) {
@@ -667,6 +674,11 @@ textarea:focus {
   border: 1px solid var(--green);
   border-radius: 50%;
   font-size: 10px;
+}
+
+.project-secrets-lock svg {
+  width: 12px;
+  height: 12px;
 }
 
 .project-secrets-close {

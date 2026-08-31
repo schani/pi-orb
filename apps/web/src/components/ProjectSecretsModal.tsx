@@ -11,6 +11,7 @@ import {
   listProjectSecrets,
   putProjectSecret,
 } from "../lib/api.ts";
+import { ProjectSecretKeyIcon } from "./ProjectSecretKeyIcon.tsx";
 
 export interface ProjectSecretsModalProps {
   readonly project: ProjectView;
@@ -109,8 +110,8 @@ export function ProjectSecretsModal({ project, onCountChange, onClose }: Project
         aria-labelledby="project-secrets-title"
       >
         <header className="project-secrets-header">
-          <span className="project-secrets-lock" aria-hidden="true">
-            ⌁
+          <span className="project-secrets-lock">
+            <ProjectSecretKeyIcon />
           </span>
           <div>
             <h2 id="project-secrets-title">Secrets for {project.name}</h2>
@@ -136,8 +137,8 @@ export function ProjectSecretsModal({ project, onCountChange, onClose }: Project
               {snapshot.items.map((item) => (
                 <div className="project-secret-row" key={item.name}>
                   <span className="project-secret-name">
-                    <span className="project-secrets-lock" aria-hidden="true">
-                      ⌁
+                    <span className="project-secrets-lock">
+                      <ProjectSecretKeyIcon />
                     </span>
                     {item.name}
                   </span>
