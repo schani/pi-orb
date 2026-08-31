@@ -329,7 +329,7 @@ export async function startControlPlane(options: {
 
 export async function api(
   baseUrl: string,
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<{ status: number; body: Record<string, unknown> }> {

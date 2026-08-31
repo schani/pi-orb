@@ -44,6 +44,7 @@ import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
+import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
@@ -196,7 +197,13 @@ export class PiOrbAgent {
   }
 
   private initializing(
-    phase: "booting" | "cloning" | "setup_running" | "loading_session" | "checking_auth",
+    phase:
+      | "booting"
+      | "cloning"
+      | "setup_running"
+      | "checking_project_secrets"
+      | "loading_session"
+      | "checking_auth",
   ): RuntimeHealth {
     return {
       v: 1,
@@ -346,6 +353,35 @@ export class PiOrbAgent {
     });
     await this.hooks.runSetup();
 
+    // 1c. Project secrets are a control-plane snapshot, fetched by the same
+    // provider-neutral bearer every host already supplies. Setup deliberately
+    // ran without them; resume and every later child process inherit them.
+    this.health = this.initializing("checking_project_secrets");
+    const broker = this.options.broker;
+    if (broker === null) {
+      return err(
+        this.failed(
+          "project_secrets_unavailable",
+          "broker environment variables are missing",
+          false,
+        ),
+      );
+    }
+    const projectSecrets = await fetchProjectSecretSnapshotAtBoot(broker);
+    if (projectSecrets.isErr()) {
+      return err(
+        this.failed(
+          "project_secrets_unavailable",
+          projectSecrets.error.message,
+          projectSecrets.error.retryable,
+        ),
+      );
+    }
+    this.hooks.addManagedEnvironmentNames(Object.keys(projectSecrets.value.values));
+    for (const [name, value] of Object.entries(projectSecrets.value.values)) {
+      process.env[name] = value;
+    }
+
     // 2. Session: never replace an existing one (docs/host-provider.md).
     this.health = this.initializing("loading_session");
     const sessionDir = join(this.options.workDir, "pi-sessions");
@@ -379,12 +415,6 @@ export class PiOrbAgent {
     // (docs/credentials.md) — the only credential path on every provider.
     this.health = this.initializing("checking_auth");
     const mockOpenAi = this.options.mockOpenAi ?? null;
-    const broker = this.options.broker;
-    if (broker === null) {
-      return err(
-        this.failed("auth_unavailable", "broker environment variables are missing", false),
-      );
-    }
     const brokerTask = new NoSimulationTask(`broker-${this.options.orbId}`, false);
     const brokerClient = new BrokerTokenClient(new HttpBrokerEndpoint(broker, "model"));
     const runtimeResult = await ResultAsync.fromPromise(

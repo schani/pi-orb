@@ -106,6 +106,21 @@ export interface ProjectConflict {
 }
 
 // ---------------------------------------------------------------------------
+// Project secrets (docs/credentials.md)
+
+/** CAS on one project's project-secret pointer lost to another writer. */
+export interface ProjectSecretPointerConflict {
+  readonly type: "project_secret_pointer_conflict";
+}
+
+export type ProjectSecretError =
+  | { readonly type: "project_secret_not_found"; readonly message: string }
+  | { readonly type: "project_secret_conflict"; readonly message: string }
+  | { readonly type: "project_secret_invalid"; readonly message: string }
+  | { readonly type: "project_secret_retryable"; readonly message: string }
+  | { readonly type: "project_secret_corruption"; readonly message: string };
+
+// ---------------------------------------------------------------------------
 // Credential broker (docs/credentials.md)
 
 /** CAS on the credential pointer's `row_version` affected zero rows. */

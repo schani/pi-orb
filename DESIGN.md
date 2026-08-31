@@ -16,7 +16,7 @@ The first target is deliberately narrow:
 - Drive lifecycle and conversation input through the web UI; a local checkout is not required. The in-orb `pi-orb` CLI may read sibling-orb metadata and replicated transcripts for agent coordination.
 - Let users register a project with a name and public Git repository URL.
 - Clone the repository into a fresh orb without caching or synchronization optimizations.
-- Use a fixed orb runtime image and a prescribed environment.
+- Use a fixed orb runtime image and prescribed base environment; projects may add write-only environment secrets fetched by each orb runtime at boot (`docs/credentials.md`).
 - Embed Pi through its TypeScript SDK.
 - Provide a web UI; no terminal TUI and no tmux-based interaction.
 - Run exactly one Pi session/conversation per orb.

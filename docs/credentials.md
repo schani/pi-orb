@@ -96,6 +96,80 @@ The control plane's own compute access is similarly fenced (decided and applied 
 
 **Deterministic simulation and contract tests.** Broker logic is control-plane domain code behind ports (`SimulationTask` clock, upstream refresher, secret store with pointer CAS, lease). Failpoints beyond the happy paths: refresh storm coalescing to one upstream call; rotation race between two instances; leaseholder crash mid-refresh; the three loss-window shapes above; stale `invalid_grant` racing a successful refresh; login racing refresh; database connection loss mid-mutation; upstream 429-then-success. The runtime-side adapter (seed, refresh, 401 singleflight) gets the same port treatment. What simulation cannot validate — Pi's actual callback/401 behavior, Cloud Run ingress and IAM, IAP, metadata-server exposure — is covered by the pinned-SDK contract test and the cloud-slice validation exercise.
 
+## Project secrets as orb environment variables (decided and implemented 2026-08-28)
+
+The first configurable environment surface supports **project-scoped secrets only**. Every current and future orb of the project receives the same names and values. There are no plain variables, account/user scopes, orb overrides, secret files, external-secret references, setup-time exceptions, or hot updates in this iteration.
+
+A secret protects its value in control-plane storage, browser APIs, UI, logs, and infrastructure metadata; it cannot hide the value from repository code after becoming an environment variable. Every process in the orb can read it. Workload identity (`docs/workload-identity.md`) and capability-specific broker grants remain preferred where available.
+
+### Simplified storage model
+
+Treat the project's complete secret set as **one immutable JSON bundle**, not one independently brokered capability or Secret Manager resource per name:
+
+```ts
+interface StoredProjectSecretBundle {
+  projectId: string;
+  revision: number;
+  values: Record<string, string>;
+}
+
+interface ProjectSecretPointer {
+  projectId: string;
+  revision: number;
+  entries: Record<string, number>; // name -> last-updated ms; no values
+  secretVersion: string; // exact immutable secret-store version
+  updatedAt: string;
+}
+```
+
+Use one control-plane secret-store namespace (and therefore one cloud Secret Manager parent) for all project bundles. Each update reads the current bundle, changes one name, writes a new immutable version, and CAS-moves that project's pointer. Different projects may point at different versions of the same parent. A failed CAS destroys the unreferenced version best-effort and retries from the new pointer; after a successful move the superseded version is destroyed best-effort. The payload repeats `projectId` and `revision`, and reads fail closed if either differs from the PostgreSQL pointer. This reuses the exact-version secret-store and CAS pattern already used by the credential broker without adding leases, refresh logic, one secret parent per project, or values in PostgreSQL.
+
+There is one explicit crash residue: process death after an immutable version is written but before its version number is recorded anywhere can leave an unreferenced version that ordinary pointer recovery cannot discover. This does not expose the value outside the secret store, but it retains superseded secret material. The shared project-secret namespace must therefore support version enumeration for deletion: once project deletion has fenced every update, it inspects bundle headers and destroys **every** version whose payload names that project, including unreferenced crash residue, before finalizing the project. Ordinary successful mutations still destroy only versions they can prove they own; a fleet-wide orphan sweeper, mutation-intent table, and lease are deliberately rejected from the first cut as more machinery than the bounded residue warrants. Project finalization waits through the existing 65-second deletion quarantine before enumeration, while cloud secret-version writes have a 30-second adapter deadline; this lets every pre-fence write either commit or leave discoverable residue before the destructive scan. The DST crash scenario pins this accepted residue and deletion's eventual cleanup rather than falsely asserting cross-store atomicity.
+
+A project that has never stored a secret has no pointer and resolves to an empty snapshot; deleting its final name publishes an empty revision so readers still observe monotonic history. Project deletion includes all of its bundle versions in the existing resource inventory. Limits are deliberately small initially: POSIX environment names, reserved platform names refused, at most 100 names, 64 KiB per value, and 256 KiB for the serialized bundle.
+
+### Browser API
+
+```text
+GET    /api/v1/projects/:projectId/secrets
+PUT    /api/v1/projects/:projectId/secrets/:name   { "value": string }
+DELETE /api/v1/projects/:projectId/secrets/:name
+```
+
+`GET` returns only `{ revision, items: [{ name, updatedAt }] }`; it never returns a value or value-derived fingerprint. `PUT` creates or replaces one name and returns the same complete metadata snapshot, as does `DELETE`, so the Sealed card never needs a follow-up read. The UI always presents replacement as entering a new value—there is no reveal action. Names are validated against `[A-Za-z_][A-Za-z0-9_]*`; `PI_ORB_*`, `HOME`, `PATH`, and the broker/Tailscale names are reserved. In the current unauthenticated POC, anyone who can reach the control plane can change project secrets, just as they can delete projects; public deployment remains gated on authentication and authorization.
+
+### Runtime snapshot
+
+```text
+GET /runtime/v1/project-secrets
+Authorization: Bearer <orb incarnation token>
+
+200 { "revision": number, "values": { "NAME": "value" } }
+    Cache-Control: no-store
+```
+
+The route derives the project from the authenticated orb and accepts no project ID. Its lifecycle authorization is the same as the existing runtime token route. Snapshot resolution is one bounded domain operation: read pointer → read its exact secret version → validate payload identity/revision → reread the pointer. A changed pointer retries; an exact version disappearing while its pointer changes also retries; an unchanged pointer with a missing/mismatched payload is corruption and fails closed. Thus a fetch racing replacement returns one complete old or new bundle, never names from one revision and values from another. The runtime invokes this snapshot operation once on every process boot, after identity-free `.agents/setup` and before `.agents/resume`, merges the values into `process.env`, then creates the Pi session. That boot operation retries 401 and 5xx outcomes for at most three minutes: a first incarnation can reach the route before its bearer hash commits, and a same-release runtime Cloud Run revision can start before the browser role finishes migration 012. A malformed success is terminal immediately. This bounded retry addresses this feature's bootstrap races without pretending to establish the general migration-before-consumer release boundary still tracked in `TODO.md`. Resume, Pi tools, and terminal PTYs inherit the same snapshot; setup receives none of these secrets. Values are never written to the persistent home, provider metadata, orb history, or logs.
+
+Platform-owned environment always wins. A project-secret name is also added to the `$HOME/.pi-orb/env` deny-list for that boot, so a hook cannot accidentally shadow the dashboard's value; the env-file status may name the refused key but never its value.
+
+A secret update affects stopped orbs on their next start and running orbs on their next process boot. It does not change the host-spec fingerprint or replace compute. The first UI states this plainly; there is no applied-revision column, fleet-wide restart action, hot mutation, or per-orb pending badge yet. Those can be added from measured need rather than making the initial storage and lifecycle contract larger.
+
+### Failure visibility and tests
+
+Snapshot lookup or secret-store failure blocks runtime readiness with typed `project_secrets_unavailable`; starting with a partial or empty environment after a configured snapshot failed is forbidden. The ordinary lifecycle failure/detail makes the outcome visible to the user and the existing edge log reconstructs the failed boot without logging names or values. Successful fetches are healthy levels and log nothing. Configuration metadata (`revision`, names, `updatedAt`) is durable; a separate access-audit table is deferred until authenticated actors exist.
+
+**DST implementation (2026-08-28): narrow by design.** The Sealed card and thin HTTP/runtime adapters have no scheduler-dependent correctness and must not be put in DST. The one simulation target is the control-plane project-secret domain service, because it coordinates two durable systems with optimistic CAS and races project deletion. Its invariants are: every published pointer names a readable bundle with the same project/revision; revisions are monotonic; each successful per-name mutation is linearizable (different-name concurrent updates are both retained, same-name updates have one explainable winner); a snapshot is one complete revision; deletion admits no later publication and eventually removes every version for that project; and no error/log/result contains a value.
+
+Keep the DST matrix small and invariant-focused:
+
+1. `project-secrets-concurrent-writers`: two writers to one project, including same and different names, plus writers to different projects sharing the parent; force every ordering around secret write and pointer CAS.
+2. `project-secrets-snapshot-during-rotation`: snapshot pointer/version/recheck interleaved with replacement and old-version cleanup; it returns a coherent old/new snapshot or a typed retryable failure, never a mixed/partial map.
+3. `project-secrets-update-versus-delete`: update and project deletion contend on the active-project fence; whichever linearizes first determines whether the update is included in cleanup or conflicts, and no version survives finalization.
+4. `project-secrets-crash-windows`: reconstruct states at death before version write, after write/before CAS, and after CAS/before old-version cleanup; require pointer readability, explicitly allow the documented unreferenced version in the middle shape, and prove deletion enumeration removes it.
+5. One failpoint sweep over pointer read/CAS, secret read/write/destroy/list, with the same invariants. Do not create a separate DST test for every HTTP status or form interaction.
+
+Ordinary tests remain essential: shared PostgreSQL/PGlite store contracts pin locking/CAS and JSON metadata; secret-store adapter tests pin exact-version read/list/destroy; route tests pin bearer/project derivation and browser redaction; runtime unit tests pin setup → snapshot → resume → Pi ordering and environment merge; Sealed-card static component tests pin the write-only copy, password input, accessible dialog shape, and non-action backdrop; the component implementation preserves failed writes and owns Escape/focus behavior. The process-provider full runtime-server E2E proves setup cannot see a project secret, resume and agent/terminal processes can, a hook cannot shadow the managed name, browser metadata never returns the value, the secret survives compute replacement and stop/start, and project deletion finalizes only after secret cleanup. This same runtime HTTP path is provider-neutral and required no Docker, GCE, or process host-provider changes. Snapshot failures and ordering are pinned by runtime unit/route tests; rotation races belong in DST, not elapsed-time browser tests.
+
 ## Requirements before public deployment
 
 - Authenticate browser access and authorize every project/orb operation.

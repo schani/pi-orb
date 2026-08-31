@@ -9,6 +9,8 @@ import {
   OrbInspectionListSchema,
   OrbTranscriptSchema,
   orbTranscriptPath,
+  PROJECT_SECRETS_RUNTIME_PATH,
+  ProjectSecretSnapshotSchema,
   runtimeTokenPath,
   type TokenName,
 } from "@pi-orb/protocol";
@@ -20,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
+import { putProjectSecret } from "../domain/project-secrets.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
 import {
   FakePointerStore,
@@ -33,6 +36,7 @@ import {
   TEST_ISSUER_CONSTANTS,
   TEST_ISSUER_URL,
 } from "../testkit/fixtures.ts";
+import { FakeProjectSecretPointerStore } from "../testkit/project-secrets.ts";
 import { InMemoryControlPlaneStore } from "../testkit/store.ts";
 import {
   decodeFakeIdToken,
@@ -56,6 +60,7 @@ describe("runtime broker routes", () => {
   let pointers: FakePointerStore;
   let secrets: FakeSecretStore;
   let signer: FakeTokenSigner;
+  let projectSecretPointers: FakeProjectSecretPointerStore;
 
   const nameGenerator: OrbNameGenerator = {
     generate: () => okAsync("Repair Runtime Auth"),
@@ -76,6 +81,7 @@ describe("runtime broker routes", () => {
       broker,
       nameGenerator,
       nameLeaseMs: 30_000,
+      projectSecrets: { pointers: projectSecretPointers, secrets },
       mint: {
         store,
         signer,
@@ -93,6 +99,7 @@ describe("runtime broker routes", () => {
     pointers = new FakePointerStore();
     secrets = new FakeSecretStore();
     signer = new FakeTokenSigner("route-key-1");
+    projectSecretPointers = new FakeProjectSecretPointerStore(PROJECT);
     broker = {
       pointers,
       secrets,
@@ -158,6 +165,30 @@ describe("runtime broker routes", () => {
       payload: body as Record<string, unknown>,
     });
   }
+
+  it("serves the authenticated orb's coherent project-secret snapshot", async () => {
+    seedOrb("running");
+    expect(
+      (
+        await putProjectSecret(
+          task,
+          { pointers: projectSecretPointers, secrets },
+          PROJECT,
+          "NPM_TOKEN",
+          "runtime-only-value",
+        )
+      ).isOk(),
+    ).toBe(true);
+    const response = await app.inject({
+      method: "GET",
+      url: PROJECT_SECRETS_RUNTIME_PATH,
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(Check(ProjectSecretSnapshotSchema, response.json())).toBe(true);
+    expect(response.json()).toEqual({ revision: 1, values: { NPM_TOKEN: "runtime-only-value" } });
+  });
 
   it("grants a token to a running orb with a valid bearer", async () => {
     seedOrb("running");

@@ -18,6 +18,17 @@ const indexOf = (needle: string): number => {
 };
 
 describe("the boot sequence's hook env merge", () => {
+  it("fetches project secrets after identity-free setup and before resume", () => {
+    const secrets = indexOf("await fetchProjectSecretSnapshotAtBoot");
+    expect(indexOf("runSetup()")).toBeLessThan(secrets);
+    expect(secrets).toBeLessThan(indexOf("runResume()"));
+    expect(secrets).toBeLessThan(indexOf("createAgentSession({"));
+  });
+
+  it("fails readiness rather than booting with a missing or partial snapshot", () => {
+    expect(boot.match(/"project_secrets_unavailable"/g)).toHaveLength(2);
+  });
+
   it("merges the runtime's own environment after both hooks and before the session", () => {
     const merge = indexOf("applyHookEnv(process.env)");
     expect(indexOf("runSetup()")).toBeLessThan(merge);

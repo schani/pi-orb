@@ -1,6 +1,8 @@
 import { type OrbView, type ProjectView, validateRepositoryUrl } from "@pi-orb/protocol";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
+import { ProjectSecretKeyIcon } from "../components/ProjectSecretKeyIcon.tsx";
+import { ProjectSecretsModal } from "../components/ProjectSecretsModal.tsx";
 import {
   type ApiError,
   archiveOrb,
@@ -9,6 +11,7 @@ import {
   deleteProject,
   describeApiError,
   listOrbs,
+  listProjectSecrets,
   listProjects,
   updateProject,
 } from "../lib/api.ts";
@@ -23,6 +26,7 @@ import {
   projectOrbFaviconStatus,
   splitProjectOrbs,
 } from "../lib/project-orbs.ts";
+import { formatProjectSecretCount } from "../lib/project-secret-metadata.ts";
 import { generateUuid } from "../lib/uuid.ts";
 
 type OrbListState =
@@ -164,6 +168,9 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [orbLists, setOrbLists] = useState<Record<string, OrbListState | undefined>>({});
+  const [projectSecretCounts, setProjectSecretCounts] = useState<
+    Record<string, number | null | undefined>
+  >({});
 
   const [name, setName] = useState("");
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -171,6 +178,7 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
+  const [secretsProject, setSecretsProject] = useState<ProjectView | null>(null);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectRenameText, setProjectRenameText] = useState("");
   const [projectRenameError, setProjectRenameError] = useState<string | null>(null);
@@ -218,16 +226,33 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
       }
       return next;
     });
-    const entries = await Promise.all(
-      result.value.items.map(async (project) => [project.id, await listOrbs(project.id)] as const),
-    );
+    const [orbEntries, secretEntries] = await Promise.all([
+      Promise.all(
+        result.value.items.map(
+          async (project) => [project.id, await listOrbs(project.id)] as const,
+        ),
+      ),
+      Promise.all(
+        result.value.items.map(
+          async (project) => [project.id, await listProjectSecrets(project.id)] as const,
+        ),
+      ),
+    ]);
     setOrbLists(
       Object.fromEntries(
-        entries.map(([projectId, orbsResult]) => [
+        orbEntries.map(([projectId, orbsResult]) => [
           projectId,
           orbsResult.isOk()
             ? ({ type: "loaded", items: orbsResult.value.items } satisfies OrbListState)
             : ({ type: "failed", error: orbsResult.error } satisfies OrbListState),
+        ]),
+      ),
+    );
+    setProjectSecretCounts(
+      Object.fromEntries(
+        secretEntries.map(([projectId, secretsResult]) => [
+          projectId,
+          secretsResult.isOk() ? secretsResult.value.items.length : null,
         ]),
       ),
     );
@@ -330,6 +355,10 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
     setRenamingProject(null);
   };
 
+  const updateProjectSecretCount = useCallback((projectId: string, count: number) => {
+    setProjectSecretCounts((current) => ({ ...current, [projectId]: count }));
+  }, []);
+
   const onDeleteProject = async (project: ProjectView) => {
     if (!window.confirm(projectDeletionConfirmation(project.name))) return;
     setDeletingProject(project.id);
@@ -405,71 +434,82 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
             key={project.id}
           >
             <div className="project-header">
-              {renamingProject === project.id ? (
-                <form
-                  className="project-rename-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void onRenameProject(project);
-                  }}
-                >
-                  <input
-                    ref={projectRenameInputRef}
-                    aria-label="project name"
-                    value={projectRenameText}
-                    maxLength={80}
-                    onChange={(event) => setProjectRenameText(event.target.value)}
-                  />
-                  <button type="submit" disabled={savingProjectName}>
-                    {savingProjectName ? "saving…" : "save"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={savingProjectName}
-                    onClick={() => {
-                      setRenamingProject(null);
-                      setProjectRenameError(null);
+              <div className="project-identity">
+                {renamingProject === project.id ? (
+                  <form
+                    className="project-rename-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void onRenameProject(project);
                     }}
                   >
-                    cancel
-                  </button>
-                </form>
-              ) : (
-                <div className="project-name">
-                  <h2
-                    data-project-heading
-                    tabIndex={project.id === focusedProjectId ? -1 : undefined}
-                  >
-                    {project.name}
-                  </h2>
-                  <button
-                    type="button"
-                    className="project-rename-button"
-                    aria-label={`Rename ${project.name}`}
-                    title="Rename project"
-                    disabled={project.state === "deleting"}
-                    onClick={() => {
-                      setProjectRenameText(project.name);
-                      setProjectRenameError(null);
-                      setRenamingProject(project.id);
-                    }}
-                  >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                    <input
+                      ref={projectRenameInputRef}
+                      aria-label="project name"
+                      value={projectRenameText}
+                      maxLength={80}
+                      onChange={(event) => setProjectRenameText(event.target.value)}
+                    />
+                    <button type="submit" disabled={savingProjectName}>
+                      {savingProjectName ? "saving…" : "save"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingProjectName}
+                      onClick={() => {
+                        setRenamingProject(null);
+                        setProjectRenameError(null);
+                      }}
                     >
-                      <path d="M12 20h9" />
-                      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-              <span className="muted mono">{project.repositoryUrl}</span>
+                      cancel
+                    </button>
+                  </form>
+                ) : (
+                  <div className="project-name">
+                    <h2
+                      data-project-heading
+                      tabIndex={project.id === focusedProjectId ? -1 : undefined}
+                    >
+                      {project.name}
+                    </h2>
+                    <button
+                      type="button"
+                      className="project-rename-button"
+                      aria-label={`Rename ${project.name}`}
+                      title="Rename project"
+                      disabled={project.state === "deleting"}
+                      onClick={() => {
+                        setProjectRenameText(project.name);
+                        setProjectRenameError(null);
+                        setRenamingProject(project.id);
+                      }}
+                    >
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+                <span className="muted mono project-repository">{project.repositoryUrl}</span>
+                <button
+                  type="button"
+                  className="project-secrets-metadata"
+                  disabled={project.state === "deleting"}
+                  onClick={() => setSecretsProject(project)}
+                >
+                  <ProjectSecretKeyIcon className="project-secrets-metadata-icon" />
+                  {formatProjectSecretCount(projectSecretCounts[project.id])}
+                </button>
+              </div>
               <span className={`state-badge state-${project.state}`}>{project.state}</span>
               <div className="project-header-actions">
                 <NewOrbLink projectId={project.id} disabled={project.state === "deleting"} />
@@ -520,6 +560,14 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
           </section>
         );
       })}
+
+      {secretsProject !== null && (
+        <ProjectSecretsModal
+          project={secretsProject}
+          onCountChange={updateProjectSecretCount}
+          onClose={() => setSecretsProject(null)}
+        />
+      )}
 
       <section className="panel new-project-panel">
         <div className="project-form-heading">

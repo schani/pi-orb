@@ -167,6 +167,8 @@ export class BootHookRunner {
   private lateVerdict: Promise<void> = Promise.resolve();
   /** What the hooks' env file turned into, once it has been merged. */
   private envApplied: HookEnvReport | null = null;
+  /** Dashboard-managed project-secret names a hook must not shadow. */
+  private readonly managedEnvironmentNames = new Set<string>();
 
   constructor(options: BootHookRunnerOptions) {
     this.options = options;
@@ -183,6 +185,11 @@ export class BootHookRunner {
         this.clearStatus(hook);
       }
     }
+  }
+
+  /** Protect dashboard-managed names before resume and the env-file merge. */
+  addManagedEnvironmentNames(names: Iterable<string>): void {
+    for (const name of names) this.managedEnvironmentNames.add(name);
   }
 
   /** The latest outcome of each hook, for the health report. Empty on a clean orb. */
@@ -262,7 +269,7 @@ export class BootHookRunner {
     if (raw === null) return null;
     // The hook's umask decided the mode; the runtime owns it from here.
     this.files.hardenFile(path);
-    const parsed = parseHookEnvFile(raw);
+    const parsed = parseHookEnvFile(raw, this.managedEnvironmentNames);
     const applied: string[] = [];
     for (const [name, value] of parsed.entries) {
       target[name] = value;
@@ -294,7 +301,7 @@ export class BootHookRunner {
   hookEnv(): ReadonlyMap<string, string> | null {
     const raw = this.files.readText(hookEnvPath(this.options.home));
     if (raw === null) return null;
-    return parseHookEnvFile(raw).entries;
+    return parseHookEnvFile(raw, this.managedEnvironmentNames).entries;
   }
 
   /** What `applyHookEnv` did, for the agent's prompt fragment. Null before it ran. */

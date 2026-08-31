@@ -15,6 +15,7 @@ import type {
   OrbHostProviderError,
   PointerConflict,
   ProjectConflict,
+  ProjectSecretPointerConflict,
   RuntimeClientError,
   SignerError,
   SigningKeyConflict,
@@ -599,6 +600,54 @@ export interface AuthGate {
 }
 
 // ---------------------------------------------------------------------------
+// Project secrets (docs/credentials.md)
+
+export interface StoredProjectSecretBundle {
+  readonly projectId: string;
+  readonly revision: number;
+  readonly values: Readonly<Record<string, string>>;
+}
+
+export interface ProjectSecretPointerRow {
+  readonly projectId: string;
+  readonly rowVersion: number;
+  readonly revision: number;
+  /** Name -> wall-clock ms of the latest write. Contains no values. */
+  readonly entries: Readonly<Record<string, number>>;
+  readonly secretVersion: string;
+  readonly updatedAt: number;
+}
+
+export type ProjectSecretPointerWrite = Omit<ProjectSecretPointerRow, "projectId" | "rowVersion">;
+
+export interface ProjectSecretPointerStore {
+  readProjectSecretPointer(
+    task: SimulationTask,
+    projectId: string,
+  ): ResultAsync<ProjectSecretPointerRow | null, StoreError | ProjectConflict>;
+  /** CAS write allowed only while the parent project is active. */
+  casWriteProjectSecretPointer(
+    task: SimulationTask,
+    projectId: string,
+    expectedRowVersion: number | null,
+    next: ProjectSecretPointerWrite,
+  ): ResultAsync<
+    ProjectSecretPointerRow,
+    StoreError | ProjectConflict | ProjectSecretPointerConflict
+  >;
+  /** Removes metadata only while the parent project is durably deleting. */
+  deleteProjectSecretPointer(
+    task: SimulationTask,
+    projectId: string,
+  ): ResultAsync<void, StoreError | ProjectConflict>;
+}
+
+export interface ProjectSecretsDeps {
+  readonly pointers: ProjectSecretPointerStore;
+  readonly secrets: CredentialSecretStore;
+}
+
+// ---------------------------------------------------------------------------
 // Credential broker (docs/credentials.md)
 
 /**
@@ -667,7 +716,7 @@ export interface StoredSigningKey {
  * of these shapes under its own provider name, so the store itself stays a
  * dumb immutable-version keeper with no idea what a version means.
  */
-export type StoredSecret = StoredCredential | StoredSigningKey;
+export type StoredSecret = StoredCredential | StoredSigningKey | StoredProjectSecretBundle;
 
 export interface CredentialSecretStore {
   /** Creates a new immutable version and returns its identifier. */
@@ -682,6 +731,8 @@ export interface CredentialSecretStore {
     provider: string,
     version: string,
   ): ResultAsync<T | null, StoreError>;
+  /** Lists all live immutable versions under one provider namespace. */
+  listSecretVersions(task: SimulationTask, provider: string): ResultAsync<string[], StoreError>;
   /** Best-effort cleanup of a superseded version. */
   destroySecret(
     task: SimulationTask,
@@ -910,4 +961,5 @@ export interface ControlPlaneDeps {
   readonly nameLeaseMs: number;
   readonly control: import("./control-state.ts").ControlState;
   readonly constants: import("./constants.ts").LifecycleConstants;
+  readonly projectSecrets: ProjectSecretsDeps;
 }

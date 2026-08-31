@@ -12,6 +12,7 @@ import {
   type OrbInspectionItem,
   type OrbNameTriggerResponse,
   OrbNameTriggerSchema,
+  PROJECT_SECRETS_RUNTIME_PATH,
   RUNTIME_TOKENS_PREFIX,
   type TokenErrorBody,
   type TokenGrantBody,
@@ -30,7 +31,14 @@ import {
 import type { MintError, StoreError } from "../domain/errors.ts";
 import type { OrbRow } from "../domain/orb.ts";
 import { generateOrbName } from "../domain/orb-naming.ts";
-import type { BrokerDeps, ControlPlaneStore, MintDeps, OrbNameGenerator } from "../domain/ports.ts";
+import type {
+  BrokerDeps,
+  ControlPlaneStore,
+  MintDeps,
+  OrbNameGenerator,
+  ProjectSecretsDeps,
+} from "../domain/ports.ts";
+import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
 
 export interface RuntimeRouteDeps {
@@ -40,6 +48,7 @@ export interface RuntimeRouteDeps {
   readonly nameLeaseMs: number;
   /** Identity issuance (docs/workload-identity.md); its own store lookup. */
   readonly mint: MintDeps;
+  readonly projectSecrets: ProjectSecretsDeps;
 }
 
 const unauthorized: TokenErrorBody = { error: "unauthorized" };
@@ -194,6 +203,30 @@ export function registerRuntimeRoutes(
     }
     return { kind: "orb", orb };
   };
+
+  app.get(PROJECT_SECRETS_RUNTIME_PATH, async (request, reply) => {
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable") {
+      return reply.status(503).send({
+        error: { code: "unavailable", message: "project secrets unavailable", retryable: true },
+      });
+    }
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    const snapshot = await getProjectSecretSnapshot(task, deps.projectSecrets, auth.orb.projectId);
+    if (snapshot.isErr()) {
+      const internal = snapshot.error.type === "project_secret_corruption";
+      const conflict = snapshot.error.type === "project_secret_conflict";
+      return reply.status(internal ? 500 : conflict ? 409 : 503).send({
+        error: {
+          code: internal ? "internal" : conflict ? "conflict" : "unavailable",
+          message: internal ? "project secrets are inconsistent" : "project secrets unavailable",
+          retryable: !internal && !conflict,
+        },
+      });
+    }
+    reply.header("cache-control", "no-store");
+    return reply.send(snapshot.value);
+  });
 
   app.get(ORB_INSPECTION_LIST_PATH, async (request, reply) => {
     const auth = await authenticate(request.headers.authorization);

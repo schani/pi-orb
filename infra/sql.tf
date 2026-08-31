@@ -84,3 +84,26 @@ resource "google_secret_manager_secret_iam_member" "cp_credential_versions" {
   role      = "roles/secretmanager.secretVersionManager"
   member    = "serviceAccount:${google_service_account.control_plane.email}"
 }
+
+# Shared immutable-version parent for project-scoped environment-secret bundles.
+# PostgreSQL points at exact versions; payloads repeat project identity so the
+# deletion finalizer can enumerate and remove crash residue safely.
+resource "google_secret_manager_secret" "project_secrets" {
+  secret_id = "pi-orb-credential-project-secrets"
+  replication {
+    auto {}
+  }
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_secret_manager_secret_iam_member" "cp_project_secrets_accessor" {
+  secret_id = google_secret_manager_secret.project_secrets.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.control_plane.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "cp_project_secrets_versions" {
+  secret_id = google_secret_manager_secret.project_secrets.id
+  role      = "roles/secretmanager.secretVersionManager"
+  member    = "serviceAccount:${google_service_account.control_plane.email}"
+}

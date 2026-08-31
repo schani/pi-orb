@@ -370,6 +370,7 @@ async function main(): Promise<void> {
     nameLeaseMs: 60_000,
     control: new ControlState(),
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
+    projectSecrets: { pointers: database.projectSecrets, secrets },
   };
 
   const app = Fastify({ logger: false });
@@ -410,6 +411,7 @@ async function main(): Promise<void> {
       broker,
       nameGenerator: deps.nameGenerator,
       nameLeaseMs: deps.nameLeaseMs,
+      projectSecrets: deps.projectSecrets,
       mint: {
         store: deps.store,
         // The signer reads the active key row per signature and caches only

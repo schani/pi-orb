@@ -139,7 +139,7 @@ new GceOrbHostProvider({
 });
 ```
 
-The contract shared by every provider is: a persistent filesystem plus a host running the orb runtime container image with provider-delivered environment variables (the broker pair in `docs/credentials.md` plus, when port exposure is enabled, the Tailscale variables in `docs/ports.md`, whose auth key providers mint only at actual host creation). Where that container runs — the local Docker daemon or a Container-Optimized OS VM — never appears in the control plane or lifecycle engine.
+The contract shared by every provider is: a persistent filesystem plus a host running the orb runtime container image with provider-delivered environment variables (the broker pair in `docs/credentials.md` plus, when port exposure is enabled, the Tailscale variables in `docs/ports.md`, whose auth key providers mint only at actual host creation). Project secrets deliberately add nothing to this provider contract: the runtime fetches them through the existing broker URL/bearer after setup, so Docker, GCE, and process providers remain unchanged. Where that container runs — the local Docker daemon or a Container-Optimized OS VM — never appears in the control plane or lifecycle engine.
 
 **Persistent home decision (2026-08-09).** The runtime user's complete Unix home is ordinary durable orb state, independent of any particular extension or tool. Every provider sets `HOME` to `<work-dir>/home`: `/workspace/home` in Docker/GCE and the corresponding per-orb process-host workspace path. The runtime independently creates that directory with mode `0700`, repairs its permissions on every boot, resets `HOME` to the authoritative path, and fails readiness with `home_init_failed` if it cannot establish it. This defense in depth prevents alternate providers/direct launches from silently writing home-relative state into a disposable container layer or the process provider's shared host home. Docker's writable layer and the GCE boot disk remain intentionally disposable; all software following `$HOME`/`os.homedir()` now lands on the attached orb filesystem alongside the explicitly placed repository, Pi session, and credential cache. Orb deletion removes the home with the same authoritative filesystem.
 
@@ -185,7 +185,7 @@ type RuntimeHealth =
       orbId: string;
       runtimeInstanceId: string;
       status: "initializing";
-      phase: "booting" | "cloning" | "loading_session" | "checking_auth";
+      phase: "booting" | "cloning" | "setup_running" | "checking_project_secrets" | "loading_session" | "checking_auth";
     }
   | {
       v: 1;
