@@ -68,7 +68,7 @@ Development/build dependencies:
 - `vite` and `@vitejs/plugin-react`;
 - `@biomejs/biome`, pinned exactly, for repository-wide linting, formatting, and import organization; a scoped GritQL plugin preserves the no-throw rule for first-party production code while allowing test assertions and deterministic-testkit invariants to throw;
 - `vitest` for unit, adapter, component, and deterministic simulation tests;
-- `@playwright/test` only when the browser E2E test is implemented.
+- `@playwright/test` for focused real-browser E2E coverage, beginning with frontend-only IAP-session recovery (`docs/testing.md`; added 2026-09-03).
 
 Everything else should begin as first-party code or use an existing CLI.
 
@@ -108,7 +108,7 @@ Use React with Vite, browser APIs, and a small first-party reducer/context for H
 
 Do not add TanStack Router, TanStack Query, or a state-management package initially. The first UI has few routes and one live session. Add a router or query-cache library only after navigation/caching behavior becomes nontrivial.
 
-Use the shared TypeBox schemas to validate data received by the browser. Add Playwright when the first browser E2E flow exists. Defer styling/component-library selection.
+Use the shared TypeBox schemas to validate data received by the browser. Playwright drives the small set of interactions that require a real browser and cannot be established by SSR or transport tests; keep ordinary components on Vitest. Defer styling/component-library selection.
 
 ## Tests, logging, Docker, and infrastructure
 

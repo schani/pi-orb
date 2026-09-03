@@ -66,6 +66,66 @@ body {
 
 /* ---------- app shell: full-bleed header, fluid width ---------- */
 
+.session-ribbon {
+  position: sticky;
+  z-index: 90;
+  top: 0;
+  min-height: 52px;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 11px;
+  padding: 7px var(--page-pad);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent);
+  box-shadow: 0 5px 16px rgb(34 28 18 / 7%);
+}
+
+.session-ribbon-mark {
+  width: 25px;
+  height: 25px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font: 700 12px var(--mono);
+}
+
+.session-ribbon-copy {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.session-ribbon-copy strong {
+  font-family: var(--serif);
+  font-size: 14px;
+}
+
+.session-ribbon-copy > span {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .session-ribbon {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+
+  .session-ribbon-copy > span {
+    display: none;
+  }
+}
+
 .app-header {
   display: flex;
   flex: none;
@@ -389,6 +449,19 @@ button.danger {
 
 button.danger:hover:not(:disabled) {
   background: var(--accent-soft);
+}
+
+.session-ribbon button {
+  flex: none;
+  color: var(--paper);
+  background: var(--accent);
+  border-color: var(--accent);
+  font-family: var(--serif);
+  font-weight: 600;
+}
+
+.session-ribbon button:hover:not(:disabled) {
+  background: var(--ink);
 }
 
 input:not(.app-search-input),
@@ -2369,4 +2442,8 @@ button.project-orb-action.danger:hover:not(:disabled) {
     padding-inline: 6px;
     font-size: 11px;
   }
+}
+
+.app:has(> .session-ribbon) .orb-header {
+  top: 52px;
 }

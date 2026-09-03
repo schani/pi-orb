@@ -41,6 +41,7 @@ Still open:
 The browser uses a small unauthenticated JSON API under `/api/v1`:
 
 ```text
+GET  /api/v1/session
 GET  /api/v1/projects
 POST /api/v1/projects
 GET  /api/v1/projects/:projectId
@@ -65,6 +66,8 @@ GET  /api/v1/orbs/:orbId/messages
 WS   /api/v1/orbs/:orbId/live
 WS   /api/v1/orbs/:orbId/terminal
 ```
+
+`GET /api/v1/session` returns `{ "status": "ok" }` without reading application state. In the cloud it is useful because merely reaching that response proves that IAP admitted the browser request; the browser probes it after regaining focus following reauthentication. It is not an application authentication or authorization implementation, and in unauthenticated local development it only confirms control-plane reachability.
 
 ### In-orb inspection API (decided and implemented 2026-08-27)
 

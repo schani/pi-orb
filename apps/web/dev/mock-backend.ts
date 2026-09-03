@@ -341,6 +341,11 @@ async function handleApi(
   const path = url.pathname;
   const method = request.method ?? "GET";
 
+  if (method === "GET" && path === "/api/v1/session") {
+    sendJson(response, 200, { status: "ok" });
+    return true;
+  }
+
   if (method === "GET" && path === "/api/v1/projects") {
     sendJson(response, 200, { items: [...state.projects.values()] });
     return true;
@@ -1306,6 +1311,7 @@ function acceptTerminalSocket(socket: WebSocket): void {
  */
 export function mockBackendPlugin(): Plugin {
   const state = initialState();
+  let sessionExpired = false;
   const sockets = new WebSocketServer({
     noServer: true,
     handleProtocols: (protocols) =>
@@ -1319,8 +1325,89 @@ export function mockBackendPlugin(): Plugin {
   return {
     name: "pi-orb-frontend-fixture",
     apply: "serve",
+    transformIndexHtml() {
+      return [
+        {
+          tag: "style",
+          children:
+            ".frontend-fixture-auth-control{position:fixed;z-index:200;right:12px;bottom:12px;display:flex;align-items:center;gap:8px;padding:7px 9px;background:#221c12;color:#f8f3e9;border-radius:6px;box-shadow:0 7px 24px rgb(34 28 18/.25);font:10px ui-monospace,monospace}.frontend-fixture-auth-control button{padding:4px 7px;border:1px solid #f8f3e9;border-radius:4px;color:inherit;background:transparent;font:inherit}",
+        },
+        {
+          tag: "script",
+          attrs: { type: "module" },
+          children: `
+            const control = document.createElement("div");
+            control.className = "frontend-fixture-auth-control";
+            const label = document.createElement("span");
+            label.textContent = "frontend fixture · session active";
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = "expire session";
+            let expired = false;
+            button.addEventListener("click", async () => {
+              button.disabled = true;
+              const action = expired ? "restore" : "expire";
+              let response;
+              try {
+                response = await fetch("/__pi_orb_fixture/session/" + action, { method: "POST" });
+              } catch {
+                label.textContent = "frontend fixture · control unavailable";
+                button.disabled = false;
+                return;
+              }
+              if (response.ok) {
+                expired = !expired;
+                label.textContent = expired
+                  ? "frontend fixture · session expired"
+                  : "frontend fixture · session active";
+                button.textContent = expired ? "restore session" : "expire session";
+                window.dispatchEvent(new Event("focus"));
+              } else {
+                label.textContent = "frontend fixture · control failed";
+              }
+              button.disabled = false;
+            });
+            control.append(label, button);
+            document.body.append(control);
+          `,
+        },
+      ];
+    },
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
+        const path = new URL(request.url ?? "/", "http://fixture.local").pathname;
+        if (
+          sessionExpired &&
+          request.method === "GET" &&
+          path === "/" &&
+          request.headers.accept?.includes("text/html") === true
+        ) {
+          // A production top-level reload enters IAP and returns after Google
+          // login. Frontend-only mode skips the external page but models the
+          // same successful same-tab round trip.
+          sessionExpired = false;
+        }
+        if (request.method === "POST" && path === "/__pi_orb_fixture/session/expire") {
+          sessionExpired = true;
+          for (const client of sockets.clients) client.terminate();
+          response.statusCode = 204;
+          response.end();
+          return;
+        }
+        if (request.method === "POST" && path === "/__pi_orb_fixture/session/restore") {
+          sessionExpired = false;
+          response.statusCode = 204;
+          response.end();
+          return;
+        }
+        if (sessionExpired && path.startsWith("/api/")) {
+          // Deliberately use an HTML body, as IAP owns this response rather
+          // than the control-plane JSON error contract.
+          response.statusCode = 401;
+          response.setHeader("content-type", "text/html; charset=utf-8");
+          response.end("<!doctype html><title>Sign in required</title>");
+          return;
+        }
         void handleApi(state, request, response).then(
           (handled) => {
             if (!handled) next();
@@ -1340,6 +1427,10 @@ export function mockBackendPlugin(): Plugin {
       const onUpgrade = (request: IncomingMessage, socket: Socket, head: Buffer) => {
         const path = new URL(request.url ?? "/", "http://fixture.local").pathname;
         const match = /^\/api\/v1\/orbs\/([^/]+)\/(live|terminal)$/.exec(path);
+        if (sessionExpired && match !== null) {
+          socket.destroy();
+          return;
+        }
         if (match === null) return;
         const orbId = decodeURIComponent(match[1] ?? "");
         const kind = match[2];

@@ -5,6 +5,10 @@ import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
 
 const closed = { additionalProperties: false } as const;
 
+/** Reachability response used to confirm that the browser passed its external auth proxy. */
+export const SessionProbeSchema = Type.Object({ status: Type.Literal("ok") }, closed);
+export type SessionProbe = Static<typeof SessionProbeSchema>;
+
 export const OrbStateSchema = Type.Union([
   Type.Literal("creating"),
   Type.Literal("starting"),

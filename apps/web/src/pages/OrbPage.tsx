@@ -28,6 +28,7 @@ import {
   stopOrb,
   updateOrb,
 } from "../lib/api.ts";
+import { loadComposerDraft, saveComposerDraft } from "../lib/composer-draft.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { mergeReplicatedHistory } from "../lib/history-refresh.ts";
@@ -101,7 +102,9 @@ type OrbPageAction =
   | { type: "message_enqueue_failed"; requestId: string; error: ApiError }
   | { type: "send_unavailable" };
 
-function initialState(): OrbPageState {
+function initialState(orbId: string): OrbPageState {
+  const loadedDraft = loadComposerDraft(orbId);
+  const draft = loadedDraft.isOk() ? loadedDraft.value : null;
   return {
     records: new Map(),
     afterRecordId: null,
@@ -114,9 +117,9 @@ function initialState(): OrbPageState {
     operationId: null,
     liveBlocks: new Map(),
     tools: new Map(),
-    composerText: "",
-    composerMode: "message",
-    composerImages: [],
+    composerText: draft?.text ?? "",
+    composerMode: draft?.mode ?? "message",
+    composerImages: draft?.images ?? [],
     pendingRequest: null,
     requestError: null,
     serverError: null,
@@ -375,7 +378,20 @@ function CopyCodeButton({ code }: { code: string }) {
 }
 
 export function OrbPage({ orbId }: { orbId: string }) {
-  const [state, dispatch] = useReducer(reducer, undefined, initialState);
+  const [state, dispatch] = useReducer(reducer, orbId, initialState);
+  const draftStorageErrorShown = useRef(false);
+
+  useEffect(() => {
+    const saved = saveComposerDraft(orbId, {
+      text: state.composerText,
+      mode: state.composerMode,
+      images: state.composerImages,
+    });
+    if (saved.isErr() && !draftStorageErrorShown.current) {
+      draftStorageErrorShown.current = true;
+      dispatch({ type: "notice", message: saved.error.message });
+    }
+  }, [orbId, state.composerImages, state.composerMode, state.composerText]);
   const [orb, setOrb] = useState<OrbView | null>(null);
   const [projectName, setProjectName] = useState<string | null>(null);
   const [orbError, setOrbError] = useState<ApiError | null>(null);

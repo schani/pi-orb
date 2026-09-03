@@ -18,10 +18,12 @@
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "test:e2e": "vitest run --config e2e/vitest.config.ts"
+    "test:e2e": "vitest run --config e2e/vitest.config.ts",
+    "test:e2e:frontend": "vitest run --config e2e/vitest.config.ts e2e/frontend-session.e2e.test.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",
+    "@playwright/test": "1.62.1",
     "typescript": "7.0.2",
     "vitest": "^3.0.0"
   },

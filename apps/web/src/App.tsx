@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { AppSearchProvider } from "./components/AppSearch.tsx";
+import { SessionRibbon } from "./components/SessionRibbon.tsx";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
@@ -38,34 +39,33 @@ function readHash(): string {
 function AppRoutes() {
   const hash = useSyncExternalStore(subscribeToHash, readHash);
   const route = parseRoute(hash);
-  return (
-    <div className="app">
-      {route.page === "projects" ? (
-        <>
-          <header className="app-header">
-            <a href="#/" className="app-title">
-              pi-orb
-            </a>
-          </header>
-          <div className="app-main">
-            <ProjectsPage focusedProjectId={route.focusedProjectId} />
-          </div>
-        </>
-      ) : route.page === "create_orb" ? (
-        <CreateOrbPage key={route.projectId} projectId={route.projectId} />
-      ) : route.page === "orb" ? (
-        <OrbPage key={route.orbId} orbId={route.orbId} />
-      ) : (
-        <NotFoundPage />
-      )}
-    </div>
+  return route.page === "projects" ? (
+    <>
+      <header className="app-header">
+        <a href="#/" className="app-title">
+          pi-orb
+        </a>
+      </header>
+      <div className="app-main">
+        <ProjectsPage focusedProjectId={route.focusedProjectId} />
+      </div>
+    </>
+  ) : route.page === "create_orb" ? (
+    <CreateOrbPage key={route.projectId} projectId={route.projectId} />
+  ) : route.page === "orb" ? (
+    <OrbPage key={route.orbId} orbId={route.orbId} />
+  ) : (
+    <NotFoundPage />
   );
 }
 
 export function App() {
   return (
     <AppSearchProvider>
-      <AppRoutes />
+      <div className="app">
+        <SessionRibbon />
+        <AppRoutes />
+      </div>
     </AppSearchProvider>
   );
 }

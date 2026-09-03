@@ -17,15 +17,22 @@ import {
   ProjectViewSchema,
   projectSecretPath,
   projectSecretsPath,
+  SessionProbeSchema,
   type UpdateOrbRequest,
   type UpdateProjectRequest,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import type { Static, TSchema } from "typebox";
 import { Check } from "typebox/value";
+import {
+  beginSessionRequest,
+  reportApplicationReached,
+  reportAuthenticationRequired,
+} from "./session.ts";
 
 /** Typed failure of a control-plane HTTP call. */
 export type ApiError =
+  | { type: "auth_required"; message: string }
   | { type: "network"; message: string }
   | {
       type: "http";
@@ -39,6 +46,8 @@ export type ApiError =
 
 export function describeApiError(error: ApiError): string {
   switch (error.type) {
+    case "auth_required":
+      return error.message;
     case "network":
       return `network error: ${error.message}`;
     case "http":
@@ -65,12 +74,28 @@ async function apiFetch<S extends TSchema>(
   path: string,
   init?: RequestInit,
 ): Promise<Result<Static<S>, ApiError>> {
+  const sequence = beginSessionRequest();
+  const headers = new Headers(init?.headers);
+  // IAP returns 401 to AJAX requests instead of redirecting them to Google.
+  // Without this signal, fetch can flatten the cross-origin redirect into an
+  // indistinguishable network/CORS failure.
+  headers.set("x-requested-with", "XMLHttpRequest");
+
   let response: Response;
   try {
-    response = await fetch(path, init);
+    response = await fetch(path, { ...init, headers });
   } catch (cause) {
     return err({ type: "network", message: describeThrown(cause) });
   }
+
+  if (response.status === 401) {
+    reportAuthenticationRequired(sequence);
+    return err({
+      type: "auth_required",
+      message: "Your pi-orb session expired. Sign in again to continue.",
+    });
+  }
+  reportApplicationReached(sequence);
 
   let body: unknown = null;
   try {
@@ -109,6 +134,10 @@ async function apiFetch<S extends TSchema>(
 
 const ProjectListSchema = ListResponseSchema(ProjectViewSchema);
 const OrbListSchema = ListResponseSchema(OrbViewSchema);
+
+export function probeSession() {
+  return apiFetch(SessionProbeSchema, "/api/v1/session", { cache: "no-store" });
+}
 
 export function listProjects(): Promise<Result<{ items: ProjectView[] }, ApiError>> {
   return apiFetch(ProjectListSchema, "/api/v1/projects");

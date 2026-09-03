@@ -192,6 +192,10 @@ export function registerRoutes(
   config: ViewConfig,
   signingKeys?: SigningKeyDeps,
 ): void {
+  // Reaching this response proves that an external browser auth proxy (IAP in
+  // cloud deployment) admitted the request. It intentionally reads no state.
+  app.get("/api/v1/session", async (_request, reply) => reply.send({ status: "ok" }));
+
   if (signingKeys !== undefined) {
     app.post("/api/v1/issuer/signing-keys/publish", async (_request, reply) => {
       const published = await publishSigningKey(task, signingKeys, { now: task.wallNow() });
