@@ -11,6 +11,7 @@ import { Check } from "typebox/value";
 import { WebSocket } from "ws";
 import { withDeadline } from "../domain/dst.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
+import { monitorWebSocketLiveness } from "./websocket-heartbeat.ts";
 
 const TRY_AGAIN_LATER = 1013;
 const UNSUPPORTED_DATA = 1003;
@@ -71,6 +72,10 @@ export async function registerLiveProxy(
       deps.control.registerBrowserConnection(orbId, connectionId, () =>
         closeBoth(TRY_AGAIN_LATER, "orb is being deleted"),
       );
+      monitorWebSocketLiveness(browserSocket, {
+        onTimeout: () =>
+          request.log.warn({ orbId, connectionId, leg: "browser" }, "live websocket timed out"),
+      });
 
       // Attach handlers synchronously: the browser sends client.hello as soon
       // as its upgrade completes, while routing below crosses async adapter
@@ -163,6 +168,10 @@ export async function registerLiveProxy(
       const wsUrl = `${observed.value.runtimeAddress.baseUrl.replace(/^http/, "ws")}/v1/live`;
       const runtimeSocket = new WebSocket(wsUrl, [RUNTIME_SUBPROTOCOL]);
       upstream = runtimeSocket;
+      monitorWebSocketLiveness(runtimeSocket, {
+        onTimeout: () =>
+          request.log.warn({ orbId, connectionId, leg: "runtime" }, "live websocket timed out"),
+      });
 
       runtimeSocket.on("open", () => {
         upstreamOpen = true;
