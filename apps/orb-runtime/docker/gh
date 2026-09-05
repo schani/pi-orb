@@ -3,8 +3,15 @@
 # a fresh short-lived GitHub token from the credential broker, and execs the
 # real gh with GH_TOKEN set. A caller-provided GH_TOKEN wins; on fetch
 # failure the message lands on stderr and gh runs unauthenticated.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "$script_dir" = /usr/local/bin ]; then
+  app_root=/app
+else
+  app_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+fi
+
 if [ -z "${GH_TOKEN:-}" ] && [ -n "${PI_ORB_RUNTIME_TOKEN:-}" ]; then
-  token="$(node /app/apps/orb-runtime/src/gh/cli.ts print)" && {
+  token="$(node "$app_root/apps/orb-runtime/src/gh/cli.ts" print)" && {
     GH_TOKEN="$token"
     export GH_TOKEN
   }

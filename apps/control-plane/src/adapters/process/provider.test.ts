@@ -47,6 +47,11 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   controlPlaneUrl: process.env.PI_ORB_CONTROL_PLANE_URL,
   port: process.env.PI_ORB_RUNTIME_PORT,
   path: process.env.PATH,
+  gitConfigCount: process.env.GIT_CONFIG_COUNT,
+  gitConfigKey0: process.env.GIT_CONFIG_KEY_0,
+  gitConfigValue0: process.env.GIT_CONFIG_VALUE_0,
+  gitConfigKey1: process.env.GIT_CONFIG_KEY_1,
+  gitConfigValue1: process.env.GIT_CONFIG_VALUE_1,
   pid: process.pid,
 }));
 const server = createServer((_req, res) => { res.end("ok"); });
@@ -167,6 +172,40 @@ describe("ProcessOrbHostProvider", () => {
       }
     });
     expect(values.path?.split(":")[0]).toBe(commandDirectory);
+    // The image's system gitconfig has no process-host equivalent, so the
+    // GitHub credential helper travels in the environment with the shim.
+    expect(values.gitConfigCount).toBe("1");
+    expect(values.gitConfigKey0).toBe("credential.https://github.com.helper");
+    expect(values.gitConfigValue0).toBe("!pi-orb-git-credential");
+    rmSync(observedEnv, { force: true });
+  });
+
+  it("appends the credential helper after inherited git configuration entries", async () => {
+    const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
+    const commandDirectory = join(tmpdir(), `pi-orb-commands-${crypto.randomUUID()}`);
+    const { provider } = makeProvider(
+      {
+        OBSERVED_ENV_FILE: observedEnv,
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "user.name",
+        GIT_CONFIG_VALUE_0: "inherited",
+      },
+      { commandDirectory },
+    );
+    const provisioned = await provider.provision(task, request, context);
+    expect(provisioned.isOk()).toBe(true);
+    const values = await eventually(() => {
+      try {
+        return JSON.parse(readFileSync(observedEnv, "utf8")) as Record<string, string>;
+      } catch {
+        return null;
+      }
+    });
+    expect(values.gitConfigCount).toBe("2");
+    expect(values.gitConfigKey0).toBe("user.name");
+    expect(values.gitConfigValue0).toBe("inherited");
+    expect(values.gitConfigKey1).toBe("credential.https://github.com.helper");
+    expect(values.gitConfigValue1).toBe("!pi-orb-git-credential");
     rmSync(observedEnv, { force: true });
   });
 
