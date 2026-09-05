@@ -94,7 +94,7 @@ No child-orb protocol has been finalized.
 
 Subsystem designs:
 
-- [docs/host-provider.md](docs/host-provider.md) — the `OrbHostProvider` port, runtime readiness, Docker/GCE specifics, the exe.dev and AWS Lambda MicroVMs evaluations, rejected host alternatives
+- [docs/host-provider.md](docs/host-provider.md) — the `OrbHostProvider` port, runtime readiness, Docker/GCE specifics, alternative host evaluations
 - [docs/compute-replacement.md](docs/compute-replacement.md) — immutable-compute plan: dispose failed incarnations, replace stale host specifications on next Start, and retain the workspace throughout
 - [docs/lifecycle.md](docs/lifecycle.md) — orb states, reconciliation rules, idle auto-stop, the orphan-host sweep
 - [docs/orb-deletion.md](docs/orb-deletion.md) — permanent orb deletion, resource inventory, cleanup protocol, and verification plan
@@ -127,5 +127,6 @@ Reference material:
 - [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's “Putting an Agent in an Orb”
 - [docs/EXE-DEV.md](docs/EXE-DEV.md) — the full exe.dev host-provider evaluation
 - [docs/AWS-MICROVMS.md](docs/AWS-MICROVMS.md) — the full AWS Lambda MicroVMs host-provider evaluation
+- [docs/GCP-SANDBOXES.md](docs/GCP-SANDBOXES.md) — GKE Agent Sandbox and Cloud Run alternatives: persistent workspaces and startup tradeoffs
 - [docs/PI-CODEX-E2E.md](docs/PI-CODEX-E2E.md) — Pi + mock-OpenAI-Codex E2E integration mechanism
 - [docs/DETERMINED-BUG.md](docs/DETERMINED-BUG.md) — `determined` 0.4.0 cross-task-await deadlock (fixed in 0.4.1)

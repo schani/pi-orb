@@ -1,8 +1,10 @@
 # AWS Lambda MicroVMs as an orb host provider — evaluation (2026-08-05)
 
-Status: **feasible via externalized durable state — proposal, not decided.**
-Summary lives in `docs/host-provider.md`; the decision is tracked as open
-question 37. This document is the full writeup.
+Status: **not adopted (2026-09-05); retain the current GCE provider.**
+The storage, lifecycle, and cross-cloud costs outweigh the unmeasured startup
+benefit. The evaluated proposal remains below for future reference.
+Summary lives in `docs/host-provider.md`; the decision is recorded in
+`docs/open-questions.md`, question 37. This document is the full writeup.
 
 The service was initially dismissed because of its hard maximum lifetime. This
 re-evaluation started from the premise that the lifetime cap is acceptable if
@@ -10,6 +12,40 @@ an orb can continue on a successor VM, provided the durable data comes along.
 The investigation confirms the premise — with the important correction that
 the disks cannot literally be brought along; they must live outside the VM
 from the start.
+
+## Re-evaluation (2026-09-05)
+
+The user's workload observation is that individual active sessions are short;
+the workspace makes an orb long-lived. This supports a simpler initial
+proposal: terminate compute on ordinary stop, retain the workspace, and create
+a fresh incarnation on Start. Suspend/resume and seamless eight-hour rotation
+need not be prerequisites. A deadline guard still must drain and stop an
+exceptionally long session before forced termination; its policy remains in
+`docs/open-questions.md`, question 37. Session lengths have not been measured
+in this investigation.
+
+The current [RunMicrovm API](https://docs.aws.amazon.com/lambda/latest/microvm-api/API_RunMicrovm.html)
+still caps existence at eight hours and exposes no persistent-volume input.
+It now documents `clientToken` for idempotent creation. Use one stable token
+per orb/incarnation; this does not replace durable resource association or
+single-writer fencing.
+
+EFS remains an **inference**, not a validated integration: the documented
+[VPC connector](https://docs.aws.amazon.com/lambda/latest/dg/microvms-networking.html)
+and [filesystem-mount capabilities](https://docs.aws.amazon.com/lambda/latest/dg/microvms-images.html)
+provide plausible prerequisites, but do not prove an NFS client/kernel,
+EFS access-point authentication, or acceptable filesystem performance.
+An attachable block disk is a different requirement and is not met by this
+proposal. Hook-driven object-store sync is rejected for authoritative state:
+a crash can lose edits before export.
+
+AWS's [startup claim](https://aws.amazon.com/blogs/compute/announcing-lambda-microvms-serverless-compute-environments-with-vm-level-isolation-and-near-instant-startup/)
+concerns restoring an initialized image. Orb readiness additionally requires
+mounting `/workspace`, refreshing credentials, and running boot hooks. Under
+`docs/orb-setup-hook.md`, every fresh incarnation runs setup again; persistent
+files alone do not eliminate that work. Historical third-party timings below
+are not measurements of pi-orb or an EFS-backed launch. GCP alternatives and
+the comparative recommendation are in `docs/GCP-SANDBOXES.md`.
 
 ## What Lambda MicroVMs are
 
@@ -94,22 +130,17 @@ data-disk/boot-disk) with the durable side outside the VM:
 - The MicroVM's local disk (the snapshot rootfs) is the disposable boot —
   runtime image, tools, caches.
 - The mount must happen in the **`/run` hook**, not at image build: a mount
-  performed during the build would be baked into the shared snapshot, and NFS
-  TCP state does not survive snapshot restore anyway. `/resume` must
-  revalidate the mount after suspend/resume for the same reason.
-- **Rotation**: the control plane tracks VM age and proactively drains
+  performed during the build would capture per-orb network state in a shared
+  snapshot. Connections may need re-establishing after restore; any optional
+  `/resume` path must revalidate the mount after suspend/resume.
+- **Optional seamless rotation**: the control plane tracks VM age and proactively drains
   (existing `stopping` machinery), terminates, `run-microvm`s a successor,
   and remounts the same EFS path — all before the 8 h cap. The `/terminate`
   hook is a flush backstop, not the plan.
 
-A weaker fallback if EFS turns out not to work: sync the workspace to object
-storage from the `/suspend` and `/terminate` hooks and restore in `/run`. This
-loses deltas on crash and depends on the undocumented terminate-hook timeout,
-so it is not the proposed design.
-
-Notable upside: this gives a **cleaner runtime-image upgrade story than any
-current provider** — terminate, run from the new image version, remount. No
-startup-script rewriting (GCE), no rootfs-is-the-data problem (exe.dev).
+Runtime-image upgrades use the same immutable-compute split as the current
+GCE provider: terminate compute, launch the new image, retain the workspace
+(`docs/compute-replacement.md`).
 
 ## How it maps onto `OrbHostProvider`
 
@@ -118,12 +149,12 @@ contract in `docs/host-provider.md`.
 
 | Port requirement | MicroVMs mapping | Fit |
 |---|---|---|
-| `provision` idempotent by orbId | `run-microvm` + create per-orb EFS access point; orbId via `runHookPayload`; idempotency is ours to build (no name/dedup parameter documented) | Workable — needs control-plane-side dedup |
+| `provision` idempotent by orbId | `run-microvm` with stable per-incarnation `clientToken` + per-orb EFS access point; orbId via `runHookPayload` | Workable — retain association durably |
 | Runtime delivery (OCI image + env) | Dockerfile-built MicroVM image; env at image level, per-orb values via `runHookPayload` (16 KB) | Good — per-orb config moves from env to run payload |
 | `observe` with definitive absence | `get-microvm` / `list-microvms`; absent from list is definitive; EFS presence distinguishes "stopped" from "never existed" | Good |
 | `listManagedHosts` with orb association | `list-microvms` + control-plane records; per-VM tagging unverified | Workable |
-| `stop` (retain filesystem) | Short-term: `suspend-microvm` (state intact, ~free). Long-term: flush + `terminate-microvm`; "stopped" = no VM, EFS holds the data | Good — better than exe.dev, but see the rotation obligation |
-| `start` (restart in place) | Resume if suspended; otherwise `run-microvm` a fresh VM + remount EFS | Good |
+| `stop` (retain filesystem) | Proposed first path: drain + `terminate-microvm`; "stopped" = no compute, EFS holds the data | Requires lifecycle support for stopped-without-compute |
+| `start` | Fresh incarnation + `run-microvm` + remount EFS | Reuses replacement invariants; needs a new lifecycle path |
 | Token readback on provision-reuse | No instance metadata store; deliver via `runHookPayload`, read back via runtime | Workable |
 | `diagnose` (optional) | `get-microvm` `stateReason` + CloudWatch logs; Lambda-provided shell-access connector exists | Good |
 | Control plane → runtime HTTP/WS | Public endpoint + JWE token header; WS officially supported | Works with the same contract extension exe.dev needs |
@@ -131,14 +162,14 @@ contract in `docs/host-provider.md`.
 
 ## The real impedance mismatches
 
-### 1. The rotation obligation (new lifecycle work, unique to this provider)
+### 1. The lifetime deadline
 
-No other evaluated provider imposes a deadline on healthy hosts. The lifecycle
-machine must learn VM age tracking, a proactive drain-terminate-rerun-remount
-sequence, and a successor-handoff so the orb's identity (runtime token,
-history cursor, endpoint) survives the swap. Suspended orbs also burn the
-budget, so "idle-stopped" orbs older than the cap must be converted to
-"terminated with EFS state" even while idle.
+The lifecycle machine must track the provider deadline. The initial proposal
+drains and stops before it; seamless drain-terminate-rerun-remount is an
+alternative for uninterrupted long sessions. Replacement preserves orb identity
+and durable history but rotates incarnation credentials and endpoint under
+`docs/compute-replacement.md`. Terminating on ordinary stop avoids spending
+the lifetime budget on suspended orbs.
 
 ### 2. Durable state is a second AWS system, not a provider feature
 
@@ -184,20 +215,11 @@ storage: $0.08/GB-month for suspended snapshots, standard EFS rates
 (~$0.30/GB-month) for orb state. Suspend/resume cycling costs pennies
 ($0.0038/GB written per suspend, $0.00155/GB read per resume).
 
-## What must be verified empirically (in order of risk)
+## Evaluation status
 
-1. **EFS/NFS mount through a VPC egress connector from inside a MicroVM.**
-   Nothing documents this combination; it merely follows from "VPC egress +
-   mount capability". This is the load-bearing assumption — if it fails, the
-   design degrades to hook-driven object-store sync.
-2. **Git/workspace performance on EFS** for realistic orb workloads.
-3. **NFS mount survival across suspend/resume** (stateful TCP under snapshot
-   restore; `/resume` revalidation strategy).
-4. **`/terminate` hook timeout** — how much flush time exists at the cap.
-5. **Auth token maximum expiry and mint rate limits** for the broker.
-6. **Per-VM tagging/enumeration fields** on `list-microvms`, and behavior
-   under concurrent `run-microvm` calls for the same orb (idempotency).
-7. **Account memory quota** default and increase turnaround.
+This is documentation research; no AWS resources were provisioned or startup
+benchmarks run. Empirical prerequisites and unresolved policy choices live in
+`docs/open-questions.md`, question 37.
 
 ## Sources
 
