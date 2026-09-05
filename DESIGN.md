@@ -13,7 +13,7 @@ Pi is the first agent harness, embedded through the Pi SDK. The host lifecycle, 
 The first target is deliberately narrow:
 
 - Run locally using Docker; container-restricted trusted test environments may use the unsandboxed process-host + embedded PGlite composition.
-- Drive lifecycle and conversation input through the web UI; a local checkout is not required. The in-orb `pi-orb` CLI may read sibling-orb metadata and replicated transcripts for agent coordination.
+- Drive lifecycle and conversation input through the web UI; a local checkout is not required. The in-orb `pi-orb` CLI may read sibling-orb metadata and replicated transcripts for agent coordination, and request self-archival when the user asks.
 - Let users register a project with a name and public Git repository URL.
 - Clone the repository into a fresh orb without caching or synchronization optimizations.
 - Use a fixed orb runtime image and prescribed base environment; projects may add write-only environment secrets fetched by each orb runtime at boot (`docs/credentials.md`).
@@ -32,7 +32,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 
 ## Product and interaction decisions
 
-- The user-facing interface is web-based. The runtime image also provides a narrow read-only `pi-orb` CLI for agents to discover sibling orbs and inspect replicated transcripts, plus workload-identity token minting.
+- The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The first slice has no authentication or authorization: anybody who can reach the control plane can perform every operation.
 - The unauthenticated first slice must be treated as local/trusted-development software and must not be exposed publicly. Authentication is required before a public deployment.

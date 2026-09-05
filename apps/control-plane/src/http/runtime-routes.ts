@@ -8,6 +8,8 @@ import {
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
   ORB_NAME_TRIGGER_PATH,
+  ORB_SELF_ARCHIVE_PATH,
+  OrbArchiveRequestSchema,
   type OrbInspectionError,
   type OrbInspectionItem,
   type OrbNameTriggerResponse,
@@ -21,6 +23,7 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import type { ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import {
   getToken,
@@ -29,9 +32,11 @@ import {
   type TokenRequest,
 } from "../domain/broker.ts";
 import type { MintError, StoreError } from "../domain/errors.ts";
+import type { CommandError } from "../domain/lifecycle.ts";
 import type { OrbRow } from "../domain/orb.ts";
 import { generateOrbName } from "../domain/orb-naming.ts";
 import type {
+  ArchiveCaller,
   BrokerDeps,
   ControlPlaneStore,
   MintDeps,
@@ -42,6 +47,11 @@ import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
 
 export interface RuntimeRouteDeps {
+  readonly archiveSelf: (
+    task: SimulationTask,
+    orbId: string,
+    caller: ArchiveCaller,
+  ) => ResultAsync<OrbRow, CommandError>;
   readonly store: ControlPlaneStore;
   readonly broker: BrokerDeps;
   readonly nameGenerator: OrbNameGenerator;
@@ -168,7 +178,7 @@ function idTokenFailure(error: MintError): IdTokenFailure {
 /**
  * The runtime-facing surface (`docs/credentials.md`, `docs/control-plane-api.md`).
  * It contains the parameterized credential broker, workload identity, naming,
- * and read-only sibling inspection. Registered only when the deployment role
+ * read-only sibling inspection, and self-archival. Registered only when the deployment role
  * includes runtime routes — a hard allowlist, not a hidden path.
  * Authentication is the per-host-incarnation orb token, honored only while
  * the calling orb's lifecycle state says its host should be up.
@@ -203,6 +213,52 @@ export function registerRuntimeRoutes(
     }
     return { kind: "orb", orb };
   };
+
+  app.post(ORB_SELF_ARCHIVE_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind !== "orb") {
+      const unavailable = auth.kind === "unavailable";
+      return reply.status(unavailable ? 503 : 401).send({
+        error: {
+          code: unavailable ? "unavailable" : "unauthorized",
+          message: unavailable ? "archival unavailable" : "runtime identity rejected",
+          retryable: unavailable,
+        },
+      });
+    }
+    if (!Check(OrbArchiveRequestSchema, request.body === undefined ? {} : request.body)) {
+      return reply.status(400).send({
+        error: {
+          code: "invalid_request",
+          message: "self-archive accepts no fields",
+          retryable: false,
+        },
+      });
+    }
+    const result = await deps.archiveSelf(task, auth.orb.id, {
+      runtimeTokenHash: auth.orb.runtimeTokenHash as string,
+      hostIncarnation: auth.orb.hostIncarnation,
+    });
+    if (result.isErr()) {
+      const status = { not_found: 404, conflict: 409, unavailable: 503, internal: 500 }[
+        result.error.code
+      ];
+      return reply.status(status).send({
+        error: {
+          code: result.error.code,
+          message:
+            result.error.code === "internal"
+              ? "archival failed"
+              : result.error.code === "unavailable"
+                ? "archival unavailable; acceptance may be unknown"
+                : result.error.message,
+          retryable: result.error.retryable,
+        },
+      });
+    }
+    return reply.status(202).send({ orbId: result.value.id, state: "archiving" });
+  });
 
   app.get(PROJECT_SECRETS_RUNTIME_PATH, async (request, reply) => {
     const auth = await authenticate(request.headers.authorization);

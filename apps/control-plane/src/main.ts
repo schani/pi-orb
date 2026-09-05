@@ -49,6 +49,7 @@ import {
 } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
+import { requestOrbArchive } from "./domain/lifecycle.ts";
 import { logEvent } from "./domain/log.ts";
 import {
   orphanSweepLoop,
@@ -427,6 +428,7 @@ async function main(): Promise<void> {
   }
   if (runtimeRole) {
     registerRuntimeRoutes(app, httpTask, {
+      archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
       store: deps.store,
       broker,
       nameGenerator: deps.nameGenerator,

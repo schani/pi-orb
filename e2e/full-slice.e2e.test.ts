@@ -80,6 +80,27 @@ const SCENARIO = {
         ],
       },
       {
+        match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+        steps: [
+          { type: "text", content: "Ran the requested tool check." },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
+        match: { userMessage: { regex: "^please archive this orb$" } },
+        steps: [
+          { type: "toolCall", name: "bash", arguments: { command: "pi-orb archive" } },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
+        match: { toolResultContains: { regex: "Archive requested" } },
+        steps: [
+          { type: "text", content: "SELF_ARCHIVE_FINAL: archival requested as you asked." },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
         match: { default: true },
         steps: [
           { type: "text", content: "Unexpected prompt reached the fallback rule." },
@@ -1486,6 +1507,19 @@ describe("full slice E2E", () => {
     const requests = await fakeControl(fake.sessionKey, "/requests");
     const inferenceCalls = JSON.stringify(requests);
     expect(inferenceCalls).toContain("E2E_TOOL_OK");
+    // Mock rules are consumed forwards. Account for the asynchronous turn
+    // notification before another orb advances this same scenario to archive.
+    await waitFor(
+      "first turn notification inference recorded",
+      async () => {
+        const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
+        return Array.isArray(recorded) &&
+          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 2)
+          ? true
+          : null;
+      },
+      { timeoutMs: 30_000, intervalMs: 200 },
+    );
 
     socket.close();
 
@@ -1517,8 +1551,8 @@ describe("full slice E2E", () => {
     expect(JSON.stringify(stoppedRecords)).toContain("USER_SHELL_E2E_OK");
 
     // Whole-project deletion fans out through the same deletion-grade cleanup.
-    // Keep one child stopped with replicated history and a second child running
-    // so completion proves mixed-state resources are all gone before the row.
+    // Keep one child stopped with replicated history and create a second child
+    // for inspection and self-archival before deleting the mixed-state project.
     const secondOrbId = randomUUID();
     const secondOrb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
       id: secondOrbId,
@@ -1554,6 +1588,38 @@ describe("full slice E2E", () => {
       "ORB_INSPECT_TRANSCRIPT_DONE",
     );
     expect(transcriptFromSibling).toContain("The check succeeded: E2E_TOOL_OK.");
+
+    // The real agent invokes the CLI inside its own busy turn. Acceptance must
+    // release the tool, retain its output and final reply, then remove resources.
+    const archiveMessage = await api(
+      base,
+      "PUT",
+      `/api/v1/orbs/${secondOrbId}/messages/${randomUUID()}`,
+      {
+        content: [{ type: "text", text: "please archive this orb" }],
+      },
+    );
+    expect(archiveMessage.status).toBe(202);
+    await waitFor(
+      "self-archive complete",
+      async () => {
+        const view = await api(base, "GET", `/api/v1/orbs/${secondOrbId}`);
+        return view.body["state"] === "archived" ? true : null;
+      },
+      { timeoutMs: 240_000, intervalMs: 1_000 },
+    );
+    const archiveHistory = await api(base, "GET", `/api/v1/orbs/${secondOrbId}/history`);
+    expect(JSON.stringify(archiveHistory.body["records"])).toContain("Archive requested.");
+    expect(JSON.stringify(archiveHistory.body["records"])).toContain(
+      "SELF_ARCHIVE_FINAL: archival requested as you asked.",
+    );
+    expect((await api(base, "POST", `/api/v1/orbs/${secondOrbId}/start`)).status).toBe(409);
+    if (PROCESS_BACKEND) {
+      expect(existsSync(processHostDirectory(secondOrbId))).toBe(false);
+    } else {
+      expect(await orbContainerNames(secondOrbId)).toEqual([]);
+      await expect(docker(["volume", "inspect", `pi-orb-data-${secondOrbId}`])).rejects.toThrow();
+    }
 
     const deletion = await api(base, "DELETE", `/api/v1/projects/${projectId}`);
     expect(deletion.status, JSON.stringify(deletion.body)).toBe(202);

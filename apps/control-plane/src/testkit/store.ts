@@ -742,7 +742,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
     return this.access(task, FAILPOINTS.storeWrite, "request orb archive", () => {
       const orb = this.orbs.get(params.orbId);
-      if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
+      if (
+        orb === undefined ||
+        orb.stateVersion !== params.expectedStateVersion ||
+        (params.caller !== undefined &&
+          (orb.runtimeTokenHash !== params.caller.runtimeTokenHash ||
+            orb.hostIncarnation !== params.caller.hostIncarnation ||
+            orb.hostDiscardThroughIncarnation !== null ||
+            orb.state !== "running"))
+      ) {
         return { conflict: true as const, currentState: orb?.state };
       }
       const updated: OrbRow = {

@@ -1279,6 +1279,60 @@ export function storeSemanticsContractTests(
       expect((await store.readHistorySnapshot(task, orb.id))._unsafeUnwrap().records).toEqual([]);
     });
 
+    it.each([
+      { runtimeTokenHash: "stale", hostIncarnation: 2 },
+      { runtimeTokenHash: "current", hostIncarnation: 1 },
+    ])("fences self-archive authority inside the write: %j", async (caller) => {
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      expect(
+        (
+          await store.insertOrb(task, {
+            ...orb,
+            state: "running",
+            runtimeTokenHash: "current",
+            hostIncarnation: 2,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const request = { orbId: orb.id, expectedStateVersion: 0, now: 2_000, cleanupAfter: 3_000 };
+      const rejected = await store.requestOrbArchive(task, { ...request, caller });
+      expect(rejected.isErr() && rejected.error.type).toBe("state_conflict");
+      expect((await store.getOrbDeletion(task, orb.id))._unsafeUnwrap()).toBeNull();
+      const accepted = await store.requestOrbArchive(task, {
+        ...request,
+        caller: { runtimeTokenHash: "current", hostIncarnation: 2 },
+      });
+      expect(accepted.isOk() && accepted.value.state).toBe("archiving");
+    });
+
+    it.each(["stopping", "discard"])(
+      "refuses self-archive at the write during %s",
+      async (condition) => {
+        expect((await store.insertProject(task, project)).isOk()).toBe(true);
+        expect(
+          (
+            await store.insertOrb(task, {
+              ...orb,
+              state: condition === "stopping" ? "stopping" : "running",
+              runtimeTokenHash: "current",
+              hostDiscardThroughIncarnation: condition === "discard" ? 0 : null,
+              hostDiscardReason: condition === "discard" ? "failed" : null,
+              hostDiscardRequestedAt: condition === "discard" ? 1_000 : null,
+            })
+          ).isOk(),
+        ).toBe(true);
+        const rejected = await store.requestOrbArchive(task, {
+          orbId: orb.id,
+          expectedStateVersion: 0,
+          now: 2_000,
+          cleanupAfter: 3_000,
+          caller: { runtimeTokenHash: "current", hostIncarnation: orb.hostIncarnation },
+        });
+        expect(rejected.isErr() && rejected.error.type).toBe("state_conflict");
+        expect((await store.getOrbDeletion(task, orb.id))._unsafeUnwrap()).toBeNull();
+      },
+    );
+
     it("seals and finalizes archival without deleting history", async () => {
       await seed();
       expect(

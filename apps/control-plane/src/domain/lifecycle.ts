@@ -13,6 +13,7 @@ import {
 import { logOrbEvent } from "./log.ts";
 import { hasNeverBeenReady, type OrbMessageRow, type OrbRow } from "./orb.ts";
 import type {
+  ArchiveCaller,
   ControlPlaneDeps,
   OrbHostObservation,
   OrbHostRef,
@@ -2002,6 +2003,7 @@ export function requestOrbArchive(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orbId: string,
+  caller?: ArchiveCaller,
 ): ResultAsync<OrbRow, CommandError> {
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
@@ -2009,12 +2011,22 @@ export function requestOrbArchive(
       if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
+      if (
+        caller !== undefined &&
+        (orb.runtimeTokenHash !== caller.runtimeTokenHash ||
+          orb.hostIncarnation !== caller.hostIncarnation ||
+          orb.hostDiscardThroughIncarnation !== null ||
+          (orb.state !== "running" && orb.state !== "archiving"))
+      ) {
+        return err(commandError("conflict", "this runtime can no longer request archival", false));
+      }
       if (orb.state === "archiving" || orb.state === "archived") return ok(orb);
       if (orb.state === "deleting") {
         return err(commandError("conflict", "orb is being permanently deleted", false));
       }
       const now = task.wallNow();
       const requested = await deps.store.requestOrbArchive(task, {
+        ...(caller === undefined ? {} : { caller }),
         orbId,
         expectedStateVersion: orb.stateVersion,
         now,
@@ -2027,6 +2039,8 @@ export function requestOrbArchive(
           from: orb.state,
           to: "archiving",
           reason: "archive_requested",
+          source: caller === undefined ? "browser" : "self",
+          ...(caller === undefined ? {} : { callerIncarnation: caller.hostIncarnation }),
         });
         return ok(requested.value);
       }

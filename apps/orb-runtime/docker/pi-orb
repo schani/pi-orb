@@ -13,11 +13,16 @@ case "${1:-}" in
     shift
     exec node "$app_root/apps/orb-runtime/src/id-token/cli.ts" "$@"
     ;;
+  archive)
+    shift
+    exec node "$app_root/apps/orb-runtime/src/archive/cli.ts" "$@"
+    ;;
   orbs|transcript)
     exec node "$app_root/apps/orb-runtime/src/inspection/cli.ts" "$@"
     ;;
   *)
     echo "usage:" >&2
+    echo "  pi-orb archive" >&2
     echo "  pi-orb orbs [query] [--json]" >&2
     echo "  pi-orb transcript <orb-id> [--json]" >&2
     echo "  pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]" >&2

@@ -12,11 +12,13 @@ import {
 } from "../adapters/oidc/signer.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
+import { requestOrbArchive } from "../domain/lifecycle.ts";
 import type { OrbNameGenerator, SigningKeyRow, SigningKeyStore } from "../domain/ports.ts";
 import { ensureActiveSigningKey } from "../domain/signing-keys.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakePointerStore, FakeSecretStore, FakeUpstream } from "../testkit/broker.ts";
 import {
+  makeHarness,
   makeOrbRow,
   makeProjectRow,
   TEST_ISSUER_CONSTANTS,
@@ -307,6 +309,8 @@ describe("minted tokens verify against the served JWKS", () => {
       issuerUrl: TEST_ISSUER_URL,
     });
     registerRuntimeRoutes(app, task, {
+      archiveSelf: (task, orbId, caller) =>
+        requestOrbArchive(task, { ...makeHarness().deps, store }, orbId, caller),
       store,
       broker: {
         pointers: new FakePointerStore(),

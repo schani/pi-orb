@@ -84,6 +84,8 @@ describe("orb runtime Dockerfile contract", () => {
     expect(piOrbShim).toContain("apps/orb-runtime/src/id-token/cli.ts");
     expect(piOrbShim).toContain("apps/orb-runtime/src/inspection/cli.ts");
     expect(piOrbShim).toContain("orbs|transcript");
+    expect(piOrbShim).toContain("apps/orb-runtime/src/archive/cli.ts");
+    expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/archive/cli.ts"))).toBe(true);
     expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/id-token/cli.ts"))).toBe(true);
     expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/inspection/cli.ts"))).toBe(true);
     // Every shim resolves its entry point from its own location, so the same

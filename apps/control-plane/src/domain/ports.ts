@@ -114,7 +114,13 @@ export interface RequestOrbDeletionParams {
   readonly cleanupAfter: number;
 }
 
+export interface ArchiveCaller {
+  readonly runtimeTokenHash: string;
+  readonly hostIncarnation: number;
+}
+
 export interface RequestOrbArchiveParams {
+  readonly caller?: ArchiveCaller;
   readonly orbId: string;
   readonly expectedStateVersion: number;
   readonly now: number;

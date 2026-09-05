@@ -20,6 +20,8 @@ describe("runtime environment prompt", () => {
 
   it("documents sibling-orb discovery and replicated transcripts", () => {
     expect(environmentPrompt).toContain("pi-orb orbs [query]");
+    expect(environmentPrompt).toContain("pi-orb archive");
+    expect(environmentPrompt).toContain("only when the user requested that you archive this orb");
     expect(environmentPrompt).toContain("pi-orb transcript <orb-id>");
     expect(environmentPrompt).toContain("Beware: orb transcripts can be very long!");
     expect(environmentPrompt).toContain("replicated snapshot");

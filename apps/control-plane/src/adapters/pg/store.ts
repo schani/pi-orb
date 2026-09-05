@@ -741,8 +741,17 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         `UPDATE orbs SET state = 'archiving', state_version = state_version + 1,
            state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
            auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
-         WHERE id = $1 AND state_version = $2 RETURNING *`,
-        [params.orbId, params.expectedStateVersion, new Date(params.now)],
+         WHERE id = $1 AND state_version = $2
+           AND ($4::text IS NULL OR (runtime_token_hash = $4 AND host_incarnation = $5
+             AND host_discard_through_incarnation IS NULL AND state = 'running'))
+         RETURNING *`,
+        [
+          params.orbId,
+          params.expectedStateVersion,
+          new Date(params.now),
+          params.caller?.runtimeTokenHash ?? null,
+          params.caller?.hostIncarnation ?? null,
+        ],
       );
       if (updated.isErr()) return err(updated.error);
       const row = updated.value.rows[0];
