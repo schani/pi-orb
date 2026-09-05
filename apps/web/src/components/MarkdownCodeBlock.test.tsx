@@ -4,15 +4,17 @@ import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { markdownCodeText } from "./MarkdownCodeBlock.tsx";
 
 describe("Markdown code block copy", () => {
-  it("renders the quiet top-right copy action only for fenced code blocks", () => {
+  it("renders a language header and copy action only for fenced code blocks", () => {
     const html = renderToStaticMarkup(
       <ChatMarkdown>{"Use `inline` here.\n\n```ts\nconst answer = 42;\n```"}</ChatMarkdown>,
     );
 
     expect(html).toContain('class="markdown-code-block"');
-    expect(html).toContain('class="markdown-code-copy"');
+    expect(html).toContain('class="icon-button markdown-code-copy" data-state="idle"');
     expect(html).toContain('aria-label="Copy code to clipboard"');
     expect(html.match(/markdown-code-copy/g)).toHaveLength(1);
+    // The header names the fence's language; the copy action sits beside it.
+    expect(html).toContain('<div class="markdown-code-head"><span>ts</span>');
     expect(html).toContain('class="language-ts"');
   });
 

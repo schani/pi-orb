@@ -346,6 +346,15 @@ async function handleApi(
     return true;
   }
 
+  if (method === "GET" && path === "/api/v1/system") {
+    sendJson(response, 200, {
+      hostProvider: "process",
+      databaseKind: "pglite",
+      version: "0.0.1-fixture",
+    });
+    return true;
+  }
+
   if (method === "GET" && path === "/api/v1/projects") {
     sendJson(response, 200, { items: [...state.projects.values()] });
     return true;

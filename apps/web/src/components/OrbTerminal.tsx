@@ -16,12 +16,13 @@ import {
   type TerminalGridMetrics,
   terminalPanelSize,
 } from "../lib/terminal-layout.ts";
+import { Icon } from "./Icons.tsx";
 
 const INITIAL_WIDTH = 552;
 const INITIAL_HEIGHT = 391;
-const EDGE_GAP = 18;
+const EDGE_GAP = 12;
 const COMPOSER_GAP = 14;
-const HEADER_HEIGHT = 38;
+const HEADER_HEIGHT = 20;
 const TERMINAL_HORIZONTAL_PADDING = 30;
 const TERMINAL_VERTICAL_PADDING = 26;
 
@@ -276,14 +277,12 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
         type="button"
         className="orb-terminal-launcher"
         style={{ bottom }}
-        title="Show terminal"
-        aria-label="Show terminal"
         onClick={() => {
           setStarted(true);
           setHidden(false);
         }}
       >
-        &gt;_
+        terminal
       </button>
     );
   }
@@ -297,47 +296,47 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
       >
         <div className="orb-terminal-resize" onPointerDown={beginResize} />
         <header className="orb-terminal-header">
-          <span className="orb-terminal-symbol">&gt;_</span>
           <span className="orb-terminal-title">terminal</span>
-          <span className="orb-terminal-path">bash · /workspace/repo</span>
-          <span className={`orb-terminal-status orb-terminal-status-${status}`}>● {status}</span>
-          {status === "ended" ? (
+          <span className="orb-terminal-status">{status}</span>
+          <span className="orb-terminal-controls">
+            {status === "ended" ? (
+              <button
+                type="button"
+                className="icon-button"
+                title="New terminal"
+                aria-label="New terminal"
+                onClick={() => {
+                  socketRef.current?.close();
+                  readyRef.current = false;
+                  setError(null);
+                  setStatus("connecting");
+                  setCore(null);
+                  setGeneration((value) => value + 1);
+                }}
+              >
+                <Icon name="restart" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="icon-button"
+                title="Clear terminal"
+                aria-label="Clear terminal"
+                onClick={() => sendInput("\f")}
+              >
+                <Icon name="clear" />
+              </button>
+            )}
             <button
               type="button"
-              className="orb-terminal-restart"
-              title="New terminal"
-              aria-label="New terminal"
-              onClick={() => {
-                socketRef.current?.close();
-                readyRef.current = false;
-                setError(null);
-                setStatus("connecting");
-                setCore(null);
-                setGeneration((value) => value + 1);
-              }}
+              className="icon-button"
+              title="Hide terminal"
+              aria-label="Hide terminal"
+              onClick={() => setHidden(true)}
             >
-              ↻
+              <Icon name="minus" />
             </button>
-          ) : (
-            <button
-              type="button"
-              className="orb-terminal-clear"
-              title="Clear terminal"
-              aria-label="Clear terminal"
-              onClick={() => sendInput("\f")}
-            >
-              ↺
-            </button>
-          )}
-          <button
-            type="button"
-            className="orb-terminal-hide"
-            title="Hide terminal"
-            aria-label="Hide terminal"
-            onClick={() => setHidden(true)}
-          >
-            −
-          </button>
+          </span>
         </header>
         {error !== null && <div className="orb-terminal-error">{error}</div>}
         {core === null ? (
@@ -364,14 +363,12 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
         type="button"
         className={`orb-terminal-launcher${hidden ? " orb-terminal-launcher-visible" : ""}`}
         style={{ bottom }}
-        title="Show terminal"
-        aria-label="Show terminal"
         onClick={() => {
           setHidden(false);
           setTimeout(focus, 0);
         }}
       >
-        &gt;_
+        terminal
       </button>
     </>
   );

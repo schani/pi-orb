@@ -1,7 +1,7 @@
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { makeHarness, makeProjectRow } from "../testkit/fixtures.ts";
+import { makeHarness, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { registerRoutes } from "./routes.ts";
 
 const task = new NoSimulationTask("orb create routes", false);
@@ -20,7 +20,7 @@ describe("orb creation ID validation", () => {
     harness = makeHarness();
     app = Fastify();
     harness.store.seedProject(makeProjectRow("project-ids"));
-    registerRoutes(app, task, harness.deps, {});
+    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
     await app.ready();
   });
 

@@ -57,13 +57,13 @@ describe("dashboard search source", () => {
       {
         kindLabel: "orb",
         title: "untitled orb",
-        context: "Atlas · working set · 14 minutes",
+        context: "Atlas · 14m",
         href: "#/orbs/working%2F1",
       },
       {
         kindLabel: "archived orb",
         title: "Old plan",
-        context: "Atlas · archive shelf · 14 minutes",
+        context: "Atlas · archive · 14m",
         href: "#/orbs/archived%2F1",
       },
     ]);

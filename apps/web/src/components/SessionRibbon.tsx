@@ -21,13 +21,7 @@ export function SessionRibbon() {
 
   return (
     <div className="session-ribbon" role="alert">
-      <span className="session-ribbon-mark" aria-hidden="true">
-        !
-      </span>
-      <span className="session-ribbon-copy">
-        <strong>Your pi-orb session expired.</strong>
-        <span>Changes and live updates may be paused.</span>
-      </span>
+      <span className="up">session expired</span>
       <button
         type="button"
         onClick={() => {

@@ -99,7 +99,7 @@ function renderReasoningRail(text: string, key: string | number, live = false): 
     <ActivityRailRow
       className="reasoning"
       key={key}
-      label="reasoning"
+      label="thinking"
       state={live ? "running" : "neutral"}
     >
       <p className="reasoning-body">
@@ -141,8 +141,8 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 }
 
 /**
- * One visual row of the manuscript: a user note, a grouped agent turn (all
- * adjacent assistant/tool/event records share one gutter mark), or a
+ * One transcript record: a user turn, a grouped agent turn (all adjacent
+ * assistant/tool/event records share one prefix), a shell block, or a
  * full-width compaction divider.
  */
 type Turn =
@@ -281,21 +281,12 @@ function groupTurns(records: readonly HistoryRecord[]): Turn[] {
   return turns;
 }
 
-function Gutter({ mark }: { mark: "Y" | "O" }) {
-  return (
-    <div className="turn-gutter">
-      <span className="turn-mark">{mark}</span>
-      <span className="turn-rail" />
-    </div>
-  );
-}
-
 interface LiveAgentContent {
   blocks: readonly LiveBlock[];
   tools: readonly ToolChip[];
 }
 
-function renderLiveAgentContent(live: LiveAgentContent): ReactNode[] {
+function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNode[] {
   const nodes: ReactNode[] = [];
   if (live.tools.length > 0) nodes.push(<ToolActivity live={live.tools} key="live-tools" />);
   for (const block of live.blocks) {
@@ -307,32 +298,27 @@ function renderLiveAgentContent(live: LiveAgentContent): ReactNode[] {
       ),
     );
   }
+  // The cursor is the only claim that the agent is still producing output.
+  if (busy) nodes.push(<span className="cur" key="cursor" />);
   return nodes;
 }
 
-function renderTurn(turn: Turn, live?: LiveAgentContent): ReactNode {
+function renderTurn(turn: Turn, live?: LiveAgentContent, busy = false): ReactNode {
   switch (turn.kind) {
     case "user":
       return (
-        <article className="turn turn-user" key={turn.record.id}>
-          <Gutter mark="Y" />
-          <div className="turn-body">
-            <span className="turn-label">You</span>
-            {renderMessageBlocks(turn.record)}
-          </div>
+        <article className="rec rec-you" key={turn.record.id}>
+          <span className="rec-px">you</span>
+          <div className="rec-bd">{renderMessageBlocks(turn.record)}</div>
         </article>
       );
     case "agent":
       return (
-        <article
-          className={`turn turn-agent${live === undefined ? "" : " turn-live"}`}
-          key={turn.key}
-        >
-          <Gutter mark="O" />
-          <div className="turn-body">
-            <span className="turn-label">Orb</span>
+        <article className="rec rec-orb" key={turn.key}>
+          <span className="rec-px">orb</span>
+          <div className="rec-bd">
             {renderAgentRecords(turn.records)}
-            {live !== undefined && renderLiveAgentContent(live)}
+            {live !== undefined && renderLiveAgentContent(live, busy)}
           </div>
         </article>
       );
@@ -348,14 +334,14 @@ function renderTurn(turn: Turn, live?: LiveAgentContent): ReactNode {
         ...(shell.truncated ? ["output truncated"] : []),
       ];
       return (
-        <article className="turn turn-shell" key={turn.record.id}>
-          <Gutter mark="Y" />
-          <div className="turn-body">
-            <span className="turn-label">Shell</span>
-            <pre className="shell-output">
-              {`$ ${shell.command}${shell.output === "" ? "" : `\n${shell.output}`}`}
-            </pre>
-            {statuses.length > 0 && <div className="shell-status">{statuses.join(" · ")}</div>}
+        <article className="rec rec-sh" key={turn.record.id}>
+          <span className="rec-px">sh</span>
+          <div className="rec-bd">
+            <div className="shblk">
+              <div className="shblk-cmd">! {shell.command}</div>
+              {shell.output !== "" && <pre className="shblk-out">{shell.output}</pre>}
+              {statuses.length > 0 && <div className="shblk-ft">{statuses.join(" · ")}</div>}
+            </div>
           </div>
         </article>
       );
@@ -429,7 +415,7 @@ export function HistoryView({
   return (
     <div className="history">
       {turns.map((turn, index) =>
-        renderTurn(turn, index === mergedTurnIndex ? liveAgentContent : undefined),
+        index === mergedTurnIndex ? renderTurn(turn, liveAgentContent, busy) : renderTurn(turn),
       )}
       {pendingMessages.map((message) => {
         const record: MessageRecord = {
@@ -452,40 +438,39 @@ export function HistoryView({
         // forever (docs/runtime-protocol.md).
         const failed = message.status === "failed";
         return (
-          <article
-            className={`turn turn-user turn-queued${failed ? " turn-failed" : ""}`}
-            key={message.id}
-          >
-            <Gutter mark="Y" />
-            <div className="turn-body">
-              <span className="turn-label">You · {status}</span>
+          <article className="rec rec-you rec-q" key={message.id}>
+            <span className="rec-px">you</span>
+            <div className="rec-bd">
+              <span className="rec-status">{status}</span>
               {renderMessageBlocks(record)}
               {failed && message.error !== undefined && (
-                <div className="turn-error">{message.error}</div>
+                <div className="error-text">{message.error}</div>
               )}
             </div>
           </article>
         );
       })}
       {shellBlocks.map((block) => (
-        <article className="turn turn-shell turn-live" key={block.blockId}>
-          <Gutter mark="Y" />
-          <div className="turn-body">
-            <span className="turn-label">Shell</span>
-            <pre className="shell-output">{block.text}</pre>
+        <article className="rec rec-sh" key={block.blockId}>
+          <span className="rec-px">sh</span>
+          <div className="rec-bd">
+            <div className="shblk">
+              <pre className="shblk-out">{block.text}</pre>
+            </div>
           </div>
         </article>
       ))}
       {hasAgentLive && !mergeLiveIntoFinalTurn && (
-        <article className="turn turn-agent turn-live">
-          <Gutter mark="O" />
-          <div className="turn-body">
-            <span className="turn-label">Orb</span>
-            {renderLiveAgentContent(liveAgentContent)}
-          </div>
+        <article className="rec rec-orb">
+          <span className="rec-px">orb</span>
+          <div className="rec-bd">{renderLiveAgentContent(liveAgentContent, busy)}</div>
         </article>
       )}
-      {busy && <div className="busy-indicator">working…</div>}
+      {busy && !hasAgentLive && (
+        <div className="busy-indicator">
+          <span className="cur" />
+        </div>
+      )}
     </div>
   );
 }

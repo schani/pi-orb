@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +8,7 @@ import {
   MOCK_OPENAI_OAUTH_URL_ENV,
   readMockOpenAiEnv,
 } from "@pi-orb/mock-openai";
+import type { SystemView } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { okAsync } from "neverthrow";
@@ -98,6 +100,15 @@ class ControlPlaneTask extends NoSimulationTask {
  * role (docs/deployment.md, docs/workload-identity.md).
  */
 const ROLES: readonly string[] = ["all", "browser", "runtime", "ops", "issuer"];
+
+/**
+ * This build's version, read once. `/api/v1/system` states it on every
+ * dashboard, and the answer cannot change while the process lives, so it is
+ * never re-read per request.
+ */
+const { version: CONTROL_PLANE_VERSION }: { version: string } = createRequire(import.meta.url)(
+  "../package.json",
+);
 
 async function main(): Promise<void> {
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
@@ -295,6 +306,15 @@ async function main(): Promise<void> {
   }
   const tailscaleOption = tailscaleForProvider ? { tailscale } : {};
   const viewConfig = tailscaleForProvider ? { tailnetDnsName } : {};
+  // What the dashboard footer states. The host-provider fallback is the one
+  // the composition below takes, so the footer names the provider actually
+  // constructed rather than the string that was typed.
+  const systemView: SystemView = {
+    hostProvider:
+      providerKind === "gce" ? "gce" : providerKind === "process" ? "process" : "docker",
+    databaseKind: databaseKind === "pglite" ? "pglite" : "postgres",
+    version: CONTROL_PLANE_VERSION,
+  };
   // Forward-only immutable-spec replacement fence (docs/compute-replacement.md).
   // An unparsable or unset value folds to 0: such a revision replaces nothing
   // a real deploy stamped, and the next real deploy replaces forward.
@@ -389,7 +409,7 @@ async function main(): Promise<void> {
     // Staged rotation lives only on the private roles: the public issuer
     // publishes keys and must not be able to change them
     // (docs/workload-identity.md).
-    registerRoutes(app, httpTask, deps, viewConfig, signingKeyDeps);
+    registerRoutes(app, httpTask, deps, viewConfig, systemView, signingKeyDeps);
     // Cloud deployment serves the built web UI from the same process; local
     // development keeps the vite dev server + proxy instead.
     const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";

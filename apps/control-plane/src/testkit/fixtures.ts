@@ -1,4 +1,4 @@
-import type { OrbState } from "@pi-orb/protocol";
+import type { OrbState, SystemView } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { errAsync, okAsync } from "neverthrow";
 import {
@@ -111,6 +111,13 @@ export function makeHarness(options?: {
  * accepting whatever the code happens to produce.
  */
 export const TEST_ISSUER_URL = "https://issuer.pi-orb.test";
+
+/** The deployment facts `/api/v1/system` states; the route composition every route test needs. */
+export const TEST_SYSTEM_VIEW: SystemView = {
+  hostProvider: "process",
+  databaseKind: "pglite",
+  version: "0.0.0-test",
+};
 
 /**
  * Fast issuer constants: only the rate-limit floor is compressed, because the

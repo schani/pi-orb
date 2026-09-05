@@ -6,6 +6,7 @@ import {
   PROJECT_NAME_MAX_CHARS,
   ProjectSecretNameSchema,
   PutProjectSecretRequestSchema,
+  type SystemView,
   UpdateOrbRequestSchema,
   UpdateProjectRequestSchema,
   validateRepositoryUrl,
@@ -190,11 +191,16 @@ export function registerRoutes(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   config: ViewConfig,
+  system: SystemView,
   signingKeys?: SigningKeyDeps,
 ): void {
   // Reaching this response proves that an external browser auth proxy (IAP in
   // cloud deployment) admitted the request. It intentionally reads no state.
   app.get("/api/v1/session", async (_request, reply) => reply.send({ status: "ok" }));
+
+  // Which host provider, which database, which build. Resolved at boot and
+  // constant for the process's lifetime, so it reads nothing per request.
+  app.get("/api/v1/system", async (_request, reply) => reply.send(system));
 
   if (signingKeys !== undefined) {
     app.post("/api/v1/issuer/signing-keys/publish", async (_request, reply) => {

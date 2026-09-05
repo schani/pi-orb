@@ -86,6 +86,21 @@ describe("orb runtime Dockerfile contract", () => {
     expect(piOrbShim).toContain("orbs|transcript");
     expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/id-token/cli.ts"))).toBe(true);
     expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/inspection/cli.ts"))).toBe(true);
+    // Every shim resolves its entry point from its own location, so the same
+    // file works at /usr/local/bin in the image and in place on a process
+    // host, where the repository copy is on PATH.
+    const credentialShim = readFileSync(
+      join(repositoryRoot, "apps/orb-runtime/docker/pi-orb-git-credential"),
+      "utf8",
+    );
+    const ghShim = readFileSync(join(repositoryRoot, "apps/orb-runtime/docker/gh"), "utf8");
+    for (const shim of [piOrbShim, credentialShim, ghShim]) {
+      expect(shim).toContain('script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)');
+      expect(shim).toContain('if [ "$script_dir" = /usr/local/bin ]');
+    }
+    expect(credentialShim).toContain("apps/orb-runtime/src/gh/cli.ts");
+    expect(ghShim).toContain("apps/orb-runtime/src/gh/cli.ts");
+    expect(existsSync(join(repositoryRoot, "apps/orb-runtime/src/gh/cli.ts"))).toBe(true);
   });
 
   it("installs the reviewed Google executable credential source", () => {

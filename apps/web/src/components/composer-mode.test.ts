@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  composerModeGlyph,
   composerModeLabel,
   enterShellMode,
   leaveShellMode,
@@ -31,9 +32,15 @@ describe("composer shell modes", () => {
     });
   });
 
-  it("uses the exact visible status labels", () => {
+  it("uses the exact assistive status labels", () => {
     expect(composerModeLabel("message")).toBe("message");
     expect(composerModeLabel("shell")).toBe("shell");
     expect(composerModeLabel("excluded_shell")).toBe("excluded shell");
+  });
+
+  it("maps each mode to its prefix glyph", () => {
+    expect(composerModeGlyph("message")).toBe(">");
+    expect(composerModeGlyph("shell")).toBe("!");
+    expect(composerModeGlyph("excluded_shell")).toBe("!!");
   });
 });

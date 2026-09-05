@@ -14,13 +14,13 @@ describe("SessionRibbon", () => {
     expect(renderToStaticMarkup(<SessionRibbon />)).toBe("");
   });
 
-  it("persistently explains expired auth and offers reauthentication", () => {
+  it("names the expired session and offers reauthentication, nothing more", () => {
     reportAuthenticationRequired(beginSessionRequest());
     const html = renderToStaticMarkup(<SessionRibbon />);
 
     expect(html).toContain('class="session-ribbon"');
-    expect(html).toContain("Your pi-orb session expired.");
-    expect(html).toContain("Changes and live updates may be paused.");
+    expect(html).toContain("session expired");
     expect(html).toContain("sign in again");
+    expect(html).not.toContain("may be paused");
   });
 });

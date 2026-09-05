@@ -1,7 +1,7 @@
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
+import { makeHarness, makeOrbRow, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { registerRoutes } from "./routes.ts";
 
 const task = new NoSimulationTask("project deletion routes", false);
@@ -15,7 +15,7 @@ describe("project deletion HTTP API", () => {
     app = Fastify();
     harness.store.seedProject(makeProjectRow("project-http"));
     harness.store.seedOrb(makeOrbRow("orb-http", "project-http", "stopped"));
-    registerRoutes(app, task, harness.deps, {});
+    registerRoutes(app, task, harness.deps, {}, TEST_SYSTEM_VIEW);
     await app.ready();
   });
 

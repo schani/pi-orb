@@ -52,12 +52,12 @@ describe("frontend-only expired session recovery", () => {
     await page.goto(`${origin}/${ORB_HASH}`);
 
     const draft = "Keep this exact draft through IAP sign-in";
-    const composer = page.getByPlaceholder(/Message the agent/);
+    const composer = page.getByPlaceholder(/Message the orb/);
     await composer.fill(draft);
 
     await page.getByRole("button", { name: "expire session" }).click();
     const ribbon = page.getByRole("alert");
-    await expectPage(ribbon).toContainText("Your pi-orb session expired.");
+    await expectPage(ribbon).toContainText("session expired");
     await expectPage(composer).toHaveValue(draft);
 
     const loaded = page.waitForEvent("load");
@@ -67,7 +67,7 @@ describe("frontend-only expired session recovery", () => {
     await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
     await expectPage(page.getByRole("alert")).toHaveCount(0);
     await expectPage(page.getByText("frontend fixture · session active")).toBeVisible();
-    await expectPage(page.getByPlaceholder(/Message the agent/)).toHaveValue(draft);
+    await expectPage(page.getByPlaceholder(/Message the orb/)).toHaveValue(draft);
 
     await page.close();
   });

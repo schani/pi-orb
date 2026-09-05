@@ -6,7 +6,8 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignoreUnknown": true
+    "ignoreUnknown": true,
+    "includes": ["**", "!design-prototypes"]
   },
   "formatter": {
     "enabled": true,
@@ -16,7 +17,6 @@
   },
   "linter": {
     "enabled": true,
-    "includes": ["**", "!design-prototypes/**"],
     "rules": {
       "preset": "recommended",
       "complexity": {

@@ -42,6 +42,7 @@ The browser uses a small unauthenticated JSON API under `/api/v1`:
 
 ```text
 GET  /api/v1/session
+GET  /api/v1/system
 GET  /api/v1/projects
 POST /api/v1/projects
 GET  /api/v1/projects/:projectId
@@ -68,6 +69,10 @@ WS   /api/v1/orbs/:orbId/terminal
 ```
 
 `GET /api/v1/session` returns `{ "status": "ok" }` without reading application state. In the cloud it is useful because merely reaching that response proves that IAP admitted the browser request; the browser probes it after regaining focus following reauthentication. It is not an application authentication or authorization implementation, and in unauthenticated local development it only confirms control-plane reachability.
+
+### Deployment facts (decided and implemented 2026-09-04)
+
+`GET /api/v1/system` returns `{ hostProvider, databaseKind, version }` — the host provider this process constructs (`process` | `docker` | `gce`), the database it opened (`pglite` | `postgres`), and the control-plane package version. It exists so the dashboard footer can state which deployment the browser is looking at, which is the first question asked when a local window and a cloud window are open side by side. Every value is resolved once at boot and constant for the process's lifetime, so the route reads nothing — no store, no filesystem — per request. It carries deployment facts only: no connection strings, project or zone names, image references, secrets, or counts of anything the fleet is doing. It is registered with the rest of the browser API, so it exists on the `all`, `browser`, and `ops` roles and nowhere else.
 
 ### In-orb inspection API (decided and implemented 2026-08-27)
 

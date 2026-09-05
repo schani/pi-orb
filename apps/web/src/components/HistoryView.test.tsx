@@ -16,7 +16,7 @@ function message(id: string, role: "user" | "assistant", text: string): HistoryR
 }
 
 describe("HistoryView turn structure", () => {
-  it("gives each user record its own gutter turn and groups adjacent agent-side records", () => {
+  it("gives each user record its own prefixed record and groups adjacent agent-side records", () => {
     const records: HistoryRecord[] = [
       message("u1", "user", "first question"),
       message("a1", "assistant", "working on it"),
@@ -38,16 +38,15 @@ describe("HistoryView turn structure", () => {
       <HistoryView records={records} liveBlocks={[]} tools={[]} busy={false} />,
     );
 
-    expect(html.match(/turn-user/g)).toHaveLength(2);
-    // a1 and t1 share one agent turn; a2 (after u2) starts a new one.
-    expect(html.match(/turn-agent/g)).toHaveLength(2);
-    expect(html.match(/turn-mark">Y</g)).toHaveLength(2);
-    expect(html.match(/turn-mark">O</g)).toHaveLength(2);
-    expect(html).toContain(">You<");
-    expect(html).toContain(">Orb<");
+    expect(html.match(/rec rec-you/g)).toHaveLength(2);
+    // a1 and t1 share one agent record; a2 (after u2) starts a new one.
+    expect(html.match(/rec rec-orb/g)).toHaveLength(2);
+    expect(html.match(/rec-px">you</g)).toHaveLength(2);
+    expect(html.match(/rec-px">orb</g)).toHaveLength(2);
+    expect(html).not.toContain("turn-mark");
   });
 
-  it("renders an outstanding queued message once as a gray user turn", () => {
+  it("renders an outstanding queued message once as a muted user turn", () => {
     const queued = {
       id: "00000000-0000-4000-8000-000000000123",
       orbId: "orb-1",
@@ -65,8 +64,8 @@ describe("HistoryView turn structure", () => {
         queuedMessages={[queued]}
       />,
     );
-    expect(queuedHtml).toContain("turn-user turn-queued");
-    expect(queuedHtml).toContain("You · delivered");
+    expect(queuedHtml).toContain("rec rec-you rec-q");
+    expect(queuedHtml).toContain('class="rec-status">delivered</span>');
     expect(queuedHtml).toContain("queued while starting");
 
     const committed = message("record-1", "user", "queued while starting");
@@ -86,7 +85,7 @@ describe("HistoryView turn structure", () => {
         queuedMessages={[queued]}
       />,
     );
-    expect(committedHtml).not.toContain("turn-queued");
+    expect(committedHtml).not.toContain("rec-q");
     expect(committedHtml.match(/queued while starting/g)).toHaveLength(1);
   });
 
@@ -109,13 +108,12 @@ describe("HistoryView turn structure", () => {
         queuedMessages={[failed]}
       />,
     );
-    expect(html).toContain("You · failed");
-    expect(html).toContain("turn-failed");
-    expect(html).toContain("400 invalid_request: message payload too large");
+    expect(html).toContain('class="rec-status">failed</span>');
+    expect(html).toContain('class="error-text">400 invalid_request: message payload too large<');
     expect(html).toContain("a payload the runtime refuses");
   });
 
-  it("places persisted and live reasoning disclosures on the Orb rail", () => {
+  it("places persisted and live reasoning disclosures on the orb activity rail", () => {
     const reasoningRecord: HistoryRecord = {
       id: "reasoning-record",
       parentId: null,
@@ -141,11 +139,10 @@ describe("HistoryView turn structure", () => {
       />,
     );
 
-    expect(html.match(/class="turn turn-agent/g)).toHaveLength(1);
-    expect(html).toContain("turn turn-agent turn-live");
-    expect(html.match(/class="turn-mark">O/g)).toHaveLength(1);
+    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
+    expect(html.match(/class="rec-px">orb</g)).toHaveLength(1);
     expect(html.match(/class="activity-rail-row [^"]* reasoning"/g)).toHaveLength(2);
-    expect(html.match(/class="activity-rail-marker"/g)).toHaveLength(2);
+    expect(html.match(/activity-rail-label">thinking</g)).toHaveLength(2);
     expect(html).toContain("considering persisted evidence");
     expect(html).toContain("considering live evidence");
   });
@@ -178,10 +175,10 @@ describe("HistoryView turn structure", () => {
     );
 
     expect(html.match(/same reasoning/g)).toHaveLength(1);
-    expect(html.match(/class="turn turn-agent/g)).toHaveLength(1);
+    expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
   });
 
-  it("renders compaction as a full-width divider outside the gutter turns", () => {
+  it("renders compaction as a full-width divider outside the prefixed records", () => {
     const records: HistoryRecord[] = [
       message("u1", "user", "hello"),
       {
@@ -200,11 +197,11 @@ describe("HistoryView turn structure", () => {
 
     expect(html).toContain("context compacted");
     expect(html.match(/record-compaction/g)).toHaveLength(1);
-    // The divider must close the preceding agent grouping context, not live inside a turn.
-    expect(html.match(/turn-agent/g)).toHaveLength(1);
+    // The divider must close the preceding agent grouping context, not live inside a record.
+    expect(html.match(/rec rec-orb/g)).toHaveLength(1);
   });
 
-  it("renders persisted and live shell output as preformatted shell turns", () => {
+  it("renders persisted and live shell output as preformatted shell blocks", () => {
     const shellRecord: HistoryRecord = {
       id: "shell-1",
       parentId: null,
@@ -243,14 +240,15 @@ describe("HistoryView turn structure", () => {
       />,
     );
 
-    expect(html.match(/turn-shell/g)).toHaveLength(2);
-    expect(html).toContain("$ npm test\npassing");
+    expect(html.match(/rec rec-sh/g)).toHaveLength(2);
+    expect(html).toContain('class="shblk-cmd">! npm test</div>');
+    expect(html).toContain('class="shblk-out">passing</pre>');
     expect(html).toContain("excluded from model context · exit 2 · output truncated");
     expect(html).toContain("$ git status\nclean");
     expect(html).not.toContain("<strong>passing</strong>");
   });
 
-  it("renders live streaming output and tool chips as an agent turn", () => {
+  it("renders live streaming output, tool chips, and the busy cursor as an agent record", () => {
     const html = renderToStaticMarkup(
       <HistoryView
         records={[message("u1", "user", "go")]}
@@ -260,11 +258,12 @@ describe("HistoryView turn structure", () => {
       />,
     );
 
-    expect(html.match(/turn-agent/g)).toHaveLength(1);
-    expect(html.match(/turn-mark">O</g)).toHaveLength(1);
+    expect(html.match(/rec rec-orb/g)).toHaveLength(1);
+    expect(html.match(/rec-px">orb</g)).toHaveLength(1);
     expect(html).toContain("streaming now");
     expect(html).toContain("activity-rail-row-running tool-activity-category");
-    expect(html).toContain("1 command ran");
+    expect(html).toContain('class="activity-rail-label">commands</span>');
+    expect(html).toContain('class="cur"></span>');
   });
 });
 
@@ -422,10 +421,13 @@ describe("HistoryView", () => {
     );
 
     expect(html).toContain("activity-rail-row-completed tool-activity-category");
-    expect(html).toContain("Command");
+    expect(html).toContain('class="activity-rail-label">commands</span>');
     expect(html).toContain('class="activity-rail-headline" title="echo tool-input"');
     expect(html).not.toContain("1 command ran");
-    expect(html).toContain("echo tool-input");
+    expect(html).not.toContain("1 ran");
+    expect(html).toContain('class="tool-command-text">echo tool-input</span>');
+    expect(html).toContain('class="rec-px">run</span>');
+    expect(html).toContain("✓ completed");
     expect(html).toContain("tool-output");
     expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
     expect(html).not.toContain("live-tool-secret");
@@ -623,11 +625,11 @@ describe("HistoryView", () => {
     expect(html).not.toContain("1 file changed");
     expect(html).toContain("+2");
     expect(html).toContain("−1");
-    expect(html).toContain("2 commands ran");
+    expect(html).toContain("2 ran");
     expect(html).toContain("1 failed");
-    expect(html).toContain("2 files read");
-    expect(html).toContain("<code>src/b.ts</code></summary>");
-    expect(html).not.toContain("Search");
+    expect(html).toContain("2 files");
+    expect(html).toContain(">src/b.ts</code></summary>");
+    expect(html).toContain("✕ failed");
     expect(html).toContain("one test failed");
   });
 });

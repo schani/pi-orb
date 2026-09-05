@@ -18,6 +18,10 @@ Whenever a conversation or implementation changes a requirement, decision, propo
 6. Incident forensics get a file in `docs/postmortems/`; the design doc keeps the resulting rule or invariant plus a link.
 7. Reference docs by path (for example `docs/credentials.md`), never by section number. When adding a doc, add it to the index in `DESIGN.md`.
 
+## Audience
+
+This project is for one person. The UI does not need to explain itself, and it must not repeat itself: no orientation copy, no help text, no legends, no label next to an icon that already says the same thing, no fact shown in two places on one screen.
+
 ## Missing resources
 
 When a requested resource does not exist, preserve the requested URL and show a clear resource-specific “doesn't exist” message with a link back to the dashboard. Never silently redirect a missing resource to the dashboard. Apply this consistently to all resource types and unknown application routes.

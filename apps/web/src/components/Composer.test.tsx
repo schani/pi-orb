@@ -21,34 +21,39 @@ function render(
       onSend={noop}
       canAbort={false}
       onAbort={noop}
-      pending={false}
       onShellAttachmentBlocked={noop}
     />,
   );
 }
 
 describe("Composer shell presentation", () => {
-  it("shows exact mode labels and uses monospace only for shell modes", () => {
+  it("carries the mode in the prefix column", () => {
+    expect(render("message")).toContain('<span class="composer-prefix">&gt;</span>');
+    expect(render("shell")).toContain('<span class="composer-prefix">!</span>');
+    expect(render("excluded_shell")).toContain('<span class="composer-prefix">!!</span>');
+  });
+
+  it("keeps exact mode labels in a visually hidden live region", () => {
     expect(render("message")).toContain(
-      '<div class="composer-mode" aria-live="polite">message</div>',
+      '<div class="composer-mode visually-hidden" aria-live="polite">message</div>',
     );
-    expect(render("message")).not.toContain("composer-input-shell");
-    expect(render("shell")).toContain("composer-input composer-input-shell");
     expect(render("shell")).toContain('aria-live="polite">shell</div>');
     expect(render("excluded_shell")).toContain('aria-live="polite">excluded shell</div>');
   });
 
-  it("prevents shell submission while preserving an image attachment", () => {
+  it("keeps an image attachment and the shell prefix when submission is blocked", () => {
     const html = render("shell", true);
     expect(html).toContain('alt="pasted attachment"');
-    expect(html).toContain('title="remove image attachments to run"');
-    expect(html).toMatch(/<button[^>]*class="composer-send"[^>]*disabled=""/);
+    expect(html).toContain('aria-live="polite">shell</div>');
     expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
   });
 
   it("keeps the textarea editable while sending is unavailable so the next message can be drafted", () => {
     const html = render("message", false, false);
-    expect(html).toMatch(/<button[^>]*class="composer-send"[^>]*disabled=""/);
     expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
+  });
+
+  it("offers no send control: ⌘⏎ is the only send gesture", () => {
+    expect(render("message")).not.toContain("<button");
   });
 });

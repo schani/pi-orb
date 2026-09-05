@@ -312,6 +312,16 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
     });
     if (this.options.commandDirectory !== undefined) {
       environment.PATH = `${this.options.commandDirectory}${delimiter}${environment.PATH ?? ""}`;
+      // A process host has no system gitconfig and the orb's HOME is private,
+      // so the image's `credential.https://github.com.helper` setting reaches
+      // nothing here. Carry it in the environment instead, where every git the
+      // runtime spawns — its own clone, Pi's shell tool, the terminal — reads
+      // it, appending after whatever entries the environment already carries.
+      const inherited = Number.parseInt(environment.GIT_CONFIG_COUNT ?? "", 10);
+      const index = Number.isSafeInteger(inherited) && inherited > 0 ? inherited : 0;
+      environment.GIT_CONFIG_COUNT = String(index + 1);
+      environment[`GIT_CONFIG_KEY_${String(index)}`] = "credential.https://github.com.helper";
+      environment[`GIT_CONFIG_VALUE_${String(index)}`] = "!pi-orb-git-credential";
     }
     return environment;
   }

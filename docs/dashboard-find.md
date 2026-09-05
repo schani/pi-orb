@@ -1,6 +1,6 @@
 # Dashboard Find
 
-> **Status:** Architecture and presentation decided and implemented 2026-08-26. The selected presentation is **Index card**. The five-direction exploration is preserved in `design-prototypes/dashboard-find.html`, and the formatted architecture is in `design-prototypes/dashboard-find-architecture.html`.
+> **Status:** Architecture decided and implemented 2026-08-26; presentation replaced 2026-09-04 by the Signal / Boards find modal (`design-prototypes/signal-boards.html`, `docs/web-ui.md`). The architecture below is unchanged. The retired **Index card** and its four rejected alternatives are preserved in `design-prototypes/dashboard-find.html`, and the formatted architecture is in `design-prototypes/dashboard-find-architecture.html`.
 
 ## Goal and scope
 
@@ -12,11 +12,11 @@ On the dashboard, Command-K on macOS and Control-K elsewhere opens pi-orb Find. 
 
 Find is navigation, not a general command palette. It does not search IDs, lifecycle state, transcript content, checkout files, or agent output. It does not make a network request per keystroke.
 
-The shortcut is dashboard-scoped. Orb, missing-resource, and create-orb routes retain the browser's default Command-K / Control-K behavior. On the dashboard, the shortcut opens Find even when focus is in a creation or rename field; this keeps the dashboard navigation shortcut globally available within its route. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists. The card has a visible close control, but the dashboard header has no persistent Find hint or button.
+The shortcut is dashboard-scoped. Orb, missing-resource, and create-orb routes retain the browser's default Command-K / Control-K behavior. On the dashboard, the shortcut opens Find even when focus is in a creation or rename field; this keeps the dashboard navigation shortcut globally available within its route. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists; a press outside the card closes it as well. There is no persistent Find hint or button, and (since 2026-09-04) no visible close control: a surface reached only by a shortcut is dismissed by that shortcut's own conventions.
 
 ## Reusable client architecture
 
-The app-level mechanism is generic; the dashboard is only its first search source. This avoids baking projects, orbs, GitHub, or dashboard lifecycle into the Command-K listener or Index card.
+The app-level mechanism is generic; the dashboard is only its first search source. This avoids baking projects, orbs, GitHub, or dashboard lifecycle into the Command-K listener or the dialog.
 
 Three layers have one-way dependencies:
 
@@ -27,9 +27,13 @@ Three layers have one-way dependencies:
 ```ts
 type AppSearchItem = {
   key: string;                 // stable and source-namespaced
-  kindLabel: string;           // e.g. "project" or "orb"
+  kindLabel: string;           // e.g. "project" or "orb"; used in accessible names
+  group?: string;              // uppercase heading; defaults to kindLabel
   title: string;
-  context?: string;            // e.g. repository URL or parent project
+  context?: string;            // accessible-name detail, e.g. repository URL
+  glyph?: { char: string; state: string; label: string };
+  chip?: string;               // owning resource, e.g. the parent project
+  age?: string;
   keywords: readonly string[]; // matching fields; never inferred from rendering
   href: string;                // every result is link-native
 };
@@ -42,8 +46,6 @@ type AppSearchStatus =
 type AppSearchSource = {
   id: string;                  // changes reset query and selection
   label: string;               // accessible dialog name
-  placeholder: string;
-  scopeDescription: string;
   items: readonly AppSearchItem[];
   status: AppSearchStatus;
 };
@@ -57,7 +59,7 @@ Orb results use `#/orbs/:orbId`. Project results use the canonical focused-dashb
 
 The generic layer is deliberately synchronous and transport-free. A future server-backed search surface owns its request, cancellation, typed errors, and result state in its route adapter, then supplies an ordinary source snapshot. The shell must not grow resource-specific fetching or caching policy.
 
-`ProjectsPage` already owns the complete project list, independently loaded orb lists, and the once-per-minute dashboard age clock. Its dashboard adapter derives `AppSearchItem[]` with `useMemo`; it introduces no control-plane API or persistence change. Project names and repository URL aliases become project `keywords`; orb names become orb `keywords`. Orb result context follows the current dashboard identity treatment by showing parent project, shelf, and formatted update age—never the removed abbreviated orb hash. Age is presentation context, not a searchable keyword. Dashboard ordering (`updatedAt` descending within each shelf) and partial-load status are likewise computed by this adapter.
+`ProjectsPage` already owns the complete project list, independently loaded orb lists, and the once-per-minute dashboard age clock. Its dashboard adapter derives `AppSearchItem[]` with `useMemo`; it introduces no control-plane API or persistence change. Project names and repository URL aliases become project `keywords`; orb names become orb `keywords`. An orb row carries the same state glyph, parent-project chip, and formatted update age the dashboard shows—never the removed abbreviated orb hash—and repeats them in its accessible name through `context`. Age and state are presentation, not searchable keywords. Dashboard ordering (`updatedAt` descending within each shelf) and partial-load status are likewise computed by this adapter.
 
 ### Normalization and matching
 
@@ -66,9 +68,9 @@ The generic layer is deliberately synchronous and transport-free. A future serve
 - Match only the explicit `keywords` supplied by a source adapter; generic Find never makes labels, context, IDs, or object fields searchable implicitly.
 - The dashboard adapter supplies project keywords from the project name, repository URL exactly as returned by the API, and a display-neutral `github.com/owner/repo` alias with protocol and trailing `.git` removed. It does not attempt repository resolution.
 - The dashboard adapter supplies orb keywords from the display name only. The fallback label `untitled orb` is searchable when the API name is absent.
-- An empty query shows no result list (or the unfiltered dashboard in an in-place-filter treatment), plus concise scope help. It must not rank arbitrary “recent” resources.
+- An empty query shows nothing: no result list, no scope help, no “recent” ranking.
 
-The core preserves source item order and never invents relevance ranking. The dashboard adapter emits projects in API order, followed by each project's working orbs and archive orbs in displayed order, so a direct project match precedes that project's orb matches. The Index card renders the first 50 matches while reporting the full match count.
+The core never invents relevance ranking. It preserves source item order within a group and orders groups by first appearance in the source, so the dashboard adapter's emission order (projects in API order, then each project's working and archive orbs) becomes `PROJECTS` before `ORBS`, and a direct project match precedes any orb match. Display order and keyboard order are the same list. The modal renders the first 50 matches; it does not report a match count.
 
 Activating a project result follows `#/projects/:projectId`, where the dashboard scrolls its panel into view, briefly marks it, and puts focus on the project heading. Activating an orb result follows `#/orbs/:orbId`. Because both rows are anchors, Command/Ctrl-click, middle-click, copy-link, link preview, and context-menu open work without special simulation.
 
@@ -82,17 +84,17 @@ Project rename, orb auto-naming observed by a dashboard refresh, archival, delet
 
 - Register one `keydown` listener in `AppSearchProvider` for the application lifetime. When and only when an active source exists, match `(event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k"`, call `preventDefault()`, then open/focus Find.
 - Use a real `search` landmark. Overlay treatments use an accessible dialog with `aria-modal="true"`; in-place treatments use an expanded region and do not claim modal behavior.
-- The query is `<input type="search">` with an explicit `aria-label`. Announce result count and partial-loading/failure status through one polite live region.
+- The query is `<input type="search">` with an explicit `aria-label`. Announce partial-loading/failure status through one polite live region; the result count is not announced or displayed.
 - Up/Down changes the sole active result, actual pointer movement updates that same selection, Enter activates it, and Tab follows ordinary interactive-element order.
-- The close control and every result arrow share one fixed-width trailing column and horizontal center. Do not trap focus for nonmodal treatments; modal treatments contain focus until closed.
+- Every result's age shares one fixed-width trailing column. Do not trap focus for nonmodal treatments; modal treatments contain focus until closed.
 - Result links include resource kind and parent context in their accessible names. Visual highlights may use `<mark>`, but accessible names remain uninterrupted.
-- At narrow widths, preserve a 44px close target, keep the query visible above the on-screen keyboard, and never depend on hover.
+- At narrow widths, keep the query visible above the on-screen keyboard and never depend on hover.
 
 ## Testing and observability
 
 Pure core unit tests cover normalization, explicit keyword matching, stable source order, and result limits without importing dashboard types. Dashboard-adapter tests separately cover URL aliases, field scope (IDs and states must not match), archived orbs, dashboard order, status mapping, and recomputation after mutation. Provider/dialog component tests cover source registration and cleanup, source-switch reset, no shortcut interception without a source, repeated shortcut focus, Escape focus restoration, keyboard selection, anchor hrefs for every item, native modified-link activation without closing the current card, zero matches, and partial loading/failure copy. The E2E acceptance scenario uses fixtures whose project name, GitHub URL, working-orb name, and archived-orb name each match distinct queries and verifies navigation.
 
-Find makes no autonomous server-side decision and creates no durable state, so lifecycle logging would be noise. User-facing diagnostics are the relevant observability: result count, indexed-item count, and explicit partial loading/failure status are visible in the surface. Development-only component diagnostics may be inspected in React tooling, but product correctness must not depend on console logs.
+Find makes no autonomous server-side decision and creates no durable state, so lifecycle logging would be noise. User-facing diagnostics are the relevant observability: explicit partial loading/failure status is visible in the surface. Development-only component diagnostics may be inspected in React tooling, but product correctness must not depend on console logs.
 
 ## Presentation directions
 
@@ -104,4 +106,4 @@ The interactive HTML study compares five treatments while retaining the contract
 4. **Filter folio** — Find expands inline and filters/highlights the existing project panels.
 5. **Bottom ribbon** — a compact browser-find-inspired bar with previous/next stepping.
 
-The centered **Index card** was selected 2026-08-26. It best communicates cross-project navigation, has enough room for repository and parent context, works at phone widths, and does not rearrange the dashboard while typing. The other four directions remain preserved as rejected presentation alternatives; they share the same indexing architecture but are not implementation targets.
+The centered **Index card** was selected 2026-08-26 over the other four: it best communicates cross-project navigation, has room for parent context, works at phone widths, and does not rearrange the dashboard while typing. Those reasons still hold, and the Signal / Boards modal that replaced its styling on 2026-09-04 is the same centered-modal direction with the design language's typography and without the card's labels, arrows, legend, count, and scope help (`docs/web-ui.md`). All five directions remain preserved as presentation history; none is an implementation target.
