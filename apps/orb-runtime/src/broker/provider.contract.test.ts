@@ -11,6 +11,7 @@ import type {
   TokenRequestBody,
 } from "../domain/broker-client.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
+import { pickCodexModel } from "../pi/model-select.ts";
 import { brokerProviderConfig } from "./provider.ts";
 
 /**
@@ -124,6 +125,13 @@ describe("Pi SDK broker provider contract (pinned SDK version)", () => {
 
   afterEach(() => {
     rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it("selects image-capable GPT-6 Astra from the offline brokered catalog", async () => {
+    const runtime = await createRuntime(new FakeBrokerEndpoint([]));
+    const model = pickCodexModel(runtime.getModels(PROVIDER));
+    expect(model?.id).toBe("gpt-6-astra");
+    expect(model?.input).toContain("image");
   });
 
   it("login drives the broker and persists only the synthetic refresh marker", async () => {

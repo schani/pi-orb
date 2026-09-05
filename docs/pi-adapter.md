@@ -4,7 +4,7 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 
 ## Embedding decisions
 
-- Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`.
+- Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`. Pi packages use [0.85.1](https://github.com/earendil-works/pi/releases/tag/v0.85.1) for GPT-6 Astra support (decided 2026-09-05).
 - The orb runtime is a Node.js service that owns the Pi SDK session and exposes a harness-agnostic HTTP/WebSocket protocol.
 - The Pi adapter translates Pi-native persisted session entries into the shared history schema.
 - A Pi extension may still be useful for Pi-specific instrumentation, but it is not the infrastructure supervisor.
@@ -41,7 +41,7 @@ Rejected alternatives:
 
 ## User shell API and persistence
 
-The pinned Pi SDK 0.80.10 exposes the required public API:
+The pinned Pi SDK 0.85.1 exposes the required public API:
 
 ```ts
 session.executeBash(command, onChunk, { excludeFromContext }): Promise<BashResult>;
