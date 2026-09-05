@@ -542,21 +542,26 @@ export function OrbPage({ orbId }: { orbId: string }) {
     };
   }, [orb?.projectId]);
 
-  // The index follows the orb's own lifecycle transitions, not the 2s poll:
-  // polling it would spend a project-wide list request on every tick.
-  const orbLifecycle =
-    orb === null ? null : `${orb.projectId}\u0000${orb.state}\u0000${orb.activity ?? ""}`;
+  // Refresh sibling titles and status independently of the open orb's activity.
   useEffect(() => {
-    const projectId = orbLifecycle?.split("\u0000")[0];
+    const projectId = orb?.projectId;
     if (projectId === undefined) return;
     let cancelled = false;
-    void listOrbs(projectId).then((result) => {
+    let inFlight = false;
+    const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      const result = await listOrbs(projectId);
+      inFlight = false;
       if (!cancelled && result.isOk()) setProjectOrbs(result.value.items);
-    });
+    };
+    void poll();
+    const timer = window.setInterval(poll, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
-  }, [orbLifecycle]);
+  }, [orb?.projectId]);
 
   useEffect(() => {
     if (renaming) renameInputRef.current?.focus();

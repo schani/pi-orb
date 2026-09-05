@@ -290,20 +290,11 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
     focusedProjectRef.current?.querySelector<HTMLElement>("[data-project-heading]")?.focus();
   }, [focusedProjectId, projects]);
 
-  // A deleting row remains visible through the race-fencing quarantine. Poll
-  // until finalization removes it instead of requiring a manual page reload.
+  // Keep names and activity current, including when no lifecycle work is pending.
   useEffect(() => {
-    const deletionInProgress =
-      projects?.some((project) => project.state === "deleting") === true ||
-      Object.values(orbLists).some(
-        (list) =>
-          list?.type === "loaded" &&
-          list.items.some((orb) => orb.state === "deleting" || orb.state === "archiving"),
-      );
-    if (!deletionInProgress) return;
     const timer = window.setInterval(() => void refresh(), 2_000);
     return () => window.clearInterval(timer);
-  }, [orbLists, projects, refresh]);
+  }, [refresh]);
 
   const onCreateProject = async (event: FormEvent) => {
     event.preventDefault();

@@ -34,6 +34,8 @@ When third-party or platform code can throw or reject, catch it at the immediate
 
 ## Testing
 
+Install repository dependencies with `npm ci` before running checks or starting the frontend. `npm run` does not install dependencies; if a local tool such as `tsc` is missing, install dependencies and continue validation rather than reporting the missing tool as a blocker.
+
 Deterministic simulation testing with the `determined` package is a first-class design constraint. Keep concurrency-critical logic, clocks, persistence, runtime transport, and host lifecycle behavior behind simulation-friendly boundaries. New state machines and retry/reconciliation logic must include deterministic scheduling checkpoints, failpoints where appropriate, invariant-focused tests, and reproducible failure traces.
 
 Run `npm run test:e2e` before deploying any change that touches the runtime protocol, the runtime HTTP/WebSocket server, or the agent harness — the unit suite does not exercise the browser↔runtime handshake end to end (learned 2026-08-04: a partially-scoped snapshot gate rejected every first message with `stale_head`; only the E2E path covers that flow). The E2E runs on macOS Docker Desktop as well as Linux/OrbStack (fixed 2026-08-06 — loopback port publishing plus `host.docker.internal`; docs/host-provider.md).
