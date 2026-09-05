@@ -9,6 +9,21 @@ const closed = { additionalProperties: false } as const;
 export const SessionProbeSchema = Type.Object({ status: Type.Literal("ok") }, closed);
 export type SessionProbe = Static<typeof SessionProbeSchema>;
 
+/** What this deployment is made of, for the dashboard footer. Facts only, never secrets. */
+export const SystemViewSchema = Type.Object(
+  {
+    hostProvider: Type.Union([
+      Type.Literal("process"),
+      Type.Literal("docker"),
+      Type.Literal("gce"),
+    ]),
+    databaseKind: Type.Union([Type.Literal("pglite"), Type.Literal("postgres")]),
+    version: Type.String(),
+  },
+  closed,
+);
+export type SystemView = Static<typeof SystemViewSchema>;
+
 export const OrbStateSchema = Type.Union([
   Type.Literal("creating"),
   Type.Literal("starting"),

@@ -129,9 +129,7 @@ export function ProjectSecretsModal({ project, onCountChange, onClose }: Project
         </header>
         <div className="project-secrets-body">
           {loading ? (
-            <p className="muted">loading configured names…</p>
-          ) : snapshot.items.length === 0 ? (
-            <p className="project-secrets-empty">No project secrets configured.</p>
+            <p className="muted">loading…</p>
           ) : (
             <div className="project-secrets-list">
               {snapshot.items.map((item) => (
@@ -142,7 +140,6 @@ export function ProjectSecretsModal({ project, onCountChange, onClose }: Project
                     </span>
                     {item.name}
                   </span>
-                  <span className="project-secret-status">configured</span>
                   <span className="project-secret-updated">
                     updated {new Date(item.updatedAt).toLocaleDateString()}
                   </span>
@@ -195,10 +192,6 @@ export function ProjectSecretsModal({ project, onCountChange, onClose }: Project
             </button>
           </form>
           {error !== null && <div className="banner banner-error">{error}</div>}
-          <p className="project-secrets-footnote">
-            Existing values cannot be viewed. Running processes keep their current environment until
-            the orb starts again.
-          </p>
         </div>
       </section>
     </div>

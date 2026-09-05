@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { OrbTerminal } from "./OrbTerminal.tsx";
 
 describe("OrbTerminal", () => {
-  it("starts as an icon-only launcher without creating a terminal", () => {
+  it("starts as a bordered launcher without creating a terminal", () => {
     const html = renderToStaticMarkup(<OrbTerminal orbId="orb-1" enabled />);
     expect(html).toContain('class="orb-terminal-launcher"');
-    expect(html).toContain("&gt;_");
+    expect(html).toContain(">terminal<");
     expect(html).not.toContain("orb-terminal-window");
   });
 

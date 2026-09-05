@@ -1,6 +1,6 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import type { AppSearchItem, AppSearchSource } from "./app-search.ts";
-import { formatProjectOrbAge, splitProjectOrbs } from "./project-orbs.ts";
+import { formatProjectOrbAge, projectOrbGlyph, splitProjectOrbs } from "./project-orbs.ts";
 
 export type DashboardOrbListSnapshot =
   | { type: "loading" }
@@ -29,6 +29,7 @@ function projectItem(project: ProjectView): AppSearchItem {
   return {
     key: `dashboard:project:${project.id}`,
     kindLabel: "project",
+    group: "projects",
     title: project.name,
     context: project.repositoryUrl,
     keywords:
@@ -47,12 +48,17 @@ function orbItem(
 ): AppSearchItem {
   const name = orb.name ?? "untitled orb";
   const age = formatProjectOrbAge(orb.updatedAt, now);
-  const shelf = archived ? "archive shelf" : "working set";
+  const glyph = projectOrbGlyph(orb.state, orb.activity);
+  const context = [project.name, ...(archived ? ["archive"] : []), ...(age === null ? [] : [age])];
   return {
     key: `dashboard:orb:${orb.id}`,
     kindLabel: archived ? "archived orb" : "orb",
+    group: "orbs",
     title: name,
-    context: age === null ? `${project.name} · ${shelf}` : `${project.name} · ${shelf} · ${age}`,
+    context: context.join(" · "),
+    glyph: { char: glyph.char, state: glyph.state, label: glyph.label },
+    chip: project.name,
+    ...(age === null ? {} : { age }),
     keywords: [name],
     href: `#/orbs/${encodeURIComponent(orb.id)}`,
   };
@@ -98,8 +104,6 @@ export function buildDashboardSearchSource(snapshot: DashboardSearchSnapshot): A
   return {
     id: "dashboard",
     label: "Find projects and orbs",
-    placeholder: "Project, GitHub URL, or orb name",
-    scopeDescription: "Project names, GitHub URLs, and orb names · archive included",
     items,
     status,
   };

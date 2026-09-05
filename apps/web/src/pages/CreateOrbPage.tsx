@@ -38,31 +38,23 @@ export function CreateOrbPage({ projectId }: CreateOrbPageProps) {
   }
 
   return (
-    <>
-      <header className="app-header">
-        <a href="#/" className="app-title">
-          pi-orb
-        </a>
-      </header>
-      <main className="app-main page create-orb-page">
-        <h1>New Orb</h1>
-        {state.type === "creating" ? (
-          <p className="muted">creating orb…</p>
-        ) : (
-          <div className="banner banner-error">
-            <p>failed to create orb: {describeApiError(state.error)}</p>
-            <div className="create-orb-error-actions">
-              <button
-                type="button"
-                onClick={() => setState({ type: "creating", attempt: state.attempt + 1 })}
-              >
-                retry
-              </button>
-              <a href="#/">Go to dashboard</a>
-            </div>
+    <main className="page simple-page">
+      {state.type === "creating" ? (
+        <p className="muted">creating orb…</p>
+      ) : (
+        <>
+          <p className="error-text">failed to create orb: {describeApiError(state.error)}</p>
+          <div className="create-orb-error-actions">
+            <button
+              type="button"
+              onClick={() => setState({ type: "creating", attempt: state.attempt + 1 })}
+            >
+              retry
+            </button>
+            <a href="#/">Back to dashboard</a>
           </div>
-        )}
-      </main>
-    </>
+        </>
+      )}
+    </main>
   );
 }

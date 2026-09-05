@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { AppSearchProvider } from "./components/AppSearch.tsx";
+import { IconSprite } from "./components/Icons.tsx";
 import { SessionRibbon } from "./components/SessionRibbon.tsx";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
@@ -40,16 +41,7 @@ function AppRoutes() {
   const hash = useSyncExternalStore(subscribeToHash, readHash);
   const route = parseRoute(hash);
   return route.page === "projects" ? (
-    <>
-      <header className="app-header">
-        <a href="#/" className="app-title">
-          pi-orb
-        </a>
-      </header>
-      <div className="app-main">
-        <ProjectsPage focusedProjectId={route.focusedProjectId} />
-      </div>
-    </>
+    <ProjectsPage focusedProjectId={route.focusedProjectId} />
   ) : route.page === "create_orb" ? (
     <CreateOrbPage key={route.projectId} projectId={route.projectId} />
   ) : route.page === "orb" ? (
@@ -63,6 +55,7 @@ export function App() {
   return (
     <AppSearchProvider>
       <div className="app">
+        <IconSprite />
         <SessionRibbon />
         <AppRoutes />
       </div>

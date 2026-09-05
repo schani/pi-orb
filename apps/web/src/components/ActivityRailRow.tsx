@@ -10,7 +10,7 @@ interface ActivityRailRowProps {
 }
 
 /**
- * The single structural primitive for every row placed on an Orb turn rail.
+ * The single structural primitive for every activity row in an Orb turn.
  * Keeping marker, columns, spacing, and disclosure behavior here prevents
  * reasoning and tool categories from drifting apart visually.
  */
@@ -29,15 +29,18 @@ export function ActivityRailRow({
         <span className="activity-rail-summary">
           <span className="activity-rail-label">{label}</span>
           {headline !== undefined && (
-            <span
-              className="activity-rail-headline"
-              title={typeof headline === "string" ? headline : undefined}
-            >
-              {headline}
-            </span>
+            <>
+              {" · "}
+              <span
+                className="activity-rail-headline"
+                title={typeof headline === "string" ? headline : undefined}
+              >
+                {headline}
+              </span>
+            </>
           )}
-          {metric !== undefined && <span className="activity-rail-metric">{metric}</span>}
         </span>
+        {metric !== undefined && <span className="activity-rail-metric">{metric}</span>}
       </summary>
       {children}
     </details>

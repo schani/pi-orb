@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
+import { Icon } from "./Icons.tsx";
 
 type CopyState = "idle" | "copied" | "failed";
 type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & { node?: unknown };
@@ -21,6 +22,20 @@ function nodeText(node: ReactNode): string {
 /** Removes react-markdown's fence-closing newline while preserving source whitespace. */
 export function markdownCodeText(children: ReactNode): string {
   return nodeText(children).replace(/\n$/, "");
+}
+
+/** The fence's info string, carried by react-markdown as `language-<name>`. */
+export function markdownCodeLanguage(children: ReactNode): string | null {
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const language = markdownCodeLanguage(child);
+      if (language !== null) return language;
+    }
+    return null;
+  }
+  if (!isValidElement<{ className?: string }>(children)) return null;
+  const match = /(?:^|\s)language-([\w+#.-]+)/.exec(children.props.className ?? "");
+  return match?.[1] ?? null;
 }
 
 export function MarkdownCodeBlock({ children, node: _node, ...props }: MarkdownPreProps) {
@@ -50,31 +65,21 @@ export function MarkdownCodeBlock({ children, node: _node, ...props }: MarkdownP
 
   return (
     <div className="markdown-code-block">
+      <div className="markdown-code-head">
+        <span>{markdownCodeLanguage(children)}</span>
+        <button
+          type="button"
+          className="icon-button markdown-code-copy"
+          data-state={copyState}
+          aria-label={label}
+          title={label}
+          aria-live="polite"
+          onClick={copy}
+        >
+          <Icon name="copy" />
+        </button>
+      </div>
       <pre {...props}>{children}</pre>
-      <button
-        type="button"
-        className="markdown-code-copy"
-        data-state={copyState}
-        aria-label={label}
-        title={label}
-        aria-live="polite"
-        onClick={copy}
-      >
-        {copyState === "copied" ? (
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="m3 8.5 3.1 3.1L13.2 4.5" />
-          </svg>
-        ) : copyState === "failed" ? (
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M8 3v6M8 12.5v.1" />
-          </svg>
-        ) : (
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <rect x="5.5" y="5.5" width="8" height="8" rx="1.2" />
-            <path d="M10.5 5.5V3.7a1.2 1.2 0 0 0-1.2-1.2H3.7a1.2 1.2 0 0 0-1.2 1.2v5.6a1.2 1.2 0 0 0 1.2 1.2h1.8" />
-          </svg>
-        )}
-      </button>
     </div>
   );
 }

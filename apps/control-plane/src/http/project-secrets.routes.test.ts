@@ -1,7 +1,7 @@
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { makeHarness, makeProjectRow } from "../testkit/fixtures.ts";
+import { makeHarness, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { makeProjectSecretsHarness } from "../testkit/project-secrets.ts";
 import { registerRoutes } from "./routes.ts";
 
@@ -16,7 +16,13 @@ describe("project secret browser routes", () => {
     const secrets = makeProjectSecretsHarness(PROJECT);
     harness.store.seedProject(makeProjectRow(PROJECT));
     app = Fastify();
-    registerRoutes(app, task, { ...harness.deps, projectSecrets: secrets.deps }, {});
+    registerRoutes(
+      app,
+      task,
+      { ...harness.deps, projectSecrets: secrets.deps },
+      {},
+      TEST_SYSTEM_VIEW,
+    );
     await app.ready();
   });
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { probeSession } from "./api.ts";
+import { getSystem, probeSession } from "./api.ts";
 import { readBrowserSession, resetBrowserSessionForTest } from "./session.ts";
 
 describe("API session handling", () => {
@@ -43,5 +43,40 @@ describe("API session handling", () => {
 
     expect(result.isOk()).toBe(true);
     expect(readBrowserSession()).toEqual({ status: "active" });
+  });
+
+  it("rejects a system response that does not match the closed schema", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ hostProvider: "kubernetes", databaseKind: "postgres" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+
+    const result = await getSystem();
+
+    expect(result.isErr() && result.error.type).toBe("invalid_response");
+  });
+
+  it("reads the deployment facts the dashboard footer states", async () => {
+    const system = { hostProvider: "process", databaseKind: "pglite", version: "0.0.1" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) => {
+        expect(path).toBe("/api/v1/system");
+        return new Response(JSON.stringify(system), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
+
+    const result = await getSystem();
+
+    expect(result.isOk() && result.value).toEqual(system);
   });
 });

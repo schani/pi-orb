@@ -1,9 +1,22 @@
+export interface AppSearchGlyph {
+  char: string;
+  /** Hue class suffix (`s-<state>`). */
+  state: string;
+  label: string;
+}
+
 export interface AppSearchItem {
   /** Stable, source-namespaced identity used to retain keyboard selection. */
   key: string;
   kindLabel: string;
+  /** Uppercase heading the item is listed under; defaults to `kindLabel`. */
+  group?: string;
   title: string;
   context?: string;
+  glyph?: AppSearchGlyph;
+  /** Owning resource, shown as a chip. */
+  chip?: string;
+  age?: string;
   /** Matching uses only these explicit fields, never presentation labels implicitly. */
   keywords: readonly string[];
   /** Every result is link-native. */
@@ -19,8 +32,6 @@ export interface AppSearchSource {
   /** Changing source identity resets query and selection. */
   id: string;
   label: string;
-  placeholder: string;
-  scopeDescription: string;
   items: readonly AppSearchItem[];
   status: AppSearchStatus;
 }
@@ -84,6 +95,20 @@ export function moveAppSearchSelection(
   return items[nextIndex]?.key ?? null;
 }
 
+export function appSearchGroup(item: AppSearchItem): string {
+  return item.group ?? item.kindLabel;
+}
+
+/** Groups matches under their headings, keeping first-seen group and item order. */
+export function orderAppSearchMatches(items: readonly AppSearchItem[]): AppSearchItem[] {
+  const groups: string[] = [];
+  for (const item of items) {
+    const group = appSearchGroup(item);
+    if (!groups.includes(group)) groups.push(group);
+  }
+  return groups.flatMap((group) => items.filter((item) => appSearchGroup(item) === group));
+}
+
 /** Stable substring matching over only source-declared keywords. */
 export function matchAppSearchItems(
   items: readonly AppSearchItem[],
@@ -91,7 +116,9 @@ export function matchAppSearchItems(
 ): AppSearchItem[] {
   const normalizedQuery = normalizeAppSearchText(query);
   if (normalizedQuery === "") return [];
-  return items.filter((item) =>
-    item.keywords.some((keyword) => normalizeAppSearchText(keyword).includes(normalizedQuery)),
+  return orderAppSearchMatches(
+    items.filter((item) =>
+      item.keywords.some((keyword) => normalizeAppSearchText(keyword).includes(normalizedQuery)),
+    ),
   );
 }

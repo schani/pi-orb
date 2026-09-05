@@ -18,6 +18,8 @@ import {
   projectSecretPath,
   projectSecretsPath,
   SessionProbeSchema,
+  type SystemView,
+  SystemViewSchema,
   type UpdateOrbRequest,
   type UpdateProjectRequest,
 } from "@pi-orb/protocol";
@@ -137,6 +139,10 @@ const OrbListSchema = ListResponseSchema(OrbViewSchema);
 
 export function probeSession() {
   return apiFetch(SessionProbeSchema, "/api/v1/session", { cache: "no-store" });
+}
+
+export function getSystem(): Promise<Result<SystemView, ApiError>> {
+  return apiFetch(SystemViewSchema, "/api/v1/system");
 }
 
 export function listProjects(): Promise<Result<{ items: ProjectView[] }, ApiError>> {

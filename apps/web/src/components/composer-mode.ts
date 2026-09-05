@@ -9,6 +9,13 @@ export function composerModeLabel(mode: ComposerMode): "message" | "shell" | "ex
   return mode === "excluded_shell" ? "excluded shell" : mode;
 }
 
+/** The composer prefix column carries the mode. */
+export function composerModeGlyph(mode: ComposerMode): ">" | "!" | "!!" {
+  if (mode === "shell") return "!";
+  if (mode === "excluded_shell") return "!!";
+  return ">";
+}
+
 /** Consume a bang typed at offset zero as a hidden mode prefix when possible. */
 export function enterShellMode(mode: ComposerMode): ComposerMode | null {
   if (mode === "message") return "shell";

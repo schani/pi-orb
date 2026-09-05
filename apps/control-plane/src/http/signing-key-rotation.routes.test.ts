@@ -6,7 +6,7 @@ import { DEFAULT_ISSUER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
 import type { SigningKeyDeps } from "../domain/ports.ts";
 import { ensureActiveSigningKey } from "../domain/signing-keys.ts";
-import { makeHarness, makeSigningKeyHarness } from "../testkit/fixtures.ts";
+import { makeHarness, makeSigningKeyHarness, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import type { FakeSigningKeyStore } from "../testkit/workload-identity.ts";
 import { registerRoutes } from "./routes.ts";
 
@@ -57,7 +57,7 @@ describe("staged signing-key rotation routes", () => {
     keys = keyHarness.keys;
     signingKeys = keyHarness.deps;
     app = Fastify();
-    registerRoutes(app, task, makeHarness().deps, {}, signingKeys);
+    registerRoutes(app, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW, signingKeys);
     await app.ready();
     // The steady state an operator rotates *from*.
     expect((await ensureActiveSigningKey(task, signingKeys, { now: task.wallNow() })).isOk()).toBe(
@@ -161,20 +161,14 @@ describe("staged signing-key rotation routes", () => {
       retryable: true,
     };
     const broken = Fastify();
-    registerRoutes(
-      broken,
-      task,
-      makeHarness().deps,
-      {},
-      {
-        ...signingKeys,
-        keys: {
-          listSigningKeys: () => errAsync(outage),
-          insertSigningKey: () => errAsync(outage),
-          casSigningKeyState: () => errAsync(outage),
-        },
+    registerRoutes(broken, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW, {
+      ...signingKeys,
+      keys: {
+        listSigningKeys: () => errAsync(outage),
+        insertSigningKey: () => errAsync(outage),
+        casSigningKeyState: () => errAsync(outage),
       },
-    );
+    });
     await broken.ready();
     // Any failure to read the key table is "the issuer's state is unknown",
     // which is the one rotation outcome a caller may retry unchanged.
@@ -189,7 +183,7 @@ describe("staged signing-key rotation routes", () => {
 
   it("does not exist on a role that was not given key management", async () => {
     const withoutKeys = Fastify();
-    registerRoutes(withoutKeys, task, makeHarness().deps, {});
+    registerRoutes(withoutKeys, task, makeHarness().deps, {}, TEST_SYSTEM_VIEW);
     await withoutKeys.ready();
     // The public issuer role serves JWKS; it must not be able to change what
     // it publishes, and a route it never registers cannot be reached at all.

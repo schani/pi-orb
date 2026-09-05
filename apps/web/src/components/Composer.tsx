@@ -1,6 +1,7 @@
 import { type ClipboardEvent, type KeyboardEvent, useRef } from "react";
 import {
   type ComposerMode,
+  composerModeGlyph,
   composerModeLabel,
   enterShellMode,
   leaveShellMode,
@@ -30,8 +31,6 @@ interface ComposerProps {
   /** An operation is running and can be aborted. */
   canAbort: boolean;
   onAbort: () => void;
-  /** A request is awaiting its result frame. */
-  pending: boolean;
   /** Shell submission was attempted while an image remains attached. */
   onShellAttachmentBlocked: () => void;
 }
@@ -47,7 +46,6 @@ export function Composer({
   onSend,
   canAbort,
   onAbort,
-  pending,
   onShellAttachmentBlocked,
 }: ComposerProps) {
   const isShell = mode !== "message";
@@ -98,10 +96,11 @@ export function Composer({
           ))}
         </div>
       )}
-      <div className="composer-row">
+      <div className="composer-line">
+        <span className="composer-prefix">{composerModeGlyph(mode)}</span>
         <textarea
           ref={inputRef}
-          className={`composer-input${isShell ? " composer-input-shell" : ""}`}
+          className="composer-input"
           value={text}
           onChange={(event) => {
             const normalized = normalizeComposerChange(mode, event.target.value);
@@ -145,30 +144,16 @@ export function Composer({
               }
             }
           }}
-          placeholder={
-            isShell
-              ? "Run a shell command… (⌘⏎ to run)"
-              : "Message the agent… (paste images directly, ⌘⏎ to send)"
-          }
-          rows={3}
+          placeholder={isShell ? "Run a shell command… (⌘⏎ to run)" : "Message the orb…"}
+          rows={2}
         />
         {canAbort && (
-          <button type="button" className="danger" onClick={onAbort}>
+          <button type="button" className="text-action" onClick={onAbort}>
             abort
           </button>
         )}
-        <button
-          type="button"
-          className="composer-send"
-          aria-label="send"
-          title={shellBlockedByAttachment ? "remove image attachments to run" : "send (⌘⏎)"}
-          onClick={submit}
-          disabled={!sendEnabled}
-        >
-          {pending ? "…" : "↑"}
-        </button>
       </div>
-      <div className="composer-mode" aria-live="polite">
+      <div className="composer-mode visually-hidden" aria-live="polite">
         {composerModeLabel(mode)}
       </div>
     </div>

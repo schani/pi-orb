@@ -1,5 +1,6 @@
 import {
   createContext,
+  Fragment,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -12,7 +13,9 @@ import {
 } from "react";
 import {
   APP_SEARCH_RESULT_LIMIT,
+  type AppSearchItem,
   type AppSearchSource,
+  appSearchGroup,
   didAppSearchPointerMove,
   matchAppSearchItems,
   moveAppSearchSelection,
@@ -94,6 +97,18 @@ export function AppSearchDialog({
     inputRef.current?.select();
   }, []);
 
+  useEffect(() => {
+    // A press that starts outside the card dismisses it; a drag that starts
+    // inside and ends outside is still a selection, not a dismissal.
+    const onPointerDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Node && dialogRef.current?.contains(target) === true) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [onClose]);
+
   const move = (offset: number) => {
     const nextKey = moveAppSearchSelection(visibleMatches, activeKey, offset);
     if (nextKey !== null) {
@@ -142,10 +157,13 @@ export function AppSearchDialog({
     if (shouldCloseAppSearchForActivation(event)) onClose(false);
   };
 
-  const countText =
-    query.trim() === ""
-      ? "Type to find"
-      : `${matches.length} ${matches.length === 1 ? "match" : "matches"}`;
+  const groups: { label: string; items: { item: AppSearchItem; index: number }[] }[] = [];
+  visibleMatches.forEach((item, index) => {
+    const label = appSearchGroup(item);
+    const group = groups.at(-1);
+    if (group?.label === label) group.items.push({ item, index });
+    else groups.push({ label, items: [{ item, index }] });
+  });
 
   return (
     <div className="app-search-backdrop">
@@ -161,7 +179,6 @@ export function AppSearchDialog({
         }}
       >
         <search className="app-search-query-row">
-          <span className="app-search-query-icon" aria-hidden="true" />
           <input
             ref={inputRef}
             type="search"
@@ -171,76 +188,60 @@ export function AppSearchDialog({
               selectedIndex < 0 ? undefined : `app-search-result-${selectedIndex}`
             }
             autoComplete="off"
-            placeholder={source.placeholder}
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             onKeyDown={onInputKeyDown}
           />
-          <button
-            type="button"
-            className="app-search-close"
-            aria-label="Close Find"
-            onClick={() => onClose()}
-          >
-            ×
-          </button>
         </search>
         <div className="app-search-result-region">
-          {query.trim() === "" ? (
-            <p className="app-search-empty">{source.scopeDescription}</p>
-          ) : visibleMatches.length === 0 ? (
-            <p className="app-search-empty">
-              No matches{source.status.type === "complete" ? "" : " in loaded items"}
-            </p>
-          ) : (
-            visibleMatches.map((item, index) => (
-              <a
-                key={item.key}
-                id={`app-search-result-${index}`}
-                ref={(element) => {
-                  if (element === null) resultRefs.current.delete(item.key);
-                  else resultRefs.current.set(item.key, element);
-                }}
-                className={`app-search-result${item.key === selectedKey ? " active" : ""}`}
-                href={item.href}
-                aria-label={`${item.kindLabel}: ${item.title}${item.context === undefined ? "" : `, ${item.context}`}`}
-                onPointerMove={(event) => {
-                  const nextPosition = { x: event.clientX, y: event.clientY };
-                  const pointerMoved = didAppSearchPointerMove(
-                    lastPointerPosition.current,
-                    nextPosition,
-                  );
-                  lastPointerPosition.current = nextPosition;
-                  if (pointerMoved) onActiveKeyChange(item.key);
-                }}
-                onClick={onResultClick}
-              >
-                <span className="app-search-kind">{item.kindLabel}</span>
-                <span className="app-search-result-copy">
+          {query.trim() !== "" && visibleMatches.length === 0 && (
+            <p className="app-search-empty">no match</p>
+          )}
+          {groups.map((group) => (
+            <Fragment key={group.label}>
+              <div className="app-search-group">{group.label}</div>
+              {group.items.map(({ item, index }) => (
+                <a
+                  key={item.key}
+                  id={`app-search-result-${index}`}
+                  ref={(element) => {
+                    if (element === null) resultRefs.current.delete(item.key);
+                    else resultRefs.current.set(item.key, element);
+                  }}
+                  className={`app-search-result${item.key === selectedKey ? " active" : ""}`}
+                  href={item.href}
+                  aria-label={`${item.kindLabel}: ${item.title}${item.context === undefined ? "" : `, ${item.context}`}`}
+                  onPointerMove={(event) => {
+                    const nextPosition = { x: event.clientX, y: event.clientY };
+                    const pointerMoved = didAppSearchPointerMove(
+                      lastPointerPosition.current,
+                      nextPosition,
+                    );
+                    lastPointerPosition.current = nextPosition;
+                    if (pointerMoved) onActiveKeyChange(item.key);
+                  }}
+                  onClick={onResultClick}
+                >
+                  <span
+                    className={`glyph${item.glyph === undefined ? "" : ` s-${item.glyph.state}`}`}
+                    aria-hidden="true"
+                  >
+                    {item.glyph?.char}
+                  </span>
                   <span className="app-search-result-title">
                     {highlightedText(item.title, query)}
                   </span>
-                  {item.context !== undefined && (
-                    <span className="app-search-result-context">
-                      {highlightedText(item.context, query)}
-                    </span>
-                  )}
-                </span>
-                <span className="app-search-result-arrow" aria-hidden="true">
-                  →
-                </span>
-              </a>
-            ))
+                  {item.chip !== undefined && <span className="app-search-chip">{item.chip}</span>}
+                  <span className="app-search-age">{item.age}</span>
+                </a>
+              ))}
+            </Fragment>
+          ))}
+          {source.status.type !== "complete" && (
+            <p className="app-search-empty" aria-live="polite">
+              {source.status.message}
+            </p>
           )}
-        </div>
-        <div className="app-search-footer">
-          <span>↑↓ move</span>
-          <span>↵ open</span>
-          <span>esc close</span>
-          <span className="app-search-count" aria-live="polite">
-            {countText}
-            {source.status.type === "complete" ? "" : ` · ${source.status.message}`}
-          </span>
         </div>
       </div>
     </div>

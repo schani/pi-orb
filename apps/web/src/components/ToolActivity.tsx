@@ -119,11 +119,11 @@ function categoryFor(name: string): { key: string; kind: CategoryKind; label: st
   switch (name) {
     case "edit":
     case "write":
-      return { key: "edit", kind: "edit", label: "Edit" };
+      return { key: "edit", kind: "edit", label: "edit" };
     case "bash":
-      return { key: "command", kind: "command", label: "Command" };
+      return { key: "command", kind: "command", label: "commands" };
     case "read":
-      return { key: "read", kind: "read", label: "Read" };
+      return { key: "read", kind: "read", label: "read" };
     default:
       return { key: `other:${name}`, kind: "other", label: name };
   }
@@ -154,33 +154,25 @@ function categoryState(category: ActivityCategory): "running" | "completed" | "f
   return "completed";
 }
 
-function categoryHeadline(category: ActivityCategory): string {
-  const count =
-    category.kind === "edit" || category.kind === "read"
-      ? uniquePathCount(category.calls)
-      : category.calls.length;
-  const onlyCall = category.calls.length === 1 ? category.calls[0] : undefined;
+/** A category of one names its file or command; larger runs count in the metric. */
+function categoryHeadline(category: ActivityCategory): string | undefined {
+  const firstCall = category.calls[0];
+  if (firstCall === undefined) return undefined;
   switch (category.kind) {
     case "edit":
-      return onlyCall === undefined
-        ? `${count} ${count === 1 ? "file" : "files"} changed`
-        : (callPath(onlyCall) ?? "1 file changed");
+      return category.calls.length === 1 ? (callPath(firstCall) ?? undefined) : undefined;
     case "command":
-      return onlyCall === undefined
-        ? `${count} commands ran`
-        : (stringArgument(onlyCall, "command") ?? "1 command ran");
-    case "read": {
-      const firstCall = category.calls[0];
-      if (count === 1 && firstCall !== undefined) return callPath(firstCall) ?? "1 file";
-      return `${count} files read`;
-    }
+      return category.calls.length === 1
+        ? (stringArgument(firstCall, "command") ?? undefined)
+        : undefined;
+    case "read":
+      return uniquePathCount(category.calls) === 1 ? (callPath(firstCall) ?? undefined) : undefined;
     case "other":
-      return `${count} ${count === 1 ? "call" : "calls"}`;
+      return undefined;
   }
 }
 
-function categoryMetric(category: ActivityCategory): ReactNode {
-  const state = categoryState(category);
+function countMetric(category: ActivityCategory): ReactNode | null {
   if (category.kind === "edit") {
     const stats = statsForCalls(category.calls);
     if (stats !== null) {
@@ -192,12 +184,33 @@ function categoryMetric(category: ActivityCategory): ReactNode {
       );
     }
   }
-  if (state === "failed") {
-    const failures = category.calls.filter((call) => call.state === "failed").length;
-    return <span className="tool-activity-failed">{failures} failed</span>;
-  }
-  if (state === "running") return <span className="tool-activity-running">running</span>;
-  return "complete";
+  const count =
+    category.kind === "edit" || category.kind === "read"
+      ? uniquePathCount(category.calls)
+      : category.calls.length;
+  if (count < 2) return null;
+  if (category.kind === "command") return `${count} ran`;
+  return `${count} ${category.kind === "other" ? "calls" : "files"}`;
+}
+
+function categoryMetric(category: ActivityCategory): ReactNode | undefined {
+  const failures = category.calls.filter((call) => call.state === "failed").length;
+  const lead = countMetric(category);
+  const trail =
+    failures > 0 ? (
+      <span className="tool-activity-failed">{failures} failed</span>
+    ) : category.calls.some((call) => call.state === "running") ? (
+      <span className="tool-activity-running">running</span>
+    ) : null;
+  if (lead === null) return trail ?? undefined;
+  if (trail === null) return lead;
+  return (
+    <>
+      {lead}
+      {" · "}
+      {trail}
+    </>
+  );
 }
 
 function callStatus(call: ActivityCall): string {
@@ -209,31 +222,31 @@ function callStatus(call: ActivityCall): string {
 function CommandCall({ call }: { call: ActivityCall }) {
   const command = stringArgument(call, "command") ?? call.name;
   const output = resultText(call.result);
-  const canExpand = call.result !== undefined;
-  if (!canExpand) {
-    return (
-      <div className="tool-activity-call tool-activity-command-call">
-        <span className="tool-call-chevron">›</span>
-        <code>{command}</code>
-        <span className={`tool-call-status tool-call-${call.state}`}>{callStatus(call)}</span>
-      </div>
-    );
-  }
   return (
-    <details className="tool-activity-call tool-activity-command-call">
-      <summary>
-        <span className="tool-call-chevron">›</span>
-        <code>{command}</code>
-        <span className={`tool-call-status tool-call-${call.state}`}>{callStatus(call)}</span>
-      </summary>
-      <pre
-        className={
-          call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
-        }
-      >
-        {output === "" ? "(no output)" : output}
-      </pre>
-    </details>
+    <div className="tool-command">
+      <div className="tool-command-line">
+        <span className="rec-px">run</span>
+        <span className="tool-command-text">{command}</span>
+      </div>
+      {output !== "" && <pre className="tool-command-output">{output}</pre>}
+      <div className="tool-command-footer">
+        <span
+          className={
+            call.state === "failed"
+              ? "tool-activity-failed"
+              : call.state === "running"
+                ? "tool-activity-running"
+                : undefined
+          }
+        >
+          {call.state === "failed"
+            ? "✕ failed"
+            : call.state === "running"
+              ? "◐ running"
+              : "✓ completed"}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -255,8 +268,8 @@ function FileCall({ call, kind }: { call: ActivityCall; kind: "edit" | "read" })
   if (detail === "") {
     return (
       <div className="tool-activity-call">
-        <span className="tool-call-chevron">›</span>
-        <code>{path}</code>
+        <span className="tool-call-marker">·</span>
+        <code className="trunc">{path}</code>
         {metric !== null && (
           <span className={`tool-call-status tool-call-${call.state}`}>{metric}</span>
         )}
@@ -266,8 +279,8 @@ function FileCall({ call, kind }: { call: ActivityCall; kind: "edit" | "read" })
   return (
     <details className="tool-activity-call">
       <summary>
-        <span className="tool-call-chevron">›</span>
-        <code>{path}</code>
+        <span className="tool-call-marker">·</span>
+        <code className="trunc">{path}</code>
         {metric !== null && (
           <span className={`tool-call-status tool-call-${call.state}`}>{metric}</span>
         )}
@@ -289,8 +302,8 @@ function OtherCall({ call }: { call: ActivityCall }) {
   return (
     <details className="tool-activity-call">
       <summary>
-        <span className="tool-call-chevron">›</span>
-        <code>{call.name}</code>
+        <span className="tool-call-marker">·</span>
+        <code className="trunc">{call.name}</code>
         <span className={`tool-call-status tool-call-${call.state}`}>{callStatus(call)}</span>
       </summary>
       <pre
