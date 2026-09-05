@@ -7,10 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": [
-      "**",
-      "!design-prototypes/**"
-    ]
+    "includes": ["**", "!design-prototypes"]
   },
   "formatter": {
     "enabled": true,
