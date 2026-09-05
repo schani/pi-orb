@@ -94,7 +94,7 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
   const readyRef = useRef(false);
   const metricsRef = useRef<TerminalGridMetrics>({
     cellWidth: 8,
-    cellHeight: 18.6,
+    cellHeight: 20,
     horizontalChrome: TERMINAL_HORIZONTAL_PADDING + 2,
     verticalChrome: HEADER_HEIGHT + TERMINAL_VERTICAL_PADDING + 2,
   });

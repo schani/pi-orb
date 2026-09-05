@@ -21,6 +21,7 @@
   --st-arch: #7a5cc4;
   --st-del: #8a8a8a;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --text-size: 13px;
   --row: 20px;
   --ribbon: 24px;
 }
@@ -40,8 +41,8 @@ body {
   background: var(--w);
   color: var(--k);
   font-family: var(--mono);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--text-size);
+  line-height: var(--row);
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
@@ -1265,23 +1266,16 @@ h3 {
 }
 
 .markdown-code-block {
+  position: relative;
   margin: 0 0 8px;
-  background: var(--w);
+  background: var(--g1);
   border: 1px solid var(--k);
 }
 
-.markdown-code-head {
-  display: flex;
-  height: var(--row);
-  align-items: center;
-  gap: 8px;
-  padding: 0 2px 0 8px;
-  color: var(--g3);
-  border-bottom: 1px solid var(--k);
-}
-
 .markdown-code-copy {
-  margin-left: auto;
+  position: absolute;
+  top: 2px;
+  right: 2px;
 }
 
 .markdown-code-copy[data-state="copied"] {
@@ -1294,6 +1288,7 @@ h3 {
 
 .chat-markdown .markdown-code-block pre {
   margin: 0;
+  margin-right: 26px;
   padding: 2px 8px;
   overflow-x: auto;
   white-space: pre;
@@ -1511,12 +1506,13 @@ h3 {
 }
 
 /* live output ends in a blinking block cursor */
-.cur {
+.cur,
+.composer-caret {
   display: inline-block;
   width: 1ch;
-  height: 1em;
+  height: var(--row);
   background: var(--k);
-  vertical-align: -2px;
+  vertical-align: bottom;
   animation: cursor-blink 1.06s steps(1, end) infinite;
 }
 
@@ -1532,7 +1528,8 @@ h3 {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cur {
+  .cur,
+  .composer-caret {
     animation: none;
   }
 }
@@ -1586,6 +1583,41 @@ h3 {
 
 .composer-prefix {
   text-align: right;
+}
+
+.composer-editor {
+  position: relative;
+  min-width: 0;
+  background: var(--w);
+  isolation: isolate;
+}
+
+.composer-caret-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  line-height: var(--row);
+}
+
+.composer-caret {
+  position: absolute;
+  pointer-events: none;
+  background: var(--w);
+  mix-blend-mode: difference;
+}
+
+.composer-caret[hidden] {
+  display: none;
+}
+
+.composer-input[data-block-caret="true"] {
+  caret-color: transparent;
 }
 
 .composer-input {
@@ -1731,9 +1763,9 @@ h3 {
   --term-bg: #fff;
   --term-cursor: #000;
   --term-font-family: var(--mono);
-  --term-font-size: 12px;
-  --term-line-height: 1.55;
-  --term-row-height: 18.6px;
+  --term-font-size: var(--text-size);
+  --term-line-height: calc(20 / 13);
+  --term-row-height: var(--row);
   --term-color-2: var(--ok);
   --term-color-3: var(--st-start);
 }

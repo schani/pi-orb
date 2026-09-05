@@ -24,20 +24,6 @@ export function markdownCodeText(children: ReactNode): string {
   return nodeText(children).replace(/\n$/, "");
 }
 
-/** The fence's info string, carried by react-markdown as `language-<name>`. */
-export function markdownCodeLanguage(children: ReactNode): string | null {
-  if (Array.isArray(children)) {
-    for (const child of children) {
-      const language = markdownCodeLanguage(child);
-      if (language !== null) return language;
-    }
-    return null;
-  }
-  if (!isValidElement<{ className?: string }>(children)) return null;
-  const match = /(?:^|\s)language-([\w+#.-]+)/.exec(children.props.className ?? "");
-  return match?.[1] ?? null;
-}
-
 export function MarkdownCodeBlock({ children, node: _node, ...props }: MarkdownPreProps) {
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,22 +49,23 @@ export function MarkdownCodeBlock({ children, node: _node, ...props }: MarkdownP
         ? "Copy failed—try again"
         : "Copy code to clipboard";
 
+  const copyButton = (
+    <button
+      type="button"
+      className="icon-button markdown-code-copy"
+      data-state={copyState}
+      aria-label={label}
+      title={label}
+      aria-live="polite"
+      onClick={copy}
+    >
+      <Icon name="copy" />
+    </button>
+  );
+
   return (
     <div className="markdown-code-block">
-      <div className="markdown-code-head">
-        <span>{markdownCodeLanguage(children)}</span>
-        <button
-          type="button"
-          className="icon-button markdown-code-copy"
-          data-state={copyState}
-          aria-label={label}
-          title={label}
-          aria-live="polite"
-          onClick={copy}
-        >
-          <Icon name="copy" />
-        </button>
-      </div>
+      {copyButton}
       <pre {...props}>{children}</pre>
     </div>
   );

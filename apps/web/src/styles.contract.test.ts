@@ -59,6 +59,12 @@ describe("dashboard layout contract", () => {
 });
 
 describe("orb workspace layout contract", () => {
+  it("gives boxed code and text the same gray background as inline code", () => {
+    expect(rule(".chat-markdown :not(pre) > code")).toContain("background: var(--g1)");
+    expect(rule(".markdown-code-block")).toContain("background: var(--g1)");
+    expect(rule(".chat-markdown pre code")).toContain("background: none");
+  });
+
   it("carries viewport height through the app to the bottom-pinned composer", () => {
     expect(rule(".app")).toContain("display: flex");
     expect(rule(".app")).toContain("min-height: 100dvh");

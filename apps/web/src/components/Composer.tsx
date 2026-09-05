@@ -1,4 +1,5 @@
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef } from "react";
+import { ComposerCaret } from "./ComposerCaret.tsx";
 import {
   type ComposerMode,
   composerModeGlyph,
@@ -102,55 +103,58 @@ export function Composer({
       )}
       <div className="composer-line">
         <span className="composer-prefix">{composerModeGlyph(mode)}</span>
-        <textarea
-          ref={inputRef}
-          className="composer-input"
-          value={text}
-          onChange={(event) => {
-            const normalized = normalizeComposerChange(mode, event.target.value);
-            onValueChange(normalized.text, normalized.mode);
-          }}
-          onPaste={handlePaste}
-          onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
-            const atStart = event.currentTarget.selectionStart === 0;
-            const collapsed =
-              event.currentTarget.selectionStart === event.currentTarget.selectionEnd;
-            if (
-              event.key === "!" &&
-              atStart &&
-              collapsed &&
-              !event.metaKey &&
-              !event.ctrlKey &&
-              !event.altKey
-            ) {
-              const nextMode = enterShellMode(mode);
-              if (nextMode !== null) {
-                event.preventDefault();
-                onValueChange(text, nextMode);
-                return;
+        <div className="composer-editor">
+          <textarea
+            ref={inputRef}
+            className="composer-input"
+            value={text}
+            onChange={(event) => {
+              const normalized = normalizeComposerChange(mode, event.target.value);
+              onValueChange(normalized.text, normalized.mode);
+            }}
+            onPaste={handlePaste}
+            onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              const atStart = event.currentTarget.selectionStart === 0;
+              const collapsed =
+                event.currentTarget.selectionStart === event.currentTarget.selectionEnd;
+              if (
+                event.key === "!" &&
+                atStart &&
+                collapsed &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.altKey
+              ) {
+                const nextMode = enterShellMode(mode);
+                if (nextMode !== null) {
+                  event.preventDefault();
+                  onValueChange(text, nextMode);
+                  return;
+                }
               }
-            }
-            if (event.key === "Backspace" && atStart && collapsed) {
-              const nextMode = leaveShellMode(mode);
-              if (nextMode !== null) {
-                event.preventDefault();
-                onValueChange(text, nextMode);
-                return;
+              if (event.key === "Backspace" && atStart && collapsed) {
+                const nextMode = leaveShellMode(mode);
+                if (nextMode !== null) {
+                  event.preventDefault();
+                  onValueChange(text, nextMode);
+                  return;
+                }
               }
-            }
-            if (isSendShortcut(event)) {
-              if (shellBlockedByAttachment) {
-                event.preventDefault();
-                onShellAttachmentBlocked();
-              } else if (sendEnabled) {
-                event.preventDefault();
-                submit();
+              if (isSendShortcut(event)) {
+                if (shellBlockedByAttachment) {
+                  event.preventDefault();
+                  onShellAttachmentBlocked();
+                } else if (sendEnabled) {
+                  event.preventDefault();
+                  submit();
+                }
               }
-            }
-          }}
-          placeholder={isShell ? "Run a shell command… (⌘⏎ to run)" : "Message the orb…"}
-          rows={4}
-        />
+            }}
+            placeholder={isShell ? "Run a shell command… (⌘⏎ to run)" : "Message the orb…"}
+            rows={4}
+          />
+          <ComposerCaret inputRef={inputRef} text={text} />
+        </div>
         {canAbort && (
           <button type="button" className="text-action" onClick={onAbort}>
             abort
