@@ -862,6 +862,13 @@ export function OrbPage({ orbId }: { orbId: string }) {
             </a>
           );
         })}
+        {orb !== null && (
+          <div className="sect">
+            <a className="text-action" href={`#/projects/${orb.projectId}/orbs/new`}>
+              new orb
+            </a>
+          </div>
+        )}
       </nav>
 
       <div className="orb-main">

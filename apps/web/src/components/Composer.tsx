@@ -1,4 +1,4 @@
-import { type ClipboardEvent, type KeyboardEvent, useRef } from "react";
+import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef } from "react";
 import {
   type ComposerMode,
   composerModeGlyph,
@@ -53,6 +53,10 @@ export function Composer({
   const hasInput = isShell ? text.trim() !== "" : text.trim() !== "" || images.length > 0;
   const sendEnabled = canSend && hasInput && !shellBlockedByAttachment;
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
 
   const submit = () => {
     onSend();
@@ -145,7 +149,7 @@ export function Composer({
             }
           }}
           placeholder={isShell ? "Run a shell command… (⌘⏎ to run)" : "Message the orb…"}
-          rows={2}
+          rows={4}
         />
         {canAbort && (
           <button type="button" className="text-action" onClick={onAbort}>

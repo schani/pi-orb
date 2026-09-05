@@ -27,6 +27,10 @@ function render(
 }
 
 describe("Composer shell presentation", () => {
+  it("starts with four lines", () => {
+    expect(render("message")).toMatch(/<textarea[^>]*rows="4"/);
+  });
+
   it("carries the mode in the prefix column", () => {
     expect(render("message")).toContain('<span class="composer-prefix">&gt;</span>');
     expect(render("shell")).toContain('<span class="composer-prefix">!</span>');
