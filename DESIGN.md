@@ -124,6 +124,7 @@ Tracking:
 
 Reference material:
 
+- [docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md](docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md) — failed initial enrollment, composed-DST reproduction, and incarnation-fenced key revocation
 - [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's “Putting an Agent in an Orb”
 - [docs/EXE-DEV.md](docs/EXE-DEV.md) — the full exe.dev host-provider evaluation
 - [docs/AWS-MICROVMS.md](docs/AWS-MICROVMS.md) — the full AWS Lambda MicroVMs host-provider evaluation

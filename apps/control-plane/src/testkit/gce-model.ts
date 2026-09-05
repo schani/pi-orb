@@ -193,16 +193,21 @@ export class DeterministicGceApiModel implements GceApiTransport {
       const name = args.body?.["name"];
       if (typeof name !== "string") return { status: 400, body: {} };
       if (this.live(this.instances, name) !== undefined) return { status: 409, body: {} };
+      // Acceptance reserves the name and exposes metadata before the async
+      // operation finishes. Otherwise competing inserts can overwrite the
+      // winner, or an abandoned operation leaves retries seeing 404 forever.
+      const resource: ModeledResource = {
+        body: {
+          ...structuredClone(args.body ?? {}),
+          name,
+          status: "PROVISIONING",
+          networkInterfaces: [{ networkIP: "10.0.0.2" }],
+        },
+        deletionVisibilityRemaining: null,
+      };
+      this.instances.set(name, resource);
       return this.operation(() => {
-        this.instances.set(name, {
-          body: {
-            ...(args.body ?? {}),
-            name,
-            status: "RUNNING",
-            networkInterfaces: [{ networkIP: "10.0.0.2" }],
-          },
-          deletionVisibilityRemaining: null,
-        });
+        resource.body["status"] = "RUNNING";
       });
     }
 
@@ -238,11 +243,13 @@ export class DeterministicGceApiModel implements GceApiTransport {
       const name = args.body?.["name"];
       if (typeof name !== "string") return { status: 400, body: {} };
       if (this.live(this.disks, name) !== undefined) return { status: 409, body: {} };
+      const resource: ModeledResource = {
+        body: { ...structuredClone(args.body ?? {}), name, status: "CREATING" },
+        deletionVisibilityRemaining: null,
+      };
+      this.disks.set(name, resource);
       return this.operation(() => {
-        this.disks.set(name, {
-          body: { ...(args.body ?? {}), name },
-          deletionVisibilityRemaining: null,
-        });
+        resource.body["status"] = "READY";
       });
     }
 

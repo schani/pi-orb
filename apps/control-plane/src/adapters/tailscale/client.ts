@@ -37,9 +37,8 @@ export interface TailscaleHttpResponse {
 }
 
 /**
- * Minimal transport seam over the Tailscale REST API — only POST is ever
- * used. The client is written against this interface so its multi-step flow
- * is unit-testable with a scripted fake.
+ * Minimal transport seam over the Tailscale REST API. Scheduling belongs at
+ * this boundary so independent real clients can share a modeled remote service.
  */
 export interface TailscaleApiTransport {
   request(args: {
@@ -74,6 +73,13 @@ export interface TailscaleOAuthConfig {
   readonly clientSecret: string;
   /** API origin override (tests); defaults to the public Tailscale API. */
   readonly baseUrl?: string;
+  /** Provision/cleanup edges only. IDs are API identifiers, never auth secrets. */
+  readonly onKeyEvent?: (event: {
+    readonly orbId: string;
+    readonly action: "preserved" | "revoked" | "minted";
+    readonly incarnation: number | null;
+    readonly keyId: string | null;
+  }) => void;
 }
 
 const REAL_API_BASE_URL = "https://api.tailscale.com";
@@ -204,6 +210,7 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
     orbId: string,
     headers: Readonly<Record<string, string>>,
     signal: AbortSignal,
+    beforeIncarnation: number | null,
   ): Promise<Result<void, TailscaleError>> {
     const keyList = await this.send("GET", this.url("/api/v2/tailnet/-/keys"), headers, signal);
     if (keyList.isErr()) return err(keyList.error);
@@ -254,6 +261,26 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
           description.startsWith(incarnationPrefix) &&
           /^\d+$/.test(description.slice(incarnationPrefix.length)));
       if (!exact) continue;
+      const keyIncarnation =
+        description === legacyDescription
+          ? null
+          : Number((description as string).slice(incarnationPrefix.length));
+      // An independent provisioner may already have installed this key in the
+      // winning VM. Minting is not ownership of same/newer-incarnation keys.
+      // Cleanup passes null only after deletion-grade lifecycle fencing.
+      if (
+        beforeIncarnation !== null &&
+        keyIncarnation !== null &&
+        keyIncarnation >= beforeIncarnation
+      ) {
+        this.config.onKeyEvent?.({
+          orbId,
+          action: "preserved",
+          incarnation: beforeIncarnation,
+          keyId: key["id"],
+        });
+        continue;
+      }
       const removed = await this.send(
         "DELETE",
         this.url(`/api/v2/tailnet/-/keys/${encodeURIComponent(key["id"])}`),
@@ -267,14 +294,21 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
       ) {
         return err(statusError("tailscale key delete", removed.value.status, removed.value.text));
       }
+      this.config.onKeyEvent?.({
+        orbId,
+        action: "revoked",
+        incarnation: beforeIncarnation,
+        keyId: key["id"],
+      });
     }
     return ok(undefined);
   }
 
   /**
-   * Auth keys are non-reusable and incarnation-scoped: each newly provisioned
-   * compute incarnation gets a fresh key, and revoke-before-mint bounds the
-   * tailnet to at most one unconsumed exact-orb key. Device identity is
+   * Auth keys are non-reusable and incarnation-scoped: each host-create
+   * attempt gets a fresh key. Minting revokes only strictly older
+   * incarnations; racing attempts may leave unused keys until a higher
+   * incarnation, expiry, or deletion-grade cleanup. Device identity is
    * separate from the keys: tailscaled state lives on the orb's retained
    * workspace, so a restart or compute replacement resumes the same device
    * without consuming a key, and the non-ephemeral device record survives the
@@ -288,7 +322,7 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
       const token = await this.accessToken(signal);
       if (token.isErr()) return err(token.error);
       const headers = { authorization: `Bearer ${token.value}` };
-      const revoked = await this.revokeOrbKeys(orbId, headers, signal);
+      const revoked = await this.revokeOrbKeys(orbId, headers, signal, null);
       if (revoked.isErr()) return err(revoked.error);
 
       const deviceList = await this.send(
@@ -351,7 +385,7 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
         authorization: `Bearer ${token.value}`,
         "content-type": "application/json",
       };
-      const revoked = await this.revokeOrbKeys(orbId, headers, signal);
+      const revoked = await this.revokeOrbKeys(orbId, headers, signal, incarnation);
       if (revoked.isErr()) return err(revoked.error);
       const response = await this.post(
         this.url("/api/v2/tailnet/-/keys"),
@@ -382,6 +416,12 @@ export class HttpTailscaleAuthKeyMinter implements TailscaleAuthKeyMinter, Tails
       if (typeof key !== "string" || key === "") {
         return err(rejected("tailscale key create response has no key"));
       }
+      this.config.onKeyEvent?.({
+        orbId,
+        action: "minted",
+        incarnation,
+        keyId: typeof body.value["id"] === "string" ? body.value["id"] : null,
+      });
       return ok(key);
     };
     return new ResultAsync(this.withOrbLock(orbId, run));

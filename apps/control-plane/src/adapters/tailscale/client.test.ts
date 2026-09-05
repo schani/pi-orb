@@ -69,6 +69,9 @@ describe("HttpTailscaleAuthKeyMinter", () => {
         json(200, [
           { id: "legacy", description: "pi-orb orb-1" },
           { id: "older", description: "pi-orb orb-1 i1" },
+          { id: "same", description: "pi-orb orb-1 i2" },
+          { id: "newer", description: "pi-orb orb-1 i3" },
+          { id: "malformed", description: "pi-orb orb-1 i2extra" },
           { id: "other", description: "pi-orb orb-10 i1" },
         ]),
       () => ({ status: 204, text: "" }),
@@ -179,7 +182,7 @@ describe("HttpTailscaleAuthKeyMinter", () => {
     let nextId = 1;
     const transport: TailscaleApiTransport = {
       request: async ({ method = "POST", url, body }) => {
-        await new Promise((resolve) => setTimeout(resolve, 1));
+        await Promise.resolve();
         if (url.endsWith("/oauth/token")) return json(200, { access_token: "at-1" });
         if (method === "GET") return json(200, keys);
         if (method === "DELETE") {
@@ -203,6 +206,30 @@ describe("HttpTailscaleAuthKeyMinter", () => {
     expect(first.isOk() && second.isOk()).toBe(true);
     expect(keys).toHaveLength(1);
     expect(keys[0]?.description).toBe("pi-orb orb-1 i2");
+  });
+
+  it("preserves same/newer keys even when descriptions require detail reads, and logs only identifiers", async () => {
+    const transport = new FakeTransport([
+      tokenOk,
+      () => json(200, { keys: [{ id: "same" }, { id: "newer" }] }),
+      () => json(200, { description: "pi-orb orb-1 i2" }),
+      () => json(200, { description: "pi-orb orb-1 i3" }),
+      () => json(200, { id: "created", key: "secret-not-for-logs" }),
+    ]);
+    const events: unknown[] = [];
+    const minter = new HttpTailscaleAuthKeyMinter(transport, {
+      clientId: "cid",
+      clientSecret: "secret",
+      onKeyEvent: (event) => events.push(event),
+    });
+    expect((await minter.mintAuthKey("orb-1", 2, signal)).isOk()).toBe(true);
+    expect(transport.requests.some((request) => request.method === "DELETE")).toBe(false);
+    expect(events).toEqual([
+      { orbId: "orb-1", action: "preserved", incarnation: 2, keyId: "same" },
+      { orbId: "orb-1", action: "preserved", incarnation: 2, keyId: "newer" },
+      { orbId: "orb-1", action: "minted", incarnation: 2, keyId: "created" },
+    ]);
+    expect(JSON.stringify(events)).not.toContain("secret");
   });
 
   it("maps a 4xx on the key create to a terminal rejection", async () => {

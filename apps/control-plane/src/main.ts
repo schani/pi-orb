@@ -50,7 +50,7 @@ import {
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
 import { requestOrbArchive } from "./domain/lifecycle.ts";
-import { logEvent } from "./domain/log.ts";
+import { logEvent, logOrbEvent } from "./domain/log.ts";
 import {
   orphanSweepLoop,
   pollLoop,
@@ -293,6 +293,9 @@ async function main(): Promise<void> {
       ? new HttpTailscaleAuthKeyMinter(new FetchTailscaleApiTransport(), {
           clientId: tailscaleClientId,
           clientSecret: tailscaleClientSecret,
+          onKeyEvent: ({ orbId, action, incarnation, keyId }) => {
+            logOrbEvent(bootTask, orbId, `tailscale-key-${action}`, { incarnation, key_id: keyId });
+          },
         })
       : null;
   const tailscale: TailscaleHostOptions | null =
