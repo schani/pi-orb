@@ -14,7 +14,7 @@
   "scripts": {
     "postinstall": "node scripts/fix-node-pty-prebuild-permissions.mjs",
     "test": "vitest run && npm run test:infra",
-    "test:infra": "node --test infra/foundation/state_split.test.mjs infra/foundation/adopt.test.mjs infra/foundation/iam_contract.test.mjs infra/smoke-timeout.contract.test.mjs && infra/native-vm/test.sh",
+    "test:infra": "node --test infra/foundation/state_split.test.mjs infra/foundation/adopt.test.mjs infra/foundation/iam_contract.test.mjs infra/release-quiesce.test.mjs infra/smoke-timeout.contract.test.mjs && infra/native-vm/test.sh",
     "dev:frontend": "npm run dev:frontend --workspace @pi-orb/web",
     "dev:local": "PI_ORB_HOST_PROVIDER=process PI_ORB_DATABASE_KIND=pglite npm run dev --workspace @pi-orb/control-plane",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e",

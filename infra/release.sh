@@ -9,6 +9,8 @@ umask 077
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 INFRA="$ROOT/infra"
+# shellcheck source=release-child.sh
+source "$INFRA/release-child.sh"
 PROJECT=${PROJECT:-playground-dev-6ae7}
 REGION=${REGION:-us-central1}
 # No ZONE here on purpose: orb VMs are created in OpenTofu's `var.zone`, which
@@ -17,6 +19,7 @@ REGION=${REGION:-us-central1}
 STATE_BUCKET=${STATE_BUCKET:-pi-orb-tfstate-$PROJECT}
 STATE_PREFIX=${STATE_PREFIX:-static-plane}
 AUTO_APPROVE=false
+QUIESCE=false
 LOCAL_LOCK_DIR="${TMPDIR:-/tmp}/pi-orb-release-${PROJECT}.lock"
 REMOTE_LOCK_URL="gs://$STATE_BUCKET/$STATE_PREFIX/release.lock"
 WORK_DIR=""
@@ -36,7 +39,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: ./infra/release.sh [--yes]
+Usage: ./infra/release.sh [--yes] [--quiesce]
 
 Deploys the clean, latest origin/main commit through build, push, OpenTofu,
 IAP/revision repair, and the live smoke test. The saved plan and generated
@@ -44,6 +47,7 @@ variables live only in a mode-0700 temporary directory and are removed on exit.
 A generation-matched GCS lock serializes the complete release transaction.
 
   --yes  Apply the reviewed plan without an interactive confirmation (for CI).
+  --quiesce  Disable and drain the browser service before revision cleanup.
 EOF
 }
 
@@ -51,6 +55,9 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --yes)
       AUTO_APPROVE=true
+      ;;
+    --quiesce)
+      QUIESCE=true
       ;;
     -h|--help)
       usage
@@ -82,6 +89,7 @@ on_signal() {
   local status=$1
   trap - HUP INT TERM
   echo "release: interrupted" >&2
+  release_stop_child
   repair_iap_after_attempt || true
   exit "$status"
 }
@@ -306,7 +314,11 @@ else
 fi
 
 echo "release: reconciling IAP and deleting drained browser revisions ..."
-"$INFRA/deploy.sh"
+if [ "$QUIESCE" = true ]; then
+  release_run_child "$INFRA/release-quiesce.sh" "$WORK_DIR/quiesce.json" -- "$INFRA/deploy.sh"
+else
+  "$INFRA/deploy.sh"
+fi
 IAP_REPAIRED=true
 
 echo "release: running live lifecycle smoke test ..."

@@ -18,7 +18,15 @@ The supported manual deployment is one command from the repository root:
 It requires a clean `main` checkout exactly matching freshly fetched
 `origin/main`, shows the exact OpenTofu plan, and requires typing `deploy` before
 applying. `./infra/release.sh --yes` is the non-interactive form intended for a
-future serialized CI job. The script owns the complete transaction:
+future serialized CI job.
+
+For the reviewed first native rollout after archiving every orb,
+`./infra/release.sh --quiesce` disables the browser after apply, requires fresh
+zero-instance metrics for every recorded browser revision, restores its prior
+scaling mode, and then runs smokes. Missing metrics fail closed; handled errors
+and signals restore scaling and repair IAP. This path awaits live validation.
+
+The script owns the complete transaction:
 
 1. rebuild and boot-validate the native VM image, then push the digest-pinned control-plane container;
 2. clamp `deploy_generation` above the generation currently serving in Cloud
