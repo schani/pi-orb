@@ -7,13 +7,14 @@ const closed = { additionalProperties: false } as const;
 /**
  * The boot-time interrupted-turn decision, reported only when it is notable
  * (docs/lifecycle.md): a resume performed, a resume the loop guard suppressed,
- * or a resume whose marker never reached the harness. Ordinary boots — a
- * settled tail, a fresh session — report nothing at all: edges, not levels.
+ * a between-turn restart notice, or a notification the harness refused.
+ * Fresh sessions report nothing: edges, not levels.
  */
 export const RuntimeTurnResumeSchema = Type.Object(
   {
     outcome: Type.Union([
       Type.Literal("resumed"),
+      Type.Literal("notified_restart"),
       Type.Literal("declined_already_resumed"),
       Type.Literal("resume_failed"),
     ]),

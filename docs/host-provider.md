@@ -196,10 +196,10 @@ type RuntimeHealth =
       checkoutCommit: string;
       activity: "idle" | "busy";
       operationId?: string;
-      // Present only when this boot made a notable interrupted-turn resume
-      // decision (docs/lifecycle.md); absent on ordinary boots.
+      // Present when boot notified an existing conversation or declined
+      // auto-resume (docs/lifecycle.md); absent on a fresh conversation.
       turnResume?: {
-        outcome: "resumed" | "declined_already_resumed" | "resume_failed";
+        outcome: "resumed" | "notified_restart" | "declined_already_resumed" | "resume_failed";
         shape?: "trailing_tool_result" | "dangling_tool_calls" | "unanswered_user_message";
         headRecordId?: string;
       };
@@ -227,6 +227,8 @@ Ready means all of the following:
 - the configured Codex credential resolves successfully;
 - history-pull and live WebSocket handlers are installed;
 - the runtime can accept a new message when idle.
+
+**Restart context (implemented 2026-09-05).** The image sets `PI_ORB_CONTAINER=1` on Docker and GCE. The runtime combines `/proc/sys/kernel/random/boot_id` with PID 1's start time from `/proc/1/stat` to identify the container execution lifetime; the kernel UUID alone would miss retained-container stop/start. `ProcessOrbHostProvider` forces `PI_ORB_CONTAINER=0` so even a containerized control plane cannot accidentally claim its unsandboxed children have a container-wide lifetime. Unknown/process-host execution identity uses conservative runtime-restart wording. No host metadata or provider API changed. Session-based notification, deduplication, crash-loop guarding, and failure visibility are specified in `docs/lifecycle.md`.
 
 A fresh clone is written to a temporary directory and atomically renamed into place so a process crash cannot make a partial checkout look ready. Restart reuses a complete checkout/session and cleans or retries an incomplete temporary clone.
 

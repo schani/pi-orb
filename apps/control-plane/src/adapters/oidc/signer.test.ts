@@ -8,6 +8,7 @@ import { DEFAULT_ISSUER_CONSTANTS } from "../../domain/constants.ts";
 import type { MintDeps, SigningKeyDeps } from "../../domain/ports.ts";
 import {
   assembleJwks,
+  createSigningKeyBootstrapState,
   ensureActiveSigningKey,
   rotateSigningKey,
   SIGNING_KEY_SECRET_PROVIDER,
@@ -51,6 +52,7 @@ beforeEach(async () => {
     keys,
     secrets,
     generator: new NodeCryptoSigningKeyGenerator(),
+    bootstrap: createSigningKeyBootstrapState(),
     constants: DEFAULT_ISSUER_CONSTANTS,
   };
   // The per-orb mint floor is a store property covered by the mint DST; here

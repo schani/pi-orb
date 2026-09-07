@@ -1,0 +1,922 @@
+{
+  "name": "signing-key-boot-failpoints",
+  "iteration": 26,
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of boot-0, boot-1",
+      "value": 0.1081095086960705
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: retry 0",
+      "value": 0.5811284460525273
+    },
+    {
+      "type": "timer-create",
+      "id": 1,
+      "reason": "boot-0 sleep: boot retry",
+      "deadline": 30.056422302626366
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: retry 1",
+      "value": 0.5307184498317978
+    },
+    {
+      "type": "timer-create",
+      "id": 2,
+      "reason": "boot-1 sleep: boot retry",
+      "deadline": 27.535922491589893
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.060147894772263566
+    },
+    {
+      "type": "timer-fire",
+      "id": 2,
+      "reason": "boot-1 sleep: boot retry",
+      "virtualTime": 27.535922491589893
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: list signing keys",
+      "value": 0.6031888811014761
+    },
+    {
+      "type": "timer-create",
+      "id": 3,
+      "reason": "boot-1 sleep: list signing keys",
+      "deadline": 31.551866897097273
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4417718518979218
+    },
+    {
+      "type": "timer-fire",
+      "id": 1,
+      "reason": "boot-0 sleep: boot retry",
+      "virtualTime": 30.056422302626366
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: list signing keys",
+      "value": 0.9096323268617843
+    },
+    {
+      "type": "timer-create",
+      "id": 4,
+      "reason": "boot-0 sleep: list signing keys",
+      "deadline": 35.604583936935285
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.14992794379166996
+    },
+    {
+      "type": "timer-fire",
+      "id": 3,
+      "reason": "boot-1 sleep: list signing keys",
+      "virtualTime": 31.551866897097273
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.9173677137095836
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: keygen latency",
+      "value": 0.5806018524363443
+    },
+    {
+      "type": "timer-create",
+      "id": 5,
+      "reason": "boot-1 sleep: generate signing key",
+      "deadline": 44.16390394582416
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.452117568709667
+    },
+    {
+      "type": "timer-fire",
+      "id": 4,
+      "reason": "boot-0 sleep: list signing keys",
+      "virtualTime": 35.604583936935285
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.7536604590427448
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: keygen latency",
+      "value": 0.9761388649758043
+    },
+    {
+      "type": "timer-create",
+      "id": 6,
+      "reason": "boot-0 sleep: generate signing key",
+      "deadline": 56.12736123645137
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9589862583886484
+    },
+    {
+      "type": "timer-fire",
+      "id": 5,
+      "reason": "boot-1 sleep: generate signing key",
+      "virtualTime": 44.16390394582416
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: broker latency: write secret",
+      "value": 0.270569239335853
+    },
+    {
+      "type": "timer-create",
+      "id": 7,
+      "reason": "boot-1 sleep: write secret",
+      "deadline": 46.516750142503426
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.33444451044924994
+    },
+    {
+      "type": "timer-fire",
+      "id": 7,
+      "reason": "boot-1 sleep: write secret",
+      "virtualTime": 46.516750142503426
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.secret.write write secret",
+      "value": 0.4889736687606072
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: insert signing key",
+      "value": 0.8641589831292346
+    },
+    {
+      "type": "timer-create",
+      "id": 8,
+      "reason": "boot-1 sleep: insert signing key",
+      "deadline": 51.8375450581496
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.3995834320661267
+    },
+    {
+      "type": "timer-fire",
+      "id": 8,
+      "reason": "boot-1 sleep: insert signing key",
+      "virtualTime": 51.8375450581496
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.write insert signing key",
+      "value": 0.21071869810732013
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: list signing keys",
+      "value": 0.4922099326429439
+    },
+    {
+      "type": "timer-create",
+      "id": 9,
+      "reason": "boot-1 sleep: list signing keys",
+      "deadline": 55.298594721364324
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.31130945880623995
+    },
+    {
+      "type": "timer-fire",
+      "id": 9,
+      "reason": "boot-1 sleep: list signing keys",
+      "virtualTime": 55.298594721364324
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.05646780122372441
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: retry 1",
+      "value": 0.1865729605893327
+    },
+    {
+      "type": "timer-create",
+      "id": 10,
+      "reason": "boot-1 sleep: boot retry",
+      "deadline": 65.62724275083096
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.835731977722429
+    },
+    {
+      "type": "timer-fire",
+      "id": 6,
+      "reason": "boot-0 sleep: generate signing key",
+      "virtualTime": 56.12736123645137
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: broker latency: write secret",
+      "value": 0.2645930915852788
+    },
+    {
+      "type": "timer-create",
+      "id": 11,
+      "reason": "boot-0 sleep: write secret",
+      "deadline": 58.450326694377765
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.28523908522764474
+    },
+    {
+      "type": "timer-fire",
+      "id": 11,
+      "reason": "boot-0 sleep: write secret",
+      "virtualTime": 58.450326694377765
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.secret.write write secret",
+      "value": 0.7749156713724126
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: insert signing key",
+      "value": 0.15683468024443603
+    },
+    {
+      "type": "timer-create",
+      "id": 12,
+      "reason": "boot-0 sleep: insert signing key",
+      "deadline": 60.23450009559995
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.709503216619803
+    },
+    {
+      "type": "timer-fire",
+      "id": 12,
+      "reason": "boot-0 sleep: insert signing key",
+      "virtualTime": 60.23450009559995
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.write insert signing key",
+      "value": 0.037086913817974465
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: list signing keys",
+      "value": 0.8031819394119357
+    },
+    {
+      "type": "timer-create",
+      "id": 13,
+      "reason": "boot-0 sleep: list signing keys",
+      "deadline": 65.25040979265962
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8776881863952735
+    },
+    {
+      "type": "timer-fire",
+      "id": 13,
+      "reason": "boot-0 sleep: list signing keys",
+      "virtualTime": 65.25040979265962
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.08173718757794612
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: retry 0",
+      "value": 0.5519975987615089
+    },
+    {
+      "type": "timer-create",
+      "id": 14,
+      "reason": "boot-0 sleep: boot retry",
+      "deadline": 93.85028973073507
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.934732730925849
+    },
+    {
+      "type": "timer-fire",
+      "id": 10,
+      "reason": "boot-1 sleep: boot retry",
+      "virtualTime": 65.62724275083096
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: list signing keys",
+      "value": 0.3405571231485517
+    },
+    {
+      "type": "timer-create",
+      "id": 15,
+      "reason": "boot-1 sleep: list signing keys",
+      "deadline": 68.33002836657371
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.05333038687825664
+    },
+    {
+      "type": "timer-fire",
+      "id": 15,
+      "reason": "boot-1 sleep: list signing keys",
+      "virtualTime": 68.33002836657371
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.02206461093718537
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: retry 1",
+      "value": 0.5889842057488786
+    },
+    {
+      "type": "timer-create",
+      "id": 16,
+      "reason": "boot-1 sleep: boot retry",
+      "deadline": 98.77923865401765
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9415830832048386
+    },
+    {
+      "type": "timer-fire",
+      "id": 14,
+      "reason": "boot-0 sleep: boot retry",
+      "virtualTime": 93.85028973073507
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: list signing keys",
+      "value": 0.3925151842266682
+    },
+    {
+      "type": "timer-create",
+      "id": 17,
+      "reason": "boot-0 sleep: list signing keys",
+      "deadline": 96.8128656518684
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.532196296986913
+    },
+    {
+      "type": "timer-fire",
+      "id": 17,
+      "reason": "boot-0 sleep: list signing keys",
+      "virtualTime": 96.8128656518684
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.1639792647894872
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: keygen latency",
+      "value": 0.4876323775709386
+    },
+    {
+      "type": "timer-create",
+      "id": 18,
+      "reason": "boot-0 sleep: generate signing key",
+      "deadline": 107.56551320328718
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.031462116694896736
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.11987846084411813
+    },
+    {
+      "type": "timer-fire",
+      "id": 16,
+      "reason": "boot-1 sleep: boot retry",
+      "virtualTime": 98.77923865401765
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: list signing keys",
+      "value": 0.0032339200520759004
+    },
+    {
+      "type": "timer-create",
+      "id": 19,
+      "reason": "boot-1 sleep: list signing keys",
+      "deadline": 99.79540825427803
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5853586847546585
+    },
+    {
+      "type": "timer-fire",
+      "id": 19,
+      "reason": "boot-1 sleep: list signing keys",
+      "virtualTime": 99.79540825427803
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.9150159951383855
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: keygen latency",
+      "value": 0.292651558788551
+    },
+    {
+      "type": "timer-create",
+      "id": 20,
+      "reason": "boot-1 sleep: generate signing key",
+      "deadline": 106.64843943004905
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6853020264442118
+    },
+    {
+      "type": "timer-fire",
+      "id": 20,
+      "reason": "boot-1 sleep: generate signing key",
+      "virtualTime": 106.64843943004905
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: broker latency: write secret",
+      "value": 0.16932127571649147
+    },
+    {
+      "type": "timer-create",
+      "id": 21,
+      "reason": "boot-1 sleep: write secret",
+      "deadline": 108.49504580863152
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9969268417945428
+    },
+    {
+      "type": "timer-fire",
+      "id": 18,
+      "reason": "boot-0 sleep: generate signing key",
+      "virtualTime": 107.56551320328718
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: broker latency: write secret",
+      "value": 0.6992991452190557
+    },
+    {
+      "type": "timer-create",
+      "id": 22,
+      "reason": "boot-0 sleep: write secret",
+      "deadline": 112.06200892938246
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8712735861630787
+    },
+    {
+      "type": "timer-fire",
+      "id": 21,
+      "reason": "boot-1 sleep: write secret",
+      "virtualTime": 108.49504580863152
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.secret.write write secret",
+      "value": 0.2699364566255752
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: insert signing key",
+      "value": 0.21450731741608464
+    },
+    {
+      "type": "timer-create",
+      "id": 23,
+      "reason": "boot-1 sleep: insert signing key",
+      "deadline": 110.56758239571194
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.23254874743557785
+    },
+    {
+      "type": "timer-fire",
+      "id": 23,
+      "reason": "boot-1 sleep: insert signing key",
+      "virtualTime": 110.56758239571194
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.write insert signing key",
+      "value": 0.1593487438125435
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: list signing keys",
+      "value": 0.4655699005467946
+    },
+    {
+      "type": "timer-create",
+      "id": 24,
+      "reason": "boot-1 sleep: list signing keys",
+      "deadline": 113.8954318984459
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.14612859233605202
+    },
+    {
+      "type": "timer-fire",
+      "id": 22,
+      "reason": "boot-0 sleep: write secret",
+      "virtualTime": 112.06200892938246
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.secret.write write secret",
+      "value": 0.7658477529358281
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: insert signing key",
+      "value": 0.4779897459007886
+    },
+    {
+      "type": "timer-create",
+      "id": 25,
+      "reason": "boot-0 sleep: insert signing key",
+      "deadline": 115.4519576588864
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.1660072301387744
+    },
+    {
+      "type": "timer-fire",
+      "id": 24,
+      "reason": "boot-1 sleep: list signing keys",
+      "virtualTime": 113.8954318984459
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.9346437153401259
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: insert signing key",
+      "value": 0.8771912035086069
+    },
+    {
+      "type": "timer-create",
+      "id": 26,
+      "reason": "boot-1 sleep: insert signing key",
+      "deadline": 119.28138791598894
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.22956862536068812
+    },
+    {
+      "type": "timer-fire",
+      "id": 25,
+      "reason": "boot-0 sleep: insert signing key",
+      "virtualTime": 115.4519576588864
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.write insert signing key",
+      "value": 0.19801734806190185
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: list signing keys",
+      "value": 0.4523912052312473
+    },
+    {
+      "type": "timer-create",
+      "id": 27,
+      "reason": "boot-0 sleep: list signing keys",
+      "deadline": 118.71391368504264
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.48044279008314517
+    },
+    {
+      "type": "timer-fire",
+      "id": 27,
+      "reason": "boot-0 sleep: list signing keys",
+      "virtualTime": 118.71391368504264
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.29088226113323756
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: insert signing key",
+      "value": 0.00445856977083825
+    },
+    {
+      "type": "timer-create",
+      "id": 28,
+      "reason": "boot-0 sleep: insert signing key",
+      "deadline": 119.73620653389683
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4367984703300395
+    },
+    {
+      "type": "timer-fire",
+      "id": 26,
+      "reason": "boot-1 sleep: insert signing key",
+      "virtualTime": 119.28138791598894
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.write insert signing key",
+      "value": 0.10331195058215048
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: list signing keys",
+      "value": 0.6576522430323152
+    },
+    {
+      "type": "timer-create",
+      "id": 29,
+      "reason": "boot-1 sleep: list signing keys",
+      "deadline": 123.56964913115053
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.39232109034172247
+    },
+    {
+      "type": "timer-fire",
+      "id": 28,
+      "reason": "boot-0 sleep: insert signing key",
+      "virtualTime": 119.73620653389683
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.write insert signing key",
+      "value": 0.23607300983692847
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: list signing keys",
+      "value": 0.49011101083242203
+    },
+    {
+      "type": "timer-create",
+      "id": 30,
+      "reason": "boot-0 sleep: list signing keys",
+      "deadline": 123.18676158805894
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6869656959396969
+    },
+    {
+      "type": "timer-fire",
+      "id": 30,
+      "reason": "boot-0 sleep: list signing keys",
+      "virtualTime": 123.18676158805894
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.2848175290322804
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: signing key latency: insert signing key",
+      "value": 0.1667237047133978
+    },
+    {
+      "type": "timer-create",
+      "id": 31,
+      "reason": "boot-0 sleep: insert signing key",
+      "deadline": 125.02038011162593
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5691777411597796
+    },
+    {
+      "type": "timer-fire",
+      "id": 29,
+      "reason": "boot-1 sleep: list signing keys",
+      "virtualTime": 123.56964913115053
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.6729089130391939
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: insert signing key",
+      "value": 0.44358638509696036
+    },
+    {
+      "type": "timer-create",
+      "id": 32,
+      "reason": "boot-1 sleep: insert signing key",
+      "deadline": 126.78758105663533
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.37363094204018865
+    },
+    {
+      "type": "timer-fire",
+      "id": 31,
+      "reason": "boot-0 sleep: insert signing key",
+      "virtualTime": 125.02038011162593
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 failpoint: issuer.signing-key.write insert signing key",
+      "value": 0.529724676956404
+    },
+    {
+      "type": "entropy",
+      "name": "boot-0 random number: broker latency: read secret",
+      "value": 0.3274619038832717
+    },
+    {
+      "type": "timer-create",
+      "id": 33,
+      "reason": "boot-0 sleep: read secret",
+      "deadline": 127.65768963104229
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5067971152995828
+    },
+    {
+      "type": "timer-fire",
+      "id": 32,
+      "reason": "boot-1 sleep: insert signing key",
+      "virtualTime": 126.78758105663533
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.write insert signing key",
+      "value": 0.06041572853963162
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: signing key latency: list signing keys",
+      "value": 0.7984433484609563
+    },
+    {
+      "type": "timer-create",
+      "id": 34,
+      "reason": "boot-1 sleep: list signing keys",
+      "deadline": 131.7797977989401
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4146706653811366
+    },
+    {
+      "type": "timer-fire",
+      "id": 33,
+      "reason": "boot-0 sleep: read secret",
+      "virtualTime": 127.65768963104229
+    },
+    {
+      "type": "timer-fire",
+      "id": 34,
+      "reason": "boot-1 sleep: list signing keys",
+      "virtualTime": 131.7797977989401
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.signing-key.read list signing keys",
+      "value": 0.32904874649427307
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: broker latency: destroy secret",
+      "value": 0.8712603901833974
+    },
+    {
+      "type": "timer-create",
+      "id": 35,
+      "reason": "boot-1 sleep: destroy secret",
+      "deadline": 137.1360997498571
+    },
+    {
+      "type": "timer-fire",
+      "id": 35,
+      "reason": "boot-1 sleep: destroy secret",
+      "virtualTime": 137.1360997498571
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 failpoint: issuer.secret.write destroy secret",
+      "value": 0.007232134666655621
+    },
+    {
+      "type": "entropy",
+      "name": "boot-1 random number: broker latency: read secret",
+      "value": 0.8090107523751698
+    },
+    {
+      "type": "timer-create",
+      "id": 36,
+      "reason": "boot-1 sleep: read secret",
+      "deadline": 142.18115351173293
+    },
+    {
+      "type": "timer-fire",
+      "id": 36,
+      "reason": "boot-1 sleep: read secret",
+      "virtualTime": 142.18115351173293
+    }
+  ]
+}

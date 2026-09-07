@@ -923,9 +923,21 @@ export interface JwksDeps {
   readonly constants: import("./constants.ts").IssuerConstants;
 }
 
+/** One boot owner's volatile state, retained across every outer ensure retry. */
+export interface SigningKeyBootstrapState {
+  generated: GeneratedSigningKey | null;
+  secretVersion: string | null;
+  /** Once disposal starts, this material must never be published again. */
+  cleanupWinner: string | null;
+  cleanupFailureLogged: boolean;
+  running: boolean;
+}
+
 /** Everything key management needs (`domain/signing-keys.ts`). */
 export interface SigningKeyDeps extends SigningKeyMaterialDeps, JwksDeps {
   readonly generator: SigningKeyGenerator;
+  /** Owned by this instance, never recreated inside its boot retry loop. */
+  readonly bootstrap: SigningKeyBootstrapState;
 }
 
 // ---------------------------------------------------------------------------

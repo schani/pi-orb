@@ -59,7 +59,7 @@ import {
   reconcileLoop,
 } from "./domain/loops.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
-import { ensureActiveSigningKey } from "./domain/signing-keys.ts";
+import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
 import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
@@ -406,6 +406,7 @@ async function main(): Promise<void> {
     keys: database.signingKeys,
     secrets,
     generator: new NodeCryptoSigningKeyGenerator(),
+    bootstrap: createSigningKeyBootstrapState(),
     constants: DEFAULT_ISSUER_CONSTANTS,
   };
   if (browserRole || opsRole) {

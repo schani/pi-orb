@@ -20,6 +20,8 @@ Finite runtime-client calls pass the signal to `fetch` or the simulated transpor
 
 Persistence is deliberately separate: the control plane never derives replica writes from WebSocket frames. It polls the runtime's HTTP `pullHistory` endpoint and commits only the complete records returned there.
 
+**Boot notifications (2026-09-05).** Ready health's optional `turnResume.outcome` now also accepts `notified_restart`, alongside `resumed`, `declined_already_resumed`, and `resume_failed`. It identifies an immediately triggered between-turn restart-context turn, not human input. The notice/decline/failure itself is a durable history record and uses the existing live publication/replication paths; no new request or event frame is introduced. A boot-triggered turn owns the ordinary busy operation and turn-start barrier before readiness can admit competing input. Runtime-local decisions and accurate host-versus-runtime wording: `docs/lifecycle.md`; complete health example: `docs/host-provider.md`.
+
 ## Transport and control-plane handoff
 
 The browser opens `/api/orbs/{orbId}/live` only after the normal control-plane HTTP API reports the orb as running. It offers the WebSocket subprotocol `pi-orb.runtime.v1`.

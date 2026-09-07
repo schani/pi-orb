@@ -86,6 +86,13 @@ const SCENARIO = {
           { type: "stop", status: "completed" },
         ],
       },
+      ...["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].map((reply) => ({
+        match: { userMessage: { regex: "^The (host|agent runtime) was restarted\\." } },
+        steps: [
+          { type: "text", content: reply },
+          { type: "stop", status: "completed" },
+        ],
+      })),
       {
         match: { userMessage: { regex: "^please archive this orb$" } },
         steps: [
@@ -1018,9 +1025,12 @@ describe("full slice E2E", () => {
         // the control plane models the next revision while preserving the
         // database, provider state, and credential directory.
         if (PROCESS_BACKEND) {
+          const before = controlPlane.logs.join("").split("E2E host specification advanced").length;
           controlPlane.process.kill("SIGHUP");
           await waitFor("E2E host spec advanced", async () =>
-            controlPlane.logs.join("").includes("E2E host specification advanced") ? true : null,
+            controlPlane.logs.join("").split("E2E host specification advanced").length > before
+              ? true
+              : null,
           );
         } else {
           await restartControlPlaneWithSpec("stage2-spec-b", 2);
@@ -1549,6 +1559,72 @@ describe("full slice E2E", () => {
     expect(stoppedRecords.length).toBe(replicated);
     expect(JSON.stringify(stoppedRecords)).toContain("The check succeeded: E2E_TOOL_OK.");
     expect(JSON.stringify(stoppedRecords)).toContain("USER_SHELL_E2E_OK");
+
+    // No human message is sent in either restart leg. The runtime must wake
+    // Pi itself, and the new request must carry the restart context as user
+    // role (a Pi custom message), not mutate the system prompt.
+    for (const [index, reply] of ["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].entries()) {
+      if (index === 1) {
+        if (PROCESS_BACKEND) {
+          const before = controlPlane.logs.join("").split("E2E host specification advanced").length;
+          controlPlane.process.kill("SIGHUP");
+          await waitFor("restart notice replacement spec advanced", async () =>
+            controlPlane.logs.join("").split("E2E host specification advanced").length > before
+              ? true
+              : null,
+          );
+        } else {
+          await restartControlPlaneWithSpec("restart-notice-spec", 1);
+        }
+      }
+      expect((await api(base, "POST", `/api/v1/orbs/${orbId}/start`)).status).toBe(202);
+      await waitFor(
+        reply,
+        async () => {
+          const view = await api(base, "GET", `/api/v1/orbs/${orbId}`);
+          if (view.body["state"] === "failed")
+            throw new FatalProbeError(String(view.body["lastError"]));
+          const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+          return JSON.stringify(history.body["records"]).includes(reply) ? true : null;
+        },
+        { timeoutMs: 300_000, intervalMs: 1_000 },
+      );
+      expect(await computeIncarnation(orbId)).toBe(index);
+      const warning = PROCESS_BACKEND
+        ? "Other processes may still be running"
+        : "All processes running before the restart were killed";
+      const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+      const serialized = JSON.stringify(history.body["records"]);
+      expect(serialized).toContain(warning);
+      const records = history.body["records"] as {
+        overflow?: { native?: { customType?: string } };
+      }[];
+      expect(
+        records.filter((record) => record.overflow?.native?.customType === "pi-orb.host-restarted"),
+      ).toHaveLength(index + 1);
+      const calls: unknown = await fakeControl(fake.sessionKey, "/requests");
+      expect(
+        Array.isArray(calls) &&
+          calls.some(
+            (call) =>
+              call.status === 200 &&
+              call.matchedRuleIndex === index + 3 &&
+              call.body?.input?.some(
+                (message: { role?: string; content?: unknown }) =>
+                  message.role === "user" && JSON.stringify(message.content).includes(warning),
+              ),
+          ),
+      ).toBe(true);
+      expect((await api(base, "POST", `/api/v1/orbs/${orbId}/stop`)).status).toBe(202);
+      await waitFor(
+        "notified orb stopped",
+        async () =>
+          (await api(base, "GET", `/api/v1/orbs/${orbId}`)).body["state"] === "stopped"
+            ? true
+            : null,
+        { timeoutMs: 120_000, intervalMs: 1_000 },
+      );
+    }
 
     // Whole-project deletion fans out through the same deletion-grade cleanup.
     // Keep one child stopped with replicated history and create a second child

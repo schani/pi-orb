@@ -94,6 +94,8 @@ ENV PI_ORB_WORK_DIR=/workspace
 # analogue (docs/orb-setup-hook.md). Set on the image, not only by the runtime,
 # so a `docker exec` shell — the thing a human debugs a hook from — sees it too.
 ENV PI_ORB=1
+# PID 1 lifetime is the execution boundary on both Docker and GCE.
+ENV PI_ORB_CONTAINER=1
 ENV HOME=/workspace/home
 ENV RUSTUP_HOME=/workspace/home/.rustup
 ENV CARGO_HOME=/workspace/home/.cargo

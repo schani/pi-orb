@@ -302,6 +302,8 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       PI_ORB_ID: metadata.orbId,
       PI_ORB_REPOSITORY_URL: metadata.repositoryUrl,
       PI_ORB_HOST_INCARNATION: String(metadata.incarnation),
+      // An unsandboxed process host cannot assert container-wide process loss.
+      PI_ORB_CONTAINER: "0",
       PI_ORB_WORK_DIR: join(this.hostDirectory(metadata.orbId), "workspace"),
       // Do not inherit the control-plane user's home: process-backed orbs must
       // have the same per-orb durable home contract as Docker and GCE.

@@ -26,7 +26,7 @@ export const TURN_RESUME_DECLINED_CUSTOM_TYPE = "pi-orb.turn-resume-declined";
 
 /** Marker text. The model sees it: it is a session record, not an event. */
 export const TURN_RESUME_CONTENT =
-  "The previous turn was interrupted by a host restart — resuming it now. Continue from where you left off.";
+  "The previous turn was interrupted by a host restart. All processes running before the restart were killed — any servers, background jobs, and shell sessions from before the restart are no longer running. Resuming the turn now. Continue from where you left off.";
 
 /** Decline text. Addressed to the user: nothing will happen without them. */
 export const TURN_RESUME_DECLINED_CONTENT =
@@ -125,6 +125,7 @@ type TailEntry =
     }
   | { readonly kind: "tool_result"; readonly id: string | null }
   | { readonly kind: "resume_marker"; readonly id: string | null }
+  | { readonly kind: "boot_marker"; readonly id: string | null }
   | { readonly kind: "decline_marker"; readonly id: string | null }
   /** Conversational but not a turn boundary we resume from (shell, compaction, …). */
   | { readonly kind: "other"; readonly id: string | null };
@@ -174,8 +175,13 @@ function classify(entry: unknown): TailEntry | null {
     }
     case "custom_message":
       switch (entry["customType"]) {
+        case "pi-orb.user-message":
+          return { kind: "user", id };
+        case "pi-orb.host-restarted":
+          return { kind: "boot_marker", id };
         case TURN_RESUME_CUSTOM_TYPE:
           return { kind: "resume_marker", id };
+        case "pi-orb.restart-notification-failed":
         case TURN_RESUME_DECLINED_CUSTOM_TYPE:
           return { kind: "decline_marker", id };
         default:
@@ -223,7 +229,8 @@ function interruptedTail(tail: readonly TailEntry[]): InterruptedTail | null {
     return null;
   }
   if (stoppedOnToolUse(last)) return { shape: "dangling_tool_calls", headRecordId: last.id };
-  if (last.kind === "user") return { shape: "unanswered_user_message", headRecordId: last.id };
+  if (last.kind === "user" || last.kind === "boot_marker")
+    return { shape: "unanswered_user_message", headRecordId: last.id };
   return null;
 }
 
@@ -248,7 +255,9 @@ export function detectInterruptedTurn(entries: readonly unknown[]): TurnResumeDe
   // last real user message means this interruption was already resumed once
   // — a turn that keeps crashing its host resumes once, then stays idle.
   const lastUserIndex = tail.findLastIndex((entry) => entry.kind === "user");
-  const markerIndex = tail.findLastIndex((entry) => entry.kind === "resume_marker");
+  const markerIndex = tail.findLastIndex(
+    (entry) => entry.kind === "resume_marker" || entry.kind === "boot_marker",
+  );
   if (markerIndex > lastUserIndex) {
     const dangling = interruptedTail(conversational);
     if (dangling === null) return { resume: false, reason: "already_resumed", suppressed: null };

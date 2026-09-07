@@ -1,10 +1,10 @@
 import type { SimulationTask } from "determined";
-import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { err, errAsync, ok, type Result, ResultAsync } from "neverthrow";
 import type { SignerError, SigningKeyConflict, StoreError } from "./errors.ts";
 import { logEvent } from "./log.ts";
 import type {
-  GeneratedSigningKey,
   JwksDeps,
+  SigningKeyBootstrapState,
   SigningKeyDeps,
   SigningKeyMaterialDeps,
   SigningKeyRow,
@@ -45,6 +45,24 @@ export const SIGNING_KEY_SECRET_PROVIDER = "oidc-signing-key";
  * spinning.
  */
 const MAX_CONVERGENCE_ATTEMPTS = 4;
+
+/** Allocate once per boot owner, outside its retry loop. Never serialize this state. */
+export function createSigningKeyBootstrapState(): SigningKeyBootstrapState {
+  return {
+    generated: null,
+    secretVersion: null,
+    cleanupWinner: null,
+    cleanupFailureLogged: false,
+    running: false,
+  };
+}
+
+function releaseBootstrapMaterial(state: SigningKeyBootstrapState): void {
+  state.generated = null;
+  state.secretVersion = null;
+  state.cleanupWinner = null;
+  state.cleanupFailureLogged = false;
+}
 
 const signerError = (code: SignerError["code"], message: string): SignerError => ({
   type: "signer_error",
@@ -110,9 +128,11 @@ function listKeys(
  * version nobody references, and returns the winner's key. It never destroys a
  * version whose row it cannot prove is absent — an unreferenced version is
  * inert, while destroying a referenced one would break the issuer permanently.
- * The key it generates is generated *once* and carried across every
- * convergence attempt, so a store that keeps refusing costs one orphaned
- * private key at worst rather than one per attempt per boot retry.
+ * `deps.bootstrap` owns the candidate across both inner convergence attempts
+ * and outer boot retries. Allocate it once per instance, not once per call:
+ * a failed read must not lose an acknowledged private-key version. Overlapping
+ * attempts on one owner are refused with a retryable error; distinct instances
+ * still coordinate through the durable unique-active constraint.
  *
  * Success means the deployment can actually sign: the material behind the row
  * is read before the row is returned. Without that check an issuer whose
@@ -127,17 +147,14 @@ export function ensureActiveSigningKey(
   deps: SigningKeyDeps,
   options: { readonly now: number },
 ): ResultAsync<SigningKeyRow, SignerError> {
+  const state = deps.bootstrap;
+  if (state.running) return errAsync(unavailable("signing-key bootstrap attempt already running"));
+  state.running = true;
   const run = async (): Promise<Result<SigningKeyRow, SignerError>> => {
     let lastFailure = unavailable("no active signing key could be established");
-    /** Generated at most once, and reused by every later attempt. */
-    let generated: GeneratedSigningKey | null = null;
-    /** The one private-key version this call wrote, if it got that far. */
-    let secretVersion: string | null = null;
-    /** True once a durable row is known to name `secretVersion`. */
-    let referenced = false;
 
     /**
-     * Drops the material this call generated once nothing can ever reference
+     * Drops the material this bootstrap owner generated once nothing can ever reference
      * it: our row was absent from the read that produced `winner` *and* some
      * other key holds the active slot, so the unique-active index can no
      * longer admit the insert we asked for — even if the write whose answer we
@@ -146,17 +163,40 @@ export function ensureActiveSigningKey(
      * break the issuer permanently. Failing to destroy it is likewise not
      * worth failing a boot over.
      */
-    const dropOrphanedMaterial = async (winner: SigningKeyRow): Promise<void> => {
-      if (generated === null || secretVersion === null || referenced) return;
-      if (winner.kid === generated.kid) return;
-      await deps.secrets.destroySecret(task, SIGNING_KEY_SECRET_PROVIDER, secretVersion);
-      secretVersion = null;
-      logEvent(task, "issuer-key-race-lost", { kid: generated.kid, active: winner.kid });
+    const dropOrphanedMaterial = async (winner: string): Promise<void> => {
+      if (state.generated === null || state.secretVersion === null) return;
+      if (winner === state.generated.kid) return;
+      const kid = state.generated.kid;
+      const version = state.secretVersion;
+      // A rejected destroy can still have committed. Never republish this
+      // candidate, even if the active slot becomes empty before the next retry.
+      state.cleanupWinner = winner;
+      const destroyed = await deps.secrets.destroySecret(
+        task,
+        SIGNING_KEY_SECRET_PROVIDER,
+        version,
+      );
+      if (destroyed.isErr()) {
+        if (!state.cleanupFailureLogged) {
+          logEvent(task, "issuer-key-cleanup-failed", {
+            kid,
+            secret_version: version,
+            code: destroyed.error.code,
+          });
+          state.cleanupFailureLogged = true;
+        }
+        return;
+      }
+      releaseBootstrapMaterial(state);
+      logEvent(task, "issuer-key-race-lost", { kid, active: winner, secret_version: version });
     };
 
     /** Every successful exit: clean up the race loss, then prove we can sign. */
     const settle = async (row: SigningKeyRow): Promise<Result<SigningKeyRow, SignerError>> => {
-      await dropOrphanedMaterial(row);
+      await dropOrphanedMaterial(row.kid);
+      // A generated key whose secret write never succeeded has no known
+      // version to clean up; the winner makes this candidate unnecessary.
+      if (state.secretVersion === null) releaseBootstrapMaterial(state);
       const material = await readKeyMaterial(task, deps, row);
       if (material.isOk()) return ok(row);
       // An issuer that cannot read its own key is not a healthy boot, and this
@@ -171,8 +211,12 @@ export function ensureActiveSigningKey(
       // A refused insert does not prove the write did not commit — a dropped
       // response after a committed write looks exactly the same from here — so
       // the next read, not the failure, decides whether our version is live.
-      const ourKid = generated?.kid;
-      if (ourKid !== undefined && rows.value.some((row) => row.kid === ourKid)) referenced = true;
+      const ourKid = state.generated?.kid;
+      if (ourKid !== undefined && rows.value.some((row) => row.kid === ourKid)) {
+        // Ownership transferred to durable metadata, including a committed
+        // insert whose acknowledgement was lost. Never destroy its material.
+        releaseBootstrapMaterial(state);
+      }
 
       const active = activeRow(rows.value);
       if (active !== undefined) return settle(active);
@@ -198,25 +242,30 @@ export function ensureActiveSigningKey(
         continue;
       }
 
-      if (generated === null) {
+      if (state.cleanupWinner !== null) {
+        await dropOrphanedMaterial(state.cleanupWinner);
+        if (state.cleanupWinner !== null)
+          return err(unavailable("signing-key material cleanup is pending"));
+      }
+      if (state.generated === null) {
         const made = await deps.generator.generate(task);
         if (made.isErr()) return err(made.error);
-        generated = made.value;
+        state.generated = made.value;
       }
-      if (secretVersion === null) {
+      if (state.secretVersion === null) {
         const written = await deps.secrets.writeSecret<StoredSigningKey>(
           task,
           SIGNING_KEY_SECRET_PROVIDER,
-          { privateKeyPem: generated.privateKeyPem },
+          { privateKeyPem: state.generated.privateKeyPem },
         );
         if (written.isErr()) return err(fromStore("write signing key material", written.error));
-        secretVersion = written.value.version;
+        state.secretVersion = written.value.version;
       }
 
       const inserted = await deps.keys.insertSigningKey(task, {
-        kid: generated.kid,
-        secretVersion,
-        publicJwk: generated.publicJwk,
+        kid: state.generated.kid,
+        secretVersion: state.secretVersion,
+        publicJwk: state.generated.publicJwk,
         state: "active",
         createdAt: options.now,
         activatedAt: options.now,
@@ -224,7 +273,7 @@ export function ensureActiveSigningKey(
         rowVersion: 0,
       });
       if (inserted.isOk()) {
-        referenced = true;
+        releaseBootstrapMaterial(state);
         logEvent(task, "issuer-key-activated", { kid: inserted.value.kid, reason: "created" });
         return settle(inserted.value);
       }
@@ -233,18 +282,29 @@ export function ensureActiveSigningKey(
 
     // Out of attempts with material written that no row was ever seen to
     // claim. One last read is the only chance to apply the proof above before
-    // this call forgets which version it wrote.
-    const orphanKid = generated?.kid;
-    if (orphanKid !== undefined && secretVersion !== null && !referenced) {
+    // the caller's next retry. An unavailable read retains ownership.
+    const orphanKid = state.generated?.kid;
+    if (orphanKid !== undefined && state.secretVersion !== null) {
       const final = await listKeys(task, deps.keys);
-      if (final.isOk() && !final.value.some((row) => row.kid === orphanKid)) {
-        const winner = activeRow(final.value);
-        if (winner !== undefined) await dropOrphanedMaterial(winner);
+      if (final.isOk()) {
+        if (final.value.some((row) => row.kid === orphanKid)) releaseBootstrapMaterial(state);
+        else {
+          const winner = activeRow(final.value);
+          if (winner !== undefined) await dropOrphanedMaterial(winner.kid);
+        }
       }
     }
     return err(lastFailure);
   };
-  return new ResultAsync(run());
+  return new ResultAsync(run())
+    .map((row) => {
+      state.running = false;
+      return row;
+    })
+    .mapErr((error) => {
+      state.running = false;
+      return error;
+    });
 }
 
 /**

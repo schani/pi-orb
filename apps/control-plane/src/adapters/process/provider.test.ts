@@ -42,6 +42,7 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   orbId: process.env.PI_ORB_ID,
   repositoryUrl: process.env.PI_ORB_REPOSITORY_URL,
   incarnation: process.env.PI_ORB_HOST_INCARNATION,
+  container: process.env.PI_ORB_CONTAINER,
   workDir: process.env.PI_ORB_WORK_DIR,
   home: process.env.HOME,
   controlPlaneUrl: process.env.PI_ORB_CONTROL_PLANE_URL,
@@ -128,7 +129,10 @@ afterEach(async () => {
 describe("ProcessOrbHostProvider", () => {
   it("uses only its configured state directory and launches a runtime with isolated env", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
-    const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
+    const { provider, root } = makeProvider({
+      OBSERVED_ENV_FILE: observedEnv,
+      PI_ORB_CONTAINER: "1",
+    });
     const provisioned = await provider.provision(task, request, context);
     expect(provisioned.isOk()).toBe(true);
     if (provisioned.isErr()) return;
@@ -143,6 +147,7 @@ describe("ProcessOrbHostProvider", () => {
     expect(values.orbId).toBe(request.orbId);
     expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
     expect(values.incarnation).toBe(String(request.incarnation));
+    expect(values.container).toBe("0");
     expect(values.controlPlaneUrl).toBe("http://127.0.0.1:7100");
     const expectedWorkDir = join(root, "configured-state", request.orbId, "workspace");
     expect(values.workDir).toBe(expectedWorkDir);

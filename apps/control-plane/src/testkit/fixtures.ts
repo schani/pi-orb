@@ -16,6 +16,7 @@ import type {
   ProjectSecretPointerStore,
   SigningKeyDeps,
 } from "../domain/ports.ts";
+import { createSigningKeyBootstrapState } from "../domain/signing-keys.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
 import { FakeSecretStore } from "./broker.ts";
@@ -196,6 +197,7 @@ export function makeSigningKeyHarness(options?: {
       keys,
       secrets,
       generator,
+      bootstrap: createSigningKeyBootstrapState(),
       constants: { ...TEST_ISSUER_CONSTANTS, ...options?.issuerConstants },
     },
   };

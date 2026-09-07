@@ -164,6 +164,9 @@ describe("runtime HTTP schemas", () => {
     expect(Check(RuntimeHealthSchema, { ...ready, turnResume: { outcome: "resume_failed" } })).toBe(
       true,
     );
+    expect(
+      Check(RuntimeHealthSchema, { ...ready, turnResume: { outcome: "notified_restart" } }),
+    ).toBe(true);
     expect(Check(RuntimeHealthSchema, { ...ready, turnResume: { outcome: "declined" } })).toBe(
       false,
     );

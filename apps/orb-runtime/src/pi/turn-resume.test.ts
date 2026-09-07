@@ -421,6 +421,8 @@ describe("startInterruptedTurnResume", () => {
     expect(call.message.customType).toBe(TURN_RESUME_CUSTOM_TYPE);
     expect(call.message.display).toBe(true);
     expect(call.message.content).toContain("interrupted");
+    expect(call.message.content).toContain("All processes running before the restart were killed");
+    expect(call.message.content).toContain("servers, background jobs, and shell sessions");
     // The replicated record alone must be enough to audit the decision.
     expect(call.message.details).toEqual({
       shape: "dangling_tool_calls",

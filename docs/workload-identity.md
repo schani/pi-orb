@@ -826,6 +826,22 @@ decisions taken while fixing them, and the alternatives rejected:
   provably absent and another key holds the active slot — not only on the one branch that used to
   check.
 
+  **DST correction and implemented decision (2026-09-05):** that reuse originally held only
+  within one invocation, not across the caller's boot retries. A reproduced two-instance trace
+  left three orphans after insert/read failures discarded call-local state and a later loser's
+  destruction also failed. `SigningKeyDeps.bootstrap` now explicitly owns the candidate and
+  acknowledged version across the **outer** retry lifetime; every instance allocates it once
+  alongside its generator, and overlapping attempts on that same owner fail retryably rather
+  than mutate it concurrently. An insert or read proving our row exists transfers ownership
+  to durable metadata and releases local material. A failed destroy retains its handle and
+  logs one `issuer-key-cleanup-failed` edge with `kid`, version, and typed code; a confirmed
+  cleanup logs `issuer-key-race-lost`. A candidate whose destruction was attempted is never
+  published again, even if the active slot empties: cleanup must finish first. Healthy boots
+  remain silent and no private material reaches logs. This is per-boot volatile ownership of
+  acknowledged versions, not recovery of unacknowledged secret creations or a durable orphan
+  sweep after process death. Rationale, preserved trace, and tests-first validation:
+  `docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md`.
+
 - **The boot key hook never gates `listen`.** It ran awaited *before* `app.listen`, with raw
   `setTimeout`/`Date.now()` retries. A database that refuses answers fast, but one that hangs — a
   saturated pool, a partition that drops packets instead of resetting — answers never, and the

@@ -14,7 +14,7 @@ import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "../domain/co
 import type { StoreError } from "../domain/errors.ts";
 import { requestOrbArchive } from "../domain/lifecycle.ts";
 import type { OrbNameGenerator, SigningKeyRow, SigningKeyStore } from "../domain/ports.ts";
-import { ensureActiveSigningKey } from "../domain/signing-keys.ts";
+import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "../domain/signing-keys.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakePointerStore, FakeSecretStore, FakeUpstream } from "../testkit/broker.ts";
 import {
@@ -291,6 +291,7 @@ describe("minted tokens verify against the served JWKS", () => {
         keys,
         secrets,
         generator: new NodeCryptoSigningKeyGenerator(),
+        bootstrap: createSigningKeyBootstrapState(),
         constants: DEFAULT_ISSUER_CONSTANTS,
       },
       { now: Date.now() },

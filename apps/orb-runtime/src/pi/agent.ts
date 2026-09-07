@@ -45,13 +45,14 @@ import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
+import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
+import { readExecutionIdentity } from "./execution-identity.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { pickCodexModel } from "./model-select.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
 import { sessionFlushed } from "./session-flush.ts";
-import { describeTurnResumeDecision, startInterruptedTurnResume } from "./turn-resume.ts";
 
 export interface PiOrbAgentOptions {
   readonly orbId: string;
@@ -69,6 +70,8 @@ export interface PiOrbAgentOptions {
   readonly previewHost?: string | null;
   /** Compute incarnation this boot belongs to; keys the setup hook's stamp. */
   readonly incarnation?: string;
+  /** Test seam; production reads the host/container execution identity at boot. */
+  readonly executionId?: string | null;
   /** Test seam; production spawns the repository's boot hooks with `NodeHookSpawner`. */
   readonly hookSpawner?: HookSpawner;
   /** Test seam; production creates the Luna adapter from the orb's existing ModelRuntime. */
@@ -102,6 +105,8 @@ export type PiSessionManager = Pick<
   | "getSessionId"
   | "getSessionFile"
   | "buildContextEntries"
+  | "appendCustomEntry"
+  | "appendCustomMessageEntry"
 >;
 
 type FrameListener = (frame: ServerFrame) => void;
@@ -159,6 +164,7 @@ export class PiOrbAgent {
   private session: PiSession | null = null;
   private liveHistory: LiveHistoryPublisher | null = null;
   private checkoutCommit = "";
+  private executionId: string | null = null;
   private activity: "idle" | "busy" = "idle";
   /** This boot's interrupted-turn decision, when notable (docs/lifecycle.md). */
   private turnResume: RuntimeTurnResume | null = null;
@@ -283,6 +289,10 @@ export class PiOrbAgent {
   }
 
   private async bootSteps(): Promise<Result<void, RuntimeHealth>> {
+    const identity = readExecutionIdentity(process.env);
+    if (identity.isErr())
+      return err(this.failed("session_init_failed", identity.error.message, true));
+    this.executionId = identity.value;
     if (this.options.testLaunchFailure === true) {
       return err(
         this.failed(
@@ -605,36 +615,99 @@ export class PiOrbAgent {
       this.triggerAutoName(content);
     }
 
-    // 5. Resume a turn a host restart interrupted (docs/lifecycle.md). The
-    // runtime is already ready here: the resumed turn is never awaited, and it
-    // surfaces as ordinary `busy` activity through Pi's agent_start.
-    this.resumeInterruptedTurn(manager, session);
+    // 5. Deliver restart context, including between turns (docs/lifecycle.md).
+    // This synchronous final boot step claims any automatic turn before
+    // another ingress can observe readiness; inference is never awaited.
+    this.notifyRestart(manager, session);
   }
 
   /**
-   * Boot's interrupted-turn hook. The marker is appended and its turn is
+   * Boot's restart-context hook. The marker is appended and its turn is
    * triggered without blocking readiness — with `triggerTurn` the SDK settles
    * its promise only when the whole resumed turn does, so awaiting it here
    * would hold the runtime in `initializing` for the length of a turn. The
    * decision is kept for `RuntimeHealth`, where the control plane's readiness
    * path turns it into one log line (docs/lifecycle.md).
    */
-  private resumeInterruptedTurn(manager: PiSessionManager, session: PiSession): void {
-    // The LiveHistoryPublisher already seeded the restored entries as known,
-    // so the record appended below publishes and replicates normally.
-    const attempt = startInterruptedTurnResume(manager.buildContextEntries(), session);
-    this.turnResume = attempt.observation;
-    console.log(`${describeTurnResumeDecision(attempt.decision)} orb=${this.options.orbId}`);
-    const issued = attempt.issued;
-    if (issued === null) return;
-    const customType = attempt.marker?.customType ?? "";
-    void issued.mapErr((error) => {
-      console.error(`turn-resume: ${customType} record failed: ${error.message}`);
-      // A resume the harness refused never happened: health must not claim it
-      // did. A failed decline record leaves the decline itself standing.
-      if (this.turnResume?.outcome === "resumed") {
-        this.turnResume = { ...this.turnResume, outcome: "resume_failed" };
-      }
+  private notifyRestart(manager: PiSessionManager, session: PiSession): void {
+    const identity = {
+      runtimeInstanceId: this.runtimeInstanceId,
+      executionId:
+        this.options.executionId === undefined ? this.executionId : this.options.executionId,
+      incarnation: this.options.incarnation ?? "0",
+    };
+    const toError = (cause: unknown) => ({
+      type: "boot_notification_error" as const,
+      message: String(cause),
+    });
+    const loaded = Result.fromThrowable(
+      () => ({
+        entries: manager.getEntries(),
+        context: manager.buildContextEntries(),
+      }),
+      toError,
+    )();
+    if (loaded.isErr()) {
+      this.health = this.failed("session_init_failed", loaded.error.message, true);
+      return;
+    }
+    const plan = planBootNotification(loaded.value.entries, loaded.value.context, identity);
+    if (plan.kind === "none") return;
+    if (plan.kind === "baseline") {
+      const saved = Result.fromThrowable(
+        () => manager.appendCustomEntry(BOOT_BASELINE_TYPE, identity),
+        toError,
+      )();
+      if (saved.isErr())
+        this.health = this.failed("session_init_failed", saved.error.message, true);
+      return;
+    }
+    this.turnResume = {
+      ...(plan.marker.details.shape !== undefined ? { shape: plan.marker.details.shape } : {}),
+      outcome:
+        plan.marker.details.reason === "resumed"
+          ? "resumed"
+          : plan.triggerTurn
+            ? "notified_restart"
+            : "declined_already_resumed",
+      ...(plan.marker.details.headRecordId !== null
+        ? { headRecordId: plan.marker.details.headRecordId }
+        : {}),
+    };
+    // Claim synchronously, before the SDK's asynchronous agent_start event.
+    // Incoming inbox deliveries wait on the same turn-start barrier as a
+    // human-started turn; readiness never awaits inference completion.
+    const operationId = plan.triggerTurn ? randomUUID() : null;
+    if (operationId !== null) {
+      this.startAgentOperation(operationId, null);
+      this.beginTurnStart();
+    }
+    const send = ResultAsync.fromThrowable(
+      () => session.sendCustomMessage(plan.marker, { triggerTurn: plan.triggerTurn }),
+      toError,
+    );
+    void send().mapErr((error) => {
+      this.turnResume = { ...this.turnResume, outcome: "resume_failed" };
+      if (operationId !== null) this.abandonAgentOperation(operationId, error.message);
+      // A durable, visible failure also covers runtimes that restart without
+      // crossing a control-plane readiness edge. No stdout-only decisions.
+      const saved = Result.fromThrowable(
+        () =>
+          manager.appendCustomMessageEntry(
+            "pi-orb.restart-notification-failed",
+            `The runtime could not deliver its restart notification: ${error.message}`,
+            true,
+            {
+              ...identity,
+              reason: "delivery_failed",
+              headRecordId: plan.marker.details.headRecordId,
+            },
+          ),
+        toError,
+      )();
+      if (saved.isErr())
+        this.health = this.failed("session_init_failed", saved.error.message, true);
+      this.liveHistory?.observe("message_end");
       return error;
     });
   }
@@ -652,8 +725,8 @@ export class PiOrbAgent {
         // A submitted turn claimed its operation synchronously at acceptance,
         // and Pi re-emits agent_start for continuations inside the same run
         // (auto-retry, auto-compaction): neither may restart the operation or
-        // change its ID. Only a turn nobody submitted — the boot
-        // interrupted-turn resume (docs/lifecycle.md) — allocates here.
+        // change its ID. Only an SDK/extension turn nobody claimed allocates
+        // here; boot notifications now claim their operation before Pi starts.
         if (this.operationKind === null) this.startAgentOperation(randomUUID(), null);
         this.settleTurnStart();
         break;

@@ -127,13 +127,15 @@ class FakePiSession {
   }
 }
 
-const fakeManager = (): PiSessionManager => ({
-  getEntries: () => [],
+const fakeManager = (entries: unknown[] = []): PiSessionManager => ({
+  appendCustomEntry: () => "baseline",
+  appendCustomMessageEntry: () => "failure",
+  getEntries: () => entries as ReturnType<PiSessionManager["getEntries"]>,
   getLeafId: () => null,
   getHeader: () => ({ id: "session-under-test" }) as ReturnType<PiSessionManager["getHeader"]>,
   getSessionId: () => "session-under-test",
   getSessionFile: () => undefined,
-  buildContextEntries: () => [],
+  buildContextEntries: () => entries as ReturnType<PiSessionManager["buildContextEntries"]>,
 });
 
 const silentSummarizer: TurnSummarizer = { summarize: () => okAsync("") };
@@ -149,7 +151,7 @@ interface Harness {
   readonly promised: Map<Submitter, { operationId: string; delivery: "turn" | "steer" }>;
 }
 
-function harness(): Harness {
+function harness(entries: unknown[] = []): Harness {
   const pi = new FakePiSession();
   const agent = new PiOrbAgent({
     orbId: "orb-under-test",
@@ -164,7 +166,7 @@ function harness(): Harness {
     const event: RuntimeEvent = frame.event;
     if (event.type === "operation_started") started.push(event.operationId);
   });
-  agent.attachSession(pi as unknown as PiSession, fakeManager(), silentSummarizer);
+  agent.attachSession(pi as unknown as PiSession, fakeManager(entries), silentSummarizer);
   return { agent, pi, started, promised: new Map() };
 }
 
@@ -304,6 +306,50 @@ describe("operation-id correlation across submitters DST", () => {
         operationId: "operation-browser",
         delivery: "steer",
       });
+    });
+  });
+
+  it("claims a boot notification before readiness admits competing senders", async () => {
+    await runDst({ name: "boot-notification-concurrent-send", iterations: 100 }, async (sim) => {
+      const h = harness([
+        { type: "message", id: "u", message: { role: "user", content: "done", timestamp: 1 } },
+        {
+          type: "message",
+          id: "a",
+          message: { role: "assistant", stopReason: "stop", content: [] },
+        },
+      ]);
+      expect(h.agent.getHealth().status).toBe("ready");
+      expect(h.agent.gateView().activity).toBe("busy");
+      const operationId = h.started[0];
+      expect(operationId).toBeTypeOf("string");
+      const run = await sim.runTasks([
+        {
+          name: "browser",
+          f: async (task) => {
+            await task.checkpoint("browser races boot agent_start");
+            expect(browserSubmit(h, "browser-operation")).toBe("busy");
+          },
+        },
+        {
+          name: "inbox",
+          f: async (task) => {
+            await task.checkpoint("inbox races boot agent_start");
+            const result = await h.agent.deliverInboxMessage(
+              "batch-boot",
+              ["batch-boot"],
+              text("new work"),
+            );
+            expect(result.isOk()).toBe(true);
+            if (result.isOk())
+              expect(result.value).toMatchObject({ delivery: "steer", operationId });
+          },
+        },
+        { name: "pi", f: async (task) => piTask(task, h, 2) },
+      ]);
+      if (run.isErr()) throw run.error;
+      expect(h.started).toEqual([operationId]);
+      expect(h.pi.landings.map((landing) => landing.landing)).toEqual(["turn", "steer"]);
     });
   });
 
