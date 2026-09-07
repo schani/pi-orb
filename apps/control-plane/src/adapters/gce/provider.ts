@@ -57,6 +57,7 @@ const TAILSCALE_KEY_METADATA_KEY = "pi-orb-tailscale-auth-key";
 /** Guest attributes are off by default. */
 const GUEST_ATTRIBUTES_METADATA_KEY = "enable-guest-attributes";
 const LOGGING_METADATA_KEY = "google-logging-enabled";
+const BLOCK_PROJECT_SSH_KEYS_METADATA_KEY = "block-project-ssh-keys";
 const CONFIG_METADATA_KEY = "pi-orb-config";
 const DATA_DEVICE = "pi-orb-data";
 /** The boot disk is disposable — the workspace lives on the data disk. */
@@ -662,6 +663,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
             items: [
               { key: TOKEN_METADATA_KEY, value: runtimeToken },
               ...observabilityMetadataItems(),
+              { key: BLOCK_PROJECT_SSH_KEYS_METADATA_KEY, value: "TRUE" },
               ...(tailscaleKey.value === null
                 ? []
                 : [

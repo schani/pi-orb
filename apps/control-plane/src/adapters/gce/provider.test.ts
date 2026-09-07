@@ -355,6 +355,7 @@ describe("GceOrbHostProvider", () => {
     ).toBe("projects/projxx/global/images/pi-orb-native-20260905");
     expect(items.find((item) => item.key === "google-logging-enabled")?.value).toBe("true");
     expect(items.find((item) => item.key === "enable-guest-attributes")?.value).toBe("TRUE");
+    expect(items.find((item) => item.key === "block-project-ssh-keys")?.value).toBe("TRUE");
     const spec = items.find((item) => item.key === "pi-orb-host-spec-fingerprint")?.value;
     expect(spec).toBe(result.isOk() ? result.value.specFingerprint : "");
     expect(items.some((item) => item.key === "pi-orb-script-sha256")).toBe(false);

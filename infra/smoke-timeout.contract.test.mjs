@@ -32,3 +32,14 @@ test("live smoke deadlines cover native lifecycle bounds", () => {
   );
   assert.match(replacement, /^boot_deadline_seconds=900\b/m);
 });
+
+test("compute replacement SSH always uses IAP", () => {
+  const replacement = readFileSync(
+    new URL("./smoke-compute-replacement.sh", import.meta.url),
+    "utf8",
+  );
+  const sshCommands = replacement.match(/gcloud compute ssh/g) ?? [];
+  const iapFlags = replacement.match(/--tunnel-through-iap/g) ?? [];
+  assert(sshCommands.length > 0);
+  assert.equal(iapFlags.length, sshCommands.length);
+});

@@ -64,15 +64,20 @@ file. Verify the active identity and project before using the tooling:
     ./infra/api.sh /api/v1/orbs/<id>/start '{}'
 
 The API helper impersonates `pi-orb-debug@...` against the ops service — no IAP
-is involved.
+is involved. That service account and its service-account-level
+`roles/iam.serviceAccountTokenCreator` binding for `pi-orb-amp-deployer` are an
+external bootstrap prerequisite retained by `infra/bootstrap-amp-oidc.sh`; the
+foundation root does not create or manage either one. Verify the binding after
+foundation adoption and before the first scoped release.
 
 The federation pool/provider and deployer permissions are a separately
 bootstrapped trust boundary, intentionally outside the recurring OpenTofu root.
 The older Amp trust path and `infra/bootstrap-amp-oidc.sh` remain independently
 scoped adoption records, but repository hooks no longer configure Amp
 credentials. The deployer has functional roles for the root's static-plane
-resources rather than Owner or Editor, object access only on the static-plane
-state bucket, and token creation only on the debug service account.
+resources rather than Owner or Editor and object access only on the static-plane
+state bucket. Its externally bootstrapped token creation grant is limited to the
+debug service account.
 
 The application root consumes foundation outputs. The foundation owns stable IAM and the trust policies; its adoption removes the old deployer's broader grants through a reviewed plan. That restriction becomes effective only after the foundation adoption and permission changes have been applied.
 

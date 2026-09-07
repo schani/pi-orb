@@ -154,9 +154,9 @@ marker=$(jq -nc --arg orbId "$orb_id" '{orbId: $orbId, incarnation: 0}')
 # nested-quote escaping.
 sentinel_b64=$(printf %s "$sentinel" | base64 | tr -d '\n')
 marker_b64=$(printf %s "$marker" | base64 | tr -d '\n')
-gcloud compute ssh "$old_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" -- \
+gcloud compute ssh "$old_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap -- \
   "sudo bash -c 'printf %s $sentinel_b64 | base64 -d > /workspace/replacement-sentinel; printf %s $marker_b64 | base64 -d > /workspace/.pi-orb-e2e-launch-failure.json'"
-gcloud compute ssh "$old_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" -- \
+gcloud compute ssh "$old_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap -- \
   "sudo grep -Fx '$sentinel' /workspace/replacement-sentinel"
 
 api POST "/api/v1/orbs/$orb_id/stop" >/dev/null
@@ -201,7 +201,7 @@ new_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerpri
 
 # The workspace survived replacement, exactly one compute identity remains,
 # and the orb is still running through the replacement incarnation.
-gcloud compute ssh "$new_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" -- \
+gcloud compute ssh "$new_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap -- \
   "sudo grep -Fx '$sentinel' /workspace/replacement-sentinel"
 [[ "$(instances)" == "$new_instance" ]]
 instance_absent "$old_instance"
@@ -252,7 +252,7 @@ if [[ -n "${PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND:-}" ]]; then
   [[ "$stage2_data_disk" == "$data_disk" ]]
   instance_absent "$new_instance"
   gcloud compute ssh "$stage2_instance" --project "$PI_ORB_GCP_PROJECT" \
-    --zone "$PI_ORB_GCE_ZONE" -- \
+    --zone "$PI_ORB_GCE_ZONE" --tunnel-through-iap -- \
     "sudo grep -Fx '$sentinel' /workspace/replacement-sentinel"
 fi
 

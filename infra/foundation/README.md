@@ -34,6 +34,10 @@ unconditional legacy deployer membership before planning its removal:
 PROJECT=playground-dev-6ae7
 BUCKET=pi-orb-tfstate-$PROJECT
 DEPLOYER=serviceAccount:pi-orb-amp-deployer@$PROJECT.iam.gserviceaccount.com
+umask 077
+PLAN_DIR=$(mktemp -d)
+chmod 700 "$PLAN_DIR"
+trap 'rm -rf "$PLAN_DIR"' EXIT
 tofu -chdir=infra/foundation init -backend-config="bucket=$BUCKET"
 for role in \
   roles/artifactregistry.writer \
@@ -50,7 +54,7 @@ for role in \
     "google_project_iam_member.obsolete_deployer[\"$role\"]" \
     "$PROJECT $role $DEPLOYER"
 done
-tofu -chdir=infra/foundation plan -out=foundation-scoped.plan \
+tofu -chdir=infra/foundation plan -out="$PLAN_DIR/foundation-scoped.plan" \
   -var=project="$PROJECT" -var=state_bucket="$BUCKET" \
   -var=adopt_legacy_deployer_grants=true
 ```
@@ -61,7 +65,7 @@ the scoped replacement grants. Remove the old unconditional state-bucket grant
 without matching the new conditioned grant:
 
 ```sh
-tofu -chdir=infra/foundation apply foundation-scoped.plan
+tofu -chdir=infra/foundation apply "$PLAN_DIR/foundation-scoped.plan"
 gcloud storage buckets remove-iam-policy-binding "gs://$BUCKET" \
   --member="$DEPLOYER" --role=roles/storage.objectAdmin --condition=None
 ```
@@ -71,9 +75,9 @@ only removals must be the imported obsolete deployer memberships. Apply that
 exact saved plan:
 
 ```sh
-tofu -chdir=infra/foundation plan -out=foundation-final.plan \
+tofu -chdir=infra/foundation plan -out="$PLAN_DIR/foundation-final.plan" \
   -var=project="$PROJECT" -var=state_bucket="$BUCKET"
-tofu -chdir=infra/foundation apply foundation-final.plan
+tofu -chdir=infra/foundation apply "$PLAN_DIR/foundation-final.plan"
 ```
 
 The old bootstrap script granted the deployer project IAM administration,
@@ -107,7 +111,18 @@ foundation outputs. Releases should read `zone`, `state_bucket`,
 root rather than reconstructing them. The isolated build subnet and its builder-only IAP firewall let a fresh
 project build the accepted native image before the application root exists.
 
-IAP build access is restricted to SSH destinations in the isolated build subnet.
-Its condition uses the documented `destination.ip` and `destination.port`
-attributes, with the subnet and address prefix defined together
+IAP release access is restricted to SSH destinations in the isolated build
+subnet and the exact orb `/20`. Builder, validator, and orb instances set
+`block-project-ssh-keys=TRUE`, so `gcloud compute ssh` publishes a fresh caller's
+key through instance metadata. The build role covers builder and validator
+metadata; a separate scoped role permits workload-instance metadata writes.
+Neither grant permits project SSH metadata changes. The tunnel condition uses the
+documented `destination.ip` and `destination.port` attributes
 ([Google IAP TCP forwarding](https://cloud.google.com/iap/docs/using-tcp-forwarding)).
+
+The debug service account and its Token Creator binding remain outside this
+root. Before the first scoped release, an administrator must verify that
+`pi-orb-amp-deployer@PROJECT.iam.gserviceaccount.com` still has
+`roles/iam.serviceAccountTokenCreator` on
+`pi-orb-debug@PROJECT.iam.gserviceaccount.com`; `infra/bootstrap-amp-oidc.sh`
+creates that service-account-level binding.

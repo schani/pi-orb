@@ -135,9 +135,35 @@ resource "google_project_iam_member" "deployer_iap_tunnel" {
   role    = "roles/iap.tunnelResourceAccessor"
   member  = "serviceAccount:${google_service_account.deployer.email}"
   condition {
-    title       = "pi-orb-image-builders-only"
-    description = "Open IAP tunnels only to disposable image build instances."
-    expression  = "destination.port == 22 && destination.ip.startsWith(\"${local.image_build_ipv4_prefix}\")"
+    title       = "pi-orb-release-ssh-only"
+    description = "Open SSH tunnels only to image build and orb subnet destinations."
+    expression = "destination.port == 22 && (${join(" || ", concat(
+      ["destination.ip.startsWith(\"${local.image_build_ipv4_prefix}\")"],
+      [for prefix in local.orb_ipv4_prefixes : "destination.ip.startsWith(\"${prefix}\")"],
+    ))})"
+  }
+}
+
+resource "google_project_iam_custom_role" "deployer_orb_ssh_key_writer" {
+  role_id     = "piOrbSmokeSshKeyWriter"
+  title       = "pi-orb smoke SSH key writer"
+  description = "Set instance metadata on a pi-orb workload instance for release SSH."
+  permissions = ["compute.instances.setMetadata"]
+}
+
+resource "google_project_iam_member" "deployer_orb_ssh_key_writer" {
+  project = var.project
+  role    = google_project_iam_custom_role.deployer_orb_ssh_key_writer.name
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+  condition {
+    title       = "pi-orb-orb-instances-only"
+    description = "Publish smoke SSH keys only on pi-orb workload instances."
+    expression = join(" && ", [
+      "resource.type == \"compute.googleapis.com/Instance\"",
+      "resource.name.startsWith(\"projects/${var.project}/zones/${var.zone}/instances/pi-orb-\")",
+      "!resource.name.startsWith(\"projects/${var.project}/zones/${var.zone}/instances/pi-orb-builder-\")",
+      "!resource.name.startsWith(\"projects/${var.project}/zones/${var.zone}/instances/pi-orb-validator-\")",
+    ])
   }
 }
 

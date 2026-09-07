@@ -66,6 +66,22 @@ describe("GCloud native-image adapter", () => {
     );
   });
 
+  it("forces builder SSH keys into instance metadata", async () => {
+    const calls: string[][] = [];
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      calls.push(args);
+      return { stdout: "[]", stderr: "" };
+    });
+    const value = await effects.run(
+      "builder",
+      "create",
+      await input(),
+      new AbortController().signal,
+    );
+    expect(value.isOk()).toBe(true);
+    expect(calls[0]).toContain("--metadata=block-project-ssh-keys=TRUE");
+  });
+
   it("maps malformed capture JSON to a typed failure", async () => {
     const effects = new GcloudImageBuildEffects(async () => ({ stdout: "not-json", stderr: "" }));
     const value = await effects.capture(await input(), new AbortController().signal);
@@ -202,6 +218,9 @@ describe("GCloud native-image adapter", () => {
     expect(startup).toContain("systemctl restart pi-orb-runtime.service");
     expect(calls[1]).toContain(
       `--metadata-from-file=pi-orb-config=${buildInput.outputDir}/validation-config.json,startup-script=${buildInput.outputDir}/validation-startup.sh`,
+    );
+    expect(calls[1]).toContain(
+      "--metadata=enable-guest-attributes=TRUE,block-project-ssh-keys=TRUE",
     );
   });
 });

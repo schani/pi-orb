@@ -40,6 +40,8 @@ resource "google_project_service" "apis" {
 
 locals {
   image_build_ipv4_prefix = "10.11.0."
+  orb_ipv4_cidr           = "10.10.0.0/20"
+  orb_ipv4_prefixes       = [for octet in range(16) : "10.10.${octet}."]
 }
 
 resource "google_compute_network" "image_build" {
@@ -78,7 +80,7 @@ resource "google_compute_subnetwork" "orbs" {
   name                     = "pi-orb-${var.region}"
   network                  = google_compute_network.pi_orb.id
   region                   = var.region
-  ip_cidr_range            = "10.10.0.0/20"
+  ip_cidr_range            = local.orb_ipv4_cidr
   private_ip_google_access = true
 }
 
