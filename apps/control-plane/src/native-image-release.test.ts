@@ -89,6 +89,7 @@ describe("native build release stage", () => {
         mkdirSync(join(root, "infra"));
         const log = join(root, "calls");
         copyFileSync(resolve("infra/build-push.sh"), join(root, "infra/build-push.sh"));
+        copyFileSync(resolve("infra/release-child.sh"), join(root, "infra/release-child.sh"));
         copyFileSync(
           resolve("infra/native-image-vars.mjs"),
           join(root, "infra/native-image-vars.mjs"),
@@ -103,8 +104,9 @@ describe("native build release stage", () => {
           `if [ "$*" = "rev-parse HEAD" ]; then echo ${commit}; else echo ${shortCommit}; fi`,
         );
         script(
-          "npm",
-          `version=""
+          "node",
+          `if [ "\${2:-}" != packages/native-image/src/cli.ts ]; then exec "$REAL_NODE" "$@"; fi
+version=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = --version ]; then version="$2"; break; fi
   shift
@@ -129,6 +131,7 @@ if [ "$1" = inspect ]; then echo 'registry/control@sha256:${"a".repeat(64)}'; fi
             PROJECT: "test-project",
             IMAGE_BUILD_DIR: join(root, "image"),
             CALL_LOG: log,
+            REAL_NODE: process.execPath,
           },
         });
         const calls = readFileSync(log, "utf8");
