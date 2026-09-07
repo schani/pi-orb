@@ -96,12 +96,27 @@ async function stopStartCycle(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   harness: TestHarness,
+  capture: LogCapture,
+  cycle: string,
 ): Promise<void> {
   const stopped = await requestOrbStop(task, deps, ORB);
   expect(stopped.isOk(), stopped.isErr() ? stopped.error.message : "").toBe(true);
-  await waitUntil(task, "orb stopped", () => harness.store.orbSnapshot(ORB)?.state === "stopped", {
-    timeoutMs: 900_000,
-  });
+  await waitUntil(
+    task,
+    `${cycle} stop reached a terminal decision`,
+    () => {
+      const state = harness.store.orbSnapshot(ORB)?.state;
+      return state === "stopped" || state === "failed";
+    },
+    { timeoutMs: 900_000 },
+  );
+  const stoppedOrb = harness.store.orbSnapshot(ORB);
+  expect(
+    stoppedOrb?.state,
+    `${cycle} stop ended as ${stoppedOrb?.state}: ${stoppedOrb?.lastError ?? "no error"}\n${capture
+      .lines()
+      .join("\n")}`,
+  ).toBe("stopped");
   const started = await requestOrbStart(task, deps, ORB);
   expect(started.isOk(), started.isErr() ? started.error.message : "").toBe(true);
   await waitUntil(
@@ -256,13 +271,13 @@ describe("mixed-generation reconcilers (DST)", () => {
               });
               expect(harness.world.specFingerprintOf(ORB)).toBe(oldFingerprint);
               // The ordinary stop/start is the only replacement trigger.
-              await stopStartCycle(task, newRevision, harness);
+              await stopStartCycle(task, newRevision, harness, capture, "replacement cycle");
               // The deploy finishes: the drained revision goes away.
               drainOld.abort();
               // The survivor must now own the host outright, and a second
               // stop/start of an already-current specification replaces
               // nothing at all.
-              await stopStartCycle(task, newRevision, harness);
+              await stopStartCycle(task, newRevision, harness, capture, "same-spec cycle");
               stopAll.abort();
             },
           },
