@@ -40,6 +40,8 @@ export type CommitPullError = StoreError | CursorConflict | ReplicationIntegrity
 
 export interface RuntimeClientError {
   readonly type: "runtime_client_error";
+  /** Whether an HTTP response arrived from the runtime before this failure. */
+  readonly answered: boolean;
   readonly code:
     | "unreachable"
     | "http_error"

@@ -1559,7 +1559,8 @@ const clientError = (
   code: RuntimeClientError["code"],
   message: string,
   retryable: boolean,
-): RuntimeClientError => ({ type: "runtime_client_error", code, message, retryable });
+  answered = false,
+): RuntimeClientError => ({ type: "runtime_client_error", answered, code, message, retryable });
 
 export class FakeRuntimeClient implements OrbRuntimeClient {
   private readonly world: FakeWorld;
@@ -1599,7 +1600,7 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
     return this.req(task, FAILPOINTS.runtimeDeliverMessage, "deliver message", context, () => {
       const script = this.world.deliverMessageScriptOf(request.baseUrl) ?? { kind: "ok" };
       if (script.kind === "reject") {
-        return errAsync(clientError(script.code, script.message, script.retryable));
+        return errAsync(clientError(script.code, script.message, script.retryable, true));
       }
       if (script.kind === "hang") {
         // Accepted and never answered: the caller's deadline aborts the wait
@@ -1677,10 +1678,10 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
       if (state === null) return errAsync(clientError("unreachable", "no runtime", true));
       const health = this.world.runtimeHealth(task, state);
       if (health.status !== "ready") {
-        return errAsync(clientError("history_unavailable", "runtime not ready", true));
+        return errAsync(clientError("history_unavailable", "runtime not ready", true, true));
       }
       if (state.pullOutageUntil > task.monotonicNow()) {
-        return errAsync(clientError("history_unavailable", "scripted outage", true));
+        return errAsync(clientError("history_unavailable", "scripted outage", true, true));
       }
       const host = state.host;
       if (host === null || host.runtime === null) {
@@ -1688,7 +1689,7 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
       }
       const fs = state.filesystem;
       if (fs.header === null) {
-        return errAsync(clientError("history_unavailable", "no session", true));
+        return errAsync(clientError("history_unavailable", "no session", true, true));
       }
       // Synchronous snapshot of persisted entries.
       const entries = [...fs.entries];
@@ -1697,7 +1698,7 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
         const index = entries.findIndex((record) => record.id === request.after);
         if (index === -1) {
           return errAsync(
-            clientError("cursor_not_found", `unknown cursor ${request.after}`, false),
+            clientError("cursor_not_found", `unknown cursor ${request.after}`, false, true),
           );
         }
         startIndex = index + 1;

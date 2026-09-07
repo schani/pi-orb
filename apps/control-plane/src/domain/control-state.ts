@@ -11,6 +11,8 @@ export interface HookFailure {
 export interface LivenessEntry {
   /** Monotonic ms of the last successful pull (or seeded baseline). */
   lastSuccessAt: number;
+  /** First runtime request since that success which has not received an answer. */
+  unansweredSinceAt: number | null;
   activity: "idle" | "busy";
   runtimeInstanceId: string | null;
   /**
@@ -136,6 +138,7 @@ export class ControlState {
   ): void {
     this.liveness.set(orbId, {
       lastSuccessAt: at,
+      unansweredSinceAt: null,
       activity,
       runtimeInstanceId,
       restartGraceMs: null,
@@ -153,7 +156,21 @@ export class ControlState {
   noteRuntimeAnswered(orbId: string, at: number): void {
     const existing = this.liveness.get(orbId);
     if (existing === undefined) return;
-    this.liveness.set(orbId, { ...existing, lastSuccessAt: at, restartGraceMs: null });
+    this.liveness.set(orbId, {
+      ...existing,
+      lastSuccessAt: at,
+      unansweredSinceAt: null,
+      restartGraceMs: null,
+    });
+  }
+
+  /** Start the silence clock only when a request is actually sent to the runtime. */
+  noteRuntimeRequestStarted(orbId: string, at: number): void {
+    const existing = this.liveness.get(orbId);
+    if (existing === undefined) return;
+    if (existing.unansweredSinceAt === null) {
+      this.liveness.set(orbId, { ...existing, unansweredSinceAt: at });
+    }
   }
 
   /**
@@ -164,6 +181,7 @@ export class ControlState {
     const existing = this.liveness.get(orbId);
     this.liveness.set(orbId, {
       lastSuccessAt: at,
+      unansweredSinceAt: null,
       activity: existing?.activity ?? "idle",
       runtimeInstanceId: null,
       restartGraceMs,
