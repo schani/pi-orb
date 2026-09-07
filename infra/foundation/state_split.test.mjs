@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { splitState } from "./state_split.mjs";
 
@@ -10,6 +11,36 @@ const resource = (type, name, id) => ({
   instances: [{ schema_version: 0, attributes: { id } }],
 });
 const scope = { project: "p", projectNumber: "123", region: "r", zone: "z", stateBucket: "b" };
+
+test("projects the project-qualified subnetwork name required by Cloud Run", () => {
+  const app = {
+    version: 4,
+    terraform_version: "1",
+    serial: 1,
+    lineage: "app",
+    outputs: {},
+    resources: [resource("google_compute_subnetwork", "run_egress", "subnet")],
+  };
+  const result = splitState(app, null, scope);
+  assert(result.isOk());
+  assert.equal(
+    result.value.foundation.outputs.run_egress_subnetwork.value,
+    "projects/p/regions/r/subnetworks/pi-orb-run-egress",
+  );
+
+  const outputs = readFileSync(new URL("./outputs.tf", import.meta.url), "utf8");
+  assert.match(
+    outputs,
+    /output "run_egress_subnetwork" \{ value = google_compute_subnetwork\.run_egress\.id \}/,
+  );
+  assert.doesNotMatch(
+    outputs,
+    /output "run_egress_subnetwork" \{ value = google_compute_subnetwork\.run_egress\.self_link \}/,
+  );
+
+  const application = readFileSync(new URL("../run.tf", import.meta.url), "utf8");
+  assert.equal(application.match(/subnetwork = local\.run_egress_subnetwork/g)?.length, 4);
+});
 
 test("moves complete resource objects and preserves every cloud identity", () => {
   const app = {
