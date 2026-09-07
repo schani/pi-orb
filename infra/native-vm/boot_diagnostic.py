@@ -13,6 +13,11 @@ ZONE_URL = 'http://metadata.google.internal/computeMetadata/v1/instance/zone'
 PROJECT_ID_URL = 'http://metadata.google.internal/computeMetadata/v1/project/project-id'
 TOKEN_URL = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token'
 LOGGING_URL = 'https://logging.googleapis.com/v2/entries:write'
+RUST_EVENT_CODES = ('rust_toolchain_retry', 'rust_toolchain_recovered')
+RUST_ERROR_CLASSES = (
+    'connection_refused', 'connection_reset', 'dns', 'http_429', 'http_5xx',
+    'network_unreachable', 'timeout',
+)
 
 
 def filesystem_details():
@@ -135,9 +140,39 @@ def publish_unit_failure(unit, command=subprocess.run, urlopen=urllib.request.ur
     return 0
 
 
+def rust_event(code, message, encoded_details):
+    if code not in RUST_EVENT_CODES or message:
+        return None
+    try:
+        details = json.loads(encoded_details)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(details, dict) or isinstance(details.get('attempt'), bool):
+        return None
+    attempt = details.get('attempt')
+    if not isinstance(attempt, int) or attempt not in (2, 3):
+        return None
+    if code == 'rust_toolchain_recovered':
+        if set(details) != {'attempt'}:
+            return None
+    else:
+        if set(details) != {'attempt', 'delayMs', 'errorClass'}:
+            return None
+        if details['delayMs'] not in (5_000, 15_000) or details['errorClass'] not in RUST_ERROR_CLASSES:
+            return None
+    return payload('runtime', 'event', code, details=details)
+
+
 def main(arguments=sys.argv[1:]):
     if len(arguments) == 2 and arguments[0] == 'unit-failure':
         return publish_unit_failure(arguments[1])
+    if len(arguments) == 5 and arguments[0:2] == ['runtime', 'event']:
+        record = rust_event(arguments[2], arguments[3], arguments[4])
+        if record is None:
+            print('invalid runtime event', file=sys.stderr)
+            return 2
+        publish(record, write_attribute=False)
+        return 0
     if len(arguments) < 2 or arguments[1] not in ('starting', 'ready', 'failed'):
         print('usage: pi-orb-boot-diagnostic PHASE STATUS [CODE] [MESSAGE]', file=sys.stderr)
         return 2
