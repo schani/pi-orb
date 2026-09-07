@@ -39,9 +39,14 @@ function revision(
   harness: TestHarness,
   specGeneration: number,
   desiredSpec: string,
+  unreachableBootDeadlineMs?: number,
 ): ControlPlaneDeps {
   return {
     ...harness.deps,
+    constants:
+      unreachableBootDeadlineMs === undefined
+        ? harness.deps.constants
+        : { ...harness.deps.constants, unreachableBootDeadlineMs },
     hostProvider: new FakeOrbHostProvider(harness.world, 50, specGeneration, desiredSpec),
     control: new ControlState(),
   };
@@ -151,6 +156,50 @@ async function stopStartCycle(
  * ordinary rollover; trace retained under `test-failures/`).
  */
 describe("mixed-generation reconcilers (DST)", () => {
+  it("parks an older revision while a newer generation exceeds its boot deadline", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "mixed-generation-slow-new-boot", iterations: 20, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness({
+          constants: { createStartDeadlineMs: 900_000, idleStopAfterMs: 3_600_000 },
+        });
+        const oldRevision = revision(harness, OLD_GENERATION, OLD_SPEC, 180_000);
+        const newRevision = revision(harness, NEW_GENERATION, NEW_SPEC, 720_000);
+        const stopAll = new AbortController();
+        const result = await sim.runTasks([
+          { name: "reconciler-old", f: (task) => reconcileLoop(task, oldRevision, stopAll.signal) },
+          { name: "reconciler-new", f: (task) => reconcileLoop(task, newRevision, stopAll.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOnRevision(task, harness, [oldRevision, newRevision]);
+              harness.world.configureOrb(ORB, { bootLatencyMs: 360_000 });
+              const stopped = await requestOrbStop(task, newRevision, ORB);
+              expect(stopped.isOk()).toBe(true);
+              await waitUntil(
+                task,
+                "orb stopped before slow boot",
+                () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              );
+              const started = await requestOrbStart(task, newRevision, ORB);
+              expect(started.isOk()).toBe(true);
+              await waitUntil(task, "slow boot reaches a terminal decision", () => {
+                const state = harness.store.orbSnapshot(ORB)?.state;
+                return state === "running" || state === "failed";
+              });
+              stopAll.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
+        expect(capture.matching("spec-replacement-declined").length).toBeGreaterThan(0);
+        expect(capture.matching("to=failed")).toEqual([]);
+      },
+    );
+  });
+
   it("replaces a stale host forward once and never backward during a rollover", async () => {
     const capture = new LogCapture();
     // The declined guard fires only in schedules where a stale pass actually

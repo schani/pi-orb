@@ -29,6 +29,7 @@ export type ReconcileOutcome =
         | "auth"
         | "readiness"
         | "host_transition"
+        | "newer_spec_owner"
         | "stale_compute_disposal"
         | "drain_blocked"
         | "deletion_quarantine";
@@ -64,6 +65,7 @@ const waiting = (
     | "auth"
     | "readiness"
     | "host_transition"
+    | "newer_spec_owner"
     | "stale_compute_disposal"
     | "drain_blocked"
     | "deletion_quarantine",
@@ -559,7 +561,7 @@ async function reconcileCreateStart(
     repositoryUrl: project.repositoryUrl,
   });
   const declinedCondition = `spec-replacement-declined:${orb.id}`;
-  let startSpecFingerprint = desiredSpecFingerprint;
+  const startSpecFingerprint = desiredSpecFingerprint;
   if (
     orb.hostRef === null &&
     orb.hostSpecFingerprint !== null &&
@@ -597,13 +599,13 @@ async function reconcileCreateStart(
       return waiting("stale_compute_disposal");
     }
     if (requested.value.type === "declined") {
-      startSpecFingerprint = orb.hostSpecFingerprint ?? desiredSpecFingerprint;
       if (deps.control.noteCondition(declinedCondition, true)) {
         logOrbEvent(task, orb.id, "spec-replacement-declined", {
           committed_generation: requested.value.committedGeneration,
           configured_generation: deps.hostProvider.specGeneration,
         });
       }
+      return waiting("newer_spec_owner");
     } else {
       deps.control.noteCondition(declinedCondition, false);
     }
@@ -773,13 +775,13 @@ async function reconcileCreateStart(
       return waiting("stale_compute_disposal");
     }
     if (replacement.value.type === "declined") {
-      startSpecFingerprint = observation.specFingerprint ?? startSpecFingerprint;
       if (deps.control.noteCondition(declinedCondition, true)) {
         logOrbEvent(task, orb.id, "spec-replacement-declined", {
           committed_generation: replacement.value.committedGeneration,
           configured_generation: deps.hostProvider.specGeneration,
         });
       }
+      return waiting("newer_spec_owner");
     }
   }
   if (observation === null) {
