@@ -32,10 +32,24 @@ test("release SSH authority is limited to port 22 in build and orb subnets", () 
   )?.[0];
   assert(block);
   assert.match(block, /destination\.port == 22/);
-  assert.match(block, /local\.image_build_ipv4_prefix/);
-  assert.match(block, /local\.orb_ipv4_prefixes/);
+  assert.match(block, /image_build = \[local\.image_build_ipv4_prefix\]/);
+  assert.match(block, /orb_0_7\s+= slice\(local\.orb_ipv4_prefixes, 0, 8\)/);
+  assert.match(block, /orb_8_15\s+= slice\(local\.orb_ipv4_prefixes, 8, 16\)/);
+  assert.match(block, /for prefix in each\.value/);
+  assert.match(main, /image_build_ipv4_prefix\s+= "10\.11\.0\."/);
   assert.match(main, /orb_ipv4_cidr\s+= "10\.10\.0\.0\/20"/);
   assert.match(main, /orb_ipv4_prefixes\s+= \[for octet in range\(16\)/);
+
+  // IAM Conditions permit at most 12 logical operators. Each rendered
+  // binding has one port conjunction plus at most seven prefix disjunctions.
+  const scopes = [
+    ["10.11.0."],
+    ...[0, 8].map((start) => Array.from({ length: 8 }, (_, offset) => `10.10.${start + offset}.`)),
+  ];
+  assert.equal(scopes.flat().length, 17);
+  assert.equal(new Set(scopes.flat()).size, 17);
+  assert(scopes.every((prefixes) => prefixes.length <= 8));
+  assert(scopes.every((prefixes) => 1 + Math.max(0, prefixes.length - 1) <= 12));
 });
 
 test("orb smoke can publish only instance SSH metadata", () => {
