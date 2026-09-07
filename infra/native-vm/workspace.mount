@@ -1,8 +1,10 @@
 [Unit]
 Description=Persistent orb workspace
+DefaultDependencies=no
 Requires=pi-orb-workspace.service
 After=pi-orb-workspace.service
-Before=pi-orb-bootstrap.service docker.service containerd.service
+Conflicts=umount.target
+Before=pi-orb-bootstrap.service docker.service containerd.service umount.target
 OnFailure=pi-orb-boot-failure@workspace.mount.service
 
 [Mount]
