@@ -8,6 +8,9 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const helper = new URL("./release-quiesce.sh", import.meta.url).pathname;
 const childLibrary = new URL("./release-child.sh", import.meta.url).pathname;
+const releaseScript = new URL("./release.sh", import.meta.url).pathname;
+const buildPushScript = new URL("./build-push.sh", import.meta.url).pathname;
+const signalHelper = new URL("../packages/native-image/src/signals.ts", import.meta.url).pathname;
 
 function fixture({
   metrics = "zero",
@@ -268,3 +271,130 @@ release_run_child "$CHILD_COMMAND"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("release tracks build-push and build-push tracks the native CLI directly", () => {
+  assert.match(readFileSync(releaseScript, "utf8"), /release_run_child "\$INFRA\/build-push\.sh"/);
+  const buildPush = readFileSync(buildPushScript, "utf8");
+  assert.match(
+    buildPush,
+    /release_run_child node --experimental-strip-types packages\/native-image\/src\/cli\.ts/,
+  );
+  assert.doesNotMatch(buildPush, /npm run native-image:build/);
+});
+
+async function assertNestedCleanup(signal, wholeGroup) {
+  const dir = mkdtempSync(join(tmpdir(), "pi-orb-release-group-test-"));
+  const worker = join(dir, "worker.ts");
+  const build = join(dir, "build");
+  const release = join(dir, "release");
+  const cleanupGate = join(dir, "cleanup-gate");
+  writeFileSync(cleanupGate, "");
+  writeFileSync(
+    worker,
+    `import { readFileSync, writeSync } from "node:fs";
+import { installAbortSignalHandlers } from ${JSON.stringify(signalHelper)};
+const controller = new AbortController();
+let cleaning = false;
+const poll = setInterval(() => {
+  if (!cleaning || readFileSync(${JSON.stringify(cleanupGate)}, "utf8") !== "finish") return;
+  clearInterval(poll);
+  writeSync(3, "cleanup-done\\n");
+  process.exit(130);
+}, 10);
+installAbortSignalHandlers(controller);
+controller.signal.addEventListener("abort", () => {
+  cleaning = true;
+  writeSync(3, "cleanup-start\\n");
+});
+writeSync(3, "ready\\n");
+`,
+  );
+  const wrapper = (child) => `#!/bin/bash
+set -euo pipefail
+source "$CHILD_LIBRARY"
+on_signal() { trap '' HUP INT TERM; release_stop_child; exit "$1"; }
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+release_run_child ${child.endsWith(".ts") ? `node --experimental-strip-types "${child}"` : `"${child}"`}
+`;
+  writeFileSync(build, wrapper(worker));
+  writeFileSync(release, wrapper(build));
+  chmodSync(worker, 0o755);
+  chmodSync(build, 0o755);
+  chmodSync(release, 0o755);
+  const childProcess = spawn(release, [], {
+    detached: true,
+    env: { ...process.env, CHILD_LIBRARY: childLibrary },
+    stdio: ["ignore", "ignore", "ignore", "pipe"],
+  });
+  const exited = new Promise((resolve) => childProcess.once("exit", (code) => resolve(code)));
+  let events = "";
+  const waiters = [];
+  childProcess.stdio[3].setEncoding("utf8");
+  childProcess.stdio[3].on("data", (chunk) => {
+    events += chunk;
+    for (const waiter of waiters.splice(0)) waiter();
+  });
+  const waitFor = async (event) => {
+    while (!events.includes(`${event}\n`)) {
+      await Promise.race([
+        new Promise((resolve) => waiters.push(resolve)),
+        delay(5_000).then(() => {
+          throw new Error(`timed out waiting for ${event}`);
+        }),
+      ]);
+    }
+  };
+  const killGroup = (groupSignal) => {
+    try {
+      process.kill(-childProcess.pid, groupSignal);
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  };
+  try {
+    await waitFor("ready");
+    if (wholeGroup) process.kill(-childProcess.pid, signal);
+    else childProcess.kill(signal);
+    await waitFor("cleanup-start");
+    if (wholeGroup) process.kill(-childProcess.pid, signal);
+    else childProcess.kill(signal);
+    assert.equal(childProcess.exitCode, null);
+    writeFileSync(cleanupGate, "finish");
+    await waitFor("cleanup-done");
+    const status = await Promise.race([
+      exited,
+      delay(5_000).then(() => {
+        throw new Error("timed out waiting for release wrapper exit");
+      }),
+    ]);
+    assert.equal(status, signal === "SIGHUP" ? 129 : signal === "SIGINT" ? 130 : 143);
+    assert.equal(events, "ready\ncleanup-start\ncleanup-done\n");
+  } finally {
+    killGroup("SIGTERM");
+    writeFileSync(cleanupGate, "finish");
+    if (childProcess.exitCode === null) {
+      await Promise.race([
+        exited,
+        delay(2_000).then(() => {
+          killGroup("SIGKILL");
+        }),
+      ]);
+      await exited;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("nested release wrappers wait for native cleanup after parent TERM", () =>
+  assertNestedCleanup("SIGTERM", false));
+
+test("nested release wrappers wait for native cleanup after process-group INT", () =>
+  assertNestedCleanup("SIGINT", true));
+
+test("nested release wrappers wait for native cleanup after process-group TERM", () =>
+  assertNestedCleanup("SIGTERM", true));
+
+test("nested release wrappers wait for native cleanup after process-group HUP", () =>
+  assertNestedCleanup("SIGHUP", true));

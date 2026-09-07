@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { GcloudImageBuildEffects } from "./gcloud.ts";
 import { buildNativeImage, type ImageBuildInput, validateImageBuildInput } from "./orchestrator.ts";
+import { installAbortSignalHandlers } from "./signals.ts";
 import { prepareSourceSnapshot } from "./snapshot.ts";
 
 const execFileAsync = promisify(execFile);
@@ -37,8 +38,7 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (process.exitCode !== undefined) return;
   const controller = new AbortController();
-  process.once("SIGINT", () => controller.abort());
-  process.once("SIGTERM", () => controller.abort());
+  installAbortSignalHandlers(controller);
   const sourceCommit = (await execFileAsync("git", ["rev-parse", "HEAD"])).stdout.trim();
   const sourceDirty =
     (
