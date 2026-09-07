@@ -26,7 +26,10 @@ zero-instance metrics for every recorded browser revision, restores its prior
 scaling mode, and then runs smokes. Missing metrics fail closed; handled errors
 and signals restore scaling and repair IAP. This path awaits live validation.
 
-The script owns the complete transaction:
+The script owns the complete transaction. Native image versions use
+`v-<short-commit>` so every Git hash forms a valid GCE resource-name segment.
+
+The stages are:
 
 1. rebuild and boot-validate the native VM image, then push the digest-pinned control-plane container;
 2. clamp `deploy_generation` above the generation currently serving in Cloud

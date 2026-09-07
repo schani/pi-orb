@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const commit = "a".repeat(40);
+const commit = `6${"a".repeat(39)}`;
+const shortCommit = commit.slice(0, 7);
 const accepted = {
   schemaVersion: 1,
   status: "accepted",
@@ -97,10 +98,19 @@ describe("native build release stage", () => {
           writeFileSync(path, `#!/bin/bash\nset -eu\n${source}\n`);
           chmodSync(path, 0o755);
         };
-        script("git", `if [ "$*" = "rev-parse HEAD" ]; then echo ${commit}; else echo aaaaaaa; fi`);
+        script(
+          "git",
+          `if [ "$*" = "rev-parse HEAD" ]; then echo ${commit}; else echo ${shortCommit}; fi`,
+        );
         script(
           "npm",
-          `echo native-build >> "$CALL_LOG"
+          `version=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --version ]; then version="$2"; break; fi
+  shift
+done
+[[ "$version" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]] || exit 64
+echo "native-build:$version" >> "$CALL_LOG"
 mkdir -p "$IMAGE_BUILD_DIR"
 cat > "$IMAGE_BUILD_DIR/manifest.json" <<'JSON'
 ${JSON.stringify({ ...accepted, status: outcome === "failed" ? "failed" : "accepted", sourceCommit: outcome === "wrong-commit" ? "b".repeat(40) : commit })}
@@ -125,7 +135,7 @@ if [ "$1" = inspect ]; then echo 'registry/control@sha256:${"a".repeat(64)}'; fi
         if (outcome === "accepted") {
           expect(result.status, result.stderr).toBe(0);
           expect(calls.trim().split("\n")).toEqual([
-            "native-build",
+            `native-build:v-${shortCommit}`,
             "docker:build",
             "docker:push",
             "docker:inspect",
@@ -133,7 +143,7 @@ if [ "$1" = inspect ]; then echo 'registry/control@sha256:${"a".repeat(64)}'; fi
           expect(result.stdout).toContain('native_image_id = "1234567890123456789"');
         } else {
           expect(result.status).toBe(1);
-          expect(calls.trim()).toBe("native-build");
+          expect(calls.trim()).toBe(`native-build:v-${shortCommit}`);
           expect(result.stdout).toBe("");
         }
       } finally {
