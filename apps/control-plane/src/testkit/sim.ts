@@ -150,13 +150,21 @@ export async function runDst(
     try {
       await scenario(sim);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const lifecycleLines = options.logCapture?.lines();
       const dir = join(process.cwd(), "test-failures");
       mkdirSync(dir, { recursive: true });
       const path = join(dir, `${options.name}-${Date.now()}-${i}.json`);
       writeFileSync(
         path,
         JSON.stringify(
-          { name: options.name, iteration: i, records: recording.getTrace() },
+          {
+            name: options.name,
+            iteration: i,
+            error: message,
+            ...(lifecycleLines === undefined ? {} : { lifecycleLines: [...lifecycleLines] }),
+            records: recording.getTrace(),
+          },
           null,
           2,
         ),
@@ -170,7 +178,6 @@ export async function runDst(
       } catch {
         reproduced = true;
       }
-      const message = error instanceof Error ? error.message : String(error);
       throw new Error(
         `DST scenario "${options.name}" failed at iteration ${i} ` +
           `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID NOT reproduce"} the failure): ${message}`,
