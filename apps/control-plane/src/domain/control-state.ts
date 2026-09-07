@@ -93,6 +93,8 @@ export class ControlState {
   /** orbId → `state_changed_at` of the episode this process's memory describes. */
   private readonly episodes = new Map<string, number>();
   private readonly nextAttemptAt = new Map<string, number>();
+  private readonly scheduleGeneration = new Map<string, number>();
+  private readonly scheduledStateVersion = new Map<string, number>();
   private readonly retryAttempts = new Map<string, number>();
   private readonly authBlocked = new Set<string>();
   private readonly drainStatus = new Map<string, DrainStatus>();
@@ -255,6 +257,35 @@ export class ControlState {
 
   setNextAttemptAt(orbId: string, at: number): void {
     this.nextAttemptAt.set(orbId, at);
+  }
+
+  nudgeNextAttemptAt(orbId: string): void {
+    // Never reset this generation in clearOrb: an in-flight pass may finish
+    // after a lifecycle transition and must not win through an ABA back to 0.
+    this.scheduleGeneration.set(orbId, (this.scheduleGeneration.get(orbId) ?? 0) + 1);
+    this.nextAttemptAt.set(orbId, 0);
+  }
+
+  getScheduleGeneration(orbId: string): number {
+    return this.scheduleGeneration.get(orbId) ?? 0;
+  }
+
+  setNextAttemptAtIfGeneration(
+    orbId: string,
+    generation: number,
+    at: number,
+    stateVersion: number,
+  ): boolean {
+    if (this.getScheduleGeneration(orbId) !== generation) return false;
+    this.nextAttemptAt.set(orbId, at);
+    this.scheduledStateVersion.set(orbId, stateVersion);
+    return true;
+  }
+
+  isReconcileDue(orbId: string, stateVersion: number, now: number): boolean {
+    return (
+      this.scheduledStateVersion.get(orbId) !== stateVersion || this.getNextAttemptAt(orbId) <= now
+    );
   }
 
   getNextAttemptAt(orbId: string): number {

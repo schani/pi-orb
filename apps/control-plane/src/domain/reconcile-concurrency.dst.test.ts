@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import { runDst, TEST_WALL_EPOCH } from "../testkit/sim.ts";
 import { SerializedAuthGate } from "./auth-gates.ts";
+import { ControlState } from "./control-state.ts";
+import { requestOrbStart } from "./lifecycle.ts";
 import {
   ReconcileDispatcher,
   type ReconcileOne,
@@ -94,6 +96,101 @@ class SimulationReconcileTaskRunner {
 }
 
 describe("reconcile concurrency (DST)", () => {
+  it("a cross-process Start invalidates an in-flight stopped pass schedule", async () => {
+    await runDst({ name: "start-invalidates-stopped-pass", iterations: 30 }, async (sim) => {
+      const harness = makeHarness();
+      harness.store.seedProject(makeProjectRow(PROJECT));
+      harness.store.seedOrb(makeOrbRow(NEW_ORB, PROJECT, "stopped"));
+      const firstStarted = deferred<void>();
+      const releaseFirst = deferred<void>();
+      const secondStarted = deferred<void>();
+      let calls = 0;
+      const reconcile: ReconcileOne = async () => {
+        calls += 1;
+        if (calls === 1) {
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          return { type: "noop" };
+        }
+        secondStarted.resolve();
+        return { type: "progressed" };
+      };
+      const stop = new AbortController();
+      const runner = new SimulationReconcileTaskRunner();
+      const schedulerDeps = { ...harness.deps, control: new ControlState() };
+      const dispatcher = new ReconcileDispatcher(schedulerDeps, runner.run, reconcile);
+      const result = await sim.runTasks([
+        {
+          name: `reconcile-${NEW_ORB}`,
+          f: (task) => runner.worker(task, NEW_ORB, stop.signal),
+        },
+        {
+          name: "driver",
+          f: async (task) => {
+            await dispatcher.dispatchDue(task);
+            await firstStarted.promise;
+            expect((await requestOrbStart(task, harness.deps, NEW_ORB)).isOk()).toBe(true);
+            releaseFirst.resolve();
+            await dispatcher.drain();
+            await dispatcher.dispatchDue(task);
+            await secondStarted.promise;
+            await dispatcher.drain();
+            expect(calls).toBe(2);
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
+  it("a local wake invalidates an in-flight pass schedule without a state change", async () => {
+    await runDst({ name: "local-wake-invalidates-pass", iterations: 30 }, async (sim) => {
+      const harness = makeHarness();
+      harness.store.seedProject(makeProjectRow(PROJECT));
+      harness.store.seedOrb(makeOrbRow(NEW_ORB, PROJECT, "starting"));
+      const firstStarted = deferred<void>();
+      const releaseFirst = deferred<void>();
+      const secondStarted = deferred<void>();
+      let calls = 0;
+      const reconcile: ReconcileOne = async () => {
+        calls += 1;
+        if (calls === 1) {
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          return { type: "waiting", reason: "host_transition" };
+        }
+        secondStarted.resolve();
+        return { type: "progressed" };
+      };
+      const stop = new AbortController();
+      const runner = new SimulationReconcileTaskRunner();
+      const dispatcher = new ReconcileDispatcher(harness.deps, runner.run, reconcile);
+      const result = await sim.runTasks([
+        {
+          name: `reconcile-${NEW_ORB}`,
+          f: (task) => runner.worker(task, NEW_ORB, stop.signal),
+        },
+        {
+          name: "driver",
+          f: async (task) => {
+            await dispatcher.dispatchDue(task);
+            await firstStarted.promise;
+            harness.deps.control.nudgeNextAttemptAt(`reconcile:${NEW_ORB}`);
+            releaseFirst.resolve();
+            await dispatcher.drain();
+            await dispatcher.dispatchDue(task);
+            await secondStarted.promise;
+            await dispatcher.drain();
+            expect(calls).toBe(2);
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("dispatches new orbs while others are blocked and allows at most one task per orb", async () => {
     await runDst({ name: "cross-orb-reconcile-concurrency", iterations: 30 }, async (sim) => {
       const harness = makeHarness();

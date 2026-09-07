@@ -2086,6 +2086,7 @@ export function requestOrbStart(
             stopReason: null,
           });
           if (cas.isOk()) {
+            deps.control.nudgeNextAttemptAt(`reconcile:${orbId}`);
             logOrbEvent(task, orbId, "transition", {
               from: orb.state,
               to: "starting",
@@ -2316,7 +2317,7 @@ export function enqueueOrbMessage(
     }
     // Wake latency is the reconciler tick, not the terminal backstop interval:
     // the orb is due now, so a stopped orb starts on the next scan.
-    deps.control.setNextAttemptAt(`reconcile:${params.orbId}`, 0);
+    deps.control.nudgeNextAttemptAt(`reconcile:${params.orbId}`);
     if (!enqueued.value.duplicate) {
       logOrbEvent(task, params.orbId, "message-queued", {
         message_id: params.messageId,
