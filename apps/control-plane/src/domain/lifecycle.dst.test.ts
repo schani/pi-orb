@@ -159,6 +159,43 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
+  it("a newer Start supersedes another role's retained stopping episode", async () => {
+    await runDst({ name: "cross-role-stopping-episode", iterations: 20 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const reconcilerDeps: ControlPlaneDeps = {
+        ...harness.deps,
+        control: new ControlState(),
+      };
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler-role", f: (task) => reconcileLoop(task, reconcilerDeps, stop.signal) },
+        {
+          name: "command-role",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const stopping = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopping.isOk()).toBe(true);
+            if (stopping.isErr()) return;
+            expect(harness.deps.control.isStopping(ORB, stopping.value.stateVersion)).toBe(true);
+            await waitUntil(
+              task,
+              "other role completes the stop",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 300_000 },
+            );
+            const started = await requestOrbStart(task, harness.deps, ORB);
+            expect(started.isOk()).toBe(true);
+            if (started.isOk()) {
+              expect(harness.deps.control.isStopping(ORB, started.value.stateVersion)).toBe(false);
+            }
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("creating reaches running with identity persisted", async () => {
     await runDst({ name: "create-happy-path", iterations: 30 }, async (sim) => {
       const harness = makeHarness();

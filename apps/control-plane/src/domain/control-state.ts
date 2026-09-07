@@ -99,7 +99,7 @@ export class ControlState {
   private readonly authBlocked = new Set<string>();
   private readonly drainStatus = new Map<string, DrainStatus>();
   private challenge: DeviceChallenge | null = null;
-  private readonly stoppingOrbs = new Set<string>();
+  private readonly stoppingOrbs = new Map<string, number>();
 
   /**
    * Drop everything this process remembers about a *previous* visit to a
@@ -461,12 +461,13 @@ export class ControlState {
   // -- stopping / drain presentation --
 
   /** While set, the HTTP layer rejects new live connections for the orb. */
-  markStopping(orbId: string): void {
-    this.stoppingOrbs.add(orbId);
+  markStopping(orbId: string, stateVersion: number): void {
+    const previous = this.stoppingOrbs.get(orbId) ?? -1;
+    if (stateVersion > previous) this.stoppingOrbs.set(orbId, stateVersion);
   }
 
-  isStopping(orbId: string): boolean {
-    return this.stoppingOrbs.has(orbId);
+  isStopping(orbId: string, observedStateVersion: number): boolean {
+    return (this.stoppingOrbs.get(orbId) ?? -1) >= observedStateVersion;
   }
 
   setDrainStatus(orbId: string, status: DrainStatus): void {
@@ -515,7 +516,6 @@ export class ControlState {
     ControlState.forgetOrb(this.retryAttempts, orbId);
     this.authBlocked.delete(orbId);
     this.drainStatus.delete(orbId);
-    this.stoppingOrbs.delete(orbId);
     this.restartPending.delete(orbId);
     this.browserVisibility.delete(orbId);
     this.browserClosers.delete(orbId);

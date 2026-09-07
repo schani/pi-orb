@@ -86,6 +86,7 @@ Commands:
 - archive is idempotent in `archiving`/`archived`, preserves history reads, and permanently conflicts with start; delete may upgrade an in-progress archive or remove an archived orb (`docs/orb-archival.md`);
 - start while `stopping` returns `409 conflict`; the caller retries after stopped;
 - currently implemented live runtime message requests are rejected once the database enters `stopping` because the control plane closes and refuses live proxy connections for that orb; under the send-anytime API, message inbox admission remains available in `stopping` and requests restart only after its drain completes.
+- The process-local proxy gate records the durable `state_version` that entered `stopping`. It rejects a connection only while that marker is at least as new as the row the proxy read. Markers stay monotone for the process lifetime: a later start supersedes an older marker, while an older completion cannot erase a newer concurrent stop (`docs/postmortems/2026-09-07-stale-stopping-marker.md`).
 
 Reconciliation rules:
 

@@ -22,6 +22,32 @@ afterEach(async () => {
 });
 
 describe("live proxy", () => {
+  it("rejects a connection covered by a concurrent stopping marker", async () => {
+    const harness = makeHarness();
+    const orbId = "orb-concurrent-stop";
+    harness.store.seedOrb(
+      makeOrbRow(orbId, "project-a", "running", { hostRef: "host-stop", stateVersion: 2 }),
+    );
+    harness.deps.control.markStopping(orbId, 3);
+    // An older terminal transition completing locally must not erase the
+    // newer stop command's gate.
+    harness.deps.control.clearOrb(orbId);
+    const app = Fastify({ logger: false });
+    openServers.push({ close: () => app.close() });
+    await registerLiveProxy(app, new NoSimulationTask("terminal proxy test", false), harness.deps);
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const proxyAddress = app.server.address() as AddressInfo;
+    const browser = new WebSocket(
+      `ws://127.0.0.1:${proxyAddress.port}/api/v1/orbs/${orbId}/terminal`,
+      TERMINAL_SUBPROTOCOL,
+    );
+    openServers.push({ close: async () => browser.terminate() });
+    await once(browser, "open");
+    const [code, reason] = await once(browser, "close");
+    expect(code).toBe(1013);
+    expect(reason.toString()).toBe("orb is not running");
+  });
+
   it("preserves client.hello sent while asynchronous runtime routing is in progress", async () => {
     const runtime = new WebSocketServer({
       host: "127.0.0.1",
@@ -47,7 +73,10 @@ describe("live proxy", () => {
 
     const harness = makeHarness();
     const orbId = "orb-live-proxy";
-    harness.store.seedOrb(makeOrbRow(orbId, "project-a", "running", { hostRef: "host-a" }));
+    harness.store.seedOrb(
+      makeOrbRow(orbId, "project-a", "running", { hostRef: "host-a", stateVersion: 2 }),
+    );
+    harness.deps.control.markStopping(orbId, 1);
     const delegate = harness.deps.hostProvider;
     const hostProvider: OrbHostProvider = {
       kind: delegate.kind,
@@ -117,7 +146,15 @@ describe("live proxy", () => {
 
     const harness = makeHarness();
     const orbId = "orb-terminal-proxy";
-    harness.store.seedOrb(makeOrbRow(orbId, "project-a", "running", { hostRef: "host-terminal" }));
+    harness.store.seedOrb(
+      makeOrbRow(orbId, "project-a", "running", {
+        hostRef: "host-terminal",
+        stateVersion: 2,
+      }),
+    );
+    // A different role completed stop/start durably; this process still
+    // carries its marker from the preceding stopping episode.
+    harness.deps.control.markStopping(orbId, 1);
     const delegate = harness.deps.hostProvider;
     const hostProvider: OrbHostProvider = {
       kind: delegate.kind,

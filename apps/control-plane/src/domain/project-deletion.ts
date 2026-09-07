@@ -51,7 +51,7 @@ export function requestProjectDeletion(
       return err(storeCommandError(requested.error));
     }
     for (const orb of requested.value.orbs) {
-      deps.control.markStopping(orb.id);
+      deps.control.markStopping(orb.id, orb.stateVersion);
       deps.control.closeBrowserConnections(orb.id);
       deps.control.nudgeNextAttemptAt(`reconcile:${orb.id}`);
     }
@@ -115,7 +115,7 @@ export async function reconcileProjectDeletionOnce(
     });
   }
   for (const orb of repaired.value.orbs) {
-    deps.control.markStopping(orb.id);
+    deps.control.markStopping(orb.id, orb.stateVersion);
     deps.control.closeBrowserConnections(orb.id);
     deps.control.nudgeNextAttemptAt(`reconcile:${orb.id}`);
   }
