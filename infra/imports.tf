@@ -1,11 +1,8 @@
 # Adoption of the live 2026-07-30 deployment into the fresh GCS-backed state
 # (the original local state was lost). Import blocks are no-ops once the
-# resource is in state. Deliberately not imported: IAM members (additive,
-# re-asserting them is idempotent), project services (enabling an enabled API
-# is a no-op), and random_password/secret versions — the database password
-# rotates on adoption, so all three Cloud Run services must be rolled to pick
-# up the new DATABASE_URL secret version (deploy.sh restarts the browser;
-# roll the other two with a no-op update).
+# resource is in state. Foundation adoption projects the existing application
+# state rather than rebuilding it, so the database password and secret version
+# remain in the application state.
 
 import {
   to = google_compute_firewall.control_plane_to_runtime

@@ -27,6 +27,55 @@ The projected foundation reports schema version 0, so releases remain blocked
 until an administrator reviews and applies the foundation plan. No cloud
 resource is applied by adoption. State backups are retained at the printed path.
 
+After `adopt.sh --execute`, initialize the new state and import each verified
+unconditional legacy deployer membership before planning its removal:
+
+```sh
+PROJECT=playground-dev-6ae7
+BUCKET=pi-orb-tfstate-$PROJECT
+DEPLOYER=serviceAccount:pi-orb-amp-deployer@$PROJECT.iam.gserviceaccount.com
+tofu -chdir=infra/foundation init -backend-config="bucket=$BUCKET"
+for role in \
+  roles/artifactregistry.writer \
+  roles/iam.serviceAccountAdmin \
+  roles/iam.serviceAccountUser \
+  roles/compute.networkAdmin \
+  roles/iap.admin \
+  roles/resourcemanager.projectIamAdmin \
+  roles/servicenetworking.networksAdmin \
+  roles/serviceusage.serviceUsageAdmin; do
+  tofu -chdir=infra/foundation import \
+    -var="project=$PROJECT" -var="state_bucket=$BUCKET" \
+    -var=adopt_legacy_deployer_grants=true \
+    "google_project_iam_member.obsolete_deployer[\"$role\"]" \
+    "$PROJECT $role $DEPLOYER"
+done
+tofu -chdir=infra/foundation plan -out=foundation-scoped.plan \
+  -var=project="$PROJECT" -var=state_bucket="$BUCKET" \
+  -var=adopt_legacy_deployer_grants=true
+```
+
+Import only memberships confirmed in the live policy; omit absent ones. Review
+the saved plan, require no stable-resource replacement, then apply it to install
+the scoped replacement grants. Remove the old unconditional state-bucket grant
+without matching the new conditioned grant:
+
+```sh
+tofu -chdir=infra/foundation apply foundation-scoped.plan
+gcloud storage buckets remove-iam-policy-binding "gs://$BUCKET" \
+  --member="$DEPLOYER" --role=roles/storage.objectAdmin --condition=None
+```
+
+Finally, plan with `adopt_legacy_deployer_grants` at its default `false`. The
+only removals must be the imported obsolete deployer memberships. Apply that
+exact saved plan:
+
+```sh
+tofu -chdir=infra/foundation plan -out=foundation-final.plan \
+  -var=project="$PROJECT" -var=state_bucket="$BUCKET"
+tofu -chdir=infra/foundation apply foundation-final.plan
+```
+
 The old bootstrap script granted the deployer project IAM administration,
 service-account administration/user, service-usage administration, and a
 project-wide Artifact Registry writer role. It also held project-wide Compute

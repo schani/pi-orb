@@ -163,6 +163,7 @@ WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pi-orb-release.XXXXXX")
 chmod 700 "$WORK_DIR"
 VARS="$WORK_DIR/release.tfvars"
 PLAN="$WORK_DIR/release.tfplan"
+PLAN_JSON="$WORK_DIR/release.tfplan.json"
 LOCK_RECORD="$WORK_DIR/release-lock.json"
 
 jq -n \
@@ -261,6 +262,25 @@ tofu -chdir="$INFRA" plan \
   -var="zone=$ZONE" \
   -var="foundation_state_bucket=$STATE_BUCKET"
 chmod 600 "$PLAN"
+
+tofu -chdir="$INFRA" show -json "$PLAN" > "$PLAN_JSON"
+chmod 600 "$PLAN_JSON"
+if ! jq -e '
+  [
+    "google_sql_database_instance.pi_orb",
+    "google_sql_database.pi_orb",
+    "google_sql_user.pi_orb",
+    "random_password.db",
+    "google_secret_manager_secret.database_url",
+    "google_secret_manager_secret_version.database_url"
+  ] as $protected |
+  [.resource_changes[]? | select(.address as $address | $protected | index($address))] as $changes |
+  ($changes | length) == ($protected | length) and
+  all($changes[]; .change.actions == ["no-op"])
+' "$PLAN_JSON" >/dev/null; then
+  echo "release refused: saved plan does not preserve the database and its credentials" >&2
+  exit 1
+fi
 
 if [ "$AUTO_APPROVE" != true ]; then
   if [ ! -t 0 ]; then

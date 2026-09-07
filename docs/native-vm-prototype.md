@@ -3,7 +3,7 @@
 The experiment runs the existing orb runtime directly under systemd, with Docker
 available to an ordinary `orb` user. Production remains unchanged. The selected
 direction and remaining release choices are in `docs/host-provider.md` and
-`docs/open-questions.md`, question 47.
+`docs/open-questions.md`, question 48.
 
 ## Initial run: scope and artifacts
 
