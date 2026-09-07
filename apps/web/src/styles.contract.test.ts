@@ -81,7 +81,7 @@ describe("orb workspace layout contract", () => {
     expect(rule(".orb-index")).toContain("position: sticky");
     expect(rule(".orb-index")).toContain("max-height: 100dvh");
     expect(rule(".orb-index")).toContain("border-right: 1px solid var(--k)");
-    expect(rule(".ix-row")).toContain("grid-template-columns: 1.6ch minmax(0, 1fr) auto");
+    expect(rule(".ix-row")).toContain("grid-template-columns: 16px minmax(0, 1fr) auto");
     expect(rule(".ix-row")).toContain("border-left: 2px solid var(--g2)");
     expect(rule(".ix-row-current,\n.ix-row-current:hover")).toContain("background: var(--k)");
   });

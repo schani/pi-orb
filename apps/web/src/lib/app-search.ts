@@ -1,5 +1,5 @@
 export interface AppSearchGlyph {
-  char: string;
+  iconHref: string;
   /** Hue class suffix (`s-<state>`). */
   state: string;
   label: string;

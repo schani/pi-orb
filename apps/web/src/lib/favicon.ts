@@ -7,15 +7,21 @@ export type OrbFaviconStatus =
   | "running"
   | "busy"
   | "transitional"
-  | "failed";
+  | "failed"
+  | "archived"
+  | "archiving"
+  | "deleting";
 
-const FAVICON_HREFS: Record<OrbFaviconStatus, string> = {
+export const FAVICON_HREFS: Record<OrbFaviconStatus, string> = {
   neutral: "/favicons/neutral.svg",
   stopped: "/favicons/stopped.svg",
   running: "/favicons/running.svg",
   busy: "/favicons/busy.svg",
   transitional: "/favicons/transitional.svg",
   failed: "/favicons/failed.svg",
+  archived: "/favicons/archived.svg",
+  archiving: "/favicons/archiving.svg",
+  deleting: "/favicons/deleting.svg",
 };
 
 /** Derives tab status from durable lifecycle state plus current live activity. */
@@ -26,14 +32,11 @@ export function deriveOrbFaviconStatus(
 ): OrbFaviconStatus {
   if (orbState === null) return "neutral";
   if (orbState === "failed") return "failed";
-  if (orbState === "stopped" || orbState === "archived") return "stopped";
-  if (
-    orbState === "creating" ||
-    orbState === "starting" ||
-    orbState === "stopping" ||
-    orbState === "deleting" ||
-    orbState === "archiving"
-  ) {
+  if (orbState === "stopped") return "stopped";
+  if (orbState === "archived") return "archived";
+  if (orbState === "archiving") return "archiving";
+  if (orbState === "deleting") return "deleting";
+  if (orbState === "creating" || orbState === "starting" || orbState === "stopping") {
     return "transitional";
   }
   return connection === "open" && activity === "busy" ? "busy" : "running";

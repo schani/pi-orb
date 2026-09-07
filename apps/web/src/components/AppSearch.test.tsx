@@ -23,7 +23,7 @@ const source: AppSearchSource = {
       group: "orbs",
       title: "Compiler repair",
       context: "Atlas · working set",
-      glyph: { char: "●", state: "busy", label: "busy" },
+      glyph: { iconHref: "/favicons/busy.svg", state: "busy", label: "busy" },
       chip: "Atlas",
       age: "2m",
       keywords: ["Compiler repair"],
@@ -35,7 +35,7 @@ const source: AppSearchSource = {
       group: "orbs",
       title: "Compiler redesign",
       context: "Atlas · working set",
-      glyph: { char: "–", state: "stop", label: "stopped" },
+      glyph: { iconHref: "/favicons/stopped.svg", state: "stop", label: "stopped" },
       chip: "Atlas",
       age: "3d",
       keywords: ["Compiler redesign"],
@@ -85,6 +85,8 @@ describe("AppSearchDialog", () => {
   it("shows the state glyph, owning project, and age on one orb row", () => {
     const html = render("repair");
     expect(html).toContain('class="glyph s-busy"');
+    expect(html).toContain('src="/favicons/busy.svg"');
+    expect(html).toContain('alt="busy"');
     expect(html).toContain('class="app-search-chip">Atlas');
     expect(html).toContain('class="app-search-age">2m');
     expect(html).toContain("<mark>repair</mark>");

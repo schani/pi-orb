@@ -14,12 +14,13 @@
   --bad: #b42318;
   --bad-bg: #fdecea;
   --st-busy: var(--ok);
-  --st-idle: #2f6fd6;
-  --st-start: #c77d0a;
-  --st-stop: #8a8a8a;
+  --st-idle: var(--ok);
+  --st-start: #966100;
+  --st-stop: #777;
   --st-fail: var(--bad);
-  --st-arch: #7a5cc4;
-  --st-del: #8a8a8a;
+  --st-arch: #666;
+  --st-archng: var(--st-start);
+  --st-del: var(--bad);
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --text-size: 13px;
   --row: 20px;
@@ -175,8 +176,8 @@ button.icon-button.danger:disabled {
 
 .ic {
   display: block;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 input,
@@ -252,12 +253,13 @@ h3 {
   white-space: nowrap;
 }
 
-/* state glyphs: glyph and weight carry the state, hue names it */
+/* Instrument tiles use the exact favicon assets, including on inverted rows. */
 .glyph {
   display: inline-block;
-  width: 1.6ch;
+  width: 16px;
+  height: 16px;
   flex: none;
-  text-align: center;
+  vertical-align: middle;
 }
 
 .s-busy {
@@ -287,7 +289,7 @@ h3 {
 }
 
 .s-archng {
-  color: var(--st-arch);
+  color: var(--st-archng);
 }
 
 .s-del {
@@ -627,9 +629,12 @@ h3 {
   border-left-color: var(--st-fail);
 }
 
-.orb-entry-arch,
-.orb-entry-archng {
+.orb-entry-arch {
   border-left-color: var(--st-arch);
+}
+
+.orb-entry-archng {
+  border-left-color: var(--st-archng);
 }
 
 .orb-entry-del {
@@ -805,7 +810,7 @@ h3 {
 
 .app-search-result {
   display: grid;
-  grid-template-columns: 1.6ch minmax(0, 1fr) auto 6ch;
+  grid-template-columns: 16px minmax(0, 1fr) auto 6ch;
   gap: 8px;
   align-items: center;
   height: var(--row);
@@ -1004,8 +1009,9 @@ h3 {
   border-right: 1px solid var(--k);
 }
 
-/* The index's first row: the app name, linking back to the dashboard. */
+/* The index's first row: the pi tile and app name link back to the dashboard. */
 .ix-brand {
+  gap: 8px;
   position: sticky;
   z-index: 4;
   top: 0;
@@ -1044,7 +1050,7 @@ h3 {
 
 .ix-row {
   display: grid;
-  grid-template-columns: 1.6ch minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   height: var(--row);

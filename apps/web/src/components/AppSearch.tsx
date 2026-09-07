@@ -222,12 +222,18 @@ export function AppSearchDialog({
                   }}
                   onClick={onResultClick}
                 >
-                  <span
-                    className={`glyph${item.glyph === undefined ? "" : ` s-${item.glyph.state}`}`}
-                    aria-hidden="true"
-                  >
-                    {item.glyph?.char}
-                  </span>
+                  {item.glyph === undefined ? (
+                    <span className="glyph" aria-hidden="true" />
+                  ) : (
+                    <img
+                      className={`glyph s-${item.glyph.state}`}
+                      src={item.glyph.iconHref}
+                      alt={item.glyph.label}
+                      title={item.glyph.label}
+                      width={16}
+                      height={16}
+                    />
+                  )}
                   <span className="app-search-result-title">
                     {highlightedText(item.title, query)}
                   </span>

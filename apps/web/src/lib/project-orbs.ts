@@ -1,4 +1,5 @@
 import type { OrbState, OrbView, ProjectView } from "@pi-orb/protocol";
+import { FAVICON_HREFS } from "./favicon.ts";
 
 export type ProjectOrbShelf = "working" | "archive";
 
@@ -42,23 +43,23 @@ export type OrbGlyphState = "busy" | "idle" | "start" | "stop" | "fail" | "arch"
 export interface OrbGlyph {
   /** Selects the hue for the glyph and the entry's left border. */
   state: OrbGlyphState;
-  char: string;
+  iconHref: string;
   /** The state word, carried only as the glyph's title. */
   label: string;
 }
 
 const GLYPHS: Record<OrbGlyphState, string> = {
-  busy: "\u25cf",
-  idle: "\u25cb",
-  start: "\u25d0",
-  stop: "\u2013",
-  fail: "\u2715",
-  arch: "\u25ab",
-  archng: "\u25d1",
-  del: "\u2026",
+  busy: FAVICON_HREFS.busy,
+  idle: FAVICON_HREFS.running,
+  start: FAVICON_HREFS.transitional,
+  stop: FAVICON_HREFS.stopped,
+  fail: FAVICON_HREFS.failed,
+  arch: FAVICON_HREFS.archived,
+  archng: FAVICON_HREFS.archiving,
+  del: FAVICON_HREFS.deleting,
 };
 
-/** The text state glyph: lifecycle state, refined by the latest activity observation. */
+/** Shared favicon/UI tile, refined by the latest activity observation. */
 export function projectOrbGlyph(state: OrbState, activity?: OrbView["activity"]): OrbGlyph {
   const busy = state === "running" && activity === "busy";
   const glyphState: OrbGlyphState = busy
@@ -76,7 +77,7 @@ export function projectOrbGlyph(state: OrbState, activity?: OrbView["activity"])
               : state === "deleting"
                 ? "del"
                 : "start";
-  return { state: glyphState, char: GLYPHS[glyphState], label: busy ? "busy" : state };
+  return { state: glyphState, iconHref: GLYPHS[glyphState], label: busy ? "busy" : state };
 }
 
 /** Disposal and retained transcripts leave the working set for the archive shelf. */

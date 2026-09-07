@@ -56,7 +56,7 @@ function orbItem(
     group: "orbs",
     title: name,
     context: context.join(" · "),
-    glyph: { char: glyph.char, state: glyph.state, label: glyph.label },
+    glyph,
     chip: project.name,
     ...(age === null ? {} : { age }),
     keywords: [name],

@@ -19,6 +19,9 @@ describe("deriveOrbFaviconStatus", () => {
     expect(deriveOrbFaviconStatus("starting", "closed", null)).toBe("transitional");
     expect(deriveOrbFaviconStatus("stopping", "closed", null)).toBe("transitional");
     expect(deriveOrbFaviconStatus("failed", "closed", null)).toBe("failed");
+    expect(deriveOrbFaviconStatus("archived", "closed", null)).toBe("archived");
+    expect(deriveOrbFaviconStatus("archiving", "closed", null)).toBe("archiving");
+    expect(deriveOrbFaviconStatus("deleting", "closed", null)).toBe("deleting");
   });
 });
 

@@ -16,6 +16,7 @@ import { Icon } from "../components/Icons.tsx";
 import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
+import { StateTile } from "../components/StateTile.tsx";
 import {
   type ApiError,
   archiveOrb,
@@ -33,7 +34,7 @@ import {
 } from "../lib/api.ts";
 import { loadComposerDraft, saveComposerDraft } from "../lib/composer-draft.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
-import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
+import { deriveOrbFaviconStatus, FAVICON_HREFS, setOrbFavicon } from "../lib/favicon.ts";
 import { mergeReplicatedHistory } from "../lib/history-refresh.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
@@ -843,6 +844,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
     <main className="orb-page">
       <nav className="orb-index">
         <a className="ix-brand up" href="#/">
+          <img src={FAVICON_HREFS.neutral} width={16} height={16} alt="" />
           pi-orb
         </a>
         <div className="sect">
@@ -859,9 +861,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
               key={entry.id}
               {...(current ? { "aria-current": "page" as const } : {})}
             >
-              <span className={`glyph s-${entryGlyph.state}`} title={entryGlyph.label}>
-                {entryGlyph.char}
-              </span>
+              <StateTile glyph={entryGlyph} />
               <span className="trunc">{entry.name ?? "untitled orb"}</span>
               <span className="ix-age">{age}</span>
             </a>
@@ -918,9 +918,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
           )}
           {glyph !== null && lifecycleWord !== null && (
             <span className="orb-life">
-              <span className={`glyph s-${glyph.state}`} title={glyph.label}>
-                {glyph.char}
-              </span>
+              <StateTile glyph={glyph} decorative />
               {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
             </span>
           )}

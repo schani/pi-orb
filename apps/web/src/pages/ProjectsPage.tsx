@@ -9,6 +9,7 @@ import { useAppSearchSource } from "../components/AppSearch.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { ProjectSecretKeyIcon } from "../components/ProjectSecretKeyIcon.tsx";
 import { ProjectSecretsModal } from "../components/ProjectSecretsModal.tsx";
+import { StateTile } from "../components/StateTile.tsx";
 import {
   type ApiError,
   archiveOrb,
@@ -88,14 +89,7 @@ function OrbEntry({ orb, now, archivingOrb, deletingOrb, onArchive, onDelete }: 
   return (
     <div className={`orb-entry orb-entry-${glyph.state}`}>
       <div className="orb-entry-title">
-        <span
-          className={`glyph s-${glyph.state}`}
-          role="img"
-          aria-label={glyph.label}
-          title={glyph.label}
-        >
-          {glyph.char}
-        </span>
+        <StateTile glyph={glyph} />
         <a className="orb-entry-link" href={`#/orbs/${orb.id}`}>
           {name}
         </a>

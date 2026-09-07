@@ -68,16 +68,36 @@ describe("project orb presentation", () => {
   });
 
   it("names each lifecycle state with one glyph and its hue", () => {
-    expect(projectOrbGlyph("running", "busy")).toEqual({ state: "busy", char: "●", label: "busy" });
-    expect(projectOrbGlyph("running")).toEqual({ state: "idle", char: "○", label: "running" });
+    expect(projectOrbGlyph("running", "busy")).toEqual({
+      state: "busy",
+      iconHref: "/favicons/busy.svg",
+      label: "busy",
+    });
+    expect(projectOrbGlyph("running")).toEqual({
+      state: "idle",
+      iconHref: "/favicons/running.svg",
+      label: "running",
+    });
     expect(projectOrbGlyph("starting").state).toBe("start");
     expect(projectOrbGlyph("creating").state).toBe("start");
     expect(projectOrbGlyph("stopping").state).toBe("start");
-    expect(projectOrbGlyph("stopped")).toEqual({ state: "stop", char: "–", label: "stopped" });
-    expect(projectOrbGlyph("failed")).toEqual({ state: "fail", char: "✕", label: "failed" });
+    expect(projectOrbGlyph("stopped")).toEqual({
+      state: "stop",
+      iconHref: "/favicons/stopped.svg",
+      label: "stopped",
+    });
+    expect(projectOrbGlyph("failed")).toEqual({
+      state: "fail",
+      iconHref: "/favicons/failed.svg",
+      label: "failed",
+    });
     expect(projectOrbGlyph("archived").state).toBe("arch");
     expect(projectOrbGlyph("archiving").state).toBe("archng");
-    expect(projectOrbGlyph("deleting")).toEqual({ state: "del", char: "…", label: "deleting" });
+    expect(projectOrbGlyph("deleting")).toEqual({
+      state: "del",
+      iconHref: "/favicons/deleting.svg",
+      label: "deleting",
+    });
   });
 
   it("exposes only actions accepted by the lifecycle state", () => {
