@@ -119,6 +119,9 @@ metadata; a separate scoped role permits workload-instance metadata writes.
 Neither grant permits project SSH metadata changes. The tunnel condition uses the
 documented `destination.ip` and `destination.port` attributes
 ([Google IAP TCP forwarding](https://cloud.google.com/iap/docs/using-tcp-forwarding)).
+Google documents no CIDR operator for `destination.ip`, so the exact `/20`
+prefixes are divided across bounded condition bindings; each remains below the
+12-logical-operator IAM Conditions limit and still requires port 22.
 
 The debug service account and its Token Creator binding remain outside this
 root. Before the first scoped release, an administrator must verify that

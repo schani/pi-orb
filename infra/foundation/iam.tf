@@ -131,16 +131,19 @@ resource "google_project_iam_member" "deployer_image_admin" {
 }
 
 resource "google_project_iam_member" "deployer_iap_tunnel" {
+  for_each = {
+    image_build = [local.image_build_ipv4_prefix]
+    orb_0_7     = slice(local.orb_ipv4_prefixes, 0, 8)
+    orb_8_15    = slice(local.orb_ipv4_prefixes, 8, 16)
+  }
+
   project = var.project
   role    = "roles/iap.tunnelResourceAccessor"
   member  = "serviceAccount:${google_service_account.deployer.email}"
   condition {
-    title       = "pi-orb-release-ssh-only"
+    title       = "pi-orb-release-ssh-${each.key}"
     description = "Open SSH tunnels only to image build and orb subnet destinations."
-    expression = "destination.port == 22 && (${join(" || ", concat(
-      ["destination.ip.startsWith(\"${local.image_build_ipv4_prefix}\")"],
-      [for prefix in local.orb_ipv4_prefixes : "destination.ip.startsWith(\"${prefix}\")"],
-    ))})"
+    expression  = "destination.port == 22 && (${join(" || ", [for prefix in each.value : "destination.ip.startsWith(\"${prefix}\")"])})"
   }
 }
 
