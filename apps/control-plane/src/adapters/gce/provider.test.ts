@@ -377,10 +377,7 @@ describe("GceOrbHostProvider", () => {
   });
 
   it("reports a failed retained data disk GET as retryable unavailability", async () => {
-    const transport = new FakeTransport([
-      () => notFound,
-      () => ({ status: 503, body: {} }),
-    ]);
+    const transport = new FakeTransport([() => notFound, () => ({ status: 503, body: {} })]);
     const result = await makeProvider(transport).provision(task, provisionRequest, context);
     expect(result.isErr() && result.error.code).toBe("unavailable");
     expect(result.isErr() && result.error.retryable).toBe(true);
@@ -388,10 +385,7 @@ describe("GceOrbHostProvider", () => {
   });
 
   it("reports a forbidden retained data disk GET as non-retryable", async () => {
-    const transport = new FakeTransport([
-      () => notFound,
-      () => ({ status: 403, body: {} }),
-    ]);
+    const transport = new FakeTransport([() => notFound, () => ({ status: 403, body: {} })]);
     const result = await makeProvider(transport).provision(task, provisionRequest, context);
     expect(result.isErr() && result.error.code).toBe("operation_failed");
     expect(result.isErr() && result.error.retryable).toBe(false);
