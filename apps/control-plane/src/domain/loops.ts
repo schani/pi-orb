@@ -163,11 +163,17 @@ async function reconcileAndScheduleNext(
   deps: ControlPlaneDeps,
   orb: OrbRow,
   retryKey: string,
+  scheduleGeneration: number,
   reconcile: ReconcileOne = reconcileOrbOnce,
 ): Promise<void> {
   const outcome = await reconcile(task, deps, orb.id);
   const delay = reconcileDelayMs(task, deps, orb.id, orb.state, outcome, retryKey);
-  deps.control.setNextAttemptAt(retryKey, task.monotonicNow() + delay);
+  deps.control.setNextAttemptAtIfGeneration(
+    retryKey,
+    scheduleGeneration,
+    task.monotonicNow() + delay,
+    orb.stateVersion,
+  );
 }
 
 /** One sequential sweep, retained as the small deterministic lifecycle-test seam. */
@@ -188,8 +194,8 @@ export async function reconcileAllOnce(
   const now = task.monotonicNow();
   for (const orb of orbsResult.value) {
     const key = `reconcile:${orb.id}`;
-    if (deps.control.getNextAttemptAt(key) > now) continue;
-    await reconcileAndScheduleNext(task, deps, orb, key);
+    if (!deps.control.isReconcileDue(key, orb.stateVersion, now)) continue;
+    await reconcileAndScheduleNext(task, deps, orb, key, deps.control.getScheduleGeneration(key));
   }
 }
 
@@ -240,8 +246,12 @@ export class ReconcileDispatcher {
     const now = task.monotonicNow();
     for (const orb of orbsResult.value) {
       const key = `reconcile:${orb.id}`;
-      if (this.deps.control.getNextAttemptAt(key) > now || this.inFlight.has(orb.id)) continue;
-      this.dispatch(task, orb, key);
+      if (
+        !this.deps.control.isReconcileDue(key, orb.stateVersion, now) ||
+        this.inFlight.has(orb.id)
+      )
+        continue;
+      this.dispatch(task, orb, key, this.deps.control.getScheduleGeneration(key));
     }
   }
 
@@ -250,9 +260,21 @@ export class ReconcileDispatcher {
     this.throwIfFatal();
   }
 
-  private dispatch(schedulerTask: SimulationTask, orb: OrbRow, retryKey: string): void {
+  private dispatch(
+    schedulerTask: SimulationTask,
+    orb: OrbRow,
+    retryKey: string,
+    scheduleGeneration: number,
+  ): void {
     const operation = this.runTask(orb.id, async (orbTask) => {
-      await reconcileAndScheduleNext(orbTask, this.deps, orb, retryKey, this.reconcile);
+      await reconcileAndScheduleNext(
+        orbTask,
+        this.deps,
+        orb,
+        retryKey,
+        scheduleGeneration,
+        this.reconcile,
+      );
       this.deps.control.noteCondition(`reconcile-task-crashed:${orb.id}`, false);
     }).catch((error: unknown) => this.captureFatal(schedulerTask, orb.id, error));
     this.inFlight.set(orb.id, operation);

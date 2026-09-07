@@ -44,6 +44,12 @@ The native Debian direction selected on 2026-09-05 in `docs/host-provider.md` ad
 
 The release command requires the matching foundation state before building. Apply the separately reviewed foundation adoption and permission changes before deploying the native application configuration. Bake-and-boot duration, image storage retention, and OS patch rebuild cadence are part of the evaluation; no new deployment mechanism is selected here. The image packaging decision is recorded in `docs/open-questions.md`, question 48.
 
+The first foundation-backed native rollout exposed three boundary-contract
+failures before live validation: the IAM condition operator limit, a
+digit-leading image version, and a Cloud Run subnet self-link. Their fixes and
+recovery evidence are in
+`docs/postmortems/2026-09-07-native-foundation-release-contracts.md`.
+
 All existing orbs were confirmed archived on 2026-09-06. This satisfies the pre-transition archive requirement; foundation adoption and the native application deployment remain pending.
 
 ## Current proposal: deploy from GitHub Actions

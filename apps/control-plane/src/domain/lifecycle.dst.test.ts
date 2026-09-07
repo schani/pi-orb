@@ -129,6 +129,36 @@ function seedCreatingOrb(
 }
 
 describe("orb lifecycle (DST)", () => {
+  it("explicit Start clears a stopped-orb backstop delay", async () => {
+    await runDst({ name: "start-clears-terminal-backstop", iterations: 20 }, async (sim) => {
+      const harness = makeHarness();
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            harness.store.seedProject(makeProjectRow(PROJECT));
+            harness.store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped"));
+            const retryKey = `reconcile:${ORB}`;
+            harness.deps.control.setNextAttemptAt(retryKey, task.monotonicNow() + 30_000);
+            const stalePassGeneration = harness.deps.control.getScheduleGeneration(retryKey);
+            expect((await requestOrbStart(task, harness.deps, ORB)).isOk()).toBe(true);
+            expect(harness.deps.control.getNextAttemptAt(retryKey)).toBe(0);
+            expect(
+              harness.deps.control.setNextAttemptAtIfGeneration(
+                retryKey,
+                stalePassGeneration,
+                task.monotonicNow() + 30_000,
+                1,
+              ),
+            ).toBe(false);
+            expect(harness.deps.control.getNextAttemptAt(retryKey)).toBe(0);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("creating reaches running with identity persisted", async () => {
     await runDst({ name: "create-happy-path", iterations: 30 }, async (sim) => {
       const harness = makeHarness();
