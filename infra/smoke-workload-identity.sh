@@ -41,8 +41,8 @@ umask 077
 DIR=$(cd "$(dirname "$0")" && pwd)
 API="$DIR/api.sh"
 
-OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-1800} # 30 minutes, whole run
-RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-600}  # 10 minutes per boot
+OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-3600} # two lifecycle boots, stops, SSH and federation
+RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-900}  # lifecycle create/start deadline
 STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}  # 5 minutes per stop
 SSH_READY_TIMEOUT=${SSH_READY_TIMEOUT:-180} # SSH daemon + metadata key propagation
 POLL_INTERVAL=${POLL_INTERVAL:-5}

@@ -16,6 +16,8 @@ export interface DeterministicGceApiModelOptions {
   readonly operationWaitPolls?: number;
   /** List calls that still expose a deleted resource after its operation is DONE. */
   readonly deletionVisibilityPolls?: number;
+  /** Force the single-resource data-disk GET to return this HTTP status. */
+  readonly diskGetStatus?: number;
 }
 
 /**
@@ -34,6 +36,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
     this.options = {
       operationWaitPolls: options.operationWaitPolls ?? 0,
       deletionVisibilityPolls: options.deletionVisibilityPolls ?? 0,
+      diskGetStatus: options.diskGetStatus ?? 200,
     };
   }
 
@@ -243,7 +246,12 @@ export class DeterministicGceApiModel implements GceApiTransport {
     }
 
     const disk = /^disks\/([^/?]+)$/.exec(relative);
-    if (args.method === "GET" && disk?.[1] !== undefined) return this.get(this.disks, disk[1]);
+    if (args.method === "GET" && disk?.[1] !== undefined) {
+      if (this.options.diskGetStatus !== 200) {
+        return { status: this.options.diskGetStatus, body: {} };
+      }
+      return this.get(this.disks, disk[1]);
+    }
     if (args.method === "DELETE" && disk?.[1] !== undefined) {
       const resource = this.live(this.disks, disk[1]);
       if (resource === undefined) return { status: 404, body: {} };

@@ -33,6 +33,12 @@ behavior tests; and shell release-contract tests. `npm test` runs Vitest and
 `npm run test:infra`; the latter runs foundation and guest tests. Live acceptance
 evidence is recorded in `docs/native-vm-prototype.md`.
 
+Live smoke waits follow the product bounds. A GCE boot may spend up to twelve
+minutes without a runtime answer and the create/start transition allows fifteen
+minutes total. Every smoke that boots an orb therefore allows fifteen minutes
+per boot; its overall deadline covers every sequential boot, stop, and required
+network check. `infra/smoke-timeout.contract.test.mjs` keeps these bounds aligned.
+
 The 2026-09-05 full-suite run exposed host CPU overcommit: a concurrent-create DST
 case hit Vitest's outer 30-second deadline while E2E and typechecking also ran.
 There was no DST trace because the simulation had not reported a failure. The

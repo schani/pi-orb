@@ -131,6 +131,12 @@ const existingInstance = (overrides: Record<string, unknown> = {}): Record<strin
   ...overrides,
 });
 
+const existingDataDisk = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  name: "pi-orb-data-orb-1",
+  labels: { "pi-orb-orb-id": "orb-1" },
+  ...overrides,
+});
+
 describe("GceOrbHostProvider", () => {
   it("rejects an unexpected image identity before cloud mutation", async () => {
     const transport = new FakeTransport([], {
@@ -357,6 +363,93 @@ describe("GceOrbHostProvider", () => {
     // reads new instances as "the future" and never repairs them backward
     // (docs/compute-replacement.md). It is a stamp only — nothing in the
     // current adapter reads it back.
+  });
+
+  it("refuses to attach a retained data disk owned by another orb", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => ok200(existingDataDisk({ labels: { "pi-orb-orb-id": "other" } })),
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(result.isErr() && result.error.retryable).toBe(false);
+    expect(transport.requests.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("reports a failed retained data disk GET as retryable unavailability", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => ({ status: 503, body: {} }),
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.code).toBe("unavailable");
+    expect(result.isErr() && result.error.retryable).toBe(true);
+    expect(transport.requests.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("reports a forbidden retained data disk GET as non-retryable", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => ({ status: 403, body: {} }),
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.code).toBe("operation_failed");
+    expect(result.isErr() && result.error.retryable).toBe(false);
+    expect(transport.requests.some((request) => request.method === "POST")).toBe(false);
+  });
+
+  it("re-reads and rejects a foreign disk after losing the create race", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => notFound,
+      () => ({ status: 409, body: {} }),
+      () => ok200(existingDataDisk({ labels: { "pi-orb-orb-id": "other" } })),
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(result.isErr() && result.error.retryable).toBe(false);
+    expect(transport.requests.filter((request) => request.method === "GET")).toHaveLength(3);
+    expect(
+      transport.requests.some(
+        (request) => request.method === "POST" && request.path.endsWith("/instances"),
+      ),
+    ).toBe(false);
+  });
+
+  it("re-reads and attaches an owned disk after losing the create race", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => notFound,
+      () => ({ status: 409, body: {} }),
+      () => ok200(existingDataDisk()),
+      () => ok200({ name: "op-inst" }),
+      () => done,
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(
+      transport.requests.some(
+        (request) => request.method === "POST" && request.path.endsWith("/instances"),
+      ),
+    ).toBe(true);
+  });
+
+  it("reattaches an owned retained disk without requiring current size or type defaults", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () =>
+        ok200(
+          existingDataDisk({
+            sizeGb: "10",
+            type: "projects/proj/zones/us-central1-a/diskTypes/pd-standard",
+          }),
+        ),
+      () => ok200({ name: "op-inst" }),
+      () => done,
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(transport.requests.some((request) => request.method === "POST")).toBe(true);
   });
 
   it("reuses an existing instance and reads its token back", async () => {

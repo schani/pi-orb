@@ -20,7 +20,7 @@ set -euo pipefail
 # — no autonomous replacement after failure, and no running orb touched by a
 # deployed specification change — are the only deliberate elapsed-time
 # assertions in this script.
-boot_deadline_seconds=900             # provision + boot + runtime ready
+boot_deadline_seconds=900             # lifecycle create/start deadline
 stop_deadline_seconds=$((boot_deadline_seconds / 3))    # graceful stop drain
 dispose_deadline_seconds=$((boot_deadline_seconds / 3)) # instance + boot-disk disposal
 negative_window_seconds=65            # more than two 30s terminal-backstop intervals

@@ -138,6 +138,34 @@ function providerError(
   };
 }
 
+function dataDiskGetError(status: number): OrbHostProviderError {
+  const retryable = status === 408 || status === 429 || status >= 500;
+  return providerError(
+    "provision",
+    retryable ? "unavailable" : "operation_failed",
+    `data disk get HTTP ${status}`,
+    retryable,
+  );
+}
+
+function verifyDataDiskOwnership(
+  body: Record<string, unknown>,
+  name: string,
+  orbId: string,
+): Result<void, OrbHostProviderError> {
+  const labels = (body["labels"] ?? {}) as Record<string, unknown>;
+  return labels[ORB_LABEL] === orbId
+    ? ok(undefined)
+    : err(
+        providerError(
+          "provision",
+          "conflict",
+          `data disk ${name} is not labeled for this orb`,
+          false,
+        ),
+      );
+}
+
 /** GCE instance status → OrbHostState (docs/host-provider.md). */
 export function mapInstanceStatus(status: string): OrbHostState {
   switch (status) {
@@ -519,7 +547,14 @@ export class GceOrbHostProvider implements OrbHostProvider {
         context,
       );
       if (disk.isErr()) return err(disk.error);
-      if (disk.value.status === 404) {
+      if (disk.value.status === 200) {
+        const owned = verifyDataDiskOwnership(
+          disk.value.body,
+          diskName(request.orbId),
+          request.orbId,
+        );
+        if (owned.isErr()) return err(owned.error);
+      } else if (disk.value.status === 404) {
         const created = await this.request("provision", "POST", this.zonePath("disks"), context, {
           name: diskName(request.orbId),
           sizeGb: String(spec.dataDiskSizeGb),
@@ -544,7 +579,36 @@ export class GceOrbHostProvider implements OrbHostProvider {
               true,
             ),
           );
+        } else {
+          const winner = await this.request(
+            "provision",
+            "GET",
+            this.zonePath(`disks/${diskName(request.orbId)}`),
+            context,
+          );
+          if (winner.isErr()) return err(winner.error);
+          if (winner.value.status !== 200) {
+            if (winner.value.status === 404) {
+              return err(
+                providerError(
+                  "provision",
+                  "unavailable",
+                  "data disk create conflict winner is not yet visible",
+                  true,
+                ),
+              );
+            }
+            return err(dataDiskGetError(winner.value.status));
+          }
+          const owned = verifyDataDiskOwnership(
+            winner.value.body,
+            diskName(request.orbId),
+            request.orbId,
+          );
+          if (owned.isErr()) return err(owned.error);
         }
+      } else {
+        return err(dataDiskGetError(disk.value.status));
       }
 
       const runtimeToken = randomBytes(32).toString("hex");

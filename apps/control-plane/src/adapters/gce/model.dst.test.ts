@@ -159,6 +159,60 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
     });
   });
 
+  it("refuses a foreign retained disk before provisioning replacement compute", async () => {
+    await runDst({ name: "gce-model-foreign-retained-disk", iterations: 10 }, async (sim) => {
+      const model = new DeterministicGceApiModel();
+      model.seedDisk(DISK, { "pi-orb-orb-id": "another-orb" });
+      const result = await sim.runTasks([
+        {
+          name: "provisioner",
+          f: async (task) => {
+            const provisioned = await provider(model).provision(
+              task,
+              {
+                orbId: ORB,
+                incarnation: 1,
+                bootstrap: { repositoryUrl: "https://github.com/o/r" },
+              },
+              anyContext(),
+            );
+            expect(provisioned.isErr() && provisioned.error.code).toBe("conflict");
+            expect(provisioned.isErr() && provisioned.error.retryable).toBe(false);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(model.hasInstance(instanceName(1))).toBe(false);
+      expect(model.hasDisk(DISK)).toBe(true);
+    });
+  });
+
+  it("surfaces a failed retained-disk GET without provisioning compute", async () => {
+    await runDst({ name: "gce-model-retained-disk-get-failure", iterations: 10 }, async (sim) => {
+      const model = new DeterministicGceApiModel({ diskGetStatus: 503 });
+      const result = await sim.runTasks([
+        {
+          name: "provisioner",
+          f: async (task) => {
+            const provisioned = await provider(model).provision(
+              task,
+              {
+                orbId: ORB,
+                incarnation: 1,
+                bootstrap: { repositoryUrl: "https://github.com/o/r" },
+              },
+              anyContext(),
+            );
+            expect(provisioned.isErr() && provisioned.error.code).toBe("unavailable");
+            expect(provisioned.isErr() && provisioned.error.retryable).toBe(true);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(model.hasInstance(instanceName(1))).toBe(false);
+    });
+  });
+
   it("a late stale discard cannot touch the explicitly started replacement", async () => {
     await runDst({ name: "gce-model-late-stale-discard", iterations: 30 }, async (sim) => {
       const model = new DeterministicGceApiModel({

@@ -163,7 +163,7 @@ The unsandboxed process provider cannot supply image packages: it inherits host 
 
 Current `GceOrbHostProvider` contract:
 
-- Each orb owns a separate persistent data disk, mirroring the Docker provider's volume/container split. The Debian boot disk is disposable and is replaced on native-image upgrades without touching orb state.
+- Each orb owns a separate persistent data disk, mirroring the Docker provider's volume/container split. Provisioning attaches an existing disk only when its exact `pi-orb-orb-id` label matches the requested orb; retained disks keep their existing size and type when defaults change. The Debian boot disk is disposable and is replaced on native-image upgrades without touching orb state.
 - The native image contains the runtime and its systemd units. Instance metadata supplies configuration; systemd supervises the runtime independently of Docker.
 - `provision` creates the instance only when it does not exist. Recovery from a stop or a Spot preemption is `instances.start` on the same instance (restart-in-place); there is no recreate-and-reattach path in the common case.
 - Spot preemption appears as instance state `TERMINATED`. Instance status alone does not distinguish preemption from other terminations, and the provider does not consult Cloud Logging to find out; it logs the cause as "likely preemption". Host-down detection, restart initiation, and restart outcome are all logged as structured lifecycle events.
