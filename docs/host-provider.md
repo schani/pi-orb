@@ -45,6 +45,7 @@ interface OrbHostObservation {
   orbId: string;
   incarnation: number; // unstamped legacy compute is incarnation 0
   state: OrbHostState;
+  lastStartedAt?: number; // last host start, epoch milliseconds
 
   // Ephemeral observation; never authoritative persisted state.
   runtimeAddress?: {

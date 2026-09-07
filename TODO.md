@@ -8,7 +8,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Resolve the mixed-generation stop timeout before deployment** ([CI run 34088088812](https://github.com/schani/pi-orb/actions/runs/34088088812)). `mixed-generation-rollover` iteration 31 timed out waiting for `stopped`; its self-reproducing trace was lost because CI did not upload it. Later passing runs do not clear this blocker. It remains distinct from the fixed stale boot-policy regression. Reproduce and identify the failing transition; CI now retains traces and lifecycle evidence.
 
 - **Finish live Tailscale enrollment recovery and port status** (`docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md`). The provision-time revocation race is reproduced and fixed locally with composed DST and sanitized lifecycle key-decision edges (2026-09-05). Deploy and correlate competing provision calls/key revocations for the affected orb; provide workspace-preserving fresh-key recovery and verify it through a tailnet-side HTTP request. Add durable enrollment/recovery outcomes, user-visible degraded port status, and avoid asserting reachability in the agent prompt solely from configured env. Safely reclaim proven-unused attempt keys without revoking a potentially installed key; same-incarnation surplus keys currently expire or are collected by higher-incarnation mint/deletion. Rotate the affected runtime bearer exposed by the sibling agent's diagnostic environment dump; never log credential values.
 

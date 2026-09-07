@@ -1,13 +1,19 @@
 import type { SimulationTask } from "determined";
+import { ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow, type TestHarness } from "../testkit/fixtures.ts";
 import { assertAtMostOneHost } from "../testkit/invariants.ts";
 import { LogCapture, runDst, waitUntil } from "../testkit/sim.ts";
 import { FakeOrbHostProvider } from "../testkit/world.ts";
 import { ControlState } from "./control-state.ts";
-import { requestOrbStart, requestOrbStop } from "./lifecycle.ts";
+import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
-import type { ControlPlaneDeps } from "./ports.ts";
+import type {
+  ControlPlaneDeps,
+  OperationContext,
+  OrbHostRef,
+  ProvisionOrbHostRequest,
+} from "./ports.ts";
 
 const ORB = "orb-mixed";
 const PROJECT = "project-mixed";
@@ -29,6 +35,115 @@ const NEW_GENERATION = 2;
  */
 const OLD_SPEC = "spec-rollover-old";
 const NEW_SPEC = "spec-rollover-new";
+
+class StaleObserveProvider extends FakeOrbHostProvider {
+  entered = false;
+  finished = false;
+  private readonly countHosts: () => number;
+
+  override observe(task: SimulationTask, ref: OrbHostRef, context: OperationContext) {
+    this.entered = true;
+    return ResultAsync.fromSafePromise(
+      (async () => {
+        while (this.worldHostCount() > 0) await task.sleep(1, "wait for replacement discard");
+      })(),
+    ).andThen(() => super.observe(task, ref, context));
+  }
+
+  constructor(
+    countHosts: () => number,
+    ...args: ConstructorParameters<typeof FakeOrbHostProvider>
+  ) {
+    super(...args);
+    this.countHosts = countHosts;
+  }
+
+  private worldHostCount(): number {
+    return this.countHosts();
+  }
+}
+
+class WinnerProvisionProvider extends FakeOrbHostProvider {
+  private readonly stale: StaleObserveProvider;
+
+  constructor(
+    stale: StaleObserveProvider,
+    ...args: ConstructorParameters<typeof FakeOrbHostProvider>
+  ) {
+    super(...args);
+    this.stale = stale;
+  }
+
+  override provision(
+    task: SimulationTask,
+    request: ProvisionOrbHostRequest,
+    context: OperationContext,
+  ) {
+    if (request.incarnation === 0) return super.provision(task, request, context);
+    return ResultAsync.fromSafePromise(
+      (async () => {
+        while (!this.stale.finished) await task.sleep(1, "wait for stale absence pass");
+      })(),
+    ).andThen(() => super.provision(task, request, context));
+  }
+}
+
+class LateProvisionProvider extends FakeOrbHostProvider {
+  provisionEntered = false;
+  finished = false;
+  private readonly countHosts: () => number;
+
+  constructor(
+    countHosts: () => number,
+    ...args: ConstructorParameters<typeof FakeOrbHostProvider>
+  ) {
+    super(...args);
+    this.countHosts = countHosts;
+  }
+
+  override observe() {
+    return ResultAsync.fromSafePromise(Promise.resolve(null));
+  }
+
+  override provision(
+    task: SimulationTask,
+    request: ProvisionOrbHostRequest,
+    context: OperationContext,
+  ) {
+    this.provisionEntered = true;
+    return ResultAsync.fromSafePromise(
+      (async () => {
+        while (this.countHosts() > 0) await task.sleep(1, "wait for stale provider effect");
+      })(),
+    ).andThen(() => super.provision(task, request, context));
+  }
+}
+
+class HeldDiscardProvider extends FakeOrbHostProvider {
+  private readonly stale: LateProvisionProvider;
+
+  constructor(
+    stale: LateProvisionProvider,
+    ...args: ConstructorParameters<typeof FakeOrbHostProvider>
+  ) {
+    super(...args);
+    this.stale = stale;
+  }
+
+  override discardCompute(
+    task: SimulationTask,
+    request: { orbId: string; throughIncarnation: number },
+    context: OperationContext,
+  ) {
+    return super.discardCompute(task, request, context).andThen(() =>
+      ResultAsync.fromSafePromise(
+        (async () => {
+          while (!this.stale.finished) await task.sleep(1, "hold replacement finalization");
+        })(),
+      ),
+    );
+  }
+}
 
 /**
  * One control-plane revision: the shared world and store (one fleet, one
@@ -215,6 +330,247 @@ describe("mixed-generation reconcilers (DST)", () => {
     );
   });
 
+  it("adopts another revision's host restart while draining", async () => {
+    const capture = new LogCapture();
+    let deferredTotal = 0;
+    await runDst(
+      {
+        name: "mixed-generation-drain-restart",
+        iterations: 60,
+        logCapture: capture,
+        lateTimerProbability: 0,
+      },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const oldRevision = revision(harness, OLD_GENERATION, OLD_SPEC);
+        const newRevision = revision(harness, NEW_GENERATION, NEW_SPEC);
+        let stopping = false;
+        let firstRestarted = false;
+        const waitForStop = async (task: SimulationTask): Promise<void> => {
+          while (!stopping) await task.sleep(1, "wait for stopping episode");
+        };
+        const result = await sim.runTasks([
+          {
+            name: "reconciler-old",
+            f: async (task) => {
+              await waitForStop(task);
+              while (!firstRestarted) await task.sleep(1, "wait for sibling restart");
+              return reconcileOrbOnce(task, oldRevision, ORB);
+            },
+          },
+          {
+            name: "reconciler-new",
+            f: async (task) => {
+              await waitForStop(task);
+              const outcome = await reconcileOrbOnce(task, newRevision, ORB);
+              firstRestarted = true;
+              return outcome;
+            },
+          },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOnRevision(task, harness, [oldRevision, newRevision]);
+              const expiredByMs = harness.deps.constants.postRestartGraceMs + 1;
+              harness.world.backdateHostStart(ORB, expiredByMs);
+              const stopped = await requestOrbStop(task, newRevision, ORB);
+              expect(stopped.isOk()).toBe(true);
+              if (stopped.isErr()) return;
+              for (const revision of [oldRevision, newRevision]) {
+                revision.control.noteStateEpisode(ORB, stopped.value.stateChangedAt);
+                revision.control.resetLivenessBaseline(ORB, task.monotonicNow() - expiredByMs);
+              }
+              stopping = true;
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.world.hostStartCountOf(ORB)).toBe(2);
+        expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopping");
+        deferredTotal += capture.matching("drain-restart-deferred").length;
+      },
+    );
+    expect(deferredTotal).toBeGreaterThan(0);
+  });
+
+  it("rejects a stale provision after replacement retired its incarnation", async () => {
+    await runDst(
+      { name: "mixed-generation-stale-provision", iterations: 20, lateTimerProbability: 0 },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const staleProvider = new StaleObserveProvider(
+          () => harness.world.hostCount(ORB),
+          harness.world,
+          0,
+          OLD_GENERATION,
+          OLD_SPEC,
+        );
+        const winnerProvider = new WinnerProvisionProvider(
+          staleProvider,
+          harness.world,
+          0,
+          NEW_GENERATION,
+          NEW_SPEC,
+        );
+        const oldRevision = {
+          ...harness.deps,
+          hostProvider: staleProvider,
+          control: new ControlState(),
+        };
+        const newRevision = {
+          ...harness.deps,
+          hostProvider: winnerProvider,
+          control: new ControlState(),
+        };
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          {
+            name: "stale-pass",
+            f: async (task) => {
+              while (harness.store.orbSnapshot(ORB) === null) {
+                await task.sleep(1, "wait for seed");
+              }
+              const outcome = await reconcileOrbOnce(task, oldRevision, ORB);
+              staleProvider.finished = true;
+              return outcome;
+            },
+          },
+          {
+            name: "winner",
+            f: async (task) => {
+              while (!staleProvider.entered) await task.sleep(1, "wait for stale observation");
+              return reconcileLoop(task, newRevision, stop.signal);
+            },
+          },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOnRevision(task, harness, [oldRevision, newRevision]);
+              const row = harness.store.orbSnapshot(ORB);
+              if (row === null) throw new Error("seeded orb missing");
+              harness.store.seedOrb({
+                ...row,
+                state: "starting",
+                stateChangedAt: task.wallNow(),
+              });
+              await waitUntil(
+                task,
+                "replacement converges after stale absence",
+                () =>
+                  harness.store.orbSnapshot(ORB)?.state === "running" &&
+                  harness.store.orbSnapshot(ORB)?.hostIncarnation === 1,
+                { timeoutMs: 300_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        const newFingerprint = winnerProvider.desiredSpecFingerprint({
+          orbId: ORB,
+          repositoryUrl: REPOSITORY_URL,
+        });
+        expect(harness.world.createdHostsOf(ORB)).toEqual([
+          expect.objectContaining({ incarnation: 0 }),
+          { incarnation: 1, specFingerprint: newFingerprint },
+        ]);
+        expect(harness.store.orbSnapshot(ORB)).toMatchObject({
+          state: "running",
+          hostIncarnation: 1,
+          hostSpecFingerprint: newFingerprint,
+        });
+      },
+    );
+  });
+
+  it("removes a stale provider effect while its incarnation discard is pending", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      {
+        name: "mixed-generation-pending-discard-provision",
+        iterations: 20,
+        lateTimerProbability: 0,
+        logCapture: capture,
+      },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const staleProvider = new LateProvisionProvider(
+          () => harness.world.hostCount(ORB),
+          harness.world,
+          0,
+          OLD_GENERATION,
+          OLD_SPEC,
+        );
+        const winnerProvider = new HeldDiscardProvider(
+          staleProvider,
+          harness.world,
+          0,
+          NEW_GENERATION,
+          NEW_SPEC,
+        );
+        const oldRevision = {
+          ...harness.deps,
+          hostProvider: staleProvider,
+          control: new ControlState(),
+        };
+        const newRevision = {
+          ...harness.deps,
+          hostProvider: winnerProvider,
+          control: new ControlState(),
+        };
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          {
+            name: "stale-pass",
+            f: async (task) => {
+              while (harness.store.orbSnapshot(ORB) === null) {
+                await task.sleep(1, "wait for seed");
+              }
+              const outcome = await reconcileOrbOnce(task, oldRevision, ORB);
+              staleProvider.finished = true;
+              return outcome;
+            },
+          },
+          {
+            name: "winner",
+            f: async (task) => {
+              while (!staleProvider.provisionEntered) {
+                await task.sleep(1, "wait for stale provision call");
+              }
+              return reconcileLoop(task, newRevision, stop.signal);
+            },
+          },
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOnRevision(task, harness, [oldRevision, newRevision]);
+              const row = harness.store.orbSnapshot(ORB);
+              if (row === null) throw new Error("seeded orb missing");
+              harness.store.seedOrb({ ...row, state: "starting", stateChangedAt: task.wallNow() });
+              await waitUntil(
+                task,
+                "replacement converges after stale provider effect",
+                () =>
+                  harness.store.orbSnapshot(ORB)?.state === "running" &&
+                  harness.store.orbSnapshot(ORB)?.hostIncarnation === 1,
+                { timeoutMs: 300_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("superseded-provision-discard")).toHaveLength(1);
+        expect(harness.world.createdHostsOf(ORB).map(({ incarnation }) => incarnation)).toEqual([
+          0, 0, 1,
+        ]);
+        expect(harness.world.hostCount(ORB)).toBe(1);
+        expect(harness.world.hostIncarnationOf(ORB)).toBe(1);
+        expect(harness.world.filesystemExists(ORB)).toBe(true);
+      },
+    );
+  });
+
   it("replaces a stale host forward once and never backward during a rollover", async () => {
     const capture = new LogCapture();
     // The declined guard fires only in schedules where a stale pass actually
@@ -222,7 +578,11 @@ describe("mixed-generation reconcilers (DST)", () => {
     // iteration budget rather than per schedule.
     let declinedTotal = 0;
     await runDst(
-      { name: "mixed-generation-rollover", iterations: 40, logCapture: capture },
+      {
+        name: "mixed-generation-rollover",
+        iterations: 40,
+        logCapture: capture,
+      },
       async (sim) => {
         // Idle auto-stop is out of scope: the orb is deliberately held running
         // across long virtual stretches with no activity.

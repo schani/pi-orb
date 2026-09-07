@@ -32,6 +32,7 @@ function makeFixture(): { root: string; log: string } {
   mkdirSync(bin);
   mkdirSync(scratch);
   copyFileSync(resolve("infra/release.sh"), join(infra, "release.sh"));
+  copyFileSync(resolve("infra/release-child.sh"), join(infra, "release-child.sh"));
   chmodSync(join(infra, "release.sh"), 0o755);
 
   executable(

@@ -209,6 +209,8 @@ interface FakeHost {
   orbId: string;
   incarnation: number;
   state: OrbHostState;
+  /** Wall-clock epoch ms when the host most recently entered `running`. */
+  lastStartedAt: number;
   runtime: FakeRuntimeInstance | null;
   /** Deploy generation that committed this immutable specification. */
   specGeneration: number;
@@ -708,6 +710,12 @@ export class FakeWorld {
     return this.orbState(orbId).hostStartCount;
   }
 
+  /** Backdate provider boot evidence to establish an already-expired test baseline. */
+  backdateHostStart(orbId: string, byMs: number): void {
+    const host = this.orbState(orbId).host;
+    if (host !== null) host.lastStartedAt -= byMs;
+  }
+
   setActivity(orbId: string, activity: "idle" | "busy"): void {
     const runtime = this.orbState(orbId).host?.runtime;
     if (runtime !== null && runtime !== undefined) runtime.activity = activity;
@@ -917,6 +925,7 @@ export class FakeWorld {
       orbId,
       incarnation,
       state: "running",
+      lastStartedAt: task.wallNow(),
       runtime: null,
       runtimeToken,
       specGeneration,
@@ -1019,6 +1028,7 @@ export class FakeWorld {
     state.host.preemptedAtMonotonic = null;
     if (state.host.state === "running") return;
     state.host.state = "running";
+    state.host.lastStartedAt = task.wallNow();
     this.bootRuntime(task, state.host.orbId);
   }
 
@@ -1181,6 +1191,7 @@ export class FakeWorld {
       incarnation: state.host.incarnation,
       specFingerprint: state.host.specFingerprint,
       state: state.host.state,
+      ...(state.host.state === "running" ? { lastStartedAt: state.host.lastStartedAt } : {}),
       ...(state.host.state === "running"
         ? { runtimeAddress: { baseUrl: `http://${state.host.ref.resourceId}:8080` } }
         : {}),

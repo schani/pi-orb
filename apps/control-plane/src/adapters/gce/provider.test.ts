@@ -576,6 +576,42 @@ describe("GceOrbHostProvider", () => {
     }
   });
 
+  it("maps an asynchronous resource-in-use insert error to retryable", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => ok200(existingInstance()),
+      () => ok200({ name: "op-inst" }),
+      () =>
+        ok200({
+          status: "DONE",
+          error: {
+            errors: [
+              {
+                code: "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE",
+                message: "resource is still attached",
+              },
+            ],
+          },
+        }),
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.retryable).toBe(true);
+    expect(result.isErr() && result.error.message).toContain("RESOURCE_IN_USE_BY_ANOTHER_RESOURCE");
+  });
+
+  it("retries an inline resource-in-use insert error", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => ok200(existingInstance()),
+      () => ({
+        status: 400,
+        body: { error: { errors: [{ code: "RESOURCE_IN_USE_BY_ANOTHER_RESOURCE" }] } },
+      }),
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.retryable).toBe(true);
+  });
+
   it("adopts the winner's token after losing a create race", async () => {
     const transport = new FakeTransport([
       () => notFound,
@@ -641,6 +677,23 @@ describe("GceOrbHostProvider", () => {
     const suspended = await provider.observe(task, ref, context);
     expect(suspended.isOk() && suspended.value?.state).toBe("stopped");
     expect(suspended.isOk() && suspended.value?.failure?.code).toBe("unsupported_state");
+  });
+
+  it.each([
+    ["2026-09-07T12:34:56.789Z", Date.parse("2026-09-07T12:34:56.789Z")],
+    [undefined, undefined],
+    ["malformed", undefined],
+    ["1969-12-31T23:59:59Z", undefined],
+  ])("reports a valid instance start timestamp from %s", async (lastStartTimestamp, expected) => {
+    const provider = makeProvider(
+      new FakeTransport([() => ok200(existingInstance({ lastStartTimestamp }))]),
+    );
+    const observed = await provider.observe(
+      task,
+      { provider: "gce", resourceId: "pi-orb-orb-1" },
+      context,
+    );
+    expect(observed.isOk() && observed.value?.lastStartedAt).toBe(expected);
   });
 
   it("paginates listManagedHosts", async () => {

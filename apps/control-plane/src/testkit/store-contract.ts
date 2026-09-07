@@ -279,12 +279,13 @@ export function storeSemanticsContractTests(
 
       const finalized = await store.finalizeHostDiscard(task, {
         orbId: orb.id,
-        expectedStateVersion: 1,
+        expectedStateVersion: 2,
         throughIncarnation: 0,
         now: 5_000,
       });
       expect(finalized.isOk() && finalized.value).toMatchObject({
         hostRef: null,
+        stateVersion: 3,
         hostIncarnation: 1,
         hostSpecFingerprint: "spec-new",
         hostSpecGeneration: 11,
@@ -342,6 +343,76 @@ export function storeSemanticsContractTests(
       });
       expect(stale.isErr() && stale.error.type).toBe("state_conflict");
       expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toEqual(before);
+    });
+
+    it("rejects stale provision commits across replacement request and finalization", async () => {
+      await seed();
+      const hosted = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 0,
+        expectedHostIncarnation: 0,
+        now: 2_000,
+        hostRef: "pi-orb-orb-1-i0",
+        runtimeTokenHash: "old-token-hash",
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 10,
+      });
+      expect(hosted.isOk()).toBe(true);
+
+      const requested = await store.requestHostSpecReplacement(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        desiredFingerprint: "spec-new",
+        configuredGeneration: 11,
+        now: 3_000,
+      });
+      expect(requested.isOk() && requested.value).toMatchObject({
+        type: "requested",
+        orb: { stateVersion: 2 },
+      });
+
+      const staleDuringDiscard = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        expectedHostIncarnation: 0,
+        now: 3_500,
+        hostRef: "pi-orb-orb-1-i0-stale",
+        runtimeTokenHash: "stale-token-hash",
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 10,
+      });
+      expect(staleDuringDiscard.isErr() && staleDuringDiscard.error.type).toBe("state_conflict");
+
+      const finalized = await store.finalizeHostDiscard(task, {
+        orbId: orb.id,
+        expectedStateVersion: 2,
+        throughIncarnation: 0,
+        now: 4_000,
+      });
+      expect(finalized.isOk() && finalized.value).toMatchObject({
+        stateVersion: 3,
+        hostRef: null,
+        hostIncarnation: 1,
+      });
+
+      const staleAfterFinalize = await store.casUpdateFields(task, {
+        orbId: orb.id,
+        expectedStateVersion: 3,
+        expectedHostIncarnation: 0,
+        now: 4_500,
+        hostRef: "pi-orb-orb-1-i0-stale",
+        runtimeTokenHash: "stale-token-hash",
+        hostSpecFingerprint: "spec-old",
+        hostSpecGeneration: 10,
+      });
+      expect(staleAfterFinalize.isErr() && staleAfterFinalize.error.type).toBe("state_conflict");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()).toMatchObject({
+        stateVersion: 3,
+        hostRef: null,
+        hostIncarnation: 1,
+        hostSpecFingerprint: "spec-new",
+        hostSpecGeneration: 11,
+      });
     });
 
     it("requests replacement at the generation boundary and reads a null committed generation as zero", async () => {
@@ -465,12 +536,13 @@ export function storeSemanticsContractTests(
 
       const finalized = await store.finalizeHostDiscard(task, {
         orbId: orb.id,
-        expectedStateVersion: 2,
+        expectedStateVersion: 3,
         throughIncarnation: 0,
         now: 5_000,
       });
       expect(finalized.isOk() && finalized.value).toMatchObject({
         hostRef: null,
+        stateVersion: 4,
         hostIncarnation: 1,
         // Reason `host_spec_changed` carries the desired spec into the
         // replacement; reason `failed` clears it instead.
@@ -482,7 +554,8 @@ export function storeSemanticsContractTests(
 
       const committed = await store.casUpdateFields(task, {
         orbId: orb.id,
-        expectedStateVersion: 2,
+        expectedStateVersion: 4,
+        expectedHostIncarnation: 1,
         now: 6_000,
         hostRef: "pi-orb-orb-1-i1",
         runtimeTokenHash: "new-token-hash",
@@ -518,7 +591,7 @@ export function storeSemanticsContractTests(
       // cannot aim newer-generation compute backwards at its own spec.
       const declined = await store.requestHostSpecReplacement(task, {
         orbId: orb.id,
-        expectedStateVersion: 1,
+        expectedStateVersion: 2,
         desiredFingerprint: "spec-stale-revision",
         configuredGeneration: 11,
         force: true,

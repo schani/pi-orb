@@ -2818,49 +2818,54 @@ describe("orb lifecycle (DST)", () => {
   // exact ending of the production incident. The single restart now gets a
   // boot-sized grace, so the drain completes on the rebooted runtime.
   it("a runtime that dies during a drain still completes the stop", async () => {
-    await runDst({ name: "runtime-dies-during-stopping-drain", iterations: 15 }, async (sim) => {
-      // Idle auto-stop is left at its default: the orb is put into `stopping`
-      // explicitly within the first tick, so the idle path can never engage.
-      const harness = makeHarness();
-      const stop = new AbortController();
-      const result = await sim.runTasks([
-        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
-        {
-          name: "driver",
-          f: async (task) => {
-            // Boot latency stays in force for the restart the drain triggers.
-            seedRunningOrb(task, harness, ORB);
-            for (let i = 0; i < 3; i++) harness.world.appendMessage(ORB);
-            const stopResult = await requestOrbStop(task, harness.deps, ORB);
-            expect(stopResult.isOk()).toBe(true);
-            // Nothing has been replicated yet (no poller), so the drain has
-            // real work when the runtime process dies under it.
-            expect(harness.store.replicaRecords(ORB).length).toBe(0);
-            const stopsBefore = harness.world.hostStopCountOf(ORB);
-            harness.world.killRuntimeProcess(ORB);
-            await waitUntil(
-              task,
-              "orb reaches a terminal state",
-              () => {
-                const state = harness.store.orbSnapshot(ORB)?.state;
-                return state === "stopped" || state === "failed";
-              },
-              { timeoutMs: 20 * 60_000 },
-            );
-            expect(harness.world.hostStopCountOf(ORB) - stopsBefore).toBeLessThanOrEqual(
-              MAX_STOPS_PER_RECOVERY,
-            );
-            stop.abort();
+    const capture = new LogCapture();
+    await runDst(
+      { name: "runtime-dies-during-stopping-drain", iterations: 15, logCapture: capture },
+      async (sim) => {
+        // Idle auto-stop is left at its default: the orb is put into `stopping`
+        // explicitly within the first tick, so the idle path can never engage.
+        const harness = makeHarness();
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              // Boot latency stays in force for the restart the drain triggers.
+              seedRunningOrb(task, harness, ORB);
+              for (let i = 0; i < 3; i++) harness.world.appendMessage(ORB);
+              const stopResult = await requestOrbStop(task, harness.deps, ORB);
+              expect(stopResult.isOk()).toBe(true);
+              // Nothing has been replicated yet (no poller), so the drain has
+              // real work when the runtime process dies under it.
+              expect(harness.store.replicaRecords(ORB).length).toBe(0);
+              const stopsBefore = harness.world.hostStopCountOf(ORB);
+              harness.world.killRuntimeProcess(ORB);
+              await waitUntil(
+                task,
+                "orb reaches a terminal state",
+                () => {
+                  const state = harness.store.orbSnapshot(ORB)?.state;
+                  return state === "stopped" || state === "failed";
+                },
+                { timeoutMs: 20 * 60_000 },
+              );
+              expect(harness.world.hostStopCountOf(ORB) - stopsBefore).toBeLessThanOrEqual(
+                MAX_STOPS_PER_RECOVERY,
+              );
+              stop.abort();
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      const orb = harness.store.orbSnapshot(ORB);
-      expect(orb?.lastError).toBeNull();
-      expect(orb?.state).toBe("stopped");
-      assertReplicaComplete(harness.world, harness.store, ORB);
-      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
-    });
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        const orb = harness.store.orbSnapshot(ORB);
+        expect(orb?.lastError).toBeNull();
+        expect(orb?.state).toBe("stopped");
+        assertReplicaComplete(harness.world, harness.store, ORB);
+        expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+        expect(capture.matching("drain-restart-deferred")).toEqual([]);
+      },
+    );
   });
 
   it("a drain whose restarted runtime never answers fails on evidence, not on the deadline", async () => {

@@ -419,6 +419,32 @@ export async function orphanSweepOnce(task: SimulationTask, deps: ControlPlaneDe
       }
       continue;
     }
+    if (orb !== null && observation.incarnation < orb.hostIncarnation) {
+      logOrbEvent(task, orb.id, "retired-host-resurrected", {
+        host,
+        observed_incarnation: observation.incarnation,
+        durable_incarnation: orb.hostIncarnation,
+        decision: "discard",
+      });
+      const discarded = await withDeadline(
+        task,
+        deps.constants.providerOperationTimeoutMs,
+        "discard resurrected retired host",
+        (context) =>
+          deps.hostProvider.discardCompute(
+            task,
+            { orbId: orb.id, throughIncarnation: observation.incarnation },
+            context,
+          ),
+      );
+      if (discarded.isErr()) {
+        logOrbEvent(task, orb.id, "retired-host-discard-failed", {
+          host,
+          error: discarded.error.message,
+        });
+      }
+      continue;
+    }
     if (observation.state === "stopped") continue;
     // An orphan is an integrity signal (docs/lifecycle.md): logged loudly, and
     // logged again on every sweep for as long as the host survives the stop.

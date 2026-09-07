@@ -397,6 +397,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
     if (incarnation === null) return null;
     const status = String(instance["status"] ?? "");
     const state = mapInstanceStatus(status);
+    const lastStartedAt = Date.parse(String(instance["lastStartTimestamp"] ?? ""));
     const interfaces = instance["networkInterfaces"];
     const internalIp =
       Array.isArray(interfaces) &&
@@ -409,6 +410,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       incarnation,
       specFingerprint: metadataValue(instance, SPEC_FINGERPRINT_METADATA_KEY),
       state,
+      ...(Number.isFinite(lastStartedAt) && lastStartedAt >= 0 ? { lastStartedAt } : {}),
       ...(state === "running" && internalIp !== ""
         ? { runtimeAddress: { baseUrl: `http://${internalIp}:8080` } }
         : {}),
