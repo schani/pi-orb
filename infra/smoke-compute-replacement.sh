@@ -13,8 +13,8 @@ set -euo pipefail
 # there is no production failpoint. The runtime E2E marker is accepted only when
 # PI_ORB_E2E_LAUNCH_FAILURE_MARKER is explicitly configured on the release.
 
-# Outer budget: every bounded wait below derives from one provision + COS boot
-# + runtime-ready pass (the slowest provider operation this smoke performs).
+# Outer budget: every bounded wait below derives from one provision + native
+# Debian boot + runtime-ready pass (the slowest provider operation this smoke performs).
 # Three lifecycle waits use it in full; stop and disposal are pure provider
 # operations and get a fraction. The two 65-second negative-observation windows
 # — no autonomous replacement after failure, and no running orb touched by a
@@ -139,7 +139,7 @@ old_description=$(describe_instance "$old_instance" | tee "$log_dir/old-instance
 old_instance_id=$(jq -r .id <<<"$old_description")
 old_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") | last' \
   <<<"$old_description")
-old_token=$(jq -r '.metadata.items[] | select(.key == "pi-orb-runtime-token") | .value' \
+old_token=$(jq -r '.metadata.items[] | select(.key == "pi-orb-config") | .value | fromjson | .PI_ORB_RUNTIME_TOKEN' \
   <<<"$old_description")
 [[ -n "$old_instance_id" && "$old_instance_id" != null ]]
 [[ -n "$old_boot_disk" && "$old_boot_disk" != "$data_disk" ]]
@@ -155,9 +155,9 @@ marker=$(jq -nc --arg orbId "$orb_id" '{orbId: $orbId, incarnation: 0}')
 sentinel_b64=$(printf %s "$sentinel" | base64 | tr -d '\n')
 marker_b64=$(printf %s "$marker" | base64 | tr -d '\n')
 gcloud compute ssh "$old_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" -- \
-  "sudo bash -c 'printf %s $sentinel_b64 | base64 -d > /mnt/disks/orb-data/replacement-sentinel; printf %s $marker_b64 | base64 -d > /mnt/disks/orb-data/.pi-orb-e2e-launch-failure.json'"
+  "sudo bash -c 'printf %s $sentinel_b64 | base64 -d > /workspace/replacement-sentinel; printf %s $marker_b64 | base64 -d > /workspace/.pi-orb-e2e-launch-failure.json'"
 gcloud compute ssh "$old_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" -- \
-  "sudo grep -Fx '$sentinel' /mnt/disks/orb-data/replacement-sentinel"
+  "sudo grep -Fx '$sentinel' /workspace/replacement-sentinel"
 
 api POST "/api/v1/orbs/$orb_id/stop" >/dev/null
 wait_orb_state stopped "$stop_deadline_seconds" >/dev/null
@@ -189,7 +189,7 @@ new_boot_disk=$(jq -r '.disks[] | select(.boot == true) | .source | split("/") |
   <<<"$new_description")
 new_data_disk=$(jq -r '.disks[] | select(.boot == false) | .source | split("/") | last' \
   <<<"$new_description")
-new_token=$(jq -r '.metadata.items[] | select(.key == "pi-orb-runtime-token") | .value' \
+new_token=$(jq -r '.metadata.items[] | select(.key == "pi-orb-config") | .value | fromjson | .PI_ORB_RUNTIME_TOKEN' \
   <<<"$new_description")
 new_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerprint") | .value' \
   <<<"$new_description")
@@ -202,7 +202,7 @@ new_spec=$(jq -r '.metadata.items[] | select(.key == "pi-orb-host-spec-fingerpri
 # The workspace survived replacement, exactly one compute identity remains,
 # and the orb is still running through the replacement incarnation.
 gcloud compute ssh "$new_instance" --project "$PI_ORB_GCP_PROJECT" --zone "$PI_ORB_GCE_ZONE" -- \
-  "sudo grep -Fx '$sentinel' /mnt/disks/orb-data/replacement-sentinel"
+  "sudo grep -Fx '$sentinel' /workspace/replacement-sentinel"
 [[ "$(instances)" == "$new_instance" ]]
 instance_absent "$old_instance"
 [[ $(orb_row | jq -r .state) == running ]]
@@ -253,7 +253,7 @@ if [[ -n "${PI_ORB_SMOKE_STAGE2_DEPLOY_COMMAND:-}" ]]; then
   instance_absent "$new_instance"
   gcloud compute ssh "$stage2_instance" --project "$PI_ORB_GCP_PROJECT" \
     --zone "$PI_ORB_GCE_ZONE" -- \
-    "sudo grep -Fx '$sentinel' /mnt/disks/orb-data/replacement-sentinel"
+    "sudo grep -Fx '$sentinel' /workspace/replacement-sentinel"
 fi
 
 echo "compute replacement smoke passed: $old_instance ($old_instance_id) -> $new_instance ($new_instance_id); disk=$data_disk"

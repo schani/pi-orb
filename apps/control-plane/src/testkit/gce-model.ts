@@ -151,6 +151,18 @@ export class DeterministicGceApiModel implements GceApiTransport {
     readonly signal: AbortSignal;
   }): Promise<GceResponse> {
     if (args.signal.aborted) return { status: 499, body: {} };
+    if (
+      args.method === "GET" &&
+      args.path === "projects/projxx/global/images/pi-orb-native-20260905"
+    ) {
+      return { status: 200, body: { id: "123456789" } };
+    }
+    if (
+      args.method === "GET" &&
+      args.path === "projects/projxx/global/images/pi-orb-native-other"
+    ) {
+      return { status: 200, body: { id: "987654321" } };
+    }
     const relative = args.path.replace(/^projects\/[^/]+\/zones\/[^/]+\//, "");
 
     const wait = /^operations\/([^/]+)\/wait$/.exec(relative);

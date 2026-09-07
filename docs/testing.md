@@ -14,6 +14,35 @@
 - The live-only Luna turn-summary coordinator is DST-covered: inference is detached from operation completion, accepts later turns while earlier summaries are pending, and retains originating operation IDs under varied completion schedules. Luna errors and timeouts are consumed without mutating agent/runtime state. Browser Notification API behavior is an ordinary frontend-adapter test concern rather than a simulation target (decided 2026-08-06).
 - Static HTML under `design-prototypes/` is deliberately excluded from Biome linting: it is non-shipping concept material, while production web code remains subject to the full accessibility rules (decided 2026-08-09).
 
+## Native VM coverage requirement (decided 2026-09-05)
+
+The native VM production integration, including its image-regeneration command, requires thorough unit and DST coverage before deployment. The experiment's live checks and existing suites do not establish coverage of the new implementation.
+
+- **Unit/contract tests:** build inputs and prerequisite errors; image identity/manifest and fingerprint generation; Compute requests and permission failures; metadata validation and credential handling; bootstrap/mount and systemd configuration; `orb`/sudo ownership; Docker disabled by default; sealing, failed-build cleanup and protection of unrelated resources. Exercise failure paths and observable outcomes, not merely matching generated text.
+- **DST:** all new orchestration, retries and lifecycle state transitions use simulated clocks and effect adapters. Cover partial build/publication failures, cancellation and cleanup; competing operations and generations; Stop/Start, Spot interruption, replacement, token fencing, diagnosis-before-discard and explicit recovery. Assert retained workspace data, one authoritative incarnation, no publication of an unvalidated image, and no deletion of foreign resources. Record and replay failing schedules with explicit checkpoints/failpoints.
+- **Real integration:** validate adapter contracts against actual GCE, Linux mounts/systemd, image boot/sealing, required tools, retained storage and failure reporting. These checks complement unit/DST coverage; simulations do not execute the kernel or prove IAM configuration. Runtime changes retain the required browser/runtime E2E gate.
+
+Keep stateful logic behind testable boundaries so the documented rebuild command and production release path exercise the same tested implementation.
+
+Implemented coverage includes the GCE provider's exact image identity and metadata
+contract; retained-disk lifecycle and generation simulations; image-build
+publication, cancellation and owned-resource cleanup simulations; real HTTP tests
+for the validation broker; archive provenance and ignored-file tests; Python guest
+bootstrap, disk, diagnostics and supervisor tests; foundation state-adoption
+behavior tests; and shell release-contract tests. `npm test` runs Vitest and
+`npm run test:infra`; the latter runs foundation and guest tests. Live acceptance
+evidence is recorded in `docs/native-vm-prototype.md`.
+
+The 2026-09-05 full-suite run exposed host CPU overcommit: a concurrent-create DST
+case hit Vitest's outer 30-second deadline while E2E and typechecking also ran.
+There was no DST trace because the simulation had not reported a failure. The
+exact isolated case completed in 7.59 seconds, with heavy scheduler contention.
+Vitest now uses half the host's workers; the complete suite passed with unchanged
+assertions and timeouts. Raw first-failure and corrected-run logs remain in
+`.context/native-final-unit-dst.log` and
+`.context/native-final-unit-dst-bounded.log`.
+
+
 ## Deterministic simulation testing strategy
 
 The [`determined`](https://www.npmjs.com/package/determined) package provides cooperative deterministic scheduling, reproducible entropy, failpoints, blocking primitives, deadlock detection, and exact record/replay of failing schedules. pi-orb does not require timed mutex or condition-variable APIs: it coordinates with database compare-and-swap, explicit lifecycle state, serialized in-process mutation queues, and cancellable adapter operations. Virtual sleep/deadline timers only need to participate correctly in scheduler quiescence and cancellation.

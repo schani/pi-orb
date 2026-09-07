@@ -115,7 +115,7 @@ trap 'on_signal 143' TERM
 
 # `node` is here for the workload-identity smoke's RS256 verification against
 # the deployed JWKS; failing at preflight beats failing after a live deploy.
-for command in curl docker gcloud git jq node tofu; do
+for command in curl docker gcloud git jq node npm tofu; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "release preflight failed: missing required command '$command'" >&2
     exit 1
@@ -192,7 +192,29 @@ esac
 
 export PROJECT REGION
 
-echo "release: building, boot-gating, and pushing images for $head_commit ..."
+echo "release: verifying the separately applied foundation ..."
+tofu -chdir="$INFRA/foundation" init -input=false -lockfile=readonly \
+  -backend-config="bucket=$STATE_BUCKET"
+foundation=$(tofu -chdir="$INFRA/foundation" output -json)
+if ! jq -e --arg project "$PROJECT" --arg region "$REGION" '
+  .foundation_schema_version.value == 1 and .project.value == $project and
+  .region.value == $region and (.zone.value | type == "string") and
+  (.image_builder_service_account_email.value | type == "string") and
+  (.image_build_subnetwork.value | type == "string") and
+  (.pi_orb_network.value | type == "string") and
+  (.orb_subnetwork_resource.value | type == "string") and
+  (.run_egress_subnetwork.value | type == "string") and
+  (.run_egress_cidr.value | type == "string")
+' <<<"$foundation" >/dev/null; then
+  echo "release refused: apply/adopt the matching foundation before releasing" >&2
+  exit 1
+fi
+ZONE=$(jq -r '.zone.value' <<<"$foundation")
+IMAGE_BUILDER_SA=$(jq -r '.image_builder_service_account_email.value' <<<"$foundation")
+IMAGE_BUILD_SUBNET=$(jq -r ' .image_build_subnetwork.value' <<<"$foundation")
+export ZONE IMAGE_BUILDER_SA IMAGE_BUILD_SUBNET
+
+echo "release: building and validating native image for $head_commit ..."
 "$INFRA/build-push.sh" > "$VARS"
 chmod 600 "$VARS"
 
@@ -226,7 +248,8 @@ mv "$WORK_DIR/release.tfvars.new" "$VARS"
 chmod 600 "$VARS"
 
 echo "release: initializing OpenTofu ..."
-tofu -chdir="$INFRA" init -input=false -lockfile=readonly
+tofu -chdir="$INFRA" init -input=false -lockfile=readonly \
+  -backend-config="bucket=$STATE_BUCKET" -backend-config="prefix=$STATE_PREFIX"
 
 echo "release: creating exact saved plan (generation $deploy_generation) ..."
 tofu -chdir="$INFRA" plan \
@@ -234,7 +257,9 @@ tofu -chdir="$INFRA" plan \
   -out="$PLAN" \
   -var-file="$VARS" \
   -var="project=$PROJECT" \
-  -var="region=$REGION"
+  -var="region=$REGION" \
+  -var="zone=$ZONE" \
+  -var="foundation_state_bucket=$STATE_BUCKET"
 chmod 600 "$PLAN"
 
 if [ "$AUTO_APPROVE" != true ]; then
@@ -283,12 +308,14 @@ fi
 PI_ORB_GCP_PROJECT="$PROJECT" PI_ORB_GCE_ZONE="$zone" "$INFRA/smoke-workload-identity.sh"
 
 control_plane_image=$(awk -F'"' '/^control_plane_image/{print $2}' "$VARS")
-runtime_image=$(awk -F'"' '/^runtime_image/{print $2}' "$VARS")
+native_image_resource=$(awk -F'"' '/^native_image_resource/{print $2}' "$VARS")
+native_image_id=$(awk -F'"' '/^native_image_id/{print $2}' "$VARS")
 cat <<EOF
 
 RELEASE SUCCEEDED
   commit:               $head_commit
   control-plane image:  $control_plane_image
-  runtime image:        $runtime_image
+  native image:         $native_image_resource
+  native image ID:      $native_image_id
   deploy generation:    $deploy_generation
 EOF

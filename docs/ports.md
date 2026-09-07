@@ -4,7 +4,7 @@ How ports inside an orb (dev servers the agent starts) are reached from outside.
 
 ## Decision (2026-08-05)
 
-- Each orb host runs `tailscaled` in **userspace-networking mode** (no TUN device, no `NET_ADMIN` — works in the unprivileged Docker container and inside the GCE COS container alike) and joins the user's tailnet as machine `pi-orb-<orbId>`.
+- Each orb host runs `tailscaled` in **userspace-networking mode** (no TUN device or `NET_ADMIN`; it runs in the local Docker container and directly on the native GCE host) and joins the user's tailnet as machine `pi-orb-<orbId>`.
 - Userspace mode forwards inbound tailnet connections to the same port on `127.0.0.1`, so dev servers that bind localhost (Vite, Next defaults) are reachable **without** `--host 0.0.0.0`.
 - The **control plane generates the preview URL**: `http://pi-orb-<orbId>.<tailnet dns name>:<port>`. It is a pure function of orb id + static configuration — no database column, no runtime round-trip.
 - The preview host is surfaced in three places: the orb detail page in the web UI, the browser API (`OrbView.previewHost`, optional field), and **the agent's system prompt**, which tells the agent the host, explains the mechanism in two sentences, and instructs it to give the user full URLs when it starts a server.
@@ -29,7 +29,7 @@ Key shape and rationale in the current implementation (implemented 2026-08-12 as
 - `PI_ORB_TAILSCALE_HOSTNAME` — `pi-orb-<orbId>`;
 - `PI_ORB_PREVIEW_HOST` — `pi-orb-<orbId>.<tailnet dns name>`; what the system prompt shows the agent. The runtime enables the feature only when all three variables are present — advertising ports to the agent without an auth key would be a lie.
 
-On Docker these are ordinary `--env` values. On GCE the auth key lives in instance metadata (`pi-orb-tailscale-auth-key`, fetched by the startup script like the runtime token) so the secret and per-orb variability stay out of the script fingerprint; hostname and preview host are literal script text. The current implementation upgrades pre-feature hosts by in-place script-hash repair and mints a missing metadata key in the same write. That mechanism is historical/current-deployment behavior only: `docs/compute-replacement.md` removes metadata repair. Enabling or changing port-exposure configuration changes the immutable host-spec fingerprint, so a running orb is left alone and its stopped VM is replaced on the next Start with a freshly bounded incarnation key.
+On Docker these are ordinary `--env` values. On GCE they are fields in the `pi-orb-config` metadata document. Enabling or changing port-exposure configuration changes the immutable host-spec fingerprint, so a running orb is left alone and its stopped VM is replaced on the next Start with a freshly bounded incarnation key.
 
 **Runtime.** When the env vars are present, the runtime spawns `tailscaled --tun=userspace-networking` before agent boot and runs `tailscale up --authkey … --hostname …`. The tailscaled state directory lives on the persistent orb volume, so node identity survives container replacement and VM stop/start; the auth key is normally consumed exactly once per orb. Failure policy: port exposure is optional — any Tailscale failure is logged loudly and the runtime boots and reports healthy anyway; a dead tailscaled never takes the orb down. The runtime never parses Tailscale state beyond this; readiness is unaffected.
 

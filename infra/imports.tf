@@ -8,28 +8,8 @@
 # roll the other two with a no-op update).
 
 import {
-  to = google_service_account.control_plane
-  id = "projects/${var.project}/serviceAccounts/pi-orb-control-plane@${var.project}.iam.gserviceaccount.com"
-}
-
-import {
-  to = google_compute_subnetwork.run_egress
-  id = "projects/${var.project}/regions/${var.region}/subnetworks/pi-orb-run-egress"
-}
-
-import {
   to = google_compute_firewall.control_plane_to_runtime
   id = "projects/${var.project}/global/firewalls/pi-orb-cp-to-runtime"
-}
-
-import {
-  to = google_compute_global_address.private_services
-  id = "projects/${var.project}/global/addresses/pi-orb-private-services"
-}
-
-import {
-  to = google_service_networking_connection.private_services
-  id = "projects/${var.project}/global/networks/pi-orb:servicenetworking.googleapis.com"
 }
 
 import {

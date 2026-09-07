@@ -3,7 +3,7 @@ import { reconcileOrbOnce, requestOrbStart } from "../../domain/lifecycle.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import { DeterministicGceApiModel } from "../../testkit/gce-model.ts";
 import { runDst } from "../../testkit/sim.ts";
-import { GceOrbHostProvider } from "./provider.ts";
+import { GceOrbHostProvider, type GceOrbHostProviderOptions } from "./provider.ts";
 
 const ORB = "orb-gce-discard";
 const PROJECT = "project-gce-discard";
@@ -28,7 +28,7 @@ function seedOrbCompute(
 
 function provider(
   model: DeterministicGceApiModel,
-  overrides: { runtimeImage?: string } = {},
+  overrides: Partial<Pick<GceOrbHostProviderOptions, "imageResource" | "imageId">> = {},
 ): GceOrbHostProvider {
   return new GceOrbHostProvider(model, {
     projectId: "proj",
@@ -36,13 +36,16 @@ function provider(
     machineType: "n2d-highmem-4",
     subnetwork: "regions/us-central1/subnetworks/pi-orb-us-central1",
     serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
-    runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
+    imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
+    imageId: "123456789",
     controlPlaneUrl: "https://runtime.example",
     ...overrides,
   });
 }
 
-const anyContext = (): { signal: AbortSignal } => ({ signal: new AbortController().signal });
+const anyContext = (): { signal: AbortSignal } => ({
+  signal: new AbortController().signal,
+});
 
 /** Read modeled instance state back through the transport the adapter uses. */
 async function instanceStatus(
@@ -274,9 +277,13 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
             // A new revision desires a different runtime image: the existing
             // stopped instance is stale specification, not repairable input.
             const updated = provider(model, {
-              runtimeImage: "registry.example/runtime@sha256:def",
+              imageResource: "projects/projxx/global/images/pi-orb-native-other",
+              imageId: "987654321",
             });
-            const desired = updated.desiredSpecFingerprint({ orbId: ORB, ...bootstrap });
+            const desired = updated.desiredSpecFingerprint({
+              orbId: ORB,
+              ...bootstrap,
+            });
             expect(desired).not.toBe(provisioned.value.specFingerprint);
 
             // Neither entry point may adopt it, and neither may boot it: a
