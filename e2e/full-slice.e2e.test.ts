@@ -37,6 +37,7 @@ import {
   startControlPlane,
   verifyIdToken,
   waitFor,
+  waitForPostgres,
 } from "./harness.ts";
 
 /**
@@ -533,14 +534,7 @@ beforeAll(async () => {
     `127.0.0.1:${PG_PORT}:5432`,
     "postgres:16",
   ]);
-  await waitFor(
-    "postgres ready",
-    async () => {
-      const out = await docker(["exec", PG_CONTAINER, "pg_isready", "-U", "pi-orb"]);
-      return out.includes("accepting connections") ? true : null;
-    },
-    { timeoutMs: 60_000 },
-  );
+  await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb");
 
   controlPlane = await startControlPlane({
     databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
