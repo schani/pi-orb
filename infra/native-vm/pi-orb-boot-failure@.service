@@ -1,0 +1,8 @@
+[Unit]
+Description=Publish pi-orb boot failure for %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pi-orb-boot-diagnostic unit-failure %i

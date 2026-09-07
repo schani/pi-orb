@@ -494,7 +494,10 @@ describe("identity minting racing lifecycle transitions (DST)", () => {
             expect(finalized.isOk() && finalized.value.hostIncarnation).toBe(1);
             const committed = await harness.store.casUpdateFields(task, {
               orbId: ORB,
-              expectedStateVersion: fenced.stateVersion,
+              expectedStateVersion: finalized.isOk()
+                ? finalized.value.stateVersion
+                : fenced.stateVersion,
+              expectedHostIncarnation: 1,
               now: task.wallNow(),
               hostRef: "host-replacement",
               runtimeTokenHash: replacementBearer,
@@ -561,7 +564,10 @@ describe("identity minting racing lifecycle transitions (DST)", () => {
             expect(finalized.isOk()).toBe(true);
             const committed = await harness.store.casUpdateFields(task, {
               orbId: ORB,
-              expectedStateVersion: fenced.stateVersion,
+              expectedStateVersion: finalized.isOk()
+                ? finalized.value.stateVersion
+                : fenced.stateVersion,
+              expectedHostIncarnation: 1,
               now: task.wallNow(),
               hostRef: "host-replacement",
               runtimeTokenHash: replacementBearer,

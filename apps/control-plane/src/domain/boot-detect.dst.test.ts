@@ -1,5 +1,6 @@
 import type { SimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
+import { lifecycleConstantsForHost } from "../lifecycle-config.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, type TestHarness } from "../testkit/fixtures.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
 import { reconcileLoop } from "./loops.ts";
@@ -13,6 +14,28 @@ function seedCreatingOrb(task: SimulationTask, harness: TestHarness): void {
 }
 
 describe("boot-failure detection (DST)", () => {
+  it("gives native GCE workspace preparation its host-specific bounded budget", async () => {
+    await runDst({ name: "native-gce-workspace-boot-budget", iterations: 5 }, async (sim) => {
+      const gceConstants = lifecycleConstantsForHost("gce");
+      const harness = makeHarness({ constants: gceConstants });
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            harness.world.configureOrb(ORB, { containerNeverStarts: true });
+            seedCreatingOrb(task, harness);
+            await task.sleep(6 * 60_000, "native workspace preparation remains bounded");
+            expect(harness.store.orbSnapshot(ORB)?.state).toBe("creating");
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("a host whose runtime never answers fails fast with host evidence", async () => {
     await runDst({ name: "boot-never-answers", iterations: 30 }, async (sim) => {
       const harness = makeHarness();

@@ -267,6 +267,7 @@ export async function pollOrbUntilCaughtUp(
       task.monotonicNow(),
       response.activity,
       response.runtimeInstanceId,
+      observation.lastStartedAt ?? null,
     );
     if (response.activity === "busy") {
       // Advisory idle-auto-stop timestamp (docs/lifecycle.md); a failure is ignored — the

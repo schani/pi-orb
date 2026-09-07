@@ -13,6 +13,8 @@ export interface LivenessEntry {
   lastSuccessAt: number;
   activity: "idle" | "busy";
   runtimeInstanceId: string | null;
+  /** Latest provider start timestamp already incorporated into this baseline. */
+  hostStartedAt: number | null;
   /**
    * Non-null only while the baseline rests on a host restart rather than on a
    * pull: the entitled grace must then outlast a boot, and a second expiry
@@ -133,11 +135,13 @@ export class ControlState {
     at: number,
     activity: "idle" | "busy",
     runtimeInstanceId: string,
+    hostStartedAt: number | null = null,
   ): void {
     this.liveness.set(orbId, {
       lastSuccessAt: at,
       activity,
       runtimeInstanceId,
+      hostStartedAt,
       restartGraceMs: null,
     });
   }
@@ -160,12 +164,18 @@ export class ControlState {
    * Seed/reset the liveness baseline (orb became running, or host restarted).
    * `restartGraceMs` is passed only by a restart, which must outlast a boot.
    */
-  resetLivenessBaseline(orbId: string, at: number, restartGraceMs: number | null = null): void {
+  resetLivenessBaseline(
+    orbId: string,
+    at: number,
+    restartGraceMs: number | null = null,
+    hostStartedAt: number | null = null,
+  ): void {
     const existing = this.liveness.get(orbId);
     this.liveness.set(orbId, {
       lastSuccessAt: at,
       activity: existing?.activity ?? "idle",
       runtimeInstanceId: null,
+      hostStartedAt,
       restartGraceMs,
     });
   }

@@ -94,6 +94,45 @@ describe("orphan-host sweep (DST)", () => {
     });
   });
 
+  it("discards a resurrected host below the durable incarnation", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "sweep-retired-incarnation", iterations: 20, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness();
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          { name: "sweeper", f: (task) => orphanSweepLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              harness.store.seedProject(makeProjectRow(PROJECT));
+              harness.world.configureOrb(ORB, { initDurationMs: 0 });
+              seedProvisionedHost(task, harness, ORB, { incarnation: 0 });
+              harness.store.seedOrb(
+                makeOrbRow(ORB, PROJECT, "starting", {
+                  hostIncarnation: 1,
+                  hostRef: null,
+                }),
+              );
+              await waitUntil(
+                task,
+                "retired incarnation discarded",
+                () => harness.world.hostCount(ORB) === 0,
+                { timeoutMs: 300_000 },
+              );
+              stop.abort();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("retired-host-resurrected").length).toBeGreaterThan(0);
+        expect(harness.world.filesystemExists(ORB)).toBe(true);
+        expect(harness.store.orbSnapshot(ORB)?.hostIncarnation).toBe(1);
+      },
+    );
+  });
+
   // The subject is what the *sweep* does, which is why the assertions are about
   // the sweep's decisions rather than about the host's state at an arbitrary
   // instant. Asserting "host running" after the tasks stopped made this

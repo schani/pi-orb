@@ -14,6 +14,41 @@
 - The live-only Luna turn-summary coordinator is DST-covered: inference is detached from operation completion, accepts later turns while earlier summaries are pending, and retains originating operation IDs under varied completion schedules. Luna errors and timeouts are consumed without mutating agent/runtime state. Browser Notification API behavior is an ordinary frontend-adapter test concern rather than a simulation target (decided 2026-08-06).
 - Static HTML under `design-prototypes/` is deliberately excluded from Biome linting: it is non-shipping concept material, while production web code remains subject to the full accessibility rules (decided 2026-08-09).
 
+## Native VM coverage requirement (decided 2026-09-05)
+
+The native VM production integration, including its image-regeneration command, requires thorough unit and DST coverage before deployment. The experiment's live checks and existing suites do not establish coverage of the new implementation.
+
+- **Unit/contract tests:** build inputs and prerequisite errors; image identity/manifest and fingerprint generation; Compute requests and permission failures; metadata validation and credential handling; bootstrap/mount and systemd configuration; `orb`/sudo ownership; Docker disabled by default; sealing, failed-build cleanup and protection of unrelated resources. Exercise failure paths and observable outcomes, not merely matching generated text.
+- **DST:** all new orchestration, retries and lifecycle state transitions use simulated clocks and effect adapters. Cover partial build/publication failures, cancellation and cleanup; competing operations and generations; Stop/Start, Spot interruption, replacement, token fencing, diagnosis-before-discard and explicit recovery. Assert retained workspace data, one authoritative incarnation, no publication of an unvalidated image, and no deletion of foreign resources. Record and replay failing schedules with explicit checkpoints/failpoints.
+- **Real integration:** validate adapter contracts against actual GCE, Linux mounts/systemd, image boot/sealing, required tools, retained storage and failure reporting. These checks complement unit/DST coverage; simulations do not execute the kernel or prove IAM configuration. Runtime changes retain the required browser/runtime E2E gate.
+
+Keep stateful logic behind testable boundaries so the documented rebuild command and production release path exercise the same tested implementation.
+
+Implemented coverage includes the GCE provider's exact image identity and metadata
+contract; retained-disk lifecycle and generation simulations; image-build
+publication, cancellation and owned-resource cleanup simulations; real HTTP tests
+for the validation broker; archive provenance and ignored-file tests; Python guest
+bootstrap, disk, diagnostics and supervisor tests; foundation state-adoption
+behavior tests; and shell release-contract tests. `npm test` runs Vitest and
+`npm run test:infra`; the latter runs foundation and guest tests. Live acceptance
+evidence is recorded in `docs/native-vm-prototype.md`.
+
+Live smoke waits follow the product bounds. A GCE boot may spend up to twelve
+minutes without a runtime answer and the create/start transition allows fifteen
+minutes total. Every smoke that boots an orb therefore allows fifteen minutes
+per boot; its overall deadline covers every sequential boot, stop, and required
+network check. `infra/smoke-timeout.contract.test.mjs` keeps these bounds aligned.
+
+The 2026-09-05 full-suite run exposed host CPU overcommit: a concurrent-create DST
+case hit Vitest's outer 30-second deadline while E2E and typechecking also ran.
+There was no DST trace because the simulation had not reported a failure. The
+exact isolated case completed in 7.59 seconds, with heavy scheduler contention.
+Vitest now uses half the host's workers; the complete suite passed with unchanged
+assertions and timeouts. Raw first-failure and corrected-run logs remain in
+`.context/native-final-unit-dst.log` and
+`.context/native-final-unit-dst-bounded.log`.
+
+
 ## Deterministic simulation testing strategy
 
 The [`determined`](https://www.npmjs.com/package/determined) package provides cooperative deterministic scheduling, reproducible entropy, failpoints, blocking primitives, deadlock detection, and exact record/replay of failing schedules. pi-orb does not require timed mutex or condition-variable APIs: it coordinates with database compare-and-swap, explicit lifecycle state, serialized in-process mutation queues, and cancellable adapter operations. Virtual sleep/deadline timers only need to participate correctly in scheduler quiescence and cancellation.
@@ -65,6 +100,12 @@ A terminal-route unit-test flake found 2026-08-11 demonstrates the repository-wi
 
 **Frontend-only session recovery has a focused browser E2E (decided and implemented 2026-09-03).** `npm run test:e2e:frontend` starts an in-process Vite server on a test-owned available port in `frontend` mode and drives it with Playwright Chromium. The test enters an orb draft, activates the fixture's IAP-shaped HTML-401 mode, observes the real global Session ribbon, invokes same-tab sign-in, and proves the same hash, recovered session, absent ribbon, and exact draft after reload. Unit tests separately own API-header/401 classification, session response-order fencing, ribbon rendering, typed session-storage failure, and the state-free control-plane probe. This browser test is necessary because SSR and isolated reducers cannot prove the Vite-injected fixture control, fetch adapter, external store, React shell, top-level navigation, and browser storage as one path. It deliberately does not claim to validate Google IAP; that requires a live protected deployment check. The launcher uses `PLAYWRIGHT_CHROMIUM_EXECUTABLE` when supplied, then the orb's `/usr/bin/chromium` when present, and otherwise Playwright's managed browser.
 
+**Terminal style E2E harness finding (fixed 2026-09-06):** React StrictMode
+can replace wterm's imperative subtree after a cursor locator resolves, making
+an element-handle style assertion stale. The browser test now asserts the font
+and row-height CSS on the stable `.orb-terminal-emulator.wterm` container while
+retaining the cursor attachment check.
+
 **Live IAP edge finding (2026-09-03):** an unauthenticated probe against the deployed Cloud Run browser origin established the load-bearing IAP behavior directly: an ordinary `GET /api/v1/session` returned `302` with an `accounts.google.com` location and HTML, while the same request with `X-Requested-With: XMLHttpRequest` returned HTML `401` with no redirect. The IAP policy still contained exactly the sole `domain:heyglide.com` accessor. This proves the browser adapter's expired-session classification premise without application deployment or a stored identity. It does not prove the authenticated cookie-expiry → ribbon → Google SSO → restored application flow.
 
 **Current proposal for the complete live IAP flow (2026-09-03; not implemented):** run a Playwright smoke against the deployed browser URL in an operator-owned persistent Chromium profile that has an active `heyglide.com` Google session; never commit or upload that profile. Load an orb and draft, clear only cookies scoped to the pi-orb application origin while retaining Google's account session, then issue the ordinary no-store `/api/v1/session` request with `X-Requested-With: XMLHttpRequest`. Require a visible 401-driven Session ribbon and no Google navigation/CORS-flattened network failure. Click same-tab **sign in again**; Google's retained SSO session should complete IAP without human input, and the smoke requires return to the exact hash, a cleared ribbon, a successful probe, and the exact draft. This tests the real edge behavior without trying to manufacture or store Google credentials. A service-account/OAuth bearer smoke is insufficient: it proves IAP authorization but not browser-cookie expiry, AJAX 401 behavior, or the top-level redirect. Keep this live check separate from deterministic CI unless a securely managed interactive browser identity with reliable renewal is designed; the fixture browser E2E remains the required per-change gate. The orb's keyless GCP deployment service account cannot complete this test: the sole-accessor policy deliberately admits the `heyglide.com` human domain, not that service account, and bearer authorization would not exercise browser cookies or Google SSO anyway.
@@ -81,6 +122,15 @@ The implemented E2E test (`e2e/`, run with `npm run test:e2e`) drives the full e
 
 - **Structured query parameters declare their intent.** `jsonParam()` for a `json`/`jsonb` column and `arrayParam()` for a PostgreSQL array (`apps/control-plane/src/adapters/pg/client.ts`); each client unwraps them for its own driver. A shared prepare step guards every driver call in both clients — including transaction-scoped queries — and rejects a remaining bare array or bare plain object with a non-retryable `invariant` `StoreError` naming the placeholder, so the hazard fails identically under PGlite, the in-memory tests, and real PostgreSQL. `apps/control-plane/src/adapters/pg/client.test.ts` covers the prepare/guard/classification logic as pure functions.
 - **The store contract runs on both drivers.** `apps/control-plane/src/testkit/store-contract.ts` takes the raw client as part of its subject and asserts the `jsonb` round trip plus the guard. `apps/control-plane/src/adapters/pg/stores.test.ts` runs it on PGlite in the default unit run; `e2e/postgres-store.e2e.test.ts` provisions `postgres:16` and runs the identical contract over node-postgres in `npm run test:e2e`; `PI_ORB_TEST_DATABASE_URL=postgres://… npx vitest run apps/control-plane/src/adapters/pg` runs it from the unit suite against any throwaway database (each test drops and recreates schema `public`). Verified by reintroducing the bug: 6 of 15 contract tests fail on the real server while PGlite stays green.
+
+**PostgreSQL readiness finding (2026-09-06):** the official image starts an
+init-only server with `listen_addresses=''`, then stops it before starting the
+final TCP server. A socket-default `pg_isready` can therefore release tests into
+that shutdown gap; CI then failed all 37 real-store cases with immediate
+`ECONNRESET`. Every E2E PostgreSQL gate now probes `127.0.0.1` explicitly through
+the shared harness helper, matching the TCP transport used by the tests. A
+delayed init script reproduced the old false-positive deterministically: the
+Unix socket accepted while the TCP probe returned no response.
 
 **Runtime-image workspace rule (2026-08-08).** Every local workspace in `apps/orb-runtime/package.json` must be copied into `apps/orb-runtime/Dockerfile`: its `package.json` before the image's `npm ci` layer and its source afterward. `npm ci` can successfully create a dangling workspace link when the target was omitted, producing an image that builds cleanly and then crash-loops before logging anything. `apps/orb-runtime/src/dockerfile.contract.test.ts` derives the local dependency set from the manifests and enforces both copies without requiring Docker. Incident: `docs/postmortems/2026-08-08-runtime-image-dangling-workspace.md`.
 
@@ -100,6 +150,8 @@ Code never `await`s an `AbortSignal` directly. APIs such as `fetch`, `execFile`,
 Baseline GitHub CI runs for every pull request and every push to `main`, using Node 24 and the committed npm lockfile. A single required checks job installs with `npm ci`, then runs the repository-wide typecheck, lint, and test scripts. Entropy-iteration budgets and deterministic failure-trace retention remain open.
 
 A DST scenario must not accidentally race unrelated product timers. Reinforced 2026-08-09 while adding terminal-stop coverage: replaying `resume-guard-single-shot` and `idle-stop-across-restart` showed legal late-timer schedules in which the idle reaper beat the scenario's first busy replication pull, so setup never established the premise the test was meant to exercise. The initial response was to hold a simulated visible tab until that pull became durable. A recorded `preemption-mid-turn-resumes` failure on 2026-08-26 showed that this was still not deterministic: the timer policy may repeatedly fire an operation deadline before an already-pending healthy fake-runtime response, so the background pull itself can remain unavailable for the whole setup horizon. That preemption scenario now establishes its already-replicated, already-busy starting premise in a separate setup phase through the store boundary, before starting the reconciler and poller; late deadlines remain fully adversarial after the preemption, where they are part of the invariant under test. Learned originally from the `shared-device-flow` replay on 2026-08-07: two independently booted orbs can legitimately take more than the compressed 30-second test idle window to overlap in `running`, so a scenario whose invariant is shared-auth convergence disables idle-stop explicitly; idle behavior remains covered by its dedicated scenarios. This is not permission to hide a product race: replay first, establish that the observed transition is designed behavior, and isolate only the timer outside the scenario's stated invariant.
+
+The `mixed-generation-rollover` failure on 2026-09-07 exposed two product races. Revisions independently restarted one draining host because restart evidence was process-local. Further exploration found a stale absence pass provisioning and committing a retired incarnation across replacement finalization. Deterministic scenarios now stage both interleavings; the original rollover scenario retains standard late-timer exploration. See `docs/postmortems/2026-09-07-mixed-generation-drain-restart.md`.
 
 Decided 2026-08-05 (from `docs/postmortems/2026-08-05-unreachable-restart-livelock.md`): **the fake world models host boot latency and preemption.** `FakeWorld` used to boot a host into a serving runtime instantaneously, which made every restart look free and hid a production livelock for as long as the feature existed — the reconciler's inline unreachable-runtime restart granted only `unreachableGraceMs` (30 s) for the runtime to come back, while a real COS VM needs ~60–70 s from `instances.start` to a serving container, so the restart path could never observe success and hard-stopped a booting VM forever. The rules now are:
 

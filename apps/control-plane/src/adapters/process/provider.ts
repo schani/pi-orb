@@ -73,6 +73,7 @@ interface HostMetadata {
 
 interface ManagedChild {
   readonly child: ChildProcess;
+  readonly startedAt: number;
   intentional: boolean;
 }
 
@@ -358,7 +359,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       );
       closeSync(stdout);
       closeSync(stderr);
-      const managed: ManagedChild = { child, intentional: false };
+      const managed: ManagedChild = { child, startedAt: Date.now(), intentional: false };
       this.children.set(metadata.orbId, managed);
       child.once("exit", () => {
         if (!this.forgetChild(metadata.orbId, managed)) return;
@@ -840,6 +841,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           incarnation: found.value.incarnation,
           specFingerprint: found.value.specFingerprint,
           state: running ? "running" : "stopped",
+          ...(running ? { lastStartedAt: managed.startedAt } : {}),
           ...(running
             ? { runtimeAddress: { baseUrl: `http://127.0.0.1:${found.value.port}` } }
             : {}),

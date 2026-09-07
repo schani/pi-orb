@@ -9,6 +9,8 @@ does share the one read/write database credential, `docs/deployment.md`).
 
 ## Deploy workflow
 
+First adopt/apply the separately authorized foundation (`infra/foundation/README.md`). Archive existing orbs before the native rollout. The release refuses an unapplied or mismatched foundation.
+
 The supported manual deployment is one command from the repository root:
 
     ./infra/release.sh
@@ -16,9 +18,17 @@ The supported manual deployment is one command from the repository root:
 It requires a clean `main` checkout exactly matching freshly fetched
 `origin/main`, shows the exact OpenTofu plan, and requires typing `deploy` before
 applying. `./infra/release.sh --yes` is the non-interactive form intended for a
-future serialized CI job. The script owns the complete transaction:
+future serialized CI job.
 
-1. build and push both digest-pinned images after the runtime boot gate;
+For the reviewed first native rollout after archiving every orb,
+`./infra/release.sh --quiesce` disables the browser after apply, requires fresh
+zero-instance metrics for every recorded browser revision, restores its prior
+scaling mode, and then runs smokes. Missing metrics fail closed; handled errors
+and signals restore scaling and repair IAP. This path awaits live validation.
+
+The script owns the complete transaction:
+
+1. rebuild and boot-validate the native VM image, then push the digest-pinned control-plane container;
 2. clamp `deploy_generation` above the generation currently serving in Cloud
    Run, then create and apply an exact saved OpenTofu plan;
 3. repair IAP after every attempted apply (`deploy.sh --iap-only` on apply
@@ -37,10 +47,7 @@ verify no release is active before removing that object. The future GitHub
 workflow must use the same lock in addition to its native concurrency group.
 
 `build-push.sh`, `deploy.sh`, `smoke.sh`, and `smoke-workload-identity.sh` remain
-implementation stages for diagnostics; they are not separate operator steps. `build-push.sh` boots the
-freshly built runtime image locally and requires it to answer `/v1/health`
-before anything is pushed — Cloud Run already fails a control-plane rollout
-loudly, but nothing downstream ever verifies the runtime artifact.
+implementation stages for diagnostics; they are not separate operator steps. The native build boots a fresh VM and requires runtime readiness, correct ownership/storage, and disabled Docker services before accepting the image. Release validates its manifest against the exact source commit and project. Rebuild an image independently using `infra/native-vm/README.md`; the accepted manifest and logs remain under `.context/native-image-release/`.
 
 ## Tooling access
 
@@ -65,22 +72,22 @@ file. Verify the active identity and project before using the tooling:
     ./infra/api.sh /api/v1/orbs/<id>/start '{}'
 
 The API helper impersonates `pi-orb-debug@...` against the ops service — no IAP
-is involved.
+is involved. That service account and its service-account-level
+`roles/iam.serviceAccountTokenCreator` binding for `pi-orb-amp-deployer` are an
+external bootstrap prerequisite retained by `infra/bootstrap-amp-oidc.sh`; the
+foundation root does not create or manage either one. Verify the binding after
+foundation adoption and before the first scoped release.
 
 The federation pool/provider and deployer permissions are a separately
 bootstrapped trust boundary, intentionally outside the recurring OpenTofu root.
 The older Amp trust path and `infra/bootstrap-amp-oidc.sh` remain independently
 scoped adoption records, but repository hooks no longer configure Amp
 credentials. The deployer has functional roles for the root's static-plane
-resources rather than Owner or Editor, object access only on the static-plane
-state bucket, and token creation only on the debug service account.
+resources rather than Owner or Editor and object access only on the static-plane
+state bucket. Its externally bootstrapped token creation grant is limited to the
+debug service account.
 
-The current OpenTofu root manages project IAM, so full deployment access is
-necessarily escalation-capable even without Owner or Editor: arbitrary code in
-any admitted project orb can obtain the deployer's short-lived authority and
-could alter project bindings. Moving stable IAM/bootstrap resources out of the
-recurring root is required before this becomes a least-privilege production
-deployment identity.
+The application root consumes foundation outputs. The foundation owns stable IAM and the trust policies; its adoption removes the old deployer's broader grants through a reviewed plan. That restriction becomes effective only after the foundation adoption and permission changes have been applied.
 
 ## Workload identity (docs/workload-identity.md)
 
@@ -150,11 +157,11 @@ policies, generic OIDC verification rules — is
   `domain:heyglide.com` member and verifies the resulting policy before
   revision cleanup or smoke.
 - During a revision rollover the draining instance's reconciler keeps running
-  with the previous startup-script generation for 12+ minutes — not ~2 — and
-  used to fight the new revision over orb VMs (dueling script repairs; see
+  with the previous host specification for 12+ minutes — not ~2 — and used to
+  fight the new revision over orb VMs (see
   docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md). Two
-  defenses now: an apply carrying a larger `deploy_generation` fences script
-  repairs forward-only, and `deploy.sh` deletes drained revisions of the browser
+  defenses now: an apply carrying a larger `deploy_generation` fences host
+  replacement forward-only, and `deploy.sh` deletes drained revisions of the browser
   service. Neither is a complete lifecycle-authority fence: on 2026-08-11 a
   deleted revision continued reconciling for 7m42s, and although it could not
   repair backward, it could still start the host and fail durable orb state

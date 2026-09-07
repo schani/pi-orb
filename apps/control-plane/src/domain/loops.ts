@@ -139,6 +139,7 @@ function reconcileDelayMs(
         case "auth":
         case "readiness":
         case "host_transition":
+        case "newer_spec_owner":
         case "stale_compute_disposal":
           return constants.readinessPollMs;
         case "drain_blocked":
@@ -414,6 +415,32 @@ export async function orphanSweepOnce(task: SimulationTask, deps: ControlPlaneDe
         logOrbEvent(task, orb.id, "archived-host-destroy-failed", {
           host,
           error: destroyed.error.message,
+        });
+      }
+      continue;
+    }
+    if (orb !== null && observation.incarnation < orb.hostIncarnation) {
+      logOrbEvent(task, orb.id, "retired-host-resurrected", {
+        host,
+        observed_incarnation: observation.incarnation,
+        durable_incarnation: orb.hostIncarnation,
+        decision: "discard",
+      });
+      const discarded = await withDeadline(
+        task,
+        deps.constants.providerOperationTimeoutMs,
+        "discard resurrected retired host",
+        (context) =>
+          deps.hostProvider.discardCompute(
+            task,
+            { orbId: orb.id, throughIncarnation: observation.incarnation },
+            context,
+          ),
+      );
+      if (discarded.isErr()) {
+        logOrbEvent(task, orb.id, "retired-host-discard-failed", {
+          host,
+          error: discarded.error.message,
         });
       }
       continue;

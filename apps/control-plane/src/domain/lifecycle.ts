@@ -29,6 +29,7 @@ export type ReconcileOutcome =
         | "auth"
         | "readiness"
         | "host_transition"
+        | "newer_spec_owner"
         | "stale_compute_disposal"
         | "drain_blocked"
         | "deletion_quarantine";
@@ -64,6 +65,7 @@ const waiting = (
     | "auth"
     | "readiness"
     | "host_transition"
+    | "newer_spec_owner"
     | "stale_compute_disposal"
     | "drain_blocked"
     | "deletion_quarantine",
@@ -303,6 +305,44 @@ async function provisionHost(
       : {}),
   });
   return result;
+}
+
+async function discardSupersededProvision(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+  provisioned: ProvisionedOrbHost,
+): Promise<void> {
+  const current = await deps.store.getOrb(task, orbId);
+  if (
+    current.isErr() ||
+    current.value === null ||
+    (current.value.hostIncarnation <= provisioned.incarnation &&
+      (current.value.hostDiscardThroughIncarnation === null ||
+        current.value.hostDiscardThroughIncarnation < provisioned.incarnation))
+  ) {
+    return;
+  }
+  const discarded = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "discard superseded provision",
+    (context) =>
+      deps.hostProvider.discardCompute(
+        task,
+        { orbId, throughIncarnation: provisioned.incarnation },
+        context,
+      ),
+  );
+  logOrbEvent(task, orbId, "superseded-provision-discard", {
+    host: provisioned.ref.resourceId,
+    provisioned_incarnation: provisioned.incarnation,
+    durable_incarnation: current.value.hostIncarnation,
+    discard_through_incarnation: current.value.hostDiscardThroughIncarnation,
+    ...(discarded.isOk()
+      ? { outcome: "ok" }
+      : { outcome: "error", error: discarded.error.message }),
+  });
 }
 
 function boundedDiscardText(value: string): string {
@@ -559,7 +599,7 @@ async function reconcileCreateStart(
     repositoryUrl: project.repositoryUrl,
   });
   const declinedCondition = `spec-replacement-declined:${orb.id}`;
-  let startSpecFingerprint = desiredSpecFingerprint;
+  const startSpecFingerprint = desiredSpecFingerprint;
   if (
     orb.hostRef === null &&
     orb.hostSpecFingerprint !== null &&
@@ -597,13 +637,13 @@ async function reconcileCreateStart(
       return waiting("stale_compute_disposal");
     }
     if (requested.value.type === "declined") {
-      startSpecFingerprint = orb.hostSpecFingerprint ?? desiredSpecFingerprint;
       if (deps.control.noteCondition(declinedCondition, true)) {
         logOrbEvent(task, orb.id, "spec-replacement-declined", {
           committed_generation: requested.value.committedGeneration,
           configured_generation: deps.hostProvider.specGeneration,
         });
       }
+      return waiting("newer_spec_owner");
     } else {
       deps.control.noteCondition(declinedCondition, false);
     }
@@ -689,6 +729,18 @@ async function reconcileCreateStart(
   // 3. Ensure a host exists.
   let hostResourceId = orb.hostRef;
   if (hostResourceId === null) {
+    const current = await deps.store.getOrb(task, orb.id);
+    if (current.isErr()) return retryable(current.error);
+    if (
+      current.value === null ||
+      current.value.stateVersion !== orb.stateVersion ||
+      current.value.hostIncarnation !== orb.hostIncarnation ||
+      current.value.hostDiscardThroughIncarnation !== null ||
+      current.value.hostRef !== null
+    ) {
+      return { type: "conflict" };
+    }
+    orb = current.value;
     const isReplacement = orb.hostIncarnation > 0;
     if (isReplacement) {
       await task.checkpoint("compute-replacement.replacement-before-provision");
@@ -711,6 +763,7 @@ async function reconcileCreateStart(
     const updated = await deps.store.casUpdateFields(task, {
       orbId: orb.id,
       expectedStateVersion: orb.stateVersion,
+      expectedHostIncarnation: orb.hostIncarnation,
       now: task.wallNow(),
       hostRef: provisioned.value.ref.resourceId,
       runtimeTokenHash: provisioned.value.runtimeTokenHash,
@@ -724,9 +777,11 @@ async function reconcileCreateStart(
       hostDiscardEvidence: null,
     });
     if (updated.isErr()) {
-      return updated.error.type === "state_conflict"
-        ? { type: "conflict" }
-        : retryable(updated.error);
+      if (updated.error.type === "state_conflict") {
+        await discardSupersededProvision(task, deps, orb.id, provisioned.value);
+        return { type: "conflict" };
+      }
+      return retryable(updated.error);
     }
     orb = updated.value;
     hostResourceId = provisioned.value.ref.resourceId;
@@ -773,13 +828,13 @@ async function reconcileCreateStart(
       return waiting("stale_compute_disposal");
     }
     if (replacement.value.type === "declined") {
-      startSpecFingerprint = observation.specFingerprint ?? startSpecFingerprint;
       if (deps.control.noteCondition(declinedCondition, true)) {
         logOrbEvent(task, orb.id, "spec-replacement-declined", {
           committed_generation: replacement.value.committedGeneration,
           configured_generation: deps.hostProvider.specGeneration,
         });
       }
+      return waiting("newer_spec_owner");
     }
   }
   if (observation === null) {
@@ -791,6 +846,21 @@ async function reconcileCreateStart(
       hostRunningSinceMono: null,
       answered: false,
     });
+    // Re-read after absence: a replacement may have advanced while this
+    // provider observation was in flight. Provisioning from that stale row
+    // would resurrect a retired incarnation after its discard completed.
+    const current = await deps.store.getOrb(task, orb.id);
+    if (current.isErr()) return retryable(current.error);
+    if (
+      current.value === null ||
+      current.value.stateVersion !== orb.stateVersion ||
+      current.value.hostIncarnation !== orb.hostIncarnation ||
+      current.value.hostDiscardThroughIncarnation !== null ||
+      current.value.hostRef !== orb.hostRef
+    ) {
+      return { type: "conflict" };
+    }
+    orb = current.value;
     // Definitive absence: idempotent provision restores the host (docs/lifecycle.md).
     const provisioned = await provisionHost(task, deps, orb, project.repositoryUrl, "host_absent");
     if (provisioned.isErr()) {
@@ -813,6 +883,7 @@ async function reconcileCreateStart(
       const updated = await deps.store.casUpdateFields(task, {
         orbId: orb.id,
         expectedStateVersion: orb.stateVersion,
+        expectedHostIncarnation: orb.hostIncarnation,
         now: task.wallNow(),
         hostRef: provisioned.value.ref.resourceId,
         runtimeTokenHash: provisioned.value.runtimeTokenHash,
@@ -820,9 +891,11 @@ async function reconcileCreateStart(
         hostSpecGeneration: provisioned.value.specGeneration,
       });
       if (updated.isErr()) {
-        return updated.error.type === "state_conflict"
-          ? { type: "conflict" }
-          : retryable(updated.error);
+        if (updated.error.type === "state_conflict") {
+          await discardSupersededProvision(task, deps, orb.id, provisioned.value);
+          return { type: "conflict" };
+        }
+        return retryable(updated.error);
       }
     }
     return { type: "progressed" };
@@ -1148,6 +1221,7 @@ async function reconcileRunning(
       orb.id,
       task.monotonicNow(),
       deps.constants.postRestartGraceMs,
+      task.wallNow(),
     );
     return transitionTo(task, deps, orb, "starting", { reason: "unreachable_restart" });
   }
@@ -1314,6 +1388,7 @@ async function reconcileStopping(
         orb.id,
         task.monotonicNow(),
         deps.constants.postRestartGraceMs,
+        task.wallNow(),
       );
       return { type: "progressed" };
     }
@@ -1365,6 +1440,32 @@ async function reconcileStopping(
   if (liveness === null) {
     deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
   } else if (task.monotonicNow() - liveness.lastSuccessAt > livenessGraceMs(deps, liveness)) {
+    const lastStartedAt = observation.lastStartedAt;
+    const hostAgeMs = lastStartedAt === undefined ? null : task.wallNow() - lastStartedAt;
+    if (
+      hostAgeMs !== null &&
+      Number.isFinite(hostAgeMs) &&
+      hostAgeMs >= 0 &&
+      hostAgeMs <= deps.constants.postRestartGraceMs &&
+      lastStartedAt !== undefined &&
+      lastStartedAt >= orb.stateChangedAt &&
+      (liveness.hostStartedAt === null || lastStartedAt > liveness.hostStartedAt)
+    ) {
+      deps.control.resetLivenessBaseline(
+        orb.id,
+        task.monotonicNow() - hostAgeMs,
+        deps.constants.postRestartGraceMs,
+        lastStartedAt,
+      );
+      logOrbEvent(task, orb.id, "drain-restart-deferred", {
+        host: orb.hostRef,
+        host_started_at: lastStartedAt,
+        host_age_ms: Math.round(hostAgeMs),
+        grace_ms: deps.constants.postRestartGraceMs,
+        reason: "recent_provider_start",
+      });
+      return waiting("readiness");
+    }
     const silentMs = Math.round(task.monotonicNow() - liveness.lastSuccessAt);
     if (liveness.restartGraceMs !== null) {
       // The restarted host had a full boot's worth of grace and still never
@@ -1412,6 +1513,7 @@ async function reconcileStopping(
       orb.id,
       task.monotonicNow(),
       deps.constants.postRestartGraceMs,
+      task.wallNow(),
     );
     return { type: "progressed" };
   }
@@ -1583,6 +1685,7 @@ async function reconcileArchiving(
         const committed = await deps.store.casUpdateFields(task, {
           orbId: orb.id,
           expectedStateVersion: orb.stateVersion,
+          expectedHostIncarnation: orb.hostIncarnation,
           now: task.wallNow(),
           hostRef: provisioned.value.ref.resourceId,
           runtimeTokenHash: provisioned.value.runtimeTokenHash,
@@ -1591,9 +1694,11 @@ async function reconcileArchiving(
           hostDiscardEvidence: null,
         });
         if (committed.isErr()) {
-          return committed.error.type === "state_conflict"
-            ? { type: "conflict" }
-            : retryable(committed.error);
+          if (committed.error.type === "state_conflict") {
+            await discardSupersededProvision(task, deps, orb.id, provisioned.value);
+            return { type: "conflict" };
+          }
+          return retryable(committed.error);
         }
         await task.checkpoint("compute-replacement.replacement-committed");
         await deps.store.recordOrbDeletionError(task, {
