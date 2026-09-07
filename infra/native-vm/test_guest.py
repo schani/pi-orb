@@ -246,6 +246,12 @@ class RuntimeSupervisorTest(unittest.TestCase):
 
 
 class DiagnosticTest(unittest.TestCase):
+    def test_workspace_mount_avoids_local_filesystem_boot_cycle(self):
+        unit = (ROOT / 'workspace.mount').read_text()
+        self.assertIn('DefaultDependencies=no', unit)
+        self.assertIn('Conflicts=umount.target', unit)
+        self.assertIn('Before=pi-orb-bootstrap.service docker.service containerd.service umount.target', unit)
+
     def test_reports_workspace_capacity_only_after_mount(self):
         filesystem = type('Filesystem', (), {'f_bavail': 2, 'f_frsize': 4096})()
         with patch.object(diagnostic.os.path, 'ismount', return_value=False), patch.object(diagnostic.os, 'statvfs', return_value=filesystem):

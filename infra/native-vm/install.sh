@@ -85,4 +85,14 @@ install -m755 infra/native-vm/acceptance.sh /opt/pi-orb/acceptance.sh
 du -sx /app /usr /opt >/opt/pi-orb/sizes-kib.tsv
 infra/native-vm/test.sh
 systemd-analyze verify /etc/systemd/system/pi-orb-runtime.service /etc/systemd/system/pi-orb-bootstrap.service /etc/systemd/system/pi-orb-workspace.service /etc/systemd/system/pi-orb-boot-failure@.service /etc/systemd/system/workspace.mount
+if ! boot_graph=$(LC_ALL=C systemd-analyze --man=no verify multi-user.target 2>&1); then
+  printf '%s\n' "$boot_graph" >&2
+  exit 1
+fi
+printf '%s\n' "$boot_graph"
+# verify can return success after deleting cyclic jobs, so its output is part of the gate.
+if grep -q 'ordering cycle' <<<"$boot_graph"; then
+  echo 'systemd boot graph contains an ordering cycle' >&2
+  exit 1
+fi
 date -u +%Y-%m-%dT%H:%M:%SZ >/opt/pi-orb/build-finished-at
