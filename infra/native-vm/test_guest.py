@@ -287,6 +287,48 @@ class DiagnosticTest(unittest.TestCase):
             raise OSError('offline')
         diagnostic.publish(diagnostic.payload('runtime', 'failed'), fail)
 
+    def test_event_is_logged_without_overwriting_boot_status(self):
+        requests = []
+        def opened(request, timeout):
+            if request.full_url == diagnostic.INSTANCE_ID_URL:
+                return Response(b'123')
+            if request.full_url == diagnostic.ZONE_URL:
+                return Response(b'projects/p/zones/us-central1-a')
+            if request.full_url == diagnostic.PROJECT_ID_URL:
+                return Response(b'project')
+            if request.full_url == diagnostic.TOKEN_URL:
+                return Response(b'{"access_token":"vm-token"}')
+            requests.append(request)
+            return Response()
+        record = diagnostic.rust_event(
+            'rust_toolchain_retry', '',
+            '{"attempt":2,"delayMs":5000,"errorClass":"dns"}',
+        )
+        self.assertIsNotNone(record)
+        diagnostic.publish(record, opened, write_attribute=False)
+        self.assertEqual([request.full_url for request in requests], [diagnostic.LOGGING_URL])
+        logged = json.loads(requests[0].data)['entries'][0]['jsonPayload']
+        self.assertEqual(logged['status'], 'event')
+        self.assertEqual(logged['code'], 'rust_toolchain_retry')
+        self.assertEqual(logged['details']['errorClass'], 'dns')
+
+    def test_runtime_events_are_bounded_and_structured(self):
+        records = []
+        with patch.object(diagnostic, 'publish', side_effect=lambda record, **kwargs: records.append((record, kwargs))):
+            self.assertEqual(diagnostic.main([
+                'runtime', 'event', 'rust_toolchain_recovered', '', '{"attempt":3}',
+            ]), 0)
+        self.assertEqual(records[0][0]['details']['attempt'], 3)
+        self.assertEqual(records[0][1], {'write_attribute': False})
+        invalid = (
+            ['runtime', 'event', 'other', '', '{"attempt":2}'],
+            ['runtime', 'event', 'rust_toolchain_retry', 'raw error', '{"attempt":2,"delayMs":5000,"errorClass":"dns"}'],
+            ['runtime', 'event', 'rust_toolchain_retry', '', '{"attempt":2,"delayMs":5000,"errorClass":"secret"}'],
+            ['runtime', 'event', 'rust_toolchain_recovered', '', '{"attempt":3,"extra":"value"}'],
+        )
+        for arguments in invalid:
+            self.assertEqual(diagnostic.main(arguments), 2)
+
     def test_unit_name_maps_to_contract_phase(self):
         records = []
         with patch.object(diagnostic, 'publish', records.append):

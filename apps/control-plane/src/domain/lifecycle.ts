@@ -1333,7 +1333,8 @@ async function reconcileRunning(
       stopReason: "idle",
       reason: `idle_for_${Math.round((now - lastActivityAt) / 1000)}s`,
     });
-    if (transitioned.type === "transitioned") deps.control.markStopping(orb.id);
+    if (transitioned.type === "transitioned")
+      deps.control.markStopping(orb.id, orb.stateVersion + 1);
     return transitioned;
   }
   return { type: "noop" };
@@ -1349,7 +1350,7 @@ async function reconcileStopping(
 ): Promise<ReconcileOutcome> {
   // New live connections are rejected and existing agent/terminal proxies are
   // closed while stopping (docs/lifecycle.md).
-  deps.control.markStopping(orb.id);
+  deps.control.markStopping(orb.id, orb.stateVersion);
   deps.control.closeBrowserConnections(orb.id);
 
   if (orb.hostRef === null) {
@@ -1606,7 +1607,7 @@ async function reconcileDeleting(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
-  deps.control.markStopping(orb.id);
+  deps.control.markStopping(orb.id, orb.stateVersion);
   deps.control.closeBrowserConnections(orb.id);
   const intent = await deps.store.getOrbDeletion(task, orb.id);
   if (intent.isErr()) return retryable(intent.error);
@@ -1634,7 +1635,7 @@ async function reconcileArchiving(
   deps: ControlPlaneDeps,
   orb: OrbRow,
 ): Promise<ReconcileOutcome> {
-  deps.control.markStopping(orb.id);
+  deps.control.markStopping(orb.id, orb.stateVersion);
   deps.control.closeBrowserConnections(orb.id);
   const intent = await deps.store.getOrbDeletion(task, orb.id);
   if (intent.isErr()) return retryable(intent.error);
@@ -2139,7 +2140,7 @@ export function requestOrbArchive(
         cleanupAfter: now + deps.constants.deletionQuarantineMs,
       });
       if (requested.isOk()) {
-        deps.control.markStopping(orbId);
+        deps.control.markStopping(orbId, requested.value.stateVersion);
         deps.control.closeBrowserConnections(orbId);
         logOrbEvent(task, orbId, "transition", {
           from: orb.state,
@@ -2178,7 +2179,7 @@ export function requestOrbDeletion(
         cleanupAfter: now + deps.constants.deletionQuarantineMs,
       });
       if (requested.isOk()) {
-        deps.control.markStopping(orbId);
+        deps.control.markStopping(orbId, requested.value.stateVersion);
         deps.control.closeBrowserConnections(orbId);
         logOrbEvent(task, orbId, "transition", {
           from: orb.state,
@@ -2263,7 +2264,7 @@ export function requestOrbStop(
           to: "stopping",
           reason: "stop_requested",
         });
-        deps.control.markStopping(orbId);
+        deps.control.markStopping(orbId, cas.value.stateVersion);
         deps.control.closeBrowserConnections(orbId);
         return ok(cas.value);
       }

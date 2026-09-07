@@ -52,6 +52,7 @@ import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { pickCodexModel } from "./model-select.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
+import { reportRustToolchainEdge } from "./rust-toolchain-reporter.ts";
 import { sessionFlushed } from "./session-flush.ts";
 
 export interface PiOrbAgentOptions {
@@ -309,7 +310,11 @@ export class PiOrbAgent {
     if (home.isErr()) {
       return err(this.failed("home_init_failed", home.error.message, false));
     }
-    const rust = await ensurePersistentRustToolchain(home.value);
+    const rust = await ensurePersistentRustToolchain(home.value, process.env, undefined, {
+      now: performance.now.bind(performance),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      report: (event, timeoutMs) => reportRustToolchainEdge(event, Math.min(20_000, timeoutMs)),
+    });
     if (rust.isErr()) {
       return err(this.failed("rust_toolchain_init_failed", rust.error.message, true));
     }
