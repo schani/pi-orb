@@ -87,7 +87,7 @@ repair_iap_after_attempt() {
 
 on_signal() {
   local status=$1
-  trap - HUP INT TERM
+  trap '' HUP INT TERM
   echo "release: interrupted" >&2
   release_stop_child
   repair_iap_after_attempt || true
@@ -224,7 +224,7 @@ IMAGE_BUILD_SUBNET=$(jq -r ' .image_build_subnetwork.value' <<<"$foundation")
 export ZONE IMAGE_BUILDER_SA IMAGE_BUILD_SUBNET
 
 echo "release: building and validating native image for $head_commit ..."
-"$INFRA/build-push.sh" > "$VARS"
+release_run_child "$INFRA/build-push.sh" > "$VARS"
 chmod 600 "$VARS"
 
 # build-push.sh emits epoch seconds. Clamp them above the generation currently

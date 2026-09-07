@@ -4,6 +4,17 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
+source infra/release-child.sh
+
+on_signal() {
+  local status=$1
+  trap '' HUP INT TERM
+  release_stop_child
+  exit "$status"
+}
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 PROJECT=${PROJECT:-playground-dev-6ae7}
 REGION=${REGION:-us-central1}
@@ -16,7 +27,8 @@ IMAGE_BUILD_DIR=${IMAGE_BUILD_DIR:-$PWD/.context/native-image-release/$(date -u 
 IMAGE_BUILDER_SA=${IMAGE_BUILDER_SA:-pi-orb-image-builder@$PROJECT.iam.gserviceaccount.com}
 IMAGE_BUILD_SUBNET=${IMAGE_BUILD_SUBNET:-projects/$PROJECT/regions/$REGION/subnetworks/pi-orb-image-build-$REGION}
 
-npm run native-image:build -- --project "$PROJECT" --zone "$ZONE" \
+release_run_child node --experimental-strip-types packages/native-image/src/cli.ts \
+  --project "$PROJECT" --zone "$ZONE" \
   --base-image "$BASE_IMAGE" --version "$TAG" --subnet "$IMAGE_BUILD_SUBNET" \
   --builder-service-account "$IMAGE_BUILDER_SA" \
   --validation-service-account "pi-orb-orb-vm@$PROJECT.iam.gserviceaccount.com" \
