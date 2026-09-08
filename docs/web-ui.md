@@ -17,6 +17,14 @@ The first UI needs to display at least:
 
 Remaining UI questions include rendering unknown content blocks, large/truncated tool output, and image storage. Transient token deltas are ephemeral presentation events and are reconstructed after reconnect through ordinary live events; they are not stored in PostgreSQL.
 
+## Orb-to-orb navigation (decided and implemented 2026-09-08)
+
+Switching orbs keeps the project index mounted, including its rows and scroll position. The selected row changes immediately; its age becomes `…` while the destination loads. The outgoing conversation remains visible until the destination's orb metadata and replicated history requests have settled, then the conversation swaps in one commit with history already initialized. No empty transcript, placeholder header, whole-page remount, fade, or loading overlay intervenes. While waiting, the outgoing conversation is inert so a send or lifecycle action cannot accidentally target the previous orb. The index stays interactive so another selection can supersede the pending one.
+
+The persistent route shell owns the destination load; only conversation-local state is keyed by orb ID. Late results from superseded loads are discarded. Returning to the still-visible orb cancels the switch without remounting it. Committed switches dispose the old live connection and initialize the new cursor from replicated history; drafts remain independently scoped by orb ID. This deliberately does not keep a fleet of hidden conversations or live sockets mounted. Same-project switches retain the index's existing polling loop; a project change resets that project-scoped data. Ordinary anchors, browser history, and modified-click behavior remain native.
+
+Loading is exposed through the selected-row indicator and `aria-busy`; HTTP/history failures still use the existing visible error surfaces, and missing orbs keep the requested URL and resource-specific message. This is browser-local presentation, with no autonomous server decision or new durable telemetry. Transport-gated Chromium tests in `e2e/frontend-session.e2e.test.ts` cover panel/row DOM identity, retained transcript while loading, inert outgoing controls, draft isolation/restoration, superseded responses, and missing URLs.
+
 ## Missing resources (decided 2026-08-08)
 
 A direct URL for a resource that does not exist stays at that URL and renders a resource-specific message (for example, “Orb doesn't exist”) with a link to the dashboard. Silently redirecting to the dashboard was rejected because it hides whether the resource was deleted, the URL is stale, or navigation failed. This behavior applies consistently to every resource type and to unknown application routes; unknown routes render “Page doesn't exist.” The browser uses hash routing, so the server serves its app shell only at `/` and `/index.html`; known built assets keep their static paths, while another path is a missing page rather than an SPA fallback.

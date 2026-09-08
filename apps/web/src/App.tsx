@@ -45,7 +45,7 @@ function AppRoutes() {
   ) : route.page === "create_orb" ? (
     <CreateOrbPage key={route.projectId} projectId={route.projectId} />
   ) : route.page === "orb" ? (
-    <OrbPage key={route.orbId} orbId={route.orbId} />
+    <OrbPage orbId={route.orbId} />
   ) : (
     <NotFoundPage />
   );

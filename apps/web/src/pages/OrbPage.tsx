@@ -16,6 +16,7 @@ import { HistoryView, type LiveBlock, type ToolChip } from "../components/Histor
 import { HostedFiles } from "../components/HostedFiles.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
+import { OrbIndex } from "../components/OrbIndex.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
 import { StateTile } from "../components/StateTile.tsx";
@@ -30,23 +31,17 @@ import {
   getProject,
   listHostedFiles,
   listOrbMessages,
-  listOrbs,
   startOrb,
   stopOrb,
   updateOrb,
 } from "../lib/api.ts";
 import { loadComposerDraft, saveComposerDraft } from "../lib/composer-draft.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
-import { deriveOrbFaviconStatus, FAVICON_HREFS, setOrbFavicon } from "../lib/favicon.ts";
+import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { mergeReplicatedHistory } from "../lib/history-refresh.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
-import {
-  formatProjectOrbAge,
-  formatTimeRemaining,
-  projectOrbGlyph,
-  splitProjectOrbs,
-} from "../lib/project-orbs.ts";
+import { formatTimeRemaining, projectOrbGlyph } from "../lib/project-orbs.ts";
 import {
   createMutationEpoch,
   hasDeliveredMessageAwaitingHistory,
@@ -390,8 +385,51 @@ function CopyCodeButton({ code }: { code: string }) {
   );
 }
 
+interface OrbLoad {
+  orbId: string;
+  orb: Awaited<ReturnType<typeof getOrb>>;
+  history: Awaited<ReturnType<typeof getOrbHistory>>;
+}
+
 export function OrbPage({ orbId }: { orbId: string }) {
-  const [state, dispatch] = useReducer(reducer, orbId, initialState);
+  const [loaded, setLoaded] = useState<OrbLoad | null>(null);
+  useEffect(() => {
+    if (loaded?.orbId === orbId) return;
+    let cancelled = false;
+    void Promise.all([getOrb(orbId), getOrbHistory(orbId)]).then(([orb, history]) => {
+      if (!cancelled) setLoaded({ orbId, orb, history });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [orbId, loaded]);
+  const pending = loaded?.orbId !== orbId;
+  return (
+    <div className="orb-page">
+      <OrbIndex
+        projectId={loaded?.orb.isOk() ? loaded.orb.value.projectId : null}
+        orbId={orbId}
+        pending={pending}
+      />
+      {loaded === null ? (
+        <div className="orb-main" aria-busy="true" />
+      ) : (
+        <OrbConversation key={loaded.orbId} initial={loaded} pending={pending} />
+      )}
+    </div>
+  );
+}
+
+function OrbConversation({ initial, pending }: { initial: OrbLoad; pending: boolean }) {
+  const orbId = initial.orbId;
+  const [state, dispatch] = useReducer(reducer, initial, (load) =>
+    reducer(
+      initialState(load.orbId),
+      load.history.isOk()
+        ? { type: "history_loaded", view: load.history.value }
+        : { type: "history_failed", error: load.history.error },
+    ),
+  );
   const draftStorageErrorShown = useRef(false);
 
   useEffect(() => {
@@ -405,12 +443,14 @@ export function OrbPage({ orbId }: { orbId: string }) {
       dispatch({ type: "notice", message: saved.error.message });
     }
   }, [orbId, state.composerImages, state.composerMode, state.composerText]);
-  const [orb, setOrb] = useState<OrbView | null>(null);
+  const [orb, setOrb] = useState<OrbView | null>(() =>
+    initial.orb.isOk() ? initial.orb.value : null,
+  );
   const [projectName, setProjectName] = useState<string | null>(null);
-  // The left index: this project's working set.
-  const [projectOrbs, setProjectOrbs] = useState<OrbView[] | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
-  const [orbError, setOrbError] = useState<ApiError | null>(null);
+  const [orbError, setOrbError] = useState<ApiError | null>(() =>
+    initial.orb.isErr() ? initial.orb.error : null,
+  );
   const [hostedFiles, setHostedFiles] = useState<HostedFilesResponse | null>(null);
   const [hostedFilesError, setHostedFilesError] = useState<ApiError | null>(null);
   const [queuedMessages, setQueuedMessages] = useState<OrbMessageView[]>([]);
@@ -420,7 +460,10 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const transcriptRef = useRef({ records: state.records, historyLoaded: state.historyLoaded });
   transcriptRef.current = { records: state.records, historyLoaded: state.historyLoaded };
   const historyRefreshInFlightRef = useRef(false);
-  const [orbNotFound, setOrbNotFound] = useState(false);
+  const [orbNotFound, setOrbNotFound] = useState(
+    () =>
+      initial.orb.isErr() && initial.orb.error.type === "http" && initial.orb.error.status === 404,
+  );
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
@@ -569,46 +612,9 @@ export function OrbPage({ orbId }: { orbId: string }) {
     };
   }, [orb?.projectId]);
 
-  // Refresh sibling titles and status independently of the open orb's activity.
-  useEffect(() => {
-    const projectId = orb?.projectId;
-    if (projectId === undefined) return;
-    let cancelled = false;
-    let inFlight = false;
-    const poll = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      const result = await listOrbs(projectId);
-      inFlight = false;
-      if (!cancelled && result.isOk()) setProjectOrbs(result.value.items);
-    };
-    void poll();
-    const timer = window.setInterval(poll, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [orb?.projectId]);
-
   useEffect(() => {
     if (renaming) renameInputRef.current?.focus();
   }, [renaming]);
-
-  // Database-first history load (docs/history-replication.md).
-  useEffect(() => {
-    let cancelled = false;
-    getOrbHistory(orbId).then((result) => {
-      if (cancelled) return;
-      dispatch(
-        result.isOk()
-          ? { type: "history_loaded", view: result.value }
-          : { type: "history_failed", error: result.error },
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [orbId]);
 
   // Follow the tail: while the reader is at (or near) the bottom, new chat
   // content keeps the view pinned there; once they scroll up, their position
@@ -859,7 +865,6 @@ export function OrbPage({ orbId }: { orbId: string }) {
       : orb.stopReason === "idle" && (orb.state === "stopping" || orb.state === "stopped")
         ? `${orb.state} (idle)`
         : orb.state;
-  const indexOrbs = projectOrbs === null ? null : splitProjectOrbs(projectOrbs).working;
   const busyLocked = orb?.state === "deleting" || orb?.state === "archiving";
   const expiresIn =
     orb?.actionRequired === undefined
@@ -867,255 +872,219 @@ export function OrbPage({ orbId }: { orbId: string }) {
       : formatTimeRemaining(orb.actionRequired.expiresAt, ageNow);
 
   return (
-    <main className="orb-page">
-      <nav className="orb-index">
-        <a className="ix-brand up" href="#/">
-          <img src={FAVICON_HREFS.neutral} width={16} height={16} alt="" />
-          pi-orb
-        </a>
-        <div className="sect">
-          <span className="trunc">{projectName ?? "project"}</span>
-        </div>
-        {indexOrbs?.map((entry) => {
-          const entryGlyph = projectOrbGlyph(entry.state, entry.activity);
-          const age = formatProjectOrbAge(entry.updatedAt, ageNow);
-          const current = entry.id === orbId;
-          return (
-            <a
-              className={`ix-row ix-row-${entryGlyph.state}${current ? " ix-row-current" : ""}`}
-              href={`#/orbs/${entry.id}`}
-              key={entry.id}
-              {...(current ? { "aria-current": "page" as const } : {})}
-            >
-              <StateTile glyph={entryGlyph} />
-              <span className="trunc">{entry.name ?? "untitled orb"}</span>
-              <span className="ix-age">{age}</span>
-            </a>
-          );
-        })}
-        {orb !== null && (
-          <div className="sect">
-            <a className="text-action" href={`#/projects/${orb.projectId}/orbs/new`}>
-              new orb
-            </a>
-          </div>
-        )}
-      </nav>
-
-      <div className="orb-main">
-        <header className="orb-header">
-          {renaming ? (
-            <form
-              className="orb-rename-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void saveName();
-              }}
-            >
-              <input
-                ref={renameInputRef}
-                aria-label="orb name"
-                value={renameText}
-                maxLength={80}
-                onChange={(event) => setRenameText(event.target.value)}
-              />
-              <button type="submit">save</button>
-              <button type="button" onClick={() => setRenaming(false)}>
-                cancel
-              </button>
-            </form>
-          ) : (
-            <>
-              <span className="orb-name">{orb?.name ?? "untitled orb"}</span>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Rename orb"
-                title="rename"
-                disabled={busyLocked}
-                onClick={() => {
-                  setRenameText(orb?.name ?? "");
-                  setRenaming(true);
-                }}
-              >
-                <Icon name="pen" />
-              </button>
-            </>
-          )}
-          {glyph !== null && lifecycleWord !== null && (
-            <span className="orb-life">
-              <StateTile glyph={glyph} decorative />
-              {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
-            </span>
-          )}
-          <span className="orb-header-actions">
-            {canStart && (
-              <button type="button" className="text-action" onClick={() => runLifecycle(startOrb)}>
-                start
-              </button>
-            )}
-            {canStop && (
-              <button type="button" className="text-action" onClick={() => runLifecycle(stopOrb)}>
-                stop
-              </button>
-            )}
+    <main className="orb-main" inert={pending} aria-busy={pending}>
+      <header className="orb-header">
+        {renaming ? (
+          <form
+            className="orb-rename-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveName();
+            }}
+          >
+            <input
+              ref={renameInputRef}
+              aria-label="orb name"
+              value={renameText}
+              maxLength={80}
+              onChange={(event) => setRenameText(event.target.value)}
+            />
+            <button type="submit">save</button>
+            <button type="button" onClick={() => setRenaming(false)}>
+              cancel
+            </button>
+          </form>
+        ) : (
+          <>
+            <span className="orb-name">{orb?.name ?? "untitled orb"}</span>
             <button
               type="button"
               className="icon-button"
-              aria-label="Archive orb"
-              title="archive"
-              disabled={
-                orb === null ||
-                orb.state === "deleting" ||
-                orb.state === "archiving" ||
-                orb.state === "archived"
-              }
-              onClick={() => void archive()}
+              aria-label="Rename orb"
+              title="rename"
+              disabled={busyLocked}
+              onClick={() => {
+                setRenameText(orb?.name ?? "");
+                setRenaming(true);
+              }}
             >
-              <Icon name="archive" />
+              <Icon name="pen" />
             </button>
-            <button
-              type="button"
-              className="icon-button danger"
-              aria-label="Delete orb"
-              title="delete"
-              disabled={orb?.state === "deleting"}
-              onClick={() => void permanentlyDelete()}
-            >
-              <Icon name="bin" />
-            </button>
+          </>
+        )}
+        {glyph !== null && lifecycleWord !== null && (
+          <span className="orb-life">
+            <StateTile glyph={glyph} decorative />
+            {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
           </span>
-        </header>
-
-        {orb?.stateDetail?.type === "discarding_failed_compute" && (
-          <OrbNotice>
-            Discarding failed compute while preserving the workspace…
-            {orb.stateDetail.retrying && " (retrying)"}
-            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-          </OrbNotice>
         )}
-        {orb?.stateDetail?.type === "replacing_stale_compute" && (
-          <OrbNotice>
-            Replacing compute for an updated host specification while preserving the workspace…
-            {orb.stateDetail.retrying && " (retrying)"}
-            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-          </OrbNotice>
-        )}
-        {orb?.stateDetail?.type === "deleting_resources" && (
-          <OrbNotice>
-            Permanently deleting orb resources…
-            {orb.stateDetail.retrying && " (retrying)"}
-            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-          </OrbNotice>
-        )}
-        {orb?.stateDetail?.type === "archiving_orb" && (
-          <OrbNotice>
-            {orb.stateDetail.phase === "waiting_for_idle"
-              ? "Archiving: waiting for the agent to become idle…"
-              : orb.stateDetail.phase === "sealing_history"
-                ? "Archiving: sealing complete history…"
-                : "Archiving: permanently removing runtime resources…"}
-            {orb.stateDetail.retrying && " (retrying)"}
-            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-          </OrbNotice>
-        )}
-        {orb?.stateDetail?.type === "draining_history" && (
-          <OrbNotice>
-            Stopping: draining history…
-            {orb.stateDetail.retrying && " (retrying)"}
-            {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-          </OrbNotice>
-        )}
-        {orb?.stateDetail?.type === "waiting_for_runtime" && (
-          <OrbNotice>
-            Waiting for the runtime…
-            {orb.stateDetail.hostState !== null && ` host ${orb.stateDetail.hostState}`}
-            {orb.stateDetail.secondsSinceHostRunning !== null &&
-              ` for ${orb.stateDetail.secondsSinceHostRunning}s`}
-            {` — ${orb.stateDetail.probeAttempts} probes`}
-            {orb.stateDetail.lastProbeError !== undefined &&
-              ` — last error: ${orb.stateDetail.lastProbeError}`}
-          </OrbNotice>
-        )}
-        {orb?.stateDetail?.type === "running_setup" && (
-          <OrbNotice>
-            Running the repository's <code>.agents/setup</code>…
-            {` for ${orb.stateDetail.secondsRunning}s`}
-          </OrbNotice>
-        )}
-        {orb?.stateDetail?.type === "setup_failed" && (
-          <OrbNotice error>
-            The repository's <code>.agents/{orb.stateDetail.hook}</code>{" "}
-            {orb.stateDetail.reason === "timeout"
-              ? "ran past its deadline and was stopped"
-              : orb.stateDetail.reason === "hook_not_executable"
-                ? "is not executable"
-                : "failed"}
-            . The orb started anyway; its log is at <code>{orb.stateDetail.logPath}</code>.
-          </OrbNotice>
-        )}
-        {orb?.actionRequired !== undefined && (
-          <OrbNotice>
-            {orb.actionRequired.type === "github_device_login"
-              ? "GitHub device login required."
-              : "OpenAI device login required."}{" "}
-            Visit{" "}
-            <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
-              {orb.actionRequired.verificationUri}
-            </a>{" "}
-            and enter <span className="user-code">{orb.actionRequired.userCode}</span>
-            <CopyCodeButton code={orb.actionRequired.userCode} />
-            {expiresIn !== null && <span className="muted"> expires in {expiresIn}</span>}
-          </OrbNotice>
-        )}
-        <OrbFailureBanner message={orb?.lastError} />
-        <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
-        {orbError !== null && <OrbNotice error>{describeApiError(orbError)}</OrbNotice>}
-        {state.serverError !== null && (
-          <OrbNotice error>
-            runtime error {state.serverError.code}: {state.serverError.message}
-          </OrbNotice>
-        )}
-        {state.requestError !== null && (
-          <OrbNotice error>
-            request rejected ({state.requestError.code}): {state.requestError.message}
-          </OrbNotice>
-        )}
-        {state.notice !== null && <OrbNotice>{state.notice}</OrbNotice>}
-        {state.historyError !== null && (
-          <OrbNotice error>history unavailable: {describeApiError(state.historyError)}</OrbNotice>
-        )}
-
-        <HistoryView
-          records={[...state.records.values()]}
-          liveBlocks={[...state.liveBlocks.values()]}
-          tools={[...state.tools.values()]}
-          busy={state.activity === "busy"}
-          queuedMessages={queuedMessages}
-        />
-
-        {orb?.state !== "archived" && orb?.state !== "archiving" && (
-          <Composer
-            text={state.composerText}
-            mode={state.composerMode}
-            onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}
-            images={state.composerImages}
-            onImageAdd={addImage}
-            onImageRemove={(id) => dispatch({ type: "image_removed", id })}
-            canSend={canSend}
-            onSend={sendComposer}
-            canAbort={canAbort}
-            onAbort={sendAbort}
-            onShellAttachmentBlocked={() =>
-              dispatch({
-                type: "notice",
-                message: "Remove image attachments before running a shell command.",
-              })
+        <span className="orb-header-actions">
+          {canStart && (
+            <button type="button" className="text-action" onClick={() => runLifecycle(startOrb)}>
+              start
+            </button>
+          )}
+          {canStop && (
+            <button type="button" className="text-action" onClick={() => runLifecycle(stopOrb)}>
+              stop
+            </button>
+          )}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Archive orb"
+            title="archive"
+            disabled={
+              orb === null ||
+              orb.state === "deleting" ||
+              orb.state === "archiving" ||
+              orb.state === "archived"
             }
-          />
-        )}
-        <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
-      </div>
+            onClick={() => void archive()}
+          >
+            <Icon name="archive" />
+          </button>
+          <button
+            type="button"
+            className="icon-button danger"
+            aria-label="Delete orb"
+            title="delete"
+            disabled={orb?.state === "deleting"}
+            onClick={() => void permanentlyDelete()}
+          >
+            <Icon name="bin" />
+          </button>
+        </span>
+      </header>
+
+      {orb?.stateDetail?.type === "discarding_failed_compute" && (
+        <OrbNotice>
+          Discarding failed compute while preserving the workspace…
+          {orb.stateDetail.retrying && " (retrying)"}
+          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+        </OrbNotice>
+      )}
+      {orb?.stateDetail?.type === "replacing_stale_compute" && (
+        <OrbNotice>
+          Replacing compute for an updated host specification while preserving the workspace…
+          {orb.stateDetail.retrying && " (retrying)"}
+          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+        </OrbNotice>
+      )}
+      {orb?.stateDetail?.type === "deleting_resources" && (
+        <OrbNotice>
+          Permanently deleting orb resources…
+          {orb.stateDetail.retrying && " (retrying)"}
+          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+        </OrbNotice>
+      )}
+      {orb?.stateDetail?.type === "archiving_orb" && (
+        <OrbNotice>
+          {orb.stateDetail.phase === "waiting_for_idle"
+            ? "Archiving: waiting for the agent to become idle…"
+            : orb.stateDetail.phase === "sealing_history"
+              ? "Archiving: sealing complete history…"
+              : "Archiving: permanently removing runtime resources…"}
+          {orb.stateDetail.retrying && " (retrying)"}
+          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+        </OrbNotice>
+      )}
+      {orb?.stateDetail?.type === "draining_history" && (
+        <OrbNotice>
+          Stopping: draining history…
+          {orb.stateDetail.retrying && " (retrying)"}
+          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+        </OrbNotice>
+      )}
+      {orb?.stateDetail?.type === "waiting_for_runtime" && (
+        <OrbNotice>
+          Waiting for the runtime…
+          {orb.stateDetail.hostState !== null && ` host ${orb.stateDetail.hostState}`}
+          {orb.stateDetail.secondsSinceHostRunning !== null &&
+            ` for ${orb.stateDetail.secondsSinceHostRunning}s`}
+          {` — ${orb.stateDetail.probeAttempts} probes`}
+          {orb.stateDetail.lastProbeError !== undefined &&
+            ` — last error: ${orb.stateDetail.lastProbeError}`}
+        </OrbNotice>
+      )}
+      {orb?.stateDetail?.type === "running_setup" && (
+        <OrbNotice>
+          Running the repository's <code>.agents/setup</code>…
+          {` for ${orb.stateDetail.secondsRunning}s`}
+        </OrbNotice>
+      )}
+      {orb?.stateDetail?.type === "setup_failed" && (
+        <OrbNotice error>
+          The repository's <code>.agents/{orb.stateDetail.hook}</code>{" "}
+          {orb.stateDetail.reason === "timeout"
+            ? "ran past its deadline and was stopped"
+            : orb.stateDetail.reason === "hook_not_executable"
+              ? "is not executable"
+              : "failed"}
+          . The orb started anyway; its log is at <code>{orb.stateDetail.logPath}</code>.
+        </OrbNotice>
+      )}
+      {orb?.actionRequired !== undefined && (
+        <OrbNotice>
+          {orb.actionRequired.type === "github_device_login"
+            ? "GitHub device login required."
+            : "OpenAI device login required."}{" "}
+          Visit{" "}
+          <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
+            {orb.actionRequired.verificationUri}
+          </a>{" "}
+          and enter <span className="user-code">{orb.actionRequired.userCode}</span>
+          <CopyCodeButton code={orb.actionRequired.userCode} />
+          {expiresIn !== null && <span className="muted"> expires in {expiresIn}</span>}
+        </OrbNotice>
+      )}
+      <OrbFailureBanner message={orb?.lastError} />
+      <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
+      {orbError !== null && <OrbNotice error>{describeApiError(orbError)}</OrbNotice>}
+      {state.serverError !== null && (
+        <OrbNotice error>
+          runtime error {state.serverError.code}: {state.serverError.message}
+        </OrbNotice>
+      )}
+      {state.requestError !== null && (
+        <OrbNotice error>
+          request rejected ({state.requestError.code}): {state.requestError.message}
+        </OrbNotice>
+      )}
+      {state.notice !== null && <OrbNotice>{state.notice}</OrbNotice>}
+      {state.historyError !== null && (
+        <OrbNotice error>history unavailable: {describeApiError(state.historyError)}</OrbNotice>
+      )}
+
+      <HistoryView
+        records={[...state.records.values()]}
+        liveBlocks={[...state.liveBlocks.values()]}
+        tools={[...state.tools.values()]}
+        busy={state.activity === "busy"}
+        queuedMessages={queuedMessages}
+      />
+
+      {orb?.state !== "archived" && orb?.state !== "archiving" && (
+        <Composer
+          text={state.composerText}
+          mode={state.composerMode}
+          onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}
+          images={state.composerImages}
+          onImageAdd={addImage}
+          onImageRemove={(id) => dispatch({ type: "image_removed", id })}
+          canSend={canSend}
+          onSend={sendComposer}
+          canAbort={canAbort}
+          onAbort={sendAbort}
+          onShellAttachmentBlocked={() =>
+            dispatch({
+              type: "notice",
+              message: "Remove image attachments before running a shell command.",
+            })
+          }
+        />
+      )}
+      <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
     </main>
   );
 }

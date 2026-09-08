@@ -47,6 +47,111 @@ describe("frontend-only browser behavior", () => {
     await vite?.close();
   });
 
+  it("keeps the index and conversation visible until an orb switch is ready", async () => {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/${ORB_HASH}`);
+    const composer = page.getByPlaceholder(/Message the orb/);
+    await composer.fill("draft for the first orb");
+    const index = page.getByRole("navigation", { name: "Project orbs" });
+    const destination = index.locator('a[href="#/orbs/frontend-auth-copy-test"]');
+    await expectPage(destination).toBeVisible();
+    const indexNode = await index.elementHandle();
+    const destinationNode = await destination.elementHandle();
+    const oldHistory = await page.locator(".history").innerText();
+    let release = () => {};
+    let arrived = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requested = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    await page.route("**/api/v1/orbs/frontend-auth-copy-test/history", async (route) => {
+      const response = await route.fetch();
+      arrived();
+      await gate;
+      await route.fulfill({ response });
+    });
+    try {
+      await destination.click();
+      await requested;
+      await expectPage(destination).toHaveAttribute("aria-current", "page");
+      await expectPage(index).toHaveAttribute("aria-busy", "true");
+      await expectPage(page.locator(".orb-main")).toHaveAttribute("inert", "");
+      await expectPage(composer).toHaveValue("draft for the first orb");
+      expectPage(await page.locator(".history").innerText()).toBe(oldHistory);
+      release();
+      await expectPage(index).toHaveAttribute("aria-busy", "false");
+      await expectPage(page.getByText("COPY-2468")).toBeVisible();
+      await expectPage(composer).toHaveValue("");
+      expectPage(
+        await indexNode?.evaluate(
+          (node) => node === node.ownerDocument.querySelector(".orb-index"),
+        ),
+      ).toBe(true);
+      expectPage(await destinationNode?.evaluate((node) => node.isConnected)).toBe(true);
+      await index.locator(`a[href="${ORB_HASH}"]`).click();
+      await expectPage(index).toHaveAttribute("aria-busy", "false");
+      await expectPage(composer).toHaveValue("draft for the first orb");
+      await expectPage(composer).toBeFocused();
+    } finally {
+      release();
+      await page.close();
+    }
+  });
+
+  it("discards a superseded orb load and preserves missing-resource URLs", async () => {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/${ORB_HASH}`);
+    const index = page.getByRole("navigation", { name: "Project orbs" });
+    const destination = index.locator('a[href="#/orbs/frontend-auth-copy-test"]');
+    await expectPage(destination).toBeVisible();
+    let release = () => {};
+    let arrived = () => {};
+    let finished = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requested = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    const completed = new Promise<void>((resolve) => {
+      finished = resolve;
+    });
+    await page.route("**/api/v1/orbs/frontend-auth-copy-test/history", async (route) => {
+      const response = await route.fetch();
+      arrived();
+      await gate;
+      await route.fulfill({ response });
+      finished();
+    });
+    try {
+      await destination.click();
+      await requested;
+      await index.evaluate((node) => {
+        node.ownerDocument.location.hash = "#/orbs/missing-switch-target";
+      });
+      await expectPage(page.getByText("Orb doesn't exist")).toBeVisible();
+      const response = page.waitForResponse("**/api/v1/orbs/frontend-auth-copy-test/history");
+      release();
+      await completed;
+      await (await response).finished();
+      // A browser task after the response lets React process any stale completion.
+      await index.evaluate(
+        (node) =>
+          new Promise<void>((resolve) =>
+            node.ownerDocument.defaultView?.requestAnimationFrame(() => resolve()),
+          ),
+      );
+      await expectPage(page.getByText("Orb doesn't exist")).toBeVisible();
+      expectPage(page.url()).toBe(`${origin}/#/orbs/missing-switch-target`);
+      await expectPage(page.getByRole("link", { name: "Back to dashboard" })).toBeVisible();
+    } finally {
+      release();
+      await page.close();
+    }
+  });
+
   it("inserts orb URLs at typed @ and preserves cancelled mentions and shell input", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
