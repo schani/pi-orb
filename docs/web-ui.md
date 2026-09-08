@@ -19,7 +19,7 @@ Remaining UI questions include rendering unknown content blocks, large/truncated
 
 ## Missing resources (decided 2026-08-08)
 
-A direct URL for a resource that does not exist stays at that URL and renders a resource-specific message (for example, “Orb doesn't exist”) with a link to the dashboard. Silently redirecting to the dashboard was rejected because it hides whether the resource was deleted, the URL is stale, or navigation failed. This behavior applies consistently to every resource type and to unknown application routes; unknown routes render “Page doesn't exist.”
+A direct URL for a resource that does not exist stays at that URL and renders a resource-specific message (for example, “Orb doesn't exist”) with a link to the dashboard. Silently redirecting to the dashboard was rejected because it hides whether the resource was deleted, the URL is stale, or navigation failed. This behavior applies consistently to every resource type and to unknown application routes; unknown routes render “Page doesn't exist.” The browser uses hash routing, so the server serves its app shell only at `/` and `/index.html`; known built assets keep their static paths, while another path is a missing page rather than an SPA fallback.
 
 ## Comprehensive frontend failure handling (current proposal, 2026-09-03)
 

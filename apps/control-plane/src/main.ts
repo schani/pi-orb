@@ -79,6 +79,7 @@ import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
+import { registerWebAssets } from "./http/web-assets.ts";
 import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
 
 const env = (name: string, fallback: string): string => {
@@ -480,15 +481,7 @@ async function main(): Promise<void> {
     // development keeps the vite dev server + proxy instead.
     const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";
     if (webDist !== "") {
-      const fastifyStatic = (await import("@fastify/static")).default;
-      await app.register(fastifyStatic, { root: webDist, wildcard: false });
-      // SPA fallback: any non-API GET renders the app shell.
-      app.setNotFoundHandler((request, reply) => {
-        if (request.method === "GET" && !request.url.startsWith("/api/")) {
-          return reply.sendFile("index.html");
-        }
-        return reply.status(404).send({ error: { code: "not_found" } });
-      });
+      await registerWebAssets(app, webDist);
     }
   }
   if (runtimeRole) {
