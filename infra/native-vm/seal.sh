@@ -28,9 +28,11 @@ ln -s /etc/machine-id /var/lib/dbus/machine-id
 rm -rf /app/infra
 python3 - <<'PY'
 from pathlib import Path
+import shutil
 for directory in ['apps', 'packages']:
  for path in Path('/app', directory).rglob('*.test.ts'):
   path.unlink()
+shutil.rmtree('/app/apps/orb-runtime/src/supervisor/.test', ignore_errors=True)
 PY
 rm -f /home/*/source.tar.gz /home/*/install.sh /home/*/seed-workspace.sh /home/*/seal.sh
 rm -rf /var/lib/docker/* /var/lib/containerd/*

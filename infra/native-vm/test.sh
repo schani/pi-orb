@@ -1,9 +1,12 @@
 #!/bin/sh
 set -eu
 python3 -m unittest -v infra/native-vm/test_guest.py
-python3 -m py_compile infra/native-vm/bootstrap.py infra/native-vm/prepare_workspace.py infra/native-vm/boot_diagnostic.py infra/native-vm/runtime_supervisor.py infra/native-vm/test_guest.py infra/native-vm/workspace_filesystem_test.py
+python3 -m py_compile infra/native-vm/bootstrap.py infra/native-vm/prepare_workspace.py infra/native-vm/boot_diagnostic.py infra/native-vm/test_guest.py infra/native-vm/workspace_filesystem_test.py
 infra/native-vm/workspace-filesystem.test.sh
 grep -q '^User=orb$' infra/native-vm/pi-orb-runtime.service
+grep -q '^ExecStart=/usr/local/bin/node /app/apps/orb-runtime/src/supervisor/main.ts$' infra/native-vm/pi-orb-runtime.service
+test -f apps/orb-runtime/src/supervisor/main.ts
+test ! -e infra/native-vm/runtime_supervisor.py
 grep -q '^Requires=pi-orb-workspace.service$' infra/native-vm/workspace.mount
 grep -q '^After=systemd-udev-trigger.service network-online.target$' infra/native-vm/pi-orb-workspace.service
 ! grep -q '^Requires=dev-disk' infra/native-vm/pi-orb-workspace.service
