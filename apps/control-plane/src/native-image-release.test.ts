@@ -23,6 +23,8 @@ const accepted = {
   sourceCommit: commit,
   imageResource: "projects/test-project/global/images/pi-orb-test",
   imageId: "1234567890123456789",
+  workspaceImageResource: "projects/test-project/global/images/pi-orb-workspace-test",
+  workspaceImageId: "2234567890123456789",
 };
 
 function consume(manifest: unknown) {
@@ -45,7 +47,7 @@ describe("native image release manifest", () => {
     const result = consume(accepted);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      'native_image_resource = "projects/test-project/global/images/pi-orb-test"\nnative_image_id = "1234567890123456789"\n',
+      'native_image_resource = "projects/test-project/global/images/pi-orb-test"\nnative_image_id = "1234567890123456789"\nworkspace_image_resource = "projects/test-project/global/images/pi-orb-workspace-test"\nworkspace_image_id = "2234567890123456789"\n',
     );
   });
 
@@ -63,6 +65,11 @@ describe("native image release manifest", () => {
     { imageId: 12345 },
     { imageId: "1e20" },
     { imageId: "" },
+    { workspaceImageResource: "projects/test-project/global/images/family/pi-orb-workspace" },
+    { workspaceImageResource: "projects/other-project/global/images/pi-orb-workspace" },
+    { workspaceImageId: 22345 },
+    { workspaceImageId: "2e20" },
+    { workspaceImageId: "" },
   ])("refuses unaccepted or mismatched input %j", (override) => {
     const result = consume({ ...accepted, ...override });
     expect(result.status).toBe(1);

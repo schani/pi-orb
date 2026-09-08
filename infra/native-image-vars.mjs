@@ -16,13 +16,20 @@ try {
     !manifest.imageResource.startsWith(`projects/${project}/global/images/pi-orb-`) ||
     !/^projects\/[a-z0-9-]+\/global\/images\/[a-z][a-z0-9-]*$/.test(manifest.imageResource) ||
     typeof manifest.imageId !== "string" ||
-    !/^[1-9][0-9]*$/.test(manifest.imageId)
+    !/^[1-9][0-9]*$/.test(manifest.imageId) ||
+    typeof manifest.workspaceImageResource !== "string" ||
+    !manifest.workspaceImageResource.startsWith(`projects/${project}/global/images/pi-orb-`) ||
+    !/^projects\/[a-z0-9-]+\/global\/images\/[a-z][a-z0-9-]*$/.test(
+      manifest.workspaceImageResource,
+    ) ||
+    typeof manifest.workspaceImageId !== "string" ||
+    !/^[1-9][0-9]*$/.test(manifest.workspaceImageId)
   ) {
     process.stderr.write("image manifest: rejected acceptance, provenance, or image identity\n");
     process.exitCode = 1;
   } else {
     process.stdout.write(
-      `native_image_resource = ${JSON.stringify(manifest.imageResource)}\nnative_image_id = ${JSON.stringify(manifest.imageId)}\n`,
+      `native_image_resource = ${JSON.stringify(manifest.imageResource)}\nnative_image_id = ${JSON.stringify(manifest.imageId)}\nworkspace_image_resource = ${JSON.stringify(manifest.workspaceImageResource)}\nworkspace_image_id = ${JSON.stringify(manifest.workspaceImageId)}\n`,
     );
   }
 } catch {

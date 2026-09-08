@@ -332,6 +332,8 @@ async function main(): Promise<void> {
           serviceAccount: env("PI_ORB_GCE_SERVICE_ACCOUNT", ""),
           imageResource: gceImage.ok ? gceImage.imageResource : "",
           imageId: gceImage.ok ? gceImage.imageId : "",
+          workspaceImageResource: gceImage.ok ? gceImage.workspaceImageResource : "",
+          workspaceImageId: gceImage.ok ? gceImage.workspaceImageId : "",
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
           specGeneration,
           ...extraEnvOption,

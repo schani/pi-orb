@@ -22,11 +22,16 @@ describe("GCE native image identity", () => {
     const values: Record<string, string> = {
       PI_ORB_GCE_IMAGE_RESOURCE: "projects/pi-orb-prod/global/images/pi-orb-20260905",
       PI_ORB_GCE_IMAGE_ID: "123456789",
+      PI_ORB_GCE_WORKSPACE_IMAGE_RESOURCE:
+        "projects/pi-orb-prod/global/images/pi-orb-workspace-20260908",
+      PI_ORB_GCE_WORKSPACE_IMAGE_ID: "223456789",
     };
     expect(readGceImageIdentity((name) => values[name] ?? "")).toEqual({
       ok: true,
       imageResource: values["PI_ORB_GCE_IMAGE_RESOURCE"],
       imageId: values["PI_ORB_GCE_IMAGE_ID"],
+      workspaceImageResource: values["PI_ORB_GCE_WORKSPACE_IMAGE_RESOURCE"],
+      workspaceImageId: values["PI_ORB_GCE_WORKSPACE_IMAGE_ID"],
     });
     expect(readGceImageIdentity((name) => (name === "PI_ORB_GCE_IMAGE_ID" ? "123" : "")).ok).toBe(
       false,

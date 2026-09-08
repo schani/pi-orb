@@ -17,17 +17,24 @@ export type GceImageIdentity =
       readonly ok: true;
       readonly imageResource: string;
       readonly imageId: string;
+      readonly workspaceImageResource: string;
+      readonly workspaceImageId: string;
     }
   | { readonly ok: false; readonly message: string };
 
 export function readGceImageIdentity(read: (name: string) => string): GceImageIdentity {
   const imageResource = read("PI_ORB_GCE_IMAGE_RESOURCE");
   const imageId = read("PI_ORB_GCE_IMAGE_ID");
-  return isExactGceImageResource(imageResource) && isNumericGceImageId(imageId)
-    ? { ok: true, imageResource, imageId }
+  const workspaceImageResource = read("PI_ORB_GCE_WORKSPACE_IMAGE_RESOURCE");
+  const workspaceImageId = read("PI_ORB_GCE_WORKSPACE_IMAGE_ID");
+  return isExactGceImageResource(imageResource) &&
+    isNumericGceImageId(imageId) &&
+    isExactGceImageResource(workspaceImageResource) &&
+    isNumericGceImageId(workspaceImageId)
+    ? { ok: true, imageResource, imageId, workspaceImageResource, workspaceImageId }
     : {
         ok: false,
         message:
-          "PI_ORB_GCE_IMAGE_RESOURCE must name an exact image and PI_ORB_GCE_IMAGE_ID must be numeric",
+          "GCE runtime and workspace image resources must name exact images and their image IDs must be numeric",
       };
 }

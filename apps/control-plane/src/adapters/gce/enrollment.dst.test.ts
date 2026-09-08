@@ -22,6 +22,8 @@ function provider(gce: GceApiTransport, minter: HttpTailscaleAuthKeyMinter): Gce
     serviceAccount: "orb@proj.iam.gserviceaccount.com",
     imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
     imageId: "123456789",
+    workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-20260908",
+    workspaceImageId: "223456789",
     controlPlaneUrl: "https://runtime.example",
     tailscale: { minter, tailnetDnsName: "tail.test" },
   });
