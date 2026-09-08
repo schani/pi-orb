@@ -56,7 +56,6 @@ python3 -c 'import tomllib; assert tomllib.load(open("/etc/containerd/config.tom
 install -m755 infra/native-vm/bootstrap.py /usr/local/bin/pi-orb-bootstrap
 install -m755 infra/native-vm/prepare_workspace.py /usr/local/bin/pi-orb-prepare-workspace
 install -m755 infra/native-vm/boot_diagnostic.py /usr/local/bin/pi-orb-boot-diagnostic
-install -m755 infra/native-vm/runtime_supervisor.py /usr/local/bin/pi-orb-runtime-supervisor
 install -m644 infra/native-vm/workspace.mount infra/native-vm/pi-orb-workspace.service infra/native-vm/pi-orb-bootstrap.service infra/native-vm/pi-orb-runtime.service infra/native-vm/pi-orb-boot-failure@.service /etc/systemd/system/
 for unit in docker.service docker.socket containerd.service; do
   mkdir -p "/etc/systemd/system/$unit.d"

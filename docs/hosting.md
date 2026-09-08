@@ -153,6 +153,13 @@ The [Public Suffix List](https://publicsuffix.org/list/public_suffix_list.dat) i
 so these hosts cannot share a parent-domain cookie. Application API and WebSocket origin checks
 still reject requests from hosted scripts.
 
+**Corrected 2026-09-08:** OpenTofu asserts the deterministic application origin in the service URL
+set, while the full post-apply deployment step reads fresh Cloud Run status and requires the
+`files` tag to route 100% to the latest ready revision before pruning old revisions. A resource
+postcondition cannot enforce the traffic status during first adoption: planning evaluates the
+provider-computed `traffic_statuses` from the old untagged service and fails before applying the
+configured tag.
+
 ## Lifecycle and product behavior
 
 Upload, replacement, and removal require a currently authorized orb incarnation and are fenced in

@@ -23,13 +23,15 @@ The native VM production integration, including its image-regeneration command, 
 - **DST:** all new orchestration, retries and lifecycle state transitions use simulated clocks and effect adapters. Cover partial build/publication failures, cancellation and cleanup; competing operations and generations; Stop/Start, Spot interruption, replacement, token fencing, diagnosis-before-discard and explicit recovery. Assert retained workspace data, one authoritative incarnation, no publication of an unvalidated image, and no deletion of foreign resources. Record and replay failing schedules with explicit checkpoints/failpoints.
 - **Real integration:** validate adapter contracts against actual GCE, Linux mounts/systemd, image boot/sealing, required tools, retained storage and failure reporting. These checks complement unit/DST coverage; simulations do not execute the kernel or prove IAM configuration. Runtime changes retain the required browser/runtime E2E gate.
 
+The native runtime supervisor has unit coverage for health parsing and retry, terminal ready/failed reporting, child-exit races, signals, and diagnostic failure. DST schedules health, exit, shutdown, and report failpoints and advances initialization past ten minutes without a supervisor deadline. Real subprocess tests verify exit-code and signal propagation plus descendant process-group cleanup. Image acceptance verifies the systemd main command, its runtime child, HTTP readiness, and the exact durable `runtime ready` guest attribute; disposable-image validation remains the Linux/systemd gate.
+
 Keep stateful logic behind testable boundaries so the documented rebuild command and production release path exercise the same tested implementation.
 
 Implemented coverage includes the GCE provider's exact image identity and metadata
 contract; retained-disk lifecycle and generation simulations; image-build
 publication, cancellation and owned-resource cleanup simulations; real HTTP tests
 for the validation broker; archive provenance and ignored-file tests; Python guest
-bootstrap, disk, diagnostics and supervisor tests; foundation state-adoption
+bootstrap, disk and diagnostics tests; foundation state-adoption
 behavior tests; and shell release-contract tests. `npm test` runs Vitest and
 `npm run test:infra`; the latter runs foundation and guest tests. Live acceptance
 evidence is recorded in `docs/native-vm-prototype.md`.

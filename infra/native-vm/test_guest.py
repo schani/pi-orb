@@ -20,7 +20,6 @@ def load(name):
 bootstrap = load('bootstrap')
 diagnostic = load('boot_diagnostic')
 workspace = load('prepare_workspace')
-supervisor = load('runtime_supervisor')
 
 
 class Response(io.BytesIO):
@@ -211,56 +210,6 @@ class WorkspaceTest(unittest.TestCase):
         sleeps = []
         self.assertFalse(workspace.wait_for_device(Path('/missing'), timeout=2, monotonic=lambda: next(ticks), sleep=sleeps.append))
         self.assertEqual(sleeps, [1, 1])
-
-
-class RuntimeSupervisorTest(unittest.TestCase):
-    class Child:
-        pid = 123
-        returncode = None
-        def poll(self): return None
-        def wait(self): return 0
-
-    def test_reports_ready_after_typed_health(self):
-        records = []
-        child = self.Child()
-        with patch.object(supervisor, 'report', side_effect=lambda *value: records.append(value)):
-            self.assertEqual(supervisor.main(health_check=lambda: ('ready', None), popen=lambda *args, **kwargs: child), 0)
-        self.assertEqual(records, [('ready',)])
-
-    def test_long_setup_does_not_create_a_supervisor_deadline(self):
-        records = []
-        statuses = iter([('initializing', None)] * 301 + [('setup_running', None)] * 301 + [('ready', None)])
-        sleeps = []
-        with patch.object(supervisor, 'report', side_effect=lambda *value: records.append(value)):
-            self.assertEqual(supervisor.main(health_check=lambda: next(statuses), sleep=sleeps.append, popen=lambda *args, **kwargs: self.Child()), 0)
-        self.assertEqual(len(sleeps), 602)
-        self.assertEqual(records, [('ready',)])
-
-    def test_reports_only_bounded_failure_code(self):
-        records = []
-        with patch.object(supervisor, 'report', side_effect=lambda *value: records.append(value)):
-            self.assertEqual(supervisor.main(health_check=lambda: ('failed', 'clone_failed'), popen=lambda *args, **kwargs: self.Child()), 0)
-        self.assertEqual(records, [('failed', 'clone_failed')])
-
-    def test_reports_exit_code_before_readiness(self):
-        child = self.Child()
-        child.poll = lambda: 23
-        child.returncode = 23
-        records = []
-        with patch.object(supervisor, 'report', side_effect=lambda *value: records.append(value)):
-            self.assertEqual(supervisor.main(popen=lambda *args, **kwargs: child), 0)
-        self.assertEqual(records, [('failed', 'runtime_exited_before_ready', {'exitCode': 23})])
-
-    def test_forwards_sigterm_to_child_process_group(self):
-        handlers = {}
-        forwarded = []
-        child = self.Child()
-        def health_check():
-            handlers[supervisor.signal.SIGTERM](supervisor.signal.SIGTERM, None)
-            return 'ready', None
-        with patch.object(supervisor, 'report'):
-            self.assertEqual(supervisor.main(health_check=health_check, popen=lambda *args, **kwargs: child, install_signal=lambda signum, handler: handlers.update({signum: handler}), killpg=lambda *args: forwarded.append(args)), 0)
-        self.assertEqual(forwarded, [(123, supervisor.signal.SIGTERM)])
 
 
 class DiagnosticTest(unittest.TestCase):

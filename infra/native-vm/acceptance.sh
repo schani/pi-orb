@@ -23,6 +23,10 @@ systemctl is-active --quiet pi-orb-workspace.service
 systemctl is-active --quiet workspace.mount
 systemctl is-active --quiet pi-orb-bootstrap.service
 systemctl is-active --quiet pi-orb-runtime.service
+runtime_supervisor_pid=$(systemctl show pi-orb-runtime.service --property=MainPID --value)
+python3 -c 'import sys; assert open("/proc/" + sys.argv[1] + "/cmdline", "rb").read().split(b"\0")[:-1] == [b"/usr/local/bin/node", b"/app/apps/orb-runtime/src/supervisor/main.ts"]' "$runtime_supervisor_pid"
+runtime_pid=$(pgrep --parent "$runtime_supervisor_pid" --full '/usr/local/bin/node apps/orb-runtime/src/main.ts')
+test "$(printf '%s\n' "$runtime_pid" | wc -l)" = 1
 curl --fail --silent --show-error http://127.0.0.1:8080/v1/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["status"] == "ready"'
 
 for unit in docker.service docker.socket containerd.service; do
@@ -37,6 +41,6 @@ test "$(python3 -c 'import tomllib; print(tomllib.load(open("/etc/containerd/con
 
 diagnostic=$(curl --fail --silent --show-error -H 'Metadata-Flavor: Google' \
   http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes/pi-orb/boot-status)
-python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["schemaVersion"] == 1; assert value["status"] in ("starting", "ready")' <<<"$diagnostic"
+python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["schemaVersion"] == 1; assert value["phase"] == "runtime"; assert value["status"] == "ready"' <<<"$diagnostic"
 
 echo native_guest_acceptance_passed
