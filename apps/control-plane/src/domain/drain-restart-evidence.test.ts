@@ -7,7 +7,7 @@ import {
   TEST_CONSTANTS,
   type TestHarness,
 } from "../testkit/fixtures.ts";
-import { runDst } from "../testkit/sim.ts";
+import { runDst, waitUntil } from "../testkit/sim.ts";
 import { reconcileOrbOnce, requestOrbStop } from "./lifecycle.ts";
 import type { ControlPlaneDeps, OrbHostProvider } from "./ports.ts";
 
@@ -81,10 +81,10 @@ describe("drain restart evidence", () => {
                 const stoppingAt = await seedStopping(task, harness);
                 const deps = withStartedAt(harness, scenario.timestamp(stoppingAt));
                 deps.control.noteStateEpisode(ORB, stoppingAt);
-                deps.control.resetLivenessBaseline(
-                  ORB,
-                  task.monotonicNow() - deps.constants.unreachableGraceMs - 1,
-                );
+                const unansweredAt = task.monotonicNow() - deps.constants.unreachableGraceMs - 1;
+                deps.control.resetLivenessBaseline(ORB, unansweredAt);
+                deps.control.noteRuntimeRequestStarted(ORB, unansweredAt);
+                harness.world.killRuntimeProcess(ORB);
                 const startsBefore = harness.world.hostStartCountOf(ORB);
                 expect(await reconcileOrbOnce(task, deps, ORB)).toEqual({ type: "progressed" });
                 expect(harness.world.hostStartCountOf(ORB)).toBe(startsBefore + 1);
@@ -103,10 +103,9 @@ describe("drain restart evidence", () => {
       const restarted = restartControlPlane(harness);
       const deps = withStartedAt(restarted, stoppingAt);
       deps.control.noteStateEpisode(ORB, stoppingAt);
-      deps.control.resetLivenessBaseline(
-        ORB,
-        task.monotonicNow() - deps.constants.unreachableGraceMs - 1,
-      );
+      const unansweredAt = task.monotonicNow() - deps.constants.unreachableGraceMs - 1;
+      deps.control.resetLivenessBaseline(ORB, unansweredAt);
+      deps.control.noteRuntimeRequestStarted(ORB, unansweredAt);
       const startsBefore = harness.world.hostStartCountOf(ORB);
       expect(await reconcileOrbOnce(task, deps, ORB)).toEqual({
         type: "waiting",
@@ -132,16 +131,20 @@ describe("drain restart evidence", () => {
         stoppingAt,
       );
       harness.world.killRuntimeProcess(ORB);
-      deps.control.resetLivenessBaseline(
-        ORB,
-        task.monotonicNow() - deps.constants.unreachableGraceMs - 1,
-        null,
-        stoppingAt,
-      );
+      const unansweredAt = task.monotonicNow() - deps.constants.unreachableGraceMs - 1;
+      deps.control.resetLivenessBaseline(ORB, unansweredAt, null, stoppingAt);
+      deps.control.noteRuntimeRequestStarted(ORB, unansweredAt);
       const startsBefore = harness.world.hostStartCountOf(ORB);
       expect(await reconcileOrbOnce(task, deps, ORB)).toEqual({ type: "progressed" });
       expect(harness.world.hostStartCountOf(ORB)).toBe(startsBefore + 1);
 
+      await waitUntil(
+        task,
+        "restarted runtime process exists",
+        () => harness.world.runtimeInstanceIdOf(ORB) !== null,
+      );
+      harness.world.killRuntimeProcess(ORB);
+      deps.control.noteRuntimeRequestStarted(ORB, task.monotonicNow());
       await task.sleep(deps.constants.postRestartGraceMs + 1, "expire one recovery restart");
       expect((await reconcileOrbOnce(task, deps, ORB)).type).toBe("transitioned");
       expect(harness.store.orbSnapshot(ORB)?.state).toBe("failed");
@@ -154,16 +157,22 @@ describe("drain restart evidence", () => {
       const stoppingAt = await seedStopping(task, harness);
       const deps = withStartedAt(harness, stoppingAt);
       deps.control.noteStateEpisode(ORB, stoppingAt);
-      deps.control.resetLivenessBaseline(
-        ORB,
-        task.monotonicNow() - deps.constants.unreachableGraceMs - 1,
-      );
+      const unansweredAt = task.monotonicNow() - deps.constants.unreachableGraceMs - 1;
+      deps.control.resetLivenessBaseline(ORB, unansweredAt);
+      deps.control.noteRuntimeRequestStarted(ORB, unansweredAt);
       expect((await reconcileOrbOnce(task, deps, ORB)).type).toBe("waiting");
-      const adoptedAt = deps.control.getLiveness(ORB)?.lastSuccessAt;
-      harness.world.setPullOutage(task, ORB, TEST_CONSTANTS.postRestartGraceMs);
+      const adopted = deps.control.getLiveness(ORB);
+      harness.world.killRuntimeProcess(ORB);
+      const failedPullAt = task.monotonicNow();
+      deps.control.noteRuntimeRequestStarted(ORB, failedPullAt);
       await task.sleep(deps.constants.unreachableGraceMs + 1, "observe same start again");
       expect((await reconcileOrbOnce(task, deps, ORB)).type).toBe("waiting");
-      expect(deps.control.getLiveness(ORB)?.lastSuccessAt).toBe(adoptedAt);
+      expect(deps.control.getLiveness(ORB)).toMatchObject({
+        lastSuccessAt: adopted?.lastSuccessAt,
+        unansweredSinceAt: failedPullAt,
+        hostStartedAt: adopted?.hostStartedAt,
+        restartGraceMs: TEST_CONSTANTS.postRestartGraceMs,
+      });
     });
   });
 });

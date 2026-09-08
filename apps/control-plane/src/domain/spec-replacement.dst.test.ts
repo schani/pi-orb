@@ -17,6 +17,7 @@ import { ControlState } from "./control-state.ts";
 import { reconcileOrbOnce, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
+import { pollOrbUntilCaughtUp } from "./replication.ts";
 
 const ORB = "orb-spec";
 /** `seedRunningOrb` derives the project id from the orb id. */
@@ -404,7 +405,30 @@ describe("host-spec replacement (DST)", () => {
               const legacyRef = harness.world.hostRefOf(ORB)?.resourceId ?? null;
               const startsBefore = harness.world.hostStartCountOf(ORB);
 
+              for (let attempt = 0; attempt < 20; attempt += 1) {
+                const outcome = await reconcileOrbOnce(task, harness.deps, ORB);
+                if (outcome.type === "noop") break;
+                expect(outcome.type).toBe("retryable");
+              }
+              expect(harness.deps.control.getLiveness(ORB)).not.toBeNull();
+
               harness.world.killRuntimeProcess(ORB);
+              for (let attempt = 0; attempt < 20; attempt += 1) {
+                if (typeof harness.deps.control.getLiveness(ORB)?.unansweredSinceAt === "number") {
+                  break;
+                }
+                expect((await pollOrbUntilCaughtUp(task, harness.deps, ORB)).type).toBe(
+                  "retryable",
+                );
+              }
+              expect(
+                typeof harness.deps.control.getLiveness(ORB)?.unansweredSinceAt,
+                "a request reached the dead legacy runtime",
+              ).toBe("number");
+              await task.sleep(
+                harness.deps.constants.unreachableGraceMs + 1,
+                "dead legacy runtime grace",
+              );
               // Hand-driven, so the check below lands in the pass right after
               // the restart and before any later pass can replace anything.
               await drive(

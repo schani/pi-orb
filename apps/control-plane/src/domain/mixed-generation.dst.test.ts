@@ -376,9 +376,12 @@ describe("mixed-generation reconcilers (DST)", () => {
               const stopped = await requestOrbStop(task, newRevision, ORB);
               expect(stopped.isOk()).toBe(true);
               if (stopped.isErr()) return;
+              harness.world.killRuntimeProcess(ORB);
               for (const revision of [oldRevision, newRevision]) {
                 revision.control.noteStateEpisode(ORB, stopped.value.stateChangedAt);
-                revision.control.resetLivenessBaseline(ORB, task.monotonicNow() - expiredByMs);
+                const unansweredAt = task.monotonicNow() - expiredByMs;
+                revision.control.resetLivenessBaseline(ORB, unansweredAt);
+                revision.control.noteRuntimeRequestStarted(ORB, unansweredAt);
               }
               stopping = true;
             },

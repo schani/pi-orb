@@ -1120,6 +1120,36 @@ function livenessGraceMs(deps: ControlPlaneDeps, liveness: LivenessEntry): numbe
   return liveness.restartGraceMs ?? deps.constants.unreachableGraceMs;
 }
 
+async function runtimeSilenceCorroborated(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+  baseUrl: string,
+  expectedUnansweredSinceAt: number,
+): Promise<boolean> {
+  const health = await withDeadline(
+    task,
+    deps.constants.runtimeRequestTimeoutMs,
+    "corroborate runtime silence",
+    (context) => {
+      deps.control.noteRuntimeRequestStarted(orbId, task.monotonicNow());
+      return deps.runtimeClient.health(task, baseUrl, context);
+    },
+  );
+  if (health.isOk() || health.error.answered) {
+    deps.control.noteRuntimeAnswered(orbId, task.monotonicNow());
+    logOrbEvent(task, orbId, "unreachable-restart-deferred", {
+      reason: "runtime_answered_corroboration",
+    });
+    return false;
+  }
+  if (deps.control.getLiveness(orbId)?.unansweredSinceAt === expectedUnansweredSinceAt) return true;
+  logOrbEvent(task, orbId, "unreachable-restart-deferred", {
+    reason: "silence_episode_changed",
+  });
+  return false;
+}
+
 function squashMessageBatch(
   messages: readonly { content: readonly MessageInputBlock[] }[],
 ): MessageInputBlock[] {
@@ -1181,14 +1211,28 @@ async function reconcileRunning(
     return { type: "noop" };
   }
   const graceMs = livenessGraceMs(deps, liveness);
-  const silentMs = task.monotonicNow() - liveness.lastSuccessAt;
-  if (silentMs > graceMs) {
+  const silentMs =
+    liveness.unansweredSinceAt === null ? 0 : task.monotonicNow() - liveness.unansweredSinceAt;
+  if (liveness.unansweredSinceAt !== null && silentMs > graceMs) {
+    if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
+    if (
+      !(await runtimeSilenceCorroborated(
+        task,
+        deps,
+        orb.id,
+        observation.runtimeAddress.baseUrl,
+        liveness.unansweredSinceAt,
+      ))
+    ) {
+      return { type: "noop" };
+    }
     logOrbEvent(task, orb.id, "unreachable-restart", {
       host: orb.hostRef,
       state: "running",
       grace_ms: graceMs,
       grace_kind: liveness.restartGraceMs !== null ? "post_restart" : "ordinary",
       silent_ms: Math.round(silentMs),
+      corroboration: "health_no_answer",
     });
     deps.control.markRestartPending(orb.id);
     const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");
@@ -1243,8 +1287,9 @@ async function reconcileRunning(
       task,
       deps.constants.runtimeRequestTimeoutMs,
       "deliver queued message batch",
-      (context) =>
-        deps.runtimeClient.deliverMessage(
+      (context) => {
+        deps.control.noteRuntimeRequestStarted(orb.id, task.monotonicNow());
+        return deps.runtimeClient.deliverMessage(
           task,
           {
             baseUrl: observation.runtimeAddress?.baseUrl ?? "",
@@ -1253,9 +1298,13 @@ async function reconcileRunning(
             content: squashMessageBatch(pendingBatch.value),
           },
           context,
-        ),
+        );
+      },
     );
     if (delivered.isErr()) {
+      if (delivered.error.answered) {
+        deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+      }
       if (delivered.error.retryable) return retryable(delivered.error);
       // A rejection the runtime will repeat for the same payload (an oversized
       // or malformed message) is terminal for this batch: redelivering it
@@ -1440,7 +1489,10 @@ async function reconcileStopping(
   const liveness = deps.control.getLiveness(orb.id);
   if (liveness === null) {
     deps.control.resetLivenessBaseline(orb.id, task.monotonicNow());
-  } else if (task.monotonicNow() - liveness.lastSuccessAt > livenessGraceMs(deps, liveness)) {
+  } else if (
+    liveness.unansweredSinceAt !== null &&
+    task.monotonicNow() - liveness.unansweredSinceAt > livenessGraceMs(deps, liveness)
+  ) {
     const lastStartedAt = observation.lastStartedAt;
     const hostAgeMs = lastStartedAt === undefined ? null : task.wallNow() - lastStartedAt;
     if (
@@ -1467,7 +1519,19 @@ async function reconcileStopping(
       });
       return waiting("readiness");
     }
-    const silentMs = Math.round(task.monotonicNow() - liveness.lastSuccessAt);
+    const silentMs = Math.round(task.monotonicNow() - liveness.unansweredSinceAt);
+    if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
+    if (
+      !(await runtimeSilenceCorroborated(
+        task,
+        deps,
+        orb.id,
+        observation.runtimeAddress.baseUrl,
+        liveness.unansweredSinceAt,
+      ))
+    ) {
+      return { type: "noop" };
+    }
     if (liveness.restartGraceMs !== null) {
       // The restarted host had a full boot's worth of grace and still never
       // answered a pull; a second restart would only repeat the evidence.
@@ -1491,6 +1555,7 @@ async function reconcileStopping(
       grace_ms: deps.constants.unreachableGraceMs,
       grace_kind: "ordinary",
       silent_ms: silentMs,
+      corroboration: "health_no_answer",
     });
     deps.control.markRestartPending(orb.id);
     const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "unreachable_runtime");

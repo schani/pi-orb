@@ -1,5 +1,6 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
+import { errAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import {
@@ -2539,6 +2540,244 @@ describe("orb lifecycle (DST)", () => {
       expect(harness.store.orbSnapshot(ORB)?.state).toBe("running");
       assertReplicaComplete(harness.world, harness.store, ORB);
     });
+  });
+
+  it("provider stalls cannot turn one missed runtime answer into a restart", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "unreachable-provider-stall-corroboration", iterations: 10, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const provider = harness.deps.hostProvider;
+        let stalledObservations = 3;
+        const stalledProvider = new Proxy(provider, {
+          get(target, property) {
+            if (property !== "observe") {
+              const value = Reflect.get(target, property);
+              return typeof value === "function" ? value.bind(target) : value;
+            }
+            return (...args: Parameters<typeof provider.observe>) => {
+              if (stalledObservations-- <= 0) return provider.observe(...args);
+              const [task, _ref, context] = args;
+              return ResultAsync.fromPromise(
+                task.sleep(
+                  TEST_CONSTANTS.providerOperationTimeoutMs - 1,
+                  "held provider observation",
+                  { signal: context.signal },
+                ),
+                () => ({
+                  type: "orb_host_provider_error" as const,
+                  provider: "fake",
+                  operation: "observe" as const,
+                  code: "cancelled" as const,
+                  message: "held provider observation cancelled",
+                  retryable: true,
+                }),
+              ).andThen(() =>
+                errAsync({
+                  type: "orb_host_provider_error" as const,
+                  provider: "fake",
+                  operation: "observe" as const,
+                  code: "unavailable" as const,
+                  message: "held provider observation failed",
+                  retryable: true,
+                }),
+              );
+            };
+          },
+        });
+        const result = await sim.runTasks([
+          {
+            name: "driver",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              const running = harness.store.orbSnapshot(ORB);
+              expect(running).not.toBeNull();
+              harness.deps.control.noteStateEpisode(ORB, running?.stateChangedAt ?? -1);
+              harness.deps.control.resetLivenessBaseline(ORB, task.monotonicNow());
+              const missedRuntime = new Proxy(harness.deps.runtimeClient, {
+                get(target, property) {
+                  if (property === "pullHistory") {
+                    return () =>
+                      errAsync({
+                        type: "runtime_client_error" as const,
+                        answered: false,
+                        code: "unreachable" as const,
+                        message: "runtime request received no answer",
+                        retryable: true,
+                      });
+                  }
+                  const value = Reflect.get(target, property);
+                  return typeof value === "function" ? value.bind(target) : value;
+                },
+              });
+              for (let attempt = 0; attempt < 20; attempt += 1) {
+                expect(
+                  (
+                    await pollOrbUntilCaughtUp(
+                      task,
+                      { ...harness.deps, runtimeClient: missedRuntime },
+                      ORB,
+                    )
+                  ).type,
+                ).toBe("retryable");
+                if (typeof harness.deps.control.getLiveness(ORB)?.unansweredSinceAt === "number") {
+                  break;
+                }
+              }
+              expect(
+                typeof harness.deps.control.getLiveness(ORB)?.unansweredSinceAt,
+                "missed runtime response starts silence",
+              ).toBe("number");
+              await task.sleep(
+                TEST_CONSTANTS.unreachableGraceMs + 1,
+                "unanswered runtime grace before provider stalls",
+              );
+              expect(harness.store.orbSnapshot(ORB)?.stateChangedAt).toBe(running?.stateChangedAt);
+              const stopsBefore = harness.world.hostStopCountOf(ORB);
+              const deps = { ...harness.deps, hostProvider: stalledProvider };
+              for (let attempt = 0; attempt < 3; attempt += 1) {
+                expect((await reconcileOrbOnce(task, deps, ORB)).type).toBe("retryable");
+                expect(
+                  typeof harness.deps.control.getLiveness(ORB)?.unansweredSinceAt,
+                  `provider stall ${attempt + 1} preserves silence`,
+                ).toBe("number");
+              }
+              const answeringRuntime = new Proxy(harness.deps.runtimeClient, {
+                get(target, property) {
+                  if (property === "health") {
+                    return (task: SimulationTask, baseUrl: string) => {
+                      const state = harness.world.resolveRuntime(baseUrl, task);
+                      if (state === null) throw new Error("seeded runtime is unavailable");
+                      return ResultAsync.fromSafePromise(
+                        Promise.resolve(harness.world.runtimeHealth(task, state)),
+                      );
+                    };
+                  }
+                  const value = Reflect.get(target, property);
+                  return typeof value === "function" ? value.bind(target) : value;
+                },
+              });
+              let recovered = false;
+              for (let attempt = 0; attempt < 5; attempt += 1) {
+                const outcome = await reconcileOrbOnce(
+                  task,
+                  { ...deps, runtimeClient: answeringRuntime },
+                  ORB,
+                );
+                if (outcome.type === "noop") {
+                  recovered = true;
+                  break;
+                }
+                expect(outcome.type).toBe("retryable");
+                expect(harness.world.hostStopCountOf(ORB)).toBe(stopsBefore);
+              }
+              expect(recovered, "a fresh runtime answer eventually defers the restart").toBe(true);
+              expect(harness.world.hostStopCountOf(ORB)).toBe(stopsBefore);
+              expect(harness.deps.control.getLiveness(ORB)?.unansweredSinceAt).toBeNull();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      },
+    );
+    expect(capture.matching("unreachable-restart-deferred")).toHaveLength(1);
+  });
+
+  it("a runtime answer racing failed corroboration vetoes the restart", async () => {
+    const capture = new LogCapture();
+    await runDst(
+      { name: "runtime-answer-races-corroboration", iterations: 20, logCapture: capture },
+      async (sim) => {
+        const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+        const runtime = harness.deps.runtimeClient;
+        let probeStarted = false;
+        let releaseProbe: (() => void) | null = null;
+        const failedHealth = new Proxy(runtime, {
+          get(target, property) {
+            if (property !== "health") {
+              const value = Reflect.get(target, property);
+              return typeof value === "function" ? value.bind(target) : value;
+            }
+            return (...args: Parameters<typeof runtime.health>) => {
+              const [_task, _baseUrl, _context] = args;
+              return ResultAsync.fromPromise(
+                new Promise<void>((resolve) => {
+                  probeStarted = true;
+                  releaseProbe = resolve;
+                }),
+                () => ({
+                  type: "runtime_client_error" as const,
+                  answered: false,
+                  code: "cancelled" as const,
+                  message: "health corroboration cancelled",
+                  retryable: true,
+                }),
+              ).andThen(() =>
+                errAsync({
+                  type: "runtime_client_error" as const,
+                  answered: false,
+                  code: "unreachable" as const,
+                  message: "health corroboration received no answer",
+                  retryable: true,
+                }),
+              );
+            };
+          },
+        });
+        const result = await sim.runTasks([
+          {
+            name: "reconciler",
+            f: async (task) => {
+              seedRunningOrb(task, harness, ORB);
+              const running = harness.store.orbSnapshot(ORB);
+              expect(running).not.toBeNull();
+              harness.deps.control.noteStateEpisode(ORB, running?.stateChangedAt ?? -1);
+              harness.deps.control.resetLivenessBaseline(ORB, task.monotonicNow());
+              harness.deps.control.noteRuntimeRequestStarted(ORB, task.monotonicNow());
+              await task.sleep(
+                TEST_CONSTANTS.unreachableGraceMs + 1,
+                "unanswered runtime grace before corroboration race",
+              );
+              const stopsBefore = harness.world.hostStopCountOf(ORB);
+              let outcome = await reconcileOrbOnce(
+                task,
+                { ...harness.deps, runtimeClient: failedHealth },
+                ORB,
+              );
+              while (!probeStarted) {
+                expect(outcome.type).toBe("retryable");
+                outcome = await reconcileOrbOnce(
+                  task,
+                  { ...harness.deps, runtimeClient: failedHealth },
+                  ORB,
+                );
+              }
+              expect(outcome.type).toBe("noop");
+              expect(harness.world.hostStopCountOf(ORB)).toBe(stopsBefore);
+              expect(harness.deps.control.getLiveness(ORB)?.unansweredSinceAt).toBeNull();
+            },
+          },
+          {
+            name: "runtime answer",
+            f: async (task) => {
+              await waitUntil(task, "health corroboration starts", () => probeStarted);
+              let pull = await pollOrbUntilCaughtUp(task, harness.deps, ORB);
+              while (
+                pull.type !== "caught_up" ||
+                harness.deps.control.getLiveness(ORB)?.unansweredSinceAt !== null
+              ) {
+                expect(["caught_up", "retryable"]).toContain(pull.type);
+                pull = await pollOrbUntilCaughtUp(task, harness.deps, ORB);
+              }
+              releaseProbe?.();
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(capture.matching("silence_episode_changed")).toHaveLength(1);
+      },
+    );
   });
 
   // The reproducer for docs/postmortems/2026-08-05-unreachable-restart-livelock.md:
