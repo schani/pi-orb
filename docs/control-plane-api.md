@@ -23,10 +23,10 @@ This forecloses local paths, `file://` URLs, credential leakage into the databas
 
 The environment is prescribed initially:
 
-- Debian 12 (the runtime container image's base);
+- Debian 12 on native GCE hosts and in the local runtime image;
 - Node.js 24;
-- fixed orb runtime/container image on every provider;
-- Spot `n2d-highmem-4` Container-Optimized OS VMs on GCE later, running that same container image;
+- a versioned native Debian image on Spot `n2d-highmem-4` GCE VMs;
+- a fixed runtime container image for the local Docker provider;
 - no required orb configuration for a simple TypeScript project.
 
 Still open:

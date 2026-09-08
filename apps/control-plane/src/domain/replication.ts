@@ -207,15 +207,18 @@ export async function pollOrbUntilCaughtUp(
       task,
       deps.constants.runtimeRequestTimeoutMs,
       "history pull request",
-      (context) =>
-        deps.runtimeClient.pullHistory(
+      (context) => {
+        deps.control.noteRuntimeRequestStarted(orbId, task.monotonicNow());
+        return deps.runtimeClient.pullHistory(
           task,
           { baseUrl, after: orb.replicationCursor, limit: deps.constants.pullLimit },
           context,
-        ),
+        );
+      },
     );
     if (pulled.isErr()) {
       const error = pulled.error;
+      if (error.answered) deps.control.noteRuntimeAnswered(orbId, task.monotonicNow());
       if (error.code === "cursor_not_found") {
         const integrity: ReplicationIntegrityError = {
           type: "replication_integrity",
@@ -267,6 +270,7 @@ export async function pollOrbUntilCaughtUp(
       task.monotonicNow(),
       response.activity,
       response.runtimeInstanceId,
+      observation.lastStartedAt ?? null,
     );
     if (response.activity === "busy") {
       // Advisory idle-auto-stop timestamp (docs/lifecycle.md); a failure is ignored — the

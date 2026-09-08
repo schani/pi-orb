@@ -11,8 +11,12 @@ export interface HookFailure {
 export interface LivenessEntry {
   /** Monotonic ms of the last successful pull (or seeded baseline). */
   lastSuccessAt: number;
+  /** First runtime request since that success which has not received an answer. */
+  unansweredSinceAt: number | null;
   activity: "idle" | "busy";
   runtimeInstanceId: string | null;
+  /** Latest provider start timestamp already incorporated into this baseline. */
+  hostStartedAt: number | null;
   /**
    * Non-null only while the baseline rests on a host restart rather than on a
    * pull: the entitled grace must then outlast a boot, and a second expiry
@@ -91,11 +95,13 @@ export class ControlState {
   /** orbId → `state_changed_at` of the episode this process's memory describes. */
   private readonly episodes = new Map<string, number>();
   private readonly nextAttemptAt = new Map<string, number>();
+  private readonly scheduleGeneration = new Map<string, number>();
+  private readonly scheduledStateVersion = new Map<string, number>();
   private readonly retryAttempts = new Map<string, number>();
   private readonly authBlocked = new Set<string>();
   private readonly drainStatus = new Map<string, DrainStatus>();
   private challenge: DeviceChallenge | null = null;
-  private readonly stoppingOrbs = new Set<string>();
+  private readonly stoppingOrbs = new Map<string, number>();
 
   /**
    * Drop everything this process remembers about a *previous* visit to a
@@ -133,11 +139,14 @@ export class ControlState {
     at: number,
     activity: "idle" | "busy",
     runtimeInstanceId: string,
+    hostStartedAt: number | null = null,
   ): void {
     this.liveness.set(orbId, {
       lastSuccessAt: at,
+      unansweredSinceAt: null,
       activity,
       runtimeInstanceId,
+      hostStartedAt,
       restartGraceMs: null,
     });
   }
@@ -153,19 +162,40 @@ export class ControlState {
   noteRuntimeAnswered(orbId: string, at: number): void {
     const existing = this.liveness.get(orbId);
     if (existing === undefined) return;
-    this.liveness.set(orbId, { ...existing, lastSuccessAt: at, restartGraceMs: null });
+    this.liveness.set(orbId, {
+      ...existing,
+      lastSuccessAt: at,
+      unansweredSinceAt: null,
+      restartGraceMs: null,
+    });
+  }
+
+  /** Start the silence clock only when a request is actually sent to the runtime. */
+  noteRuntimeRequestStarted(orbId: string, at: number): void {
+    const existing = this.liveness.get(orbId);
+    if (existing === undefined) return;
+    if (existing.unansweredSinceAt === null) {
+      this.liveness.set(orbId, { ...existing, unansweredSinceAt: at });
+    }
   }
 
   /**
    * Seed/reset the liveness baseline (orb became running, or host restarted).
    * `restartGraceMs` is passed only by a restart, which must outlast a boot.
    */
-  resetLivenessBaseline(orbId: string, at: number, restartGraceMs: number | null = null): void {
+  resetLivenessBaseline(
+    orbId: string,
+    at: number,
+    restartGraceMs: number | null = null,
+    hostStartedAt: number | null = null,
+  ): void {
     const existing = this.liveness.get(orbId);
     this.liveness.set(orbId, {
       lastSuccessAt: at,
+      unansweredSinceAt: null,
       activity: existing?.activity ?? "idle",
       runtimeInstanceId: null,
+      hostStartedAt,
       restartGraceMs,
     });
   }
@@ -245,6 +275,35 @@ export class ControlState {
 
   setNextAttemptAt(orbId: string, at: number): void {
     this.nextAttemptAt.set(orbId, at);
+  }
+
+  nudgeNextAttemptAt(orbId: string): void {
+    // Never reset this generation in clearOrb: an in-flight pass may finish
+    // after a lifecycle transition and must not win through an ABA back to 0.
+    this.scheduleGeneration.set(orbId, (this.scheduleGeneration.get(orbId) ?? 0) + 1);
+    this.nextAttemptAt.set(orbId, 0);
+  }
+
+  getScheduleGeneration(orbId: string): number {
+    return this.scheduleGeneration.get(orbId) ?? 0;
+  }
+
+  setNextAttemptAtIfGeneration(
+    orbId: string,
+    generation: number,
+    at: number,
+    stateVersion: number,
+  ): boolean {
+    if (this.getScheduleGeneration(orbId) !== generation) return false;
+    this.nextAttemptAt.set(orbId, at);
+    this.scheduledStateVersion.set(orbId, stateVersion);
+    return true;
+  }
+
+  isReconcileDue(orbId: string, stateVersion: number, now: number): boolean {
+    return (
+      this.scheduledStateVersion.get(orbId) !== stateVersion || this.getNextAttemptAt(orbId) <= now
+    );
   }
 
   getNextAttemptAt(orbId: string): number {
@@ -420,12 +479,13 @@ export class ControlState {
   // -- stopping / drain presentation --
 
   /** While set, the HTTP layer rejects new live connections for the orb. */
-  markStopping(orbId: string): void {
-    this.stoppingOrbs.add(orbId);
+  markStopping(orbId: string, stateVersion: number): void {
+    const previous = this.stoppingOrbs.get(orbId) ?? -1;
+    if (stateVersion > previous) this.stoppingOrbs.set(orbId, stateVersion);
   }
 
-  isStopping(orbId: string): boolean {
-    return this.stoppingOrbs.has(orbId);
+  isStopping(orbId: string, observedStateVersion: number): boolean {
+    return (this.stoppingOrbs.get(orbId) ?? -1) >= observedStateVersion;
   }
 
   setDrainStatus(orbId: string, status: DrainStatus): void {
@@ -474,7 +534,6 @@ export class ControlState {
     ControlState.forgetOrb(this.retryAttempts, orbId);
     this.authBlocked.delete(orbId);
     this.drainStatus.delete(orbId);
-    this.stoppingOrbs.delete(orbId);
     this.restartPending.delete(orbId);
     this.browserVisibility.delete(orbId);
     this.browserClosers.delete(orbId);

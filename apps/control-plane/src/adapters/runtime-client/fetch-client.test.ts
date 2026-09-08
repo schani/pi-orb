@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { describeFetchError } from "./fetch-client.ts";
+import { NoSimulationTask } from "determined";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { describeFetchError, FetchRuntimeClient } from "./fetch-client.ts";
+
+const task = new NoSimulationTask("runtime client response evidence", false);
+
+afterEach(() => vi.unstubAllGlobals());
 
 /**
  * undici's rejection shapes (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md):
@@ -64,5 +69,71 @@ describe("describeFetchError", () => {
     const looping = new Error("fetch failed");
     (looping as { cause?: unknown }).cause = looping;
     expect(describeFetchError(looping)).toBe("fetch failed");
+  });
+});
+
+describe("FetchRuntimeClient response evidence", () => {
+  it("marks an HTTP error as answered", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ error: { message: "busy" } }, { status: 503 })),
+    );
+    const result = await new FetchRuntimeClient().health(task, "http://runtime.test", {
+      signal: new AbortController().signal,
+    });
+    expect(result.isErr() && result.error).toMatchObject({
+      answered: true,
+      code: "http_error",
+    });
+  });
+
+  it.each([
+    ["unparseable JSON", new Response("{", { status: 200 })],
+    ["invalid schema", Response.json({}, { status: 200 })],
+  ])("marks %s after a response as answered", async (_case, response) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response),
+    );
+    const result = await new FetchRuntimeClient().health(task, "http://runtime.test", {
+      signal: new AbortController().signal,
+    });
+    expect(result.isErr() && result.error).toMatchObject({
+      answered: true,
+      code: "invalid_response",
+    });
+  });
+
+  it("marks a network failure as unanswered", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new TypeError("fetch failed"))),
+    );
+    const result = await new FetchRuntimeClient().health(task, "http://runtime.test", {
+      signal: new AbortController().signal,
+    });
+    expect(result.isErr() && result.error).toMatchObject({
+      answered: false,
+      code: "unreachable",
+    });
+  });
+
+  it("marks a pre-aborted request as unanswered cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        expect(init?.signal?.aborted).toBe(true);
+        return Promise.reject(new DOMException("aborted", "AbortError"));
+      }),
+    );
+    const result = await new FetchRuntimeClient().health(task, "http://runtime.test", {
+      signal: controller.signal,
+    });
+    expect(result.isErr() && result.error).toMatchObject({
+      answered: false,
+      code: "cancelled",
+    });
   });
 });

@@ -21,7 +21,7 @@ describe("hosted-file cloud infrastructure", () => {
     const hosting = readFileSync(resolve("infra/hosting.tf"), "utf8");
 
     expect(hosting).toMatch(
-      /resource "google_storage_bucket_iam_member" "control_plane_hosting_objects"[\s\S]*role\s+=\s+"roles\/storage\.objectAdmin"[\s\S]*member\s+=\s+"serviceAccount:\$\{google_service_account\.control_plane\.email\}"/,
+      /resource "google_storage_bucket_iam_member" "control_plane_hosting_objects"[\s\S]*role\s+=\s+"roles\/storage\.objectAdmin"[\s\S]*member\s+=\s+"serviceAccount:\$\{local\.control_plane_email\}"/,
     );
   });
 
@@ -31,7 +31,7 @@ describe("hosted-file cloud infrastructure", () => {
     const outputs = readFileSync(resolve("infra/outputs.tf"), "utf8");
 
     expect(hosting).toMatch(
-      /app_origin\s+=\s+"https:\/\/\$\{local\.browser_service_name\}-\$\{data\.google_project\.pi_orb\.number\}\.\$\{var\.region\}\.run\.app"/,
+      /app_origin\s+=\s+"https:\/\/\$\{local\.browser_service_name\}-\$\{local\.foundation\.project_number\}\.\$\{var\.region\}\.run\.app"/,
     );
     expect(hosting).toMatch(
       /hosting_origin\s+=\s+"https:\/\/files---\$\{local\.browser_service_name\}/,

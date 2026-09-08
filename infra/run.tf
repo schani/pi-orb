@@ -11,9 +11,10 @@ locals {
       PI_ORB_GCP_PROJECT         = var.project
       PI_ORB_HOST_PROVIDER       = "gce"
       PI_ORB_GCE_ZONE            = var.zone
-      PI_ORB_GCE_SERVICE_ACCOUNT = google_service_account.orb_vm.email
-      PI_ORB_GCE_SUBNETWORK      = "regions/${var.region}/subnetworks/${google_compute_subnetwork.orbs.name}"
-      PI_ORB_RUNTIME_IMAGE       = var.runtime_image
+      PI_ORB_GCE_SERVICE_ACCOUNT = local.orb_vm_email
+      PI_ORB_GCE_SUBNETWORK      = local.orb_subnetwork_resource
+      PI_ORB_GCE_IMAGE_RESOURCE  = var.native_image_resource
+      PI_ORB_GCE_IMAGE_ID        = var.native_image_id
       # Always set, so a revision's fence is explicit rather than inherited
       # from a default (docs/host-provider.md).
       PI_ORB_HOST_SPEC_GENERATION = tostring(var.deploy_generation)
@@ -34,7 +35,7 @@ resource "google_cloud_run_v2_service" "runtime" {
   deletion_protection  = false
 
   template {
-    service_account = google_service_account.control_plane.email
+    service_account = local.control_plane_email
     scaling {
       min_instance_count = 0
       max_instance_count = 1
@@ -42,8 +43,8 @@ resource "google_cloud_run_v2_service" "runtime" {
     vpc_access {
       egress = "PRIVATE_RANGES_ONLY"
       network_interfaces {
-        network    = google_compute_network.pi_orb.id
-        subnetwork = google_compute_subnetwork.run_egress.id
+        network    = local.pi_orb_network
+        subnetwork = local.run_egress_subnetwork
       }
     }
     containers {
@@ -131,7 +132,7 @@ resource "google_cloud_run_v2_service" "browser" {
   }
 
   template {
-    service_account = google_service_account.control_plane.email
+    service_account = local.control_plane_email
     timeout         = "3600s"
     scaling {
       min_instance_count = 1
@@ -140,8 +141,8 @@ resource "google_cloud_run_v2_service" "browser" {
     vpc_access {
       egress = "PRIVATE_RANGES_ONLY"
       network_interfaces {
-        network    = google_compute_network.pi_orb.id
-        subnetwork = google_compute_subnetwork.run_egress.id
+        network    = local.pi_orb_network
+        subnetwork = local.run_egress_subnetwork
       }
     }
     containers {
@@ -244,7 +245,7 @@ resource "google_cloud_run_v2_service" "ops" {
   deletion_protection = false
 
   template {
-    service_account = google_service_account.control_plane.email
+    service_account = local.control_plane_email
     scaling {
       min_instance_count = 0
       max_instance_count = 1
@@ -252,8 +253,8 @@ resource "google_cloud_run_v2_service" "ops" {
     vpc_access {
       egress = "PRIVATE_RANGES_ONLY"
       network_interfaces {
-        network    = google_compute_network.pi_orb.id
-        subnetwork = google_compute_subnetwork.run_egress.id
+        network    = local.pi_orb_network
+        subnetwork = local.run_egress_subnetwork
       }
     }
     containers {
@@ -342,7 +343,7 @@ resource "google_cloud_run_v2_service" "issuer" {
   deletion_protection  = false
 
   template {
-    service_account = google_service_account.issuer.email
+    service_account = local.issuer_email
     scaling {
       # Capped at one instance like its siblings. On a public unauthenticated
       # endpoint that cap is also the spend bound: both documents are served
@@ -355,8 +356,8 @@ resource "google_cloud_run_v2_service" "issuer" {
       # Only to reach Cloud SQL, which is private-IP only.
       egress = "PRIVATE_RANGES_ONLY"
       network_interfaces {
-        network    = google_compute_network.pi_orb.id
-        subnetwork = google_compute_subnetwork.run_egress.id
+        network    = local.pi_orb_network
+        subnetwork = local.run_egress_subnetwork
       }
     }
     containers {
@@ -397,10 +398,9 @@ resource "google_cloud_run_v2_service" "issuer" {
       #                                provider.
       #   PI_ORB_HOST_PROVIDER,
       #   PI_ORB_GCE_*,
-      #   PI_ORB_RUNTIME_IMAGE,
       #   PI_ORB_HOST_SPEC_GENERATION  this service creates no compute. Leaving
-      #                                the provider unset also keeps the
-      #                                digest-pin boot gate off its path.
+      #                                the provider unset also keeps the native
+      #                                image boot gate off its path.
       #   PI_ORB_GITHUB_*,
       #   PI_ORB_TAILSCALE_*           broker and reconciler settings; the
       #                                issuer brokers nothing and runs no loops.

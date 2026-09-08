@@ -245,6 +245,33 @@ export async function waitFor<T>(
   }
 }
 
+/** Wait for the final TCP-listening server, not the init-only Unix socket. */
+export async function waitForPostgres(
+  container: string,
+  user: string,
+  database: string,
+  what = "postgres ready",
+): Promise<void> {
+  await waitFor(
+    what,
+    async () => {
+      const out = await docker([
+        "exec",
+        container,
+        "pg_isready",
+        "-h",
+        "127.0.0.1",
+        "-U",
+        user,
+        "-d",
+        database,
+      ]);
+      return out.includes("accepting connections") ? true : null;
+    },
+    { timeoutMs: 60_000 },
+  );
+}
+
 export interface ControlPlaneHandle {
   process: ChildProcess;
   port: number;

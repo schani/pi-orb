@@ -9,6 +9,8 @@ umask 077
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 INFRA="$ROOT/infra"
+# shellcheck source=release-child.sh
+source "$INFRA/release-child.sh"
 PROJECT=${PROJECT:-playground-dev-6ae7}
 REGION=${REGION:-us-central1}
 # No ZONE here on purpose: orb VMs are created in OpenTofu's `var.zone`, which
@@ -17,6 +19,7 @@ REGION=${REGION:-us-central1}
 STATE_BUCKET=${STATE_BUCKET:-pi-orb-tfstate-$PROJECT}
 STATE_PREFIX=${STATE_PREFIX:-static-plane}
 AUTO_APPROVE=false
+QUIESCE=false
 LOCAL_LOCK_DIR="${TMPDIR:-/tmp}/pi-orb-release-${PROJECT}.lock"
 REMOTE_LOCK_URL="gs://$STATE_BUCKET/$STATE_PREFIX/release.lock"
 WORK_DIR=""
@@ -36,7 +39,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: ./infra/release.sh [--yes]
+Usage: ./infra/release.sh [--yes] [--quiesce]
 
 Deploys the clean, latest origin/main commit through build, push, OpenTofu,
 IAP/revision repair, and the live smoke test. The saved plan and generated
@@ -44,6 +47,7 @@ variables live only in a mode-0700 temporary directory and are removed on exit.
 A generation-matched GCS lock serializes the complete release transaction.
 
   --yes  Apply the reviewed plan without an interactive confirmation (for CI).
+  --quiesce  Disable and drain the browser service before revision cleanup.
 EOF
 }
 
@@ -51,6 +55,9 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --yes)
       AUTO_APPROVE=true
+      ;;
+    --quiesce)
+      QUIESCE=true
       ;;
     -h|--help)
       usage
@@ -80,8 +87,9 @@ repair_iap_after_attempt() {
 
 on_signal() {
   local status=$1
-  trap - HUP INT TERM
+  trap '' HUP INT TERM
   echo "release: interrupted" >&2
+  release_stop_child
   repair_iap_after_attempt || true
   exit "$status"
 }
@@ -115,7 +123,7 @@ trap 'on_signal 143' TERM
 
 # `node` is here for the workload-identity smoke's RS256 verification against
 # the deployed JWKS; failing at preflight beats failing after a live deploy.
-for command in curl docker gcloud git jq node tofu; do
+for command in curl docker gcloud git jq node npm tofu; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "release preflight failed: missing required command '$command'" >&2
     exit 1
@@ -163,6 +171,7 @@ WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/pi-orb-release.XXXXXX")
 chmod 700 "$WORK_DIR"
 VARS="$WORK_DIR/release.tfvars"
 PLAN="$WORK_DIR/release.tfplan"
+PLAN_JSON="$WORK_DIR/release.tfplan.json"
 LOCK_RECORD="$WORK_DIR/release-lock.json"
 
 jq -n \
@@ -192,8 +201,30 @@ esac
 
 export PROJECT REGION
 
-echo "release: building, boot-gating, and pushing images for $head_commit ..."
-"$INFRA/build-push.sh" > "$VARS"
+echo "release: verifying the separately applied foundation ..."
+tofu -chdir="$INFRA/foundation" init -input=false -lockfile=readonly \
+  -backend-config="bucket=$STATE_BUCKET"
+foundation=$(tofu -chdir="$INFRA/foundation" output -json)
+if ! jq -e --arg project "$PROJECT" --arg region "$REGION" '
+  .foundation_schema_version.value == 1 and .project.value == $project and
+  .region.value == $region and (.zone.value | type == "string") and
+  (.image_builder_service_account_email.value | type == "string") and
+  (.image_build_subnetwork.value | type == "string") and
+  (.pi_orb_network.value | type == "string") and
+  (.orb_subnetwork_resource.value | type == "string") and
+  (.run_egress_subnetwork.value | type == "string") and
+  (.run_egress_cidr.value | type == "string")
+' <<<"$foundation" >/dev/null; then
+  echo "release refused: apply/adopt the matching foundation before releasing" >&2
+  exit 1
+fi
+ZONE=$(jq -r '.zone.value' <<<"$foundation")
+IMAGE_BUILDER_SA=$(jq -r '.image_builder_service_account_email.value' <<<"$foundation")
+IMAGE_BUILD_SUBNET=$(jq -r ' .image_build_subnetwork.value' <<<"$foundation")
+export ZONE IMAGE_BUILDER_SA IMAGE_BUILD_SUBNET
+
+echo "release: building and validating native image for $head_commit ..."
+release_run_child "$INFRA/build-push.sh" > "$VARS"
 chmod 600 "$VARS"
 
 # build-push.sh emits epoch seconds. Clamp them above the generation currently
@@ -226,7 +257,8 @@ mv "$WORK_DIR/release.tfvars.new" "$VARS"
 chmod 600 "$VARS"
 
 echo "release: initializing OpenTofu ..."
-tofu -chdir="$INFRA" init -input=false -lockfile=readonly
+tofu -chdir="$INFRA" init -input=false -lockfile=readonly \
+  -backend-config="bucket=$STATE_BUCKET" -backend-config="prefix=$STATE_PREFIX"
 
 echo "release: creating exact saved plan (generation $deploy_generation) ..."
 tofu -chdir="$INFRA" plan \
@@ -234,8 +266,29 @@ tofu -chdir="$INFRA" plan \
   -out="$PLAN" \
   -var-file="$VARS" \
   -var="project=$PROJECT" \
-  -var="region=$REGION"
+  -var="region=$REGION" \
+  -var="zone=$ZONE" \
+  -var="foundation_state_bucket=$STATE_BUCKET"
 chmod 600 "$PLAN"
+
+tofu -chdir="$INFRA" show -json "$PLAN" > "$PLAN_JSON"
+chmod 600 "$PLAN_JSON"
+if ! jq -e '
+  [
+    "google_sql_database_instance.pi_orb",
+    "google_sql_database.pi_orb",
+    "google_sql_user.pi_orb",
+    "random_password.db",
+    "google_secret_manager_secret.database_url",
+    "google_secret_manager_secret_version.database_url"
+  ] as $protected |
+  [.resource_changes[]? | select(.address as $address | $protected | index($address))] as $changes |
+  ($changes | length) == ($protected | length) and
+  all($changes[]; .change.actions == ["no-op"])
+' "$PLAN_JSON" >/dev/null; then
+  echo "release refused: saved plan does not preserve the database and its credentials" >&2
+  exit 1
+fi
 
 if [ "$AUTO_APPROVE" != true ]; then
   if [ ! -t 0 ]; then
@@ -261,7 +314,11 @@ else
 fi
 
 echo "release: reconciling IAP and deleting drained browser revisions ..."
-"$INFRA/deploy.sh"
+if [ "$QUIESCE" = true ]; then
+  release_run_child "$INFRA/release-quiesce.sh" "$WORK_DIR/quiesce.json" -- "$INFRA/deploy.sh"
+else
+  "$INFRA/deploy.sh"
+fi
 IAP_REPAIRED=true
 
 echo "release: running live lifecycle smoke test ..."
@@ -283,12 +340,14 @@ fi
 PI_ORB_GCP_PROJECT="$PROJECT" PI_ORB_GCE_ZONE="$zone" "$INFRA/smoke-workload-identity.sh"
 
 control_plane_image=$(awk -F'"' '/^control_plane_image/{print $2}' "$VARS")
-runtime_image=$(awk -F'"' '/^runtime_image/{print $2}' "$VARS")
+native_image_resource=$(awk -F'"' '/^native_image_resource/{print $2}' "$VARS")
+native_image_id=$(awk -F'"' '/^native_image_id/{print $2}' "$VARS")
 cat <<EOF
 
 RELEASE SUCCEEDED
   commit:               $head_commit
   control-plane image:  $control_plane_image
-  runtime image:        $runtime_image
+  native image:         $native_image_resource
+  native image ID:      $native_image_id
   deploy generation:    $deploy_generation
 EOF

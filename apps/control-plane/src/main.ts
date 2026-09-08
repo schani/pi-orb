@@ -20,7 +20,7 @@ import { okAsync } from "neverthrow";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
-import { isDigestPinnedImage } from "./adapters/gce/image-pin.ts";
+import { readGceImageIdentity } from "./adapters/gce/image-pin.ts";
 import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
 import {
   type GithubOAuthConfig,
@@ -49,11 +49,7 @@ import {
 } from "./adapters/tailscale/client.ts";
 import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
 import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
-import {
-  DEFAULT_BROKER_CONSTANTS,
-  DEFAULT_ISSUER_CONSTANTS,
-  DEFAULT_LIFECYCLE_CONSTANTS,
-} from "./domain/constants.ts";
+import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
 import { requestOrbArchive } from "./domain/lifecycle.ts";
@@ -83,6 +79,7 @@ import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
+import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
 
 const env = (name: string, fallback: string): string => {
   const value = process.env[name];
@@ -142,10 +139,9 @@ async function main(): Promise<void> {
   const runtimeImage = env("PI_ORB_RUNTIME_IMAGE", "pi-orb-runtime:dev");
   const dockerNetwork = env("PI_ORB_DOCKER_NETWORK", "pi-orb");
   const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
-  if (providerKind === "gce" && !isDigestPinnedImage(runtimeImage)) {
-    // Refuse before any side effect — a misconfigured deploy must not migrate
-    // the schema and then die.
-    bootTask.error("PI_ORB_RUNTIME_IMAGE must be digest-pinned for GCE");
+  const gceImage = readGceImageIdentity((name) => env(name, ""));
+  if (providerKind === "gce" && !gceImage.ok) {
+    bootTask.error(gceImage.message);
     process.exitCode = 1;
     return;
   }
@@ -374,7 +370,8 @@ async function main(): Promise<void> {
             "regions/us-central1/subnetworks/pi-orb-us-central1",
           ),
           serviceAccount: env("PI_ORB_GCE_SERVICE_ACCOUNT", ""),
-          runtimeImage,
+          imageResource: gceImage.ok ? gceImage.imageResource : "",
+          imageId: gceImage.ok ? gceImage.imageId : "",
           controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
           specGeneration,
           ...extraEnvOption,
@@ -442,7 +439,7 @@ async function main(): Promise<void> {
     nameGenerator,
     nameLeaseMs: 60_000,
     control: new ControlState(),
-    constants: DEFAULT_LIFECYCLE_CONSTANTS,
+    constants: lifecycleConstantsForHost(hostProvider.kind),
     projectSecrets: { pointers: database.projectSecrets, secrets },
     hosting: {
       store: database.hosting,

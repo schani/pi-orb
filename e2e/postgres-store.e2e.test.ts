@@ -6,7 +6,7 @@ import {
 import { PostgreSQLHostingStore } from "../apps/control-plane/src/adapters/pg/hosting.ts";
 import { openThrowawayPostgres } from "../apps/control-plane/src/testkit/postgres.ts";
 import { storeContractTests } from "../apps/control-plane/src/testkit/store-contract.ts";
-import { docker, waitFor } from "./harness.ts";
+import { docker, waitForPostgres } from "./harness.ts";
 
 /**
  * The store contract against a real PostgreSQL server, over the same
@@ -55,14 +55,7 @@ if (providedUrl === "" && PROCESS_BACKEND) {
         `127.0.0.1:${PG_PORT}:5432`,
         "postgres:16",
       ]);
-      await waitFor(
-        "store-contract postgres ready",
-        async () => {
-          const out = await docker(["exec", PG_CONTAINER, "pg_isready", "-U", "pi-orb"]);
-          return out.includes("accepting connections") ? true : null;
-        },
-        { timeoutMs: 60_000 },
-      );
+      await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb", "store-contract postgres ready");
       connectionString = `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`;
     }, 120_000);
 

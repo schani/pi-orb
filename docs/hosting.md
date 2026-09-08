@@ -174,7 +174,7 @@ and blocked cleanup produce sanitized durable outcomes sufficient to reconstruct
 object won, without storing contents or bearer values. Implementation needs store contracts,
 adapter tests, deterministic crash checkpoints and failpoints around each object/catalog boundary,
 and end-to-end coverage for restart, archive retention, exact replacement, and deletion cleanup.
-The first implementation publishes one file at a time; question 50 keeps atomic folder releases
+The first implementation publishes one file at a time; question 51 keeps atomic folder releases
 open rather than making them implicit in this contract.
 
 ## Verification
@@ -234,7 +234,7 @@ deterministic dependencies; the domain, fakes, and scenarios use no real randomn
   Permanent orb/project deletion and archive-to-delete upgrade eventually remove catalog entries,
   operations, sessions, and all object generations, including completion after caller death.
 - Cleanup claims are exclusive across workers and restart. Expiry alone never authorizes assuming an
-  external upload cannot finish; question 54 must supply the terminal proof used by the invariant.
+  external upload cannot finish; the byte-store contract supplies provider-confirmed terminal proof.
 - Healthy reads create no log. Publish/delete outcomes and cleanup blockers are durable,
   edge-deduplicated, sanitized, and sufficient for the UI to explain blocked cleanup.
 
@@ -256,9 +256,9 @@ safety assertions apply after every boundary, including failing schedules.
    inventory or deleting a newer replacement.
 5. Explicit removal races replacement so it unpublishes only the exact observed generation.
    Cleanup races active and paused writers, including a writer that begins or completes provider
-   work after cleanup claims it; tests pin the eventual question-54 terminal proof.
+   work after cleanup claims it; tests pin the provider-confirmed terminal proof.
 6. A reader races replacement retirement and permanent deletion at read-open and every chunk. Tests
-   pin the eventual question-54 contract rather than assuming an open GCS read survives deletion.
+   pin the implemented exact-generation read contract rather than assuming an open GCS read survives deletion.
 7. Stop/start, compute replacement, and archive retain the exact catalog and bytes; archive blocks
    later writes while the retained file remains downloadable.
 8. Zero-byte, tiny, large generated, and concurrent transfers cover chunk boundaries, source/sink

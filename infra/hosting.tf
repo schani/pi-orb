@@ -2,8 +2,8 @@
 # publication and cleanup state; this bucket contains only immutable file bytes.
 locals {
   browser_service_name = "pi-orb"
-  app_origin           = "https://${local.browser_service_name}-${data.google_project.pi_orb.number}.${var.region}.run.app"
-  hosting_origin       = "https://files---${local.browser_service_name}-${data.google_project.pi_orb.number}.${var.region}.run.app"
+  app_origin           = "https://${local.browser_service_name}-${local.foundation.project_number}.${var.region}.run.app"
+  hosting_origin       = "https://files---${local.browser_service_name}-${local.foundation.project_number}.${var.region}.run.app"
 }
 
 resource "google_storage_bucket" "hosting" {
@@ -25,5 +25,5 @@ resource "google_storage_bucket" "hosting" {
 resource "google_storage_bucket_iam_member" "control_plane_hosting_objects" {
   bucket = google_storage_bucket.hosting.name
   role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.control_plane.email}"
+  member = "serviceAccount:${local.control_plane_email}"
 }

@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader, type ResourceLoader } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
-import { createOrbResourceLoader } from "./resource-loader.ts";
+import { BAKED_SKILLS_DIR, createOrbResourceLoader } from "./resource-loader.ts";
 
 /**
  * Pinned Pi SDK contract test (docs/ports.md): verifies, against the exact
@@ -39,10 +39,10 @@ import { createOrbResourceLoader } from "./resource-loader.ts";
  *  6. `additionalSkillPaths` really discovers the image-baked skills directory
  *     through `getSkills()`, and an absent directory stays harmless.
  *
- * Every control-equality test passes `skillsDir: null` explicitly: the
- * production default is the image path `/opt/pi-orb/skills`, and this suite
- * must compare the same skill set as the control loader whether or not it
- * happens to run inside an orb image that has it.
+ * Every control-equality test passes `skillsDir: null` explicitly so it
+ * compares the same skill set as the control loader. Production defaults to
+ * `/opt/pi-orb/skills` in the image and the trusted runtime-relative source
+ * directory for process installs.
  */
 
 const PREVIEW_HOST = "pi-orb-test.tailabc.ts.net";
@@ -230,9 +230,23 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     ]);
   });
 
-  it("tolerates a missing skills directory, as on a provider with no image", async () => {
-    // The process host provider never has /opt/pi-orb/skills. `existsSync`
-    // filtering in the options builder is what keeps this quiet: passing the
+  it("discovers bundled skills from the source install by default", async () => {
+    const result = await createOrbResourceLoader({
+      cwd: repoDir,
+      agentDir,
+      previewHost: PREVIEW_HOST,
+    });
+    if (result.isErr()) throw new Error(`loader build failed: ${result.error}`);
+
+    const hosting = result.value.getSkills().skills.find((skill) => skill.name === "hosting");
+    const installedSkills = existsSync(BAKED_SKILLS_DIR) ? BAKED_SKILLS_DIR : BAKED_SKILLS_SOURCE;
+    expect(hosting?.filePath).toBe(join(installedSkills, "hosting", "SKILL.md"));
+    expect(hosting?.description).toContain("HTML explainers");
+    expect(result.value.getSkills().diagnostics).toEqual([]);
+  });
+
+  it("tolerates an explicitly configured missing skills directory", async () => {
+    // `existsSync` filtering keeps an incomplete install quiet: passing the
     // path anyway makes `reload()` record a `type: "error"` skill diagnostic.
     const absent = join(workDir, "no-such-skills-dir");
     const loader = await orbLoader(PREVIEW_HOST, absent);

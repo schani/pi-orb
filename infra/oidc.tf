@@ -4,8 +4,6 @@
 # private signing keys. The Cloud Run service itself is in run.tf beside its
 # siblings.
 
-data "google_project" "pi_orb" {}
-
 locals {
   issuer_service_name = "pi-orb-issuer"
 
@@ -31,7 +29,7 @@ locals {
   # A platform that stopped assigning the deterministic form would fail the
   # release loudly rather than deploy an issuer advertising a URL that does not
   # resolve.
-  oidc_issuer_url = "https://${local.issuer_service_name}-${data.google_project.pi_orb.number}.${var.region}.run.app"
+  oidc_issuer_url = "https://${local.issuer_service_name}-${local.foundation.project_number}.${var.region}.run.app"
 }
 
 # The issuer is the deployment's only public unauthenticated surface, so it
@@ -51,21 +49,10 @@ locals {
 # JWKS are registered) and the trimmed environment, not the credential. A
 # read-only PostgreSQL role for the issuer, granted `SELECT` on
 # `oidc_signing_keys` alone, is tracked in `TODO.md` for the live gate.
-resource "google_service_account" "issuer" {
-  account_id   = "pi-orb-issuer"
-  display_name = "pi-orb public OIDC issuer"
-}
-
 resource "google_secret_manager_secret_iam_member" "issuer_reads_database_url" {
   secret_id = google_secret_manager_secret.database_url.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.issuer.email}"
-}
-
-resource "google_project_iam_member" "issuer_log_writer" {
-  project = var.project
-  role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.issuer.email}"
+  member    = "serviceAccount:${local.issuer_email}"
 }
 
 # Parent secret for the issuer's private signing keys, following the Codex and
@@ -82,7 +69,6 @@ resource "google_secret_manager_secret" "oidc_signing_key" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.apis]
 }
 
 # Only the minting identity. `secretAccessor` covers the signer's per-signature
@@ -101,11 +87,11 @@ resource "google_secret_manager_secret" "oidc_signing_key" {
 resource "google_secret_manager_secret_iam_member" "cp_signing_key_accessor" {
   secret_id = google_secret_manager_secret.oidc_signing_key.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.control_plane.email}"
+  member    = "serviceAccount:${local.control_plane_email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "cp_signing_key_versions" {
   secret_id = google_secret_manager_secret.oidc_signing_key.id
   role      = "roles/secretmanager.secretVersionManager"
-  member    = "serviceAccount:${google_service_account.control_plane.email}"
+  member    = "serviceAccount:${local.control_plane_email}"
 }

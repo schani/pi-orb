@@ -3,7 +3,7 @@ import { reconcileOrbOnce, requestOrbStart } from "../../domain/lifecycle.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
 import { DeterministicGceApiModel } from "../../testkit/gce-model.ts";
 import { runDst } from "../../testkit/sim.ts";
-import { GceOrbHostProvider } from "./provider.ts";
+import { GceOrbHostProvider, type GceOrbHostProviderOptions } from "./provider.ts";
 
 const ORB = "orb-gce-discard";
 const PROJECT = "project-gce-discard";
@@ -28,7 +28,7 @@ function seedOrbCompute(
 
 function provider(
   model: DeterministicGceApiModel,
-  overrides: { runtimeImage?: string } = {},
+  overrides: Partial<Pick<GceOrbHostProviderOptions, "imageResource" | "imageId">> = {},
 ): GceOrbHostProvider {
   return new GceOrbHostProvider(model, {
     projectId: "proj",
@@ -36,13 +36,16 @@ function provider(
     machineType: "n2d-highmem-4",
     subnetwork: "regions/us-central1/subnetworks/pi-orb-us-central1",
     serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
-    runtimeImage: "us-central1-docker.pkg.dev/proj/pi-orb/runtime@sha256:abc",
+    imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
+    imageId: "123456789",
     controlPlaneUrl: "https://runtime.example",
     ...overrides,
   });
 }
 
-const anyContext = (): { signal: AbortSignal } => ({ signal: new AbortController().signal });
+const anyContext = (): { signal: AbortSignal } => ({
+  signal: new AbortController().signal,
+});
 
 /** Read modeled instance state back through the transport the adapter uses. */
 async function instanceStatus(
@@ -153,6 +156,60 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
       expect(model.hasInstance("pi-orb-orb-gce-discard-i0")).toBe(false);
       expect(model.hasInstance("pi-orb-orb-gce-discard-i1")).toBe(true);
       expect(model.hasDisk("pi-orb-data-orb-gce-discard")).toBe(true);
+    });
+  });
+
+  it("refuses a foreign retained disk before provisioning replacement compute", async () => {
+    await runDst({ name: "gce-model-foreign-retained-disk", iterations: 10 }, async (sim) => {
+      const model = new DeterministicGceApiModel();
+      model.seedDisk(DISK, { "pi-orb-orb-id": "another-orb" });
+      const result = await sim.runTasks([
+        {
+          name: "provisioner",
+          f: async (task) => {
+            const provisioned = await provider(model).provision(
+              task,
+              {
+                orbId: ORB,
+                incarnation: 1,
+                bootstrap: { repositoryUrl: "https://github.com/o/r" },
+              },
+              anyContext(),
+            );
+            expect(provisioned.isErr() && provisioned.error.code).toBe("conflict");
+            expect(provisioned.isErr() && provisioned.error.retryable).toBe(false);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(model.hasInstance(instanceName(1))).toBe(false);
+      expect(model.hasDisk(DISK)).toBe(true);
+    });
+  });
+
+  it("surfaces a failed retained-disk GET without provisioning compute", async () => {
+    await runDst({ name: "gce-model-retained-disk-get-failure", iterations: 10 }, async (sim) => {
+      const model = new DeterministicGceApiModel({ diskGetStatus: 503 });
+      const result = await sim.runTasks([
+        {
+          name: "provisioner",
+          f: async (task) => {
+            const provisioned = await provider(model).provision(
+              task,
+              {
+                orbId: ORB,
+                incarnation: 1,
+                bootstrap: { repositoryUrl: "https://github.com/o/r" },
+              },
+              anyContext(),
+            );
+            expect(provisioned.isErr() && provisioned.error.code).toBe("unavailable");
+            expect(provisioned.isErr() && provisioned.error.retryable).toBe(true);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(model.hasInstance(instanceName(1))).toBe(false);
     });
   });
 
@@ -274,9 +331,13 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
             // A new revision desires a different runtime image: the existing
             // stopped instance is stale specification, not repairable input.
             const updated = provider(model, {
-              runtimeImage: "registry.example/runtime@sha256:def",
+              imageResource: "projects/projxx/global/images/pi-orb-native-other",
+              imageId: "987654321",
             });
-            const desired = updated.desiredSpecFingerprint({ orbId: ORB, ...bootstrap });
+            const desired = updated.desiredSpecFingerprint({
+              orbId: ORB,
+              ...bootstrap,
+            });
             expect(desired).not.toBe(provisioned.value.specFingerprint);
 
             // Neither entry point may adopt it, and neither may boot it: a

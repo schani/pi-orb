@@ -68,7 +68,7 @@ if [ "$IAP_ONLY" = true ]; then
 fi
 
 # Delete drained-out revisions of the reconciler-running service. A draining
-# old revision keeps reconciling with the previous startup-script generation
+# old revision keeps reconciling with the previous host specification
 # for many minutes and fights the new revision over orb VMs
 # (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
 serving=$(gcloud run services describe pi-orb --project "$PROJECT" --region "$REGION" \

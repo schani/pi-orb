@@ -95,6 +95,7 @@ No child-orb protocol has been finalized.
 Subsystem designs:
 
 - [docs/host-provider.md](docs/host-provider.md) — the `OrbHostProvider` port, runtime readiness, Docker/GCE specifics, the exe.dev and AWS Lambda MicroVMs evaluations, rejected host alternatives
+- [docs/native-vm-prototype.md](docs/native-vm-prototype.md) — native Debian VM experiment, retention/failure evidence, image inventory, and limits
 - [docs/compute-replacement.md](docs/compute-replacement.md) — immutable-compute plan: dispose failed incarnations, replace stale host specifications on next Start, and retain the workspace throughout
 - [docs/lifecycle.md](docs/lifecycle.md) — orb states, reconciliation rules, idle auto-stop, the orphan-host sweep
 - [docs/orb-deletion.md](docs/orb-deletion.md) — permanent orb deletion, resource inventory, cleanup protocol, and verification plan
@@ -127,6 +128,13 @@ Tracking:
 Reference material:
 
 - [docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md](docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md) — failed initial enrollment, composed-DST reproduction, and incarnation-fenced key revocation
+- [docs/postmortems/2026-09-07-mixed-generation-drain-restart.md](docs/postmortems/2026-09-07-mixed-generation-drain-restart.md) — cross-revision restart and stale-provision races found by DST
+- [docs/postmortems/2026-09-07-explicit-start-terminal-backstop.md](docs/postmortems/2026-09-07-explicit-start-terminal-backstop.md) — explicit Start delayed by a process-local terminal backstop
+- [docs/postmortems/2026-09-07-stale-stopping-marker.md](docs/postmortems/2026-09-07-stale-stopping-marker.md) — an old process-local stop episode rejected a restarted orb
+- [docs/postmortems/2026-09-07-native-foundation-release-contracts.md](docs/postmortems/2026-09-07-native-foundation-release-contracts.md) — first native rollout contract failures and fixes
+- [docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md](docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md) — native boot blocked by Rust DNS resolver behavior
+- [docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md](docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md) — retained-workspace boot dropped by a systemd ordering cycle
+- [docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md](docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md) — interrupted release exited before builder cleanup
 - [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's “Putting an Agent in an Orb”
 - [docs/EXE-DEV.md](docs/EXE-DEV.md) — the full exe.dev host-provider evaluation
 - [docs/AWS-MICROVMS.md](docs/AWS-MICROVMS.md) — the full AWS Lambda MicroVMs host-provider evaluation

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   DefaultResourceLoader,
   type ResourceLoader,
@@ -17,9 +18,10 @@ type LoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
  * Where the runtime image bakes pi-orb's own agent skills (docs/pi-adapter.md,
  * decided 2026-08-22). Deliberately outside `/workspace`: the orb's persistent
  * volume is mounted there and would shadow anything the image placed under it.
- * Providers with no image — the process host provider — simply do not have it.
+ * Source/process installs fall back to the repository-bundled directory.
  */
 export const BAKED_SKILLS_DIR = "/opt/pi-orb/skills";
+const SOURCE_SKILLS_DIR = join(import.meta.dirname, "../../skills");
 
 export interface OrbResourceLoaderInput {
   readonly cwd: string;
@@ -33,7 +35,7 @@ export interface OrbResourceLoaderInput {
   readonly hookEnv?: HookEnvReport | null;
   /**
    * Overridden only by tests. `null` disables the baked skills entirely;
-   * omitting it uses `BAKED_SKILLS_DIR`.
+   * omitting it prefers `BAKED_SKILLS_DIR`, then the trusted source/install layout.
    */
   readonly skillsDir?: string | null;
 }
@@ -59,7 +61,12 @@ export interface OrbResourceLoaderInput {
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
   const previewHost = input.previewHost ?? null;
   const hookPrompt = bootHookPrompt(input.hooks ?? {}, input.hookEnv ?? null);
-  const skillsDir = input.skillsDir === undefined ? BAKED_SKILLS_DIR : input.skillsDir;
+  const skillsDir =
+    input.skillsDir === undefined
+      ? existsSync(BAKED_SKILLS_DIR)
+        ? BAKED_SKILLS_DIR
+        : SOURCE_SKILLS_DIR
+      : input.skillsDir;
   return {
     cwd: input.cwd,
     agentDir: input.agentDir,

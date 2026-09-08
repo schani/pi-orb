@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -115,15 +115,16 @@ describe("orbResourceLoaderOptions baked skills", () => {
     expect(orbResourceLoaderOptions({ ...base, skillsDir: null }).additionalSkillPaths).toEqual([]);
   });
 
-  it("defaults to the baked image path", () => {
-    // Compared against the explicit form rather than a literal so the
-    // assertion holds whether or not this machine happens to have the image
-    // path — what is pinned is that omitting the option means the baked dir.
-    expect(orbResourceLoaderOptions(base).additionalSkillPaths).toEqual(
-      orbResourceLoaderOptions({ ...base, skillsDir: BAKED_SKILLS_DIR }).additionalSkillPaths,
-    );
+  it("keeps the canonical image path outside the persistent workspace", () => {
     // Under /workspace the orb's persistent volume would shadow the image's
     // copy, so the baked location must stay outside it.
     expect(BAKED_SKILLS_DIR.startsWith("/workspace")).toBe(false);
+  });
+
+  it("uses the installed bundled-skills layout", () => {
+    const expected = existsSync(BAKED_SKILLS_DIR)
+      ? BAKED_SKILLS_DIR
+      : join(import.meta.dirname, "../../skills");
+    expect(orbResourceLoaderOptions(base).additionalSkillPaths).toEqual([expected]);
   });
 });

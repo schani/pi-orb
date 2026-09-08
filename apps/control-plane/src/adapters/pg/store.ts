@@ -1011,9 +1011,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       params.orbId,
       params.expectedStateVersion,
       [
-        // Disposal preparation does not end the lifecycle episode. In
-        // particular, it must not retire a queued wake admitted against the
-        // current failed state_version; failed -> starting consumes that one shot.
+        // Replacement disposal fences stale provisioning passes. Failed
+        // disposal preserves the failed wake's one-shot state_version.
+        "state_version = state_version + CASE WHEN host_discard_reason = 'host_spec_changed' THEN 1 ELSE 0 END",
         "updated_at = $3",
         "host_ref = NULL",
         "runtime_token_hash = NULL",
@@ -1063,7 +1063,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         return ok({ type: "declined" as const, orb, committedGeneration: committed });
       }
       const updated = await query(
-        `UPDATE orbs SET runtime_token_hash = NULL,
+        `UPDATE orbs SET state_version = state_version + 1, runtime_token_hash = NULL,
            host_spec_fingerprint = $4, host_spec_generation = $5,
            host_discard_through_incarnation = host_incarnation,
            host_discard_reason = 'host_spec_changed', host_discard_error = NULL,
@@ -1182,7 +1182,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     if (params.hostDiscardEvidence !== undefined) {
       sets.push("host_discard_evidence = NULL");
     }
-    return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values);
+    let additionalWhere: string | undefined;
+    if (params.expectedHostIncarnation !== undefined) {
+      additionalWhere = `host_incarnation = $${index} AND host_discard_through_incarnation IS NULL`;
+      values.push(params.expectedHostIncarnation);
+    }
+    return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values, additionalWhere);
   }
 
   touchLastBusy(

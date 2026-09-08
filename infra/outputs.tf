@@ -37,3 +37,11 @@ output "issuer_url" {
 output "zone" {
   value = var.zone
 }
+
+output "orb_subnetwork" {
+  value = local.orb_subnetwork
+}
+
+output "image_builder_service_account_email" {
+  value = local.image_builder_email
+}

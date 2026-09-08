@@ -8,7 +8,6 @@
 
 terraform {
   backend "gcs" {
-    bucket = "pi-orb-tfstate-playground-dev-6ae7"
     prefix = "static-plane"
   }
 
@@ -29,16 +28,40 @@ provider "google" {
   region  = var.region
 }
 
-resource "google_project_service" "apis" {
-  for_each = toset([
-    "run.googleapis.com",
-    "compute.googleapis.com",
-    "sqladmin.googleapis.com",
-    "secretmanager.googleapis.com",
-    "servicenetworking.googleapis.com",
-    "artifactregistry.googleapis.com",
-    "iap.googleapis.com",
-  ])
-  service            = each.key
-  disable_on_destroy = false
+data "terraform_remote_state" "foundation" {
+  backend = "gcs"
+  config = {
+    bucket = var.foundation_state_bucket
+    prefix = "foundation"
+  }
+}
+
+locals {
+  foundation                = data.terraform_remote_state.foundation.outputs
+  control_plane_email       = local.foundation.control_plane_service_account_email
+  orb_vm_email              = local.foundation.orb_vm_service_account_email
+  issuer_email              = local.foundation.issuer_service_account_email
+  artifact_registry_repo    = local.foundation.artifact_registry_repository
+  image_builder_email       = local.foundation.image_builder_service_account_email
+  foundation_deployer_email = local.foundation.deployer_service_account_email
+  pi_orb_network            = local.foundation.pi_orb_network
+  orb_subnetwork            = local.foundation.orb_subnetwork
+  orb_subnetwork_resource   = local.foundation.orb_subnetwork_resource
+  run_egress_subnetwork     = local.foundation.run_egress_subnetwork
+  run_egress_cidr           = local.foundation.run_egress_cidr
+}
+
+resource "terraform_data" "foundation_guard" {
+  input = local.foundation.foundation_schema_version
+
+  lifecycle {
+    precondition {
+      condition     = local.foundation.foundation_schema_version == 1
+      error_message = "Unsupported or unadopted foundation state."
+    }
+    precondition {
+      condition     = local.foundation.project == var.project && local.foundation.region == var.region && local.foundation.zone == var.zone
+      error_message = "Foundation project, region, and zone must match the application root."
+    }
+  }
 }
