@@ -61,6 +61,7 @@ import {
   type ReconcileTaskRunner,
   reconcileLoop,
 } from "./domain/loops.ts";
+import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
@@ -493,6 +494,8 @@ async function main(): Promise<void> {
       appOrigin,
     });
     registerRuntimeRoutes(app, httpTask, {
+      appOrigin,
+      spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
       archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
       store: deps.store,
       broker,

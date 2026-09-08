@@ -21,7 +21,7 @@ docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
 Then run the control plane and web UI in separate terminals:
 
 ```sh
-npm run dev --workspace @pi-orb/control-plane
+PI_ORB_APP_ORIGIN=http://localhost:5173 npm run dev --workspace @pi-orb/control-plane
 npm run dev --workspace @pi-orb/web
 ```
 
@@ -33,13 +33,21 @@ This is a real control plane plus real orb runtimes, not a frontend fixture. The
 
 ```sh
 # Terminal 1: control plane + PGlite + unsandboxed orb-process supervisor
-npm run dev:local
+PI_ORB_APP_ORIGIN=http://localhost:5173 npm run dev:local
 
 # Terminal 2: normal web UI, proxied to the control plane
 npm run dev --workspace @pi-orb/web
 ```
 
 Open http://localhost:5173. Projects, lifecycle operations, Pi sessions, runtime HTTP/WebSockets, replication, and model calls use the real application paths. State defaults to `~/.pi-orb/local`; override the independent paths with `PI_ORB_PGLITE_PATH` and `PI_ORB_PROCESS_STATE_DIR`. Orb runtimes are unsandboxed child processes and must only run trusted repositories.
+
+### Launch work from an orb
+
+```sh
+pi-orb spawn --prompt 'Implement parser tests and push your branch.'
+```
+
+Returns the new orb's browser URL after creation and its prompt are durably accepted. The independent orb starts in the same project with a fresh checkout; it does not inherit local files or conversation context. Use `--prompt-file <path|->`, `--name`, or `--json` as needed. On unknown acceptance, retry the same arguments with the reported `--id`. See [docs/orb-spawning.md](docs/orb-spawning.md).
 
 ### Docker-free frontend-only fixture
 

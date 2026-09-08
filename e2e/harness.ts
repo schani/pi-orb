@@ -375,6 +375,7 @@ export async function startControlPlane(options: {
   e2eHostSpec?: string;
   authDir?: string;
   hostingRoot?: string;
+  webDist?: string;
 }): Promise<ControlPlaneHandle> {
   const authDir = options.authDir ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const ownedHostingRoot = options.hostingRoot === undefined;
@@ -397,6 +398,9 @@ export async function startControlPlane(options: {
       PI_ORB_RUNTIME_IMAGE: options.runtimeImage,
       PI_ORB_HOSTING_STORE: "filesystem",
       PI_ORB_HOSTING_ROOT: hostingRoot,
+      PI_ORB_WEB_DIST: options.webDist,
+      PI_ORB_APP_ORIGIN: `http://127.0.0.1:${options.port}`,
+      PI_ORB_HOSTING_ORIGIN: `http://files.localhost:${options.port}`,
       PI_ORB_DOCKER_NETWORK: options.dockerNetwork,
       PI_ORB_E2E_LAUNCH_FAILURE_MARKER: options.launchFailureMarker,
       PI_ORB_HOST_SPEC_GENERATION: String(options.hostSpecGeneration ?? 0),

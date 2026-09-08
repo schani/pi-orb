@@ -121,6 +121,19 @@ export interface ArchiveCaller {
   readonly hostIncarnation: number;
 }
 
+export interface SpawnOrbParams {
+  readonly callerOrbId: string;
+  readonly caller: ArchiveCaller;
+  readonly orb: OrbRow;
+  readonly prompt: string;
+  readonly requestHash: string;
+}
+
+export interface SpawnConflict {
+  readonly type: "spawn_conflict";
+  readonly reason: "unauthorized" | "conflict";
+}
+
 export interface RequestOrbArchiveParams {
   readonly caller?: ArchiveCaller;
   readonly orbId: string;
@@ -188,6 +201,10 @@ export interface ControlPlaneStore {
   ): ResultAsync<OrbRow[], StoreError>;
   /** Inserts only while the parent project is active, fencing create-vs-delete. */
   insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict>;
+  spawnOrb(
+    task: SimulationTask,
+    params: SpawnOrbParams,
+  ): ResultAsync<{ duplicate: boolean }, StoreError | SpawnConflict>;
   setOrbName(
     task: SimulationTask,
     params: { orbId: string; name: string; now: number; onlyIfNull: boolean },

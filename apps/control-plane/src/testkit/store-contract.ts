@@ -124,6 +124,104 @@ export function storeSemanticsContractTests(
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
 
+    it("atomically spawns with immutable retry identity and fences retired callers", async () => {
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      const caller = {
+        ...orb,
+        state: "running" as const,
+        runtimeTokenHash: "caller-token",
+        hostIncarnation: 1,
+      };
+      expect((await store.insertOrb(task, caller)).isOk()).toBe(true);
+      const child = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
+      const params = {
+        callerOrbId: caller.id,
+        caller: { runtimeTokenHash: "caller-token", hostIncarnation: 1 },
+        orb: child,
+        prompt: "Do the work",
+        requestHash: "immutable-request",
+      };
+      const accepted = await store.spawnOrb(task, params);
+      expect(accepted.isOk() && accepted.value.duplicate).toBe(false);
+      expect((await store.getOrb(task, child.id))._unsafeUnwrap()?.state).toBe("creating");
+      expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toMatchObject([
+        { messageId: child.id, content: [{ type: "text", text: "Do the work" }], status: "queued" },
+      ]);
+      await store.setOrbName(task, {
+        orbId: child.id,
+        name: "Changed later",
+        now: 2000,
+        onlyIfNull: false,
+      });
+      await store.claimNextOrbMessageBatch(task, { orbId: child.id, now: 2000 });
+      const retry = await store.spawnOrb(task, params);
+      expect(retry.isOk() && retry.value.duplicate).toBe(true);
+      const conflict = await store.spawnOrb(task, {
+        ...params,
+        requestHash: "different-request",
+        prompt: "Different",
+      });
+      expect(conflict.isErr() && conflict.error.type).toBe("spawn_conflict");
+      expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toHaveLength(1);
+      const deniedId = "00000000-0000-4000-8000-000000000004";
+      const denied = await store.spawnOrb(task, {
+        ...params,
+        orb: { ...child, id: deniedId },
+        caller: { ...params.caller, hostIncarnation: 2 },
+      });
+      expect(denied.isErr() && denied.error.type).toBe("spawn_conflict");
+      expect((await store.getOrb(task, deniedId))._unsafeUnwrap()).toBeNull();
+      expect((await store.listOrbMessages(task, deniedId))._unsafeUnwrap()).toEqual([]);
+      await store.requestProjectDeletion(task, {
+        projectId: project.id,
+        now: 3000,
+        cleanupAfter: 3000,
+      });
+      expect((await store.spawnOrb(task, params)).isErr()).toBe(true);
+    });
+
+    it("serializes concurrent spawn retries and project deletion", async () => {
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      expect(
+        (
+          await store.insertOrb(task, { ...orb, state: "running", runtimeTokenHash: "token" })
+        ).isOk(),
+      ).toBe(true);
+      const params = {
+        callerOrbId: orb.id,
+        caller: { runtimeTokenHash: "token", hostIncarnation: 0 },
+        orb: { ...orb, id: "00000000-0000-4000-8000-000000000003" },
+        prompt: "work",
+        requestHash: "hash",
+      };
+      const retries = await Promise.all([
+        store.spawnOrb(task, params),
+        store.spawnOrb(task, params),
+      ]);
+      expect(retries.map((result) => result._unsafeUnwrap().duplicate).sort()).toEqual([
+        false,
+        true,
+      ]);
+      const racing = {
+        ...params,
+        orb: { ...params.orb, id: "00000000-0000-4000-8000-000000000004" },
+      };
+      const [created, deleted] = await Promise.all([
+        store.spawnOrb(task, racing),
+        store.requestProjectDeletion(task, {
+          projectId: project.id,
+          now: 2000,
+          cleanupAfter: 2000,
+        }),
+      ]);
+      expect(deleted.isOk()).toBe(true);
+      const child = (await store.getOrb(task, racing.orb.id))._unsafeUnwrap();
+      expect(child?.state ?? null).toBe(created.isOk() ? "deleting" : null);
+      expect((await store.listOrbMessages(task, racing.orb.id))._unsafeUnwrap()).toHaveLength(
+        created.isOk() ? 1 : 0,
+      );
+    });
+
     it("persists projects and performs lifecycle state-version CAS", async () => {
       await seed();
       expect((await store.getProject(task, project.id))._unsafeUnwrap()).toEqual(project);
@@ -1789,6 +1887,56 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
+
+    it("rolls back partial spawn writes and retains deletion-safe provenance", async () => {
+      await seed();
+      expect(
+        (
+          await client.query(
+            "UPDATE orbs SET state = 'running', runtime_token_hash = 'token' WHERE id = $1",
+            [orb.id],
+          )
+        ).isOk(),
+      ).toBe(true);
+      const child = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
+      const params = {
+        callerOrbId: orb.id,
+        caller: { runtimeTokenHash: "token", hostIncarnation: 0 },
+        orb: child,
+        prompt: "work",
+        requestHash: "hash",
+      };
+      // Fail the last write, after both the child and its message were inserted.
+      expect(
+        (
+          await client.query("ALTER TABLE orb_spawns ADD CONSTRAINT reject_spawn CHECK (false)")
+        ).isOk(),
+      ).toBe(true);
+      expect((await store.spawnOrb(task, params)).isErr()).toBe(true);
+      expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toEqual([]);
+      expect(
+        (await client.query("ALTER TABLE orb_spawns DROP CONSTRAINT reject_spawn")).isOk(),
+      ).toBe(true);
+      expect((await store.spawnOrb(task, params)).isOk()).toBe(true);
+      const provenance = (
+        await client.query(
+          "SELECT caller_orb_id, caller_incarnation, request_hash FROM orb_spawns WHERE orb_id = $1",
+          [child.id],
+        )
+      )._unsafeUnwrap().rows[0];
+      expect(provenance?.["caller_orb_id"]).toBe(orb.id);
+      expect(provenance?.["request_hash"]).toBe("hash");
+      expect((await client.query("DELETE FROM orbs WHERE id = $1", [child.id])).isOk()).toBe(true);
+      expect((await store.spawnOrb(task, params)).isErr()).toBe(true);
+      expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toBeNull();
+      expect((await client.query("DELETE FROM orbs WHERE id = $1", [orb.id])).isOk()).toBe(true);
+      expect((await client.query("SELECT * FROM orb_spawns"))._unsafeUnwrap().rows).toHaveLength(1);
+      expect((await client.query("DELETE FROM projects WHERE id = $1", [project.id])).isOk()).toBe(
+        true,
+      );
+      expect((await client.query("SELECT * FROM orb_spawns"))._unsafeUnwrap().rows).toHaveLength(0);
+    });
 
     // The regression from
     // docs/postmortems/2026-08-11-orb-message-jsonb-param-encoding.md: the

@@ -22,6 +22,8 @@ import type {
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
   RequestOrbDeletionParams,
+  SpawnConflict,
+  SpawnOrbParams,
 } from "../../domain/ports.ts";
 import { arrayParam, jsonParam, type PgRow, type PostgreSQLClient } from "./client.ts";
 
@@ -449,6 +451,87 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (inserted.isErr()) return err(inserted.error);
       return ok(mapOrbRow(inserted.value.rows[0] ?? {}));
     });
+  }
+
+  spawnOrb(
+    _task: SimulationTask,
+    params: SpawnOrbParams,
+  ): ResultAsync<{ duplicate: boolean }, StoreError | SpawnConflict> {
+    return this.db.transaction<{ duplicate: boolean }, StoreError | SpawnConflict>(
+      async (query) => {
+        // Project first matches deletion's lock order. It also serializes same-project retries.
+        const project = await query("SELECT state FROM projects WHERE id = $1 FOR UPDATE", [
+          params.orb.projectId,
+        ]);
+        if (project.isErr()) return err(project.error);
+        if (project.value.rows[0]?.["state"] !== "active")
+          return err({ type: "spawn_conflict", reason: "conflict" });
+        const caller = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [
+          params.callerOrbId,
+        ]);
+        if (caller.isErr()) return err(caller.error);
+        const source = caller.value.rows[0];
+        if (
+          source === undefined ||
+          source["state"] !== "running" ||
+          source["runtime_token_hash"] !== params.caller.runtimeTokenHash ||
+          Number(source["host_incarnation"]) !== params.caller.hostIncarnation ||
+          source["host_discard_through_incarnation"] !== null
+        )
+          return err({ type: "spawn_conflict", reason: "unauthorized" });
+        if (source["project_id"] !== params.orb.projectId)
+          return err({ type: "spawn_conflict", reason: "conflict" });
+        const acceptance = await query("SELECT * FROM orb_spawns WHERE orb_id = $1", [
+          params.orb.id,
+        ]);
+        if (acceptance.isErr()) return err(acceptance.error);
+        const existing = acceptance.value.rows[0];
+        if (existing !== undefined) {
+          if (
+            existing["caller_orb_id"] !== params.callerOrbId ||
+            existing["request_hash"] !== params.requestHash
+          )
+            return err({ type: "spawn_conflict", reason: "conflict" });
+          const target = await query("SELECT state FROM orbs WHERE id = $1 FOR UPDATE", [
+            params.orb.id,
+          ]);
+          if (target.isErr()) return err(target.error);
+          const state = target.value.rows[0]?.["state"];
+          if (state === undefined || ["deleting", "archiving", "archived"].includes(String(state)))
+            return err({ type: "spawn_conflict", reason: "conflict" });
+          return ok({ duplicate: true });
+        }
+        const now = new Date(params.orb.createdAt);
+        const inserted = await query(
+          `INSERT INTO orbs (id, project_id, name, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at)
+        VALUES ($1,$2,$3,'creating',$4,$5,$5,$5,$5) ON CONFLICT (id) DO NOTHING RETURNING id`,
+          [params.orb.id, params.orb.projectId, params.orb.name, params.orb.hostKind, now],
+        );
+        if (inserted.isErr()) return err(inserted.error);
+        if (inserted.value.rows.length === 0)
+          return err({ type: "spawn_conflict", reason: "conflict" });
+        const message = await query(
+          `INSERT INTO orb_messages (orb_id, message_id, content, created_at, updated_at) VALUES ($1,$1,$2::jsonb,$3,$3)`,
+          [params.orb.id, jsonParam([{ type: "text", text: params.prompt }]), now],
+        );
+        if (message.isErr()) return err(message.error);
+        const recorded = await query(
+          `INSERT INTO orb_spawns (orb_id, project_id, caller_orb_id, caller_incarnation, request_hash, accepted_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (orb_id) DO NOTHING RETURNING orb_id`,
+          [
+            params.orb.id,
+            params.orb.projectId,
+            params.callerOrbId,
+            params.caller.hostIncarnation,
+            params.requestHash,
+            now,
+          ],
+        );
+        if (recorded.isErr()) return err(recorded.error);
+        if (recorded.value.rows.length === 0)
+          return err({ type: "spawn_conflict", reason: "conflict" });
+        return ok({ duplicate: false });
+      },
+    );
   }
 
   setOrbName(

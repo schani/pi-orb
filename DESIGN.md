@@ -13,7 +13,7 @@ Pi is the first agent harness, embedded through the Pi SDK. The host lifecycle, 
 The first target is deliberately narrow:
 
 - Run locally using Docker; container-restricted trusted test environments may use the unsandboxed process-host + embedded PGlite composition.
-- Drive lifecycle and conversation input through the web UI; a local checkout is not required. The in-orb `pi-orb` CLI may read sibling-orb metadata and replicated transcripts for agent coordination, and request self-archival when the user asks.
+- Drive lifecycle and conversation input through the web UI; a local checkout is not required. The in-orb `pi-orb` CLI may read sibling-orb metadata and replicated transcripts, launch independent same-project orbs with prompts, and request self-archival when the user asks.
 - Let users register a project with a name and public Git repository URL.
 - Clone the repository into a fresh orb without caching or synchronization optimizations.
 - Use a fixed orb runtime image and prescribed base environment; projects may add write-only environment secrets fetched by each orb runtime at boot (`docs/credentials.md`).
@@ -32,7 +32,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 
 ## Product and interaction decisions
 
-- The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
+- The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The first slice has no authentication or authorization: anybody who can reach the control plane can perform every operation.
 - The unauthenticated first slice must be treated as local/trusted-development software and must not be exposed publicly. Authentication is required before a public deployment.
@@ -76,7 +76,9 @@ Orb host
 
 The browser talks only to the control plane. In the unauthenticated first slice, the control plane resolves/starts the orb, loads replicated history, and performs the cursor-aware handoff. It proxies the live WebSocket content-agnostically between browser and runtime. History persistence is a separate control-plane-to-runtime HTTP pull, so the proxy does not need to understand agent messages. Cloud Run WebSocket behavior was validated operationally in 2026-07 (`docs/open-questions.md`, question 2).
 
-## Deferred: suborbs
+## In-orb spawning and deferred suborbs
+
+An orb can launch another orb with a prompt through `pi-orb spawn` and receive its browser URL (implemented 2026-09-08). This creates independent same-project work with atomic durable prompt acceptance; see `docs/orb-spawning.md`.
 
 First-class child orbs/subagents are a product goal but not part of the first slice.
 
@@ -101,6 +103,7 @@ Subsystem designs:
 - [docs/orb-deletion.md](docs/orb-deletion.md) — permanent orb deletion, resource inventory, cleanup protocol, and verification plan
 - [docs/project-deletion.md](docs/project-deletion.md) — permanent project deletion by atomic fan-out through deletion-grade cleanup for every child orb
 - [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup
+- [docs/orb-spawning.md](docs/orb-spawning.md) — in-orb CLI creation with an atomically queued prompt and browser URL
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, frame union, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, the PostgreSQL schema
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping

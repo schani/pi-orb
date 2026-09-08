@@ -13,6 +13,7 @@ Project deletion is permanent deletion, not archival. Archived or archiving orbs
 A project currently owns only:
 
 - its `projects` database row, including repository URL, display name, deletion intent, and timestamps;
+- its project-owned `orb_spawns` acceptance/provenance and retry tombstones, removed by project foreign-key cascade (`docs/orb-spawning.md`);
 - its `project_secret_pointers` metadata row and every immutable secret-store bundle version whose payload names the project, including unreferenced crash residue (`docs/credentials.md`);
 - every `orbs` row whose `project_id` names it;
 - transitively, every resource owned by those orbs in the complete inventory in `docs/orb-deletion.md`: history records and cleanup intents; live proxies and in-process work; Docker/GCE/process compute and persistent filesystems; runtime processes, logs stored in process-provider directories, host metadata and bearer tokens; and exact-match Tailscale keys/devices.

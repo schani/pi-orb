@@ -7,6 +7,7 @@ export * from "./json.ts";
 export * from "./orb-archive.ts";
 export * from "./orb-inspection.ts";
 export * from "./orb-naming.ts";
+export * from "./orb-spawn.ts";
 export * from "./project-secrets.ts";
 export * from "./repository-url.ts";
 export * from "./runtime-http.ts";

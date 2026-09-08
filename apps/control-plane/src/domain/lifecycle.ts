@@ -12,6 +12,7 @@ import {
 } from "./errors.ts";
 import { cleanupHostedFiles } from "./hosting.ts";
 import { logOrbEvent } from "./log.ts";
+import { newOrbRow } from "./new-orb.ts";
 import { hasNeverBeenReady, type OrbMessageRow, type OrbRow } from "./orb.ts";
 import type {
   ArchiveCaller,
@@ -2081,39 +2082,7 @@ export function createOrb(
       return ok(existing.value);
     }
     const now = task.wallNow();
-    const row: OrbRow = {
-      id: params.orbId,
-      projectId: params.projectId,
-      name: params.name ?? null,
-      autoNameLeaseUntil: null,
-      autoNameAttempts: 0,
-      autoNameNextAttemptAt: null,
-      state: "creating",
-      stateVersion: 0,
-      hostKind: deps.hostProvider.kind,
-      hostRef: null,
-      hostIncarnation: 0,
-      hostSpecFingerprint: null,
-      hostSpecGeneration: null,
-      hostDiscardThroughIncarnation: null,
-      hostDiscardReason: null,
-      hostDiscardError: null,
-      hostDiscardEvidence: null,
-      hostDiscardRequestedAt: null,
-      checkoutCommit: null,
-      harnessSessionId: null,
-      harnessSessionHeader: null,
-      lastError: null,
-      runtimeTokenHash: null,
-      replicationCursor: null,
-      replicatedHeadId: null,
-      lastBusyAt: null,
-      stopReason: null,
-      lastMintAt: null,
-      stateChangedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const row = newOrbRow(params, deps.hostProvider.kind, now);
     const inserted = await deps.store.insertOrb(task, row);
     if (inserted.isErr()) {
       if (inserted.error.type === "project_conflict") {

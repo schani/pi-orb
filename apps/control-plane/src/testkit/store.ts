@@ -22,6 +22,8 @@ import type {
   RequestHostSpecReplacementParams,
   RequestOrbArchiveParams,
   RequestOrbDeletionParams,
+  SpawnConflict,
+  SpawnOrbParams,
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 
@@ -64,6 +66,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly replicas = new Map<string, OrbReplica>();
   private readonly deletions = new Map<string, OrbDeletionRow>();
   private readonly messages = new Map<string, OrbMessageRow[]>();
+  private readonly spawns = new Map<
+    string,
+    { callerOrbId: string; projectId: string; requestHash: string }
+  >();
   private nextMessageOrdinal = 1;
   /** Remaining scripted failures of `clearOrbMessageAutoStart`. */
   private clearAutoStartFailures = 0;
@@ -361,6 +367,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         return { conflict: "concurrent_change" as const };
       }
       this.projects.delete(params.projectId);
+      for (const [id, spawn] of this.spawns) {
+        if (spawn.projectId === params.projectId) this.spawns.delete(id);
+      }
       return { conflict: null };
     }).andThen((outcome) =>
       outcome.conflict === null
@@ -415,6 +424,67 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       outcome.conflict !== null
         ? errAsync({ type: "project_conflict" as const, reason: outcome.conflict })
         : okAsync(outcome.orb),
+    );
+  }
+
+  spawnOrb(
+    task: SimulationTask,
+    params: SpawnOrbParams,
+  ): ResultAsync<{ duplicate: boolean }, StoreError | SpawnConflict> {
+    return this.access(task, FAILPOINTS.storeWrite, "spawn orb", () => {
+      const caller = this.orbs.get(params.callerOrbId);
+      if (
+        caller === undefined ||
+        caller.state !== "running" ||
+        caller.runtimeTokenHash !== params.caller.runtimeTokenHash ||
+        caller.hostIncarnation !== params.caller.hostIncarnation ||
+        caller.hostDiscardThroughIncarnation !== null
+      )
+        return { reason: "unauthorized" as const };
+      const project = this.projects.get(params.orb.projectId);
+      if (project?.state !== "active" || caller.projectId !== params.orb.projectId)
+        return { reason: "conflict" as const };
+      const existing = this.spawns.get(params.orb.id);
+      const child = this.orbs.get(params.orb.id);
+      if (existing !== undefined) {
+        if (
+          existing.callerOrbId !== caller.id ||
+          existing.requestHash !== params.requestHash ||
+          child === undefined ||
+          ["deleting", "archiving", "archived"].includes(child.state)
+        )
+          return { reason: "conflict" as const };
+        return { duplicate: true };
+      }
+      if (child !== undefined) return { reason: "conflict" as const };
+      this.orbs.set(params.orb.id, { ...params.orb, lastBusyAt: params.orb.createdAt });
+      this.messages.set(params.orb.id, [
+        {
+          orbId: params.orb.id,
+          messageId: params.orb.id,
+          ordinal: this.nextMessageOrdinal++,
+          content: [{ type: "text", text: params.prompt }],
+          status: "queued",
+          delivery: null,
+          operationId: null,
+          deliveryBatchId: null,
+          autoStart: false,
+          wakeStateVersion: null,
+          lastError: null,
+          createdAt: params.orb.createdAt,
+          updatedAt: params.orb.createdAt,
+        },
+      ]);
+      this.spawns.set(params.orb.id, {
+        callerOrbId: caller.id,
+        projectId: caller.projectId,
+        requestHash: params.requestHash,
+      });
+      return { duplicate: false };
+    }).andThen((outcome) =>
+      "reason" in outcome
+        ? errAsync({ type: "spawn_conflict" as const, reason: outcome.reason })
+        : okAsync(outcome),
     );
   }
 

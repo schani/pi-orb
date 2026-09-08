@@ -310,6 +310,8 @@ describe("minted tokens verify against the served JWKS", () => {
       issuerUrl: TEST_ISSUER_URL,
     });
     registerRuntimeRoutes(app, task, {
+      appOrigin: "https://browser.test",
+      spawn: () => okAsync(undefined),
       archiveSelf: (task, orbId, caller) =>
         requestOrbArchive(task, { ...makeHarness().deps, store }, orbId, caller),
       store,

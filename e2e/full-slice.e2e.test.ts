@@ -18,6 +18,8 @@ import {
   type ServerFrame,
   TERMINAL_SUBPROTOCOL,
 } from "@pi-orb/protocol";
+import { chromium, expect as expectPage } from "@playwright/test";
+import { build } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
@@ -95,6 +97,20 @@ const SCENARIO = {
         ],
       })),
       {
+        match: { userMessage: { regex: "^Do the spawned E2E task$" } },
+        steps: [
+          { type: "text", content: "SPAWNED_TASK_COMPLETE" },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
+        match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+        steps: [
+          { type: "text", content: "Completed the spawned task." },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
         match: { userMessage: { regex: "^please archive this orb$" } },
         steps: [
           { type: "toolCall", name: "bash", arguments: { command: "pi-orb archive" } },
@@ -141,6 +157,8 @@ let orbId = "";
 let failedOrbId = "";
 let specOrbId = "";
 let localStateDirectory = "";
+let webDistDirectory = "";
+const additionalOrbIds: string[] = [];
 let hostingRootDirectory = "";
 
 function processHostDirectory(id: string): string {
@@ -497,6 +515,14 @@ async function withOrbDiagnostics(id: () => string, body: () => Promise<void>): 
 }
 
 beforeAll(async () => {
+  webDistDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-web-"));
+  const webRoot = join(import.meta.dirname, "../apps/web");
+  await build({
+    root: webRoot,
+    configFile: join(webRoot, "vite.config.ts"),
+    logLevel: "silent",
+    build: { outDir: webDistDirectory, emptyOutDir: true },
+  });
   hostingRootDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   fake = await createFakeSession(`pi-orb-e2e-${Date.now()}`, SCENARIO);
   nameFake = await createFakeSession(`pi-orb-name-e2e-${Date.now()}`, NAME_SCENARIO);
@@ -513,6 +539,7 @@ beforeAll(async () => {
       hostSpecGeneration: 1,
       e2eHostSpec: "stage2-spec-a",
       hostingRoot: hostingRootDirectory,
+      webDist: webDistDirectory,
     });
     return;
   }
@@ -551,12 +578,13 @@ beforeAll(async () => {
     hostSpecGeneration: 1,
     e2eHostSpec: "stage2-spec-a",
     hostingRoot: hostingRootDirectory,
+    webDist: webDistDirectory,
   });
 }, 720_000);
 
 afterAll(async () => {
   if (!PROCESS_BACKEND) {
-    for (const id of [orbId, failedOrbId, specOrbId]) {
+    for (const id of [orbId, failedOrbId, specOrbId, ...additionalOrbIds]) {
       if (id === "") continue;
       await removeOrbContainers(id);
       await docker(["volume", "rm", "-f", `pi-orb-data-${id}`]).catch(() => undefined);
@@ -567,6 +595,7 @@ afterAll(async () => {
   if (fake !== undefined) await deleteFakeSession(fake.sessionKey);
   if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
   if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
+  if (webDistDirectory !== "") rmSync(webDistDirectory, { recursive: true, force: true });
   if (hostingRootDirectory !== "") rmSync(hostingRootDirectory, { recursive: true, force: true });
 }, 120_000);
 
@@ -591,6 +620,7 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
     e2eHostSpec: spec,
     authDir,
     hostingRoot: hostingRootDirectory,
+    webDist: webDistDirectory,
   });
 }
 
@@ -1681,6 +1711,7 @@ describe("full slice E2E", () => {
     // Keep one child stopped with replicated history and create a second child
     // for inspection and self-archival before deleting the mixed-state project.
     const secondOrbId = randomUUID();
+    additionalOrbIds.push(secondOrbId);
     const secondOrb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
       id: secondOrbId,
     });
@@ -1715,6 +1746,69 @@ describe("full slice E2E", () => {
       "ORB_INSPECT_TRANSCRIPT_DONE",
     );
     expect(transcriptFromSibling).toContain("The check succeeded: E2E_TOOL_OK.");
+
+    const spawnedOrbId = randomUUID();
+    additionalOrbIds.push(spawnedOrbId);
+    const spawnCommand = `pi-orb spawn --id ${spawnedOrbId} --prompt 'Do the spawned E2E task' --name 'Spawned E2E task' --json`;
+    const spawned = await terminalRun(
+      secondOrbId,
+      `${spawnCommand}; printf '\\123\\120\\101\\127\\116\\137\\104\\117\\116\\105\\012'`,
+      "SPAWN_DONE",
+    );
+    expect(spawned).toContain(`"orbId":"${spawnedOrbId}"`);
+    expect(spawned).toContain(`"url":"${base}/#/orbs/${spawnedOrbId}"`);
+    // No browser/live socket is opened for the child: inbox delivery must start it.
+    await waitFor(
+      "spawned orb completes unattended",
+      async () => {
+        const history = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/history`);
+        return JSON.stringify(history.body["records"]).includes("SPAWNED_TASK_COMPLETE")
+          ? true
+          : null;
+      },
+      { timeoutMs: 300_000, intervalMs: 1_000 },
+    );
+    await waitFor(
+      "spawned turn notification inference recorded",
+      async () => {
+        const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
+        return Array.isArray(recorded) &&
+          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 6)
+          ? true
+          : null;
+      },
+      { timeoutMs: 30_000, intervalMs: 200 },
+    );
+    const retriedSpawn = await terminalRun(
+      secondOrbId,
+      `${spawnCommand}; printf '\\123\\120\\101\\127\\116\\137\\122\\105\\124\\122\\131\\012'`,
+      "SPAWN_RETRY",
+    );
+    expect(retriedSpawn).toContain(`"orbId":"${spawnedOrbId}"`);
+    const spawnedMessages = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/messages`);
+    expect(spawnedMessages.body["items"]).toHaveLength(1);
+    const spawnedHistory = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/history`);
+    expect(
+      (spawnedHistory.body["records"] as { role?: string; content?: unknown }[]).filter(
+        (record) =>
+          record.role === "assistant" &&
+          JSON.stringify(record.content).includes("SPAWNED_TASK_COMPLETE"),
+      ),
+    ).toHaveLength(1);
+    const executablePath =
+      process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
+      (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
+    const browser = await chromium.launch({
+      ...(executablePath === undefined ? {} : { executablePath }),
+      args: ["--no-sandbox"],
+    });
+    try {
+      const page = await browser.newPage();
+      await page.goto(`${base}/#/orbs/${spawnedOrbId}`);
+      await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
+    } finally {
+      await browser.close();
+    }
 
     await writeWorkspaceFiles(secondOrbId, 0, {
       "repo/archived.html": "archived-hosted-file",
@@ -1767,8 +1861,8 @@ describe("full slice E2E", () => {
     expect(deletion.status, JSON.stringify(deletion.body)).toBe(202);
     expect(deletion.body["state"]).toBe("deleting");
     expect(deletion.body["deletionProgress"]).toMatchObject({
-      total: 2,
-      remaining: 2,
+      total: 3,
+      remaining: 3,
       blocked: 0,
     });
     const lateChild = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
@@ -1791,7 +1885,7 @@ describe("full slice E2E", () => {
         (entry) => basename(String(entry)) === "data",
       ),
     ).toEqual([]);
-    for (const deletedOrbId of [orbId, secondOrbId]) {
+    for (const deletedOrbId of [orbId, secondOrbId, spawnedOrbId]) {
       expect((await api(base, "GET", `/api/v1/orbs/${deletedOrbId}`)).status).toBe(404);
       expect((await api(base, "GET", `/api/v1/orbs/${deletedOrbId}/history`)).status).toBe(404);
       if (PROCESS_BACKEND) {

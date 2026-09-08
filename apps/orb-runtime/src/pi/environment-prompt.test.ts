@@ -28,6 +28,13 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("briefly lag");
   });
 
+  it("documents independent spawning and safe recovery rather than recursive delegation", () => {
+    expect(environmentPrompt).toContain("pi-orb spawn --prompt");
+    expect(environmentPrompt).toContain("fresh default-branch checkout");
+    expect(environmentPrompt).toContain("Do not recursively fan out work without user direction");
+    expect(environmentPrompt).toContain("retry the same prompt/name with the reported `--id`");
+  });
+
   it("documents the boot hooks the repository may own", () => {
     // The failure fragment (`hooks/prompt.ts`) is appended only when a hook
     // broke; an agent that never sees one must still know the convention

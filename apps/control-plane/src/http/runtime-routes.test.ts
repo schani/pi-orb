@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
 import { requestOrbArchive } from "../domain/lifecycle.ts";
+import { spawnOrb } from "../domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
 import { putProjectSecret } from "../domain/project-secrets.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
@@ -79,6 +80,9 @@ describe("runtime broker routes", () => {
   ): Promise<void> {
     app = Fastify();
     registerRuntimeRoutes(app, task, {
+      appOrigin: "https://browser.test",
+      spawn: (task, caller, orbId, request) =>
+        spawnOrb(task, { ...makeHarness().deps, store: routeStore }, caller, orbId, request),
       archiveSelf: (task, orbId, caller) =>
         requestOrbArchive(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
       store: routeStore,
@@ -120,6 +124,83 @@ describe("runtime broker routes", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await app.close();
+  });
+
+  describe("spawn", () => {
+    const id = "00000000-0000-4000-8000-000000000003";
+    const spawn = (payload: unknown = { prompt: "Do the work" }, token = TOKEN) =>
+      app.inject({
+        method: "PUT",
+        url: `/runtime/v1/orbs/${id}/spawn`,
+        headers: { authorization: `Bearer ${token}`, host: "untrusted.test" },
+        payload,
+      });
+    it("atomically accepts a prompt, returns the configured browser URL and retries once", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      const response = await spawn();
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual({
+        orbId: id,
+        projectId: PROJECT,
+        messageId: id,
+        url: `https://browser.test/#/orbs/${id}`,
+      });
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect((await spawn()).statusCode).toBe(202);
+      expect(store.messageSnapshots(id)).toHaveLength(1);
+      expect((await spawn({ prompt: "Different" })).statusCode).toBe(409);
+    });
+    it("normalizes retry names and lets only a current replacement bearer recover acceptance", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      expect((await spawn({ prompt: "work", name: "  Parser   tests " })).statusCode).toBe(202);
+      const replacement = "replacement-token";
+      store.seedOrb(
+        makeOrbRow(ORB, PROJECT, "running", {
+          runtimeTokenHash: sha256(replacement),
+          hostIncarnation: 1,
+        }),
+      );
+      expect((await spawn({ prompt: "work", name: "Parser tests" })).statusCode).toBe(401);
+      expect((await spawn({ prompt: "work", name: "Parser tests" }, replacement)).statusCode).toBe(
+        202,
+      );
+      expect(store.messageSnapshots(id)).toHaveLength(1);
+    });
+
+    it.each(["getOrbByRuntimeTokenHash", "spawnOrb"] as const)(
+      "sanitizes failures at %s without retrying deterministic bugs",
+      async (method) => {
+        store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+        const failing = vi.spyOn(store, method);
+        for (const code of ["unavailable", "invariant"] as const) {
+          failing.mockReturnValue(
+            errAsync<never, StoreError>({
+              type: "store_error",
+              code,
+              message: "private database details",
+              retryable: code === "unavailable",
+            }),
+          );
+          const response = await spawn();
+          expect(response.statusCode).toBe(code === "unavailable" ? 503 : 500);
+          expect(response.json().error.retryable).toBe(code === "unavailable");
+          expect(response.body).not.toContain("private");
+        }
+        expect(store.orbSnapshot(id)).toBeNull();
+      },
+    );
+
+    it("rejects invalid bodies and unauthorized callers without creating work", async () => {
+      expect((await spawn()).statusCode).toBe(401);
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      for (const payload of [
+        { prompt: " " },
+        { prompt: "work", projectId: "other" },
+        { prompt: "work", name: " " },
+      ])
+        expect((await spawn(payload)).statusCode).toBe(400);
+      expect(store.orbSnapshot(id)).toBeNull();
+    });
   });
 
   describe("self-archive", () => {

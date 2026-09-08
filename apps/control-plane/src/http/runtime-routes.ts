@@ -9,11 +9,16 @@ import {
   ORB_NAME_README_MAX_BYTES,
   ORB_NAME_TRIGGER_PATH,
   ORB_SELF_ARCHIVE_PATH,
+  ORB_SPAWN_MAX_BYTES,
+  ORB_SPAWN_PATH,
+  ORB_SPAWN_UUID,
   OrbArchiveRequestSchema,
   type OrbInspectionError,
   type OrbInspectionItem,
   type OrbNameTriggerResponse,
   OrbNameTriggerSchema,
+  type OrbSpawnRequest,
+  OrbSpawnRequestSchema,
   PROJECT_SECRETS_RUNTIME_PATH,
   RUNTIME_TOKENS_PREFIX,
   type TokenErrorBody,
@@ -34,7 +39,7 @@ import {
 import type { MintError, StoreError } from "../domain/errors.ts";
 import type { CommandError } from "../domain/lifecycle.ts";
 import type { OrbRow } from "../domain/orb.ts";
-import { generateOrbName } from "../domain/orb-naming.ts";
+import { generateOrbName, normalizeOrbName } from "../domain/orb-naming.ts";
 import type {
   ArchiveCaller,
   BrokerDeps,
@@ -42,11 +47,19 @@ import type {
   MintDeps,
   OrbNameGenerator,
   ProjectSecretsDeps,
+  SpawnConflict,
 } from "../domain/ports.ts";
 import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
 
 export interface RuntimeRouteDeps {
+  readonly appOrigin: string;
+  readonly spawn: (
+    task: SimulationTask,
+    caller: OrbRow,
+    orbId: string,
+    request: OrbSpawnRequest,
+  ) => ResultAsync<void, StoreError | SpawnConflict>;
   readonly archiveSelf: (
     task: SimulationTask,
     orbId: string,
@@ -121,7 +134,7 @@ function bearerHash(authorization: unknown): string | null {
 type BearerAuth =
   | { readonly kind: "orb"; readonly orb: OrbRow }
   | { readonly kind: "unauthorized" }
-  | { readonly kind: "unavailable"; readonly message: string };
+  | { readonly kind: "unavailable"; readonly message: string; readonly error: StoreError };
 
 const UNAUTHENTICATED: BearerAuth = { kind: "unauthorized" };
 
@@ -200,7 +213,8 @@ export function registerRuntimeRoutes(
     const tokenHash = bearerHash(authorization);
     if (tokenHash === null) return UNAUTHENTICATED;
     const orbResult = await deps.store.getOrbByRuntimeTokenHash(task, tokenHash);
-    if (orbResult.isErr()) return { kind: "unavailable", message: "store unavailable" };
+    if (orbResult.isErr())
+      return { kind: "unavailable", message: "store unavailable", error: orbResult.error };
     const orb = orbResult.value;
     if (
       orb === null ||
@@ -213,6 +227,62 @@ export function registerRuntimeRoutes(
     }
     return { kind: "orb", orb };
   };
+
+  app.put<{ Params: { orbId: string } }>(
+    ORB_SPAWN_PATH,
+    { bodyLimit: ORB_SPAWN_MAX_BYTES },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      const fail = (status: number, code: string, message: string, retryable = false) =>
+        reply.status(status).send({ error: { code, message, retryable } });
+      const auth = await authenticate(request.headers.authorization);
+      if (auth.kind === "unavailable") {
+        const internal = auth.error.code === "invariant" || auth.error.code === "corruption";
+        return fail(
+          internal ? 500 : 503,
+          internal ? "internal" : "unavailable",
+          "spawn unavailable",
+          !internal,
+        );
+      }
+      if (auth.kind === "unauthorized")
+        return fail(401, "unauthorized", "runtime identity rejected");
+      if (
+        !ORB_SPAWN_UUID.test(request.params.orbId) ||
+        !Check(OrbSpawnRequestSchema, request.body) ||
+        request.body.prompt.trim() === ""
+      )
+        return fail(400, "invalid_request", "spawn requires a UUID and a nonempty text prompt");
+      const name =
+        request.body.name === undefined ? undefined : normalizeOrbName(request.body.name);
+      if (name?.isErr()) return fail(400, "invalid_request", name.error.message);
+      const orbId = request.params.orbId.toLowerCase();
+      const accepted = await deps.spawn(task, auth.orb, orbId, {
+        prompt: request.body.prompt,
+        ...(name?.isOk() ? { name: name.value } : {}),
+      });
+      if (accepted.isErr()) {
+        const error = accepted.error;
+        if (error.type === "spawn_conflict")
+          return error.reason === "unauthorized"
+            ? fail(401, "unauthorized", "runtime identity rejected")
+            : fail(409, "conflict", "spawn conflicts with existing work or project lifecycle");
+        const internal = error.code === "invariant" || error.code === "corruption";
+        return fail(
+          internal ? 500 : 503,
+          internal ? "internal" : "unavailable",
+          "spawn unavailable",
+          !internal,
+        );
+      }
+      return reply.status(202).send({
+        orbId,
+        projectId: auth.orb.projectId,
+        messageId: orbId,
+        url: `${deps.appOrigin}/#/orbs/${orbId}`,
+      });
+    },
+  );
 
   app.post(ORB_SELF_ARCHIVE_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");
