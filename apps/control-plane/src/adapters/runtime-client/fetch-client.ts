@@ -21,8 +21,9 @@ function clientError(
   code: RuntimeClientError["code"],
   message: string,
   retryable: boolean,
+  answered: boolean,
 ): RuntimeClientError {
-  return { type: "runtime_client_error", code, message, retryable };
+  return { type: "runtime_client_error", answered, code, message, retryable };
 }
 
 /** Bounded walk depth; also the cycle guard for a self-referential cause. */
@@ -76,13 +77,13 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
         fetch(url, { ...init, signal: context.signal }),
         (error) => {
           const message = describeFetchError(error);
-          if (context.signal.aborted) return clientError("cancelled", message, true);
-          return clientError("unreachable", message, true);
+          if (context.signal.aborted) return clientError("cancelled", message, true, false);
+          return clientError("unreachable", message, true, false);
         },
       );
       if (response.isErr()) return err(response.error);
       const body = await ResultAsync.fromPromise(response.value.json(), (error) =>
-        clientError("invalid_response", `unparseable response body: ${String(error)}`, false),
+        clientError("invalid_response", `unparseable response body: ${String(error)}`, false, true),
       );
       if (body.isErr()) return err(body.error);
       return ok({ status: response.value.status, body: body.value });
@@ -98,9 +99,9 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
           : body.error.code === "history_unavailable"
             ? "history_unavailable"
             : "http_error";
-      return clientError(code, body.error.message, body.error.retryable);
+      return clientError(code, body.error.message, body.error.retryable, true);
     }
-    return clientError("http_error", `runtime returned HTTP ${status}`, status >= 500);
+    return clientError("http_error", `runtime returned HTTP ${status}`, status >= 500, true);
   }
 
   deliverMessage(
@@ -125,7 +126,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
       if (status !== 200 && status !== 202) return err(this.mapErrorResponse(status, body));
       if (!Check(DeliverOrbMessageResponseSchema, body)) {
         return err(
-          clientError("invalid_response", "message response failed schema validation", false),
+          clientError("invalid_response", "message response failed schema validation", false, true),
         );
       }
       return ok(body);
@@ -143,7 +144,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
       }
       if (!Check(RuntimeHealthSchema, body)) {
         return err<RuntimeHealth, RuntimeClientError>(
-          clientError("invalid_response", "health response failed schema validation", false),
+          clientError("invalid_response", "health response failed schema validation", false, true),
         );
       }
       return ok(body);
@@ -165,7 +166,7 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
         }
         if (!Check(PullHistoryResponseSchema, body)) {
           return err<PullHistoryResponse, RuntimeClientError>(
-            clientError("invalid_response", "pull response failed schema validation", false),
+            clientError("invalid_response", "pull response failed schema validation", false, true),
           );
         }
         return ok(body);

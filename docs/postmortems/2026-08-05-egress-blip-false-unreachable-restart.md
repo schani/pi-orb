@@ -1,6 +1,6 @@
 # 2026-08-05 — control-plane egress blip triggers false unreachable-restart of a healthy runtime
 
-Status: partially resolved. Defect (c) has a decided design — interrupted-turn resume at runtime boot (2026-08-07, `docs/lifecycle.md`; recurrence that forced the decision: `docs/postmortems/2026-08-07-preemption-lost-turn.md`) — with implementation tracked in `TODO.md`. Defects (a)+(b) (silence measurement and corroboration) remain open follow-ups in `TODO.md`.
+Status: partially resolved. Runtime-attempt measurement and per-orb corroboration were implemented 2026-09-07: runtime silence now begins at an attempted runtime transport, and a fresh health request corroborates it before restart (`docs/lifecycle.md`). A control-plane egress partition can still defeat both runtime probes while provider access works; fleet-level corroboration remains in `TODO.md`. Defect (c) has a decided design — interrupted-turn resume at runtime boot (2026-08-07, `docs/lifecycle.md`; recurrence that forced the decision: `docs/postmortems/2026-08-07-preemption-lost-turn.md`) — with remaining validation tracked in `TODO.md`.
 
 **Field finding (2026-08-05, orb 1c806852, all times UTC): the unreachable-runtime restart fired against a demonstrably healthy runtime because the control plane's own outbound network was failing, killing an agent turn mid-flight.** Reconstructed from the reconciler event log (which worked exactly as designed — this reconstruction took minutes, not hours) and GCE operation audit logs.
 
