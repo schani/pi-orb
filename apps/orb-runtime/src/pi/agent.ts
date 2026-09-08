@@ -46,6 +46,7 @@ import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
+import { settleBootPrerequisites } from "./boot-prerequisites.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
@@ -312,45 +313,21 @@ export class PiOrbAgent {
     if (home.isErr()) {
       return err(this.failed("home_init_failed", home.error.message, false));
     }
-    const rust = await ensurePersistentRustToolchain(home.value, process.env, undefined, {
-      now: performance.now.bind(performance),
-      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-      report: (event, timeoutMs) => reportRustToolchainEdge(event, Math.min(20_000, timeoutMs)),
-    });
-    if (rust.isErr()) {
-      return err(this.failed("rust_toolchain_init_failed", rust.error.message, true));
-    }
-
-    // 1. Clone (fresh temp dir + atomic rename; docs/host-provider.md).
+    // 1. Rust setup and checkout are independent after HOME is configured.
+    // Wait for both so a failure cannot leave background boot work running.
     this.health = this.initializing("cloning");
     const repoDir = join(this.options.workDir, "repo");
-    if (!existsSync(repoDir)) {
-      // Re-validate before cloning: the first-slice database is writable by
-      // anyone who can reach the control plane (docs/control-plane-api.md).
-      const url = validateRepositoryUrl(this.options.repositoryUrl);
-      if (url.isErr()) {
-        return err(this.failed("invalid_repository_url", url.error.message, false));
-      }
-      const tmpDir = join(this.options.workDir, ".clone-tmp");
-      const cleaned = Result.fromThrowable(
-        () => {
-          rmSync(tmpDir, { recursive: true, force: true });
-          mkdirSync(this.options.workDir, { recursive: true });
-        },
-        (error) => String(error),
-      )();
-      if (cleaned.isErr()) return err(this.failed("clone_failed", cleaned.error, true));
-      const cloned = await execGit(["clone", "--", url.value.url, tmpDir], this.options.workDir);
-      if (cloned.isErr()) return err(this.failed("clone_failed", cloned.error.message, true));
-      const renamed = Result.fromThrowable(
-        () => renameSync(tmpDir, repoDir),
-        (error) => String(error),
-      )();
-      if (renamed.isErr()) return err(this.failed("clone_failed", renamed.error, true));
-    }
-    const commit = await execGit(["rev-parse", "HEAD"], repoDir);
-    if (commit.isErr()) return err(this.failed("clone_failed", commit.error.message, true));
-    this.checkoutCommit = commit.value;
+    const prerequisites = await settleBootPrerequisites(
+      () =>
+        ensurePersistentRustToolchain(home.value, process.env, undefined, {
+          now: performance.now.bind(performance),
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          report: (event, timeoutMs) => reportRustToolchainEdge(event, Math.min(20_000, timeoutMs)),
+        }).mapErr((error) => this.failed("rust_toolchain_init_failed", error.message, true)),
+      () => this.prepareCheckout(repoDir),
+    );
+    if (prerequisites.isErr()) return err(prerequisites.error);
+    this.checkoutCommit = prerequisites.value[1];
 
     // 1b. The repository's `.agents/setup` (docs/orb-setup-hook.md) — it needs
     // the checkout, and everything after it may depend on what it installs.
@@ -545,6 +522,35 @@ export class PiOrbAgent {
     const summarizer = this.options.turnSummarizer ?? new LunaTurnSummarizer(modelRuntime, model);
     this.attachSession(sessionResult.value.session, sessionManager, summarizer);
     return ok(undefined);
+  }
+
+  /** Fresh temp clone plus atomic rename, or validation of the reused checkout. */
+  private async prepareCheckout(repoDir: string): Promise<Result<string, RuntimeHealth>> {
+    if (!existsSync(repoDir)) {
+      const url = validateRepositoryUrl(this.options.repositoryUrl);
+      if (url.isErr()) {
+        return err(this.failed("invalid_repository_url", url.error.message, false));
+      }
+      const tmpDir = join(this.options.workDir, ".clone-tmp");
+      const cleaned = Result.fromThrowable(
+        () => {
+          rmSync(tmpDir, { recursive: true, force: true });
+          mkdirSync(this.options.workDir, { recursive: true });
+        },
+        (error) => String(error),
+      )();
+      if (cleaned.isErr()) return err(this.failed("clone_failed", cleaned.error, true));
+      const cloned = await execGit(["clone", "--", url.value.url, tmpDir], this.options.workDir);
+      if (cloned.isErr()) return err(this.failed("clone_failed", cloned.error.message, true));
+      const renamed = Result.fromThrowable(
+        () => renameSync(tmpDir, repoDir),
+        (error) => String(error),
+      )();
+      if (renamed.isErr()) return err(this.failed("clone_failed", renamed.error, true));
+    }
+    const commit = await execGit(["rev-parse", "HEAD"], repoDir);
+    if (commit.isErr()) return err(this.failed("clone_failed", commit.error.message, true));
+    return ok(commit.value);
   }
 
   /**
