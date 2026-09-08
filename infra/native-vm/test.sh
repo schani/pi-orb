@@ -2,6 +2,7 @@
 set -eu
 python3 -m unittest -v infra/native-vm/test_guest.py
 python3 -m py_compile infra/native-vm/bootstrap.py infra/native-vm/prepare_workspace.py infra/native-vm/boot_diagnostic.py infra/native-vm/runtime_supervisor.py infra/native-vm/test_guest.py
+infra/native-vm/workspace-filesystem.test.sh
 grep -q '^User=orb$' infra/native-vm/pi-orb-runtime.service
 grep -q '^Requires=pi-orb-workspace.service$' infra/native-vm/workspace.mount
 grep -q '^After=systemd-udev-trigger.service network-online.target$' infra/native-vm/pi-orb-workspace.service

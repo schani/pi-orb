@@ -63,8 +63,8 @@ def prepare(device=DEVICE, command=run):
             return 'filesystem_size_invalid'
         if current_size == size:
             return 'filesystem_size_current'
-        checked = command(['/usr/sbin/e2fsck', '-p', '-f', str(resolved)])
-        if checked.returncode not in (0, 1):
+        checked = command(['/usr/sbin/e2fsck', '-f', '-n', str(resolved)])
+        if checked.returncode != 0:
             return 'filesystem_check_failed'
         grown = command(['/usr/sbin/resize2fs', str(resolved)])
         return 'filesystem_grown' if grown.returncode == 0 else 'filesystem_resize_failed'

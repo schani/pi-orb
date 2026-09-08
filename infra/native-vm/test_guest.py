@@ -127,7 +127,7 @@ class WorkspaceTest(unittest.TestCase):
             if 'tune2fs' in argv[0]: return Result(stdout='Block count: 2621440\nBlock size: 4096\n')
             return Result()
         self.assertEqual(workspace.prepare(Path(disk.name), command), 'filesystem_grown')
-        self.assertTrue(any('e2fsck' in argv[0] for argv in commands))
+        self.assertTrue(any('e2fsck' in argv[0] and '-n' in argv for argv in commands))
         self.assertTrue(any('resize2fs' in argv[0] for argv in commands))
 
     def test_missing_and_unsupported_filesystems_fail_closed_without_formatting(self):
