@@ -1,3 +1,4 @@
+import type { SimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import { reconcileOrbOnce, requestOrbStart } from "../../domain/lifecycle.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
