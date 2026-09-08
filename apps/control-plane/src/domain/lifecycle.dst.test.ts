@@ -3772,7 +3772,12 @@ describe("reconciler logging (DST)", () => {
   it("logs discard recovery from durable error state after control-plane restart", async () => {
     const capture = new LogCapture();
     await runDst(
-      { name: "logging-discard-recovery-after-restart", iterations: 20, logCapture: capture },
+      {
+        name: "logging-discard-recovery-after-restart",
+        iterations: 20,
+        logCapture: capture,
+        lateTimerProbability: 0,
+      },
       async (sim) => {
         const harness = makeHarness({ constants: QUIET_CONSTANTS });
         const result = await sim.runTasks([
@@ -3793,11 +3798,7 @@ describe("reconciler logging (DST)", () => {
               // Fresh ControlState models a restarted process: the only
               // recovery evidence is the persisted discard error.
               const outcome = await reconcileOrbOnce(task, harness.deps, ORB);
-              expect(["progressed", "retryable"]).toContain(outcome.type);
-              if (outcome.type === "retryable") {
-                const retried = await reconcileOrbOnce(task, harness.deps, ORB);
-                expect(retried.type).toBe("progressed");
-              }
+              expect(outcome.type).toBe("progressed");
             },
           },
         ]);
