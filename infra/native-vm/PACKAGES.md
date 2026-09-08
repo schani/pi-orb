@@ -27,12 +27,10 @@ SSH keys, runtime credentials, and first-party test/build-only source are remove
 before capture. The installed guest publishes boot edges directly and the image
 acceptance test verifies the guest-attribute copy.
 
-The guest validates `/dev/disk/by-id/google-pi-orb-data` before mounting it. An
-existing ext4 signature is preserved, including when mounting later finds damage.
-The guest formats only a device with no filesystem, no detectable disk signature,
-and zero bytes across the complete block device. This full scan costs one read of
-a new disk on its first boot and prevents a stale launch flag from authorizing
-destructive formatting. Boot edges are written to the serial journal, the
+The guest validates `/dev/disk/by-id/google-pi-orb-data` before mounting it. It
+accepts only ext4, runs a noninteractive filesystem check, and grows the filesystem
+to the device size. It never formats a runtime disk. Missing, unsupported, and
+damaged filesystems fail closed; existing 50 GiB user disks remain intact. Boot edges are written to the serial journal, the
 `pi-orb/boot-status` guest attribute, and the `pi-orb-boot` Cloud Logging log.
 Cloud publication uses the already prescribed Google Cloud CLI and adds no image
 package.

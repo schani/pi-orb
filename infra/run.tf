@@ -6,15 +6,17 @@
 locals {
   shared_env = merge(
     {
-      PI_ORB_ROLE_UNUSED         = "per-service"
-      PI_ORB_SECRET_STORE        = "gsm"
-      PI_ORB_GCP_PROJECT         = var.project
-      PI_ORB_HOST_PROVIDER       = "gce"
-      PI_ORB_GCE_ZONE            = var.zone
-      PI_ORB_GCE_SERVICE_ACCOUNT = local.orb_vm_email
-      PI_ORB_GCE_SUBNETWORK      = local.orb_subnetwork_resource
-      PI_ORB_GCE_IMAGE_RESOURCE  = var.native_image_resource
-      PI_ORB_GCE_IMAGE_ID        = var.native_image_id
+      PI_ORB_ROLE_UNUSED                  = "per-service"
+      PI_ORB_SECRET_STORE                 = "gsm"
+      PI_ORB_GCP_PROJECT                  = var.project
+      PI_ORB_HOST_PROVIDER                = "gce"
+      PI_ORB_GCE_ZONE                     = var.zone
+      PI_ORB_GCE_SERVICE_ACCOUNT          = local.orb_vm_email
+      PI_ORB_GCE_SUBNETWORK               = local.orb_subnetwork_resource
+      PI_ORB_GCE_IMAGE_RESOURCE           = var.native_image_resource
+      PI_ORB_GCE_IMAGE_ID                 = var.native_image_id
+      PI_ORB_GCE_WORKSPACE_IMAGE_RESOURCE = var.workspace_image_resource
+      PI_ORB_GCE_WORKSPACE_IMAGE_ID       = var.workspace_image_id
       # Always set, so a revision's fence is explicit rather than inherited
       # from a default (docs/host-provider.md).
       PI_ORB_HOST_SPEC_GENERATION = tostring(var.deploy_generation)

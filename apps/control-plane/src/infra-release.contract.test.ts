@@ -113,6 +113,8 @@ cat <<'VARS'
 control_plane_image = "registry/control@sha256:abc"
 native_image_resource = "projects/test/global/images/pi-orb-test"
 native_image_id = "12345"
+workspace_image_resource = "projects/test/global/images/pi-orb-workspace-test"
+workspace_image_id = "22345"
 deploy_generation   = 100
 VARS
 `,

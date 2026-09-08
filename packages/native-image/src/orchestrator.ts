@@ -61,6 +61,8 @@ export interface ImageBuildManifest {
   readonly baseImageId: string;
   readonly imageResource: string;
   readonly imageId: string;
+  readonly workspaceImageResource: string;
+  readonly workspaceImageId: string;
   readonly validation: true;
   readonly inputInventory: Readonly<Record<string, string>>;
   readonly toolingInputInventory: Readonly<Record<string, string>>;
@@ -76,7 +78,11 @@ export interface ImageBuildEffects {
     input: ImageBuildInput,
     signal: AbortSignal,
   ): ResultAsync<void, ImageBuildError>;
-  capture(input: ImageBuildInput, signal: AbortSignal): ResultAsync<CapturedImage, ImageBuildError>;
+  capture(
+    input: ImageBuildInput,
+    kind: "runtime" | "workspace",
+    signal: AbortSignal,
+  ): ResultAsync<CapturedImage, ImageBuildError>;
   readPackageInventory(
     input: ImageBuildInput,
     signal: AbortSignal,
@@ -88,6 +94,11 @@ export interface ImageBuildEffects {
   verifyBuilderBaseImage(
     input: ImageBuildInput,
     expectedBaseImageId: string,
+    signal: AbortSignal,
+  ): ResultAsync<void, ImageBuildError>;
+  verifyValidationWorkspaceImage(
+    input: ImageBuildInput,
+    expectedWorkspaceImageId: string,
     signal: AbortSignal,
   ): ResultAsync<void, ImageBuildError>;
   wait(
@@ -169,7 +180,8 @@ export async function buildNativeImage(
   progress: (event: ImageBuildProgress) => void = () => undefined,
 ): Promise<Result<ImageBuildManifest, ImageBuildError>> {
   const startedAt = effects.now();
-  let captureAttempted = false;
+  let runtimeCaptureAttempted = false;
+  let workspaceCaptureAttempted = false;
   let primaryFailure: ImageBuildError | undefined;
   let manifest: ImageBuildManifest | undefined;
   const startedActions = new Set<string>();
@@ -261,14 +273,33 @@ export async function buildNativeImage(
       progress({ stage: "install", action: "read-inventory", status: "succeeded" });
     }
   }
+  if (primaryFailure === undefined && !(await step("capture", "create-workspace-disk")))
+    primaryFailure ??= cancelled("capture");
+  if (primaryFailure === undefined && !(await step("capture", "attach-workspace-disk")))
+    primaryFailure ??= cancelled("capture");
+  if (primaryFailure === undefined && !(await step("capture", "format-workspace-disk")))
+    primaryFailure ??= cancelled("capture");
+  if (primaryFailure === undefined && !(await step("capture", "detach-workspace-disk")))
+    primaryFailure ??= cancelled("capture");
+  let workspaceImage: CapturedImage | undefined;
+  if (primaryFailure === undefined) {
+    progress({ stage: "capture", action: "create-workspace-image", status: "started" });
+    workspaceCaptureAttempted = true;
+    const captured = await effects.capture(input, "workspace", signal);
+    if (captured.isErr()) primaryFailure = captured.error;
+    else {
+      workspaceImage = captured.value;
+      progress({ stage: "capture", action: "create-workspace-image", status: "succeeded" });
+    }
+  }
   if (primaryFailure === undefined && !(await step("seal", "seal")))
     primaryFailure ??= cancelled("seal");
   if (primaryFailure === undefined && !(await step("capture", "stop-builder")))
     primaryFailure ??= cancelled("capture");
   if (primaryFailure === undefined) {
     progress({ stage: "capture", action: "create-image", status: "started" });
-    captureAttempted = true;
-    const image = await effects.capture(input, signal);
+    runtimeCaptureAttempted = true;
+    const image = await effects.capture(input, "runtime", signal);
     if (image.isErr()) primaryFailure = image.error;
     else {
       progress({ stage: "capture", action: "create-image", status: "succeeded" });
@@ -286,6 +317,8 @@ export async function buildNativeImage(
         baseImageId,
         imageResource: image.value.resource,
         imageId: image.value.id,
+        workspaceImageResource: (workspaceImage as CapturedImage).resource,
+        workspaceImageId: (workspaceImage as CapturedImage).id,
         validation: true,
         inputInventory: input.inputInventory,
         toolingInputInventory: input.toolingInputInventory,
@@ -297,6 +330,12 @@ export async function buildNativeImage(
   }
   if (primaryFailure === undefined && !(await step("validate", "create")))
     primaryFailure ??= cancelled("validate");
+  if (primaryFailure === undefined && workspaceImage !== undefined) {
+    progress({ stage: "validate", action: "verify-workspace-image", status: "started" });
+    const verified = await effects.verifyValidationWorkspaceImage(input, workspaceImage.id, signal);
+    if (verified.isErr()) primaryFailure = verified.error;
+    else progress({ stage: "validate", action: "verify-workspace-image", status: "succeeded" });
+  }
   if (primaryFailure === undefined && !(await poll("validate", "ready", 60)))
     primaryFailure ??= cancelled("validate");
   if (primaryFailure === undefined && !(await poll("validate", "probe", 60)))
@@ -311,7 +350,9 @@ export async function buildNativeImage(
     "delete-validator",
     "delete-builder",
     "delete-data",
-    ...(primaryFailure && captureAttempted ? ["delete-image"] : []),
+    "delete-workspace-disk",
+    ...(primaryFailure && runtimeCaptureAttempted ? ["delete-image"] : []),
+    ...(primaryFailure && workspaceCaptureAttempted ? ["delete-workspace-image"] : []),
   ];
   for (const action of cleanupActions) {
     progress({ stage: "cleanup", action, status: "started" });
@@ -321,11 +362,19 @@ export async function buildNativeImage(
   }
   if (
     primaryFailure !== undefined &&
-    captureAttempted &&
+    runtimeCaptureAttempted &&
     !cleanupActions.includes("delete-image")
   ) {
     progress({ stage: "cleanup", action: "delete-image", status: "started" });
     await effects.run("cleanup", "delete-image", input, new AbortController().signal);
+  }
+  if (
+    primaryFailure !== undefined &&
+    workspaceCaptureAttempted &&
+    !cleanupActions.includes("delete-workspace-image")
+  ) {
+    progress({ stage: "cleanup", action: "delete-workspace-image", status: "started" });
+    await effects.run("cleanup", "delete-workspace-image", input, new AbortController().signal);
   }
 
   if (primaryFailure === undefined && manifest !== undefined) {
@@ -335,6 +384,7 @@ export async function buildNativeImage(
     if (written.isErr()) {
       primaryFailure = written.error;
       await effects.run("cleanup", "delete-image", input, new AbortController().signal);
+      await effects.run("cleanup", "delete-workspace-image", input, new AbortController().signal);
     } else progress({ stage: "manifest", action: "write-accepted", status: "succeeded" });
   }
 

@@ -7,6 +7,14 @@ test "$(id -g orb)" = 2000
 sudo -u orb sudo -n true
 
 findmnt --noheadings --output SOURCE --target /workspace | grep -q '/dev/'
+workspace_device=$(readlink -f /dev/disk/by-id/google-pi-orb-data)
+filesystem_metadata=$(tune2fs -l "$workspace_device")
+block_size=$(printf '%s\n' "$filesystem_metadata" | awk -F: '/^Block size:/{gsub(/ /,"",$2); print $2}')
+filesystem_bytes=$(printf '%s\n' "$filesystem_metadata" | awk -F: '/^Block count:/{count=$2} /^Block size:/{size=$2} END{gsub(/ /,"",count); gsub(/ /,"",size); printf "%.0f\n", count*size}')
+device_bytes=$(blockdev --getsize64 "$workspace_device")
+test "$filesystem_bytes" -gt $((10 * 1024 * 1024 * 1024))
+test "$device_bytes" -ge "$filesystem_bytes"
+test $((device_bytes - filesystem_bytes)) -lt "$block_size"
 test "$(stat -c %u:%g /workspace)" = 2000:2000
 test "$(stat -c %a /workspace/home)" = 700
 test "$(stat -c %U:%G:%a /run/pi-orb/environment)" = root:root:600

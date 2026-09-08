@@ -21,27 +21,48 @@ export type CommandRunner = (
   args: string[],
   options: { signal: AbortSignal; maxBuffer: number; timeout: number; killSignal: NodeJS.Signals },
 ) => Promise<RunResult>;
+export interface CleanupTiming {
+  now(): number;
+  wait(milliseconds: number, signal: AbortSignal): Promise<void>;
+}
 
 export class GcloudImageBuildEffects implements ImageBuildEffects {
   private commandNumber = 0;
   private readonly commandRunner: CommandRunner;
+  private readonly cleanupTiming: CleanupTiming;
 
-  constructor(commandRunner: CommandRunner = execFileAsync) {
+  constructor(
+    commandRunner: CommandRunner = execFileAsync,
+    cleanupTiming: CleanupTiming = {
+      now: Date.now,
+      wait: (milliseconds, signal) => setTimeout(milliseconds, undefined, { signal }),
+    },
+  ) {
     this.commandRunner = commandRunner;
+    this.cleanupTiming = cleanupTiming;
   }
 
   now(): string {
     return new Date().toISOString();
   }
 
-  private name(input: ImageBuildInput, kind: "builder" | "validator" | "data" | "image"): string {
+  private name(
+    input: ImageBuildInput,
+    kind: "builder" | "validator" | "data" | "image" | "workspace-disk" | "workspace-image",
+  ): string {
     const suffix = input.operationId
       .toLowerCase()
       .replace(/[^a-z0-9-]/g, "-")
       .slice(0, 16);
     const reserved = `pi-orb-${kind}--${suffix}`.length;
     const version = input.version.slice(0, 63 - reserved).replace(/-$/, "");
-    return `pi-orb-${kind}-${version}-${suffix}`;
+    const prefix =
+      kind === "workspace-image"
+        ? "image-workspace"
+        : kind === "workspace-disk"
+          ? "data-workspace"
+          : kind;
+    return `pi-orb-${prefix}-${version}-${suffix}`;
   }
 
   private labels(input: ImageBuildInput): string {
@@ -59,6 +80,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     command: string,
     args: string[],
     signal: AbortSignal,
+    timeout = 300_000,
   ): ResultAsync<RunResult, ImageBuildError> {
     const sequence = String(++this.commandNumber).padStart(3, "0");
     return ResultAsync.fromPromise(
@@ -69,7 +91,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           output = await this.commandRunner(command, args, {
             signal,
             maxBuffer: 16 * 1024 * 1024,
-            timeout: 300_000,
+            timeout,
             killSignal: "SIGKILL",
           });
           outcome = ok(output);
@@ -103,8 +125,9 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     stage: ImageBuildStage,
     args: string[],
     signal: AbortSignal,
+    timeout?: number,
   ): ResultAsync<RunResult, ImageBuildError> {
-    return this.execute(input, stage, "gcloud", args, signal);
+    return this.execute(input, stage, "gcloud", args, signal, timeout);
   }
 
   private ssh(
@@ -140,6 +163,8 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     const validator = this.name(input, "validator");
     const data = this.name(input, "data");
     const image = this.name(input, "image");
+    const workspaceDisk = this.name(input, "workspace-disk");
+    const workspaceImage = this.name(input, "workspace-image");
     const common = [`--project=${input.project}`, `--zone=${input.zone}`];
     switch (`${stage}:${action}`) {
       case "prerequisites:check":
@@ -247,6 +272,60 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           `set -eu; echo '${input.version}' | sudo tee /opt/pi-orb/image-version >/dev/null; sudo /app/infra/native-vm/seal.sh`,
           signal,
         ).map(() => undefined);
+      case "capture:create-workspace-disk":
+        return this.gcloud(
+          input,
+          stage,
+          [
+            "compute",
+            "disks",
+            "create",
+            workspaceDisk,
+            ...common,
+            "--size=10GB",
+            "--type=pd-balanced",
+            `--labels=${this.labels(input)}`,
+            "--format=json",
+          ],
+          signal,
+        ).map(() => undefined);
+      case "capture:attach-workspace-disk":
+        return this.gcloud(
+          input,
+          stage,
+          [
+            "compute",
+            "instances",
+            "attach-disk",
+            builder,
+            ...common,
+            `--disk=${workspaceDisk}`,
+            "--device-name=pi-orb-workspace-template",
+          ],
+          signal,
+        ).map(() => undefined);
+      case "capture:format-workspace-disk":
+        return this.ssh(
+          input,
+          stage,
+          builder,
+          'set -eu; disk=/dev/disk/by-id/google-pi-orb-workspace-template; test -b "$disk"; filesystem=; if filesystem=$(sudo blkid -p -o value -s TYPE "$disk"); then test -z "$filesystem"; else test $? -eq 2; fi; sudo mkfs.ext4 -F -L pi-orb-workspace "$disk"; mount_dir=$(mktemp -d); sudo mount "$disk" "$mount_dir"; test -z "$(sudo find "$mount_dir" -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit)"; sudo umount "$mount_dir"; rmdir "$mount_dir"',
+          signal,
+        ).map(() => undefined);
+      case "capture:detach-workspace-disk":
+        return this.gcloud(
+          input,
+          stage,
+          [
+            "compute",
+            "instances",
+            "detach-disk",
+            builder,
+            ...common,
+            "--device-name=pi-orb-workspace-template",
+          ],
+          signal,
+        ).map(() => undefined);
       case "capture:stop-builder":
         return this.gcloud(
           input,
@@ -267,6 +346,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             ...common,
             "--size=20GB",
             "--type=pd-balanced",
+            `--image=${workspaceImage}`,
             `--labels=${this.labels(input)}`,
             "--format=json",
           ],
@@ -405,8 +485,12 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
         return this.deleteOwned(input, "instances", builder, signal);
       case "cleanup:delete-image":
         return this.deleteOwned(input, "images", image, signal);
+      case "cleanup:delete-workspace-image":
+        return this.deleteOwned(input, "images", workspaceImage, signal);
       case "cleanup:delete-data":
         return this.deleteOwned(input, "disks", data, signal);
+      case "cleanup:delete-workspace-disk":
+        return this.deleteOwned(input, "disks", workspaceDisk, signal);
       default:
         return errAsync({ type: "image_build_failed", stage, message: `unknown action ${action}` });
     }
@@ -435,41 +519,189 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
       kind === "images"
         ? [`--project=${input.project}`]
         : [`--project=${input.project}`, `--zone=${input.zone}`];
+    const notFound = (failure: ImageBuildError): boolean =>
+      failure.message.includes("not found") || failure.message.includes("was not found");
+    const describe = (): ResultAsync<"absent" | "owned", ImageBuildError> =>
+      this.gcloud(
+        input,
+        stage,
+        ["compute", kind, "describe", name, ...scope, "--format=json(name,labels)"],
+        signal,
+      )
+        .andThen((description) =>
+          Result.fromThrowable(
+            () => JSON.parse(description.stdout) as unknown,
+            (cause): ImageBuildError => ({
+              type: "image_build_failed",
+              stage,
+              message: `invalid ${kind} description: ${String(cause)}`,
+            }),
+          )().andThen((value) => {
+            const body = value as { name?: unknown; labels?: unknown };
+            const labels = body?.labels as Record<string, unknown> | undefined;
+            if (body?.name !== name || labels?.["pi-orb-native-build"] !== input.operationId) {
+              return err<"owned", ImageBuildError>({
+                type: "image_build_failed",
+                stage,
+                message: `refusing to delete foreign ${kind} ${name}`,
+              });
+            }
+            return ok<"owned", ImageBuildError>("owned");
+          }),
+        )
+        .orElse((failure) =>
+          notFound(failure) ? okAsync<"absent", ImageBuildError>("absent") : errAsync(failure),
+        );
+    return this.waitForTargetOperations(input, kind, name, signal).andThen(() =>
+      describe().andThen((observation) =>
+        observation === "absent"
+          ? okAsync<void, ImageBuildError>(undefined)
+          : this.gcloud(
+              input,
+              stage,
+              ["compute", kind, "delete", name, ...scope, "--quiet"],
+              signal,
+            ).map(() => undefined),
+      ),
+    );
+  }
+
+  private waitForTargetOperations(
+    input: ImageBuildInput,
+    kind: "instances" | "disks" | "images",
+    name: string,
+    signal: AbortSignal,
+  ): ResultAsync<void, ImageBuildError> {
+    const stage = "cleanup" as const;
+    const target =
+      kind === "images"
+        ? `projects/${input.project}/global/images/${name}`
+        : `projects/${input.project}/zones/${input.zone}/${kind}/${name}`;
+    const deadline = this.cleanupTiming.now() + 60_000;
     return this.gcloud(
       input,
       stage,
-      ["compute", kind, "describe", name, ...scope, "--format=value(labels.pi-orb-native-build)"],
+      [
+        "compute",
+        "operations",
+        "list",
+        `--project=${input.project}`,
+        `--filter=targetLink~/${name}$ AND status!=DONE`,
+        "--format=json(name,status,targetLink)",
+      ],
       signal,
-    )
-      .orElse((failure) =>
-        failure.message.includes("not found") || failure.message.includes("was not found")
-          ? okAsync({ stdout: "", stderr: "" })
-          : errAsync(failure),
-      )
-      .andThen((description) => {
-        const owner = description.stdout.trim();
-        if (owner === "") return okAsync<void, ImageBuildError>(undefined);
-        if (owner !== input.operationId)
+      10_000,
+    ).andThen((listed) => {
+      const parsed = Result.fromThrowable(
+        () => JSON.parse(listed.stdout) as unknown,
+        (cause): ImageBuildError => ({
+          type: "image_build_failed",
+          stage,
+          message: `invalid operation list: ${String(cause)}`,
+        }),
+      )();
+      if (parsed.isErr()) return errAsync<void, ImageBuildError>(parsed.error);
+      if (!Array.isArray(parsed.value)) {
+        return errAsync<void, ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: "invalid operation list shape",
+        });
+      }
+      const names: string[] = [];
+      for (const entry of parsed.value) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const operation = entry as Record<string, unknown>;
+        const targetLink = String(operation["targetLink"] ?? "").replace(
+          /^https:\/\/www\.googleapis\.com\/compute\/v1\//,
+          "",
+        );
+        if (targetLink !== target || operation["status"] === "DONE") continue;
+        if (typeof operation["name"] !== "string" || operation["name"] === "") {
           return errAsync<void, ImageBuildError>({
             type: "image_build_failed",
             stage,
-            message: `refusing to delete foreign ${kind} ${name}`,
+            message: `invalid operation for ${kind} ${name}`,
           });
-        return this.gcloud(
-          input,
-          stage,
-          ["compute", kind, "delete", name, ...scope, "--quiet"],
-          signal,
-        ).map(() => undefined);
+        }
+        names.push(operation["name"]);
+      }
+      return names.reduce<ResultAsync<void, ImageBuildError>>(
+        (waiting, operation) =>
+          waiting.andThen(() =>
+            this.waitForTargetOperation(input, kind, operation, signal, deadline),
+          ),
+        okAsync<void, ImageBuildError>(undefined),
+      );
+    });
+  }
+
+  private waitForTargetOperation(
+    input: ImageBuildInput,
+    kind: "instances" | "disks" | "images",
+    operation: string,
+    signal: AbortSignal,
+    deadline: number,
+  ): ResultAsync<void, ImageBuildError> {
+    const stage = "cleanup" as const;
+    const remaining = deadline - this.cleanupTiming.now();
+    if (remaining <= 0) {
+      return errAsync<void, ImageBuildError>({
+        type: "image_build_failed",
+        stage,
+        message: `timed out waiting for cleanup operation ${operation}`,
       });
+    }
+    return this.gcloud(
+      input,
+      stage,
+      [
+        "compute",
+        "operations",
+        "describe",
+        operation,
+        `--project=${input.project}`,
+        ...(kind === "images" ? ["--global"] : [`--zone=${input.zone}`]),
+        "--format=value(status)",
+      ],
+      signal,
+      Math.min(10_000, remaining),
+    ).andThen((described) => {
+      const status = described.stdout.trim();
+      if (status === "DONE") return okAsync<void, ImageBuildError>(undefined);
+      if (status !== "PENDING" && status !== "RUNNING") {
+        return errAsync<void, ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: `invalid cleanup operation status ${status || "missing"}`,
+        });
+      }
+      const waitRemaining = deadline - this.cleanupTiming.now();
+      if (waitRemaining <= 0) {
+        return errAsync<void, ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: `timed out waiting for cleanup operation ${operation}`,
+        });
+      }
+      return ResultAsync.fromPromise(
+        this.cleanupTiming.wait(Math.min(5_000, waitRemaining), signal),
+        (cause): ImageBuildError => ({
+          type: signal.aborted ? "cancelled" : "image_build_failed",
+          stage,
+          message: String(cause),
+        }),
+      ).andThen(() => this.waitForTargetOperation(input, kind, operation, signal, deadline));
+    });
   }
 
   capture(
     input: ImageBuildInput,
+    kind: "runtime" | "workspace",
     signal: AbortSignal,
   ): ResultAsync<CapturedImage, ImageBuildError> {
-    const name = this.name(input, "image");
-    const builder = this.name(input, "builder");
+    const name = this.name(input, kind === "runtime" ? "image" : "workspace-image");
+    const source = this.name(input, kind === "runtime" ? "builder" : "workspace-disk");
     return this.gcloud(
       input,
       "capture",
@@ -479,7 +711,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
         "create",
         name,
         `--project=${input.project}`,
-        `--source-disk=${builder}`,
+        `--source-disk=${source}`,
         `--source-disk-zone=${input.zone}`,
         `--labels=${this.labels(input)}`,
         "--format=json",
@@ -556,6 +788,36 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             type: "image_build_failed",
             stage: "builder",
             message: "builder base-image identity changed",
+          }),
+    );
+  }
+
+  verifyValidationWorkspaceImage(
+    input: ImageBuildInput,
+    expectedWorkspaceImageId: string,
+    signal: AbortSignal,
+  ): ResultAsync<void, ImageBuildError> {
+    const data = this.name(input, "data");
+    return this.gcloud(
+      input,
+      "validate",
+      [
+        "compute",
+        "disks",
+        "describe",
+        data,
+        `--project=${input.project}`,
+        `--zone=${input.zone}`,
+        "--format=value(sourceImageId)",
+      ],
+      signal,
+    ).andThen((result) =>
+      result.stdout.trim() === expectedWorkspaceImageId
+        ? okAsync<void, ImageBuildError>(undefined)
+        : errAsync<void, ImageBuildError>({
+            type: "image_build_failed",
+            stage: "validate",
+            message: "validation workspace-image identity changed",
           }),
     );
   }

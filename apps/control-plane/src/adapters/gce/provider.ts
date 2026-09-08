@@ -39,6 +39,10 @@ export interface GceOrbHostProviderOptions {
   readonly imageResource: string;
   /** Numeric Compute Engine image ID recorded by the accepted image manifest. */
   readonly imageId: string;
+  /** Exact empty-ext4 image used only to create a missing workspace disk. */
+  readonly workspaceImageResource: string;
+  /** Numeric identity of the accepted workspace image. */
+  readonly workspaceImageId: string;
   /** Broker base URL as reachable from orb VMs (the runtime-role service). */
   readonly controlPlaneUrl: string;
   readonly dataDiskSizeGb?: number;
@@ -168,6 +172,36 @@ function verifyDataDiskOwnership(
       );
 }
 
+function sourceMatches(resource: string, observed: unknown): boolean {
+  const value = String(observed ?? "");
+  return value === resource || value === `https://www.googleapis.com/compute/v1/${resource}`;
+}
+
+function verifyCreatedDataDisk(
+  body: Record<string, unknown>,
+  name: string,
+  orbId: string,
+  imageResource: string,
+  imageId: string,
+): Result<void, OrbHostProviderError> {
+  const owned = verifyDataDiskOwnership(body, name, orbId);
+  if (owned.isErr()) return owned;
+  if (
+    !sourceMatches(imageResource, body["sourceImage"]) ||
+    String(body["sourceImageId"] ?? "") !== imageId
+  ) {
+    return err(
+      providerError(
+        "provision",
+        "conflict",
+        `new data disk ${name} does not carry the accepted workspace image identity`,
+        false,
+      ),
+    );
+  }
+  return ok(undefined);
+}
+
 /** GCE instance status → OrbHostState (docs/host-provider.md). */
 export function mapInstanceStatus(status: string): OrbHostState {
   switch (status) {
@@ -288,6 +322,37 @@ export class GceOrbHostProvider implements OrbHostProvider {
         return providerError(operation, "unavailable", message, true);
       },
     );
+  }
+
+  private async verifyImageIdentity(
+    resource: string,
+    expectedId: string,
+    label: string,
+    context: OperationContext,
+  ): Promise<Result<void, OrbHostProviderError>> {
+    const image = await this.request("provision", "GET", resource, context);
+    if (image.isErr()) return err(image.error);
+    if (image.value.status !== 200) {
+      return err(
+        providerError(
+          "provision",
+          "operation_failed",
+          `${label} image get HTTP ${image.value.status}`,
+          image.value.status >= 500,
+        ),
+      );
+    }
+    const observedId = String(image.value.body["id"] ?? "missing");
+    return observedId === expectedId
+      ? ok(undefined)
+      : err(
+          providerError(
+            "provision",
+            "conflict",
+            `${label} image ${resource} has id ${observedId}, expected ${expectedId}`,
+            false,
+          ),
+        );
   }
 
   /**
@@ -445,28 +510,13 @@ export class GceOrbHostProvider implements OrbHostProvider {
         repositoryUrl: request.bootstrap.repositoryUrl,
       });
 
-      const image = await this.request("provision", "GET", spec.imageResource, context);
-      if (image.isErr()) return err(image.error);
-      if (image.value.status !== 200) {
-        return err(
-          providerError(
-            "provision",
-            "operation_failed",
-            `image get HTTP ${image.value.status}`,
-            image.value.status >= 500,
-          ),
-        );
-      }
-      if (String(image.value.body["id"] ?? "") !== spec.imageId) {
-        return err(
-          providerError(
-            "provision",
-            "conflict",
-            `image ${spec.imageResource} has id ${String(image.value.body["id"] ?? "missing")}, expected ${spec.imageId}`,
-            false,
-          ),
-        );
-      }
+      const runtimeImage = await this.verifyImageIdentity(
+        spec.imageResource,
+        spec.imageId,
+        "runtime",
+        context,
+      );
+      if (runtimeImage.isErr()) return err(runtimeImage.error);
 
       const existing = await this.request(
         "provision",
@@ -560,14 +610,21 @@ export class GceOrbHostProvider implements OrbHostProvider {
         );
         if (owned.isErr()) return err(owned.error);
       } else if (disk.value.status === 404) {
+        const workspaceImage = await this.verifyImageIdentity(
+          this.options.workspaceImageResource,
+          this.options.workspaceImageId,
+          "workspace",
+          context,
+        );
+        if (workspaceImage.isErr()) return err(workspaceImage.error);
         const created = await this.request("provision", "POST", this.zonePath("disks"), context, {
           name: diskName(request.orbId),
           sizeGb: String(spec.dataDiskSizeGb),
           type: this.zonePath("diskTypes/pd-balanced"),
           labels: { [ORB_LABEL]: request.orbId },
+          sourceImage: this.options.workspaceImageResource,
         });
-        if (created.isErr()) return err(created.error);
-        if (created.value.status === 200) {
+        if (created.isOk() && created.value.status === 200) {
           const waited = await this.waitOperation(
             task,
             "provision",
@@ -575,7 +632,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
             context,
           );
           if (waited.isErr()) return err(waited.error);
-        } else if (created.value.status !== 409) {
+        } else if (created.isOk() && created.value.status !== 409) {
           return err(
             providerError(
               "provision",
@@ -584,34 +641,31 @@ export class GceOrbHostProvider implements OrbHostProvider {
               true,
             ),
           );
-        } else {
-          const winner = await this.request(
-            "provision",
-            "GET",
-            this.zonePath(`disks/${diskName(request.orbId)}`),
-            context,
-          );
-          if (winner.isErr()) return err(winner.error);
-          if (winner.value.status !== 200) {
-            if (winner.value.status === 404) {
-              return err(
-                providerError(
-                  "provision",
-                  "unavailable",
-                  "data disk create conflict winner is not yet visible",
-                  true,
-                ),
-              );
-            }
-            return err(dataDiskGetError(winner.value.status));
-          }
-          const owned = verifyDataDiskOwnership(
-            winner.value.body,
-            diskName(request.orbId),
-            request.orbId,
-          );
-          if (owned.isErr()) return err(owned.error);
         }
+        const winner = await this.request(
+          "provision",
+          "GET",
+          this.zonePath(`disks/${diskName(request.orbId)}`),
+          context,
+        );
+        if (winner.isErr()) return err(created.isErr() ? created.error : winner.error);
+        if (winner.value.status !== 200) {
+          if (created.isErr()) return err(created.error);
+          if (winner.value.status === 404) {
+            return err(
+              providerError("provision", "unavailable", "new data disk is not yet visible", true),
+            );
+          }
+          return err(dataDiskGetError(winner.value.status));
+        }
+        const accepted = verifyCreatedDataDisk(
+          winner.value.body,
+          diskName(request.orbId),
+          request.orbId,
+          this.options.workspaceImageResource,
+          this.options.workspaceImageId,
+        );
+        if (accepted.isErr()) return err(accepted.error);
       } else {
         return err(dataDiskGetError(disk.value.status));
       }
