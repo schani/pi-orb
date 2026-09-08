@@ -157,6 +157,7 @@ describe("ProcessOrbHostProvider", () => {
 
     const observed = await provider.observe(task, provisioned.value.ref, context);
     expect(observed.isOk() && observed.value?.state).toBe("running");
+    expect(observed.isOk() && Number.isFinite(observed.value?.lastStartedAt)).toBe(true);
     expect(observed.isOk() && observed.value?.runtimeAddress?.baseUrl).toBe(
       `http://127.0.0.1:${values.port}`,
     );
@@ -732,6 +733,7 @@ describe("ProcessOrbHostProvider host specification", () => {
     expect(started.isOk(), JSON.stringify(started)).toBe(true);
     const observed = await provider.observe(task, first.value.ref, context);
     expect(observed.isOk() && observed.value?.state).toBe("running");
+    expect(observed.isOk() && Number.isFinite(observed.value?.lastStartedAt)).toBe(true);
     rmSync(observedEnv, { force: true });
   });
 

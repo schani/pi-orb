@@ -1,0 +1,18 @@
+[Unit]
+Description=Persistent orb workspace
+DefaultDependencies=no
+Requires=pi-orb-workspace.service
+After=pi-orb-workspace.service
+Conflicts=umount.target
+Before=pi-orb-bootstrap.service docker.service containerd.service umount.target
+OnFailure=pi-orb-boot-failure@workspace.mount.service
+
+[Mount]
+What=/dev/disk/by-id/google-pi-orb-data
+Where=/workspace
+Type=ext4
+Options=defaults,discard
+TimeoutSec=30
+
+[Install]
+WantedBy=multi-user.target

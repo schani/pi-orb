@@ -37,6 +37,7 @@ import {
   startControlPlane,
   verifyIdToken,
   waitFor,
+  waitForPostgres,
 } from "./harness.ts";
 
 /**
@@ -533,14 +534,7 @@ beforeAll(async () => {
     `127.0.0.1:${PG_PORT}:5432`,
     "postgres:16",
   ]);
-  await waitFor(
-    "postgres ready",
-    async () => {
-      const out = await docker(["exec", PG_CONTAINER, "pg_isready", "-U", "pi-orb"]);
-      return out.includes("accepting connections") ? true : null;
-    },
-    { timeoutMs: 60_000 },
-  );
+  await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb");
 
   controlPlane = await startControlPlane({
     databaseUrl: `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`,
@@ -1136,6 +1130,20 @@ describe("full slice E2E", () => {
           expect(
             (await api(controlPlane.baseUrl, "POST", `/api/v1/orbs/${specOrbId}/start`)).status,
           ).toBe(202);
+          await waitForLifecycleEdges("spec-replacement declined edge", specOrbId, (lines) =>
+            lines.some((line) => line.includes(" spec-replacement-declined ")),
+          );
+          expect(
+            (await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`)).body["state"],
+          ).toBe("starting");
+          expect(await computeIncarnation(specOrbId)).toBe(1);
+          expect(await computeIdentity(specOrbId, 1)).toBe(declinedIdentity);
+          expect(await orbContainerNames(specOrbId)).toEqual([`pi-orb-${specOrbId}-i1`]);
+          expect(lifecycleLines(specOrbId).join("\n")).not.toContain("compute-discard-requested");
+
+          // The stale revision parks this Start for its newer owner. Restore
+          // that owner and verify the existing incarnation starts unchanged.
+          await restartControlPlaneWithSpec("stage2-spec-b", 2);
           await waitFor(
             "declined-generation start running",
             async () => {
@@ -1147,16 +1155,10 @@ describe("full slice E2E", () => {
             },
             { timeoutMs: 300_000, intervalMs: 1_000 },
           );
-          await waitForLifecycleEdges("spec-replacement declined edge", specOrbId, (lines) =>
-            lines.some((line) => line.includes(" spec-replacement-declined ")),
-          );
           expect(await computeIncarnation(specOrbId)).toBe(1);
           expect(await computeIdentity(specOrbId, 1)).toBe(declinedIdentity);
           expect(await orbContainerNames(specOrbId)).toEqual([`pi-orb-${specOrbId}-i1`]);
           expect(lifecycleLines(specOrbId).join("\n")).not.toContain("compute-discard-requested");
-          // Leave the suite on a control plane whose configured specification
-          // matches the committed one.
-          await restartControlPlaneWithSpec("stage2-spec-b", 2);
         }
         expect(
           (await api(controlPlane.baseUrl, "DELETE", `/api/v1/projects/${projectId}`)).status,

@@ -21,9 +21,9 @@ set -euo pipefail
 DIR=$(cd "$(dirname "$0")" && pwd)
 API="$DIR/api.sh"
 
-OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-720}   # 12 minutes, whole run
-RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-300}   # 5 minutes per start
-STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-180}   # 3 minutes per stop
+OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-2700}  # two 15-minute boots plus bounded stops/checks
+RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-900}   # lifecycle create/start deadline
+STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}   # provider stop and drain
 TAILNET_TIMEOUT=${TAILNET_TIMEOUT:-60}    # machine visible on the tailnet
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-60}      # preview health reaches "ready"
 POLL_INTERVAL=${POLL_INTERVAL:-5}

@@ -34,8 +34,10 @@ export interface GceOrbHostProviderOptions {
   readonly subnetwork: string;
   /** Dedicated minimal service account for orb VMs (docs/credentials.md). */
   readonly serviceAccount: string;
-  /** Orb runtime container image (digest-pinned in deployment). */
-  readonly runtimeImage: string;
+  /** Exact immutable Compute Engine image resource, e.g. projects/p/global/images/pi-orb-20260905. */
+  readonly imageResource: string;
+  /** Numeric Compute Engine image ID recorded by the accepted image manifest. */
+  readonly imageId: string;
   /** Broker base URL as reachable from orb VMs (the runtime-role service). */
   readonly controlPlaneUrl: string;
   readonly dataDiskSizeGb?: number;
@@ -50,26 +52,14 @@ const ORB_LABEL = "pi-orb-orb-id";
 const INCARNATION_LABEL = "pi-orb-host-incarnation";
 const SPEC_FINGERPRINT_METADATA_KEY = "pi-orb-host-spec-fingerprint";
 const TOKEN_METADATA_KEY = "pi-orb-runtime-token";
-/** The auth key lives in metadata, never in the script: it is per-orb secret
- * state, and keeping it out of the script body keeps the script — and therefore
- * the host-spec fingerprint — free of per-host secrets. */
+/** Per-orb secret state, excluded from the host-spec fingerprint. */
 const TAILSCALE_KEY_METADATA_KEY = "pi-orb-tailscale-auth-key";
-/**
- * Guest attributes are off by default. Without this key every `report()` PUT
- * from the startup script 404s (swallowed by its `|| true`) and `diagnose`
- * has nothing to read — which is how the 2026-08-06 crash loop stayed
- * invisible (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
- */
+/** Guest attributes are off by default. */
 const GUEST_ATTRIBUTES_METADATA_KEY = "enable-guest-attributes";
-/**
- * COS's logging agent ships container stdout/stderr to Cloud Logging: the one
- * evidence channel that outlives the VM, which matters because the lifecycle
- * machinery stops failed hosts aggressively (same postmortem).
- */
 const LOGGING_METADATA_KEY = "google-logging-enabled";
+const BLOCK_PROJECT_SSH_KEYS_METADATA_KEY = "block-project-ssh-keys";
+const CONFIG_METADATA_KEY = "pi-orb-config";
 const DATA_DEVICE = "pi-orb-data";
-/** Container-Optimized OS: the only supported boot image for orb hosts. */
-const BOOT_IMAGE = "projects/cos-cloud/global/images/family/cos-stable";
 /** The boot disk is disposable — the workspace lives on the data disk. */
 const BOOT_DISK_SIZE_GB = "20";
 const DEFAULT_DATA_DISK_SIZE_GB = 50;
@@ -84,17 +74,16 @@ const SERVICE_ACCOUNT_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"
  * guest attribute is `namespace/key`, so both live directly under the `pi-orb`
  * namespace and each `getGuestAttributes?queryPath=…` returns one item.
  */
-const STARTUP_ATTRIBUTE = { path: "pi-orb/startup", key: "startup" } as const;
-const CONTAINER_ATTRIBUTE = { path: "pi-orb/container", key: "container" } as const;
-const GUEST_ATTRIBUTES_URL =
-  "http://metadata.google.internal/computeMetadata/v1/instance/guest-attributes";
-/** Transient systemd unit that owns the container-state reporter loop. */
-const REPORTER_UNIT = "pi-orb-container-reporter";
+const BOOT_STATUS_ATTRIBUTE = {
+  path: "pi-orb/boot-status",
+  key: "boot-status",
+} as const;
 
 /** Non-secret launch facts shared by the insert body and the fingerprint. */
 interface GceLaunchSpec {
-  readonly runtimeImage: string;
-  readonly startupScript: string;
+  readonly imageResource: string;
+  readonly imageId: string;
+  readonly runtimeConfig: Readonly<Record<string, string>>;
   readonly bootImage: string;
   readonly bootDiskSizeGb: string;
   readonly machineType: string;
@@ -140,7 +129,42 @@ function providerError(
   message: string,
   retryable: boolean,
 ): OrbHostProviderError {
-  return { type: "orb_host_provider_error", provider: "gce", operation, code, message, retryable };
+  return {
+    type: "orb_host_provider_error",
+    provider: "gce",
+    operation,
+    code,
+    message,
+    retryable,
+  };
+}
+
+function dataDiskGetError(status: number): OrbHostProviderError {
+  const retryable = status === 408 || status === 429 || status >= 500;
+  return providerError(
+    "provision",
+    retryable ? "unavailable" : "operation_failed",
+    `data disk get HTTP ${status}`,
+    retryable,
+  );
+}
+
+function verifyDataDiskOwnership(
+  body: Record<string, unknown>,
+  name: string,
+  orbId: string,
+): Result<void, OrbHostProviderError> {
+  const labels = (body["labels"] ?? {}) as Record<string, unknown>;
+  return labels[ORB_LABEL] === orbId
+    ? ok(undefined)
+    : err(
+        providerError(
+          "provision",
+          "conflict",
+          `data disk ${name} is not labeled for this orb`,
+          false,
+        ),
+      );
 }
 
 /** GCE instance status → OrbHostState (docs/host-provider.md). */
@@ -176,139 +200,8 @@ export function metadataValue(instance: Record<string, unknown>, key: string): s
 }
 
 /**
- * Startup script: mount the persistent data disk, then run the orb runtime
- * container with docker (replacing konlet — the declaration mechanism has no
- * ordering against the disk mount, docs/host-provider.md). The runtime token is read
- * back from instance metadata so it never appears in the script body.
- */
-export function buildStartupScript(options: {
-  readonly runtimeImage: string;
-  readonly orbId: string;
-  readonly incarnation?: number;
-  readonly repositoryUrl: string;
-  readonly controlPlaneUrl: string;
-  readonly extraEnv: Readonly<Record<string, string>>;
-  /**
-   * Present only when tailscale port exposure is configured. Hostname and
-   * preview host are pure functions of the orb id and static config, so they
-   * are literals here; the secret auth key is read from metadata like the
-   * runtime token.
-   */
-  readonly tailscale?: { readonly hostname: string; readonly previewHost: string };
-}): string {
-  // Each entry carries its own trailing continuation so an empty map never
-  // leaves a blank line inside the docker run command.
-  const extra = Object.entries(options.extraEnv)
-    .map(([key, value]) => `  -e ${key}='${value}' \\\n`)
-    .join("");
-  const tailscaleFetch =
-    options.tailscale === undefined
-      ? ""
-      : `TS_AUTHKEY=$(curl -sf -H 'Metadata-Flavor: Google' \\
-  'http://metadata.google.internal/computeMetadata/v1/instance/attributes/${TAILSCALE_KEY_METADATA_KEY}')
-`;
-  const tailscaleEnv =
-    options.tailscale === undefined
-      ? ""
-      : `  -e ${TAILSCALE_AUTH_KEY_ENV}="$TS_AUTHKEY" \\\n` +
-        `  -e ${TAILSCALE_HOSTNAME_ENV}='${options.tailscale.hostname}' \\\n` +
-        `  -e ${PREVIEW_HOST_ENV}='${options.tailscale.previewHost}' \\\n`;
-  return `#!/bin/bash
-set -euo pipefail
-report() {
-  curl -sf -X PUT -H 'Metadata-Flavor: Google' --data "$1" \\
-    '${GUEST_ATTRIBUTES_URL}/${STARTUP_ATTRIBUTE.path}' || true
-}
-trap 'report "failed: line $LINENO: $BASH_COMMAND"' ERR
-report starting
-DISK=/dev/disk/by-id/google-${DATA_DEVICE}
-MNT=/mnt/disks/orb-data
-if ! blkid "$DISK" >/dev/null 2>&1; then
-  mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard "$DISK"
-fi
-mkdir -p "$MNT"
-mountpoint -q "$MNT" || mount -o discard,defaults "$DISK" "$MNT"
-report disk-mounted
-# COS's host firewall admits only SSH by default; open the runtime port.
-iptables -w -A INPUT -p tcp --dport 8080 -j ACCEPT
-report port-opened
-TOKEN=$(curl -sf -H 'Metadata-Flavor: Google' \\
-  'http://metadata.google.internal/computeMetadata/v1/instance/attributes/${TOKEN_METADATA_KEY}')
-${tailscaleFetch}# COS mounts / read-only; docker config must live on the stateful partition.
-export DOCKER_CONFIG=/var/lib/pi-orb-docker
-mkdir -p "$DOCKER_CONFIG"
-docker-credential-gcr configure-docker --registries=$(echo '${options.runtimeImage}' | cut -d/ -f1)
-# Never destroy the runnable container before the replacement image is local.
-# Stop it first so an old runtime/protocol cannot answer readiness during the
-# pull, but retain it as durable evidence/recovery material if every pull fails.
-RUNTIME_IMAGE='${options.runtimeImage}'
-PULL_ATTEMPTS=3
-PULL_BACKOFF_SECONDS=5
-docker stop pi-orb-runtime >/dev/null 2>&1 || true
-for ((attempt = 1; attempt <= PULL_ATTEMPTS; attempt++)); do
-  report "image-pull-attempt $attempt/$PULL_ATTEMPTS"
-  if docker pull "$RUNTIME_IMAGE"; then
-    report image-pulled
-    break
-  fi
-  if (( attempt == PULL_ATTEMPTS )); then
-    report "image-pull-failed attempts=$PULL_ATTEMPTS"
-    exit 1
-  fi
-  sleep $((PULL_BACKOFF_SECONDS * attempt))
-done
-docker rm -f pi-orb-runtime >/dev/null 2>&1 || true
-docker run --pull=never --detach --name pi-orb-runtime --restart unless-stopped \\
-  --network host \\
-  -v "$MNT":/workspace \\
-  -e PI_ORB_ID='${options.orbId}' \\
-  -e PI_ORB_HOST_INCARNATION='${options.incarnation ?? 0}' \\
-  -e PI_ORB_REPOSITORY_URL='${options.repositoryUrl}' \\
-  -e ${RUNTIME_TOKEN_ENV}="$TOKEN" \\
-  -e ${CONTROL_PLANE_URL_ENV}='${options.controlPlaneUrl}' \\
-${tailscaleEnv}${extra}  -e HOME=/workspace/home \\
-  "$RUNTIME_IMAGE"
-# Keep successful retry recovery reconstructable after the per-attempt markers
-# above have been overwritten in the single startup guest attribute.
-report "container-started imagePullAttempts=$attempt"
-# The startup script ends here, but a container that crash-loops afterwards is
-# invisible to the control plane (docs/postmortems/2026-08-06-rollover-repair-war-corrupt-image.md).
-# Keep publishing its state for as long as the VM lives.
-REPORTER=/var/lib/${REPORTER_UNIT}.sh
-# COS runs this script from a systemd unit whose exit reaps everything left in
-# its cgroup, so a plain background child (even under setsid/nohup) dies with
-# it; only a transient unit owned by PID 1 survives. Re-running the script must
-# replace that unit rather than stack a second reporter, and must never be the
-# thing that fails the boot. Stop first: bash reads a script file lazily, so
-# rewriting it under a running reporter would corrupt that reporter.
-systemctl stop ${REPORTER_UNIT}.service >/dev/null 2>&1 || true
-systemctl reset-failed ${REPORTER_UNIT}.service >/dev/null 2>&1 || true
-cat >"$REPORTER" <<'REPORTER_EOF'
-#!/bin/bash
-# Best-effort by construction: neither a missing container nor an unreachable
-# metadata server may end the loop.
-while true; do
-  STATE=$(docker inspect \\
-    -f 'status={{.State.Status}} restartCount={{.RestartCount}} lastExitCode={{.State.ExitCode}}' \\
-    pi-orb-runtime 2>/dev/null || echo 'status=absent restartCount=0 lastExitCode=0')
-  curl -sf -X PUT -H 'Metadata-Flavor: Google' \\
-    --data "$STATE at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
-    '${GUEST_ATTRIBUTES_URL}/${CONTAINER_ATTRIBUTE.path}' || true
-  sleep 15
-done
-REPORTER_EOF
-systemd-run --unit=${REPORTER_UNIT} --collect \\
-  --property=Restart=always --property=RestartSec=15 \\
-  /bin/bash "$REPORTER" || report container-reporter-failed
-`;
-}
-
-/**
- * `GceOrbHostProvider` (docs/host-provider.md/docs/host-provider.md): one Spot COS VM plus one
- * persistent data disk per orb. Read-back token model: the token lives in
- * instance metadata; provision reports the hash of what the instance
- * actually carries. Restart-in-place: recovery from stop or preemption is
- * `instances.start` on the same instance and disks.
+ * One Spot native Debian VM plus one persistent data disk per orb. The image
+ * contains the runtime; instance metadata supplies per-orb configuration.
  */
 export class GceOrbHostProvider implements OrbHostProvider {
   readonly kind = "gce";
@@ -356,9 +249,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
     readonly repositoryUrl: string;
   }): GceLaunchSpec {
     return {
-      runtimeImage: this.options.runtimeImage,
-      startupScript: this.expectedScript(input.orbId, input.incarnation, input.repositoryUrl),
-      bootImage: BOOT_IMAGE,
+      imageResource: this.options.imageResource,
+      imageId: this.options.imageId,
+      runtimeConfig: this.expectedConfig(input.orbId, input.incarnation, input.repositoryUrl),
+      bootImage: this.options.imageResource,
       bootDiskSizeGb: BOOT_DISK_SIZE_GB,
       machineType: this.options.machineType,
       subnetwork: this.options.subnetwork,
@@ -445,29 +339,27 @@ export class GceOrbHostProvider implements OrbHostProvider {
   }
 
   /**
-   * The one script generator for this provider: the insert body and the
-   * host-spec fingerprint both go through it (via `launchSpec`), so an
-   * inserted host and the specification it is measured against can never
-   * disagree about the script.
+   * The insert body and fingerprint share this configuration composition.
    */
-  private expectedScript(orbId: string, incarnation: number, repositoryUrl: string): string {
+  private expectedConfig(
+    orbId: string,
+    incarnation: number,
+    repositoryUrl: string,
+  ): Readonly<Record<string, string>> {
     const tailscale = this.options.tailscale;
-    return buildStartupScript({
-      runtimeImage: this.options.runtimeImage,
-      orbId,
-      incarnation,
-      repositoryUrl,
-      controlPlaneUrl: this.options.controlPlaneUrl,
-      extraEnv: this.options.extraEnv ?? {},
+    return {
+      ...(this.options.extraEnv ?? {}),
+      PI_ORB_ID: orbId,
+      PI_ORB_HOST_INCARNATION: String(incarnation),
+      PI_ORB_REPOSITORY_URL: repositoryUrl,
+      [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
       ...(tailscale === undefined
         ? {}
         : {
-            tailscale: {
-              hostname: tailscaleHostname(orbId),
-              previewHost: previewHost(orbId, tailscale.tailnetDnsName),
-            },
+            [TAILSCALE_HOSTNAME_ENV]: tailscaleHostname(orbId),
+            [PREVIEW_HOST_ENV]: previewHost(orbId, tailscale.tailnetDnsName),
           }),
-    });
+    };
   }
 
   /**
@@ -505,6 +397,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
     if (incarnation === null) return null;
     const status = String(instance["status"] ?? "");
     const state = mapInstanceStatus(status);
+    const lastStartedAt = Date.parse(String(instance["lastStartTimestamp"] ?? ""));
     const interfaces = instance["networkInterfaces"];
     const internalIp =
       Array.isArray(interfaces) &&
@@ -517,11 +410,17 @@ export class GceOrbHostProvider implements OrbHostProvider {
       incarnation,
       specFingerprint: metadataValue(instance, SPEC_FINGERPRINT_METADATA_KEY),
       state,
+      ...(Number.isFinite(lastStartedAt) && lastStartedAt >= 0 ? { lastStartedAt } : {}),
       ...(state === "running" && internalIp !== ""
         ? { runtimeAddress: { baseUrl: `http://${internalIp}:8080` } }
         : {}),
       ...(status === "SUSPENDED" || status === "SUSPENDING"
-        ? { failure: { code: "unsupported_state", message: `instance is ${status}` } }
+        ? {
+            failure: {
+              code: "unsupported_state",
+              message: `instance is ${status}`,
+            },
+          }
         : {}),
     };
   }
@@ -543,6 +442,29 @@ export class GceOrbHostProvider implements OrbHostProvider {
         incarnation: request.incarnation,
         repositoryUrl: request.bootstrap.repositoryUrl,
       });
+
+      const image = await this.request("provision", "GET", spec.imageResource, context);
+      if (image.isErr()) return err(image.error);
+      if (image.value.status !== 200) {
+        return err(
+          providerError(
+            "provision",
+            "operation_failed",
+            `image get HTTP ${image.value.status}`,
+            image.value.status >= 500,
+          ),
+        );
+      }
+      if (String(image.value.body["id"] ?? "") !== spec.imageId) {
+        return err(
+          providerError(
+            "provision",
+            "conflict",
+            `image ${spec.imageResource} has id ${String(image.value.body["id"] ?? "missing")}, expected ${spec.imageId}`,
+            false,
+          ),
+        );
+      }
 
       const existing = await this.request(
         "provision",
@@ -628,7 +550,14 @@ export class GceOrbHostProvider implements OrbHostProvider {
         context,
       );
       if (disk.isErr()) return err(disk.error);
-      if (disk.value.status === 404) {
+      if (disk.value.status === 200) {
+        const owned = verifyDataDiskOwnership(
+          disk.value.body,
+          diskName(request.orbId),
+          request.orbId,
+        );
+        if (owned.isErr()) return err(owned.error);
+      } else if (disk.value.status === 404) {
         const created = await this.request("provision", "POST", this.zonePath("disks"), context, {
           name: diskName(request.orbId),
           sizeGb: String(spec.dataDiskSizeGb),
@@ -653,7 +582,36 @@ export class GceOrbHostProvider implements OrbHostProvider {
               true,
             ),
           );
+        } else {
+          const winner = await this.request(
+            "provision",
+            "GET",
+            this.zonePath(`disks/${diskName(request.orbId)}`),
+            context,
+          );
+          if (winner.isErr()) return err(winner.error);
+          if (winner.value.status !== 200) {
+            if (winner.value.status === 404) {
+              return err(
+                providerError(
+                  "provision",
+                  "unavailable",
+                  "data disk create conflict winner is not yet visible",
+                  true,
+                ),
+              );
+            }
+            return err(dataDiskGetError(winner.value.status));
+          }
+          const owned = verifyDataDiskOwnership(
+            winner.value.body,
+            diskName(request.orbId),
+            request.orbId,
+          );
+          if (owned.isErr()) return err(owned.error);
         }
+      } else {
+        return err(dataDiskGetError(disk.value.status));
       }
 
       const runtimeToken = randomBytes(32).toString("hex");
@@ -707,19 +665,26 @@ export class GceOrbHostProvider implements OrbHostProvider {
             items: [
               { key: TOKEN_METADATA_KEY, value: runtimeToken },
               ...observabilityMetadataItems(),
+              { key: BLOCK_PROJECT_SSH_KEYS_METADATA_KEY, value: "TRUE" },
               ...(tailscaleKey.value === null
                 ? []
-                : [{ key: TAILSCALE_KEY_METADATA_KEY, value: tailscaleKey.value }]),
-              { key: "startup-script", value: spec.startupScript },
+                : [
+                    {
+                      key: TAILSCALE_KEY_METADATA_KEY,
+                      value: tailscaleKey.value,
+                    },
+                  ]),
+              {
+                key: CONFIG_METADATA_KEY,
+                value: JSON.stringify({
+                  ...spec.runtimeConfig,
+                  [RUNTIME_TOKEN_ENV]: runtimeToken,
+                  ...(tailscaleKey.value === null
+                    ? {}
+                    : { [TAILSCALE_AUTH_KEY_ENV]: tailscaleKey.value }),
+                }),
+              },
               { key: SPEC_FINGERPRINT_METADATA_KEY, value: specFingerprint },
-              // Transitional rollover fence: the draining pre-replacement
-              // revision treats an absent `pi-orb-script-generation` stamp as
-              // generation 0 and would stop this instance and rewrite its
-              // script in place — the exact 2026-08-06 repair-war class.
-              // Stamping the current deploy generation makes the old code
-              // read the instance as "the future" and leave it alone. Remove
-              // once no revision with in-place repair can drain (TODO.md).
-              { key: "pi-orb-script-generation", value: String(this.specGeneration) },
             ],
           },
         },
@@ -894,7 +859,9 @@ export class GceOrbHostProvider implements OrbHostProvider {
     const instances: { name: string; incarnation: number | null }[] = [];
     let pageToken: string | undefined;
     do {
-      const query = new URLSearchParams({ filter: `labels.${ORB_LABEL}=${orbId}` });
+      const query = new URLSearchParams({
+        filter: `labels.${ORB_LABEL}=${orbId}`,
+      });
       if (pageToken !== undefined) query.set("pageToken", pageToken);
       const page = await this.request(
         operation,
@@ -966,7 +933,10 @@ export class GceOrbHostProvider implements OrbHostProvider {
           ),
         );
       }
-      instances.push({ name: instance.name, incarnation: instance.incarnation });
+      instances.push({
+        name: instance.name,
+        incarnation: instance.incarnation,
+      });
     }
     return ok(instances);
   }
@@ -1150,20 +1120,32 @@ export class GceOrbHostProvider implements OrbHostProvider {
     context: OperationContext,
   ): ResultAsync<string | null, OrbHostProviderError> {
     const run = async (): Promise<Result<string | null, OrbHostProviderError>> => {
-      const startup = await this.guestAttribute(ref.resourceId, STARTUP_ATTRIBUTE, context);
-      if (startup.isErr()) return err(startup.error);
-      // Container state is supplementary evidence: a failure reading it must
-      // never make the whole diagnosis uncertain (the caller defers its
-      // decision a poll on Err) and so suppress the startup markers.
-      const container = await this.guestAttribute(
-        ref.resourceId,
-        CONTAINER_ATTRIBUTE,
-        context,
-      ).unwrapOr(null);
-      const parts: string[] = [];
-      if (startup.value !== null) parts.push(`startup-script: ${startup.value}`);
-      if (container !== null) parts.push(`container: ${container}`);
-      return ok(parts.length === 0 ? null : parts.join("; "));
+      const status = await this.guestAttribute(ref.resourceId, BOOT_STATUS_ATTRIBUTE, context);
+      if (status.isErr()) return err(status.error);
+      if (status.value === null) return ok(null);
+      try {
+        const parsed = JSON.parse(status.value) as Record<string, unknown>;
+        if (
+          parsed["schemaVersion"] !== 1 ||
+          !["workspace", "bootstrap", "runtime"].includes(String(parsed["phase"] ?? "")) ||
+          !["starting", "ready", "failed"].includes(String(parsed["status"] ?? ""))
+        ) {
+          return ok(`boot-status: invalid: ${status.value}`);
+        }
+        const detail = [parsed["code"], parsed["message"]]
+          .filter((value): value is string => typeof value === "string" && value !== "")
+          .map((value) => value.slice(0, 500))
+          .join(": ");
+        const fields =
+          typeof parsed["details"] === "object" && parsed["details"] !== null
+            ? ` ${JSON.stringify(parsed["details"]).slice(0, 1_000)}`
+            : "";
+        return ok(
+          `boot-status: ${String(parsed["phase"])} ${String(parsed["status"])}${detail === "" ? "" : `: ${detail}`}${fields}`,
+        );
+      } catch {
+        return ok(`boot-status: invalid: ${status.value.slice(0, 1_000)}`);
+      }
     };
     return new ResultAsync(run());
   }

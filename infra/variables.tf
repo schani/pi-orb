@@ -13,6 +13,12 @@ variable "zone" {
   default = "us-central1-a"
 }
 
+variable "foundation_state_bucket" {
+  description = "Bucket containing the separately administered foundation state."
+  type        = string
+  default     = "pi-orb-tfstate-playground-dev-6ae7"
+}
+
 variable "iap_domain" {
   description = "Google Workspace domain allowed through IAP (hardcoded decision, docs/deployment.md)."
   type        = string
@@ -48,7 +54,20 @@ variable "control_plane_image" {
   type        = string
 }
 
-variable "runtime_image" {
-  description = "Digest-pinned orb runtime image (from build-push.sh)."
+variable "native_image_resource" {
+  description = "Accepted native VM image resource (from build-push.sh)."
   type        = string
+  validation {
+    condition     = can(regex("^projects/[a-z0-9-]+/global/images/pi-orb-[a-z0-9-]+$", var.native_image_resource))
+    error_message = "An exact pi-orb image resource is required."
+  }
+}
+
+variable "native_image_id" {
+  description = "Numeric GCE identity of the accepted image, pinned against name reuse."
+  type        = string
+  validation {
+    condition     = can(regex("^[1-9][0-9]*$", var.native_image_id))
+    error_message = "A numeric GCE image identity is required."
+  }
 }

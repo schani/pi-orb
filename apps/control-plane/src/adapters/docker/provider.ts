@@ -317,6 +317,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
     const incarnation = incarnationFromInspect(info);
     if (incarnation === null) return null;
     const stateInfo = (info["State"] ?? {}) as Record<string, unknown>;
+    const startedAt = Date.parse(String(stateInfo["StartedAt"] ?? ""));
     const status = String(stateInfo["Status"] ?? "dead");
     const state = mapContainerState(status);
     const inspectedName = info["Name"];
@@ -330,6 +331,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       incarnation,
       specFingerprint: specFingerprintFromInspect(info),
       state,
+      ...(Number.isFinite(startedAt) && startedAt >= 0 ? { lastStartedAt: startedAt } : {}),
       ...(state === "running"
         ? { runtimeAddress: { baseUrl: this.runtimeBaseUrl(info, name) } }
         : {}),

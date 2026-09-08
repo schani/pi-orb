@@ -28,9 +28,11 @@ function makeFixture(): { root: string; log: string } {
   const scratch = join(root, "tmp");
   const log = join(root, "calls.log");
   mkdirSync(infra);
+  mkdirSync(join(infra, "foundation"));
   mkdirSync(bin);
   mkdirSync(scratch);
   copyFileSync(resolve("infra/release.sh"), join(infra, "release.sh"));
+  copyFileSync(resolve("infra/release-child.sh"), join(infra, "release-child.sh"));
   chmodSync(join(infra, "release.sh"), 0o755);
 
   executable(
@@ -73,9 +75,30 @@ for arg in "$@"; do
   esac
 done
 case "$*" in
+  *" show -json "*)
+    action=no-op
+    if [ "\${MOCK_DATABASE_PLAN_STATUS:-}" = replace ]; then action=delete; fi
+    cat <<JSON
+{"resource_changes":[
+  {"address":"google_sql_database_instance.pi_orb","change":{"actions":["$action"]}},
+  {"address":"google_sql_database.pi_orb","change":{"actions":["no-op"]}},
+  {"address":"google_sql_user.pi_orb","change":{"actions":["no-op"]}},
+  {"address":"random_password.db","change":{"actions":["no-op"]}},
+  {"address":"google_secret_manager_secret.database_url","change":{"actions":["no-op"]}},
+  {"address":"google_secret_manager_secret_version.database_url","change":{"actions":["no-op"]}}
+]}
+JSON
+    ;;
   *" apply "*)
     if [ "\${MOCK_APPLY_SIGNAL:-}" = TERM ]; then kill -TERM "$PPID"; sleep 0.1; exit 143; fi
     exit "\${MOCK_APPLY_STATUS:-0}"
+    ;;
+  *"foundation output -json"*)
+    if [ "\${MOCK_FOUNDATION_STATUS:-}" = missing ]; then echo '{}'; else
+      cat <<JSON
+{"foundation_schema_version":{"value":1},"project":{"value":"$PROJECT"},"region":{"value":"$REGION"},"zone":{"value":"us-central1-a"},"image_builder_service_account_email":{"value":"builder@example.com"},"image_build_subnetwork":{"value":"projects/test-project/regions/us-central1/subnetworks/pi-orb-image-build"},"pi_orb_network":{"value":"projects/test-project/global/networks/pi-orb"},"orb_subnetwork_resource":{"value":"regions/us-central1/subnetworks/pi-orb-us-central1"},"run_egress_subnetwork":{"value":"projects/test-project/regions/us-central1/subnetworks/pi-orb-run-egress"},"run_egress_cidr":{"value":"10.10.16.0/26"}}
+JSON
+    fi
     ;;
   *"output -raw zone"*)
     echo us-central1-a
@@ -88,7 +111,8 @@ esac
     `echo build >> "$CALL_LOG"
 cat <<'VARS'
 control_plane_image = "registry/control@sha256:abc"
-runtime_image       = "registry/runtime@sha256:def"
+native_image_resource = "projects/test/global/images/pi-orb-test"
+native_image_id = "12345"
 deploy_generation   = 100
 VARS
 `,
@@ -190,7 +214,7 @@ describe("workload-identity cloud release configuration", () => {
     const smoke = readFileSync(resolve("infra/smoke-workload-identity.sh"), "utf8");
 
     expect(network).toMatch(
-      /resource "google_compute_firewall" "iap_to_orb_ssh"[\s\S]*source_ranges\s+=\s+\["35\.235\.240\.0\/20"\][\s\S]*target_service_accounts\s+=\s+\[google_service_account\.orb_vm\.email\][\s\S]*ports\s+=\s+\["22"\]/,
+      /resource "google_compute_firewall" "iap_to_orb_ssh"[\s\S]*source_ranges\s+=\s+\["35\.235\.240\.0\/20"\][\s\S]*target_service_accounts\s+=\s+\[local\.orb_vm_email, local\.image_builder_email\][\s\S]*ports\s+=\s+\["22"\]/,
     );
     expect(smoke).toContain("--tunnel-through-iap --quiet");
     expect(smoke).toContain('wait_for_ssh "$MINT_INSTANCE"');
@@ -261,6 +285,27 @@ describe("infra/release.sh", () => {
     expect(calls).toContain("gcloud:storage rm");
   });
 
+  it("refuses a saved plan that changes the database or its credentials", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        MOCK_DATABASE_PLAN_STATUS: "replace",
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("saved plan does not preserve the database");
+    const calls = readFileSync(log, "utf8");
+    expect(calls).not.toContain(" apply ");
+    expect(calls).not.toContain("smoke");
+  });
+
   it("repairs IAP and releases the global lock when apply is interrupted", () => {
     const { root, log } = makeFixture();
     const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
@@ -279,6 +324,27 @@ describe("infra/release.sh", () => {
     const calls = readFileSync(log, "utf8");
     expect(calls).toContain("deploy:--iap-only");
     expect(calls).not.toContain("smoke");
+    expect(calls).toContain("gcloud:storage rm");
+  });
+
+  it("refuses release before build when the foundation is not applied", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        MOCK_FOUNDATION_STATUS: "missing",
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+      },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("apply/adopt the matching foundation");
+    const calls = readFileSync(log, "utf8");
+    expect(calls).not.toContain("\nbuild\n");
+    expect(calls).not.toContain(" apply ");
     expect(calls).toContain("gcloud:storage rm");
   });
 

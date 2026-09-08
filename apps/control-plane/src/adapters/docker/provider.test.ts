@@ -583,7 +583,11 @@ describe("DockerOrbHostProvider host specification", () => {
     makeProvider(overrides).desiredSpecFingerprint(specInput);
 
   /** A `docker inspect` payload for the orb's incarnation-0 container. */
-  function containerPayload(labels: Record<string, string>, status = "running"): string {
+  function containerPayload(
+    labels: Record<string, string>,
+    status = "running",
+    startedAt?: string,
+  ): string {
     return JSON.stringify([
       {
         Name: "/pi-orb-orb-1-i0",
@@ -591,7 +595,7 @@ describe("DockerOrbHostProvider host specification", () => {
           Labels: { "pi-orb.orb-id": "orb-1", "pi-orb.host-incarnation": "0", ...labels },
           Env: [`${RUNTIME_TOKEN_ENV}=tok`],
         },
-        State: { Status: status },
+        State: { Status: status, ...(startedAt === undefined ? {} : { StartedAt: startedAt }) },
         NetworkSettings: withoutMapping,
       },
     ]);
@@ -657,6 +661,18 @@ describe("DockerOrbHostProvider host specification", () => {
     }));
     const observed = await makeProvider().observe(task, ref, context);
     expect(observed.isOk() && observed.value?.specFingerprint).toBe("fingerprint-abc");
+  });
+
+  it.each([
+    ["2026-09-07T12:34:56.789Z", Date.parse("2026-09-07T12:34:56.789Z")],
+    [undefined, undefined],
+    ["malformed", undefined],
+    ["0001-01-01T00:00:00Z", undefined],
+    ["1969-12-31T23:59:59Z", undefined],
+  ])("reports a valid container start timestamp from %s", async (startedAt, expected) => {
+    dockerFake.install(() => ({ stdout: containerPayload({}, "running", startedAt) }));
+    const observed = await makeProvider().observe(task, ref, context);
+    expect(observed.isOk() && observed.value?.lastStartedAt).toBe(expected);
   });
 
   it("observes a legacy unstamped container as having no fingerprint", async () => {

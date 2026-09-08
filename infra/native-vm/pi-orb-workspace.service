@@ -1,0 +1,13 @@
+[Unit]
+Description=Validate the persistent orb workspace disk
+Wants=network-online.target
+After=systemd-udev-trigger.service network-online.target
+Before=workspace.mount
+
+[Service]
+Type=oneshot
+TimeoutStartSec=10min
+ExecStartPre=/usr/local/bin/pi-orb-boot-diagnostic workspace starting
+ExecStart=/usr/local/bin/pi-orb-prepare-workspace
+ExecStartPost=/usr/local/bin/pi-orb-boot-diagnostic workspace ready
+RemainAfterExit=yes

@@ -54,6 +54,8 @@ export interface CasTransitionParams {
 export interface CasUpdateFieldsParams {
   readonly orbId: string;
   readonly expectedStateVersion: number;
+  /** Provision commits require the durable incarnation and no pending discard. */
+  readonly expectedHostIncarnation?: number;
   readonly now: number;
   readonly hostRef?: string | null;
   readonly checkoutCommit?: string | null;
@@ -444,6 +446,8 @@ export interface OrbHostObservation {
   /** Immutable specification stamped on this resource; legacy resources report null. */
   readonly specFingerprint: string | null;
   readonly state: OrbHostState;
+  /** Wall-clock epoch ms when this host most recently entered `running`. */
+  readonly lastStartedAt?: number;
   /** Ephemeral observation; never authoritative persisted state. */
   readonly runtimeAddress?: { baseUrl: string };
   readonly failure?: { code: string; message: string };

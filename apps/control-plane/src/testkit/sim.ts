@@ -66,6 +66,8 @@ export interface DstOptions {
   readonly maxSchedulingSteps?: number;
   readonly maxVirtualDurationMs?: number;
   readonly wallClockEpoch?: number;
+  /** Override late timer exploration when a scenario isolates non-timeout behavior. */
+  readonly lateTimerProbability?: number;
   /** Collects the app-level log lines of every iteration (reset per iteration). */
   readonly logCapture?: LogCapture;
 }
@@ -82,6 +84,7 @@ function pickTimerBiasedEarliest(
   timers: readonly PendingTimerView[],
   _now: number,
   random: (reason: string) => number,
+  lateTimerProbability: number,
 ): number {
   let earliest = 0;
   for (let i = 1; i < timers.length; i++) {
@@ -91,7 +94,7 @@ function pickTimerBiasedEarliest(
       earliest = i;
     }
   }
-  if (random("timer pick: explore late firing") < 0.05) {
+  if (random("timer pick: explore late firing") < lateTimerProbability) {
     return Math.floor(random("timer pick: index") * timers.length);
   }
   return earliest;
@@ -112,7 +115,8 @@ export function makeSimulation(options: DstOptions, entropy: EntropySource): Sim
       maxSchedulingSteps: options.maxSchedulingSteps ?? 200_000,
       maxVirtualDurationMs: options.maxVirtualDurationMs ?? 24 * 3_600_000,
       failOnLateCompletion: false,
-      pickTimerIndex: pickTimerBiasedEarliest,
+      pickTimerIndex: (timers, now, random) =>
+        pickTimerBiasedEarliest(timers, now, random, options.lateTimerProbability ?? 0.05),
     },
   );
 }
@@ -150,13 +154,21 @@ export async function runDst(
     try {
       await scenario(sim);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const lifecycleLines = options.logCapture?.lines();
       const dir = join(process.cwd(), "test-failures");
       mkdirSync(dir, { recursive: true });
       const path = join(dir, `${options.name}-${Date.now()}-${i}.json`);
       writeFileSync(
         path,
         JSON.stringify(
-          { name: options.name, iteration: i, records: recording.getTrace() },
+          {
+            name: options.name,
+            iteration: i,
+            error: message,
+            ...(lifecycleLines === undefined ? {} : { lifecycleLines: [...lifecycleLines] }),
+            records: recording.getTrace(),
+          },
           null,
           2,
         ),
@@ -170,7 +182,6 @@ export async function runDst(
       } catch {
         reproduced = true;
       }
-      const message = error instanceof Error ? error.message : String(error);
       throw new Error(
         `DST scenario "${options.name}" failed at iteration ${i} ` +
           `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID NOT reproduce"} the failure): ${message}`,

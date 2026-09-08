@@ -4,6 +4,8 @@ coverage/
 test-failures/
 *.tsbuildinfo
 .vite/
+__pycache__/
+*.pyc
 .env*
 .amp/gcp-external-account.json
 .amp/gcp-env

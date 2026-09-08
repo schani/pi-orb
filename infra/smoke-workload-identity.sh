@@ -41,8 +41,8 @@ umask 077
 DIR=$(cd "$(dirname "$0")" && pwd)
 API="$DIR/api.sh"
 
-OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-1800} # 30 minutes, whole run
-RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-600}  # 10 minutes per boot
+OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-3600} # two lifecycle boots, stops, SSH and federation
+RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-900}  # lifecycle create/start deadline
 STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}  # 5 minutes per stop
 SSH_READY_TIMEOUT=${SSH_READY_TIMEOUT:-180} # SSH daemon + metadata key propagation
 POLL_INTERVAL=${POLL_INTERVAL:-5}
@@ -514,7 +514,7 @@ mint() { # mint <audience> <out-file>
   # silently corrupting the token, and the token is never printed, echoed, or
   # placed in an argument list — only redirected into a mode-0600 file and piped.
   if ! orb_ssh "$MINT_INSTANCE" \
-    "sudo docker exec pi-orb-runtime pi-orb id-token --audience '$audience'" \
+    "sudo systemd-run --quiet --pipe --wait --collect --uid=orb --property=EnvironmentFile=/run/pi-orb/environment /usr/local/bin/pi-orb id-token --audience '$audience'" \
     > "$WORK_DIR/mint.raw" 2> "$WORK_DIR/mint.err"; then
     return 1
   fi
@@ -628,15 +628,15 @@ say "step 6/7: prove a stopped orb cannot mint"
 # The bearer of the orb about to be stopped, read from its instance metadata —
 # the same place the provider injected it. It is transported to the prober orb
 # on stdin, so it never appears in an argument list on either machine.
-STOPPED_BEARER=$(instance_metadata "$STOPPED_INSTANCE" pi-orb-runtime-token) ||
+STOPPED_BEARER=$(instance_metadata "$STOPPED_INSTANCE" pi-orb-config | node -e 'let s=""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => process.stdout.write(JSON.parse(s).PI_ORB_RUNTIME_TOKEN ?? ""))') ||
   fail "read-bearer" "gcloud could not describe $STOPPED_INSTANCE"
 [ -n "$STOPPED_BEARER" ] || fail "read-bearer" "no runtime token on $STOPPED_INSTANCE"
-# The runtime service's URL as orbs see it, straight from the container the
+# The runtime service's URL as orbs see it, straight from the runtime environment the
 # provider configured — no assumption about the deployment's topology. The
 # `if !` form matters: `pipefail` makes a failed ssh fail the whole pipeline,
 # and a plain assignment would abort the script before `fail` could say why.
 if ! MINT_ROUTE=$(orb_ssh "$MINT_INSTANCE" \
-  "sudo docker exec pi-orb-runtime printenv PI_ORB_CONTROL_PLANE_URL" 2>/dev/null |
+  "sudo systemd-run --quiet --pipe --wait --collect --uid=orb --property=EnvironmentFile=/run/pi-orb/environment /usr/bin/printenv PI_ORB_CONTROL_PLANE_URL" 2>/dev/null |
   tr -d '\r' | tail -n 1); then
   fail "probe-setup" "could not read the control-plane URL from $MINT_INSTANCE over ssh"
 fi
@@ -645,7 +645,7 @@ MINT_ROUTE="${MINT_ROUTE%/}/runtime/v1/id-token"
 
 probe() { # probe <bearer> ; prints "<status> <code>"
   printf '%s' "$1" | orb_ssh "$MINT_INSTANCE" \
-    "sudo docker exec -i pi-orb-runtime node -e \"\$(printf %s $PROBE_B64 | base64 -d)\" '$MINT_ROUTE'" |
+    "sudo -u orb /usr/local/bin/node -e \"\$(printf %s $PROBE_B64 | base64 -d)\" '$MINT_ROUTE'" |
     tr -d '\r' | tail -n 1
 }
 

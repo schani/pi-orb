@@ -16,6 +16,8 @@ export interface DeterministicGceApiModelOptions {
   readonly operationWaitPolls?: number;
   /** List calls that still expose a deleted resource after its operation is DONE. */
   readonly deletionVisibilityPolls?: number;
+  /** Force the single-resource data-disk GET to return this HTTP status. */
+  readonly diskGetStatus?: number;
 }
 
 /**
@@ -34,6 +36,7 @@ export class DeterministicGceApiModel implements GceApiTransport {
     this.options = {
       operationWaitPolls: options.operationWaitPolls ?? 0,
       deletionVisibilityPolls: options.deletionVisibilityPolls ?? 0,
+      diskGetStatus: options.diskGetStatus ?? 200,
     };
   }
 
@@ -151,6 +154,18 @@ export class DeterministicGceApiModel implements GceApiTransport {
     readonly signal: AbortSignal;
   }): Promise<GceResponse> {
     if (args.signal.aborted) return { status: 499, body: {} };
+    if (
+      args.method === "GET" &&
+      args.path === "projects/projxx/global/images/pi-orb-native-20260905"
+    ) {
+      return { status: 200, body: { id: "123456789" } };
+    }
+    if (
+      args.method === "GET" &&
+      args.path === "projects/projxx/global/images/pi-orb-native-other"
+    ) {
+      return { status: 200, body: { id: "987654321" } };
+    }
     const relative = args.path.replace(/^projects\/[^/]+\/zones\/[^/]+\//, "");
 
     const wait = /^operations\/([^/]+)\/wait$/.exec(relative);
@@ -231,7 +246,12 @@ export class DeterministicGceApiModel implements GceApiTransport {
     }
 
     const disk = /^disks\/([^/?]+)$/.exec(relative);
-    if (args.method === "GET" && disk?.[1] !== undefined) return this.get(this.disks, disk[1]);
+    if (args.method === "GET" && disk?.[1] !== undefined) {
+      if (this.options.diskGetStatus !== 200) {
+        return { status: this.options.diskGetStatus, body: {} };
+      }
+      return this.get(this.disks, disk[1]);
+    }
     if (args.method === "DELETE" && disk?.[1] !== undefined) {
       const resource = this.live(this.disks, disk[1]);
       if (resource === undefined) return { status: 404, body: {} };

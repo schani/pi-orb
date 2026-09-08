@@ -108,13 +108,9 @@ describe("frontend-only browser behavior", () => {
     await expectPage(caret).toBeHidden();
     const terminalCursor = page.locator(".term-cursor").first();
     await expectPage(terminalCursor).toBeAttached();
-    const terminalCell = await terminalCursor.evaluate((element) => {
-      const styles = element.ownerDocument.defaultView?.getComputedStyle(
-        element.closest(".wterm") ?? element,
-      );
-      return { font: styles?.fontSize, row: styles?.getPropertyValue("--term-row-height").trim() };
-    });
-    expectPage(terminalCell).toEqual({ font: "13px", row: "20px" });
+    const terminal = page.locator(".orb-terminal-emulator.wterm");
+    await expectPage(terminal).toHaveCSS("font-size", "13px");
+    await expectPage(terminal).toHaveCSS("--term-row-height", "20px");
     await page.close();
   });
 
