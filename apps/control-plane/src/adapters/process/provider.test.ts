@@ -46,6 +46,7 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   workDir: process.env.PI_ORB_WORK_DIR,
   home: process.env.HOME,
   controlPlaneUrl: process.env.PI_ORB_CONTROL_PLANE_URL,
+  skillsDir: process.env.PI_ORB_SKILLS_DIR,
   port: process.env.PI_ORB_RUNTIME_PORT,
   path: process.env.PATH,
   gitConfigCount: process.env.GIT_CONFIG_COUNT,
@@ -78,6 +79,7 @@ function makeProvider(
     stateDirectory: join(root, "configured-state"),
     runtimeEntryPoint: fixture(root),
     controlPlaneUrl: "http://127.0.0.1:7100",
+    skillsDir: "/opt/pi-orb/test-skills",
     restartDelayMs: 10,
     extraEnv,
     ...options,
@@ -149,6 +151,7 @@ describe("ProcessOrbHostProvider", () => {
     expect(values.incarnation).toBe(String(request.incarnation));
     expect(values.container).toBe("0");
     expect(values.controlPlaneUrl).toBe("http://127.0.0.1:7100");
+    expect(values.skillsDir).toBe("/opt/pi-orb/test-skills");
     const expectedWorkDir = join(root, "configured-state", request.orbId, "workspace");
     expect(values.workDir).toBe(expectedWorkDir);
     expect(values.home).toBe(join(expectedWorkDir, "home"));
@@ -387,6 +390,7 @@ describe("ProcessOrbHostProvider", () => {
       stateDirectory: join(root, "configured-state"),
       runtimeEntryPoint: join(root, "runtime.mjs"),
       controlPlaneUrl: "http://127.0.0.1:7100",
+      skillsDir: "/opt/pi-orb/test-skills",
       restartDelayMs: 10,
       extraEnv: { OBSERVED_ENV_FILE: observedEnv },
     });
@@ -421,6 +425,7 @@ describe("ProcessOrbHostProvider", () => {
       stateDirectory: join(root, "configured-state"),
       runtimeEntryPoint: join(root, "runtime.mjs"),
       controlPlaneUrl: "http://127.0.0.1:7100",
+      skillsDir: "/opt/pi-orb/test-skills",
       restartDelayMs: 10,
       extraEnv: { OBSERVED_ENV_FILE: observedEnv },
     });
@@ -615,6 +620,7 @@ describe("ProcessOrbHostProvider host specification", () => {
       stateDirectory: join(root, "configured-state"),
       runtimeEntryPoint: join(root, "runtime.mjs"),
       controlPlaneUrl: "http://127.0.0.1:7100",
+      skillsDir: "/opt/pi-orb/test-skills",
     };
     const fingerprint = (overrides: Partial<ProcessOrbHostProviderOptions> = {}): string =>
       new ProcessOrbHostProvider({ ...base, ...overrides }).desiredSpecFingerprint(specInput);
@@ -629,6 +635,7 @@ describe("ProcessOrbHostProvider host specification", () => {
     expect(fingerprint({ runtimeEntryPoint: join(root, "other-runtime.mjs") })).not.toBe(original);
     expect(fingerprint({ controlPlaneUrl: "http://127.0.0.1:7200" })).not.toBe(original);
     expect(fingerprint({ commandDirectory: join(root, "commands") })).not.toBe(original);
+    expect(fingerprint({ skillsDir: join(root, "skills") })).not.toBe(original);
     expect(
       new ProcessOrbHostProvider(base).desiredSpecFingerprint({
         ...specInput,
@@ -751,6 +758,7 @@ describe("ProcessOrbHostProvider host specification", () => {
       stateDirectory: join(root, "configured-state"),
       runtimeEntryPoint: join(root, "runtime.mjs"),
       controlPlaneUrl: "http://127.0.0.1:7200",
+      skillsDir: "/opt/pi-orb/test-skills",
       restartDelayMs: 10,
       extraEnv: { OBSERVED_ENV_FILE: observedEnv },
     });

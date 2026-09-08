@@ -349,6 +349,7 @@ describe("GceOrbHostProvider", () => {
       PI_ORB_REPOSITORY_URL: "https://github.com/o/r",
       PI_ORB_CONTROL_PLANE_URL: "https://runtime.example",
       PI_ORB_RUNTIME_TOKEN: token,
+      PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills",
     });
     expect(
       (disks[0]?.["initializeParams"] as Record<string, unknown> | undefined)?.["sourceImage"],

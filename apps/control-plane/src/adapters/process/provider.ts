@@ -18,6 +18,7 @@ import {
   CONTROL_PLANE_URL_ENV,
   PREVIEW_HOST_ENV,
   RUNTIME_TOKEN_ENV,
+  SKILLS_DIR_ENV,
   TAILSCALE_AUTH_KEY_ENV,
   TAILSCALE_HOSTNAME_ENV,
 } from "@pi-orb/protocol";
@@ -39,6 +40,7 @@ export interface ProcessOrbHostProviderOptions {
   readonly stateDirectory: string;
   readonly runtimeEntryPoint: string;
   readonly controlPlaneUrl: string;
+  readonly skillsDir: string;
   /** Image-installed commands exposed from the source tree in process-host development. */
   readonly commandDirectory?: string;
   readonly nodeExecutable?: string;
@@ -148,6 +150,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       runtimeEntryPoint: this.options.runtimeEntryPoint,
       nodeExecutable: this.options.nodeExecutable ?? process.execPath,
       controlPlaneUrl: this.options.controlPlaneUrl,
+      skillsDir: this.options.skillsDir,
       commandDirectory: this.options.commandDirectory ?? null,
       extraEnv: this.options.extraEnv ?? {},
       repositoryUrl: input.repositoryUrl,
@@ -312,6 +315,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       PI_ORB_RUNTIME_PORT: String(metadata.port),
       [RUNTIME_TOKEN_ENV]: metadata.runtimeToken,
       [CONTROL_PLANE_URL_ENV]: this.options.controlPlaneUrl,
+      [SKILLS_DIR_ENV]: this.options.skillsDir,
     });
     if (this.options.commandDirectory !== undefined) {
       environment.PATH = `${this.options.commandDirectory}${delimiter}${environment.PATH ?? ""}`;

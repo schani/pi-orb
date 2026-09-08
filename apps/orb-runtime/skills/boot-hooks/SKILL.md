@@ -100,7 +100,7 @@ last value. Expand in the hook, as the `printf` above does, not in the file.
   `PI_ORB_RUNTIME_TOKEN`, `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`,
   `PI_ORB_HOST_INCARNATION`, `PI_ORB_WORK_DIR`, `HOME`, `PATH`, `PI_ORB`,
   `PI_ORB_TAILSCALE_AUTH_KEY`, `PI_ORB_TAILSCALE_HOSTNAME`,
-  `PI_ORB_PREVIEW_HOST`.
+  `PI_ORB_PREVIEW_HOST`, `PI_ORB_SKILLS_DIR`.
 - An unusable line is skipped, reported by number in `env.status.json` and in
   your own context, and the rest of the file still applies.
 - A resume hook still running past its 10-second window writes too late for this

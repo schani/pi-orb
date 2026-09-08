@@ -4,6 +4,7 @@ import {
   PREVIEW_HOST_ENV,
   previewHost,
   RUNTIME_TOKEN_ENV,
+  SKILLS_DIR_ENV,
   TAILSCALE_AUTH_KEY_ENV,
   TAILSCALE_HOSTNAME_ENV,
   tailscaleHostname,
@@ -349,6 +350,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
     const tailscale = this.options.tailscale;
     return {
       ...(this.options.extraEnv ?? {}),
+      [SKILLS_DIR_ENV]: "/opt/pi-orb/skills",
       PI_ORB_ID: orbId,
       PI_ORB_HOST_INCARNATION: String(incarnation),
       PI_ORB_REPOSITORY_URL: repositoryUrl,

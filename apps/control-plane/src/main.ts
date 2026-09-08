@@ -388,6 +388,7 @@ async function main(): Promise<void> {
               new URL("../../orb-runtime/src/main.ts", import.meta.url),
             ),
             commandDirectory: fileURLToPath(new URL("../../orb-runtime/docker", import.meta.url)),
+            skillsDir: fileURLToPath(new URL("../../orb-runtime/skills", import.meta.url)),
             controlPlaneUrl: env("PI_ORB_BROKER_URL", `http://127.0.0.1:${port}`),
             specGeneration,
             ...extraEnvOption,

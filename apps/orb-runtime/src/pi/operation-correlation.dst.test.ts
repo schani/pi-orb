@@ -154,6 +154,7 @@ interface Harness {
 function harness(entries: unknown[] = []): Harness {
   const pi = new FakePiSession();
   const agent = new PiOrbAgent({
+    skillsDir: null,
     orbId: "orb-under-test",
     repositoryUrl: "https://example.com/repo.git",
     workDir: "/nonexistent",

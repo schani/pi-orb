@@ -39,6 +39,7 @@ function fixture() {
     },
   });
   const agent = new PiOrbAgent({
+    skillsDir: null,
     orbId: "boot-test",
     repositoryUrl: "https://example.com/repo",
     workDir: root,

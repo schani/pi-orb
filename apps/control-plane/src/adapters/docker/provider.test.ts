@@ -9,6 +9,7 @@ import { NoSimulationTask } from "determined";
 import { errAsync, okAsync } from "neverthrow";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TailscaleError } from "../../domain/errors.ts";
+import { specFingerprintOf } from "../spec-fingerprint.ts";
 import type { TailscaleAuthKeyMinter } from "../tailscale/client.ts";
 import { DockerOrbHostProvider, publishedRuntimePort } from "./provider.ts";
 
@@ -179,6 +180,12 @@ describe("DockerOrbHostProvider", () => {
     const run = await provisionArgv(makeProvider());
     expect(envValue(run, "HOME")).toBe("/workspace/home");
     expect(run).toContain("pi-orb-data-orb-1:/workspace");
+  });
+
+  it("pins the baked skills directory after caller-supplied environment", async () => {
+    const argv = await provisionArgv(makeProvider({ extraEnv: { PI_ORB_SKILLS_DIR: "/wrong" } }));
+    const values = argv.filter((value) => value.startsWith("PI_ORB_SKILLS_DIR="));
+    expect(values.at(-1)).toBe("PI_ORB_SKILLS_DIR=/opt/pi-orb/skills");
   });
 
   it("maps host.docker.internal to the host gateway and brokers through it", async () => {
@@ -605,6 +612,21 @@ describe("DockerOrbHostProvider host specification", () => {
     expect(desired()).toBe(desired());
     expect(desired({ extraEnv: { A: "1", B: "2" } })).toBe(
       desired({ extraEnv: { B: "2", A: "1" } }),
+    );
+  });
+
+  it("fingerprints the provider-owned skills directory", () => {
+    expect(desired()).toBe(
+      specFingerprintOf({
+        v: 1,
+        image: "pi-orb-runtime:dev",
+        network: "pi-orb",
+        controlPlaneUrl: "http://host.docker.internal:3000",
+        extraEnv: {},
+        skillsDir: "/opt/pi-orb/skills",
+        tailscale: null,
+        repositoryUrl: request.bootstrap.repositoryUrl,
+      }),
     );
   });
 

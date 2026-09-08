@@ -276,7 +276,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             ResultAsync.fromPromise(
               writeFile(
                 `${input.outputDir}/validation-config.json`,
-                `${JSON.stringify({ PI_ORB_ID: `image-validation-${input.operationId}`, PI_ORB_RUNTIME_TOKEN: runtimeToken, PI_ORB_CONTROL_PLANE_URL: "http://127.0.0.1:18080", PI_ORB_HOST_INCARNATION: "0", PI_ORB_REPOSITORY_URL: input.validationRepositoryUrl })}\n`,
+                `${JSON.stringify({ PI_ORB_ID: `image-validation-${input.operationId}`, PI_ORB_RUNTIME_TOKEN: runtimeToken, PI_ORB_CONTROL_PLANE_URL: "http://127.0.0.1:18080", PI_ORB_HOST_INCARNATION: "0", PI_ORB_REPOSITORY_URL: input.validationRepositoryUrl, PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills" })}\n`,
                 { mode: 0o600 },
               ),
               (cause): ImageBuildError => ({

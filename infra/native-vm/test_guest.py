@@ -44,6 +44,7 @@ class BootstrapTest(unittest.TestCase):
             'PI_ORB_CONTROL_PLANE_URL': 'https://control',
             'PI_ORB_HOST_INCARNATION': '2',
             'PI_ORB_REPOSITORY_URL': 'https://github.com/o/r',
+            'PI_ORB_SKILLS_DIR': '/opt/pi-orb/skills',
             'QUOTED': 'a"b\\c',
         }
 
@@ -69,6 +70,13 @@ class BootstrapTest(unittest.TestCase):
             opened = lambda request, timeout, value=bad: Response(json.dumps(value).encode())
             with self.assertRaises(ValueError):
                 bootstrap.load_config(opened)
+
+    def test_rejects_missing_skills_directory_configuration(self):
+        config = self.config()
+        del config['PI_ORB_SKILLS_DIR']
+        opened = lambda request, timeout: Response(json.dumps(config).encode())
+        with self.assertRaisesRegex(ValueError, 'PI_ORB_SKILLS_DIR'):
+            bootstrap.load_config(opened)
 
     def test_rejects_user_controlled_home_symlink(self):
         with tempfile.TemporaryDirectory() as temporary:

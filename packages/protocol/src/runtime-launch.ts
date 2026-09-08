@@ -1,0 +1,1 @@
+export const SKILLS_DIR_ENV = "PI_ORB_SKILLS_DIR";

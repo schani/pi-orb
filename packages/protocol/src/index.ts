@@ -10,6 +10,7 @@ export * from "./orb-naming.ts";
 export * from "./project-secrets.ts";
 export * from "./repository-url.ts";
 export * from "./runtime-http.ts";
+export * from "./runtime-launch.ts";
 export * from "./tailscale.ts";
 export * from "./terminal.ts";
 export * from "./workload-identity.ts";

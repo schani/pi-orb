@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader, type ResourceLoader } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
-import { BAKED_SKILLS_DIR, createOrbResourceLoader } from "./resource-loader.ts";
+import { createOrbResourceLoader } from "./resource-loader.ts";
 
 /**
  * Pinned Pi SDK contract test (docs/ports.md): verifies, against the exact
@@ -230,34 +230,48 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     ]);
   });
 
-  it("discovers bundled skills from the source install by default", async () => {
+  it("discovers bundled skills from the provider-configured source install", async () => {
     const result = await createOrbResourceLoader({
       cwd: repoDir,
       agentDir,
       previewHost: PREVIEW_HOST,
+      skillsDir: BAKED_SKILLS_SOURCE,
     });
     if (result.isErr()) throw new Error(`loader build failed: ${result.error}`);
 
     const hosting = result.value.getSkills().skills.find((skill) => skill.name === "hosting");
-    const installedSkills = existsSync(BAKED_SKILLS_DIR) ? BAKED_SKILLS_DIR : BAKED_SKILLS_SOURCE;
-    expect(hosting?.filePath).toBe(join(installedSkills, "hosting", "SKILL.md"));
+    expect(hosting?.filePath).toBe(join(BAKED_SKILLS_SOURCE, "hosting", "SKILL.md"));
     expect(hosting?.description).toContain("HTML explainers");
     expect(result.value.getSkills().diagnostics).toEqual([]);
   });
 
-  it("tolerates an explicitly configured missing skills directory", async () => {
-    // `existsSync` filtering keeps an incomplete install quiet: passing the
-    // path anyway makes `reload()` record a `type: "error"` skill diagnostic.
+  it("fails initialization for an explicitly configured missing skills directory", async () => {
     const absent = join(workDir, "no-such-skills-dir");
-    const loader = await orbLoader(PREVIEW_HOST, absent);
-    const control = await implicitLoader();
+    const result = await createOrbResourceLoader({
+      cwd: repoDir,
+      agentDir,
+      previewHost: PREVIEW_HOST,
+      skillsDir: absent,
+    });
 
-    expect(loader.getSkills().diagnostics).toEqual([]);
-    expect(loader.getSkills().skills.map((skill) => skill.name)).toEqual(
-      control.getSkills().skills.map((skill) => skill.name),
-    );
-    // The prompt sections are unaffected by the skills path either way.
-    expect(loader.getAppendSystemPrompt()).toContain(portExposurePrompt(PREVIEW_HOST));
+    expect(result.isErr()).toBe(true);
+    if (result.isOk()) return;
+    expect(result.error).toContain(`cannot read configured skills directory ${absent}:`);
+  });
+
+  it("fails initialization when the configured skills path is a file", async () => {
+    const file = join(workDir, "skills-file");
+    writeFileSync(file, "not a directory");
+    const result = await createOrbResourceLoader({
+      cwd: repoDir,
+      agentDir,
+      previewHost: PREVIEW_HOST,
+      skillsDir: file,
+    });
+
+    expect(result.isErr()).toBe(true);
+    if (result.isOk()) return;
+    expect(result.error).toBe(`configured skills path is not a directory: ${file}`);
   });
 
   it("requires the reload() that createOrbResourceLoader awaits", async () => {

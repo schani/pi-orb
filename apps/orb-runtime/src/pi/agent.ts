@@ -60,6 +60,8 @@ export interface PiOrbAgentOptions {
   readonly repositoryUrl: string;
   /** Persistent orb filesystem root (the Docker volume). */
   readonly workDir: string;
+  /** Host-provider supplied bundled-skills install directory. */
+  readonly skillsDir: string | null;
   /** Control-plane broker access (docs/credentials.md); the only credential path. */
   readonly broker: BrokerEnv | null;
   /** E2E mode: route inference to the fake OpenAI service. */
@@ -520,6 +522,7 @@ export class PiOrbAgent {
       previewHost: this.options.previewHost ?? null,
       hooks: this.hooks.report(),
       hookEnv,
+      skillsDir: this.options.skillsDir,
     });
     if (loaderResult.isErr()) {
       return err(this.failed("session_init_failed", loaderResult.error, true));

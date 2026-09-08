@@ -5,6 +5,7 @@ import {
   PREVIEW_HOST_ENV,
   previewHost,
   RUNTIME_TOKEN_ENV,
+  SKILLS_DIR_ENV,
   TAILSCALE_AUTH_KEY_ENV,
   TAILSCALE_HOSTNAME_ENV,
   tailscaleHostname,
@@ -51,6 +52,7 @@ export interface DockerOrbHostProviderOptions {
 const ORB_LABEL = "pi-orb.orb-id";
 const INCARNATION_LABEL = "pi-orb.host-incarnation";
 const SPEC_FINGERPRINT_LABEL = "pi-orb.host-spec-fingerprint";
+const IMAGE_SKILLS_DIR = "/opt/pi-orb/skills";
 
 /** Port the orb runtime listens on inside the container (apps/orb-runtime). */
 export const RUNTIME_PORT = 8080;
@@ -202,6 +204,7 @@ export class DockerOrbHostProvider implements OrbHostProvider {
       network: this.options.network,
       controlPlaneUrl: this.controlPlaneUrl(),
       extraEnv: this.options.extraEnv ?? {},
+      skillsDir: IMAGE_SKILLS_DIR,
       tailscale:
         this.options.tailscale === undefined
           ? null
@@ -534,6 +537,8 @@ export class DockerOrbHostProvider implements OrbHostProvider {
             "--env",
             `${key}=${value}`,
           ]),
+          "--env",
+          `${SKILLS_DIR_ENV}=${IMAGE_SKILLS_DIR}`,
           // HOME is part of the durable orb filesystem contract. Keep this
           // after extraEnv so composition cannot redirect home to the
           // disposable container layer.

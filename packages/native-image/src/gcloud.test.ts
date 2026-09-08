@@ -213,6 +213,7 @@ describe("GCloud native-image adapter", () => {
       await readFile(`${buildInput.outputDir}/validation-config.json`, "utf8"),
     );
     expect(config.PI_ORB_CONTROL_PLANE_URL).toBe("http://127.0.0.1:18080");
+    expect(config.PI_ORB_SKILLS_DIR).toBe("/opt/pi-orb/skills");
     const startup = await readFile(`${buildInput.outputDir}/validation-startup.sh`, "utf8");
     expect(startup).toContain("pi-orb-validation-broker");
     expect(startup).toContain("systemctl restart pi-orb-runtime.service");

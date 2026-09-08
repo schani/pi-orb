@@ -1,14 +1,19 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bootHookPrompt } from "../hooks/prompt.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
-import { BAKED_SKILLS_DIR, orbResourceLoaderOptions } from "./resource-loader.ts";
+import { orbResourceLoaderOptions } from "./resource-loader.ts";
 
 const host = "pi-orb-abc123.tail1234.ts.net";
-const base = { cwd: "/workspace/repo", agentDir: "/workspace/pi-agent", previewHost: host };
+const base = {
+  cwd: "/workspace/repo",
+  agentDir: "/workspace/pi-agent",
+  previewHost: host,
+  skillsDir: null,
+};
 
 describe("orbResourceLoaderOptions", () => {
   it("keeps the cwd and agentDir the SDK would have used", () => {
@@ -104,27 +109,11 @@ describe("orbResourceLoaderOptions baked skills", () => {
     ).toEqual([presentDir]);
   });
 
-  it("adds nothing when the directory is absent", () => {
-    // The process host provider has no image and therefore no baked skills.
-    // A path passed anyway would leave a permanent `error` skill diagnostic on
-    // the loader, so the absent case must resolve to no path at all.
+  it("does not silently discard a configured missing directory", () => {
     const absent = join(presentDir, "definitely-not-here");
-    expect(orbResourceLoaderOptions({ ...base, skillsDir: absent }).additionalSkillPaths).toEqual(
-      [],
-    );
+    expect(orbResourceLoaderOptions({ ...base, skillsDir: absent }).additionalSkillPaths).toEqual([
+      absent,
+    ]);
     expect(orbResourceLoaderOptions({ ...base, skillsDir: null }).additionalSkillPaths).toEqual([]);
-  });
-
-  it("keeps the canonical image path outside the persistent workspace", () => {
-    // Under /workspace the orb's persistent volume would shadow the image's
-    // copy, so the baked location must stay outside it.
-    expect(BAKED_SKILLS_DIR.startsWith("/workspace")).toBe(false);
-  });
-
-  it("uses the installed bundled-skills layout", () => {
-    const expected = existsSync(BAKED_SKILLS_DIR)
-      ? BAKED_SKILLS_DIR
-      : join(import.meta.dirname, "../../skills");
-    expect(orbResourceLoaderOptions(base).additionalSkillPaths).toEqual([expected]);
   });
 });

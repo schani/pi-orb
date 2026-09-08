@@ -1,27 +1,17 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { statSync } from "node:fs";
 import {
   DefaultResourceLoader,
   type ResourceLoader,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { RuntimeHooks } from "@pi-orb/protocol";
-import { Result, ResultAsync } from "neverthrow";
+import { errAsync, Result, ResultAsync } from "neverthrow";
 import type { HookEnvReport } from "../hooks/env-file.ts";
 import { bootHookPrompt } from "../hooks/prompt.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 
 type LoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
-
-/**
- * Where the runtime image bakes pi-orb's own agent skills (docs/pi-adapter.md,
- * decided 2026-08-22). Deliberately outside `/workspace`: the orb's persistent
- * volume is mounted there and would shadow anything the image placed under it.
- * Source/process installs fall back to the repository-bundled directory.
- */
-export const BAKED_SKILLS_DIR = "/opt/pi-orb/skills";
-const SOURCE_SKILLS_DIR = join(import.meta.dirname, "../../skills");
 
 export interface OrbResourceLoaderInput {
   readonly cwd: string;
@@ -33,11 +23,8 @@ export interface OrbResourceLoaderInput {
   readonly hooks?: RuntimeHooks;
   /** What the hooks' env file turned into; only its problems reach the prompt. */
   readonly hookEnv?: HookEnvReport | null;
-  /**
-   * Overridden only by tests. `null` disables the baked skills entirely;
-   * omitting it prefers `BAKED_SKILLS_DIR`, then the trusted source/install layout.
-   */
-  readonly skillsDir?: string | null;
+  /** Provider-supplied install directory; tests may use null to disable it. */
+  readonly skillsDir: string | null;
 }
 
 /**
@@ -51,27 +38,15 @@ export interface OrbResourceLoaderInput {
  * `APPEND_SYSTEM.md`, while the override runs on top of whatever was
  * discovered. `additionalSkillPaths` is likewise additive — it merges with the
  * user and project skill directories the SDK finds on its own.
- *
- * The existence check is not defensive noise: the SDK tolerates a missing
- * additional skill path (`loadSkills` warns and skips it rather than throwing),
- * but `DefaultResourceLoader.reload()` then records a `type: "error"` skill
- * diagnostic for it. On a provider with no image the directory is legitimately
- * absent, and a permanent error diagnostic there would be a false alarm.
  */
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
   const previewHost = input.previewHost ?? null;
   const hookPrompt = bootHookPrompt(input.hooks ?? {}, input.hookEnv ?? null);
-  const skillsDir =
-    input.skillsDir === undefined
-      ? existsSync(BAKED_SKILLS_DIR)
-        ? BAKED_SKILLS_DIR
-        : SOURCE_SKILLS_DIR
-      : input.skillsDir;
   return {
     cwd: input.cwd,
     agentDir: input.agentDir,
     ...(input.settingsManager !== undefined ? { settingsManager: input.settingsManager } : {}),
-    additionalSkillPaths: skillsDir !== null && existsSync(skillsDir) ? [skillsDir] : [],
+    additionalSkillPaths: input.skillsDir === null ? [] : [input.skillsDir],
     appendSystemPromptOverride: (base: string[]): string[] => [
       ...base,
       environmentPrompt,
@@ -87,6 +62,17 @@ export function createOrbResourceLoader(
 ): ResultAsync<ResourceLoader, string> {
   const toMessage = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
+  if (input.skillsDir !== null) {
+    const skillsDir = input.skillsDir;
+    const directory = Result.fromThrowable(
+      () => statSync(skillsDir),
+      (error) => `cannot read configured skills directory ${skillsDir}: ${toMessage(error)}`,
+    )();
+    if (directory.isErr()) return errAsync(directory.error);
+    if (!directory.value.isDirectory()) {
+      return errAsync(`configured skills path is not a directory: ${skillsDir}`);
+    }
+  }
   return Result.fromThrowable(
     () => new DefaultResourceLoader(orbResourceLoaderOptions(input)),
     toMessage,

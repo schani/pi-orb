@@ -68,6 +68,7 @@ writeFileSync(
     PI_ORB_RUNTIME_TOKEN: fixture.token,
     PI_ORB_CONTROL_PLANE_URL: "http://127.0.0.1:18100",
     PI_ORB_REPOSITORY_URL: "https://github.com/schani/pi-orb",
+    PI_ORB_SKILLS_DIR: "/opt/pi-orb/skills",
     PI_ORB_FAKE_OPENAI_OAUTH_URL: fake.oauthBaseUrl,
     PI_ORB_FAKE_OPENAI_INFERENCE_URL: fake.inferenceBaseUrl,
     PI_OFFLINE: "1",

@@ -20,7 +20,8 @@ import {
   SETUP_DEADLINE_MS,
   SETUP_SCRUBBED_ENV,
 } from "../hooks/runner.ts";
-import { BAKED_SKILLS_DIR } from "./resource-loader.ts";
+
+const BAKED_SKILLS_DIR = "/opt/pi-orb/skills";
 
 /**
  * The skills the Dockerfile bakes at `/opt/pi-orb/skills` (docs/pi-adapter.md).

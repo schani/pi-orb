@@ -11,7 +11,7 @@ import urllib.request
 METADATA_CONFIG_URL = 'http://metadata.google.internal/computeMetadata/v1/instance/attributes/pi-orb-config'
 REQUIRED_KEYS = (
     'PI_ORB_ID', 'PI_ORB_RUNTIME_TOKEN', 'PI_ORB_CONTROL_PLANE_URL',
-    'PI_ORB_HOST_INCARNATION', 'PI_ORB_REPOSITORY_URL',
+    'PI_ORB_HOST_INCARNATION', 'PI_ORB_REPOSITORY_URL', 'PI_ORB_SKILLS_DIR',
 )
 
 

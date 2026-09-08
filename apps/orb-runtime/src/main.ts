@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { readMockOpenAiEnv } from "@pi-orb/mock-openai";
+import { SKILLS_DIR_ENV } from "@pi-orb/protocol";
 import { readBrokerEnv } from "./broker/endpoint.ts";
 import { ORB_MARKER_ENV } from "./hooks/env-file.ts";
 import { buildRuntimeServer } from "./http/server.ts";
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
     orbId: env("PI_ORB_ID"),
     repositoryUrl: env("PI_ORB_REPOSITORY_URL"),
     workDir,
+    skillsDir: env(SKILLS_DIR_ENV),
     broker: readBrokerEnv(process.env),
     mockOpenAi: readMockOpenAiEnv(process.env),
     previewHost: tailscale?.previewHost ?? null,
