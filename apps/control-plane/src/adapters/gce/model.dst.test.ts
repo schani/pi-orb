@@ -1,3 +1,4 @@
+import type { SimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import { reconcileOrbOnce, requestOrbStart } from "../../domain/lifecycle.ts";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../../testkit/fixtures.ts";
@@ -28,7 +29,12 @@ function seedOrbCompute(
 
 function provider(
   model: DeterministicGceApiModel,
-  overrides: Partial<Pick<GceOrbHostProviderOptions, "imageResource" | "imageId">> = {},
+  overrides: Partial<
+    Pick<
+      GceOrbHostProviderOptions,
+      "imageResource" | "imageId" | "workspaceImageResource" | "workspaceImageId"
+    >
+  > = {},
 ): GceOrbHostProvider {
   return new GceOrbHostProvider(model, {
     projectId: "proj",
@@ -38,6 +44,8 @@ function provider(
     serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
     imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
     imageId: "123456789",
+    workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-20260908",
+    workspaceImageId: "223456789",
     controlPlaneUrl: "https://runtime.example",
     ...overrides,
   });
@@ -72,6 +80,35 @@ async function listOrbInstances(model: DeterministicGceApiModel): Promise<string
 }
 
 describe("GCE adapter over deterministic stateful model (DST)", () => {
+  it("pins concurrent first provisioning to one accepted workspace image", async () => {
+    await runDst({ name: "gce-model-concurrent-workspace-create", iterations: 30 }, async (sim) => {
+      const model = new DeterministicGceApiModel({ operationWaitPolls: 1 });
+      const result = await sim.runTasks(
+        [provider(model), provider(model)].map((gce, index) => ({
+          name: `provisioner-${index}`,
+          f: async (task: SimulationTask) => {
+            await gce.provision(
+              task,
+              {
+                orbId: ORB,
+                incarnation: 0,
+                bootstrap: { repositoryUrl: "https://github.com/o/r" },
+              },
+              anyContext(),
+            );
+          },
+        })),
+      );
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(model.diskSnapshot(DISK)).toMatchObject({
+        labels: { "pi-orb-orb-id": ORB },
+        sourceImage: "projects/projxx/global/images/pi-orb-workspace-20260908",
+        sourceImageId: "223456789",
+      });
+      expect(await listOrbInstances(model)).toEqual([instanceName(0)]);
+    });
+  });
+
   it("waits for asynchronous deletion, tolerates delayed visibility, and fences newer compute", async () => {
     await runDst({ name: "gce-model-discard-fence", iterations: 30 }, async (sim) => {
       const model = new DeterministicGceApiModel({
@@ -333,12 +370,20 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
             const updated = provider(model, {
               imageResource: "projects/projxx/global/images/pi-orb-native-other",
               imageId: "987654321",
+              workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-other",
+              workspaceImageId: "99887766",
             });
             const desired = updated.desiredSpecFingerprint({
               orbId: ORB,
               ...bootstrap,
             });
             expect(desired).not.toBe(provisioned.value.specFingerprint);
+            expect(
+              provider(model, {
+                workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-other",
+                workspaceImageId: "99887766",
+              }).desiredSpecFingerprint({ orbId: ORB, ...bootstrap }),
+            ).toBe(provisioned.value.specFingerprint);
 
             // Neither entry point may adopt it, and neither may boot it: a
             // successful start here would run the old image on the workspace.
@@ -398,6 +443,7 @@ describe("GCE adapter over deterministic stateful model (DST)", () => {
       expect(await listOrbInstances(model)).toEqual([instanceName(1)]);
       expect(model.hasInstance(instanceName(0))).toBe(false);
       expect(model.hasDisk(DISK)).toBe(true);
+      expect(model.diskSnapshot(DISK)?.["sourceImageId"]).toBe("223456789");
     });
   });
 

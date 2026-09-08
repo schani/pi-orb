@@ -342,6 +342,8 @@ PI_ORB_GCP_PROJECT="$PROJECT" PI_ORB_GCE_ZONE="$zone" "$INFRA/smoke-workload-ide
 control_plane_image=$(awk -F'"' '/^control_plane_image/{print $2}' "$VARS")
 native_image_resource=$(awk -F'"' '/^native_image_resource/{print $2}' "$VARS")
 native_image_id=$(awk -F'"' '/^native_image_id/{print $2}' "$VARS")
+workspace_image_resource=$(awk -F'"' '/^workspace_image_resource/{print $2}' "$VARS")
+workspace_image_id=$(awk -F'"' '/^workspace_image_id/{print $2}' "$VARS")
 cat <<EOF
 
 RELEASE SUCCEEDED
@@ -349,5 +351,7 @@ RELEASE SUCCEEDED
   control-plane image:  $control_plane_image
   native image:         $native_image_resource
   native image ID:      $native_image_id
+  workspace image:      $workspace_image_resource
+  workspace image ID:   $workspace_image_id
   deploy generation:    $deploy_generation
 EOF

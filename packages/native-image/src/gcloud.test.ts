@@ -53,6 +53,7 @@ describe("GCloud native-image adapter", () => {
     };
     const value = await new GcloudImageBuildEffects(runner).capture(
       await input(),
+      "runtime",
       new AbortController().signal,
     );
     expect(value.isOk() && value.value).toEqual({
@@ -84,7 +85,7 @@ describe("GCloud native-image adapter", () => {
 
   it("maps malformed capture JSON to a typed failure", async () => {
     const effects = new GcloudImageBuildEffects(async () => ({ stdout: "not-json", stderr: "" }));
-    const value = await effects.capture(await input(), new AbortController().signal);
+    const value = await effects.capture(await input(), "runtime", new AbortController().signal);
     expect(value.isErr() && value.error).toMatchObject({
       type: "image_build_failed",
       stage: "capture",
@@ -96,7 +97,7 @@ describe("GCloud native-image adapter", () => {
       stdout: JSON.stringify([{ id: 123, name: "image-v1" }]),
       stderr: "",
     }));
-    const value = await effects.capture(await input(), new AbortController().signal);
+    const value = await effects.capture(await input(), "runtime", new AbortController().signal);
     expect(value.isErr() && value.error.message).toBe("invalid image response shape");
   });
 
@@ -104,7 +105,14 @@ describe("GCloud native-image adapter", () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {
       calls.push(args);
-      return { stdout: "another-owner\n", stderr: "" };
+      if (args[1] === "operations") return { stdout: "[]", stderr: "" };
+      return {
+        stdout: JSON.stringify({
+          name: "pi-orb-builder-v1-0123456789abcdef",
+          labels: { "pi-orb-native-build": "another-owner" },
+        }),
+        stderr: "",
+      };
     });
     const value = await effects.run(
       "cleanup",
@@ -113,15 +121,25 @@ describe("GCloud native-image adapter", () => {
       new AbortController().signal,
     );
     expect(value.isErr() && value.error.message).toContain("refusing to delete foreign");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("--format=value(labels.pi-orb-native-build)");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("--format=json(name,labels)");
   });
 
   it("deletes only after the ownership label matches", async () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {
       calls.push(args);
-      return { stdout: calls.length === 1 ? "0123456789abcdef\n" : "", stderr: "" };
+      if (args[1] === "operations") return { stdout: "[]", stderr: "" };
+      return {
+        stdout:
+          args[2] === "describe"
+            ? JSON.stringify({
+                name: "pi-orb-builder-v1-0123456789abcdef",
+                labels: { "pi-orb-native-build": "0123456789abcdef" },
+              })
+            : "",
+        stderr: "",
+      };
     });
     const value = await effects.run(
       "cleanup",
@@ -130,7 +148,88 @@ describe("GCloud native-image adapter", () => {
       new AbortController().signal,
     );
     expect(value.isOk()).toBe(true);
-    expect(calls[1]?.slice(0, 3)).toEqual(["compute", "instances", "delete"]);
+    expect(calls[2]?.slice(0, 3)).toEqual(["compute", "instances", "delete"]);
+  });
+
+  it("waits for an exact late create operation before owned cleanup", async () => {
+    const calls: string[][] = [];
+    let materialized = false;
+    const name = "pi-orb-image-workspace-v1-0123456789abcdef";
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      calls.push(args);
+      if (args[1] === "operations" && args[2] === "list") {
+        return {
+          stdout: JSON.stringify([
+            {
+              name: "operation-late-workspace-image",
+              status: "RUNNING",
+              targetLink: `https://www.googleapis.com/compute/v1/projects/target-project/global/images/${name}`,
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (args[1] === "operations" && args[2] === "describe") {
+        materialized = true;
+        return { stdout: "DONE\n", stderr: "" };
+      }
+      if (args[2] === "describe") {
+        if (!materialized) throw new Error(`${name} was not found`);
+        return {
+          stdout: JSON.stringify({
+            name,
+            labels: { "pi-orb-native-build": "0123456789abcdef" },
+          }),
+          stderr: "",
+        };
+      }
+      return { stdout: "", stderr: "" };
+    });
+    const value = await effects.run(
+      "cleanup",
+      "delete-workspace-image",
+      await input(),
+      new AbortController().signal,
+    );
+    expect(value.isOk()).toBe(true);
+    expect(calls.map((args) => args.slice(0, 3))).toEqual([
+      ["compute", "operations", "list"],
+      ["compute", "operations", "describe"],
+      ["compute", "images", "describe"],
+      ["compute", "images", "delete"],
+    ]);
+    expect(calls[1]).toContain("--global");
+  });
+
+  it("fails cleanup when an exact operation cannot be described", async () => {
+    let deleted = false;
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      if (args[1] === "operations" && args[2] === "list") {
+        return {
+          stdout: JSON.stringify([
+            {
+              name: "operation-late-workspace-image",
+              status: "RUNNING",
+              targetLink:
+                "projects/target-project/global/images/pi-orb-image-workspace-v1-0123456789abcdef",
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (args[1] === "operations" && args[2] === "describe")
+        throw new Error("operation status unavailable");
+      if (args[2] === "delete") deleted = true;
+      return { stdout: "", stderr: "" };
+    });
+    const value = await effects.run(
+      "cleanup",
+      "delete-workspace-image",
+      await input(),
+      new AbortController().signal,
+    );
+    expect(value.isErr() && value.error.message).toContain("operation status unavailable");
+    expect(deleted).toBe(false);
   });
 
   it("classifies transient readiness and permanent install failure", async () => {
@@ -200,6 +299,22 @@ describe("GCloud native-image adapter", () => {
     expect(calls[0]).toContain("--format=value(sourceImageId)");
   });
 
+  it("verifies the validation disk's workspace-image identity", async () => {
+    const calls: string[][] = [];
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      calls.push(args);
+      return { stdout: "4567\n", stderr: "" };
+    });
+    const value = await effects.verifyValidationWorkspaceImage(
+      await input(),
+      "4567",
+      new AbortController().signal,
+    );
+    expect(value.isOk()).toBe(true);
+    expect(calls[0]).toContain("--format=value(sourceImageId)");
+    expect(calls[0]).toContain("pi-orb-data-v1-0123456789abcdef");
+  });
+
   it("boots validation with its loopback broker startup fixture", async () => {
     const calls: string[][] = [];
     const buildInput = await input();
@@ -222,5 +337,43 @@ describe("GCloud native-image adapter", () => {
     expect(calls[1]).toContain(
       "--metadata=enable-guest-attributes=TRUE,block-project-ssh-keys=TRUE",
     );
+    expect(calls[0]).toContain("--image=pi-orb-image-workspace-v1-0123456789abcdef");
+  });
+
+  it("creates and captures an owned empty workspace template", async () => {
+    const calls: string[][] = [];
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      calls.push(args);
+      return {
+        stdout:
+          args.includes("create") && args.includes("images")
+            ? JSON.stringify([
+                {
+                  id: "456",
+                  name: "pi-orb-image-workspace-v1-0123456789abcdef",
+                  selfLink:
+                    "https://www.googleapis.com/compute/v1/projects/target-project/global/images/pi-orb-image-workspace-v1-0123456789abcdef",
+                },
+              ])
+            : "[]",
+        stderr: "",
+      };
+    });
+    const buildInput = await input();
+    expect(
+      (
+        await effects.run(
+          "capture",
+          "create-workspace-disk",
+          buildInput,
+          new AbortController().signal,
+        )
+      ).isOk(),
+    ).toBe(true);
+    expect(calls[0]).toContain("pi-orb-data-workspace-v1-0123456789abcdef");
+    expect(calls[0]).toContain("--size=10GB");
+    const captured = await effects.capture(buildInput, "workspace", new AbortController().signal);
+    expect(captured.isOk() && captured.value.id).toBe("456");
+    expect(calls.at(-1)).toContain("--source-disk=pi-orb-data-workspace-v1-0123456789abcdef");
   });
 });

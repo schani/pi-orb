@@ -74,6 +74,8 @@ class SimEffects implements ImageBuildEffects {
           this.cancellation.controller.abort();
         if (action === "create")
           this.shared.resources.set(`${input.operationId}:${stage}`, input.operationId);
+        if (stage === "capture" && action === "create-workspace-disk")
+          this.shared.resources.set(`${input.operationId}:workspace-disk`, input.operationId);
         if (stage === "builder" && action === "create" && this.shared.replaceBaseOnCreate)
           this.shared.baseImageId = "replacement-base-id";
         if (stage === "cleanup") {
@@ -91,13 +93,32 @@ class SimEffects implements ImageBuildEffects {
       (cause): ImageBuildError => ({ type: "image_build_failed", stage, message: String(cause) }),
     );
   }
-  capture(input: ImageBuildInput): ResultAsync<CapturedImage, ImageBuildError> {
-    this.shared.resources.set(`${input.operationId}:image`, input.operationId);
-    return okAsync({
-      resource: `projects/p/global/images/${input.version}`,
-      id: input.operationId,
-      name: input.version,
-    });
+  capture(
+    input: ImageBuildInput,
+    kind: "runtime" | "workspace",
+    signal: AbortSignal,
+  ): ResultAsync<CapturedImage, ImageBuildError> {
+    const resourceKind = kind === "runtime" ? "image" : "workspace-image";
+    return ResultAsync.fromPromise(
+      (async () => {
+        await this.task.checkpoint(input.operationId, "capture", `create-${kind}-image`);
+        this.shared.resources.set(`${input.operationId}:${resourceKind}`, input.operationId);
+        if (this.injectFailpoints) await this.task.failpoint("native-image-capture-failure", kind);
+        if (this.cancellation?.action === `capture:create-${kind}-image`)
+          this.cancellation.controller.abort();
+        if (signal.aborted) throw new Error("cancelled");
+        return {
+          resource: `projects/p/global/images/${input.version}-${kind}`,
+          id: kind === "runtime" ? `1${input.operationId.length}` : `2${input.operationId.length}`,
+          name: `${input.version}-${kind}`,
+        };
+      })(),
+      (cause): ImageBuildError => ({
+        type: signal.aborted ? "cancelled" : "image_build_failed",
+        stage: "capture",
+        message: String(cause),
+      }),
+    );
   }
   resolveBaseImageId(): ResultAsync<string, ImageBuildError> {
     return okAsync(this.shared.baseImageId ?? "base-id");
@@ -113,6 +134,9 @@ class SimEffects implements ImageBuildEffects {
           stage: "builder",
           message: "builder base-image identity changed",
         });
+  }
+  verifyValidationWorkspaceImage(): ResultAsync<void, ImageBuildError> {
+    return okAsync(undefined);
   }
   readPackageInventory(): ResultAsync<string, ImageBuildError> {
     return okAsync("inventory");
@@ -165,7 +189,10 @@ describe("native image orchestration (DST)", () => {
       expect(result.value[1]?.isErr()).toBe(true);
       expect(shared.accepted).toEqual(["good"]);
       expect(shared.resources.get("good:image")).toBe("good");
+      expect(shared.resources.get("good:workspace-image")).toBe("good");
       expect(shared.resources.has("bad:image")).toBe(false);
+      expect(shared.resources.has("bad:workspace-image")).toBe(false);
+      expect(shared.resources.has("bad:workspace-disk")).toBe(false);
       expect(shared.deleted).not.toContain("good:image");
     });
   });
@@ -175,7 +202,12 @@ describe("native image orchestration (DST)", () => {
       {
         name: "native-image-partial-failures",
         iterations: 50,
-        failpointProbabilities: { "native-image-stage-failure": 0.2 },
+        // Capture failure occurs after the simulated API may have created the image.
+        // Cleanup must therefore treat its response as ambiguous.
+        failpointProbabilities: {
+          "native-image-stage-failure": 0.2,
+          "native-image-capture-failure": 0.2,
+        },
       },
       async (sim) => {
         const shared = {
@@ -199,42 +231,51 @@ describe("native image orchestration (DST)", () => {
         if (build?.isOk()) {
           expect(shared.accepted).toEqual(["faulted"]);
           expect(shared.resources.get("faulted:image")).toBe("faulted");
+          expect(shared.resources.get("faulted:workspace-image")).toBe("faulted");
         } else {
           expect(shared.accepted).toEqual([]);
           expect(shared.resources.has("faulted:image")).toBe(false);
+          expect(shared.resources.has("faulted:workspace-image")).toBe(false);
+          expect(shared.resources.has("faulted:workspace-disk")).toBe(false);
         }
       },
     );
   });
 
-  it.each(["builder:create", "install:run", "validate:create", "validate:cloud-log"])(
-    "cancels and cleans up from %s under deterministic scheduling",
-    async (action) => {
-      await runDst({ name: `native-image-cancel-${action}`, iterations: 20 }, async (sim) => {
-        const shared = {
-          resources: new Map<string, string>(),
-          accepted: [] as string[],
-          deleted: [] as string[],
-        };
-        const controller = new AbortController();
-        const result = await sim.runTasks([
-          {
-            name: "build",
-            f: (task) =>
-              buildNativeImage(
-                makeInput("cancelled"),
-                new SimEffects(task, shared, undefined, false, { action, controller }),
-                controller.signal,
-              ),
-          },
-        ]);
-        if (result.isErr()) throw result.error;
-        expect(result.value[0]?.isErr()).toBe(true);
-        expect(shared.accepted).toEqual([]);
-        expect(shared.resources.has("cancelled:image")).toBe(false);
-      });
-    },
-  );
+  it.each([
+    "builder:create",
+    "install:run",
+    "capture:create-workspace-image",
+    "capture:create-runtime-image",
+    "validate:create",
+    "validate:cloud-log",
+  ])("cancels and cleans up from %s under deterministic scheduling", async (action) => {
+    await runDst({ name: `native-image-cancel-${action}`, iterations: 20 }, async (sim) => {
+      const shared = {
+        resources: new Map<string, string>(),
+        accepted: [] as string[],
+        deleted: [] as string[],
+      };
+      const controller = new AbortController();
+      const result = await sim.runTasks([
+        {
+          name: "build",
+          f: (task) =>
+            buildNativeImage(
+              makeInput("cancelled"),
+              new SimEffects(task, shared, undefined, false, { action, controller }),
+              controller.signal,
+            ),
+        },
+      ]);
+      if (result.isErr()) throw result.error;
+      expect(result.value[0]?.isErr()).toBe(true);
+      expect(shared.accepted).toEqual([]);
+      expect(shared.resources.has("cancelled:image")).toBe(false);
+      expect(shared.resources.has("cancelled:workspace-image")).toBe(false);
+      expect(shared.resources.has("cancelled:workspace-disk")).toBe(false);
+    });
+  });
 
   it("rejects a base image replaced between resolution and builder creation", async () => {
     await runDst({ name: "native-image-base-replacement", iterations: 20 }, async (sim) => {

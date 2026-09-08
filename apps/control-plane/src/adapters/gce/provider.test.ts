@@ -50,6 +50,12 @@ class FakeTransport implements GceApiTransport {
     if (args.method === "GET" && args.path === "projects/projxx/global/images/pi-orb-other") {
       return { status: 200, body: { id: "123456789" } };
     }
+    if (
+      args.method === "GET" &&
+      args.path === "projects/projxx/global/images/pi-orb-workspace-20260908"
+    ) {
+      return { status: 200, body: { id: "223456789" } };
+    }
     const recorded: Recorded = {
       method: args.method,
       path: args.path,
@@ -66,6 +72,7 @@ function makeProvider(
   transport: GceApiTransport,
   tailscale?: TailscaleHostOptions,
   specGeneration?: number,
+  overrides: Partial<GceOrbHostProviderOptions> = {},
 ): GceOrbHostProvider {
   return new GceOrbHostProvider(transport, {
     projectId: "proj",
@@ -75,9 +82,12 @@ function makeProvider(
     serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
     imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
     imageId: "123456789",
+    workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-20260908",
+    workspaceImageId: "223456789",
     controlPlaneUrl: "https://runtime.example",
     ...(tailscale === undefined ? {} : { tailscale }),
     ...(specGeneration === undefined ? {} : { specGeneration }),
+    ...overrides,
   });
 }
 
@@ -136,6 +146,12 @@ const existingDataDisk = (overrides: Record<string, unknown> = {}): Record<strin
   labels: { "pi-orb-orb-id": "orb-1" },
   ...overrides,
 });
+const currentWorkspaceDisk = (overrides: Record<string, unknown> = {}): Record<string, unknown> =>
+  existingDataDisk({
+    sourceImage: "projects/projxx/global/images/pi-orb-workspace-20260908",
+    sourceImageId: "223456789",
+    ...overrides,
+  });
 
 describe("GceOrbHostProvider", () => {
   it("rejects an unexpected image identity before cloud mutation", async () => {
@@ -316,6 +332,7 @@ describe("GceOrbHostProvider", () => {
       () => notFound, // disk get
       () => ok200({ name: "op-disk" }), // disk insert
       () => done, // op wait
+      () => ok200(currentWorkspaceDisk()), // created disk identity
       () => ok200({ name: "op-inst" }), // instance insert
       () => done, // op wait
     ]);
@@ -336,6 +353,12 @@ describe("GceOrbHostProvider", () => {
     );
     const disks = body["disks"] as Record<string, unknown>[];
     expect(disks[1]?.["autoDelete"]).toBe(false);
+    const dataDiskInsert = transport.requests.find(
+      (request) => request.method === "POST" && request.path.endsWith("/disks"),
+    );
+    expect(dataDiskInsert?.body?.["sourceImage"]).toBe(
+      "projects/projxx/global/images/pi-orb-workspace-20260908",
+    );
     const items = (body["metadata"] as { items: { key: string; value: string }[] }).items;
     const token = items.find((item) => item.key === "pi-orb-runtime-token")?.value ?? "";
     expect(token).not.toBe("");
@@ -364,6 +387,15 @@ describe("GceOrbHostProvider", () => {
     // reads new instances as "the future" and never repairs them backward
     // (docs/compute-replacement.md). It is a stamp only — nothing in the
     // current adapter reads it back.
+  });
+
+  it("rejects an unexpected workspace image identity before disk creation", async () => {
+    const transport = new FakeTransport([() => notFound, () => notFound]);
+    const result = await makeProvider(transport, undefined, undefined, {
+      workspaceImageId: "999",
+    }).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(transport.requests.some((request) => request.path.endsWith("/disks"))).toBe(false);
   });
 
   it("refuses to attach a retained data disk owned by another orb", async () => {
@@ -416,7 +448,7 @@ describe("GceOrbHostProvider", () => {
       () => notFound,
       () => notFound,
       () => ({ status: 409, body: {} }),
-      () => ok200(existingDataDisk()),
+      () => ok200(currentWorkspaceDisk()),
       () => ok200({ name: "op-inst" }),
       () => done,
     ]);
@@ -427,6 +459,37 @@ describe("GceOrbHostProvider", () => {
         (request) => request.method === "POST" && request.path.endsWith("/instances"),
       ),
     ).toBe(true);
+  });
+
+  it("rejects a create-race disk from a different workspace image", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => notFound,
+      () => ({ status: 409, body: {} }),
+      () => ok200(currentWorkspaceDisk({ sourceImageId: "999" })),
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(
+      transport.requests.some(
+        (request) => request.method === "POST" && request.path.endsWith("/instances"),
+      ),
+    ).toBe(false);
+  });
+
+  it("recovers a timed-out disk create only after observing its pinned identity", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () => notFound,
+      () => {
+        throw new Error("request timed out after disk creation");
+      },
+      () => ok200(currentWorkspaceDisk()),
+      () => ok200({ name: "op-inst" }),
+      () => done,
+    ]);
+    const result = await makeProvider(transport).provision(task, provisionRequest, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
   });
 
   it("reattaches an owned retained disk without requiring current size or type defaults", async () => {
@@ -445,6 +508,26 @@ describe("GceOrbHostProvider", () => {
     const result = await makeProvider(transport).provision(task, provisionRequest, context);
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
     expect(transport.requests.some((request) => request.method === "POST")).toBe(true);
+  });
+
+  it("reattaches a retained disk created from a prior workspace template", async () => {
+    const transport = new FakeTransport([
+      () => notFound,
+      () =>
+        ok200(
+          existingDataDisk({
+            sourceImage: "projects/projxx/global/images/pi-orb-workspace-old",
+            sourceImageId: "111",
+          }),
+        ),
+      () => ok200({ name: "op-inst" }),
+      () => done,
+    ]);
+    const result = await makeProvider(transport, undefined, undefined, {
+      workspaceImageId: "999",
+    }).provision(task, provisionRequest, context);
+    expect(result.isOk(), JSON.stringify(result)).toBe(true);
+    expect(transport.requests.filter((request) => request.path.endsWith("/disks"))).toHaveLength(0);
   });
 
   it("reuses an existing instance and reads its token back", async () => {
@@ -893,6 +976,8 @@ describe("GceOrbHostProvider host specification", () => {
       serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
       imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
       imageId: "123456789",
+      workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-20260908",
+      workspaceImageId: "223456789",
       controlPlaneUrl: "https://runtime.example",
       ...overrides,
     });
@@ -920,6 +1005,12 @@ describe("GceOrbHostProvider host specification", () => {
       }),
     ).not.toBe(currentSpecFingerprint);
     expect(fingerprintWith({ imageId: "987654321" })).not.toBe(currentSpecFingerprint);
+    expect(
+      fingerprintWith({
+        workspaceImageResource: "projects/projxx/global/images/pi-orb-workspace-other",
+        workspaceImageId: "999",
+      }),
+    ).toBe(currentSpecFingerprint);
     expect(fingerprintWith({ machineType: "n2d-highmem-8" })).not.toBe(currentSpecFingerprint);
     expect(fingerprintWith({ subnetwork: "regions/us-central1/subnetworks/other" })).not.toBe(
       currentSpecFingerprint,

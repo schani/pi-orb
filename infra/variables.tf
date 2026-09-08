@@ -71,3 +71,21 @@ variable "native_image_id" {
     error_message = "A numeric GCE image identity is required."
   }
 }
+
+variable "workspace_image_resource" {
+  description = "Accepted empty-ext4 workspace image resource (from build-push.sh)."
+  type        = string
+  validation {
+    condition     = can(regex("^projects/[a-z0-9-]+/global/images/pi-orb-[a-z0-9-]+$", var.workspace_image_resource))
+    error_message = "An exact pi-orb workspace image resource is required."
+  }
+}
+
+variable "workspace_image_id" {
+  description = "Numeric GCE identity of the accepted workspace image, pinned against name reuse."
+  type        = string
+  validation {
+    condition     = can(regex("^[1-9][0-9]*$", var.workspace_image_id))
+    error_message = "A numeric GCE workspace image identity is required."
+  }
+}

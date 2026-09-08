@@ -68,6 +68,11 @@ export class DeterministicGceApiModel implements GceApiTransport {
     return this.disks.has(name);
   }
 
+  diskSnapshot(name: string): Record<string, unknown> | null {
+    const resource = this.live(this.disks, name);
+    return resource === undefined ? null : structuredClone(resource.body);
+  }
+
   pendingOperationCount(): number {
     return [...this.operations.values()].filter((operation) => !operation.applied).length;
   }
@@ -165,6 +170,18 @@ export class DeterministicGceApiModel implements GceApiTransport {
       args.path === "projects/projxx/global/images/pi-orb-native-other"
     ) {
       return { status: 200, body: { id: "987654321" } };
+    }
+    if (
+      args.method === "GET" &&
+      args.path === "projects/projxx/global/images/pi-orb-workspace-20260908"
+    ) {
+      return { status: 200, body: { id: "223456789" } };
+    }
+    if (
+      args.method === "GET" &&
+      args.path === "projects/projxx/global/images/pi-orb-workspace-other"
+    ) {
+      return { status: 200, body: { id: "99887766" } };
     }
     const relative = args.path.replace(/^projects\/[^/]+\/zones\/[^/]+\//, "");
 
@@ -264,7 +281,18 @@ export class DeterministicGceApiModel implements GceApiTransport {
       if (typeof name !== "string") return { status: 400, body: {} };
       if (this.live(this.disks, name) !== undefined) return { status: 409, body: {} };
       const resource: ModeledResource = {
-        body: { ...structuredClone(args.body ?? {}), name, status: "CREATING" },
+        body: {
+          ...structuredClone(args.body ?? {}),
+          name,
+          status: "CREATING",
+          sourceImageId:
+            args.body?.["sourceImage"] === "projects/projxx/global/images/pi-orb-workspace-20260908"
+              ? "223456789"
+              : args.body?.["sourceImage"] ===
+                  "projects/projxx/global/images/pi-orb-workspace-other"
+                ? "99887766"
+                : undefined,
+        },
         deletionVisibilityRemaining: null,
       };
       this.disks.set(name, resource);
