@@ -51,9 +51,9 @@ export function requestProjectDeletion(
       return err(storeCommandError(requested.error));
     }
     for (const orb of requested.value.orbs) {
-      deps.control.markStopping(orb.id);
+      deps.control.markStopping(orb.id, orb.stateVersion);
       deps.control.closeBrowserConnections(orb.id);
-      deps.control.setNextAttemptAt(`reconcile:${orb.id}`, 0);
+      deps.control.nudgeNextAttemptAt(`reconcile:${orb.id}`);
     }
     if (requested.value.newlyRequested) {
       logProjectEvent(task, projectId, "deletion-requested", {
@@ -115,9 +115,9 @@ export async function reconcileProjectDeletionOnce(
     });
   }
   for (const orb of repaired.value.orbs) {
-    deps.control.markStopping(orb.id);
+    deps.control.markStopping(orb.id, orb.stateVersion);
     deps.control.closeBrowserConnections(orb.id);
-    deps.control.setNextAttemptAt(`reconcile:${orb.id}`, 0);
+    deps.control.nudgeNextAttemptAt(`reconcile:${orb.id}`);
   }
   const progress = await deps.store.getProjectDeletionProgress(task, projectId);
   if (progress.isErr()) {

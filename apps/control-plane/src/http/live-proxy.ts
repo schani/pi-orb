@@ -133,7 +133,7 @@ export async function registerLiveProxy(
         orbResult.isErr() ||
         orbResult.value === null ||
         orbResult.value.state !== "running" ||
-        deps.control.isStopping(orbId)
+        deps.control.isStopping(orbId, orbResult.value.stateVersion)
       ) {
         closeBoth(TRY_AGAIN_LATER, "orb is not running");
         return;
@@ -278,7 +278,7 @@ export async function registerLiveProxy(
         orbResult.isErr() ||
         orbResult.value === null ||
         orbResult.value.state !== "running" ||
-        deps.control.isStopping(orbId) ||
+        deps.control.isStopping(orbId, orbResult.value.stateVersion) ||
         orbResult.value.hostRef === null
       ) {
         closeBoth(TRY_AGAIN_LATER, "orb is not running");

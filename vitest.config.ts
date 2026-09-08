@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.{ts,tsx}"],
     testTimeout: 30_000,
+    maxWorkers: "50%",
   },
 });

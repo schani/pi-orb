@@ -130,6 +130,73 @@ function seedCreatingOrb(
 }
 
 describe("orb lifecycle (DST)", () => {
+  it("explicit Start clears a stopped-orb backstop delay", async () => {
+    await runDst({ name: "start-clears-terminal-backstop", iterations: 20 }, async (sim) => {
+      const harness = makeHarness();
+      const result = await sim.runTasks([
+        {
+          name: "driver",
+          f: async (task) => {
+            harness.store.seedProject(makeProjectRow(PROJECT));
+            harness.store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped"));
+            const retryKey = `reconcile:${ORB}`;
+            harness.deps.control.setNextAttemptAt(retryKey, task.monotonicNow() + 30_000);
+            const stalePassGeneration = harness.deps.control.getScheduleGeneration(retryKey);
+            expect((await requestOrbStart(task, harness.deps, ORB)).isOk()).toBe(true);
+            expect(harness.deps.control.getNextAttemptAt(retryKey)).toBe(0);
+            expect(
+              harness.deps.control.setNextAttemptAtIfGeneration(
+                retryKey,
+                stalePassGeneration,
+                task.monotonicNow() + 30_000,
+                1,
+              ),
+            ).toBe(false);
+            expect(harness.deps.control.getNextAttemptAt(retryKey)).toBe(0);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
+  it("a newer Start supersedes another role's retained stopping episode", async () => {
+    await runDst({ name: "cross-role-stopping-episode", iterations: 20 }, async (sim) => {
+      const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
+      const reconcilerDeps: ControlPlaneDeps = {
+        ...harness.deps,
+        control: new ControlState(),
+      };
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler-role", f: (task) => reconcileLoop(task, reconcilerDeps, stop.signal) },
+        {
+          name: "command-role",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const stopping = await requestOrbStop(task, harness.deps, ORB);
+            expect(stopping.isOk()).toBe(true);
+            if (stopping.isErr()) return;
+            expect(harness.deps.control.isStopping(ORB, stopping.value.stateVersion)).toBe(true);
+            await waitUntil(
+              task,
+              "other role completes the stop",
+              () => harness.store.orbSnapshot(ORB)?.state === "stopped",
+              { timeoutMs: 300_000 },
+            );
+            const started = await requestOrbStart(task, harness.deps, ORB);
+            expect(started.isOk()).toBe(true);
+            if (started.isOk()) {
+              expect(harness.deps.control.isStopping(ORB, started.value.stateVersion)).toBe(false);
+            }
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("creating reaches running with identity persisted", async () => {
     await runDst({ name: "create-happy-path", iterations: 30 }, async (sim) => {
       const harness = makeHarness();
@@ -2544,15 +2611,20 @@ describe("orb lifecycle (DST)", () => {
                   return typeof value === "function" ? value.bind(target) : value;
                 },
               });
-              expect(
-                (
-                  await pollOrbUntilCaughtUp(
-                    task,
-                    { ...harness.deps, runtimeClient: missedRuntime },
-                    ORB,
-                  )
-                ).type,
-              ).toBe("retryable");
+              for (let attempt = 0; attempt < 20; attempt += 1) {
+                expect(
+                  (
+                    await pollOrbUntilCaughtUp(
+                      task,
+                      { ...harness.deps, runtimeClient: missedRuntime },
+                      ORB,
+                    )
+                  ).type,
+                ).toBe("retryable");
+                if (typeof harness.deps.control.getLiveness(ORB)?.unansweredSinceAt === "number") {
+                  break;
+                }
+              }
               expect(
                 typeof harness.deps.control.getLiveness(ORB)?.unansweredSinceAt,
                 "missed runtime response starts silence",
@@ -2668,15 +2740,20 @@ describe("orb lifecycle (DST)", () => {
                 "unanswered runtime grace before corroboration race",
               );
               const stopsBefore = harness.world.hostStopCountOf(ORB);
-              expect(
-                (
-                  await reconcileOrbOnce(
-                    task,
-                    { ...harness.deps, runtimeClient: failedHealth },
-                    ORB,
-                  )
-                ).type,
-              ).toBe("noop");
+              let outcome = await reconcileOrbOnce(
+                task,
+                { ...harness.deps, runtimeClient: failedHealth },
+                ORB,
+              );
+              while (!probeStarted) {
+                expect(outcome.type).toBe("retryable");
+                outcome = await reconcileOrbOnce(
+                  task,
+                  { ...harness.deps, runtimeClient: failedHealth },
+                  ORB,
+                );
+              }
+              expect(outcome.type).toBe("noop");
               expect(harness.world.hostStopCountOf(ORB)).toBe(stopsBefore);
               expect(harness.deps.control.getLiveness(ORB)?.unansweredSinceAt).toBeNull();
             },
@@ -3047,49 +3124,54 @@ describe("orb lifecycle (DST)", () => {
   // exact ending of the production incident. The single restart now gets a
   // boot-sized grace, so the drain completes on the rebooted runtime.
   it("a runtime that dies during a drain still completes the stop", async () => {
-    await runDst({ name: "runtime-dies-during-stopping-drain", iterations: 15 }, async (sim) => {
-      // Idle auto-stop is left at its default: the orb is put into `stopping`
-      // explicitly within the first tick, so the idle path can never engage.
-      const harness = makeHarness();
-      const stop = new AbortController();
-      const result = await sim.runTasks([
-        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
-        {
-          name: "driver",
-          f: async (task) => {
-            // Boot latency stays in force for the restart the drain triggers.
-            seedRunningOrb(task, harness, ORB);
-            for (let i = 0; i < 3; i++) harness.world.appendMessage(ORB);
-            const stopResult = await requestOrbStop(task, harness.deps, ORB);
-            expect(stopResult.isOk()).toBe(true);
-            // Nothing has been replicated yet (no poller), so the drain has
-            // real work when the runtime process dies under it.
-            expect(harness.store.replicaRecords(ORB).length).toBe(0);
-            const stopsBefore = harness.world.hostStopCountOf(ORB);
-            harness.world.killRuntimeProcess(ORB);
-            await waitUntil(
-              task,
-              "orb reaches a terminal state",
-              () => {
-                const state = harness.store.orbSnapshot(ORB)?.state;
-                return state === "stopped" || state === "failed";
-              },
-              { timeoutMs: 20 * 60_000 },
-            );
-            expect(harness.world.hostStopCountOf(ORB) - stopsBefore).toBeLessThanOrEqual(
-              MAX_STOPS_PER_RECOVERY,
-            );
-            stop.abort();
+    const capture = new LogCapture();
+    await runDst(
+      { name: "runtime-dies-during-stopping-drain", iterations: 15, logCapture: capture },
+      async (sim) => {
+        // Idle auto-stop is left at its default: the orb is put into `stopping`
+        // explicitly within the first tick, so the idle path can never engage.
+        const harness = makeHarness();
+        const stop = new AbortController();
+        const result = await sim.runTasks([
+          { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+          {
+            name: "driver",
+            f: async (task) => {
+              // Boot latency stays in force for the restart the drain triggers.
+              seedRunningOrb(task, harness, ORB);
+              for (let i = 0; i < 3; i++) harness.world.appendMessage(ORB);
+              const stopResult = await requestOrbStop(task, harness.deps, ORB);
+              expect(stopResult.isOk()).toBe(true);
+              // Nothing has been replicated yet (no poller), so the drain has
+              // real work when the runtime process dies under it.
+              expect(harness.store.replicaRecords(ORB).length).toBe(0);
+              const stopsBefore = harness.world.hostStopCountOf(ORB);
+              harness.world.killRuntimeProcess(ORB);
+              await waitUntil(
+                task,
+                "orb reaches a terminal state",
+                () => {
+                  const state = harness.store.orbSnapshot(ORB)?.state;
+                  return state === "stopped" || state === "failed";
+                },
+                { timeoutMs: 20 * 60_000 },
+              );
+              expect(harness.world.hostStopCountOf(ORB) - stopsBefore).toBeLessThanOrEqual(
+                MAX_STOPS_PER_RECOVERY,
+              );
+              stop.abort();
+            },
           },
-        },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-      const orb = harness.store.orbSnapshot(ORB);
-      expect(orb?.lastError).toBeNull();
-      expect(orb?.state).toBe("stopped");
-      assertReplicaComplete(harness.world, harness.store, ORB);
-      expect(harness.world.hostStateOf(ORB)).toBe("stopped");
-    });
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        const orb = harness.store.orbSnapshot(ORB);
+        expect(orb?.lastError).toBeNull();
+        expect(orb?.state).toBe("stopped");
+        assertReplicaComplete(harness.world, harness.store, ORB);
+        expect(harness.world.hostStateOf(ORB)).toBe("stopped");
+        expect(capture.matching("drain-restart-deferred")).toEqual([]);
+      },
+    );
   });
 
   it("a drain whose restarted runtime never answers fails on evidence, not on the deadline", async () => {

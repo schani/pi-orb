@@ -1053,8 +1053,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }
       const updated: OrbRow = {
         ...orb,
-        // Same lifecycle episode: preserve a failed wake's version until the
-        // failed -> starting transition consumes it.
+        // A specification replacement fences stale provisioning passes. A
+        // failed-compute cleanup preserves the failed wake's one-shot version.
+        stateVersion:
+          orb.hostDiscardReason === "host_spec_changed" ? orb.stateVersion + 1 : orb.stateVersion,
         updatedAt: params.now,
         hostRef: null,
         runtimeTokenHash: null,
@@ -1109,6 +1111,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }
       const updated: OrbRow = {
         ...orb,
+        stateVersion: orb.stateVersion + 1,
         runtimeTokenHash: null,
         hostSpecFingerprint: params.desiredFingerprint,
         hostSpecGeneration: params.configuredGeneration,
@@ -1193,7 +1196,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     }
     return this.access(task, FAILPOINTS.storeWrite, "cas update fields", () => {
       const orb = this.orbs.get(params.orbId);
-      if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
+      if (
+        orb === undefined ||
+        orb.stateVersion !== params.expectedStateVersion ||
+        (params.expectedHostIncarnation !== undefined &&
+          (orb.hostIncarnation !== params.expectedHostIncarnation ||
+            orb.hostDiscardThroughIncarnation !== null))
+      ) {
         return { conflict: true as const, currentState: orb?.state };
       }
       const updated: OrbRow = {

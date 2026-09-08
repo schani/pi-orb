@@ -1,0 +1,27 @@
+[Unit]
+Description=Pi orb runtime
+Requires=pi-orb-bootstrap.service workspace.mount
+After=pi-orb-bootstrap.service workspace.mount
+BindsTo=workspace.mount
+StartLimitIntervalSec=60
+StartLimitBurst=5
+OnFailure=pi-orb-boot-failure@%n.service
+
+[Service]
+User=orb
+Group=orb
+RuntimeDirectory=tailscale
+RuntimeDirectoryMode=0700
+WorkingDirectory=/app
+EnvironmentFile=/run/pi-orb/environment
+ExecStartPre=/usr/local/bin/pi-orb-boot-diagnostic runtime starting
+ExecStart=/usr/local/bin/pi-orb-runtime-supervisor
+Restart=always
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

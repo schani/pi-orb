@@ -13,19 +13,18 @@ resource "google_secret_manager_secret" "github_credential" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.apis]
 }
 
 resource "google_secret_manager_secret_iam_member" "cp_github_credential_accessor" {
   secret_id = google_secret_manager_secret.github_credential.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.control_plane.email}"
+  member    = "serviceAccount:${local.control_plane_email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "cp_github_credential_versions" {
   secret_id = google_secret_manager_secret.github_credential.id
   role      = "roles/secretmanager.secretVersionManager"
-  member    = "serviceAccount:${google_service_account.control_plane.email}"
+  member    = "serviceAccount:${local.control_plane_email}"
 }
 
 resource "google_secret_manager_secret" "github_client_secret" {
@@ -33,11 +32,10 @@ resource "google_secret_manager_secret" "github_client_secret" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.apis]
 }
 
 resource "google_secret_manager_secret_iam_member" "cp_reads_github_client_secret" {
   secret_id = google_secret_manager_secret.github_client_secret.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.control_plane.email}"
+  member    = "serviceAccount:${local.control_plane_email}"
 }

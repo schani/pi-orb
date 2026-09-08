@@ -20,7 +20,8 @@ function provider(gce: GceApiTransport, minter: HttpTailscaleAuthKeyMinter): Gce
     machineType: "n2d-highmem-4",
     subnetwork: "regions/region/subnetworks/orbs",
     serviceAccount: "orb@proj.iam.gserviceaccount.com",
-    runtimeImage: "registry.example/runtime@sha256:abc",
+    imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
+    imageId: "123456789",
     controlPlaneUrl: "https://runtime.example",
     tailscale: { minter, tailnetDnsName: "tail.test" },
   });

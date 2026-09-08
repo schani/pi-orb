@@ -1,0 +1,17 @@
+[Unit]
+Description=Load orb instance configuration
+Wants=network-online.target
+Requires=workspace.mount
+After=workspace.mount network-online.target
+BindsTo=workspace.mount
+OnFailure=pi-orb-boot-failure@%n.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/local/bin/pi-orb-boot-diagnostic bootstrap starting
+ExecStart=/usr/local/bin/pi-orb-bootstrap
+ExecStartPost=/usr/local/bin/pi-orb-boot-diagnostic bootstrap ready
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

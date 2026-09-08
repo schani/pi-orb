@@ -12,11 +12,10 @@ resource "google_secret_manager_secret" "tailscale_oauth_client_secret" {
   replication {
     auto {}
   }
-  depends_on = [google_project_service.apis]
 }
 
 resource "google_secret_manager_secret_iam_member" "cp_reads_tailscale_client_secret" {
   secret_id = google_secret_manager_secret.tailscale_oauth_client_secret.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.control_plane.email}"
+  member    = "serviceAccount:${local.control_plane_email}"
 }
