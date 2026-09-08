@@ -99,6 +99,7 @@ describe("agent boot prerequisites", () => {
       repositoryUrl: "https://github.com/example/repo.git",
       workDir,
       broker: null,
+      skillsDir: null,
       hookSpawner,
     });
 

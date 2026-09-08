@@ -283,6 +283,24 @@ describe("GCloud native-image adapter", () => {
     ]);
   });
 
+  it("describes the base image once across prerequisites and identity resolution", async () => {
+    const calls: string[][] = [];
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      calls.push(args);
+      return { stdout: args[0] === "auth" ? "builder@example.com\n" : "9876\n", stderr: "" };
+    });
+    const buildInput = await input();
+    expect(
+      (
+        await effects.run("prerequisites", "check", buildInput, new AbortController().signal)
+      ).isOk(),
+    ).toBe(true);
+    expect(
+      (await effects.resolveBaseImageId(buildInput, new AbortController().signal)).isOk(),
+    ).toBe(true);
+    expect(calls.filter((args) => args[1] === "images" && args[2] === "describe")).toHaveLength(1);
+  });
+
   it("verifies the builder boot disk's numeric source-image identity", async () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {

@@ -38,7 +38,9 @@ The command creates the builder, runs installation and guest contract tests,
 captures inventory, seals the runtime image, and creates a separate empty 10 GiB
 ext4 workspace image. Validation clones that image into a 20 GiB disk, boots the
 candidate, proves the filesystem grew, runs `/opt/pi-orb/acceptance.sh`, and verifies the exact
-validator instance's `runtime ready` record in Cloud Logging. There are no
+validator instance's `runtime ready` record in Cloud Logging. Validator SSH
+readiness and guest acceptance each retain 60 attempts, so boot connectivity
+does not consume the acceptance allowance. There are no
 operator SSH stages. Before growing ext4, the guest requires a forced read-only
 `e2fsck` to pass; it never repairs a damaged workspace automatically. The Linux
 guest test exercises healthy growth and damaged-image refusal with real e2fsprogs.

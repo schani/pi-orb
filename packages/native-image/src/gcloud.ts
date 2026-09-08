@@ -185,11 +185,6 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
                   stage,
                   message: "gcloud has no active account",
                 }),
-          )
-          .andThen(() =>
-            this.gcloud(input, stage, this.baseImageDescribeArgs(input), signal).map(
-              () => undefined,
-            ),
           );
       case "builder:create":
         return this.gcloud(

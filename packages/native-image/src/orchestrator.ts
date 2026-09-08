@@ -186,6 +186,21 @@ export async function buildNativeImage(
   let manifest: ImageBuildManifest | undefined;
   const startedActions = new Set<string>();
 
+  const tracked = async <T>(
+    stage: ImageBuildStage,
+    action: string,
+    effect: () => PromiseLike<Result<T, ImageBuildError>>,
+  ): Promise<T | undefined> => {
+    progress({ stage, action, status: "started" });
+    const result = await effect();
+    if (result.isErr()) {
+      primaryFailure = result.error;
+      return undefined;
+    }
+    progress({ stage, action, status: "succeeded" });
+    return result.value;
+  };
+
   const step = async (stage: ImageBuildStage, action: string): Promise<boolean> => {
     const key = `${stage}:${action}`;
     if (!startedActions.has(key)) {
@@ -238,21 +253,17 @@ export async function buildNativeImage(
     primaryFailure ??= cancelled("prerequisites");
   let baseImageId = "";
   if (primaryFailure === undefined) {
-    progress({ stage: "prerequisites", action: "resolve-base-image", status: "started" });
-    const baseIdentity = await effects.resolveBaseImageId(input, signal);
-    if (baseIdentity.isErr()) primaryFailure = baseIdentity.error;
-    else {
-      baseImageId = baseIdentity.value;
-      progress({ stage: "prerequisites", action: "resolve-base-image", status: "succeeded" });
-    }
+    baseImageId =
+      (await tracked("prerequisites", "resolve-base-image", () =>
+        effects.resolveBaseImageId(input, signal),
+      )) ?? "";
   }
   if (primaryFailure === undefined && !(await step("builder", "create")))
     primaryFailure ??= cancelled("builder");
   if (primaryFailure === undefined) {
-    progress({ stage: "builder", action: "verify-base-image", status: "started" });
-    const verified = await effects.verifyBuilderBaseImage(input, baseImageId, signal);
-    if (verified.isErr()) primaryFailure = verified.error;
-    else progress({ stage: "builder", action: "verify-base-image", status: "succeeded" });
+    await tracked("builder", "verify-base-image", () =>
+      effects.verifyBuilderBaseImage(input, baseImageId, signal),
+    );
   }
   if (primaryFailure === undefined && !(await poll("builder", "ready", 60)))
     primaryFailure ??= cancelled("builder");
@@ -265,13 +276,10 @@ export async function buildNativeImage(
 
   let packageInventory = "";
   if (primaryFailure === undefined) {
-    progress({ stage: "install", action: "read-inventory", status: "started" });
-    const inventory = await effects.readPackageInventory(input, signal);
-    if (inventory.isErr()) primaryFailure = inventory.error;
-    else {
-      packageInventory = inventory.value;
-      progress({ stage: "install", action: "read-inventory", status: "succeeded" });
-    }
+    packageInventory =
+      (await tracked("install", "read-inventory", () =>
+        effects.readPackageInventory(input, signal),
+      )) ?? "";
   }
   if (primaryFailure === undefined && !(await step("capture", "create-workspace-disk")))
     primaryFailure ??= cancelled("capture");
@@ -283,26 +291,21 @@ export async function buildNativeImage(
     primaryFailure ??= cancelled("capture");
   let workspaceImage: CapturedImage | undefined;
   if (primaryFailure === undefined) {
-    progress({ stage: "capture", action: "create-workspace-image", status: "started" });
     workspaceCaptureAttempted = true;
-    const captured = await effects.capture(input, "workspace", signal);
-    if (captured.isErr()) primaryFailure = captured.error;
-    else {
-      workspaceImage = captured.value;
-      progress({ stage: "capture", action: "create-workspace-image", status: "succeeded" });
-    }
+    workspaceImage = await tracked("capture", "create-workspace-image", () =>
+      effects.capture(input, "workspace", signal),
+    );
   }
   if (primaryFailure === undefined && !(await step("seal", "seal")))
     primaryFailure ??= cancelled("seal");
   if (primaryFailure === undefined && !(await step("capture", "stop-builder")))
     primaryFailure ??= cancelled("capture");
   if (primaryFailure === undefined) {
-    progress({ stage: "capture", action: "create-image", status: "started" });
     runtimeCaptureAttempted = true;
-    const image = await effects.capture(input, "runtime", signal);
-    if (image.isErr()) primaryFailure = image.error;
-    else {
-      progress({ stage: "capture", action: "create-image", status: "succeeded" });
+    const image = await tracked("capture", "create-image", () =>
+      effects.capture(input, "runtime", signal),
+    );
+    if (image !== undefined) {
       manifest = {
         schemaVersion: 1,
         status: "accepted",
@@ -315,8 +318,8 @@ export async function buildNativeImage(
         sourceArchiveSha256: input.sourceArchiveSha256,
         baseImageResource: input.baseImage,
         baseImageId,
-        imageResource: image.value.resource,
-        imageId: image.value.id,
+        imageResource: image.resource,
+        imageId: image.id,
         workspaceImageResource: (workspaceImage as CapturedImage).resource,
         workspaceImageId: (workspaceImage as CapturedImage).id,
         validation: true,
@@ -331,10 +334,9 @@ export async function buildNativeImage(
   if (primaryFailure === undefined && !(await step("validate", "create")))
     primaryFailure ??= cancelled("validate");
   if (primaryFailure === undefined && workspaceImage !== undefined) {
-    progress({ stage: "validate", action: "verify-workspace-image", status: "started" });
-    const verified = await effects.verifyValidationWorkspaceImage(input, workspaceImage.id, signal);
-    if (verified.isErr()) primaryFailure = verified.error;
-    else progress({ stage: "validate", action: "verify-workspace-image", status: "succeeded" });
+    await tracked("validate", "verify-workspace-image", () =>
+      effects.verifyValidationWorkspaceImage(input, workspaceImage.id, signal),
+    );
   }
   if (primaryFailure === undefined && !(await poll("validate", "ready", 60)))
     primaryFailure ??= cancelled("validate");

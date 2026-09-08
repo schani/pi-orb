@@ -37,6 +37,7 @@ class FakeEffects implements ImageBuildEffects {
   abortAt?: string;
   failManifest = false;
   retryOnceAt?: string;
+  retryAlwaysAt?: string;
   private retried = false;
   readonly controller = new AbortController();
 
@@ -51,6 +52,8 @@ class FakeEffects implements ImageBuildEffects {
       this.retried = true;
       return errAsync({ type: "image_build_failed", stage, message: "not ready", retryable: true });
     }
+    if (this.retryAlwaysAt === key)
+      return errAsync({ type: "image_build_failed", stage, message: "not ready", retryable: true });
     return this.failAt === key
       ? errAsync({ type: "image_build_failed", stage, message: "injected" })
       : okAsync(undefined);
@@ -222,7 +225,10 @@ describe("native image build orchestration", () => {
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
     expect(effects.manifest).toBeUndefined();
-    expect(effects.actions).toContain("cleanup:delete-image");
+    expect(effects.actions.slice(-2)).toEqual([
+      "cleanup:delete-image",
+      "cleanup:delete-workspace-image",
+    ]);
   });
 
   it("removes the candidate when writing the manifest fails", async () => {
@@ -248,5 +254,19 @@ describe("native image build orchestration", () => {
     expect(events.filter((event) => event === "install:complete:started")).toHaveLength(1);
     expect(events.filter((event) => event === "install:complete:waiting")).toHaveLength(1);
     expect(events.filter((event) => event === "install:complete:succeeded")).toHaveLength(1);
+  });
+
+  it.each([
+    ["validate:ready", "validate:probe", 0],
+    ["validate:probe", "validate:ready", 1],
+  ])("keeps the 60-attempt validator budget for %s", async (action, otherAction, otherCount) => {
+    const effects = new FakeEffects();
+    effects.retryAlwaysAt = action;
+    const result = await buildNativeImage(input(), effects, effects.controller.signal);
+    expect(result.isErr()).toBe(true);
+    expect(effects.actions.filter((candidate) => candidate === action)).toHaveLength(60);
+    expect(effects.actions.filter((candidate) => candidate === otherAction)).toHaveLength(
+      otherCount,
+    );
   });
 });
