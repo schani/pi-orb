@@ -73,6 +73,8 @@ export interface AppSearchDialogProps {
   onQueryChange(query: string): void;
   onActiveKeyChange(key: string): void;
   onClose(restoreFocus?: boolean): void;
+  /** Picker activation replaces navigation when supplied. */
+  onSelect?(item: AppSearchItem): void;
 }
 
 export function AppSearchDialog({
@@ -82,6 +84,7 @@ export function AppSearchDialog({
   onQueryChange,
   onActiveKeyChange,
   onClose,
+  onSelect,
 }: AppSearchDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -130,13 +133,16 @@ export function AppSearchDialog({
         event.preventDefault();
         resultRefs.current.get(active.key)?.click();
       }
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
     }
   };
 
   const containFocus = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
     if (event.key !== "Tab") return;
     const focusable = Array.from(
       dialogRef.current?.querySelectorAll<HTMLElement>("input, a[href], button") ?? [],
@@ -220,7 +226,12 @@ export function AppSearchDialog({
                     lastPointerPosition.current = nextPosition;
                     if (pointerMoved) onActiveKeyChange(item.key);
                   }}
-                  onClick={onResultClick}
+                  onClick={(event) => {
+                    if (onSelect !== undefined) {
+                      event.preventDefault();
+                      onSelect(item);
+                    } else onResultClick(event);
+                  }}
                 >
                   {item.glyph === undefined ? (
                     <span className="glyph" aria-hidden="true" />

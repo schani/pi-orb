@@ -1,4 +1,11 @@
-import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef } from "react";
+import {
+  type ClipboardEvent,
+  type KeyboardEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { ComposerCaret } from "./ComposerCaret.tsx";
 import {
   type ComposerMode,
@@ -8,6 +15,7 @@ import {
   leaveShellMode,
   normalizeComposerChange,
 } from "./composer-mode.ts";
+import { OrbLinkPicker } from "./OrbLinkPicker.tsx";
 import { isSendShortcut } from "./send-shortcut.ts";
 
 export interface ComposerImage {
@@ -54,6 +62,27 @@ export function Composer({
   const hasInput = isShell ? text.trim() !== "" : text.trim() !== "" || images.length > 0;
   const sendEnabled = canSend && hasInput && !shellBlockedByAttachment;
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [mentionOffset, setMentionOffset] = useState<number | null>(null);
+  const restoreCaret = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (mentionOffset !== null || restoreCaret.current === null) return;
+    inputRef.current?.focus({ preventScroll: true });
+    inputRef.current?.setSelectionRange(restoreCaret.current, restoreCaret.current);
+    restoreCaret.current = null;
+  });
+
+  const closePicker = (href?: string) => {
+    if (mentionOffset === null) return;
+    let caret = mentionOffset + 1;
+    if (href !== undefined && mode === "message" && text[mentionOffset] === "@") {
+      const url = `${window.location.href.split("#")[0]}${href}`;
+      onValueChange(text.slice(0, mentionOffset) + url + text.slice(mentionOffset + 1), mode);
+      caret = mentionOffset + url.length;
+    }
+    restoreCaret.current = caret;
+    setMentionOffset(null);
+  };
 
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
@@ -84,6 +113,9 @@ export function Composer({
 
   return (
     <div className="composer">
+      {mentionOffset !== null && (
+        <OrbLinkPicker onSelect={closePicker} onClose={() => closePicker()} />
+      )}
       {images.length > 0 && (
         <div className="composer-attachments">
           {images.map((image) => (
@@ -111,6 +143,16 @@ export function Composer({
             onChange={(event) => {
               const normalized = normalizeComposerChange(mode, event.target.value);
               onValueChange(normalized.text, normalized.mode);
+              const input = event.nativeEvent as InputEvent;
+              if (
+                mode === "message" &&
+                normalized.mode === "message" &&
+                input.inputType === "insertText" &&
+                input.data === "@" &&
+                !input.isComposing
+              ) {
+                setMentionOffset(event.target.selectionStart - 1);
+              }
             }}
             onPaste={handlePaste}
             onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {

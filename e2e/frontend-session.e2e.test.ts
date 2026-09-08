@@ -47,6 +47,47 @@ describe("frontend-only browser behavior", () => {
     await vite?.close();
   });
 
+  it("inserts orb URLs at typed @ and preserves cancelled mentions and shell input", async () => {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/${ORB_HASH}`);
+    const composer = page.getByPlaceholder(/Message the orb/);
+    await composer.fill("before replace after");
+    await composer.evaluate((element) => element.setSelectionRange(7, 14));
+    await composer.press("@");
+    const dialog = page.getByRole("dialog", { name: "Find orbs" });
+    await expectPage(dialog).toBeVisible();
+    await expectPage(composer).toHaveValue("before @ after");
+    await dialog.getByRole("searchbox").fill("Finished design");
+    await expectPage(dialog.getByRole("link")).toHaveCount(1);
+    await dialog.getByRole("searchbox").press("Enter");
+    const inserted = `${origin}/#/orbs/frontend-archived-orb`;
+    await expectPage(composer).toHaveValue(`before ${inserted} after`);
+    await expectPage(composer).toBeFocused();
+    expectPage(page.url()).toBe(`${origin}/${ORB_HASH}`);
+    await composer.press("@");
+    await dialog.getByRole("searchbox").fill("Frontend");
+    await dialog.getByRole("link").first().focus();
+    await page.keyboard.press("Escape");
+    await expectPage(dialog).toBeHidden();
+    await expectPage(composer).toBeFocused();
+    await expectPage(composer).toHaveValue(`before ${inserted}@ after`);
+    await composer.press("x");
+    await expectPage(composer).toHaveValue(`before ${inserted}@x after`);
+
+    await composer.fill("");
+    await composer.press("!");
+    const shell = page.getByPlaceholder(/Run a shell command/);
+    await shell.press("@");
+    await expectPage(shell).toHaveValue("@");
+    await expectPage(dialog).toBeHidden();
+    await shell.fill("");
+    await shell.press("!");
+    await shell.press("@");
+    await expectPage(shell).toHaveValue("@");
+    await expectPage(dialog).toBeHidden();
+    await page.close();
+  });
+
   it("uses full-cell block cursors and keeps the composer caret aligned during native editing", async () => {
     const page = await browser.newPage({ reducedMotion: "reduce" });
     await page.goto(`${origin}/${ORB_HASH}`);

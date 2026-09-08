@@ -14,6 +14,14 @@ Find is navigation, not a general command palette. It does not search IDs, lifec
 
 The shortcut is dashboard-scoped. Orb, missing-resource, and create-orb routes retain the browser's default Command-K / Control-K behavior. On the dashboard, the shortcut opens Find even when focus is in a creation or rename field; this keeps the dashboard navigation shortcut globally available within its route. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists; a press outside the card closes it as well. There is no persistent Find hint or button, and (since 2026-09-04) no visible close control: a surface reached only by a shortcut is dismissed by that shortcut's own conventions.
 
+## Composer orb-link picker (decided 2026-09-08)
+
+Typing `@` in message mode opens the same search dialog, scoped to orb names across all projects, including archived orbs. The typed character first replaces the textarea selection normally. Picking a result replaces only that `@` with the absolute application URL (`https://<app>/#/orbs/:orbId`), without navigation, then restores composer focus and the caret immediately after the URL. Escape (including from a focused result) or outside dismissal leaves the `@` and restores the caret after it. Shell and excluded-shell input, paste, and IME composition do not trigger the picker.
+
+`OrbLinkPicker` owns a fresh project/orb index for each opening, using the existing typed list APIs and dashboard source adapter with project results removed. Requests are not repeated per keystroke; late responses after dismissal are ignored. The dialog displays the existing loading and partial-failure diagnostics so an incomplete index is never silently presented as complete. Reopening retries loading; no persistent cache or lifecycle events are needed. `AppSearchDialog` accepts an optional selection callback for this insertion use case; dashboard navigation retains native anchor behavior. The Command-K scope is unchanged.
+
+Browser fixture tests cover replacing a selection in the middle of a draft, archived-orb lookup, keyboard activation without navigation, caret/focus restoration, Escape from a result, and both shell modes.
+
 ## Reusable client architecture
 
 The app-level mechanism is generic; the dashboard is only its first search source. This avoids baking projects, orbs, GitHub, or dashboard lifecycle into the Command-K listener or the dialog.
@@ -53,7 +61,7 @@ type AppSearchSource = {
 
 Routes register at most one active source through a small `useAppSearchSource(source | null)` hook and unregister it on cleanup. The provider intercepts Command-K only when a source is registered; otherwise the browser retains its default. Source replacement closes the card and clears route-specific state, preventing results from one route from leaking into another.
 
-Every item has an `href`, and every result row is a real anchor—never a button with an imperative navigation callback. Ordinary click, Command/Ctrl-click, middle-click, keyboard activation, link preview, copy-link, and the browser context menu therefore behave normally. The dialog closes only for an unmodified same-tab activation; modified activation must leave the current tab untouched.
+In navigation mode, every item has an `href`, and every result row is a real anchor—never a button with an imperative navigation callback. Ordinary click, Command/Ctrl-click, middle-click, keyboard activation, link preview, copy-link, and the browser context menu therefore behave normally. The dialog closes only for an unmodified same-tab activation; modified activation must leave the current tab untouched.
 
 Orb results use `#/orbs/:orbId`. Project results use the canonical focused-dashboard URL `#/projects/:projectId`. That route renders the ordinary dashboard, scrolls to and focuses the named project once its data loads, and otherwise leaves all dashboard behavior intact. It is a real resource URL: if the project is absent, it stays at that URL and renders “Project doesn't exist” with a link back to `#/`, following the missing-resource rule in `docs/web-ui.md`. This focused route is not a separate project-detail page and requires no new API.
 
