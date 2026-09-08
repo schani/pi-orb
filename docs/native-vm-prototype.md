@@ -13,7 +13,7 @@ preemption during deterministic acceptance. Boot disks are disposable 20 GB disk
 one separately formatted 50 GB `pd-balanced` disk is retained at `/workspace`.
 
 `infra/native-vm/` contains the image recipe, systemd units, package rationale,
-cloud-stage driver, and guest acceptance scripts. `e2e/native-vm/` composes the
+and guest acceptance scripts. `e2e/native-vm/` composes the
 stock control plane with a fixed test host adapter and isolated PGlite/model/OAuth
 fixtures. The test process disables idle auto-stop so the driver owns uptime.
 Its adapter cannot mutate GCP and keeps a fixed logical host reference
