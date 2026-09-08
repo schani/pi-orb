@@ -40,14 +40,15 @@ describe("hosted-file cloud infrastructure", () => {
     expect(run).toMatch(
       /traffic\s*{[\s\S]*type\s+=\s+"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"[\s\S]*percent\s+=\s+100[\s\S]*tag\s+=\s+"files"/,
     );
-    expect(run.match(/name\s+=\s+"PI_ORB_HOSTING_STORE"/g)).toHaveLength(3);
-    expect(run.match(/name\s+=\s+"PI_ORB_HOSTING_BUCKET"/g)).toHaveLength(3);
-    expect(run.match(/name\s+=\s+"PI_ORB_HOSTING_ORIGIN"/g)).toHaveLength(3);
+    expect(run).toMatch(/hosting_env\s*=\s*{[\s\S]*PI_ORB_HOSTING_STORE\s*=\s*"gcs"/);
+    expect(run).toMatch(/PI_ORB_HOSTING_BUCKET\s*=\s*google_storage_bucket\.hosting\.name/);
+    expect(run).toMatch(/PI_ORB_HOSTING_ORIGIN\s*=\s*local\.hosting_origin/);
     expect(run).toMatch(/contains\(self\.urls, local\.app_origin\)/);
     expect(run).toMatch(
       /status\.tag == "files"[\s\S]*status\.type == "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"[\s\S]*status\.percent == 100/,
     );
-    expect(run.match(/name\s+=\s+"PI_ORB_APP_ORIGIN"/g)).toHaveLength(3);
+    expect(run).toMatch(/PI_ORB_APP_ORIGIN\s*=\s*local\.app_origin/);
+    expect(run.match(/for_each\s*=\s*local\.hosting_env/g)).toHaveLength(3);
     expect(outputs).toMatch(/output "hosting_url"[\s\S]*value\s+=\s+local\.hosting_origin/);
     expect(outputs).toMatch(
       /output "browser_url"[\s\S]*value\s+=\s+google_cloud_run_v2_service\.browser\.uri/,

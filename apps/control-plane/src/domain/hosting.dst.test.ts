@@ -2,12 +2,11 @@ import { NoSimulationTask } from "determined";
 import { errAsync, okAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
-import { makeHostingHarness, source } from "../testkit/hosting.ts";
+import { makeHostingHarness, openHostedFile, source } from "../testkit/hosting.ts";
 import { runDst } from "../testkit/sim.ts";
 import {
   cleanupHostedFiles,
   cleanupRetiredHostedFiles,
-  openHostedFile,
   publishHostedFile,
   removeHostedFile,
 } from "./hosting.ts";
@@ -211,7 +210,7 @@ describe("hosted files domain", () => {
               const cleaned = await cleanupRetiredHostedFiles(
                 innerTask,
                 h.deps,
-                { owner: "cleaner", leaseMs: 1_000, limit: 10 },
+                { leaseMs: 1_000, limit: 10 },
                 context,
               );
               expect(cleaned.isErr()).toBe(true);
@@ -220,7 +219,7 @@ describe("hosted files domain", () => {
               const recovered = await cleanupRetiredHostedFiles(
                 innerTask,
                 h.deps,
-                { owner: "cleaner-after-restart", leaseMs: 1_000, limit: 10 },
+                { leaseMs: 1_000, limit: 10 },
                 context,
               );
               expect(recovered.isOk() && recovered.value).toBe(0);
@@ -244,7 +243,6 @@ describe("hosted files domain", () => {
             if (reserved.isErr()) return;
             const claimed = await h.deps.store.claimUpload(innerTask, {
               operationId: reserved.value.id,
-              owner: "worker",
               now: 0,
               leaseUntil: 100,
             });
@@ -619,7 +617,7 @@ describe("hosted files domain", () => {
     const cleaned = await cleanupRetiredHostedFiles(
       task,
       h.deps,
-      { owner: "worker-a", leaseMs: 1000, limit: 10 },
+      { leaseMs: 1000, limit: 10 },
       context,
     );
     expect(cleaned.isOk()).toBe(true);
@@ -666,7 +664,7 @@ describe("hosted files domain", () => {
             await cleanupRetiredHostedFiles(
               innerTask,
               h.deps,
-              { owner: "cleaner", leaseMs: 1_000, limit: 10 },
+              { leaseMs: 1_000, limit: 10 },
               context,
             );
             const chunks: Uint8Array[] = [];
@@ -699,12 +697,7 @@ describe("hosted files domain", () => {
       "index.html",
       opened.value.file.object,
     );
-    await cleanupRetiredHostedFiles(
-      task,
-      h.deps,
-      { owner: "cleaner", leaseMs: 1_000, limit: 10 },
-      context,
-    );
+    await cleanupRetiredHostedFiles(task, h.deps, { leaseMs: 1_000, limit: 10 }, context);
     const interrupted = await opened.value.source.next(task, context);
     expect(interrupted.isErr() && interrupted.error.type).toBe("hosting_retryable");
   });
@@ -720,7 +713,6 @@ describe("hosted files domain", () => {
             await h.deps.store.beginOrbCleanup(innerTask, h.orbId);
             const abandoned = await h.deps.store.claimCleanup(innerTask, {
               orbId: h.orbId,
-              owner: "dead-cleaner",
               now: innerTask.wallNow(),
               leaseUntil: innerTask.wallNow() + 10,
               limit: 10,
@@ -730,7 +722,7 @@ describe("hosted files domain", () => {
             const recovered = await cleanupRetiredHostedFiles(
               innerTask,
               h.deps,
-              { owner: "successor", leaseMs: 1_000, limit: 10, orbId: h.orbId },
+              { leaseMs: 1_000, limit: 10, orbId: h.orbId },
               context,
             );
             expect(recovered.isOk() && recovered.value).toBe(1);
@@ -764,7 +756,7 @@ describe("hosted files domain", () => {
                   await cleanupRetiredHostedFiles(
                     innerTask,
                     h.deps,
-                    { owner: "healthy", leaseMs: 1, limit: 10 },
+                    { leaseMs: 1, limit: 10 },
                     context,
                   )
                 )._unsafeUnwrap(),
@@ -787,14 +779,14 @@ describe("hosted files domain", () => {
               await cleanupRetiredHostedFiles(
                 innerTask,
                 h.deps,
-                { owner: "blocked-1", leaseMs: 1, limit: 10 },
+                { leaseMs: 1, limit: 10 },
                 context,
               );
               await innerTask.sleep(2, "blocked cleanup claim expires");
               await cleanupRetiredHostedFiles(
                 innerTask,
                 h.deps,
-                { owner: "blocked-2", leaseMs: 1, limit: 10 },
+                { leaseMs: 1, limit: 10 },
                 context,
               );
               expect(h.events().filter((event) => event === "cleanup_blocked")).toHaveLength(1);
@@ -856,7 +848,7 @@ describe("hosted files domain", () => {
             const cleaned = await cleanupRetiredHostedFiles(
               t,
               h.deps,
-              { owner, leaseMs: 1000, limit: 10 },
+              { leaseMs: 1000, limit: 10 },
               context,
             );
             if (cleaned.isOk()) counts.push(cleaned.value);
@@ -875,7 +867,7 @@ describe("hosted files domain", () => {
     const cleaned = await cleanupRetiredHostedFiles(
       task,
       h.deps,
-      { owner: "sweeper", leaseMs: 1000, limit: 10, orbId: h.orbId },
+      { leaseMs: 1000, limit: 10, orbId: h.orbId },
       context,
     );
     expect(cleaned.isOk() && cleaned.value).toBe(1);

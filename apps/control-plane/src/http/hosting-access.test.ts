@@ -3,7 +3,6 @@ import { createHostingAccessPolicy } from "./hosting-access.ts";
 
 const configured = () =>
   createHostingAccessPolicy({
-    appOrigin: "https://pi-orb.example.test",
     filesOrigin: "https://files.pi-orb.example.test",
     trustedBrowserOrigins: ["http://localhost:5173", "http://vibestation:5173"],
   });
@@ -17,16 +16,7 @@ describe("hosting HTTP access policy", () => {
     "https://files.example.test/#fragment",
   ])("rejects an invalid files origin: %s", (filesOrigin) => {
     const result = createHostingAccessPolicy({
-      appOrigin: "https://pi-orb.example.test",
       filesOrigin,
-    });
-    expect(result.isErr()).toBe(true);
-  });
-
-  it("requires different hostnames, not merely different ports", () => {
-    const result = createHostingAccessPolicy({
-      appOrigin: "https://pi-orb.example.test:443",
-      filesOrigin: "https://pi-orb.example.test:8443",
     });
     expect(result.isErr()).toBe(true);
   });
@@ -78,14 +68,14 @@ describe("hosting HTTP access policy", () => {
     ).toEqual({ kind: "reject", reason: "files_websocket" });
   });
 
-  it("never serves /s paths through the app or an unknown host", () => {
+  it("never serves /s paths through a non-files host", () => {
     const policy = configured()._unsafeUnwrap();
     expect(
       policy.decide({ method: "GET", path: "/s/orb/file", host: "pi-orb.example.test" }),
     ).toEqual({ kind: "reject", reason: "files_wrong_host" });
     expect(
       policy.decide({ method: "GET", path: "/s/orb/file", host: "attacker.example.test" }),
-    ).toEqual({ kind: "reject", reason: "unknown_host" });
+    ).toEqual({ kind: "reject", reason: "files_wrong_host" });
   });
 
   it("allows same-origin and explicit Vite development browser requests", () => {

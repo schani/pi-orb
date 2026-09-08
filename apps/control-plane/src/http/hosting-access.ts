@@ -3,8 +3,6 @@ import { err, ok, Result, type Result as ResultType } from "neverthrow";
 
 export interface HostingAccessConfig {
   readonly filesOrigin: string;
-  /** Omit when the app is reachable through multiple service aliases. */
-  readonly appOrigin?: string;
   /** Explicit browser development origins, such as the Vite server. */
   readonly trustedBrowserOrigins?: readonly string[];
 }
@@ -21,7 +19,7 @@ export interface HostingAccessRequest {
 
 export interface HostingAccessConfigError {
   readonly type: "hosting_access_config_error";
-  readonly field: "filesOrigin" | "appOrigin" | "trustedBrowserOrigins";
+  readonly field: "filesOrigin" | "trustedBrowserOrigins";
   readonly message: string;
 }
 
@@ -127,20 +125,6 @@ export function createHostingAccessPolicy(
 ): ResultType<HostingAccessPolicy, HostingAccessConfigError> {
   const files = parseOrigin(config.filesOrigin, "filesOrigin");
   if (files.isErr()) return err(files.error);
-  let app: ParsedOrigin | null = null;
-  if (config.appOrigin !== undefined) {
-    const parsed = parseOrigin(config.appOrigin, "appOrigin");
-    if (parsed.isErr()) return err(parsed.error);
-    app = parsed.value;
-  }
-  if (app !== null && app.hostname === files.value.hostname) {
-    return err({
-      type: "hosting_access_config_error",
-      field: "appOrigin",
-      message: "appOrigin and filesOrigin must use different hostnames",
-    });
-  }
-
   const trusted = new Set<string>();
   for (const value of config.trustedBrowserOrigins ?? []) {
     const parsed = parseOrigin(value, "trustedBrowserOrigins");
@@ -174,7 +158,7 @@ export function createHostingAccessPolicy(
           : { kind: "isolated_not_found" };
       }
 
-      if (host.hostname === files.value.hostname || (app !== null && host.host !== app.host)) {
+      if (host.hostname === files.value.hostname) {
         return { kind: "reject", reason: "unknown_host" };
       }
       if (path === "/s" || path.startsWith("/s/")) {
@@ -185,7 +169,7 @@ export function createHostingAccessPolicy(
         if (request.origin !== undefined) {
           const origin = parseOrigin(request.origin, "trustedBrowserOrigins");
           if (origin.isErr()) return { kind: "reject", reason: "untrusted_origin" };
-          const expected = app?.origin ?? `${files.value.protocol}//${host.host}`;
+          const expected = `${files.value.protocol}//${host.host}`;
           if (origin.value.origin !== expected && !trusted.has(origin.value.origin)) {
             return { kind: "reject", reason: "untrusted_origin" };
           }

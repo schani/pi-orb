@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -450,7 +449,6 @@ async function main(): Promise<void> {
       bytes: hostedBytes,
       uploadLeaseMs: HOSTING_TRANSFER_TIMEOUT_MS + 30_000,
       maxFileBytes: HOSTING_MAX_FILE_BYTES,
-      nextClaimOwner: () => randomUUID(),
     },
   };
 

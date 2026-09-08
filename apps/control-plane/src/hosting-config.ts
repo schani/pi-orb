@@ -28,9 +28,16 @@ export function createConfiguredHostingAccessPolicy(
 const invalid = (message: string): ResultType<never, HostingConfigurationError> =>
   err({ type: "hosting_configuration_error", message });
 const parseOrigin = Result.fromThrowable(
-  (value: string) => new URL(value).origin,
+  (value: string) => new URL(value),
   () => "invalid origin",
 );
+const isExactOrigin = (url: URL): boolean =>
+  (url.protocol === "http:" || url.protocol === "https:") &&
+  url.username === "" &&
+  url.password === "" &&
+  url.pathname === "/" &&
+  url.search === "" &&
+  url.hash === "";
 
 export function readHostingConfiguration(
   environment: Readonly<Record<string, string | undefined>>,
@@ -51,27 +58,34 @@ export function readHostingConfiguration(
   const trustedBrowserOrigins =
     role === "all" ? ["http://localhost:5173", "http://127.0.0.1:5173"] : [];
   const policy = createHostingAccessPolicy({
-    appOrigin: appValue,
     filesOrigin: filesValue,
     trustedBrowserOrigins,
   });
   if (policy.isErr()) return invalid(policy.error.message);
   const appOrigin = parseOrigin(appValue);
   const filesOrigin = parseOrigin(filesValue);
-  if (appOrigin.isErr() || filesOrigin.isErr()) return invalid("hosting origins are invalid");
+  if (
+    appOrigin.isErr() ||
+    filesOrigin.isErr() ||
+    !isExactOrigin(appOrigin.value) ||
+    !isExactOrigin(filesOrigin.value)
+  )
+    return invalid("hosting origins are invalid");
+  if (appOrigin.value.hostname === filesOrigin.value.hostname)
+    return invalid("appOrigin and filesOrigin must use different hostnames");
   if (kind === "gcs") {
     const bucket = environment["PI_ORB_HOSTING_BUCKET"] ?? "";
     if (bucket === "") return invalid("PI_ORB_HOSTING_BUCKET is required for GCS hosting");
     return ok({
-      appOrigin: appOrigin.value,
-      filesOrigin: filesOrigin.value,
+      appOrigin: appOrigin.value.origin,
+      filesOrigin: filesOrigin.value.origin,
       store: { bucket, kind },
       trustedBrowserOrigins,
     });
   }
   return ok({
-    appOrigin: appOrigin.value,
-    filesOrigin: filesOrigin.value,
+    appOrigin: appOrigin.value.origin,
+    filesOrigin: filesOrigin.value.origin,
     store: {
       kind,
       root: environment["PI_ORB_HOSTING_ROOT"] ?? join(home, ".pi-orb", "hosting"),

@@ -541,7 +541,6 @@ export async function hostingCleanupOnce(
         task,
         deps.hosting,
         {
-          owner: deps.hosting.nextClaimOwner(task),
           leaseMs: deps.hosting.uploadLeaseMs,
           limit: 100,
         },

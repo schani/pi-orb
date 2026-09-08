@@ -90,7 +90,6 @@ export interface HostingStore {
     task: SimulationTask,
     params: {
       readonly operationId: string;
-      readonly owner: string;
       readonly now: number;
       readonly leaseUntil: number;
     },
@@ -147,7 +146,6 @@ export interface HostingStore {
     task: SimulationTask,
     params: {
       readonly orbId?: string;
-      readonly owner: string;
       readonly now: number;
       readonly leaseUntil: number;
       readonly limit: number;
@@ -180,6 +178,4 @@ export interface HostingDeps {
   readonly maxFileBytes?: number;
   /** At least the enclosing upload deadline; adapters may renew during long writes. */
   readonly uploadLeaseMs: number;
-  /** Injected restart/process-local claim identity; never used as durable publication identity. */
-  readonly nextClaimOwner: (task: SimulationTask) => string;
 }

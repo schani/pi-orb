@@ -43,6 +43,22 @@ describe("hosting boot configuration", () => {
         "/h",
       ).isErr(),
     ).toBe(true);
+    for (const appOrigin of [
+      "ftp://app.example",
+      "https://user@app.example",
+      "https://app.example/path",
+      "https://app.example?query=yes",
+      "https://app.example/#fragment",
+    ]) {
+      expect(
+        readHostingConfiguration(
+          { ...split, PI_ORB_APP_ORIGIN: appOrigin },
+          "browser",
+          7100,
+          "/h",
+        ).isErr(),
+      ).toBe(true);
+    }
     expect(
       readHostingConfiguration(
         { ...split, PI_ORB_HOSTING_BUCKET: "" },
@@ -62,6 +78,21 @@ describe("hosting boot configuration", () => {
     expect(
       readHostingConfiguration(
         { ...split, PI_ORB_HOSTING_ORIGIN: "https://app.example" },
+        "browser",
+        7100,
+        "/h",
+      ).isErr(),
+    ).toBe(true);
+  });
+
+  it("requires different hostnames, not merely different ports", () => {
+    expect(
+      readHostingConfiguration(
+        {
+          ...split,
+          PI_ORB_APP_ORIGIN: "https://app.example:443",
+          PI_ORB_HOSTING_ORIGIN: "https://app.example:8443",
+        },
         "browser",
         7100,
         "/h",

@@ -177,6 +177,17 @@ and end-to-end coverage for restart, archive retention, exact replacement, and d
 The first implementation publishes one file at a time; question 51 keeps atomic folder releases
 open rather than making them implicit in this contract.
 
+## Claim and access boundaries (decided 2026-09-07)
+
+Upload and cleanup claims use lease expiry and monotonically increasing epochs to fence stale
+workers. Authorization and claim checks stay inside the transaction that mutates their records;
+shared lookup helpers preserve the existing lock order. Access policy compares browser origins
+against the request host so application service aliases work, while configuration validates that
+the application and files origins use distinct hostnames.
+
+The simplification retains GCS and filesystem storage and all behavioral and DST coverage.
+Question 56 tracks a separate, deferred storage alternative.
+
 ## Verification
 
 The implementation follows this plan and its focused unit, adapter, DST, HTTP, and frontend tests

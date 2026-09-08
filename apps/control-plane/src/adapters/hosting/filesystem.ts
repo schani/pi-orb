@@ -115,6 +115,18 @@ export function createFilesystemHostedByteStore(
       return Promise.reject(error);
     }
   };
+  const readCommitted = async (s: FileSession): Promise<StoredHostedObject | null> => {
+    const stored = await readStored(objectDir(s));
+    if (stored !== null) {
+      await persistCommitted(s, stored);
+      return stored;
+    }
+    try {
+      return JSON.parse(await readFile(committedPath(s), "utf8")) as StoredHostedObject;
+    } catch (error) {
+      return isMissing(error) ? null : Promise.reject(error);
+    }
+  };
   return {
     begin: (_task, key, expected, context) =>
       flatten(
@@ -218,18 +230,9 @@ export function createFilesystemHostedByteStore(
           const decoded = decode(sessionId);
           if (decoded.isErr()) return err(decoded.error);
           const s = decoded.value;
-          const stored = await readStored(objectDir(s));
+          const stored = await readCommitted(s);
           if (stored !== null) {
-            await persistCommitted(s, stored);
             return ok({ type: "committed" as const, object: stored });
-          }
-          try {
-            const object = JSON.parse(
-              await readFile(committedPath(s), "utf8"),
-            ) as StoredHostedObject;
-            return ok({ type: "committed" as const, object });
-          } catch (error) {
-            if (!isMissing(error)) return Promise.reject(error);
           }
           try {
             await readFile(join(activeDir(s), "session.json"));
@@ -257,18 +260,9 @@ export function createFilesystemHostedByteStore(
             await remove(join(cancelledDir(s), "data"));
             return ok({ type: "cancelled" as const });
           }
-          const stored = await readStored(objectDir(s));
+          const stored = await readCommitted(s);
           if (stored !== null) {
-            await persistCommitted(s, stored);
             return ok({ type: "committed" as const, object: stored });
-          }
-          try {
-            const object = JSON.parse(
-              await readFile(committedPath(s), "utf8"),
-            ) as StoredHostedObject;
-            return ok({ type: "committed" as const, object });
-          } catch (error) {
-            if (!isMissing(error)) return Promise.reject(error);
           }
           try {
             await readFile(join(cancelledDir(s), "session.json"));

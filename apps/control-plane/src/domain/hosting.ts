@@ -68,10 +68,8 @@ export function publishHostedFile(
       const closed = await source.close(task);
       return closed.isErr() ? err(closed.error) : ok(operation.publishedFile);
     }
-    const owner = deps.nextClaimOwner(task);
     let claimed = await deps.store.claimUpload(task, {
       operationId: operation.id,
-      owner,
       now: task.wallNow(),
       leaseUntil: task.wallNow() + deps.uploadLeaseMs,
     });
@@ -123,7 +121,6 @@ export function publishHostedFile(
       }
       claimed = await deps.store.claimUpload(task, {
         operationId: operation.id,
-        owner,
         now: task.wallNow(),
         leaseUntil: task.wallNow() + deps.uploadLeaseMs,
       });
@@ -239,25 +236,6 @@ export function openHostedFileSnapshot(
   return new ResultAsync(run());
 }
 
-export function openHostedFile(
-  task: SimulationTask,
-  deps: HostingDeps,
-  orbId: string,
-  path: string,
-  context: OperationContext,
-) {
-  const run = async (): Promise<
-    Result<{ file: HostedFile; source: HostedByteSource }, HostingError>
-  > => {
-    const resolved = await resolveHostedFile(task, deps, orbId, path);
-    if (resolved.isErr()) return err(resolved.error);
-    if (resolved.value === null)
-      return err({ type: "hosting_not_found", message: "hosted file does not exist" });
-    return await openHostedFileSnapshot(task, deps, resolved.value, context);
-  };
-  return new ResultAsync(run());
-}
-
 export function removeHostedFile(
   task: SimulationTask,
   deps: HostingDeps,
@@ -285,7 +263,7 @@ export function cleanupHostedFiles(
       const pass = await cleanupRetiredHostedFiles(
         task,
         deps,
-        { owner: deps.nextClaimOwner(task), leaseMs: deps.uploadLeaseMs, limit: 100, orbId },
+        { leaseMs: deps.uploadLeaseMs, limit: 100, orbId },
         context,
       );
       if (pass.isErr()) return err(pass.error);
@@ -301,7 +279,6 @@ export function cleanupRetiredHostedFiles(
   task: SimulationTask,
   deps: HostingDeps,
   params: {
-    readonly owner: string;
     readonly leaseMs: number;
     readonly limit: number;
     readonly orbId?: string;
@@ -311,7 +288,6 @@ export function cleanupRetiredHostedFiles(
   const run = async (): Promise<Result<number, HostingError>> => {
     const claimed = await deps.store.claimCleanup(task, {
       ...(params.orbId === undefined ? {} : { orbId: params.orbId }),
-      owner: params.owner,
       now: task.wallNow(),
       leaseUntil: task.wallNow() + params.leaseMs,
       limit: params.limit,

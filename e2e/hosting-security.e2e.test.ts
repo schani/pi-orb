@@ -58,7 +58,7 @@ describe("hosted-file browser origin isolation", () => {
       }),
     );
     app = Fastify();
-    const policy = createHostingAccessPolicy({ appOrigin, filesOrigin });
+    const policy = createHostingAccessPolicy({ filesOrigin });
     expect(policy.isOk()).toBe(true);
     if (policy.isErr()) return;
     registerHostingAccessGuard(app, policy.value, appOrigin);

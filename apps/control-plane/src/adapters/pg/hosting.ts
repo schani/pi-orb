@@ -197,21 +197,31 @@ export class PostgreSQLHostingStore implements HostingStore {
     return ok(undefined);
   }
 
-  private async authorizeOperation(
+  private async lockAuthorizedOperation(
     query: Query,
     operationId: string,
-  ): Promise<Result<void, HostingError>> {
+  ): Promise<Result<PgRow, HostingError>> {
     const selected = await query("SELECT * FROM hosting_operations WHERE id = $1", [operationId]);
     if (selected.isErr()) return err(storage(selected.error));
     const row = selected.value.rows[0];
     if (row === undefined) return err(conflict("upload operation does not exist"));
-    return this.authorize(query, mapOperation(row).request, "running");
+    const auth = await this.authorize(query, mapOperation(row).request, "running");
+    if (auth.isErr()) return err(auth.error);
+    const locked = await query("SELECT * FROM hosting_operations WHERE id = $1 FOR UPDATE", [
+      operationId,
+    ]);
+    if (locked.isErr()) return err(storage(locked.error));
+    const lockedRow = locked.value.rows[0];
+    return lockedRow === undefined
+      ? err(conflict("upload operation does not exist"))
+      : ok(lockedRow);
   }
 
-  private async authorizeAttempt(
+  private async lockAuthorizedAttempt(
     query: Query,
     attemptId: string,
-  ): Promise<Result<void, HostingError>> {
+    epoch: number,
+  ): Promise<Result<PgRow, HostingError>> {
     const selected = await query(
       `SELECT o.* FROM hosting_attempts a
          JOIN hosting_operations o ON o.id = a.operation_id WHERE a.id = $1`,
@@ -220,7 +230,23 @@ export class PostgreSQLHostingStore implements HostingStore {
     if (selected.isErr()) return err(storage(selected.error));
     const row = selected.value.rows[0];
     if (row === undefined) return err(conflict("upload attempt does not exist"));
-    return this.authorize(query, mapOperation(row).request, "running");
+    const auth = await this.authorize(query, mapOperation(row).request, "running");
+    if (auth.isErr()) return err(auth.error);
+    const locked = await query("SELECT * FROM hosting_attempts WHERE id = $1 FOR UPDATE", [
+      attemptId,
+    ]);
+    if (locked.isErr()) return err(storage(locked.error));
+    const lockedRow = locked.value.rows[0];
+    if (lockedRow === undefined || Number(lockedRow["epoch"]) !== epoch) {
+      return err(conflict("upload attempt claim is stale"));
+    }
+    const cleanup = await query("SELECT 1 FROM hosting_cleanup_items WHERE attempt_id = $1", [
+      attemptId,
+    ]);
+    if (cleanup.isErr()) return err(storage(cleanup.error));
+    return cleanup.value.rows.length > 0
+      ? err(conflict("upload attempt is being cleaned"))
+      : ok(lockedRow);
   }
 
   reserveUpload(
@@ -269,7 +295,6 @@ export class PostgreSQLHostingStore implements HostingStore {
     _task: SimulationTask,
     params: {
       operationId: string;
-      owner: string;
       now: number;
       leaseUntil: number;
     },
@@ -280,15 +305,9 @@ export class PostgreSQLHostingStore implements HostingStore {
     HostingError
   > {
     return this.transaction(async (query) => {
-      const auth = await this.authorizeOperation(query, params.operationId);
-      if (auth.isErr()) return err(auth.error);
-      const selected = await query("SELECT * FROM hosting_operations WHERE id = $1 FOR UPDATE", [
-        params.operationId,
-      ]);
-      if (selected.isErr()) return err(storage(selected.error));
-      const operationRow = selected.value.rows[0];
-      if (operationRow === undefined) return err(conflict("upload operation does not exist"));
-      const operation = mapOperation(operationRow);
+      const locked = await this.lockAuthorizedOperation(query, params.operationId);
+      if (locked.isErr()) return err(locked.error);
+      const operation = mapOperation(locked.value);
       if (operation.publishedFile !== null) {
         return ok({ type: "published" as const, file: operation.publishedFile });
       }
@@ -306,9 +325,9 @@ export class PostgreSQLHostingStore implements HostingStore {
         if (cleanup.value.rows.length > 0) return ok({ type: "busy" as const });
         if (toMs(current["claim_until"]) > params.now) return ok({ type: "busy" as const });
         const reclaimed = await query(
-          `UPDATE hosting_attempts SET epoch = epoch + 1, claim_owner = $2,
-             claim_until = $3, updated_at = $4 WHERE id = $1 RETURNING *`,
-          [String(current["id"]), params.owner, new Date(params.leaseUntil), new Date(params.now)],
+          `UPDATE hosting_attempts SET epoch = epoch + 1,
+             claim_until = $2, updated_at = $3 WHERE id = $1 RETURNING *`,
+          [String(current["id"]), new Date(params.leaseUntil), new Date(params.now)],
         );
         return reclaimed.isErr()
           ? err(storage(reclaimed.error))
@@ -329,13 +348,12 @@ export class PostgreSQLHostingStore implements HostingStore {
       const attemptId = `${operation.id}:attempt:${number}`;
       const inserted = await query(
         `INSERT INTO hosting_attempts
-           (id, operation_id, object_key, epoch, state, claim_owner, claim_until, updated_at)
-         VALUES ($1, $2, $3, 1, 'beginning', $4, $5, $6) RETURNING *`,
+           (id, operation_id, object_key, epoch, state, claim_until, updated_at)
+         VALUES ($1, $2, $3, 1, 'beginning', $4, $5) RETURNING *`,
         [
           attemptId,
           operation.id,
           `${operation.request.orbId}/operations/${operation.request.requestId}/attempt-${number}`,
-          params.owner,
           new Date(params.leaseUntil),
           new Date(params.now),
         ],
@@ -378,21 +396,9 @@ export class PostgreSQLHostingStore implements HostingStore {
     sessionId: string,
   ): ResultAsync<HostingAttempt, HostingError> {
     return this.transaction(async (query) => {
-      const auth = await this.authorizeAttempt(query, attemptId);
-      if (auth.isErr()) return err(auth.error);
-      const selected = await query("SELECT * FROM hosting_attempts WHERE id = $1 FOR UPDATE", [
-        attemptId,
-      ]);
-      if (selected.isErr()) return err(storage(selected.error));
-      const row = selected.value.rows[0];
-      if (row === undefined || Number(row["epoch"]) !== epoch) {
-        return err(conflict("upload attempt claim is stale"));
-      }
-      const cleanup = await query("SELECT 1 FROM hosting_cleanup_items WHERE attempt_id = $1", [
-        attemptId,
-      ]);
-      if (cleanup.isErr()) return err(storage(cleanup.error));
-      if (cleanup.value.rows.length > 0) return err(conflict("upload attempt is being cleaned"));
+      const locked = await this.lockAuthorizedAttempt(query, attemptId, epoch);
+      if (locked.isErr()) return err(locked.error);
+      const row = locked.value;
       if (String(row["state"]) !== "beginning") {
         return String(row["session_id"]) === sessionId
           ? ok(mapAttempt(row))
@@ -416,21 +422,9 @@ export class PostgreSQLHostingStore implements HostingStore {
     object: StoredHostedObject,
   ): ResultAsync<HostingAttempt, HostingError> {
     return this.transaction(async (query) => {
-      const auth = await this.authorizeAttempt(query, attemptId);
-      if (auth.isErr()) return err(auth.error);
-      const selected = await query("SELECT * FROM hosting_attempts WHERE id = $1 FOR UPDATE", [
-        attemptId,
-      ]);
-      if (selected.isErr()) return err(storage(selected.error));
-      const row = selected.value.rows[0];
-      if (row === undefined || Number(row["epoch"]) !== epoch) {
-        return err(conflict("upload attempt claim is stale"));
-      }
-      const cleanup = await query("SELECT 1 FROM hosting_cleanup_items WHERE attempt_id = $1", [
-        attemptId,
-      ]);
-      if (cleanup.isErr()) return err(storage(cleanup.error));
-      if (cleanup.value.rows.length > 0) return err(conflict("upload attempt is being cleaned"));
+      const locked = await this.lockAuthorizedAttempt(query, attemptId, epoch);
+      if (locked.isErr()) return err(locked.error);
+      const row = locked.value;
       if (String(row["state"]) === "committed") {
         const current = mapAttempt(row).committedObject;
         return current !== null &&
@@ -463,15 +457,9 @@ export class PostgreSQLHostingStore implements HostingStore {
     now: number,
   ): ResultAsync<HostedFile, HostingError> {
     return this.transaction(async (query) => {
-      const auth = await this.authorizeOperation(query, operationId);
-      if (auth.isErr()) return err(auth.error);
-      const selected = await query("SELECT * FROM hosting_operations WHERE id = $1 FOR UPDATE", [
-        operationId,
-      ]);
-      if (selected.isErr()) return err(storage(selected.error));
-      const operationRow = selected.value.rows[0];
-      if (operationRow === undefined) return err(conflict("upload operation does not exist"));
-      const operation = mapOperation(operationRow);
+      const locked = await this.lockAuthorizedOperation(query, operationId);
+      if (locked.isErr()) return err(locked.error);
+      const operation = mapOperation(locked.value);
       if (operation.publishedFile !== null) return ok(operation.publishedFile);
       const selectedAttempt = await query(
         "SELECT * FROM hosting_attempts WHERE id = $1 AND operation_id = $2 FOR UPDATE",
@@ -706,7 +694,7 @@ export class PostgreSQLHostingStore implements HostingStore {
 
   claimCleanup(
     _task: SimulationTask,
-    params: { orbId?: string; owner: string; now: number; leaseUntil: number; limit: number },
+    params: { orbId?: string; now: number; leaseUntil: number; limit: number },
   ): ResultAsync<HostingCleanupClaim[], HostingError> {
     return this.transaction(async (query) => {
       const candidates = await query(
@@ -762,9 +750,9 @@ export class PostgreSQLHostingStore implements HostingStore {
       const claims: HostingCleanupClaim[] = [];
       for (const row of selected.value.rows) {
         const updated = await query(
-          `UPDATE hosting_cleanup_items SET claim_owner = $2, claim_until = $3,
+          `UPDATE hosting_cleanup_items SET claim_until = $2,
              claim_epoch = claim_epoch + 1 WHERE id = $1 RETURNING *`,
-          [String(row["id"]), params.owner, new Date(params.leaseUntil)],
+          [String(row["id"]), new Date(params.leaseUntil)],
         );
         if (updated.isErr()) return err(storage(updated.error));
         const claimed = updated.value.rows[0] as PgRow;

@@ -4,6 +4,12 @@
 # is still settling; revisit when it is stable.
 
 locals {
+  hosting_env = {
+    PI_ORB_HOSTING_STORE  = "gcs"
+    PI_ORB_HOSTING_BUCKET = google_storage_bucket.hosting.name
+    PI_ORB_HOSTING_ORIGIN = local.hosting_origin
+    PI_ORB_APP_ORIGIN     = local.app_origin
+  }
   shared_env = merge(
     {
       PI_ORB_ROLE_UNUSED                  = "per-service"
@@ -64,21 +70,12 @@ resource "google_cloud_run_v2_service" "runtime" {
         name  = "PI_ORB_OIDC_ISSUER_URL"
         value = local.oidc_issuer_url
       }
-      env {
-        name  = "PI_ORB_HOSTING_STORE"
-        value = "gcs"
-      }
-      env {
-        name  = "PI_ORB_HOSTING_BUCKET"
-        value = google_storage_bucket.hosting.name
-      }
-      env {
-        name  = "PI_ORB_HOSTING_ORIGIN"
-        value = local.hosting_origin
-      }
-      env {
-        name  = "PI_ORB_APP_ORIGIN"
-        value = local.app_origin
+      dynamic "env" {
+        for_each = local.hosting_env
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
       env {
         name = "DATABASE_URL"
@@ -157,21 +154,12 @@ resource "google_cloud_run_v2_service" "browser" {
         name  = "PI_ORB_BROKER_URL"
         value = google_cloud_run_v2_service.runtime.uri
       }
-      env {
-        name  = "PI_ORB_HOSTING_STORE"
-        value = "gcs"
-      }
-      env {
-        name  = "PI_ORB_HOSTING_BUCKET"
-        value = google_storage_bucket.hosting.name
-      }
-      env {
-        name  = "PI_ORB_HOSTING_ORIGIN"
-        value = local.hosting_origin
-      }
-      env {
-        name  = "PI_ORB_APP_ORIGIN"
-        value = local.app_origin
+      dynamic "env" {
+        for_each = local.hosting_env
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
       env {
         name = "DATABASE_URL"
@@ -265,21 +253,12 @@ resource "google_cloud_run_v2_service" "ops" {
         name  = "PI_ORB_ROLE"
         value = "ops"
       }
-      env {
-        name  = "PI_ORB_HOSTING_STORE"
-        value = "gcs"
-      }
-      env {
-        name  = "PI_ORB_HOSTING_BUCKET"
-        value = google_storage_bucket.hosting.name
-      }
-      env {
-        name  = "PI_ORB_HOSTING_ORIGIN"
-        value = local.hosting_origin
-      }
-      env {
-        name  = "PI_ORB_APP_ORIGIN"
-        value = local.app_origin
+      dynamic "env" {
+        for_each = local.hosting_env
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
       env {
         name = "DATABASE_URL"

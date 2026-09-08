@@ -128,13 +128,11 @@ export function hostingStoreContractTests(
       const [left, right] = await Promise.all([
         store.claimUpload(task, {
           operationId: operation.id,
-          owner: "worker-a",
           now: 1_000,
           leaseUntil: 2_000,
         }),
         store.claimUpload(task, {
           operationId: operation.id,
-          owner: "worker-b",
           now: 1_000,
           leaseUntil: 2_000,
         }),
@@ -149,7 +147,6 @@ export function hostingStoreContractTests(
         (
           await store.claimUpload(task, {
             operationId: operation.id,
-            owner: "worker-a",
             now: 1_001,
             leaseUntil: 2_001,
           })
@@ -158,7 +155,6 @@ export function hostingStoreContractTests(
 
       const reclaimed = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "worker-c",
         now: 2_001,
         leaseUntil: 3_000,
       });
@@ -178,7 +174,6 @@ export function hostingStoreContractTests(
       const operation = (await store.reserveUpload(task, request("request-a")))._unsafeUnwrap();
       const first = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "worker-a",
         now: 1_000,
         leaseUntil: 2_000,
       });
@@ -193,7 +188,6 @@ export function hostingStoreContractTests(
 
       const takeover = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "worker-b",
         now: 2_001,
         leaseUntil: 3_000,
       });
@@ -217,7 +211,6 @@ export function hostingStoreContractTests(
 
       const next = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "worker-c",
         now: 3_001,
         leaseUntil: 4_000,
       });
@@ -231,7 +224,6 @@ export function hostingStoreContractTests(
       const operation = (await store.reserveUpload(task, request("request-a")))._unsafeUnwrap();
       const upload = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "paused-uploader",
         now: 1_000,
         leaseUntil: 2_000,
       });
@@ -239,7 +231,6 @@ export function hostingStoreContractTests(
       if (upload.isErr() || upload.value.type !== "claimed") return;
 
       const cleanup = await store.claimCleanup(task, {
-        owner: "cleaner",
         now: 2_001,
         leaseUntil: 3_000,
         limit: 10,
@@ -260,7 +251,6 @@ export function hostingStoreContractTests(
       const operation = (await store.reserveUpload(task, request("request-a")))._unsafeUnwrap();
       const upload = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "paused-uploader",
         now: 1_000,
         leaseUntil: 2_000,
       });
@@ -273,7 +263,6 @@ export function hostingStoreContractTests(
         "session",
       );
       await store.claimCleanup(task, {
-        owner: "cleaner",
         now: 2_001,
         leaseUntil: 3_000,
         limit: 10,
@@ -282,7 +271,6 @@ export function hostingStoreContractTests(
         (
           await store.claimUpload(task, {
             operationId: operation.id,
-            owner: "new-uploader",
             now: 2_002,
             leaseUntil: 3_002,
           })
@@ -295,7 +283,6 @@ export function hostingStoreContractTests(
         const operation = (await store.reserveUpload(task, request(requestId)))._unsafeUnwrap();
         const claim = await store.claimUpload(task, {
           operationId: operation.id,
-          owner: requestId,
           now,
           leaseUntil: now + 1_000,
         });
@@ -326,7 +313,6 @@ export function hostingStoreContractTests(
         (await store.reserveUpload(task, request("request-a")))._unsafeUnwrap().publishedFile,
       ).toEqual(first);
       const cleanup = await store.claimCleanup(task, {
-        owner: "cleaner",
         now: 3_000,
         leaseUntil: 4_000,
         limit: 10,
@@ -341,7 +327,6 @@ export function hostingStoreContractTests(
       const operation = (await store.reserveUpload(task, request("publish-fence")))._unsafeUnwrap();
       const claimed = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "worker",
         now: 1_000,
         leaseUntil: 2_000,
       });
@@ -370,7 +355,6 @@ export function hostingStoreContractTests(
       const operation = (await store.reserveUpload(task, request("request-a")))._unsafeUnwrap();
       const claim = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "worker",
         now: 1_000,
         leaseUntil: 2_000,
       });
@@ -413,7 +397,6 @@ export function hostingStoreContractTests(
       const operation = (await store.reserveUpload(task, request("request-a")))._unsafeUnwrap();
       const claim = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "uploader",
         now: 1_000,
         leaseUntil: 2_000,
       });
@@ -442,7 +425,6 @@ export function hostingStoreContractTests(
       const first = (
         await store.claimCleanup(task, {
           orbId: ORB,
-          owner: "cleaner-a",
           now: 3_000,
           leaseUntil: 4_000,
           limit: 10,
@@ -454,7 +436,6 @@ export function hostingStoreContractTests(
         (
           await store.claimCleanup(task, {
             orbId: ORB,
-            owner: "cleaner-b",
             now: 3_000,
             leaseUntil: 4_000,
             limit: 10,
@@ -501,7 +482,6 @@ export function hostingStoreContractTests(
       const operation = (await store.reserveUpload(task, request("request-lock")))._unsafeUnwrap();
       const claimed = await store.claimUpload(task, {
         operationId: operation.id,
-        owner: "uploader",
         now: 1_000,
         leaseUntil: 2_000,
       });
@@ -518,7 +498,6 @@ export function hostingStoreContractTests(
       const items = (
         await store.claimCleanup(task, {
           orbId: ORB,
-          owner: "finisher",
           now: 3_000,
           leaseUntil: 4_000,
           limit: 10,
@@ -530,7 +509,6 @@ export function hostingStoreContractTests(
       const [finished, swept] = await Promise.all([
         store.finishClaimedCleanup(task, item.id, item.epoch),
         store.claimCleanup(task, {
-          owner: "sweeper",
           now: 3_001,
           leaseUntil: 4_001,
           limit: 10,

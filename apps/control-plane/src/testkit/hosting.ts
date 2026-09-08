@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ApplicationFailure, type SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, ResultAsync } from "neverthrow";
+import { openHostedFileSnapshot, resolveHostedFile } from "../domain/hosting.ts";
 import type {
   HostedByteSource,
   HostedByteStore,
@@ -17,11 +18,29 @@ import type {
   HostingUploadRequest,
   StoredHostedObject,
 } from "../domain/hosting-types.ts";
+import type { OperationContext } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 
 const failure = (message: string): HostingError => ({ type: "hosting_retryable", message });
 const sameRef = (a: HostedObjectRef, b: HostedObjectRef) =>
   a.key === b.key && a.generation === b.generation;
+
+export function openHostedFile(
+  task: SimulationTask,
+  deps: HostingDeps,
+  orbId: string,
+  path: string,
+  context: OperationContext,
+) {
+  const run = async () => {
+    const resolved = await resolveHostedFile(task, deps, orbId, path);
+    if (resolved.isErr()) return err(resolved.error);
+    if (resolved.value === null)
+      return err({ type: "hosting_not_found" as const, message: "hosted file does not exist" });
+    return await openHostedFileSnapshot(task, deps, resolved.value, context);
+  };
+  return new ResultAsync(run());
+}
 
 export function source(text: string): HostedByteSource & { pulled(): number; closed(): number } {
   const chunks = [new TextEncoder().encode(text)];
@@ -239,7 +258,7 @@ class FakeStore implements HostingStore {
   observe: () => void = () => undefined;
   readonly operations = new Map<string, HostingOperation>();
   readonly attempts = new Map<string, HostingAttempt>();
-  readonly attemptOwners = new Map<string, { owner: string; leaseUntil: number }>();
+  readonly attemptLeases = new Map<string, number>();
   readonly files = new Map<string, HostedFile>();
   readonly cleanup = new Map<string, HostingCleanupItem>();
   readonly cleanupClaims = new Map<string, { epoch: number; leaseUntil: number }>();
@@ -335,7 +354,7 @@ class FakeStore implements HostingStore {
   }
   claimUpload(
     _task: SimulationTask,
-    params: { operationId: string; owner: string; now: number; leaseUntil: number },
+    params: { operationId: string; now: number; leaseUntil: number },
   ) {
     const operation = this.operations.get(params.operationId);
     if ([...this.cleanupOperations.values()].includes(params.operationId))
@@ -343,8 +362,8 @@ class FakeStore implements HostingStore {
     if (operation?.publishedFile !== null && operation?.publishedFile !== undefined)
       return okAsync({ type: "published" as const, file: operation.publishedFile });
     let attempt = [...this.attempts.values()].find((a) => a.operationId === params.operationId);
-    const priorOwner = attempt === undefined ? undefined : this.attemptOwners.get(attempt.id);
-    if (attempt !== undefined && priorOwner !== undefined && priorOwner.leaseUntil > params.now)
+    const priorLease = attempt === undefined ? undefined : this.attemptLeases.get(attempt.id);
+    if (attempt !== undefined && priorLease !== undefined && priorLease > params.now)
       return okAsync({ type: "busy" as const });
     const takeover = attempt !== undefined;
     if (takeover && attempt !== undefined) {
@@ -364,7 +383,7 @@ class FakeStore implements HostingStore {
       };
       this.attempts.set(attempt.id, attempt);
     }
-    this.attemptOwners.set(attempt.id, { owner: params.owner, leaseUntil: params.leaseUntil });
+    this.attemptLeases.set(attempt.id, params.leaseUntil);
     return okAsync({ type: "claimed" as const, attempt, takeover });
   }
   abandonEmptyAttempt(_task: SimulationTask, id: string, epoch: number) {
@@ -497,7 +516,7 @@ class FakeStore implements HostingStore {
         this.operations.set(id, next);
         this.events.push("published");
         this.attempts.delete(attemptId);
-        this.attemptOwners.delete(attemptId);
+        this.attemptLeases.delete(attemptId);
         this.observe();
         await task.failpoint(FAILPOINTS.hostingPublishAfter, id);
         return file;
@@ -591,11 +610,11 @@ class FakeStore implements HostingStore {
   }
   claimCleanup(
     _task: SimulationTask,
-    params: { orbId?: string; owner: string; now: number; leaseUntil: number; limit: number },
+    params: { orbId?: string; now: number; leaseUntil: number; limit: number },
   ) {
     for (const attempt of this.attempts.values()) {
-      const owner = this.attemptOwners.get(attempt.id);
-      if (owner !== undefined && owner.leaseUntil > params.now) continue;
+      const lease = this.attemptLeases.get(attempt.id);
+      if (lease !== undefined && lease > params.now) continue;
       const operation = this.operations.get(attempt.operationId);
       if (
         operation === undefined ||
@@ -612,7 +631,7 @@ class FakeStore implements HostingStore {
       });
       this.cleanupOperations.set(id, attempt.operationId);
       this.attempts.delete(attempt.id);
-      this.attemptOwners.delete(attempt.id);
+      this.attemptLeases.delete(attempt.id);
     }
     const claimed = [];
     for (const item of this.cleanup.values()) {
@@ -741,7 +760,6 @@ export function makeHostingHarness(
       .update(requestId === "request-b" ? "bravo" : "alpha")
       .digest("hex"),
   });
-  let claimSequence = 0;
   const observeOwnership = () => {
     const owners = new Map<string, number>();
     const add = (ref: HostedObjectRef | null | undefined) => {
@@ -793,7 +811,6 @@ export function makeHostingHarness(
       store,
       bytes,
       uploadLeaseMs: options.uploadLeaseMs ?? 60_000,
-      nextClaimOwner: () => `claim-${++claimSequence}`,
     } satisfies HostingDeps,
     request,
     current: (path: string) => store.files.get(`${orbId}:${path}`),
