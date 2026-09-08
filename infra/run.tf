@@ -62,6 +62,22 @@ resource "google_cloud_run_v2_service" "runtime" {
         value = local.oidc_issuer_url
       }
       env {
+        name  = "PI_ORB_HOSTING_STORE"
+        value = "gcs"
+      }
+      env {
+        name  = "PI_ORB_HOSTING_BUCKET"
+        value = google_storage_bucket.hosting.name
+      }
+      env {
+        name  = "PI_ORB_HOSTING_ORIGIN"
+        value = local.hosting_origin
+      }
+      env {
+        name  = "PI_ORB_APP_ORIGIN"
+        value = local.app_origin
+      }
+      env {
         name = "DATABASE_URL"
         value_source {
           secret_key_ref {
@@ -96,16 +112,23 @@ resource "google_cloud_run_v2_service" "runtime" {
     }
   }
   depends_on = [
+    google_storage_bucket_iam_member.control_plane_hosting_objects,
     google_secret_manager_secret_iam_member.cp_reads_database_url,
     google_secret_manager_secret_version.database_url,
   ]
 }
 
 resource "google_cloud_run_v2_service" "browser" {
-  name                = "pi-orb"
+  name                = local.browser_service_name
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
+
+  traffic {
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+    percent = 100
+    tag     = "files"
+  }
 
   template {
     service_account = google_service_account.control_plane.email
@@ -130,6 +153,22 @@ resource "google_cloud_run_v2_service" "browser" {
       env {
         name  = "PI_ORB_BROKER_URL"
         value = google_cloud_run_v2_service.runtime.uri
+      }
+      env {
+        name  = "PI_ORB_HOSTING_STORE"
+        value = "gcs"
+      }
+      env {
+        name  = "PI_ORB_HOSTING_BUCKET"
+        value = google_storage_bucket.hosting.name
+      }
+      env {
+        name  = "PI_ORB_HOSTING_ORIGIN"
+        value = local.hosting_origin
+      }
+      env {
+        name  = "PI_ORB_APP_ORIGIN"
+        value = local.app_origin
       }
       env {
         name = "DATABASE_URL"
@@ -180,7 +219,17 @@ resource "google_cloud_run_v2_service" "browser" {
       }
     }
   }
+  lifecycle {
+    postcondition {
+      condition = contains(self.urls, local.app_origin) && length([
+        for status in self.traffic_statuses : status
+        if status.tag == "files" && status.type == "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST" && status.percent == 100
+      ]) == 1
+      error_message = "Cloud Run did not assign the canonical app origin and latest files traffic tag."
+    }
+  }
   depends_on = [
+    google_storage_bucket_iam_member.control_plane_hosting_objects,
     google_secret_manager_secret_iam_member.cp_reads_database_url,
     google_secret_manager_secret_version.database_url,
   ]
@@ -212,6 +261,22 @@ resource "google_cloud_run_v2_service" "ops" {
       env {
         name  = "PI_ORB_ROLE"
         value = "ops"
+      }
+      env {
+        name  = "PI_ORB_HOSTING_STORE"
+        value = "gcs"
+      }
+      env {
+        name  = "PI_ORB_HOSTING_BUCKET"
+        value = google_storage_bucket.hosting.name
+      }
+      env {
+        name  = "PI_ORB_HOSTING_ORIGIN"
+        value = local.hosting_origin
+      }
+      env {
+        name  = "PI_ORB_APP_ORIGIN"
+        value = local.app_origin
       }
       env {
         name = "DATABASE_URL"
@@ -250,6 +315,7 @@ resource "google_cloud_run_v2_service" "ops" {
     }
   }
   depends_on = [
+    google_storage_bucket_iam_member.control_plane_hosting_objects,
     google_secret_manager_secret_iam_member.cp_reads_database_url,
     google_secret_manager_secret_version.database_url,
   ]

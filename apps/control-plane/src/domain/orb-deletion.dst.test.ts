@@ -1,8 +1,15 @@
+import { err, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { makeHarness, restartControlPlane, seedRunningOrb } from "../testkit/fixtures.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
-import { requestOrbDeletion, requestOrbStart, requestOrbStop } from "./lifecycle.ts";
+import { publishHostedFile } from "./hosting.ts";
+import {
+  requestOrbArchive,
+  requestOrbDeletion,
+  requestOrbStart,
+  requestOrbStop,
+} from "./lifecycle.ts";
 import { reconcileLoop } from "./loops.ts";
 
 const ORB = "orb-delete";
@@ -41,6 +48,87 @@ describe("orb deletion (DST)", () => {
       expect(harness.world.filesystemExists(ORB)).toBe(false);
       expect(harness.store.replicaRecords(ORB)).toEqual([]);
       expect(harness.store.deletionSnapshot(ORB)).toBeNull();
+    });
+  });
+
+  it("does not finalize the orb while hosted bytes remain", async () => {
+    await runDst({ name: "delete-cleans-hosted-files", iterations: 12 }, async (sim) => {
+      const harness = makeHarness({
+        constants: { deletionQuarantineMs: 2_000 },
+        hostingOrbId: ORB,
+      });
+      harness.hosting.seedCompletedUpload();
+      const stop = new AbortController();
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, harness.deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            expect((await requestOrbDeletion(task, harness.deps, ORB)).isOk()).toBe(true);
+            await waitUntil(
+              task,
+              "hosted cleanup before row removal",
+              () => harness.store.orbSnapshot(ORB) === null,
+              { timeoutMs: 120_000 },
+            );
+            expect(harness.hosting.ownedObjects()).toEqual([]);
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
+  it("an archive fence prevents an already reserved upload from publishing", async () => {
+    await runDst({ name: "archive-fences-hosted-publish", iterations: 12 }, async (sim) => {
+      const harness = makeHarness({ hostingOrbId: ORB });
+      const result = await sim.runTasks([
+        {
+          name: "uploader",
+          f: async (task) => {
+            seedRunningOrb(task, harness, ORB);
+            const orb = harness.store.orbSnapshot(ORB);
+            if (orb === null || orb.runtimeTokenHash === null) return;
+            const runtimeTokenHash = orb.runtimeTokenHash;
+            let emitted = false;
+            const uploaded = await publishHostedFile(
+              task,
+              harness.deps.hosting,
+              {
+                ...harness.hosting.request("archive-race"),
+                runtimeTokenHash,
+                incarnation: orb.hostIncarnation,
+              },
+              {
+                next: () =>
+                  new ResultAsync(
+                    (async () => {
+                      if (emitted) return ok(null);
+                      emitted = true;
+                      const archived = await requestOrbArchive(task, harness.deps, ORB, {
+                        runtimeTokenHash,
+                        hostIncarnation: orb.hostIncarnation,
+                      });
+                      if (archived.isErr())
+                        return err({
+                          type: "hosting_retryable" as const,
+                          message: archived.error.message,
+                        });
+                      return ok(new TextEncoder().encode("alpha"));
+                    })(),
+                  ),
+                close: () => okAsync(undefined),
+              },
+              { signal: new AbortController().signal },
+            );
+            expect(uploaded.isErr()).toBe(true);
+            expect(harness.hosting.current("index.html")).toBeUndefined();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
     });
   });
 

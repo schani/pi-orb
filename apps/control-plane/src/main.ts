@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -8,7 +9,11 @@ import {
   MOCK_OPENAI_OAUTH_URL_ENV,
   readMockOpenAiEnv,
 } from "@pi-orb/mock-openai";
-import type { SystemView } from "@pi-orb/protocol";
+import {
+  HOSTING_MAX_FILE_BYTES,
+  HOSTING_TRANSFER_TIMEOUT_MS,
+  type SystemView,
+} from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { okAsync } from "neverthrow";
@@ -22,6 +27,8 @@ import {
   GithubOAuthHttpClient,
   GithubUpstreamRefresher,
 } from "./adapters/github-oauth/client.ts";
+import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
+import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
 import { readIssuerUrl } from "./adapters/oidc/issuer-url.ts";
 import {
@@ -52,6 +59,7 @@ import { GithubAuthGate } from "./domain/github-auth.ts";
 import { requestOrbArchive } from "./domain/lifecycle.ts";
 import { logEvent, logOrbEvent } from "./domain/log.ts";
 import {
+  hostingCleanupLoop,
   orphanSweepLoop,
   pollLoop,
   projectDeletionLoop,
@@ -61,6 +69,16 @@ import {
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
+import {
+  type ControlPlaneRole,
+  createConfiguredHostingAccessPolicy,
+  readHostingConfiguration,
+} from "./hosting-config.ts";
+import { registerHostingAccessGuard } from "./http/hosting-access.ts";
+import {
+  registerBrowserHostingRoutes,
+  registerRuntimeHostingRoutes,
+} from "./http/hosting-routes.ts";
 import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
 import { registerRoutes } from "./http/routes.ts";
@@ -112,6 +130,7 @@ const { version: CONTROL_PLANE_VERSION }: { version: string } = createRequire(im
 );
 
 async function main(): Promise<void> {
+  const bootTask = new NoSimulationTask("boot", true);
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
   const pglitePath = env(
@@ -123,7 +142,6 @@ async function main(): Promise<void> {
   const runtimeImage = env("PI_ORB_RUNTIME_IMAGE", "pi-orb-runtime:dev");
   const dockerNetwork = env("PI_ORB_DOCKER_NETWORK", "pi-orb");
   const providerKind = env("PI_ORB_HOST_PROVIDER", "docker");
-  const bootTask = new NoSimulationTask("boot", true);
   if (providerKind === "gce" && !isDigestPinnedImage(runtimeImage)) {
     // Refuse before any side effect — a misconfigured deploy must not migrate
     // the schema and then die.
@@ -137,12 +155,13 @@ async function main(): Promise<void> {
   // separate services; local development serves all of them from one process.
   // A hard allowlist: a typo must refuse to boot rather than come up healthy
   // and serve nothing but 404s.
-  const role = env("PI_ORB_ROLE", "all");
-  if (!ROLES.includes(role)) {
+  const configuredRole = env("PI_ORB_ROLE", "all");
+  if (!ROLES.includes(configuredRole)) {
     bootTask.error(`PI_ORB_ROLE must be one of ${ROLES.join(", ")}`);
     process.exitCode = 1;
     return;
   }
+  const role = configuredRole as ControlPlaneRole;
   const browserRole = role === "all" || role === "browser";
   // "ops": the browser API surface for tooling, with no background loops,
   // no migrations, and no web assets — invoker-IAM keeps it private.
@@ -151,6 +170,27 @@ async function main(): Promise<void> {
   // "issuer": the deployment's only public unauthenticated surface, serving
   // OIDC discovery and JWKS and nothing else (docs/workload-identity.md).
   const issuerRole = role === "all" || role === "issuer";
+  const hostingConfiguration = readHostingConfiguration(process.env, role, port, homedir());
+  if (hostingConfiguration.isErr()) {
+    bootTask.error(hostingConfiguration.error.message);
+    process.exitCode = 1;
+    return;
+  }
+  const hosting = hostingConfiguration.value;
+  const hostingRole = hosting !== null;
+  const hostingOrigin = hosting?.filesOrigin ?? "";
+  const appOrigin = hosting?.appOrigin ?? "";
+  const hostingAccessResult =
+    hosting === null ? null : createConfiguredHostingAccessPolicy(hosting);
+  let hostingAccess = null;
+  if (hostingAccessResult !== null) {
+    if (hostingAccessResult.isErr()) {
+      bootTask.error(hostingAccessResult.error.message);
+      process.exitCode = 1;
+      return;
+    }
+    hostingAccess = hostingAccessResult.value;
+  }
 
   // The issuer URL is part of the security identity of every minted token, so
   // it is configuration and is validated before any side effect, exactly like
@@ -371,6 +411,15 @@ async function main(): Promise<void> {
     broker,
     nameInferenceUrl === "" ? null : nameInferenceUrl,
   );
+  const hostedBytes =
+    hosting?.store.kind === "gcs"
+      ? createGcsHostedByteStore({
+          bucket: hosting.store.bucket,
+          auth: createGcsTokenProvider(),
+        })
+      : createFilesystemHostedByteStore({
+          root: hosting?.store.root ?? join(homedir(), ".pi-orb", "hosting"),
+        });
   const deps: ControlPlaneDeps = {
     store: database.store,
     hostProvider,
@@ -395,9 +444,18 @@ async function main(): Promise<void> {
     control: new ControlState(),
     constants: DEFAULT_LIFECYCLE_CONSTANTS,
     projectSecrets: { pointers: database.projectSecrets, secrets },
+    hosting: {
+      store: database.hosting,
+      bytes: hostedBytes,
+      uploadLeaseMs: HOSTING_TRANSFER_TIMEOUT_MS + 30_000,
+      maxFileBytes: HOSTING_MAX_FILE_BYTES,
+      nextClaimOwner: () => randomUUID(),
+    },
   };
 
   const app = Fastify({ logger: false });
+  if (hostingRole && hostingAccess !== null)
+    registerHostingAccessGuard(app, hostingAccess, appOrigin);
   // Commands issued over HTTP log their transitions too (docs/lifecycle.md).
   const httpTask = new ControlPlaneTask("http");
   // Everything key management needs. Shared by the boot hook below and, on the
@@ -410,6 +468,12 @@ async function main(): Promise<void> {
     constants: DEFAULT_ISSUER_CONSTANTS,
   };
   if (browserRole || opsRole) {
+    registerBrowserHostingRoutes(app, httpTask, {
+      store: deps.store,
+      hosting: deps.hosting,
+      filesOrigin: hostingOrigin,
+      appOrigin,
+    });
     await registerLiveProxy(app, httpTask, deps);
     // Staged rotation lives only on the private roles: the public issuer
     // publishes keys and must not be able to change them
@@ -431,6 +495,12 @@ async function main(): Promise<void> {
     }
   }
   if (runtimeRole) {
+    await registerRuntimeHostingRoutes(app, httpTask, {
+      store: deps.store,
+      hosting: deps.hosting,
+      filesOrigin: hostingOrigin,
+      appOrigin,
+    });
     registerRuntimeRoutes(app, httpTask, {
       archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
       store: deps.store,
@@ -564,6 +634,7 @@ async function main(): Promise<void> {
       ),
       projectDeletionLoop(new ControlPlaneTask("project-deletion"), deps, stop.signal),
       orphanSweepLoop(new ControlPlaneTask("sweeper"), deps, stop.signal),
+      hostingCleanupLoop(new ControlPlaneTask("hosting-cleanup"), deps, stop.signal),
     ];
     try {
       await Promise.all(loops);

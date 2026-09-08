@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   DEFAULT_TTL_SECONDS,
   ID_TOKEN_PATH,
@@ -140,6 +140,7 @@ let orbId = "";
 let failedOrbId = "";
 let specOrbId = "";
 let localStateDirectory = "";
+let hostingRootDirectory = "";
 
 function processHostDirectory(id: string): string {
   return join(localStateDirectory, "process-hosts", id);
@@ -488,12 +489,14 @@ async function withOrbDiagnostics(id: () => string, body: () => Promise<void>): 
   try {
     await body();
   } catch (error) {
+    console.error("=== original failure ===", error);
     await dumpOrbDiagnostics(id()).catch(() => undefined);
     throw error;
   }
 }
 
 beforeAll(async () => {
+  hostingRootDirectory = mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   fake = await createFakeSession(`pi-orb-e2e-${Date.now()}`, SCENARIO);
   nameFake = await createFakeSession(`pi-orb-name-e2e-${Date.now()}`, NAME_SCENARIO);
 
@@ -508,6 +511,7 @@ beforeAll(async () => {
       launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
       hostSpecGeneration: 1,
       e2eHostSpec: "stage2-spec-a",
+      hostingRoot: hostingRootDirectory,
     });
     return;
   }
@@ -552,6 +556,7 @@ beforeAll(async () => {
     launchFailureMarker: ".pi-orb-e2e-launch-failure.json",
     hostSpecGeneration: 1,
     e2eHostSpec: "stage2-spec-a",
+    hostingRoot: hostingRootDirectory,
   });
 }, 720_000);
 
@@ -568,6 +573,7 @@ afterAll(async () => {
   if (fake !== undefined) await deleteFakeSession(fake.sessionKey);
   if (nameFake !== undefined) await deleteFakeSession(nameFake.sessionKey);
   if (localStateDirectory !== "") rmSync(localStateDirectory, { recursive: true, force: true });
+  if (hostingRootDirectory !== "") rmSync(hostingRootDirectory, { recursive: true, force: true });
 }, 120_000);
 
 async function restartControlPlaneWithSpec(spec: string, generation: number): Promise<void> {
@@ -590,6 +596,7 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
     hostSpecGeneration: generation,
     e2eHostSpec: spec,
     authDir,
+    hostingRoot: hostingRootDirectory,
   });
 }
 
@@ -599,6 +606,7 @@ describe("full slice E2E", () => {
       await runScenario();
     } catch (error) {
       // Dump every diagnostic surface before failing.
+      console.error("=== original failure ===", error);
       await dumpOrbDiagnostics(orbId).catch(() => undefined);
       const requests = await fakeControl(fake.sessionKey, "/requests").catch(() => null);
       console.error("=== fake inference requests ===", JSON.stringify(requests));
@@ -1317,6 +1325,45 @@ describe("full slice E2E", () => {
     await terminalComplete;
     expect(terminalOutput).toContain("TERMINAL_E2E_OK");
 
+    await writeWorkspaceFiles(orbId, 0, {
+      "repo/hosted/index.html": '<!doctype html><img src="asset.txt">first',
+      "repo/hosted/asset.txt": "relative-asset",
+    });
+    const hosted = await terminalRun(
+      orbId,
+      String.raw`pi-orb host hosted/index.html site/index.html --request-id ${randomUUID()} && pi-orb host hosted/asset.txt site/asset.txt --request-id ${randomUUID()} && pi-orb host ls; printf '\110\117\123\124\111\116\107\137\105\062\105\137\104\117\116\105\012'`,
+      "HOSTING_E2E_DONE",
+    );
+    const hostedUrl = /http:\/\/files\.localhost:\d+\/s\/[^\s]+\/site\/index\.html/.exec(
+      hosted,
+    )?.[0];
+    expect(hostedUrl, hosted).toBeDefined();
+    if (hostedUrl === undefined) throw new Error("host CLI did not print its stable URL");
+    expect(await (await fetch(hostedUrl)).text()).toContain("first");
+    expect(await (await fetch(new URL("asset.txt", hostedUrl))).text()).toBe("relative-asset");
+    await writeWorkspaceFiles(orbId, 0, {
+      "repo/hosted/index.html": '<!doctype html><img src="asset.txt">replacement',
+    });
+    const replaced = await terminalRun(
+      orbId,
+      String.raw`pi-orb host hosted/index.html site/index.html --request-id ${randomUUID()}; printf '\110\117\123\124\111\116\107\137\122\105\120\114\101\103\105\104\012'`,
+      "HOSTING_REPLACED",
+    );
+    expect(replaced).toContain(hostedUrl);
+    expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
+    const removed = await terminalRun(
+      orbId,
+      String.raw`pi-orb host rm site/index.html; pi-orb host ls; printf '\110\117\123\124\111\116\107\137\122\115\137\104\117\116\105\012'`,
+      "HOSTING_RM_DONE",
+    );
+    expect(removed).not.toMatch(/site\/index\.html\s+http/);
+    expect((await fetch(hostedUrl)).status).toBe(404);
+    await terminalRun(
+      orbId,
+      String.raw`pi-orb host hosted/index.html site/index.html --request-id ${randomUUID()}; printf '\110\117\123\124\111\116\107\137\122\105\120\125\102\114\111\123\110\105\104\012'`,
+      "HOSTING_REPUBLISHED",
+    );
+
     // Live connection through the content-agnostic proxy (docs/testing.md steps 5-6).
     const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const cursor = (history.body["cursor"] as string | null) ?? null;
@@ -1559,6 +1606,7 @@ describe("full slice E2E", () => {
     expect(stoppedRecords.length).toBe(replicated);
     expect(JSON.stringify(stoppedRecords)).toContain("The check succeeded: E2E_TOOL_OK.");
     expect(JSON.stringify(stoppedRecords)).toContain("USER_SHELL_E2E_OK");
+    expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
 
     // No human message is sent in either restart leg. The runtime must wake
     // Pi itself, and the new request must carry the restart context as user
@@ -1590,6 +1638,7 @@ describe("full slice E2E", () => {
         { timeoutMs: 300_000, intervalMs: 1_000 },
       );
       expect(await computeIncarnation(orbId)).toBe(index);
+      expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
       const warning = PROCESS_BACKEND
         ? "Other processes may still be running"
         : "All processes running before the restart were killed";
@@ -1665,6 +1714,19 @@ describe("full slice E2E", () => {
     );
     expect(transcriptFromSibling).toContain("The check succeeded: E2E_TOOL_OK.");
 
+    await writeWorkspaceFiles(secondOrbId, 0, {
+      "repo/archived.html": "archived-hosted-file",
+    });
+    const archivedHosting = await terminalRun(
+      secondOrbId,
+      String.raw`pi-orb host archived.html archive/index.html --request-id ${randomUUID()}; printf '\101\122\103\110\111\126\105\137\110\117\123\124\105\104\012'`,
+      "ARCHIVE_HOSTED",
+    );
+    const archivedHostedUrl = /http:\/\/files\.localhost:\d+\/s\/[^\s]+\/archive\/index\.html/.exec(
+      archivedHosting,
+    )?.[0];
+    expect(archivedHostedUrl, archivedHosting).toBeDefined();
+
     // The real agent invokes the CLI inside its own busy turn. Acceptance must
     // release the tool, retain its output and final reply, then remove resources.
     const archiveMessage = await api(
@@ -1690,6 +1752,8 @@ describe("full slice E2E", () => {
       "SELF_ARCHIVE_FINAL: archival requested as you asked.",
     );
     expect((await api(base, "POST", `/api/v1/orbs/${secondOrbId}/start`)).status).toBe(409);
+    if (archivedHostedUrl === undefined) throw new Error("archive hosting URL was absent");
+    expect(await (await fetch(archivedHostedUrl)).text()).toBe("archived-hosted-file");
     if (PROCESS_BACKEND) {
       expect(existsSync(processHostDirectory(secondOrbId))).toBe(false);
     } else {
@@ -1718,6 +1782,13 @@ describe("full slice E2E", () => {
       },
       { timeoutMs: 240_000, intervalMs: 1_000 },
     );
+    expect((await fetch(hostedUrl)).status).toBe(404);
+    expect((await fetch(archivedHostedUrl)).status).toBe(404);
+    expect(
+      readdirSync(hostingRootDirectory, { recursive: true }).filter(
+        (entry) => basename(String(entry)) === "data",
+      ),
+    ).toEqual([]);
     for (const deletedOrbId of [orbId, secondOrbId]) {
       expect((await api(base, "GET", `/api/v1/orbs/${deletedOrbId}`)).status).toBe(404);
       expect((await api(base, "GET", `/api/v1/orbs/${deletedOrbId}/history`)).status).toBe(404);

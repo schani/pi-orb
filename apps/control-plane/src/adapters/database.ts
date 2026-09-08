@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { err, ok, type Result, type ResultAsync } from "neverthrow";
 import type { StoreError } from "../domain/errors.ts";
+import type { HostingStore } from "../domain/hosting-ports.ts";
 import type {
   ControlPlaneStore,
   CredentialPointerStore,
@@ -10,6 +11,7 @@ import type {
 } from "../domain/ports.ts";
 import { PgClient, type PostgreSQLClient } from "./pg/client.ts";
 import { PostgreSQLCredentialPointerStore } from "./pg/credential-pointers.ts";
+import { PostgreSQLHostingStore } from "./pg/hosting.ts";
 import { runMigrations } from "./pg/migrate.ts";
 import { PGliteClient } from "./pg/pglite-client.ts";
 import { PostgreSQLProjectSecretPointerStore } from "./pg/project-secrets.ts";
@@ -21,6 +23,7 @@ export interface ControlPlaneDatabase {
   readonly pointers: CredentialPointerStore;
   readonly projectSecrets: ProjectSecretPointerStore;
   readonly signingKeys: SigningKeyStore;
+  readonly hosting: HostingStore;
   migrate(): ResultAsync<string[], StoreError>;
   close(): ResultAsync<void, StoreError>;
 }
@@ -36,6 +39,7 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     pointers: new PostgreSQLCredentialPointerStore(client),
     projectSecrets: new PostgreSQLProjectSecretPointerStore(client),
     signingKeys: new PostgreSQLSigningKeyStore(client),
+    hosting: new PostgreSQLHostingStore(client),
     migrate: () => runMigrations(client),
     close: () => client.end(),
   };

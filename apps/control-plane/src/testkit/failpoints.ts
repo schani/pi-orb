@@ -49,6 +49,16 @@ export const FAILPOINTS = {
   signerSign: "signer.sign",
   githubDeviceCode: "github.device.code",
   githubDevicePoll: "github.device.poll",
+  hostingSessionBegin: "hosting.session.begin",
+  hostingSessionRegisterBefore: "hosting.session.register.before",
+  hostingSessionRegisterAfter: "hosting.session.register.after",
+  hostingChunk: "hosting.chunk",
+  hostingProviderFinalize: "hosting.provider.finalize",
+  hostingPublishBefore: "hosting.publish.before",
+  hostingPublishAfter: "hosting.publish.after",
+  hostingCancel: "hosting.cancel",
+  hostingDeleteExact: "hosting.delete-exact",
+  hostingCleanupFinishAfter: "hosting.cleanup.finish.after",
 } as const;
 
 export type FailpointName = (typeof FAILPOINTS)[keyof typeof FAILPOINTS];

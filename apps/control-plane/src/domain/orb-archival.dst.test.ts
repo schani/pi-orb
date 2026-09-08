@@ -1,8 +1,10 @@
 import { ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, seedRunningOrb } from "../testkit/fixtures.ts";
+import { source } from "../testkit/hosting.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
 import { ControlState } from "./control-state.ts";
+import { publishHostedFile } from "./hosting.ts";
 import { requestOrbArchive, requestOrbDeletion, requestOrbStart } from "./lifecycle.ts";
 import { reconcileLoop } from "./loops.ts";
 
@@ -76,7 +78,10 @@ describe("orb archival (DST)", () => {
 
   it("self-archive returns while busy and retains the rest of the turn", async () => {
     await runDst({ name: "self-archive-busy-turn", iterations: 20 }, async (sim) => {
-      const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });
+      const harness = makeHarness({
+        constants: { deletionQuarantineMs: 2_000 },
+        hostingOrbId: ORB,
+      });
       const stop = new AbortController();
       const expected: string[] = [];
       let accepted = false;
@@ -93,6 +98,24 @@ describe("orb archival (DST)", () => {
           name: "agent",
           f: async (task) => {
             seedRunningOrb(task, harness, ORB);
+            const authority = harness.store.orbSnapshot(ORB);
+            if (authority?.runtimeTokenHash === null || authority === null) return;
+            const hostingRequest = {
+              ...harness.hosting.request("archive-retained"),
+              runtimeTokenHash: authority.runtimeTokenHash,
+              incarnation: authority.hostIncarnation,
+            };
+            expect(
+              (
+                await publishHostedFile(
+                  task,
+                  harness.deps.hosting,
+                  hostingRequest,
+                  source("alpha"),
+                  { signal: new AbortController().signal },
+                )
+              ).isOk(),
+            ).toBe(true);
             harness.world.setActivity(ORB, "busy");
             expected.push(harness.world.appendMessage(ORB, "Please archive this orb").id);
             const orb = harness.store.orbSnapshot(ORB);
@@ -119,6 +142,19 @@ describe("orb archival (DST)", () => {
               () => harness.store.orbSnapshot(ORB)?.state === "archived",
               { timeoutMs: 120_000 },
             );
+            expect(harness.hosting.current("index.html")?.sha256).toBe(hostingRequest.sha256);
+            expect(harness.hosting.ownedObjects()).toHaveLength(1);
+            expect(
+              (
+                await publishHostedFile(
+                  task,
+                  harness.deps.hosting,
+                  { ...hostingRequest, requestId: "archive-denied" },
+                  source("alpha"),
+                  { signal: new AbortController().signal },
+                )
+              ).isErr(),
+            ).toBe(true);
             stop.abort();
           },
         },

@@ -1,6 +1,7 @@
 import {
   CAPABILITY_ABORT,
   type HistoryRecord,
+  type HostedFilesResponse,
   type MessageInputBlock,
   type OrbHistoryView,
   type OrbMessageView,
@@ -12,6 +13,7 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react"
 import { Composer, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
+import { HostedFiles } from "../components/HostedFiles.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
@@ -26,6 +28,7 @@ import {
   getOrb,
   getOrbHistory,
   getProject,
+  listHostedFiles,
   listOrbMessages,
   listOrbs,
   startOrb,
@@ -408,6 +411,8 @@ export function OrbPage({ orbId }: { orbId: string }) {
   const [projectOrbs, setProjectOrbs] = useState<OrbView[] | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
   const [orbError, setOrbError] = useState<ApiError | null>(null);
+  const [hostedFiles, setHostedFiles] = useState<HostedFilesResponse | null>(null);
+  const [hostedFilesError, setHostedFilesError] = useState<ApiError | null>(null);
   const [queuedMessages, setQueuedMessages] = useState<OrbMessageView[]>([]);
   // Invalidates queued-message reads that were already in flight when a
   // message mutation committed (see lib/queued-messages.ts).
@@ -478,6 +483,27 @@ export function OrbPage({ orbId }: { orbId: string }) {
       }
     };
     poll();
+    const timer = window.setInterval(poll, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [orbId, orbNotFound]);
+
+  useEffect(() => {
+    if (orbNotFound) return;
+    let cancelled = false;
+    const poll = async () => {
+      const result = await listHostedFiles(orbId);
+      if (cancelled) return;
+      if (result.isOk()) {
+        setHostedFiles(result.value);
+        setHostedFilesError(null);
+      } else if (!(result.error.type === "http" && result.error.status === 404)) {
+        setHostedFilesError(result.error);
+      }
+    };
+    void poll();
     const timer = window.setInterval(poll, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
@@ -1043,6 +1069,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
           </OrbNotice>
         )}
         <OrbFailureBanner message={orb?.lastError} />
+        <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
         {orbError !== null && <OrbNotice error>{describeApiError(orbError)}</OrbNotice>}
         {state.serverError !== null && (
           <OrbNotice error>

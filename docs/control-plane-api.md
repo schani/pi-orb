@@ -62,6 +62,7 @@ POST /api/v1/orbs/:orbId/archive
 DELETE /api/v1/orbs/:orbId
 
 GET  /api/v1/orbs/:orbId/history
+GET  /api/v1/orbs/:orbId/hosted-files
 PUT  /api/v1/orbs/:orbId/messages/:messageId
 GET  /api/v1/orbs/:orbId/messages
 WS   /api/v1/orbs/:orbId/live
@@ -69,6 +70,17 @@ WS   /api/v1/orbs/:orbId/terminal
 ```
 
 `GET /api/v1/session` returns `{ "status": "ok" }` without reading application state. In the cloud it is useful because merely reaching that response proves that IAP admitted the browser request; the browser probes it after regaining focus following reauthentication. It is not an application authentication or authorization implementation, and in unauthenticated local development it only confirms control-plane reachability.
+
+### Hosted files (decided 2026-09-07)
+
+`GET /api/v1/orbs/:orbId/hosted-files` returns `{ files, cleanupIssues }` for working and archived
+orbs. Each file contains `path`, `url`, `size`, `mediaType`, and numeric `updatedAt`; cleanup issues
+contain `path` (nullable), `lastError`, and `lastErrorAt`. Missing orbs return `404`.
+
+File links navigate to the separate files hostname. That hostname serves only hosted reads;
+application APIs and WebSockets reject requests originating from hosted documents. Runtime uploads
+use the orb's existing bearer and cannot select another namespace. See `docs/hosting.md` for the
+wire protocol, storage, and lifecycle contract.
 
 ### Deployment facts (decided and implemented 2026-09-04)
 

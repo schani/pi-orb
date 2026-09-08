@@ -1,4 +1,9 @@
 import { afterAll, beforeAll, describe, it } from "vitest";
+import {
+  hostingStoreContractTests,
+  postgreSQLHostingContractSubject,
+} from "../apps/control-plane/src/adapters/pg/hosting.contract.ts";
+import { PostgreSQLHostingStore } from "../apps/control-plane/src/adapters/pg/hosting.ts";
 import { openThrowawayPostgres } from "../apps/control-plane/src/testkit/postgres.ts";
 import { storeContractTests } from "../apps/control-plane/src/testkit/store-contract.ts";
 import { docker, waitFor } from "./harness.ts";
@@ -67,4 +72,14 @@ if (providedUrl === "" && PROCESS_BACKEND) {
   }
 
   storeContractTests("node-postgres (real server)", () => openThrowawayPostgres(connectionString));
+  hostingStoreContractTests("node-postgres (real server)", async () => {
+    const subject = await openThrowawayPostgres(connectionString);
+    return postgreSQLHostingContractSubject(
+      subject.client,
+      new PostgreSQLHostingStore(subject.client),
+      async () => {
+        await subject.database.close();
+      },
+    );
+  });
 }

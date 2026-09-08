@@ -930,6 +930,17 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           ),
         );
       }
+      const hosting = await query(
+        `SELECT
+           (SELECT count(*) FROM hosting_operations WHERE orb_id = $1) +
+           (SELECT count(*) FROM hosted_files WHERE orb_id = $1) +
+           (SELECT count(*) FROM hosting_cleanup_items WHERE orb_id = $1) AS owned`,
+        [params.orbId],
+      );
+      if (hosting.isErr()) return err(hosting.error);
+      if (Number(hosting.value.rows[0]?.["owned"]) > 0) {
+        return err(stateConflict("deleting"));
+      }
       const cleared = await query(
         "UPDATE orbs SET replication_cursor = NULL, replicated_head_id = NULL WHERE id = $1",
         [params.orbId],

@@ -1,6 +1,6 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createPublicKey, createVerify } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -251,7 +251,87 @@ export interface ControlPlaneHandle {
   baseUrl: string;
   authDir: string;
   logs: string[];
+  hostingRoot: string;
   stop(): Promise<void>;
+}
+
+function waitForChildListenAnnouncement(
+  child: ChildProcess,
+  logs: string[],
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const timeout = setTimeout(
+      () => finish(new Error("timed out waiting for control plane child to announce listening")),
+      timeoutMs,
+    );
+    const onData = (chunk: Buffer): void => {
+      output += chunk.toString();
+      if (output.includes("control plane listening on ")) finish();
+    };
+    const onError = (error: Error): void => finish(error);
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void =>
+      finish(
+        new Error(
+          `control plane child exited before listening (code ${String(code)}, signal ${String(signal)}): ${logs.join("")}`,
+        ),
+      );
+    const finish = (error?: Error): void => {
+      clearTimeout(timeout);
+      child.stdout?.off("data", onData);
+      child.stderr?.off("data", onData);
+      child.off("error", onError);
+      child.off("exit", onExit);
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
+}
+
+export async function waitForOwnedControlPlane(
+  child: ChildProcess,
+  logs: string[],
+  baseUrl: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  await waitForChildListenAnnouncement(child, logs, timeoutMs);
+
+  let removeStopListeners = (): void => undefined;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    const onError = (error: Error): void => reject(error);
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void =>
+      reject(
+        new Error(
+          `control plane child exited during startup (code ${String(code)}, signal ${String(signal)}): ${logs.join("")}`,
+        ),
+      );
+    removeStopListeners = () => {
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
+  try {
+    await Promise.race([
+      waitFor(
+        "control plane HTTP",
+        async () => {
+          const response = await fetch(`${baseUrl}/api/v1/projects`);
+          return response.ok ? true : null;
+        },
+        { timeoutMs, intervalMs: 500 },
+      ),
+      stopped,
+    ]);
+  } finally {
+    removeStopListeners();
+  }
 }
 
 export async function startControlPlane(options: {
@@ -267,8 +347,11 @@ export async function startControlPlane(options: {
   hostSpecGeneration?: number;
   e2eHostSpec?: string;
   authDir?: string;
+  hostingRoot?: string;
 }): Promise<ControlPlaneHandle> {
   const authDir = options.authDir ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
+  const ownedHostingRoot = options.hostingRoot === undefined;
+  const hostingRoot = options.hostingRoot ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   const logs: string[] = [];
   const child = spawn("node", ["apps/control-plane/src/main.ts"], {
     cwd: join(import.meta.dirname, ".."),
@@ -285,6 +368,8 @@ export async function startControlPlane(options: {
       PORT: String(options.port),
       PI_ORB_AUTH_DIR: authDir,
       PI_ORB_RUNTIME_IMAGE: options.runtimeImage,
+      PI_ORB_HOSTING_STORE: "filesystem",
+      PI_ORB_HOSTING_ROOT: hostingRoot,
       PI_ORB_DOCKER_NETWORK: options.dockerNetwork,
       PI_ORB_E2E_LAUNCH_FAILURE_MARKER: options.launchFailureMarker,
       PI_ORB_HOST_SPEC_GENERATION: String(options.hostSpecGeneration ?? 0),
@@ -301,27 +386,25 @@ export async function startControlPlane(options: {
   child.stderr?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
 
   const baseUrl = `http://127.0.0.1:${options.port}`;
-  await waitFor(
-    "control plane HTTP",
-    async () => {
-      const response = await fetch(`${baseUrl}/api/v1/projects`);
-      return response.ok ? true : null;
-    },
-    { timeoutMs: 30_000, intervalMs: 500 },
-  );
+  await waitForOwnedControlPlane(child, logs, baseUrl);
   return {
     process: child,
     port: options.port,
     baseUrl,
     authDir,
     logs,
+    hostingRoot,
     stop: () =>
       new Promise((resolve) => {
-        child.once("exit", () => resolve());
+        const finish = () => {
+          if (ownedHostingRoot) rmSync(hostingRoot, { recursive: true, force: true });
+          resolve();
+        };
+        child.once("exit", finish);
         child.kill("SIGTERM");
         setTimeout(() => {
           child.kill("SIGKILL");
-          resolve();
+          finish();
         }, 10_000).unref();
       }),
   };

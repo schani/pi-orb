@@ -8,6 +8,10 @@ Permanent removal of an orb and every resource owned by it.
 
 Export-before-delete is not part of this requirement and remains open in `docs/open-questions.md`.
 
+**Hosted-file extension required 2026-09-07; not implemented:** permanent deletion also removes
+the orb's hosted-file catalog, operations, and objects as specified in `docs/hosting.md`. Cleanup
+retains exact object inventory until absence is confirmed.
+
 ## Resource inventory
 
 Resources owned by one orb and therefore deleted:

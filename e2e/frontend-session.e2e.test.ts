@@ -108,13 +108,19 @@ describe("frontend-only browser behavior", () => {
     await expectPage(caret).toBeHidden();
     const terminalCursor = page.locator(".term-cursor").first();
     await expectPage(terminalCursor).toBeAttached();
-    const terminalCell = await terminalCursor.evaluate((element) => {
-      const styles = element.ownerDocument.defaultView?.getComputedStyle(
-        element.closest(".wterm") ?? element,
-      );
-      return { font: styles?.fontSize, row: styles?.getPropertyValue("--term-row-height").trim() };
-    });
-    expectPage(terminalCell).toEqual({ font: "13px", row: "20px" });
+    await expectPage
+      .poll(() =>
+        terminalCursor.evaluate((element) => {
+          const terminal = element.closest(".wterm");
+          if (terminal === null || !terminal.isConnected) return null;
+          const styles = element.ownerDocument.defaultView?.getComputedStyle(terminal);
+          return {
+            font: styles?.fontSize,
+            row: styles?.getPropertyValue("--term-row-height").trim(),
+          };
+        }),
+      )
+      .toEqual({ font: "13px", row: "20px" });
     await page.close();
   });
 
@@ -140,6 +146,24 @@ describe("frontend-only browser behavior", () => {
     await expectPage(page.getByText("frontend fixture · session active")).toBeVisible();
     await expectPage(page.getByPlaceholder(/Message the orb/)).toHaveValue(draft);
 
+    await page.close();
+  });
+
+  it("shows hosted files on an archived orb and preserves a missing orb URL", async () => {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/#/orbs/frontend-archived-orb`);
+    await expectPage(page.getByText("files (1)")).toBeVisible();
+    await page.getByText("files (1)").click();
+    const file = page.getByRole("link", { name: "index.html" });
+    await expectPage(file).toHaveAttribute(
+      "href",
+      "http://files.localhost:7100/s/frontend-archived-orb/index.html",
+    );
+    await expectPage(page.getByPlaceholder(/Message the orb/)).toHaveCount(0);
+
+    await page.goto(`${origin}/#/orbs/missing-hosted-files-orb`);
+    await expectPage(page).toHaveURL(`${origin}/#/orbs/missing-hosted-files-orb`);
+    await expectPage(page.getByRole("heading", { name: "Orb doesn't exist" })).toBeVisible();
     await page.close();
   });
 });

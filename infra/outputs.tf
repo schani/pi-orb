@@ -2,6 +2,11 @@ output "browser_url" {
   value = google_cloud_run_v2_service.browser.uri
 }
 
+output "hosting_url" {
+  value      = local.hosting_origin
+  depends_on = [google_cloud_run_v2_service.browser]
+}
+
 output "runtime_url" {
   value = google_cloud_run_v2_service.runtime.uri
 }

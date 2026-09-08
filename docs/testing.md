@@ -39,6 +39,20 @@ The architecture should keep side effects behind adapters and put concurrency/st
 
 The project-secrets feature follows the same boundary rule but does **not** make every layer a simulation target (decided and implemented 2026-08-28). Its control-plane domain service coordinates PostgreSQL and an immutable secret store, so DST owns concurrent mutation, snapshot-versus-rotation, update-versus-delete, cross-store crash windows, and adapter failpoint schedules. It explicitly models the accepted unreferenced secret version left by death after secret write/before pointer CAS and proves deletion enumeration eventually removes it; no test may claim atomicity the two stores do not provide. HTTP folds, runtime environment merge, and the selected Sealed-card UI are conventional contract/unit/component tests, with one runtime-server E2E for boot ordering and exposure. The complete five-scenario DST matrix and invariants live in `docs/credentials.md`. All five scenarios pass under entropy scheduling; the process-provider full-slice E2E additionally proves setup exclusion, resume/terminal exposure, hook-shadow refusal, compute-replacement and stop/start retention, browser redaction, and deletion finalization through the real runtime HTTP server.
 
+Orb-hosted files apply this boundary to a PostgreSQL catalog plus immutable byte store. DST owns
+publication/retirement linearization, crash ownership, lifecycle fencing, cleanup convergence, and
+reader/writer races through the production domain coordinator; stream adapters, GCS semantics,
+hostname/IAP routing, browser-origin isolation, and measured memory remain boundary or live tests.
+The required matrix, invariants, failpoints, and replay workflow live in `docs/hosting.md`.
+`domain/hosting.dst.test.ts` exercises the coordinator; the shared hosting store contract runs
+against the fake, PGlite, and PostgreSQL. Filesystem, GCS transport, HTTP, CLI, and browser tests
+exercise their respective boundaries. These tests do not establish live IAP or GCS behavior.
+
+E2E control-plane readiness requires a listen announcement from the spawned child before probing
+HTTP. A response on the requested port alone can belong to another test run. Full-slice Docker and
+process runs share fixed fixture ports and must run serially (found during hosting validation,
+2026-09-07).
+
 Runtime-internal state is a simulation target too, and the Pi adapter is reachable through a deliberate seam rather than a boot: `PiSession`/`PiSessionManager` narrow the SDK objects to the calls the adapter actually makes, and `PiOrbAgent.attachSession` is boot's final wiring step called directly. A scenario can then substitute a fake `AgentSession` whose accept/announce steps are scheduled, which is what makes the operation-ID correlation contract in `docs/pi-adapter.md` testable at all — it was previously reachable only through the E2E, where the interleaving cannot be forced.
 
 **Harness finding (2026-08-12): native promises need an explicit simulated owner until their completion condition.** The operation-correlation DST originally let its fake-Pi task execute a fixed six checkpoints and exit. One schedule exhausted those checkpoints before the submitters' native-Promise continuations installed the modeled Pi prologue, leaving the inbox blocked on a promise outside `determined` with no simulated task able to resolve it. The recorded trace reproduced as a deterministic deadlock, not noise. The fake-Pi task now remains schedulable until the expected submissions have actually landed and all pending prologue/announcement work is complete. This is an explicit state predicate, not a timeout or rerun; simulation helpers must follow the same rule whenever native promises bridge into a modeled scheduler.

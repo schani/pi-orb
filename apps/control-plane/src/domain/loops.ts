@@ -1,6 +1,7 @@
 import type { OrbState } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { sleepResult, withDeadline } from "./dst.ts";
+import { cleanupRetiredHostedFiles } from "./hosting.ts";
 import { type ReconcileOutcome, reconcileOrbOnce } from "./lifecycle.ts";
 import { logEvent, logOrbEvent, logProjectEvent } from "./log.ts";
 import type { OrbRow } from "./orb.ts";
@@ -471,6 +472,53 @@ export async function orphanSweepLoop(
       task,
       deps.constants.orphanSweepIntervalMs,
       "orphan sweep tick",
+      stop,
+    );
+    if (slept.isErr()) return;
+  }
+}
+
+/** One bounded sweep over retired objects and expired unpublished uploads. */
+export async function hostingCleanupOnce(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+): Promise<void> {
+  const cleaned = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "hosted file cleanup",
+    (context) =>
+      cleanupRetiredHostedFiles(
+        task,
+        deps.hosting,
+        {
+          owner: deps.hosting.nextClaimOwner(task),
+          leaseMs: deps.hosting.uploadLeaseMs,
+          limit: 100,
+        },
+        context,
+      ),
+  );
+  if (cleaned.isErr()) {
+    if (deps.control.noteCondition("hosting-cleanup", true))
+      logEvent(task, "hosting-cleanup-blocked", { error: cleaned.error.message });
+    return;
+  }
+  if (deps.control.noteCondition("hosting-cleanup", false))
+    logEvent(task, "hosting-cleanup-recovered");
+}
+
+export async function hostingCleanupLoop(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  stop: AbortSignal,
+): Promise<void> {
+  while (!stop.aborted) {
+    await hostingCleanupOnce(task, deps);
+    const slept = await sleepResult(
+      task,
+      deps.constants.orphanSweepIntervalMs,
+      "hosted file cleanup tick",
       stop,
     );
     if (slept.isErr()) return;

@@ -10,6 +10,7 @@ import {
   type StateConflict,
   type StoreError,
 } from "./errors.ts";
+import { cleanupHostedFiles } from "./hosting.ts";
 import { logOrbEvent } from "./log.ts";
 import { hasNeverBeenReady, type OrbMessageRow, type OrbRow } from "./orb.ts";
 import type {
@@ -1513,6 +1514,20 @@ async function reconcileDeleting(
   }
   const disposal = await reconcileResourceDisposal(task, deps, orb);
   if (disposal !== null) return disposal;
+  const hosted = await withDeadline(
+    task,
+    deps.constants.providerOperationTimeoutMs,
+    "clean orb hosted files",
+    (context) => cleanupHostedFiles(task, deps.hosting, orb.id, context),
+  );
+  if (hosted.isErr()) {
+    await deps.store.recordOrbDeletionError(task, {
+      orbId: orb.id,
+      message: `hosted file cleanup: ${hosted.error.message}`,
+      now: task.wallNow(),
+    });
+    return retryable(hosted.error);
+  }
   const finalized = await deps.store.finalizeOrbDeletion(task, {
     orbId: orb.id,
     expectedStateVersion: orb.stateVersion,

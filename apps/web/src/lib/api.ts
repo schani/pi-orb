@@ -3,6 +3,8 @@ import {
   type CreateOrbRequest,
   type CreateProjectRequest,
   type EnqueueOrbMessageRequest,
+  type HostedFilesResponse,
+  HostedFilesResponseSchema,
   ListResponseSchema,
   type OrbHistoryView,
   OrbHistoryViewSchema,
@@ -247,6 +249,14 @@ export function deleteOrb(orbId: string): Promise<Result<OrbView, ApiError>> {
 
 export function getOrb(orbId: string): Promise<Result<OrbView, ApiError>> {
   return apiFetch(OrbViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}`);
+}
+
+export function listHostedFiles(orbId: string): Promise<Result<HostedFilesResponse, ApiError>> {
+  return apiFetch(
+    HostedFilesResponseSchema,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/hosted-files`,
+    { cache: "no-store" },
+  );
 }
 
 export function startOrb(orbId: string): Promise<Result<OrbView, ApiError>> {

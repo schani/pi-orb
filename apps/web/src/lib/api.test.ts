@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getSystem, probeSession } from "./api.ts";
+import { getSystem, listHostedFiles, probeSession } from "./api.ts";
 import { readBrowserSession, resetBrowserSessionForTest } from "./session.ts";
 
 describe("API session handling", () => {
@@ -78,5 +78,29 @@ describe("API session handling", () => {
     const result = await getSystem();
 
     expect(result.isOk() && result.value).toEqual(system);
+  });
+
+  it("validates the hosted-file inventory and encodes the orb id", async () => {
+    const inventory = {
+      files: [
+        {
+          path: "site/index.html",
+          url: "https://files.test/s/orb/site/index.html",
+          size: 42,
+          mediaType: "text/html",
+          updatedAt: 1,
+        },
+      ],
+      cleanupIssues: [{ path: null, lastError: "cleanup failed", lastErrorAt: 2 }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) => {
+        expect(path).toBe("/api/v1/orbs/orb%2Farchived/hosted-files");
+        return Response.json(inventory);
+      }),
+    );
+    const result = await listHostedFiles("orb/archived");
+    expect(result.isOk() && result.value).toEqual(inventory);
   });
 });

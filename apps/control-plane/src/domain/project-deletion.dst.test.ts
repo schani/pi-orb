@@ -1,3 +1,4 @@
+import { err, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import {
@@ -8,6 +9,7 @@ import {
   seedProvisionedHost,
 } from "../testkit/fixtures.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
+import { publishHostedFile } from "./hosting.ts";
 import { createOrb } from "./lifecycle.ts";
 import { projectDeletionLoop, reconcileLoop } from "./loops.ts";
 import { requestProjectDeletion } from "./project-deletion.ts";
@@ -47,6 +49,58 @@ function seed(
 }
 
 describe("project deletion (DST)", () => {
+  it("fences a child upload racing permanent project deletion", async () => {
+    await runDst({ name: "project-delete-hosting-race", iterations: 20 }, async (sim) => {
+      const orbId = ORBS[0];
+      const harness = makeHarness({
+        constants: { deletionQuarantineMs: 2_000 },
+        hostingOrbId: orbId,
+      });
+      let emitted = false;
+      const result = await sim.runTasks([
+        {
+          name: "uploader",
+          f: async (task) => {
+            seed(task, harness);
+            const orb = harness.store.orbSnapshot(orbId);
+            expect(orb?.runtimeTokenHash).not.toBeNull();
+            if (orb?.runtimeTokenHash === null || orb === null) return;
+            const uploaded = await publishHostedFile(
+              task,
+              harness.deps.hosting,
+              {
+                ...harness.hosting.request("project-delete-race"),
+                runtimeTokenHash: orb.runtimeTokenHash as string,
+                incarnation: orb.hostIncarnation,
+              },
+              {
+                next: () =>
+                  new ResultAsync(
+                    (async () => {
+                      if (emitted) return ok(null);
+                      emitted = true;
+                      const deleted = await requestProjectDeletion(task, harness.deps, PROJECT);
+                      return deleted.isErr()
+                        ? err({
+                            type: "hosting_retryable" as const,
+                            message: deleted.error.message,
+                          })
+                        : ok(new TextEncoder().encode("alpha"));
+                    })(),
+                  ),
+                close: () => okAsync(undefined),
+              },
+              { signal: new AbortController().signal },
+            );
+            expect(uploaded.isErr()).toBe(true);
+            expect(harness.hosting.current("index.html")).toBeUndefined();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    });
+  });
+
   it("serializes a child create racing the delete intent", async () => {
     await runDst({ name: "project-delete-create-race", iterations: 50 }, async (sim) => {
       const harness = makeHarness();

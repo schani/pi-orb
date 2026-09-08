@@ -652,6 +652,33 @@ async function handleApi(
     }
   }
 
+  const hostedFilesRoute = /^\/api\/v1\/orbs\/([^/]+)\/hosted-files$/.exec(path);
+  if (hostedFilesRoute !== null && method === "GET") {
+    const orbId = decodeURIComponent(hostedFilesRoute[1] ?? "");
+    if (!state.orbs.has(orbId)) {
+      sendJson(response, 404, {
+        error: { code: "not_found", message: `orb ${orbId} does not exist`, retryable: false },
+      });
+      return true;
+    }
+    sendJson(response, 200, {
+      cleanupIssues: [],
+      files:
+        orbId === ARCHIVED_ORB_ID
+          ? [
+              {
+                mediaType: "text/html",
+                path: "index.html",
+                size: 1536,
+                updatedAt: Date.now(),
+                url: `http://files.localhost:7100/s/${encodeURIComponent(orbId)}/index.html`,
+              },
+            ]
+          : [],
+    });
+    return true;
+  }
+
   const orbRoute = /^\/api\/v1\/orbs\/([^/]+)(?:\/(history|start|stop|archive))?$/.exec(path);
   if (orbRoute !== null) {
     const orbId = decodeURIComponent(orbRoute[1] ?? "");

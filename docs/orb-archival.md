@@ -8,6 +8,10 @@ Read-only retention of an orb's transcript and metadata after all runtime resour
 
 An archive is irreversible. Restoring, cloning, exporting, or reconstructing a runnable orb from its replica is out of scope. In particular, the history replica does not contain the checkout or arbitrary workspace files.
 
+**Hosted-file extension required 2026-09-07; not implemented:** system-hosted files in
+`docs/hosting.md` survive archival with their catalog and orb namespace. They are distinct from the
+workspace files destroyed by the implemented archival flow.
+
 ## Product semantics
 
 Add terminal state `archived` and transitional state `archiving`.

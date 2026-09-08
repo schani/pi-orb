@@ -21,6 +21,7 @@ import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
 import { FakeSecretStore } from "./broker.ts";
 import { FAILPOINTS } from "./failpoints.ts";
+import { makeHostingHarness } from "./hosting.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
 import {
   FakeMintIdSource,
@@ -73,11 +74,13 @@ export interface TestHarness {
   readonly store: InMemoryControlPlaneStore;
   readonly authGate: FakeAuthGate;
   readonly deps: ControlPlaneDeps;
+  readonly hosting: ReturnType<typeof makeHostingHarness>;
 }
 
 export function makeHarness(options?: {
   authMode?: FakeAuthMode;
   constants?: Partial<LifecycleConstants>;
+  hostingOrbId?: string;
 }): TestHarness {
   const world = new FakeWorld();
   const store = new InMemoryControlPlaneStore();
@@ -91,6 +94,20 @@ export function makeHarness(options?: {
       errAsync({ type: "project_secret_pointer_conflict" as const }),
     deleteProjectSecretPointer: () => okAsync(undefined),
   };
+  const hosting = makeHostingHarness({
+    ...(options?.hostingOrbId === undefined ? {} : { orbId: options.hostingOrbId }),
+    authority: (orbId) => {
+      const orb = store.orbSnapshot(orbId);
+      return orb === null
+        ? null
+        : {
+            state: orb.state,
+            runtimeTokenHash: orb.runtimeTokenHash,
+            hostIncarnation: orb.hostIncarnation,
+            hostDiscardThroughIncarnation: orb.hostDiscardThroughIncarnation,
+          };
+    },
+  });
   const deps: ControlPlaneDeps = {
     store,
     hostProvider: new FakeOrbHostProvider(world),
@@ -102,8 +119,9 @@ export function makeHarness(options?: {
     control: new ControlState(),
     constants: { ...TEST_CONSTANTS, ...options?.constants },
     projectSecrets: { pointers: projectSecretPointers, secrets: new FakeSecretStore() },
+    hosting: hosting.deps,
   };
-  return { world, store, authGate, deps };
+  return { world, store, authGate, deps, hosting };
 }
 
 /**
