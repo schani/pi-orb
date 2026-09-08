@@ -646,7 +646,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     const stage = "cleanup" as const;
     const remaining = deadline - this.cleanupTiming.now();
     if (remaining <= 0) {
-      return errAsync({
+      return errAsync<void, ImageBuildError>({
         type: "image_build_failed",
         stage,
         message: `timed out waiting for cleanup operation ${operation}`,
@@ -676,8 +676,16 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           message: `invalid cleanup operation status ${status || "missing"}`,
         });
       }
+      const waitRemaining = deadline - this.cleanupTiming.now();
+      if (waitRemaining <= 0) {
+        return errAsync<void, ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: `timed out waiting for cleanup operation ${operation}`,
+        });
+      }
       return ResultAsync.fromPromise(
-        this.cleanupTiming.wait(Math.min(5_000, remaining), signal),
+        this.cleanupTiming.wait(Math.min(5_000, waitRemaining), signal),
         (cause): ImageBuildError => ({
           type: signal.aborted ? "cancelled" : "image_build_failed",
           stage,

@@ -201,6 +201,37 @@ describe("GCloud native-image adapter", () => {
     expect(calls[1]).toContain("--global");
   });
 
+  it("fails cleanup when an exact operation cannot be described", async () => {
+    let deleted = false;
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      if (args[1] === "operations" && args[2] === "list") {
+        return {
+          stdout: JSON.stringify([
+            {
+              name: "operation-late-workspace-image",
+              status: "RUNNING",
+              targetLink:
+                "projects/target-project/global/images/pi-orb-image-workspace-v1-0123456789abcdef",
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (args[1] === "operations" && args[2] === "describe")
+        throw new Error("operation status unavailable");
+      if (args[2] === "delete") deleted = true;
+      return { stdout: "", stderr: "" };
+    });
+    const value = await effects.run(
+      "cleanup",
+      "delete-workspace-image",
+      await input(),
+      new AbortController().signal,
+    );
+    expect(value.isErr() && value.error.message).toContain("operation status unavailable");
+    expect(deleted).toBe(false);
+  });
+
   it("classifies transient readiness and permanent install failure", async () => {
     const transient = new GcloudImageBuildEffects(async () => {
       throw new Error("ssh unavailable");

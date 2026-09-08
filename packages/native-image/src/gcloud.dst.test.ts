@@ -131,56 +131,64 @@ describe("GCloud cleanup under deterministic scheduling", () => {
 
   it("fails visibly when an exact operation never completes within the cleanup budget", async () => {
     await withOutputDir(async (input) =>
-      runDst({ name: "native-image-operation-timeout", iterations: 10 }, async (sim) => {
-        let cleanupFinished = false;
-        const schedule = await sim.runTasks([
-          {
-            name: "cleanup",
-            f: async (task) => {
-              const runner: CommandRunner = async (_command, args) => {
-                await task.checkpoint("gcloud cleanup command", ...args.slice(0, 4));
-                if (args[1] === "operations" && args[2] === "list") {
-                  return {
-                    stdout: JSON.stringify([
-                      {
-                        name: "stuck-create",
-                        status: "RUNNING",
-                        targetLink:
-                          "projects/target-project/global/images/pi-orb-image-workspace-v1-0123456789abcdef",
-                      },
-                    ]),
-                    stderr: "",
-                  };
+      runDst(
+        { name: "native-image-operation-timeout", iterations: 10, lateTimerProbability: 0 },
+        async (sim) => {
+          let cleanupFinished = false;
+          const schedule = await sim.runTasks([
+            {
+              name: "cleanup",
+              f: async (task) => {
+                const waitStarts: number[] = [];
+                const runner: CommandRunner = async (_command, args) => {
+                  await task.checkpoint("gcloud cleanup command", ...args.slice(0, 4));
+                  if (args[1] === "operations" && args[2] === "list") {
+                    return {
+                      stdout: JSON.stringify([
+                        {
+                          name: "stuck-create",
+                          status: "RUNNING",
+                          targetLink:
+                            "projects/target-project/global/images/pi-orb-image-workspace-v1-0123456789abcdef",
+                        },
+                      ]),
+                      stderr: "",
+                    };
+                  }
+                  if (args[1] === "operations" && args[2] === "describe") {
+                    await task.sleep(10_000, "slow operation status command");
+                    return { stdout: "RUNNING\n", stderr: "" };
+                  }
+                  throw new Error(`unexpected command: ${args.join(" ")}`);
+                };
+                try {
+                  const result = await new GcloudImageBuildEffects(runner, {
+                    now: () => task.monotonicNow(),
+                    wait: async (milliseconds, signal) => {
+                      waitStarts.push(task.monotonicNow());
+                      await task.sleep(milliseconds, "wait for exact cloud operation", { signal });
+                    },
+                  }).run("cleanup", "delete-workspace-image", input, new AbortController().signal);
+                  expect(result.isErr() && result.error.message).toContain(
+                    "timed out waiting for cleanup operation stuck-create",
+                  );
+                  expect(waitStarts.every((startedAt) => startedAt < 60_000)).toBe(true);
+                } finally {
+                  cleanupFinished = true;
                 }
-                if (args[1] === "operations" && args[2] === "describe")
-                  return { stdout: "RUNNING\n", stderr: "" };
-                throw new Error(`unexpected command: ${args.join(" ")}`);
-              };
-              try {
-                const result = await new GcloudImageBuildEffects(runner, timing(task)).run(
-                  "cleanup",
-                  "delete-workspace-image",
-                  input,
-                  new AbortController().signal,
-                );
-                expect(result.isErr() && result.error.message).toContain(
-                  "timed out waiting for cleanup operation stuck-create",
-                );
-              } finally {
-                cleanupFinished = true;
-              }
+              },
             },
-          },
-          {
-            name: "cloud-operation",
-            f: async (task) => {
-              while (!cleanupFinished)
-                await task.sleep(1_000, "stuck cloud operation remains observable");
+            {
+              name: "cloud-operation",
+              f: async (task) => {
+                while (!cleanupFinished)
+                  await task.sleep(1_000, "stuck cloud operation remains observable");
+              },
             },
-          },
-        ]);
-        expect(schedule.isOk(), schedule.isErr() ? schedule.error.message : "").toBe(true);
-      }),
+          ]);
+          expect(schedule.isOk(), schedule.isErr() ? schedule.error.message : "").toBe(true);
+        },
+      ),
     );
   });
 });
