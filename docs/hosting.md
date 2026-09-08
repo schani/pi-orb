@@ -61,8 +61,8 @@ application cap leaves no documented transport headroom.
 Production bytes live in a dedicated private GCS bucket, separate from OpenTofu state. PostgreSQL
 is authoritative for published names and lifecycle ownership. A catalog row contains orb ID,
 normalized path, immutable object reference, byte size, media type, content hash, created time,
-and updated time. `(orb_id, path)` is unique. Local development uses a filesystem adapter; DST uses
-an in-memory fake.
+and updated time. `(orb_id, path)` is unique. Migration `013_hosted_files.sql` creates the hosting
+tables. Local development uses a filesystem adapter; DST uses an in-memory fake.
 
 Hosted storage is a control-plane capability, independent of `OrbHostProvider`. Every orb uploads
 through the same control-plane API and existing runtime bearer; it receives no GCS credential, and
