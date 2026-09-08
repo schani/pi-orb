@@ -105,7 +105,14 @@ describe("GCloud native-image adapter", () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {
       calls.push(args);
-      return { stdout: "another-owner\n", stderr: "" };
+      if (args[1] === "operations") return { stdout: "[]", stderr: "" };
+      return {
+        stdout: JSON.stringify({
+          name: "pi-orb-builder-v1-0123456789abcdef",
+          labels: { "pi-orb-native-build": "another-owner" },
+        }),
+        stderr: "",
+      };
     });
     const value = await effects.run(
       "cleanup",
@@ -114,15 +121,25 @@ describe("GCloud native-image adapter", () => {
       new AbortController().signal,
     );
     expect(value.isErr() && value.error.message).toContain("refusing to delete foreign");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("--format=value(labels.pi-orb-native-build)");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("--format=json(name,labels)");
   });
 
   it("deletes only after the ownership label matches", async () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {
       calls.push(args);
-      return { stdout: calls.length === 1 ? "0123456789abcdef\n" : "", stderr: "" };
+      if (args[1] === "operations") return { stdout: "[]", stderr: "" };
+      return {
+        stdout:
+          args[2] === "describe"
+            ? JSON.stringify({
+                name: "pi-orb-builder-v1-0123456789abcdef",
+                labels: { "pi-orb-native-build": "0123456789abcdef" },
+              })
+            : "",
+        stderr: "",
+      };
     });
     const value = await effects.run(
       "cleanup",
@@ -131,7 +148,57 @@ describe("GCloud native-image adapter", () => {
       new AbortController().signal,
     );
     expect(value.isOk()).toBe(true);
-    expect(calls[1]?.slice(0, 3)).toEqual(["compute", "instances", "delete"]);
+    expect(calls[2]?.slice(0, 3)).toEqual(["compute", "instances", "delete"]);
+  });
+
+  it("waits for an exact late create operation before owned cleanup", async () => {
+    const calls: string[][] = [];
+    let materialized = false;
+    const name = "pi-orb-image-workspace-v1-0123456789abcdef";
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      calls.push(args);
+      if (args[1] === "operations" && args[2] === "list") {
+        return {
+          stdout: JSON.stringify([
+            {
+              name: "operation-late-workspace-image",
+              status: "RUNNING",
+              targetLink: `https://www.googleapis.com/compute/v1/projects/target-project/global/images/${name}`,
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (args[1] === "operations" && args[2] === "describe") {
+        materialized = true;
+        return { stdout: "DONE\n", stderr: "" };
+      }
+      if (args[2] === "describe") {
+        if (!materialized) throw new Error(`${name} was not found`);
+        return {
+          stdout: JSON.stringify({
+            name,
+            labels: { "pi-orb-native-build": "0123456789abcdef" },
+          }),
+          stderr: "",
+        };
+      }
+      return { stdout: "", stderr: "" };
+    });
+    const value = await effects.run(
+      "cleanup",
+      "delete-workspace-image",
+      await input(),
+      new AbortController().signal,
+    );
+    expect(value.isOk()).toBe(true);
+    expect(calls.map((args) => args.slice(0, 3))).toEqual([
+      ["compute", "operations", "list"],
+      ["compute", "operations", "describe"],
+      ["compute", "images", "describe"],
+      ["compute", "images", "delete"],
+    ]);
+    expect(calls[1]).toContain("--global");
   });
 
   it("classifies transient readiness and permanent install failure", async () => {
