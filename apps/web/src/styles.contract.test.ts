@@ -59,6 +59,16 @@ describe("dashboard layout contract", () => {
 });
 
 describe("orb workspace layout contract", () => {
+  it("scrolls wide tables instead of breaking words to squeeze columns", () => {
+    expect(rule(".markdown-table-scroll")).toContain("overflow-x: auto");
+    expect(rule(".markdown-table-scroll")).toContain("max-width: 100%");
+    const table = rule(".markdown-table-scroll table");
+    expect(table).toContain("overflow-wrap: normal");
+    expect(table).toContain("word-break: normal");
+    expect(table).toContain("white-space: normal");
+    expect(rule(".markdown-table-scroll :is(th, td)")).toContain("vertical-align: top");
+  });
+
   it("gives boxed code and text the same gray background as inline code", () => {
     expect(rule(".chat-markdown :not(pre) > code")).toContain("background: var(--g1)");
     expect(rule(".markdown-code-block")).toContain("background: var(--g1)");

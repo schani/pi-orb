@@ -17,6 +17,10 @@ The first UI needs to display at least:
 
 Remaining UI questions include rendering unknown content blocks, large/truncated tool output, and image storage. Transient token deltas are ephemeral presentation events and are reconstructed after reconnect through ordinary live events; they are not stored in PostgreSQL.
 
+## Markdown tables (decided and implemented 2026-09-08)
+
+Transcript tables use natural column sizing with whole-word wrapping, top-aligned padded cells, left-aligned headers unless Markdown specifies alignment, and horizontal row rules. Each semantic table sits inside a keyboard-focusable horizontal scroll region. When its minimum content width exceeds the transcript, only the table scrolls; ordinary prose still wraps anywhere to contain long tokens. Applying that prose rule to tables was rejected after a field screenshot showed service names and even headers squeezed into fragments while a verbose column consumed the width. No truncation, content rewriting, or forced no-wrap for entire cells: prose can still wrap at normal word boundaries. This is static browser presentation with no autonomous decisions or new telemetry; rendering and CSS contract tests cover the policy.
+
 ## Orb-to-orb navigation (decided and implemented 2026-09-08)
 
 Switching orbs keeps the project index mounted, including its rows and scroll position. The selected row changes immediately; its age becomes `…` while the destination loads. The outgoing conversation remains visible until the destination's orb metadata and replicated history requests have settled, then the conversation swaps in one commit with history already initialized. No empty transcript, placeholder header, whole-page remount, fade, or loading overlay intervenes. While waiting, the outgoing conversation is inert so a send or lifecycle action cannot accidentally target the previous orb. The index stays interactive so another selection can supersede the pending one.

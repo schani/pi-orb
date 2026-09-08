@@ -1239,6 +1239,31 @@ h3 {
   margin-bottom: 0;
 }
 
+.markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
+
+.markdown-table-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
+}
+
+.markdown-table-scroll :is(th, td) {
+  padding: 4px 12px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--g2);
+}
+
+.markdown-table-scroll th {
+  text-align: left;
+  border-bottom: 1px solid var(--k);
+}
+
 .chat-markdown p {
   margin: 0 0 8px;
 }
