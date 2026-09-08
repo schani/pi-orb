@@ -34,14 +34,23 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     return new Date().toISOString();
   }
 
-  private name(input: ImageBuildInput, kind: "builder" | "validator" | "data" | "image"): string {
+  private name(
+    input: ImageBuildInput,
+    kind: "builder" | "validator" | "data" | "image" | "workspace-disk" | "workspace-image",
+  ): string {
     const suffix = input.operationId
       .toLowerCase()
       .replace(/[^a-z0-9-]/g, "-")
       .slice(0, 16);
     const reserved = `pi-orb-${kind}--${suffix}`.length;
     const version = input.version.slice(0, 63 - reserved).replace(/-$/, "");
-    return `pi-orb-${kind}-${version}-${suffix}`;
+    const prefix =
+      kind === "workspace-image"
+        ? "image-workspace"
+        : kind === "workspace-disk"
+          ? "data-workspace"
+          : kind;
+    return `pi-orb-${prefix}-${version}-${suffix}`;
   }
 
   private labels(input: ImageBuildInput): string {
@@ -140,6 +149,8 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     const validator = this.name(input, "validator");
     const data = this.name(input, "data");
     const image = this.name(input, "image");
+    const workspaceDisk = this.name(input, "workspace-disk");
+    const workspaceImage = this.name(input, "workspace-image");
     const common = [`--project=${input.project}`, `--zone=${input.zone}`];
     switch (`${stage}:${action}`) {
       case "prerequisites:check":
@@ -247,6 +258,60 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           `set -eu; echo '${input.version}' | sudo tee /opt/pi-orb/image-version >/dev/null; sudo /app/infra/native-vm/seal.sh`,
           signal,
         ).map(() => undefined);
+      case "capture:create-workspace-disk":
+        return this.gcloud(
+          input,
+          stage,
+          [
+            "compute",
+            "disks",
+            "create",
+            workspaceDisk,
+            ...common,
+            "--size=10GB",
+            "--type=pd-balanced",
+            `--labels=${this.labels(input)}`,
+            "--format=json",
+          ],
+          signal,
+        ).map(() => undefined);
+      case "capture:attach-workspace-disk":
+        return this.gcloud(
+          input,
+          stage,
+          [
+            "compute",
+            "instances",
+            "attach-disk",
+            builder,
+            ...common,
+            `--disk=${workspaceDisk}`,
+            "--device-name=pi-orb-workspace-template",
+          ],
+          signal,
+        ).map(() => undefined);
+      case "capture:format-workspace-disk":
+        return this.ssh(
+          input,
+          stage,
+          builder,
+          'set -eu; disk=/dev/disk/by-id/google-pi-orb-workspace-template; test -b "$disk"; filesystem=; if filesystem=$(sudo blkid -p -o value -s TYPE "$disk"); then test -z "$filesystem"; else test $? -eq 2; fi; sudo mkfs.ext4 -F -L pi-orb-workspace "$disk"; mount_dir=$(mktemp -d); sudo mount "$disk" "$mount_dir"; test -z "$(sudo find "$mount_dir" -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit)"; sudo umount "$mount_dir"; rmdir "$mount_dir"',
+          signal,
+        ).map(() => undefined);
+      case "capture:detach-workspace-disk":
+        return this.gcloud(
+          input,
+          stage,
+          [
+            "compute",
+            "instances",
+            "detach-disk",
+            builder,
+            ...common,
+            "--device-name=pi-orb-workspace-template",
+          ],
+          signal,
+        ).map(() => undefined);
       case "capture:stop-builder":
         return this.gcloud(
           input,
@@ -267,6 +332,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             ...common,
             "--size=20GB",
             "--type=pd-balanced",
+            `--image=${workspaceImage}`,
             `--labels=${this.labels(input)}`,
             "--format=json",
           ],
@@ -405,8 +471,12 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
         return this.deleteOwned(input, "instances", builder, signal);
       case "cleanup:delete-image":
         return this.deleteOwned(input, "images", image, signal);
+      case "cleanup:delete-workspace-image":
+        return this.deleteOwned(input, "images", workspaceImage, signal);
       case "cleanup:delete-data":
         return this.deleteOwned(input, "disks", data, signal);
+      case "cleanup:delete-workspace-disk":
+        return this.deleteOwned(input, "disks", workspaceDisk, signal);
       default:
         return errAsync({ type: "image_build_failed", stage, message: `unknown action ${action}` });
     }
@@ -466,10 +536,11 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
 
   capture(
     input: ImageBuildInput,
+    kind: "runtime" | "workspace",
     signal: AbortSignal,
   ): ResultAsync<CapturedImage, ImageBuildError> {
-    const name = this.name(input, "image");
-    const builder = this.name(input, "builder");
+    const name = this.name(input, kind === "runtime" ? "image" : "workspace-image");
+    const source = this.name(input, kind === "runtime" ? "builder" : "workspace-disk");
     return this.gcloud(
       input,
       "capture",
@@ -479,7 +550,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
         "create",
         name,
         `--project=${input.project}`,
-        `--source-disk=${builder}`,
+        `--source-disk=${source}`,
         `--source-disk-zone=${input.zone}`,
         `--labels=${this.labels(input)}`,
         "--format=json",
@@ -556,6 +627,36 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             type: "image_build_failed",
             stage: "builder",
             message: "builder base-image identity changed",
+          }),
+    );
+  }
+
+  verifyValidationWorkspaceImage(
+    input: ImageBuildInput,
+    expectedWorkspaceImageId: string,
+    signal: AbortSignal,
+  ): ResultAsync<void, ImageBuildError> {
+    const data = this.name(input, "data");
+    return this.gcloud(
+      input,
+      "validate",
+      [
+        "compute",
+        "disks",
+        "describe",
+        data,
+        `--project=${input.project}`,
+        `--zone=${input.zone}`,
+        "--format=value(sourceImageId)",
+      ],
+      signal,
+    ).andThen((result) =>
+      result.stdout.trim() === expectedWorkspaceImageId
+        ? okAsync<void, ImageBuildError>(undefined)
+        : errAsync<void, ImageBuildError>({
+            type: "image_build_failed",
+            stage: "validate",
+            message: "validation workspace-image identity changed",
           }),
     );
   }

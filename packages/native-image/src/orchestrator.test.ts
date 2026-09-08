@@ -55,14 +55,18 @@ class FakeEffects implements ImageBuildEffects {
       ? errAsync({ type: "image_build_failed", stage, message: "injected" })
       : okAsync(undefined);
   }
-  capture(): ResultAsync<CapturedImage, ImageBuildError> {
-    this.actions.push("capture:create-image");
-    return this.failAt === "capture:create-image"
+  capture(
+    _input: ImageBuildInput,
+    kind: "runtime" | "workspace",
+  ): ResultAsync<CapturedImage, ImageBuildError> {
+    const action = `capture:create-${kind}-image`;
+    this.actions.push(action);
+    return this.failAt === action
       ? errAsync({ type: "image_build_failed", stage: "capture", message: "injected" })
       : okAsync({
-          resource: "projects/project-a/global/images/image-a",
-          id: "1234",
-          name: "image-a",
+          resource: `projects/project-a/global/images/${kind}-image-a`,
+          id: kind === "runtime" ? "1234" : "5678",
+          name: `${kind}-image-a`,
         });
   }
   readPackageInventory(): ResultAsync<string, ImageBuildError> {
@@ -73,6 +77,10 @@ class FakeEffects implements ImageBuildEffects {
   }
   verifyBuilderBaseImage(): ResultAsync<void, ImageBuildError> {
     this.actions.push("builder:verify-base-image");
+    return okAsync(undefined);
+  }
+  verifyValidationWorkspaceImage(): ResultAsync<void, ImageBuildError> {
+    this.actions.push("validate:verify-workspace-image");
     return okAsync(undefined);
   }
   wait(): ResultAsync<void, ImageBuildError> {
@@ -116,17 +124,23 @@ describe("native image build orchestration", () => {
     expect(effects.actions.indexOf("validate:probe")).toBeLessThan(
       effects.actions.indexOf("manifest:accepted"),
     );
+    expect(effects.actions.indexOf("capture:format-workspace-disk")).toBeLessThan(
+      effects.actions.indexOf("seal:seal"),
+    );
     expect(effects.manifest).toMatchObject({
       status: "accepted",
       validation: true,
       baseImageId: "9876",
       imageId: "1234",
-      imageResource: "projects/project-a/global/images/image-a",
+      imageResource: "projects/project-a/global/images/runtime-image-a",
+      workspaceImageId: "5678",
+      workspaceImageResource: "projects/project-a/global/images/workspace-image-a",
     });
-    expect(effects.actions.slice(-4)).toEqual([
+    expect(effects.actions.slice(-5)).toEqual([
       "cleanup:delete-validator",
       "cleanup:delete-builder",
       "cleanup:delete-data",
+      "cleanup:delete-workspace-disk",
       "manifest:accepted",
     ]);
   });
@@ -137,22 +151,27 @@ describe("native image build orchestration", () => {
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
     expect(effects.manifest).toBeUndefined();
-    expect(effects.actions.slice(-4)).toEqual([
-      "cleanup:delete-validator",
-      "cleanup:delete-builder",
-      "cleanup:delete-data",
-      "cleanup:delete-image",
-    ]);
+    expect(effects.actions).toContain("cleanup:delete-image");
+    expect(effects.actions).toContain("cleanup:delete-workspace-image");
     expect(effects.failure).toMatchObject({ stage: "validate" });
   });
 
   it("attempts candidate cleanup when capture has an ambiguous failure", async () => {
     const effects = new FakeEffects();
-    effects.failAt = "capture:create-image";
+    effects.failAt = "capture:create-runtime-image";
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
     expect(effects.actions).toContain("cleanup:delete-image");
     expect(effects.manifest).toBeUndefined();
+  });
+
+  it("attempts workspace candidate cleanup when its capture has an ambiguous failure", async () => {
+    const effects = new FakeEffects();
+    effects.failAt = "capture:create-workspace-image";
+    const result = await buildNativeImage(input(), effects, effects.controller.signal);
+    expect(result.isErr()).toBe(true);
+    expect(effects.actions).toContain("cleanup:delete-workspace-image");
+    expect(effects.actions).not.toContain("manifest:accepted");
   });
 
   it("cleans up with a fresh signal after cancellation", async () => {
@@ -160,10 +179,11 @@ describe("native image build orchestration", () => {
     effects.abortAt = "install:run";
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
-    expect(effects.actions.slice(-3)).toEqual([
+    expect(effects.actions.slice(-4)).toEqual([
       "cleanup:delete-validator",
       "cleanup:delete-builder",
       "cleanup:delete-data",
+      "cleanup:delete-workspace-disk",
     ]);
   });
 
@@ -175,6 +195,10 @@ describe("native image build orchestration", () => {
     "install:run",
     "install:complete",
     "seal:seal",
+    "capture:create-workspace-disk",
+    "capture:attach-workspace-disk",
+    "capture:format-workspace-disk",
+    "capture:detach-workspace-disk",
     "capture:stop-builder",
     "validate:create",
     "validate:ready",
@@ -186,8 +210,10 @@ describe("native image build orchestration", () => {
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
     expect(effects.manifest).toBeUndefined();
-    if (effects.actions.includes("capture:create-image"))
+    if (effects.actions.includes("capture:create-runtime-image"))
       expect(effects.actions).toContain("cleanup:delete-image");
+    if (effects.actions.includes("capture:create-workspace-image"))
+      expect(effects.actions).toContain("cleanup:delete-workspace-image");
   });
 
   it("does not accept when temporary cleanup fails", async () => {
@@ -205,7 +231,10 @@ describe("native image build orchestration", () => {
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
     expect(effects.manifest).toBeUndefined();
-    expect(effects.actions.at(-1)).toBe("cleanup:delete-image");
+    expect(effects.actions.slice(-2)).toEqual([
+      "cleanup:delete-image",
+      "cleanup:delete-workspace-image",
+    ]);
   });
 
   it("reports one waiting edge across repeated poll attempts", async () => {

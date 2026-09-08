@@ -9,5 +9,4 @@ Type=oneshot
 TimeoutStartSec=10min
 ExecStartPre=/usr/local/bin/pi-orb-boot-diagnostic workspace starting
 ExecStart=/usr/local/bin/pi-orb-prepare-workspace
-ExecStartPost=/usr/local/bin/pi-orb-boot-diagnostic workspace ready
 RemainAfterExit=yes

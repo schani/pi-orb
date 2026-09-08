@@ -35,8 +35,9 @@ source symlinks are rejected. The uploaded archive is never regenerated during
 the run.
 
 The command creates the builder, runs installation and guest contract tests,
-captures inventory, seals the image, boots a candidate with a fresh blank
-workspace disk, runs `/opt/pi-orb/acceptance.sh`, and verifies the exact
+captures inventory, seals the runtime image, and creates a separate empty 10 GiB
+ext4 workspace image. Validation clones that image into a 20 GiB disk, boots the
+candidate, proves the filesystem grew, runs `/opt/pi-orb/acceptance.sh`, and verifies the exact
 validator instance's `runtime ready` record in Cloud Logging. There are no
 operator SSH stages.
 
@@ -54,7 +55,9 @@ external command has a numbered log. The accepted `manifest.json` records:
   "baseImageResource": "projects/PROJECT/global/images/NAME",
   "baseImageId": "NUMERIC_GCE_ID",
   "imageResource": "projects/PROJECT/global/images/NAME",
-  "imageId": "NUMERIC_GCE_ID"
+  "imageId": "NUMERIC_GCE_ID",
+  "workspaceImageResource": "projects/PROJECT/global/images/NAME",
+  "workspaceImageId": "NUMERIC_GCE_ID"
 }
 ```
 
@@ -64,6 +67,6 @@ remain recorded. Releases reject `sourceDirty: true`.
 On failure or interruption, `failure.json`, the source archive, command logs,
 and available serial/journal evidence remain locally. Cleanup checks the unique
 operation label and expected name before each deletion and refuses foreign
-resources. It deletes validator and builder instances before the validation
-disk. A candidate that fails validation is deleted and never receives an
+resources. It deletes validator and builder instances before the validation and
+template disks. A candidate that fails validation has both images deleted and never receives an
 accepted manifest. `--output-dir` selects another private evidence directory.
