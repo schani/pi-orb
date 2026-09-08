@@ -212,11 +212,8 @@ resource "google_cloud_run_v2_service" "browser" {
   }
   lifecycle {
     postcondition {
-      condition = contains(self.urls, local.app_origin) && length([
-        for status in self.traffic_statuses : status
-        if status.tag == "files" && status.type == "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST" && status.percent == 100
-      ]) == 1
-      error_message = "Cloud Run did not assign the canonical app origin and latest files traffic tag."
+      condition     = contains(self.urls, local.app_origin)
+      error_message = "Cloud Run did not assign the canonical app origin."
     }
   }
   depends_on = [

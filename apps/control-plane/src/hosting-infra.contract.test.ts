@@ -44,9 +44,7 @@ describe("hosted-file cloud infrastructure", () => {
     expect(run).toMatch(/PI_ORB_HOSTING_BUCKET\s*=\s*google_storage_bucket\.hosting\.name/);
     expect(run).toMatch(/PI_ORB_HOSTING_ORIGIN\s*=\s*local\.hosting_origin/);
     expect(run).toMatch(/contains\(self\.urls, local\.app_origin\)/);
-    expect(run).toMatch(
-      /status\.tag == "files"[\s\S]*status\.type == "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"[\s\S]*status\.percent == 100/,
-    );
+    expect(run).not.toContain("self.traffic_statuses");
     expect(run).toMatch(/PI_ORB_APP_ORIGIN\s*=\s*local\.app_origin/);
     expect(run.match(/for_each\s*=\s*local\.hosting_env/g)).toHaveLength(3);
     expect(outputs).toMatch(/output "hosting_url"[\s\S]*value\s+=\s+local\.hosting_origin/);

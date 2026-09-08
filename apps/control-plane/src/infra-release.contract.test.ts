@@ -153,7 +153,13 @@ JSON
     fi
     ;;
   "beta iap web set-iam-policy") cp "$5" "$POLICY_FILE" ;;
-  "run services describe pi-orb") echo serving-revision ;;
+  "run services describe pi-orb")
+    if env | grep '^MOCK_SERVICE_STATUS=' >/dev/null; then printenv MOCK_SERVICE_STATUS; else
+      cat <<'JSON'
+{"status":{"latestReadyRevisionName":"serving-revision","traffic":[{"tag":"files","latestRevision":true,"percent":100,"revisionName":"serving-revision"}]}}
+JSON
+    fi
+    ;;
   "run revisions list --service") printf 'serving-revision\\nold-revision\\n' ;;
   "run revisions delete old-revision") exit 0 ;;
   *) echo "unexpected gcloud call: $*" >&2; exit 1 ;;
@@ -194,7 +200,78 @@ describe("infra/deploy.sh", () => {
       role: "roles/viewer",
     });
     expect(applied.etag).toBe("etag-1");
-    expect(readFileSync(log, "utf8")).toContain("run revisions delete old-revision");
+    const calls = readFileSync(log, "utf8");
+    const describe =
+      "gcloud:run services describe pi-orb --project playground-dev-6ae7 --region us-central1 --format=json";
+    expect(calls).toContain(describe);
+    expect(calls.indexOf("beta iap web set-iam-policy")).toBeLessThan(calls.indexOf(describe));
+    expect(calls.lastIndexOf("beta iap web get-iam-policy")).toBeLessThan(calls.indexOf(describe));
+    expect(calls.indexOf(describe)).toBeLessThan(
+      calls.indexOf("run revisions delete old-revision"),
+    );
+  });
+
+  it.each([
+    [
+      "missing",
+      {
+        status: {
+          latestReadyRevisionName: "serving-revision",
+          traffic: [{ latestRevision: true, percent: 100, revisionName: "serving-revision" }],
+        },
+      },
+    ],
+    [
+      "misrouted",
+      {
+        status: {
+          latestReadyRevisionName: "serving-revision",
+          traffic: [
+            {
+              tag: "files",
+              latestRevision: false,
+              percent: 100,
+              revisionName: "old-revision",
+            },
+          ],
+        },
+      },
+    ],
+  ])("refuses a %s files traffic route before pruning revisions", (_name, serviceStatus) => {
+    const { root, log, policy } = makeDeployFixture();
+    const result = spawnSync(join(root, "deploy.sh"), [], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        POLICY_FILE: policy,
+        MOCK_SERVICE_STATUS: JSON.stringify(serviceStatus),
+        TMPDIR: root,
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("does not route the files tag");
+    expect(readFileSync(log, "utf8")).not.toContain("run revisions delete");
+  });
+
+  it("repairs IAP only without requiring the application traffic route", () => {
+    const { root, log, policy } = makeDeployFixture();
+    const result = spawnSync(join(root, "deploy.sh"), ["--iap-only"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        POLICY_FILE: policy,
+        MOCK_SERVICE_STATUS: "{}",
+        TMPDIR: root,
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(log, "utf8")).not.toContain("run services describe");
   });
 });
 

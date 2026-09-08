@@ -48,7 +48,9 @@ The cloud browser service exposes its latest revision with traffic tag `files`; 
 existing runtime service and downloads use the browser service's IAP policy. No additional serving
 service, public bucket URL, or orb-host credential is introduced. A non-GCP deployment must provide
 its own authenticated ingress for both hostnames; local development retains its trusted-local
-access boundary. See `docs/hosting.md` for origin isolation and transfer limits.
+access boundary. The full post-apply step verifies fresh Cloud Run traffic status before revision
+pruning; the IAP-only repair path remains available when application traffic is malformed. See
+`docs/hosting.md` for origin isolation, first-adoption rationale, and transfer limits.
 
 ## Decision: split portable foundation and application roots before remote builds
 
