@@ -9,7 +9,15 @@ does share the one read/write database credential, `docs/deployment.md`).
 
 ## Deploy workflow
 
-First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Bootstrap status (2026-09-09):** GitHub keyless authentication is live-verified; the published workflow remains authentication-only until application rollout safety and credential containment are live-validated.
+First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Status (2026-09-09):** GitHub keyless authentication is live-verified. The full manual workflow is wired; its first application run remains unvalidated. The user deferred database password rotation; release plans must preserve the existing credential.
+
+In GitHub Actions, select **Deploy → Run workflow → main**, leaving
+`validate_release` empty for a new deployment. Supply a recorded release ID or
+`latest` only for explicit validation-only recovery. The workflow pins tools,
+rejects a dispatched commit that is no longer main, and runs `infra/release.sh`
+under non-cancelled concurrency. Its summary and single allowlisted JSON artifact
+report the actual outcome and retained fixtures; raw plans/state/log bundles are
+never uploaded. The job timeout is 240 minutes; no browser pause is introduced.
 
 The supported manual deployment is one command from the repository root:
 
@@ -35,7 +43,7 @@ The script owns the complete transaction. Native image versions use
 
 The stages are:
 
-1. verify tools, Docker, auth, foundation, ops access and a non-mutating application plan; install locked dependencies and run typecheck, lint, unit and E2E checks before building;
+1. verify tools, Docker, auth, foundation, ops access and a non-mutating application plan; install locked dependencies, run typecheck/lint/unit checks, build the local Docker E2E runtime image and run E2E before cloud image builds;
 2. build/boot-validate native images and push the digest-pinned, source-labelled control-plane image;
 3. clamp generation above serving and published authority, create the exact saved plan, and reject database/credential changes;
 4. run migrations using that image in a one-task Cloud Run job, with retries disabled, before any new service consumes schema;

@@ -97,7 +97,7 @@ The deployed image `pi-orb-image-v-db8cb5d-ebd0a574514547e9` occupies 1,369,020,
 
 ## Automation priorities after the orb-local release
 
-**Implementation authorized (2026-09-09):** the user requested the complete one-button deployment path, requiring only necessary authentication. Use a manually triggered external workflow; do not enable deployment on every push or automatic rollback. The scope below is accepted; implementation and cloud/GitHub authorization are not yet complete. Harden the existing release command before adding unattended deployment. Most of the happy path is already scripted; this release's manual work was failure diagnosis, environment recovery and proving old-controller retirement, not typing deployment commands.
+**Implementation authorized (2026-09-09):** the user requested the complete one-button deployment path, requiring only necessary authentication. Use a manually triggered external workflow; do not enable deployment on every push or automatic rollback. The scope below is accepted; GitHub admission is complete, and full-workflow live validation remains pending. Harden the existing release command before adding unattended deployment. Most of the happy path is already scripted; this release's manual work was failure diagnosis, environment recovery and proving old-controller retirement, not typing deployment commands.
 
 1. **Remove rollout interference first.** Stale revisions must lose autonomous lifecycle authority, not merely disappear from revision inventory. The existing lifecycle-fencing and tagged-maintenance work in `TODO.md` remains the safety prerequisite. Where maintenance is necessary, the independently verified restoration watchdog is mandatory; prefer avoiding downtime when quiescence is already proven.
 2. **Make prerequisites reproducible and fail early.** Provision pinned deployment tools through repository setup; check tool availability, Docker readiness and scoped cloud access before an expensive build. The missing hosting-bucket permission and missing OpenTofu executable should be actionable preflight failures, not late surprises. Foundation permission changes stay separately administered.
@@ -111,8 +111,8 @@ The first useful milestone is “start one release and receive one trustworthy r
 
 The GitHub provider admits only the numeric repository/owner and manual `main`
 workflow specified in `infra/foundation/github.tf`. The initial `Deploy`
-workflow is deliberately authentication-only while application release safety
-is implemented. Run `34359863108` passed real keyless project and hosting-bucket
+workflow was deliberately authentication-only while application release safety
+was implemented; the full transaction is now wired below but not yet live-validated. Run `34359863108` passed real keyless project and hosting-bucket
 reads at commit `0502c53`; the same commit passed CI and E2E. The temporary
 administrator login was then revoked and orb federation rechecked successfully.
 Existing orb federation remains unchanged.
@@ -223,26 +223,49 @@ shared deployer, exercising only read-only APIs. It creates/deletes its own two
 orbs, never that shared project. This does not bootstrap the separate experimental
 STS tier or add identity authority.
 
-## Current proposal: deploy from GitHub Actions
+## Manual GitHub Actions deployment
 
-**Status: researched 2026-08-09; manually triggered implementation authorized 2026-09-09, not yet implemented.** The first-release policy is recorded in `docs/open-questions.md` (question 40). The current single-command manual transaction in `infra/release.sh` and `infra/README.md` remains authoritative until this proposal ships.
+**Implemented 2026-09-09; full application workflow not yet live-validated.**
+`.github/workflows/deploy.yml` calls the authoritative `infra/release.sh`; it does
+not duplicate the deployment algorithm. The first-release policy is recorded in
+`docs/open-questions.md` (question 40).
 
-The proposed pipeline uses one workflow dependency graph so the repository checks and full-slice E2E demonstrably pass for the exact `main` commit that is checked out and deployed. It then preserves the current release sequence as one serialized critical section:
+The workflow checks out the dispatched SHA, verifies it is still `origin/main`,
+and creates local branch `main` at that exact SHA before authentication. The shared
+command repeats the freshness check. Node 24.6.0, SDK 583.0.0 and checksum-verified
+OpenTofu 1.12.6 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
+and provider lock files are read-only. The 240-minute job budget accommodates
+checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
+The shared checks stage builds its own Docker E2E runtime image rather than relying
+on a pre-existing runner cache. Registry access uses the same refreshing keyless
+identity as deployment.
+
+An empty `validate_release` input performs a release. An explicit release ID or
+`latest` invokes validation-only recovery. Inputs enter through quoted environment
+variables, never interpolated shell programs. `release_report.py` validates nested
+record fields and the runner commit before exporting exactly `release.json`.
+No diagnostic directory, state, plan, credential file or source bundle is uploaded.
+The job summary distinguishes transaction failure from recorded gate success,
+links durable evidence, and lists retained fixtures/costs. Failure before record
+creation is explicit and never fabricates a successful deployment.
+
+The shared command runs checks and full-slice E2E for the exact dispatched commit,
+then preserves the release sequence as one serialized critical section:
 
 1. build/seal the native Debian runtime and fixed-size workspace images on disposable GCE compute, and pass fresh-VM acceptance; build the `linux/amd64` control-plane container;
 2. publish to the existing GCE image inventory and Artifact Registry repository, carrying exact VM/workspace image resources and numeric identities plus the immutable control-plane digest into the release;
-3. use the existing global release lock and serving-generation clamp shared with manual releases, run `tofu init`, and apply an exact saved plan against the GCS backend; retain only a reviewed/redacted plan summary plus a release manifest containing the commit, image resources/identities and digest, generation, and workflow URL — binary plans and unsanitized JSON contain state secrets and must never be uploaded;
+3. hold the existing global release lock and clamp the generation, require the exact saved plan to preserve the database and its credentials, run migrations in a same-image no-retry job, then apply the saved plan against the GCS backend; retain only allowlisted evidence — binary plans and unsanitized JSON contain state secrets and must never be uploaded;
 4. after any attempted apply, restore IAP with unconditional/finally semantics because OpenTofu can change the browser service and then fail; verify the serving revision and establish old-controller isolation before smoke. Revision deletion remains cleanup, not proof of quiescence. Any deliberate maintenance pause requires the independent restoration safeguard;
 5. run `infra/smoke.sh`, including its load-bearing stop/start leg, and `infra/smoke-workload-identity.sh`. Record fixture IDs immediately; delete successful fixtures and poll to `404`. Retain failed fixtures for diagnosis and surface their ownership/cost and cleanup commands, rather than erase evidence.
 
-The manual release entry point now separates IAP-only repair from revision pruning through `infra/deploy.sh --iap-only`; the GitHub workflow must preserve that finally behavior. `infra/api.sh` now supports explicit HTTP methods and keeps its bearer out of argv; identity smoke retains failed fixtures. Lifecycle success cleanup and durable release-level cleanup reporting remain part of the proposed workflow. The ops URL should be passed directly so the smoke identity does not need state-bucket access merely to run `tofu output`. Cleanup can remain blocked if the newly deployed browser reconciler is broken, so its project ID and blocker must be retained as a visible deployment artifact for later recovery.
+The shared entry point separates IAP-only repair from revision pruning through `infra/deploy.sh --iap-only` and preserves its finally behavior. `infra/api.sh` keeps its bearer out of argv; ops URLs are passed directly. Successful smoke cleanup is verified; failure retains fixtures and reports their IDs rather than erasing diagnostic evidence.
 
 Apply, IAP repair, old-revision deletion, and smoke must share one GitHub Actions concurrency group with in-progress cancellation disabled and the workflow must acquire the same GCS release lock used by `infra/release.sh`. OpenTofu's state lock covers only state mutation; the release lock serializes the shell-side repair and smoke work and makes the live-generation clamp safe across CI, manual releases, clock skew, and same-second runs. GitHub's concurrency group remains defense in depth and controls pending-run behavior: by default it coalesces older pending runs, implementing “deploy the newest eligible `main` state after the current deploy,” not a literal durable FIFO for every transient push. The current `queue: max` option can retain up to 100 pending runs, but GitHub orders them by when they begin waiting rather than by commit chronology and does not guarantee dispatch order; a strict chronological every-push policy therefore still needs an explicit ordering check/queue rather than an inaccurate workflow comment.
 
 Authentication must be keyless: GitHub OIDC to a Google Workload Identity Federation provider, then short-lived service-account impersonation. Admission must be restricted by the repository's numeric GitHub IDs (repository `1307054237`, owner `61363`), `refs/heads/main`, the chosen workflow event (`workflow_dispatch` for the proposed manual entry point; `push` only if that policy is approved), and preferably the protected deployment environment subject; name-only trust is vulnerable to repository or owner-name reuse. The pool/provider and CI identities need a separately bootstrapped trust boundary so the recurring deploy does not depend on creating the identity it is currently using.
 
-The preferred identity split is: a repository-scoped Artifact Registry publisher; an OpenTofu deployer with object access only to the static-plane state bucket and the resource-management permissions its reviewed plan actually needs, including the out-of-band Cloud Run/IAP operations; and a smoke identity able to mint tokens only for the existing `pi-orb-debug` service account. State access is high trust, not clerical: the current state contains the generated database password and complete connection URL. The foundation split now separately owns project APIs, stable IAM/admission and networking. The application root retains Cloud SQL, Secret Manager, Cloud Run and application-resource access policies, so its authority is still high trust. Generic Owner/Editor remains rejected; validate new permissions against real plans and Cloud Audit Logs.
+The initial proposal separated publisher, deployer and smoke identities. The implemented POC instead reuses the existing scoped deployer and admitted repository project, avoiding new authority or another identity bootstrap for recurring deployment. State access is high trust, not clerical: the current state contains the generated database password and complete connection URL. The foundation split now separately owns project APIs, stable IAM/admission and networking. The application root retains Cloud SQL, Secret Manager, Cloud Run and application-resource access policies, so its authority is still high trust. Generic Owner/Editor remains rejected; validate new permissions against real plans and Cloud Audit Logs.
 
-Supply-chain requirements for the workflow: pin every third-party action by immutable commit SHA; pin the OpenTofu CLI and runner versions; use the committed OpenTofu lock files read-only during ordinary deploys; preserve the root `.dockerignore` exclusions for `.git`, generated credentials, state, plans, and unrelated workspace files; and retain digest/generation release metadata. Hosted GitHub runners can execute the amd64 boot gate and GCE lifecycle smoke, but they are not tailnet members, so the current best-effort Tailscale preview leg will skip unless a separate tailnet-connected probe or runner is chosen.
+Supply-chain requirements for the workflow: pin every third-party action by immutable commit SHA; pin the OpenTofu CLI and runner versions; use the committed OpenTofu lock files read-only during ordinary deploys; preserve the root `.dockerignore` exclusions for `.git`, generated credentials, state, plans, and unrelated workspace files; and retain digest/generation release metadata. Hosted GitHub runners are not tailnet members. The mandatory preview gate dials through the already-owned smoke orb's Tailscale daemon; it never skips because of runner networking.
 
-Rollback cannot mean shifting traffic to an old Cloud Run revision because `infra/deploy.sh` deliberately deletes drained revisions. It is another forward deployment of retained last-known-good image digests with a newer generation, followed by the same repair and smoke sequence. Artifact Registry retention must guarantee those referenced digests survive. Automatic rollback is not proposed for releases containing database migrations or static-plane changes: the browser revision applies migrations before listening while OpenTofu may update the three services concurrently, an old revision may overlap the changed schema, and a prior image may not understand it. Such a release needs explicit detection and approval/maintenance policy, a verified Cloud SQL recovery point, and a rehearsed forward-fix or migration-specific rollback runbook; the POC deliberately has no backwards-compatibility choreography.
+Rollback cannot mean shifting traffic to an old Cloud Run revision because `infra/deploy.sh` deliberately deletes drained revisions. It is another forward deployment of retained last-known-good image digests with a newer generation, followed by the same repair and smoke sequence. Artifact Registry retention must guarantee those referenced digests survive. Automatic rollback is not proposed for releases containing database migrations or static-plane changes: migrations commit before any new service is applied, but old revisions can overlap the changed schema and a prior image may not understand it. Such a release needs explicit detection and approval/maintenance policy, a verified Cloud SQL recovery point, and a rehearsed forward-fix or migration-specific rollback runbook; the POC deliberately has no backwards-compatibility choreography.

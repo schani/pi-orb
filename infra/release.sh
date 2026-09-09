@@ -170,6 +170,7 @@ if [ -z "$VALIDATE" ]; then
   release_run_child npm run typecheck
   release_run_child npm run lint
   release_run_child npm test
+  release_run_child docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
   release_run_child npm run test:e2e
   stage build
   release_run_child "$INFRA/build-push.sh" > "$WORK_DIR/release.tfvars"

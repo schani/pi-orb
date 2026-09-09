@@ -64,7 +64,10 @@ NODE
   *) exit 1 ;;
 esac\n`,
   );
-  executable(join(bin, "docker"), 'test "$1" = info\n');
+  executable(
+    join(bin, "docker"),
+    'echo "docker:$*" >> "$CALL_LOG"\ntest "$1" = info || test "$1" = build\n',
+  );
   executable(join(bin, "uuidgen"), "echo 00000000-0000-4000-8000-000000000001\n");
   executable(join(bin, "npm"), 'echo "npm:$*" >> "$CALL_LOG"\n');
   executable(
@@ -355,6 +358,9 @@ describe("infra/release.sh", () => {
     expect(calls).toMatch(
       /gcloud:storage cp[\s\S]*tofu:.* init[\s\S]*tofu:.* plan[\s\S]*\nbuild[\s\S]*tofu:.* plan[\s\S]*run jobs create[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*infra.release_retire wait[\s\S]*infra.release_state activate[\s\S]*smoke[\s\S]*wif-smoke[\s\S]*gcloud:storage rm/,
     );
+    expect(calls).toMatch(
+      /npm:ci[\s\S]*npm:test\n[\s\S]*docker:build -f apps\/orb-runtime\/Dockerfile -t pi-orb-runtime:dev \.[\s\S]*npm:run test:e2e[\s\S]*\nbuild\n/,
+    );
     // The workload-identity smoke runs inside the lock, after the lifecycle
     // smoke, and is handed the project and zone its GCE legs need.
     expect(calls).toContain("wif-smoke:test-project:us-central1-a");
@@ -383,7 +389,9 @@ describe("infra/release.sh", () => {
     expect(calls).toContain("release-original");
     expect(calls).toContain("infra.release_state activate");
     expect(calls).toContain("wif-smoke");
-    expect(calls).not.toMatch(/\nbuild\n|tofu:.* plan |tofu:.* apply |run jobs create/);
+    expect(calls).not.toMatch(
+      /\nbuild\n|docker:build|npm:|tofu:.* plan |tofu:.* apply |run jobs create/,
+    );
   });
 
   it("retains the global lock after an uncertain migration job", () => {

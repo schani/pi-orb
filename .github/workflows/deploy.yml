@@ -2,6 +2,12 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      validate_release:
+        description: 'Optional: validate an existing release ID or latest; no build, migration or apply'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -11,18 +17,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  authorization:
+  release:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 240
     permissions:
       contents: read
       id-token: write
+    env:
+      PROJECT: playground-dev-6ae7
+      REGION: us-central1
+      CLOUDSDK_CORE_LOG_HTTP: 'false'
+      CLOUDSDK_CORE_VERBOSITY: warning
     steps:
-      - name: Check out repository
+      - name: Check out the dispatched commit
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Reject tracked deployment credentials, plans and state
-        run: python3 infra/artifact_guard.py
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify exact main and reject tracked credential artifacts
+        run: |
+          set -euo pipefail
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          git fetch origin main
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+          git checkout -B main "$GITHUB_SHA"
+          python3 infra/artifact_guard.py
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24.6.0'
+      - name: Install release prerequisites and checksum-pinned OpenTofu
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential python3 curl jq unzip uuid-runtime
+          archive="$RUNNER_TEMP/tofu_1.12.6_linux_amd64.zip"
+          curl --fail --silent --show-error --location https://github.com/opentofu/opentofu/releases/download/v1.12.6/tofu_1.12.6_linux_amd64.zip -o "$archive"
+          printf '5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8  %s\n' "$archive" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/tofu-bin"
+          unzip -q "$archive" tofu -d "$RUNNER_TEMP/tofu-bin"
+          echo "$RUNNER_TEMP/tofu-bin" >> "$GITHUB_PATH"
+          docker info >/dev/null
       - name: Authenticate the GitHub deployment identity
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -32,8 +68,29 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
         with:
           version: '583.0.0'
-      - name: Verify keyless access without applying an application release
+      - name: Configure keyless registry access
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+      - name: Run the authoritative release transaction
+        id: release
+        env:
+          VALIDATE_RELEASE: ${{ inputs.validate_release }}
+          PI_ORB_RELEASE_RESULT_DIR: ${{ runner.temp }}/release-result
         run: |
-          gcloud projects describe playground-dev-6ae7 --format='value(projectId)'
-          gcloud storage buckets describe gs://pi-orb-hosting-playground-dev-6ae7 --format='value(name)'
-          echo 'GitHub keyless deployment identity verified. Application release stages are not enabled yet.' >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          args=(--yes)
+          if [ -n "$VALIDATE_RELEASE" ]; then args+=(--validate "$VALIDATE_RELEASE"); fi
+          ./infra/release.sh "${args[@]}"
+      - name: Prepare allowlisted result and job summary
+        if: always()
+        env:
+          RELEASE_OUTCOME: ${{ steps.release.outcome }}
+        run: |
+          python3 -m infra.release_report "$RUNNER_TEMP/release-result/release.json" "$RUNNER_TEMP/release-artifact" "$GITHUB_SHA" "${RELEASE_OUTCOME:-skipped}" "$GITHUB_STEP_SUMMARY"
+      - name: Upload only the validated release record
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-artifact/release.json
+          if-no-files-found: ignore
+          retention-days: 30
