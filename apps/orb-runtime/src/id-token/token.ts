@@ -49,8 +49,36 @@ export type IdTokenEndpointResult =
   | { readonly kind: "internal"; readonly message: string };
 
 export interface IdTokenEndpoint {
-  mint(task: SimulationTask, request: IdTokenRequest): Promise<IdTokenEndpointResult>;
+  /** The transport must bound headers and body by the remaining invocation budget. */
+  mint(
+    task: SimulationTask,
+    request: IdTokenRequest,
+    timeoutMs: number,
+  ): Promise<IdTokenEndpointResult>;
 }
+
+/** Strict diagnostic allowlist: never request data, tokens or arbitrary error messages. */
+export type IdTokenObservation =
+  | {
+      readonly event: "attempt";
+      readonly attempt: number;
+      readonly elapsedMs: number;
+      readonly timeoutMs: number;
+    }
+  | {
+      readonly event: "result";
+      readonly attempt: number;
+      readonly elapsedMs: number;
+      readonly outcome: IdTokenEndpointResult["kind"];
+      readonly retryAfterMs?: number;
+    }
+  | {
+      readonly event: "retry";
+      readonly attempt: number;
+      readonly elapsedMs: number;
+      readonly waitMs: number;
+    }
+  | { readonly event: "budget_exhausted"; readonly attempt: number; readonly elapsedMs: number };
 
 export interface IdTokenClientConstants {
   /**
@@ -195,12 +223,35 @@ export async function fetchIdToken(
   endpoint: IdTokenEndpoint,
   request: IdTokenRequest,
   constants: IdTokenClientConstants = CLI_ID_TOKEN_CONSTANTS,
+  observe: (event: IdTokenObservation) => void = () => undefined,
 ): Promise<Result<string, IdTokenFailure>> {
-  const deadline = task.monotonicNow() + constants.retryWindowMs;
+  const startedAt = task.monotonicNow();
+  const deadline = startedAt + constants.retryWindowMs;
   let attempt = 0;
+  let terminal: IdTokenFailure = {
+    type: "unavailable",
+    message: "identity request budget exhausted",
+  };
   for (;;) {
-    const outcome = await endpoint.mint(task, request);
-    let terminal: IdTokenFailure;
+    const elapsedMs = task.monotonicNow() - startedAt;
+    const timeoutMs = Math.floor(deadline - task.monotonicNow());
+    if (timeoutMs < 1) {
+      observe({ event: "budget_exhausted", attempt, elapsedMs });
+      return err(terminal);
+    }
+    attempt += 1;
+    observe({ event: "attempt", attempt, elapsedMs, timeoutMs });
+    const outcome = await endpoint.mint(task, request, timeoutMs);
+    observe({
+      event: "result",
+      attempt,
+      elapsedMs: task.monotonicNow() - startedAt,
+      outcome: outcome.kind,
+      ...((outcome.kind === "rate_limited" || outcome.kind === "retryable") &&
+      outcome.retryAfterMs !== undefined
+        ? { retryAfterMs: outcome.retryAfterMs }
+        : {}),
+    });
     let retryAfterMs: number | undefined;
     switch (outcome.kind) {
       case "token":
@@ -223,12 +274,15 @@ export async function fetchIdToken(
         retryAfterMs = outcome.retryAfterMs;
         break;
     }
-    attempt += 1;
     const backoff = Math.min(constants.backoffCapMs, constants.backoffBaseMs * 2 ** (attempt - 1));
     const waitMs = retryAfterMs === undefined ? backoff : Math.max(retryAfterMs, backoff);
     // Give up rather than sleep past the window: a `Retry-After` longer than
     // the CLI's whole budget is an answer, not an instruction to hang.
-    if (task.monotonicNow() + waitMs > deadline) return err(terminal);
+    if (task.monotonicNow() + waitMs >= deadline) {
+      observe({ event: "budget_exhausted", attempt, elapsedMs: task.monotonicNow() - startedAt });
+      return err(terminal);
+    }
+    observe({ event: "retry", attempt, elapsedMs: task.monotonicNow() - startedAt, waitMs });
     await task.sleep(waitMs, "id-token retry backoff");
   }
 }

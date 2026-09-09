@@ -32,6 +32,8 @@ import {
  * credential for the audience it names: shell tracing around this command
  * (`set -x`, `bash -x`, a CI step that echoes commands and their output)
  * exposes it, as does any redirection of stdout into a file or log.
+ * PI_ORB_ID_TOKEN_DIAGNOSTICS=1 emits a token-free timing/outcome allowlist on
+ * stderr only; it never includes request fields or arbitrary error messages.
  *
  * This is a process boundary: outcomes leave as exit codes, not exceptions.
  */
@@ -53,7 +55,17 @@ async function main(): Promise<number> {
   }
 
   const task = new NoSimulationTask("id-token-cli", false);
-  const token = await fetchIdToken(task, new HttpIdTokenEndpoint(env), parsed.value);
+  const token = await fetchIdToken(
+    task,
+    new HttpIdTokenEndpoint(env),
+    parsed.value,
+    undefined,
+    process.env["PI_ORB_ID_TOKEN_DIAGNOSTICS"] === "1"
+      ? (event) => {
+          process.stderr.write(`identity-mint: ${JSON.stringify(event)}\n`);
+        }
+      : undefined,
+  );
   if (token.isErr()) {
     process.stderr.write(`pi-orb: ${describeIdTokenFailure(token.error)}\n`);
     return exitCodeFor(token.error);

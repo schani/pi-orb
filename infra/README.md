@@ -141,9 +141,12 @@ be probed from inside the VPC), mints through `pi-orb id-token` over
 and JWKS. With `PI_ORB_SMOKE_WIF_AUDIENCE`, `PI_ORB_SMOKE_WIF_STS_AUDIENCE`, and
 `PI_ORB_SMOKE_WIF_TEST_SA` set it additionally exchanges through STS, impersonates
 the read-only test account, calls a real API, and proves a wrong-audience token
-dies at STS; unset, those legs skip with a loud notice. Both orbs are deleted on
-exit, pass or fail. No token is ever printed: they move through pipes and
-mode-0600 files in a mode-0700 directory removed on exit.
+dies at STS; unset, those legs skip with a loud notice. On success, both orbs
+and the disposable project are deleted. On failure, cloud fixtures remain for
+inspection; their IDs and a compute/storage cost warning are printed. Preserve
+evidence, then explicitly delete only those fixtures. The exit trap removes local
+credential scratch for either verdict. No token is ever printed: they move
+through pipes and mode-0600 files in a mode-0700 directory.
 
 Relying-party configuration — GCP external-account files, AWS role trust
 policies, generic OIDC verification rules — is

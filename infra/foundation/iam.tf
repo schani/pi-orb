@@ -228,6 +228,46 @@ resource "google_project_iam_member" "deployer" {
   member   = "serviceAccount:${google_service_account.deployer.email}"
 }
 
+# GCS authorizes bucket creation on the project, before the bucket exists.
+# Keep that unavoidable project-level permission separate from management of
+# the application's one hosting bucket. Neither role grants direct object access.
+resource "google_project_iam_custom_role" "deployer_hosting_bucket_creator" {
+  role_id     = "piOrbHostingBucketCreator"
+  title       = "pi-orb hosting bucket creator"
+  description = "Create the application hosting bucket; GCS checks creation at project scope."
+  permissions = ["storage.buckets.create"]
+}
+
+resource "google_project_iam_member" "deployer_hosting_bucket_creator" {
+  project = var.project
+  role    = google_project_iam_custom_role.deployer_hosting_bucket_creator.name
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_project_iam_custom_role" "deployer_hosting_bucket_manager" {
+  role_id     = "piOrbHostingBucketManager"
+  title       = "pi-orb hosting bucket manager"
+  description = "Manage hosting bucket metadata and its application access policy, not file objects."
+  permissions = [
+    "storage.buckets.get",
+    "storage.buckets.update",
+    "storage.buckets.delete",
+    "storage.buckets.getIamPolicy",
+    "storage.buckets.setIamPolicy",
+  ]
+}
+
+resource "google_project_iam_member" "deployer_hosting_bucket_manager" {
+  project = var.project
+  role    = google_project_iam_custom_role.deployer_hosting_bucket_manager.name
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+  condition {
+    title       = "pi-orb-hosting-bucket-only"
+    description = "Manage only the application's hosted-files bucket."
+    expression  = "resource.type == \"storage.googleapis.com/Bucket\" && resource.name == \"projects/_/buckets/pi-orb-hosting-${var.project}\""
+  }
+}
+
 resource "google_storage_bucket_iam_member" "deployer_state_objects" {
   bucket = google_storage_bucket.state.name
   role   = "roles/storage.objectAdmin"

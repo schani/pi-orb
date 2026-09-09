@@ -4,6 +4,10 @@ This is an awesome project! I use it every day, and I'm so glad you're helping m
 
 pi-orb is still a POC (noted 2026-08-03). Do not build backwards-compatibility machinery unless explicitly asked: no deprecated route aliases, no dual-read/dual-write phases, no multi-deploy migration choreography. Breaking changes to internal contracts (runtime routes, protocol schemas, env contracts) ship directly; running orbs that break on an old contract are simply stopped and restarted. SQL schema migrations (`adapters/pg/migrations/*.sql`) remain the normal way to change the database — this note is about compatibility staging, not about avoiding migration files.
 
+## Simplicity
+
+Always consider simplicity an important criterion when planning and building. Prefer the smallest design that satisfies the actual requirements; question whether a problem can be removed instead of managed. Avoid speculative configurability, extra state machines, and compatibility machinery without a demonstrated need. When simplifying, remove obsolete code, options, tests, and documentation together while preserving safety and observability.
+
 ## Design documentation
 
 The design docs are the source of truth for pi-orb's evolving design. `DESIGN.md` is the entry point: purpose, scope, product decisions, the architecture overview, and an index of the topical docs under `docs/` (one per subsystem: host provider, lifecycle, runtime protocol, history/replication, Pi adapter, control-plane API, web UI, credentials, deployment, testing, stack). Incident forensics live in `docs/postmortems/`, undecided design questions in `docs/open-questions.md`, and actionable work in `TODO.md`.

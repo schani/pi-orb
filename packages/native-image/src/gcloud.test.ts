@@ -1,6 +1,8 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { type CommandRunner, GcloudImageBuildEffects } from "./gcloud.ts";
 import type { ImageBuildInput } from "./orchestrator.ts";
@@ -35,6 +37,95 @@ afterEach(async () => {
 });
 
 describe("GCloud native-image adapter", () => {
+  it("creates a private operation-owned SSH key without prompts and removes it", async () => {
+    const buildInput = await input();
+    const effects = new GcloudImageBuildEffects(async (command, args) =>
+      command === "ssh-keygen"
+        ? promisify(execFile)(command, args)
+        : { stdout: "deployer", stderr: "" },
+    );
+    const signal = new AbortController().signal;
+    expect((await effects.run("prerequisites", "check", buildInput, signal)).isOk()).toBe(true);
+    const directory = `${buildInput.outputDir}/build-ssh`;
+    expect((await stat(directory)).mode & 0o777).toBe(0o700);
+    expect((await stat(`${directory}/key`)).mode & 0o777).toBe(0o600);
+    expect(await readFile(`${directory}/key.pub`, "utf8")).toMatch(/^ssh-ed25519 /);
+    expect((await effects.run("cleanup", "delete-ssh-key", buildInput, signal)).isOk()).toBe(true);
+    await expect(stat(directory)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await effects.run("cleanup", "delete-ssh-key", buildInput, signal)).isOk()).toBe(true);
+  });
+
+  it("refuses an existing SSH directory and never deletes foreign keys", async () => {
+    const buildInput = await input();
+    const directory = `${buildInput.outputDir}/build-ssh`;
+    await mkdir(directory);
+    await writeFile(`${directory}/key`, "foreign");
+    const effects = new GcloudImageBuildEffects(async () => {
+      throw new Error("must not execute");
+    });
+    const signal = new AbortController().signal;
+    expect((await effects.run("prerequisites", "check", buildInput, signal)).isErr()).toBe(true);
+    expect((await effects.run("cleanup", "delete-ssh-key", buildInput, signal)).isOk()).toBe(true);
+    expect(await readFile(`${directory}/key`, "utf8")).toBe("foreign");
+  });
+
+  it("does not confuse another operation's SSH directory with its own", async () => {
+    const owned = await input();
+    const foreign = await input();
+    const effects = new GcloudImageBuildEffects(async () => ({ stdout: "deployer", stderr: "" }));
+    const signal = new AbortController().signal;
+    expect((await effects.run("prerequisites", "check", owned, signal)).isOk()).toBe(true);
+    await mkdir(`${foreign.outputDir}/build-ssh`);
+    await writeFile(`${foreign.outputDir}/build-ssh/key`, "foreign");
+    expect((await effects.run("cleanup", "delete-ssh-key", foreign, signal)).isOk()).toBe(true);
+    expect(await readFile(`${foreign.outputDir}/build-ssh/key`, "utf8")).toBe("foreign");
+    expect((await effects.run("cleanup", "delete-ssh-key", owned, signal)).isOk()).toBe(true);
+    await expect(stat(`${owned.outputDir}/build-ssh`)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("preserves key-generation failure and cleans its partially created directory", async () => {
+    const buildInput = await input();
+    const effects = new GcloudImageBuildEffects(async () => {
+      throw new Error("ssh-keygen unavailable");
+    });
+    const signal = new AbortController().signal;
+    const result = await effects.run("prerequisites", "check", buildInput, signal);
+    expect(result.isErr() && result.error).toMatchObject({
+      stage: "prerequisites",
+      message: "ssh-keygen unavailable",
+    });
+    expect((await effects.run("cleanup", "delete-ssh-key", buildInput, signal)).isOk()).toBe(true);
+    await expect(stat(`${buildInput.outputDir}/build-ssh`)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("uses an explicit administrator, operation key and batch mode for SSH and SCP", async () => {
+    const buildInput = await input();
+    const calls: string[][] = [];
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "" };
+    });
+    const signal = new AbortController().signal;
+    for (const [stage, action] of [
+      ["builder", "ready"],
+      ["install", "upload"],
+      ["validate", "ready"],
+      ["seal", "seal"],
+    ] as const)
+      expect((await effects.run(stage, action, buildInput, signal)).isOk()).toBe(true);
+    expect(calls).toHaveLength(4);
+    for (const args of calls) {
+      expect(args).toContain(`--ssh-key-file=${buildInput.outputDir}/build-ssh/key`);
+      expect(args).toContain("--quiet");
+      expect(args).toContain("--tunnel-through-iap");
+      const scp = args[1] === "scp";
+      expect(args[scp ? 3 : 2]).toMatch(/^pi-orb-build@pi-orb-(builder|validator)-/);
+      expect(args).toContain(scp ? "--scp-flag=-oBatchMode=yes" : "--ssh-flag=-oBatchMode=yes");
+    }
+  });
+
   it("captures the exact image identity from the Compute response", async () => {
     const calls: string[][] = [];
     const runner: CommandRunner = async (_command, args) => {
@@ -357,6 +448,7 @@ describe("GCloud native-image adapter", () => {
       "--metadata=enable-guest-attributes=TRUE,block-project-ssh-keys=TRUE",
     );
     expect(calls[0]).toContain("--image=pi-orb-image-workspace-v1-0123456789abcdef");
+    expect(calls[0]).toContain("--size=50GB");
   });
 
   it("creates and captures an owned empty workspace template", async () => {
@@ -390,7 +482,21 @@ describe("GCloud native-image adapter", () => {
       ).isOk(),
     ).toBe(true);
     expect(calls[0]).toContain("pi-orb-data-workspace-v1-0123456789abcdef");
-    expect(calls[0]).toContain("--size=10GB");
+    expect(calls[0]).toContain("--size=50GB");
+    expect(
+      (
+        await effects.run(
+          "capture",
+          "format-workspace-disk",
+          buildInput,
+          new AbortController().signal,
+        )
+      ).isOk(),
+    ).toBe(true);
+    const format = calls.at(-1)?.find((arg) => arg.startsWith("--command=")) ?? "";
+    expect(format).toContain('sudo e2fsck -f -n "$disk"');
+    expect(format.indexOf('sudo umount "$mount_dir"')).toBeLessThan(format.indexOf("sudo e2fsck"));
+    expect(format).not.toContain("resize2fs");
     const captured = await effects.capture(buildInput, "workspace", new AbortController().signal);
     expect(captured.isOk() && captured.value.id).toBe("456");
     expect(calls.at(-1)).toContain("--source-disk=pi-orb-data-workspace-v1-0123456789abcdef");

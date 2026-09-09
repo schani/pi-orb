@@ -10,18 +10,6 @@ import type { BrokerEnv } from "../broker/endpoint.ts";
 import type { IdTokenEndpoint, IdTokenEndpointResult, IdTokenRequest } from "./token.ts";
 
 /**
- * Ceiling on one mint request, headers and body together. A control plane that
- * accepts the connection and then answers nothing — a half-dead instance, a
- * proxy holding the socket open — is indistinguishable from a working one to a
- * `fetch` without a deadline, and an executable credential source that hangs is
- * worse than one that fails: the SDK calling `pi-orb id-token` inherits the
- * hang. Three seconds is comfortably under `CLI_ID_TOKEN_CONSTANTS`'
- * whole-invocation budget of ten, so one silent attempt still leaves room for
- * the retry the client would make against a restarting control plane.
- */
-export const MINT_REQUEST_TIMEOUT_MS = 3_000;
-
-/**
  * HTTP transport for the identity mint (docs/workload-identity.md). Like the
  * broker endpoint it never throws: every outcome, network failure and timeout
  * included, becomes a typed `IdTokenEndpointResult`. The incarnation bearer
@@ -35,15 +23,20 @@ export class HttpIdTokenEndpoint implements IdTokenEndpoint {
     this.env = env;
   }
 
-  mint(_task: SimulationTask, request: IdTokenRequest): Promise<IdTokenEndpointResult> {
+  mint(
+    _task: SimulationTask,
+    request: IdTokenRequest,
+    timeoutMs: number,
+  ): Promise<IdTokenEndpointResult> {
     const body: IdTokenRequestBody = {
       audience: request.audience,
       ...(request.ttlSeconds === undefined ? {} : { ttlSeconds: request.ttlSeconds }),
     };
-    // One signal for the whole exchange: `fetch` ties the response body stream
-    // to it too, so a control plane that sends a status line and then stalls
-    // mid-body is bounded exactly like one that never replies at all.
-    const deadline = AbortSignal.timeout(MINT_REQUEST_TIMEOUT_MS);
+    // Spend the caller's remaining budget on headers AND body. A separate short
+    // attempt cap abandons requests queued behind a cold start; they can still
+    // mint server-side and throttle the caller's retries. See the 2026-09-08
+    // cold-start incident in docs/postmortems/2026-09-08-identity-cold-start.md.
+    const deadline = AbortSignal.timeout(timeoutMs);
     return fetch(`${this.env.controlPlaneUrl}${ID_TOKEN_PATH}`, {
       method: "POST",
       headers: {
@@ -66,7 +59,7 @@ export class HttpIdTokenEndpoint implements IdTokenEndpoint {
         // the failed read rather than on the signal alone, so a response that
         // arrived complete is never thrown away by a deadline that fires while
         // it is being parsed.
-        if (bodyFailed && deadline.aborted) return timedOut();
+        if (bodyFailed && deadline.aborted) return timedOut(timeoutMs);
         if (response.status === 200) {
           if (!Check(IdTokenResponseSchema, payload)) {
             return { kind: "internal", message: "malformed mint response" };
@@ -111,7 +104,7 @@ export class HttpIdTokenEndpoint implements IdTokenEndpoint {
       // terminal.
       (error: unknown): IdTokenEndpointResult =>
         deadline.aborted
-          ? timedOut()
+          ? timedOut(timeoutMs)
           : {
               kind: "retryable",
               message: error instanceof Error ? error.message : String(error),
@@ -125,10 +118,10 @@ export class HttpIdTokenEndpoint implements IdTokenEndpoint {
  * elapsed budget rather than repeating the platform's bare "operation was
  * aborted".
  */
-function timedOut(): IdTokenEndpointResult {
+function timedOut(timeoutMs: number): IdTokenEndpointResult {
   return {
     kind: "retryable",
-    message: `control plane did not answer within ${MINT_REQUEST_TIMEOUT_MS}ms`,
+    message: `control plane did not answer within ${timeoutMs}ms`,
   };
 }
 

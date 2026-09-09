@@ -1,6 +1,5 @@
 #!/usr/bin/python3
-"""Validate and grow the ext4 persistent workspace disk before mounting."""
-import os
+"""Validate the fixed-size ext4 persistent workspace disk without modifying it."""
 from pathlib import Path
 import subprocess
 import sys
@@ -8,6 +7,7 @@ import time
 
 DEVICE = Path('/dev/disk/by-id/google-pi-orb-data')
 DEVICE_WAIT_SECONDS = 90
+WORKSPACE_SIZE_BYTES = 50 * 1024 ** 3
 
 
 def run(command):
@@ -47,8 +47,8 @@ def prepare(device=DEVICE, command=run):
         size = int(size_result.stdout.strip())
     except ValueError:
         return 'disk_size_invalid'
-    if size < 10 * 1024 * 1024 * 1024:
-        return 'disk_too_small'
+    if size != WORKSPACE_SIZE_BYTES:
+        return 'disk_size_mismatch'
 
     probe = command(['/usr/sbin/blkid', '-p', '-o', 'value', '-s', 'TYPE', str(resolved)])
     filesystem = probe.stdout.strip()
@@ -59,15 +59,11 @@ def prepare(device=DEVICE, command=run):
         if metadata.returncode != 0:
             return 'filesystem_metadata_failed'
         current_size = filesystem_size(metadata.stdout)
-        if current_size is None or current_size > size:
+        if current_size is None:
             return 'filesystem_size_invalid'
-        if current_size == size:
-            return 'filesystem_size_current'
-        checked = command(['/usr/sbin/e2fsck', '-f', '-n', str(resolved)])
-        if checked.returncode != 0:
-            return 'filesystem_check_failed'
-        grown = command(['/usr/sbin/resize2fs', str(resolved)])
-        return 'filesystem_grown' if grown.returncode == 0 else 'filesystem_resize_failed'
+        if current_size != size:
+            return 'filesystem_size_mismatch'
+        return 'filesystem_ready'
     if probe.returncode != 2:
         return 'disk_probe_failed'
     return 'missing_filesystem'
@@ -81,7 +77,7 @@ def main():
             result = prepare()
         except (OSError, RuntimeError):
             result = 'workspace_device_unavailable'
-    success = result in ('filesystem_size_current', 'filesystem_grown')
+    success = result == 'filesystem_ready'
     print(result, file=sys.stdout if success else sys.stderr)
     if success:
         subprocess.run(

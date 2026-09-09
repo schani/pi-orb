@@ -19,7 +19,7 @@ npm run native-image:build -- \
 Apply the foundation first (`infra/foundation/README.md`); its outputs supply
 the build subnet and service accounts.
 
-Required local tools are Node.js 24, npm, Git, tar, and an authenticated
+Required local tools are Node.js 24, npm, Git, tar, `ssh-keygen`, and an authenticated
 `gcloud`. The caller needs IAP SSH, Compute instance/disk/image
 create/inspect/delete, Logging viewer, image IAM publication, and
 `iam.serviceAccounts.actAs` permissions. The builder service account needs only
@@ -35,15 +35,40 @@ source symlinks are rejected. The uploaded archive is never regenerated during
 the run.
 
 The command creates the builder, runs installation and guest contract tests,
-captures inventory, seals the runtime image, and creates a separate empty 10 GiB
-ext4 workspace image. Validation clones that image into a 20 GiB disk, boots the
-candidate, proves the filesystem grew, runs `/opt/pi-orb/acceptance.sh`, and verifies the exact
+captures inventory, seals the runtime image, and creates a separate empty 50 GiB
+ext4 workspace image. Validation clones that image into a 50 GiB disk, matching
+production's fixed workspace capacity, runs `/opt/pi-orb/acceptance.sh`, and verifies the exact
 validator instance's `runtime ready` record in Cloud Logging. Validator SSH
 readiness and guest acceptance each retain 60 attempts, so boot connectivity
 does not consume the acceptance allowance. There are no
-operator SSH stages. Before growing ext4, the guest requires a forced read-only
-`e2fsck` to pass; it never repairs a damaged workspace automatically. The Linux
-guest test exercises healthy growth and damaged-image refusal with real e2fsprogs.
+operator SSH stages. SSH and SCP always name `pi-orb-build`, never the caller's
+local username or runtime `orb`. Preflight generates an unencrypted Ed25519 key
+in the operation's mode-0700 `build-ssh` directory with no prompt; all connections
+use that key, IAP, quiet mode and SSH batch mode. Existing directories are refused,
+not overwritten. Cleanup removes the operation key on success, failure and handled
+cancellation, after remote diagnostics and resource cleanup. A trap-bypassing kill
+can leave the private key in the private evidence directory; verify ownership and
+remove it when recovering the interrupted build. No personal SSH key is needed.
+
+Sealing retains the build administrator with a locked password and no copied SSH
+credentials. It stops (but does not disable) guest-account reconciliation before
+scrubbing keys so instance metadata cannot repopulate them before capture. At the
+validator's boot these services restart and accept only the new instance's SSH
+metadata. Acceptance checks the separate administrator home and locked password,
+plus runtime `orb`'s UID/GID 2000 and `/workspace/home`; it does not adopt a
+pre-existing runtime account with arbitrary ownership.
+
+Workspace capacity is fixed at 50 GiB in the builder, validator and provider; there
+is no workspace-size option or runtime growth path. The builder runs a forced
+read-only `e2fsck` after the empty template's final unmount and refuses a damaged
+candidate. Guest admission only reads disk capacity, filesystem type and size,
+requiring a 50 GiB ext4 filesystem that fills a 50 GiB disk before mounting. It
+never formats, resizes or repairs a retained disk, and does not add an offline
+check to ordinary restarts; normal ext4 mount/journal handling remains unchanged.
+Wrong-size or malformed storage emits the precise workspace failure code through
+the existing boot diagnostics. The Linux tests cover fixed-size admission,
+retained contents, mismatch refusal without mutation and the template integrity
+gate with real e2fsprogs.
 
 Output defaults to `.context/native-image/<version>-<operation-id>/`. Every
 external command has a numbered log. The accepted `manifest.json` records:

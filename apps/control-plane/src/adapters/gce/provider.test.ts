@@ -356,6 +356,7 @@ describe("GceOrbHostProvider", () => {
     const dataDiskInsert = transport.requests.find(
       (request) => request.method === "POST" && request.path.endsWith("/disks"),
     );
+    expect(dataDiskInsert?.body?.["sizeGb"]).toBe("50");
     expect(dataDiskInsert?.body?.["sourceImage"]).toBe(
       "projects/projxx/global/images/pi-orb-workspace-20260908",
     );
@@ -493,7 +494,7 @@ describe("GceOrbHostProvider", () => {
     expect(result.isOk(), JSON.stringify(result)).toBe(true);
   });
 
-  it("reattaches an owned retained disk without requiring current size or type defaults", async () => {
+  it("reattaches an owned disk unchanged and leaves capacity admission to the guest", async () => {
     const transport = new FakeTransport([
       () => notFound,
       () =>
@@ -1019,7 +1020,6 @@ describe("GceOrbHostProvider host specification", () => {
     expect(fingerprintWith({ serviceAccount: "other@proj.iam.gserviceaccount.com" })).not.toBe(
       currentSpecFingerprint,
     );
-    expect(fingerprintWith({ dataDiskSizeGb: 512 })).not.toBe(currentSpecFingerprint);
     expect(fingerprintWith({ extraEnv: { OPENAI_BASE_URL: "http://a" } })).not.toBe(
       currentSpecFingerprint,
     );

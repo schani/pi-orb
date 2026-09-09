@@ -108,7 +108,7 @@ class WorkspaceTest(unittest.TestCase):
         temporary = tempfile.NamedTemporaryFile()
         return temporary
 
-    def test_same_size_ext4_skips_forced_check_and_resize(self):
+    def test_fixed_size_ext4_admission_only_reads_metadata(self):
         disk = self.make_disk()
         self.addCleanup(disk.close)
         commands = []
@@ -118,24 +118,35 @@ class WorkspaceTest(unittest.TestCase):
             if 'blkid' in argv[0]: return Result(stdout='ext4\n')
             if 'tune2fs' in argv[0]: return Result(stdout='Block count: 13107200\nBlock size: 4096\n')
             return Result()
-        self.assertEqual(workspace.prepare(Path(disk.name), command), 'filesystem_size_current')
+        self.assertEqual(workspace.prepare(Path(disk.name), command), 'filesystem_ready')
         self.assertFalse(any('mkfs' in argv[0] for argv in commands))
         self.assertFalse(any('e2fsck' in argv[0] for argv in commands))
         self.assertFalse(any('resize2fs' in argv[0] for argv in commands))
 
-    def test_checks_and_grows_cloned_ext4_to_device(self):
+    def test_smaller_and_larger_filesystems_are_refused_without_mutation(self):
         disk = self.make_disk()
         self.addCleanup(disk.close)
-        commands = []
-        def command(argv):
-            commands.append(argv)
-            if 'blockdev' in argv[0]: return Result(stdout=str(50 * 1024 ** 3))
-            if 'blkid' in argv[0]: return Result(stdout='ext4\n')
-            if 'tune2fs' in argv[0]: return Result(stdout='Block count: 2621440\nBlock size: 4096\n')
-            return Result()
-        self.assertEqual(workspace.prepare(Path(disk.name), command), 'filesystem_grown')
-        self.assertTrue(any('e2fsck' in argv[0] and '-n' in argv for argv in commands))
-        self.assertTrue(any('resize2fs' in argv[0] for argv in commands))
+        for blocks in (2621440, 15728640):
+            commands = []
+            def command(argv):
+                commands.append(argv)
+                if 'blockdev' in argv[0]: return Result(stdout=str(50 * 1024 ** 3))
+                if 'blkid' in argv[0]: return Result(stdout='ext4\n')
+                if 'tune2fs' in argv[0]: return Result(stdout=f'Block count: {blocks}\nBlock size: 4096\n')
+                self.fail(f'unexpected command: {argv}')
+            self.assertEqual(workspace.prepare(Path(disk.name), command), 'filesystem_size_mismatch')
+            self.assertEqual(len(commands), 3)
+
+    def test_unsupported_disk_capacities_are_refused_before_filesystem_inspection(self):
+        disk = self.make_disk()
+        self.addCleanup(disk.close)
+        for gib in (10, 20, 49, 51, 100):
+            commands = []
+            def command(argv):
+                commands.append(argv)
+                return Result(stdout=str(gib * 1024 ** 3))
+            self.assertEqual(workspace.prepare(Path(disk.name), command), 'disk_size_mismatch')
+            self.assertEqual(len(commands), 1)
 
     def test_missing_and_unsupported_filesystems_fail_closed_without_formatting(self):
         disk = self.make_disk()
@@ -144,24 +155,11 @@ class WorkspaceTest(unittest.TestCase):
             commands = []
             def command(argv):
                 commands.append(argv)
-                if 'blockdev' in argv[0]: return Result(stdout=str(20 * 1024 ** 3))
+                if 'blockdev' in argv[0]: return Result(stdout=str(50 * 1024 ** 3))
                 if 'blkid' in argv[0]: return Result(returncode=2) if filesystem is None else Result(stdout=filesystem)
                 return Result()
             self.assertEqual(workspace.prepare(Path(disk.name), command), expected)
             self.assertFalse(any('mkfs' in argv[0] for argv in commands))
-
-    def test_damaged_or_ungrowable_ext4_fails_closed(self):
-        disk = self.make_disk()
-        self.addCleanup(disk.close)
-        def commands_with(failing):
-            def command(argv):
-                if 'blockdev' in argv[0]: return Result(stdout=str(20 * 1024 ** 3))
-                if 'blkid' in argv[0]: return Result(stdout='ext4')
-                if 'tune2fs' in argv[0]: return Result(stdout='Block count: 2621440\nBlock size: 4096\n')
-                return Result(returncode=4 if failing in argv[0] else 0)
-            return command
-        self.assertEqual(workspace.prepare(Path(disk.name), commands_with('e2fsck')), 'filesystem_check_failed')
-        self.assertEqual(workspace.prepare(Path(disk.name), commands_with('resize2fs')), 'filesystem_resize_failed')
 
     def test_invalid_ext4_metadata_fails_closed_without_repair(self):
         disk = self.make_disk()
@@ -169,7 +167,7 @@ class WorkspaceTest(unittest.TestCase):
         commands = []
         def command(argv):
             commands.append(argv)
-            if 'blockdev' in argv[0]: return Result(stdout=str(20 * 1024 ** 3))
+            if 'blockdev' in argv[0]: return Result(stdout=str(50 * 1024 ** 3))
             if 'blkid' in argv[0]: return Result(stdout='ext4')
             if 'tune2fs' in argv[0]: return Result(stdout='invalid')
             return Result()
@@ -179,8 +177,8 @@ class WorkspaceTest(unittest.TestCase):
     def test_acceptance_requires_filesystem_to_fill_the_device(self):
         acceptance = (ROOT / 'acceptance.sh').read_text()
         self.assertIn('blockdev --getsize64', acceptance)
-        self.assertIn('device_bytes - filesystem_bytes', acceptance)
-        self.assertIn('-lt "$block_size"', acceptance)
+        self.assertIn('test "$device_bytes" -eq $((50 * 1024 * 1024 * 1024))', acceptance)
+        self.assertIn('test "$filesystem_bytes" -eq "$device_bytes"', acceptance)
 
     def test_main_publishes_exact_failure_code(self):
         with patch.object(workspace, 'wait_for_device', return_value=True), patch.object(workspace, 'prepare', return_value='missing_filesystem'), patch.object(workspace.subprocess, 'run') as run:
@@ -190,14 +188,13 @@ class WorkspaceTest(unittest.TestCase):
             ['/usr/local/bin/pi-orb-boot-diagnostic', 'workspace', 'failed', 'missing_filesystem'],
         )
 
-    def test_main_publishes_the_workspace_size_decision(self):
-        for result in ('filesystem_size_current', 'filesystem_grown'):
-            with patch.object(workspace, 'wait_for_device', return_value=True), patch.object(workspace, 'prepare', return_value=result), patch.object(workspace.subprocess, 'run') as run:
-                self.assertEqual(workspace.main(), 0)
-            self.assertEqual(
-                run.call_args.args[0],
-                ['/usr/local/bin/pi-orb-boot-diagnostic', 'workspace', 'ready', result],
-            )
+    def test_main_publishes_workspace_ready(self):
+        with patch.object(workspace, 'wait_for_device', return_value=True), patch.object(workspace, 'prepare', return_value='filesystem_ready'), patch.object(workspace.subprocess, 'run') as run:
+            self.assertEqual(workspace.main(), 0)
+        self.assertEqual(
+            run.call_args.args[0],
+            ['/usr/local/bin/pi-orb-boot-diagnostic', 'workspace', 'ready', 'filesystem_ready'],
+        )
 
     def test_missing_device_times_out_without_probing_or_formatting(self):
         with patch.object(workspace, 'wait_for_device', return_value=False), patch.object(workspace, 'prepare') as prepare, patch.object(workspace.subprocess, 'run') as run:

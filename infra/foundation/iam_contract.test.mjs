@@ -70,6 +70,57 @@ test("orb smoke can publish only instance SSH metadata", () => {
   assert.match(binding, /!resource\.name\.startsWith[\s\S]*instances\/pi-orb-validator-/);
 });
 
+test("hosting bucket creation is the sole new project-wide storage permission", () => {
+  const role = iam.match(
+    /resource "google_project_iam_custom_role" "deployer_hosting_bucket_creator" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(role);
+  assert.match(role, /permissions = \["storage\.buckets\.create"\]/);
+  const binding = iam.match(
+    /resource "google_project_iam_member" "deployer_hosting_bucket_creator" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(binding);
+  assert.match(
+    binding,
+    /role\s+= google_project_iam_custom_role\.deployer_hosting_bucket_creator\.name/,
+  );
+  assert.match(binding, /google_service_account\.deployer\.email/);
+  assert.doesNotMatch(binding, /condition/);
+});
+
+test("hosting bucket management excludes other buckets and direct object permissions", () => {
+  const role = iam.match(
+    /resource "google_project_iam_custom_role" "deployer_hosting_bucket_manager" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(role);
+  assert.deepEqual([...role.matchAll(/"(storage\.[^"]+)"/g)].map((m) => m[1]).sort(), [
+    "storage.buckets.delete",
+    "storage.buckets.get",
+    "storage.buckets.getIamPolicy",
+    "storage.buckets.setIamPolicy",
+    "storage.buckets.update",
+  ]);
+  const binding = iam.match(
+    /resource "google_project_iam_member" "deployer_hosting_bucket_manager" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert(binding);
+  assert.match(
+    binding,
+    /role\s+= google_project_iam_custom_role\.deployer_hosting_bucket_manager\.name/,
+  );
+  assert.match(binding, /google_service_account\.deployer\.email/);
+  assert(binding.includes('resource.type == \\"storage.googleapis.com/Bucket\\"'));
+  assert.match(
+    binding,
+    /resource\.name == \\"projects\/_\/buckets\/pi-orb-hosting-\$\{var\.project\}\\"/,
+  );
+  assert.doesNotMatch(binding, /startsWith|\|\|/);
+  assert.doesNotMatch(
+    iam.match(/deployer_project_roles = toset\(\[[\s\S]*?\]\)/)?.[0] ?? "",
+    /roles\/storage\./,
+  );
+});
+
 test("blanket recurring network and IAP roles are absent", () => {
   const roles = iam.match(/deployer_project_roles = toset\(\[[\s\S]*?\]\)/)?.[0];
   assert(roles);

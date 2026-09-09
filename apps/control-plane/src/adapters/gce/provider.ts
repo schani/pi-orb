@@ -45,7 +45,6 @@ export interface GceOrbHostProviderOptions {
   readonly workspaceImageId: string;
   /** Broker base URL as reachable from orb VMs (the runtime-role service). */
   readonly controlPlaneUrl: string;
-  readonly dataDiskSizeGb?: number;
   readonly extraEnv?: Readonly<Record<string, string>>;
   /** Tailscale port exposure; enabling it changes the immutable specification. */
   readonly tailscale?: TailscaleHostOptions;
@@ -67,7 +66,7 @@ const CONFIG_METADATA_KEY = "pi-orb-config";
 const DATA_DEVICE = "pi-orb-data";
 /** The boot disk is disposable — the workspace lives on the data disk. */
 const BOOT_DISK_SIZE_GB = "20";
-const DEFAULT_DATA_DISK_SIZE_GB = 50;
+const WORKSPACE_DISK_SIZE_GB = 50;
 /** Spot with STOP on preemption; the retained data disk survives the stop. */
 const SCHEDULING = {
   provisioningModel: "SPOT",
@@ -294,7 +293,7 @@ export class GceOrbHostProvider implements OrbHostProvider {
       serviceAccount: this.options.serviceAccount,
       scopes: SERVICE_ACCOUNT_SCOPES,
       scheduling: SCHEDULING,
-      dataDiskSizeGb: this.options.dataDiskSizeGb ?? DEFAULT_DATA_DISK_SIZE_GB,
+      dataDiskSizeGb: WORKSPACE_DISK_SIZE_GB,
     };
   }
 

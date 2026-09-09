@@ -129,6 +129,12 @@ Tracking:
 - [docs/postmortems/2026-09-09-live-web-rebuild.md](docs/postmortems/2026-09-09-live-web-rebuild.md) — blank dashboard from rebuilding a live static root; immutable build and asset/browser validation rules
 - [docs/postmortems/2026-09-09-posthog-template-discovery.md](docs/postmortems/2026-09-09-posthog-template-discovery.md) — authenticated PostHog discovery blocked by an optional method's HTTP-404 error envelope
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
+- [docs/postmortems/2026-09-09-deleted-browser-reconciler.md](docs/postmortems/2026-09-09-deleted-browser-reconciler.md) — deleted browser revision remained active and raced new-generation provisioning
+- [docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md](docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md) — preview smoke must dial through the daemon on userspace Tailscale callers
+- [docs/postmortems/2026-09-09-release-hosting-bucket-iam.md](docs/postmortems/2026-09-09-release-hosting-bucket-iam.md) — scoped release cannot read the application hosting bucket during plan
+- [docs/postmortems/2026-09-08-identity-cold-start.md](docs/postmortems/2026-09-08-identity-cold-start.md) — short HTTP attempt caps abandon queued mint requests and self-throttle behind runtime API cold starts
+- [docs/postmortems/2026-09-08-workspace-image-readonly-check.md](docs/postmortems/2026-09-08-workspace-image-readonly-check.md) — captured workspace template fails resize after a successful read-only check
+- [docs/postmortems/2026-09-08-orb-local-release-builder-user.md](docs/postmortems/2026-09-08-orb-local-release-builder-user.md) — orb-local release blocked by implicit SSH username and runtime account collision
 - [docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md](docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md) — DST-discovered signing-key orphan leak, retry ownership fix, and preserved failure trace
 
 Reference material:

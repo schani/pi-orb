@@ -33,6 +33,23 @@ test("live smoke deadlines cover native lifecycle bounds", () => {
   assert.match(replacement, /^boot_deadline_seconds=900\b/m);
 });
 
+test("preview smoke distinguishes userspace dialing from kernel networking", () => {
+  const smoke = readFileSync(new URL("./smoke.sh", import.meta.url), "utf8");
+  assert.match(smoke, /status --json \| jget TUN/);
+  assert.match(smoke, /False\|false\)[\s\S]*?transport=userspace/);
+  assert.match(smoke, /True\|true\) transport=kernel/);
+  assert.match(smoke, /python3 "\$DIR\/smoke_preview\.py" "\$ts" "\$preview"/);
+  assert.match(smoke, /curl -sS --max-time 10/);
+  assert.equal(seconds(smoke, "HEALTH_TIMEOUT"), 60);
+});
+
+test("ops API bearer travels through stdin, not curl arguments", () => {
+  const api = readFileSync(new URL("./api.sh", import.meta.url), "utf8");
+  assert.match(api, /printf 'header = "Authorization: Bearer %s"/);
+  assert.match(api, /curl -s -K - -X/);
+  assert.doesNotMatch(api, /curl[^\n]*Authorization: Bearer/);
+});
+
 test("compute replacement SSH always uses IAP", () => {
   const replacement = readFileSync(
     new URL("./smoke-compute-replacement.sh", import.meta.url),

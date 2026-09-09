@@ -139,11 +139,12 @@ describe("native image build orchestration", () => {
       workspaceImageId: "5678",
       workspaceImageResource: "projects/project-a/global/images/workspace-image-a",
     });
-    expect(effects.actions.slice(-5)).toEqual([
+    expect(effects.actions.slice(-6)).toEqual([
       "cleanup:delete-validator",
       "cleanup:delete-builder",
       "cleanup:delete-data",
       "cleanup:delete-workspace-disk",
+      "cleanup:delete-ssh-key",
       "manifest:accepted",
     ]);
   });
@@ -182,11 +183,12 @@ describe("native image build orchestration", () => {
     effects.abortAt = "install:run";
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
-    expect(effects.actions.slice(-4)).toEqual([
+    expect(effects.actions.slice(-5)).toEqual([
       "cleanup:delete-validator",
       "cleanup:delete-builder",
       "cleanup:delete-data",
       "cleanup:delete-workspace-disk",
+      "cleanup:delete-ssh-key",
     ]);
   });
 
@@ -213,23 +215,31 @@ describe("native image build orchestration", () => {
     const result = await buildNativeImage(input(), effects, effects.controller.signal);
     expect(result.isErr()).toBe(true);
     expect(effects.manifest).toBeUndefined();
+    expect(effects.actions).toContain("cleanup:delete-ssh-key");
     if (effects.actions.includes("capture:create-runtime-image"))
       expect(effects.actions).toContain("cleanup:delete-image");
     if (effects.actions.includes("capture:create-workspace-image"))
       expect(effects.actions).toContain("cleanup:delete-workspace-image");
   });
 
-  it("does not accept when temporary cleanup fails", async () => {
-    const effects = new FakeEffects();
-    effects.failAt = "cleanup:delete-validator";
-    const result = await buildNativeImage(input(), effects, effects.controller.signal);
-    expect(result.isErr()).toBe(true);
-    expect(effects.manifest).toBeUndefined();
-    expect(effects.actions.slice(-2)).toEqual([
-      "cleanup:delete-image",
-      "cleanup:delete-workspace-image",
-    ]);
-  });
+  it.each(["cleanup:delete-validator", "cleanup:delete-ssh-key"])(
+    "does not accept when %s fails",
+    async (action) => {
+      const effects = new FakeEffects();
+      effects.failAt = action;
+      const events: string[] = [];
+      const result = await buildNativeImage(input(), effects, effects.controller.signal, (event) =>
+        events.push(`${event.stage}:${event.action}:${event.status}`),
+      );
+      expect(events).toContain(`${action}:failed`);
+      expect(result.isErr()).toBe(true);
+      expect(effects.manifest).toBeUndefined();
+      expect(effects.actions.slice(-2)).toEqual([
+        "cleanup:delete-image",
+        "cleanup:delete-workspace-image",
+      ]);
+    },
+  );
 
   it("removes the candidate when writing the manifest fails", async () => {
     const effects = new FakeEffects();

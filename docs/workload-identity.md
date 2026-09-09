@@ -283,21 +283,30 @@ what makes the next orb's gcloud identity cost zero steps. The `--cred-file` log
 because setup has no identity, and `apps/orb-runtime/src/pi/skills.test.ts` asserts that
 structurally. A second baked skill, `boot-hooks`, is the general authoring guide for those files.
 
+**Persistent deployment access reaffirmed 2026-09-09:** this repository's committed hooks already configure project-wide federation. Additional deployment permissions belong on the shared service account in the separately administered foundation, not in per-orb personal logins. After fixing the missing hosting-bucket grant, the actual resume hook ran twice in an empty HOME/gcloud configuration, passed an application plan with federation alone, and preserved the denial of state-bucket mutation and project-IAM administration. The temporary administrator login was revoked. Existing and future admitted project orbs receive the same durable IAM grant without sharing a refresh token. The exact permission scope and platform limitations are recorded in `docs/deployment.md` and `docs/postmortems/2026-09-09-release-hosting-bucket-iam.md`.
+
 The CLI retries only outcomes a later attempt can change — the first-boot 401 before the bearer
 hash commits, the per-orb floor, and transient issuer/network failures — inside one 10-second
 budget with the `gh` helper's 250 ms/2 s backoff, honoring `Retry-After` but never sleeping past
 that budget: a `Retry-After` longer than the whole budget is an answer, not an instruction to
 hang. `not_mintable`, `invalid_request`, and `internal` are returned on the first response.
 
-Hardened 2026-08-22: `HttpIdTokenEndpoint` bounds each mint request with
-`AbortSignal.timeout(MINT_REQUEST_TIMEOUT_MS)` — 3 s, comfortably under the CLI's 10-second budget,
-so one silent attempt still leaves room for the retry a restarting control plane deserves. Without
-it a control plane that accepts the connection and never answers hangs the CLI past its own budget,
-and an executable credential source that hangs is worse than one that fails: the SDK invoking
-`pi-orb id-token` inherits the hang. The abort surfaces as the ordinary typed `retryable` result,
-never a rejected promise, on both the request leg and a stall mid-body — and only when the body read
-actually failed, so a response that arrived complete is never discarded by a deadline firing during
-parsing.
+**Corrected 2026-09-08:** `fetchIdToken` passes the remaining invocation budget to
+`HttpIdTokenEndpoint`, which bounds headers and body together with `AbortSignal.timeout(timeoutMs)`.
+The former three-second attempt cap (added 2026-08-22 to prevent a hung transport) abandoned requests
+queued behind real 8–9-second runtime API cold starts. Those requests still minted server-side,
+then throttled their own queued retries after most of the ten-second budget had elapsed. Waiting
+for the first response fixes that defect without extending the total budget or changing the mint
+floor. Fast failures still back off and retry within the remaining time; a late wake cannot issue
+a post-deadline request. Transport timeout remains a typed `retryable` result, not a raw rejection,
+and mid-body timeout is distinguished from malformed JSON. The original rationale for a bounded
+transport remains valid; carving the budget into independent short attempts was the rejected part.
+Evidence and deterministic/real-tool reproduction: `docs/postmortems/2026-09-08-identity-cold-start.md`.
+
+`PI_ORB_ID_TOKEN_DIAGNOSTICS=1` emits an opt-in token-free JSON event allowlist on stderr:
+attempt number, elapsed and remaining milliseconds, result kind, retry hint, selected wait, and
+budget exhaustion. It never includes audience, bearer, token or arbitrary error text. Successful
+stdout remains exactly the token and newline. Without the flag, success remains silent on stderr.
 
 ## Orb integration
 

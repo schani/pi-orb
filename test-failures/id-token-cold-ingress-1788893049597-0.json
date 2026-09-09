@@ -1,0 +1,70 @@
+{
+  "name": "id-token-cold-ingress",
+  "iteration": 0,
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "timer-create",
+      "id": 1,
+      "reason": "cli sleep: ingress response or client deadline",
+      "deadline": 3000
+    },
+    {
+      "type": "timer-fire",
+      "id": 1,
+      "reason": "cli sleep: ingress response or client deadline",
+      "virtualTime": 3000
+    },
+    {
+      "type": "timer-create",
+      "id": 2,
+      "reason": "cli sleep: id-token retry backoff",
+      "deadline": 3250
+    },
+    {
+      "type": "timer-fire",
+      "id": 2,
+      "reason": "cli sleep: id-token retry backoff",
+      "virtualTime": 3250
+    },
+    {
+      "type": "timer-create",
+      "id": 3,
+      "reason": "cli sleep: ingress response or client deadline",
+      "deadline": 6250
+    },
+    {
+      "type": "timer-fire",
+      "id": 3,
+      "reason": "cli sleep: ingress response or client deadline",
+      "virtualTime": 6250
+    },
+    {
+      "type": "timer-create",
+      "id": 4,
+      "reason": "cli sleep: id-token retry backoff",
+      "deadline": 6750
+    },
+    {
+      "type": "timer-fire",
+      "id": 4,
+      "reason": "cli sleep: id-token retry backoff",
+      "virtualTime": 6750
+    },
+    {
+      "type": "timer-create",
+      "id": 5,
+      "reason": "cli sleep: ingress response or client deadline",
+      "deadline": 8502
+    },
+    {
+      "type": "timer-fire",
+      "id": 5,
+      "reason": "cli sleep: ingress response or client deadline",
+      "virtualTime": 8502
+    }
+  ]
+}
