@@ -41,6 +41,11 @@ At this checkpoint credential rotation is not complete. Its outcome and any
 additional exposed credentials must be verified separately; remaining work is
 tracked only in `TODO.md`.
 
+**Subsequent user decision (2026-09-09):** accept the existing exposure and leave
+the password unchanged. Rotation and independent credential recovery are deferred,
+not prerequisites for application deployment. This is risk acceptance, not evidence
+of rotation or recovered secrecy. Redaction and artifact containment remain in force.
+
 ## Rule
 
 Upload only allowlisted, structurally constructed release records. Never upload

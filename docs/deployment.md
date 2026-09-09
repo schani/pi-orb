@@ -123,6 +123,14 @@ tracked state/plan/credential artifacts, and Docker excludes them from build
 contexts. Only structurally constructed token-free release records may be
 uploaded. Deleting archives does not substitute for credential rotation.
 
+**User decision (2026-09-09):** leave the exposed database password unchanged and
+proceed with deployment work. Rotation and its independent recovery machinery are
+not deployment prerequisites. This accepts the existing exposure; it does not
+assert that the password was rotated or that historical copies are safe. Credential
+redaction, artifact guards, protected database-plan checks and the other release
+safety gates remain required. No credential probes or mutations are part of this
+release work.
+
 ### Credential mutation safety (2026-09-09)
 
 A disposable credential probe inherited the production ownership role and used
@@ -138,7 +146,7 @@ armed recovery whose authority does not depend on this application's issuer,
 and must execute the exact tested procedure. The original credential remains
 exposed despite restoration. No rotation completion is claimed.
 
-### Current credential-recovery proposal (2026-09-09; not implemented)
+### Deferred credential-recovery proposal (2026-09-09; not implemented)
 
 The proposed recovery authority is a separate GitHub Actions job using the
 already-admitted GitHub identity, not an orb token or a database session. It must
