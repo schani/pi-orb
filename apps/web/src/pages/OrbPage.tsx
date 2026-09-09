@@ -110,7 +110,7 @@ type OrbPageAction =
   | { type: "message_enqueue_failed"; requestId: string; error: ApiError }
   | { type: "send_unavailable" };
 
-function initialState(orbId: string): OrbPageState {
+export function initialState(orbId: string): OrbPageState {
   const loadedDraft = loadComposerDraft(orbId);
   const draft = loadedDraft.isOk() ? loadedDraft.value : null;
   return {
@@ -272,7 +272,14 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
   }
 }
 
-function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
+export function isLiveBusy(
+  lifecycle: OrbView["state"] | undefined,
+  state: Pick<OrbPageState, "connection" | "activity">,
+): boolean {
+  return lifecycle === "running" && state.connection === "open" && state.activity === "busy";
+}
+
+export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
   switch (action.type) {
     case "history_loaded": {
       const records = new Map<string, HistoryRecord>();
@@ -308,7 +315,11 @@ function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
     case "frame":
       return applyFrame(state, action.frame);
     case "connection_status":
-      return { ...state, connection: action.status };
+      return {
+        ...state,
+        connection: action.status,
+        ...(action.status === "open" ? {} : { activity: null, operationId: null }),
+      };
     case "composer_changed":
       return { ...state, composerText: action.text, composerMode: action.mode, notice: null };
     case "image_added":
@@ -1060,7 +1071,7 @@ function OrbConversation({ initial, pending }: { initial: OrbLoad; pending: bool
         records={[...state.records.values()]}
         liveBlocks={[...state.liveBlocks.values()]}
         tools={[...state.tools.values()]}
-        busy={state.activity === "busy"}
+        busy={isLiveBusy(orb?.state, state)}
         queuedMessages={queuedMessages}
       />
 
