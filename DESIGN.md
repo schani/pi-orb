@@ -126,6 +126,7 @@ Tracking:
 - [TODO.md](TODO.md) — the actionable backlog: bugs, hardening, agreed follow-ups
 - [docs/open-questions.md](docs/open-questions.md) — undecided design questions (frozen numbering)
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
+- [docs/postmortems/2026-09-09-deleted-browser-reconciler.md](docs/postmortems/2026-09-09-deleted-browser-reconciler.md) — deleted browser revision remained active and raced new-generation provisioning
 - [docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md](docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md) — preview smoke must dial through the daemon on userspace Tailscale callers
 - [docs/postmortems/2026-09-09-release-hosting-bucket-iam.md](docs/postmortems/2026-09-09-release-hosting-bucket-iam.md) — scoped release cannot read the application hosting bucket during plan
 - [docs/postmortems/2026-09-08-identity-cold-start.md](docs/postmortems/2026-09-08-identity-cold-start.md) — short HTTP attempt caps abandon queued mint requests and self-throttle behind runtime API cold starts

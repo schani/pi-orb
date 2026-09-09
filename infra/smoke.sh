@@ -282,5 +282,5 @@ echo
 echo "SMOKE PASSED in $(( $(date +%s) - START_TS ))s"
 echo "  project: $PROJECT_ID ($PROJECT_NAME)"
 echo "  orb:     $ORB_ID (left in 'stopped')"
-echo "  Note: smoke orbs accumulate — there is no orb deletion API yet, so the"
-echo "  orb and its project stay in the deployment until one is added."
+echo "  Delete this test project after inspection:"
+echo "  $API /api/v1/projects/$PROJECT_ID '' DELETE"
