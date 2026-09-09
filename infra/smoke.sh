@@ -181,7 +181,7 @@ tailscale_cli() {
 # failure. Only a machine that joins the tailnet and then refuses to report
 # "ready" is a real defect.
 check_preview() {
-  local view=$1 preview ts limit code body machine
+  local view=$1 preview ts limit code body machine tun transport
   preview=$(printf '%s' "$view" | jget previewHost)
   if [ -z "$preview" ]; then
     say "SKIP preview health: orb view carries no previewHost (port exposure not configured)"
@@ -204,12 +204,25 @@ check_preview() {
     sleep "$POLL_INTERVAL"
   done
   say "  tailnet machine present"
+  tun=$("$ts" status --json | jget TUN) || fail "preview-health" "cannot read Tailscale network mode"
+  case "$tun" in
+    False|false)
+      command -v python3 >/dev/null 2>&1 || fail "preview-health" "userspace Tailscale probe requires python3"
+      transport=userspace
+      ;;
+    True|true) transport=kernel ;;
+    *) fail "preview-health" "Tailscale status lacks a boolean TUN field" ;;
+  esac
 
-  say "fetching http://$preview:8080/v1/health (<= ${HEALTH_TIMEOUT}s for ready)"
+  say "fetching http://$preview:8080/v1/health via $transport Tailscale (<= ${HEALTH_TIMEOUT}s for ready)"
   limit=$(( $(date +%s) + HEALTH_TIMEOUT ))
   while :; do
     check_deadline "preview-health"
-    body=$(curl -s --max-time 10 -w '\n%{http_code}' "http://$preview:8080/v1/health" 2>/dev/null || true)
+    if [ "$transport" = userspace ]; then
+      body=$(python3 "$DIR/smoke_preview.py" "$ts" "$preview" 2>&1 || true)
+    else
+      body=$(curl -sS --max-time 10 -w '\n%{http_code}' "http://$preview:8080/v1/health" 2>&1 || true)
+    fi
     code=$(printf '%s' "$body" | tail -n1)
     body=$(printf '%s' "$body" | sed '$d')
     if [ "$code" = "200" ] && printf '%s' "$body" | grep -q '"status":"ready"'; then

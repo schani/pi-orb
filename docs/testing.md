@@ -44,6 +44,8 @@ minutes total. Every smoke that boots an orb therefore allows fifteen minutes
 per boot; its overall deadline covers every sequential boot, stop, and required
 network check. `infra/smoke-timeout.contract.test.mjs` keeps these bounds aligned.
 
+**Orb-local preview smoke (corrected 2026-09-09):** a visible Tailscale peer does not imply that the caller has kernel tailnet routing or MagicDNS in its host resolver. The live smoke reads `TUN` from daemon status: kernel clients use curl, userspace clients dial through `tailscale nc` with `infra/smoke_preview.py`. The helper keeps stdin open until the HTTP response completes, parses content-length/chunked responses, and kills/reaps the subprocess at the existing ten-second attempt deadline. Tests exercise pipe ownership without sleeps, parsing and failure paths, and pin transport selection and unchanged overall bounds. Both transports preserve useful failure diagnostics. This corrects a reproduced harness assumption rather than masking it with a skip or larger timeout. Evidence: `docs/postmortems/2026-09-09-orb-local-tailnet-smoke.md`.
+
 The 2026-09-05 full-suite run exposed host CPU overcommit: a concurrent-create DST
 case hit Vitest's outer 30-second deadline while E2E and typechecking also ran.
 There was no DST trace because the simulation had not reported a failure. The

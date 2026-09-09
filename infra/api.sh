@@ -15,5 +15,6 @@ fi
 TOKEN=$(gcloud auth print-identity-token \
   --impersonate-service-account=pi-orb-debug@playground-dev-6ae7.iam.gserviceaccount.com \
   --audiences="$URL" 2>/dev/null)
-curl -s -H "Authorization: Bearer $TOKEN" -X "$METHOD" \
+printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
+  curl -s -K - -X "$METHOD" \
   ${BODY:+-H content-type:application/json -d "$BODY"} "$URL$1"
