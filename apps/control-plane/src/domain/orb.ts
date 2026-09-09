@@ -55,6 +55,8 @@ export interface OrbRow {
    * Advisory and monotone: written outside the state_version CAS.
    */
   readonly lastBusyAt: number | null;
+  /** Transfer lease projection; expiry starts a fresh idle interval. */
+  readonly uploadActiveUntil: number | null;
   /** Why the orb last entered `stopping`; null for explicit stops. */
   readonly stopReason: StopReason | null;
   /** Durable per-orb mint rate-limit floor; monotone, written outside the CAS. */

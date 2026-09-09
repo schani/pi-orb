@@ -15,7 +15,9 @@ import {
   type ServerFrame,
   TERMINAL_SUBPROTOCOL,
   TerminalClientControlSchema,
+  UploadBatchSchema,
   validateRepositoryUrl,
+  type WorkspaceUpload,
 } from "@pi-orb/protocol";
 import { Check } from "typebox/value";
 import type { Plugin } from "vite";
@@ -33,6 +35,7 @@ interface MockState {
   orbs: Map<string, OrbView>;
   histories: Map<string, HistoryRecord[]>;
   messages: Map<string, OrbMessageView[]>;
+  uploads: Map<string, WorkspaceUpload[]>;
   liveSessions: Map<string, Set<LiveSession>>;
   startupTimers: Map<string, NodeJS.Timeout>;
   projectSecrets: Map<string, Map<string, { value: string; updatedAt: string }>>;
@@ -314,6 +317,7 @@ function initialState(): MockState {
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),
+    uploads: new Map(),
     messages: new Map([
       [orb.id, []],
       [authOrb.id, []],
@@ -699,6 +703,128 @@ async function handleApi(
       setTimeout(() => deliverPendingMessage(state, orbId, messageId), 0);
       return true;
     }
+  }
+
+  const uploadsRoute =
+    /^\/api\/v1\/orbs\/([^/]+)\/uploads(?:\/([^/]+)\/(status|chunk|finish|cancel))?$/.exec(path);
+  if (uploadsRoute) {
+    const orbId = uploadsRoute[1] ?? "";
+    const id = uploadsRoute[2];
+    const action = uploadsRoute[3];
+    const orb = state.orbs.get(orbId);
+    if (!orb) {
+      notFound(response);
+      return true;
+    }
+    const rows = state.uploads.get(orbId) ?? [];
+    if (method === "GET" && !id) {
+      sendJson(response, 200, rows);
+      return true;
+    }
+    if (orb.state !== "running") {
+      sendJson(response, 409, {
+        error: { code: "conflict", message: "orb is not running", retryable: false },
+      });
+      return true;
+    }
+    if (method === "POST" && !id) {
+      const body = await readJson(request);
+      if (!Check(UploadBatchSchema, body)) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "invalid file metadata", retryable: false },
+        });
+        return true;
+      }
+      const existing = rows.filter(
+        (row) => row.batchId === body.id || body.files.some((file) => file.id === row.id),
+      );
+      if (
+        existing.length &&
+        (existing.length !== body.files.length ||
+          existing.some(
+            (row) =>
+              row.batchId !== body.id ||
+              !body.files.some(
+                (file) => file.id === row.id && file.name === row.name && file.size === row.size,
+              ),
+          ))
+      ) {
+        sendJson(response, 409, {
+          error: { code: "conflict", message: "batch membership changed", retryable: false },
+        });
+        return true;
+      }
+      if (!existing.length) {
+        rows.push(
+          ...body.files.map((file) => ({
+            ...file,
+            batchId: body.id,
+            offset: 0,
+            path: null,
+            sha256: null,
+            status: "transferring" as const,
+            error: null,
+          })),
+        );
+        state.uploads.set(orbId, rows);
+      }
+      sendJson(
+        response,
+        200,
+        rows.filter((row) => row.batchId === body.id),
+      );
+      return true;
+    }
+    const row = rows.find((r) => r.id === id);
+    if (!row) {
+      notFound(response);
+      return true;
+    }
+    if (action === "chunk") {
+      let bytes = 0;
+      for await (const chunk of request) bytes += (chunk as Buffer).length;
+      row.offset += bytes;
+    }
+    if (action === "cancel") row.status = "cancelled";
+    if (action === "finish" && row.offset === row.size && row.status !== "notified") {
+      row.path = `/workspace/uploads/${row.id}/${row.name}`;
+      row.sha256 = "0".repeat(64);
+      row.status = "stored";
+    }
+    const members = rows.filter((member) => member.batchId === row.batchId);
+    const stored = members
+      .filter((member) => member.path !== null && member.status !== "cancelled")
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+    if (
+      members.every((member) => ["stored", "notified", "cancelled"].includes(member.status)) &&
+      stored.some((member) => member.status === "stored")
+    ) {
+      const lines = stored.map((member) => `${JSON.stringify(member.path)} (${member.size} bytes)`);
+      const message: OrbMessageView = {
+        id: row.batchId,
+        orbId,
+        content: [
+          {
+            type: "text",
+            text:
+              lines.length === 1
+                ? `The user uploaded a file to ${lines[0]}.`
+                : `The user uploaded files:\n${lines.map((line) => `- ${line}`).join("\n")}`,
+          },
+        ],
+        status: "queued",
+        createdAt: now(),
+        updatedAt: now(),
+      };
+      const messages = state.messages.get(orbId) ?? [];
+      if (!messages.some((existing) => existing.id === row.batchId)) {
+        state.messages.set(orbId, [...messages, message]);
+        setTimeout(() => deliverPendingMessage(state, orbId, row.batchId), 0);
+      }
+      for (const member of stored) member.status = "notified";
+    }
+    sendJson(response, 200, row);
+    return true;
   }
 
   const hostedFilesRoute = /^\/api\/v1\/orbs\/([^/]+)\/hosted-files$/.exec(path);

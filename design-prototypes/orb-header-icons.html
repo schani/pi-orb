@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orb header — upload and lifecycle icons</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#fff;color:#000;font:13px/20px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}button{font:inherit;color:inherit;cursor:pointer;border:1px solid #000;background:#fff}button:hover{background:#000;color:#fff}button:focus-visible{outline:2px solid #1a7e37;outline-offset:3px}h1,h2,p{margin:0}h1{font-size:26px;line-height:34px;letter-spacing:-1px}h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase}header{padding:28px 32px 24px;display:flex;justify-content:space-between;align-items:end;gap:32px;border-bottom:1px solid #000}.eyebrow{color:#555;margin-bottom:8px}.intro{color:#555;max-width:490px}.workbench{padding:24px 32px;background:#f2f2f2;border-bottom:1px solid #000}.bench-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:12px}.bench-head span{color:#555}.bench-head button{padding:2px 8px}.mock{border:1px solid #000;background:#fff}.orb-header{height:24px;display:flex;gap:10px;align-items:center;padding:0 8px;border-bottom:1px solid #000;white-space:nowrap}.orb-name{overflow:hidden;text-overflow:ellipsis;min-width:0}.status{display:flex;align-items:center;gap:6px;color:#555}.tile{width:16px;height:16px;flex:none}.spacer{flex:1}.actions{display:flex;align-items:center;gap:6px}.ic{border:0;width:20px;height:20px;padding:2px;display:inline-flex;align-items:center;justify-content:center;flex:none;background:transparent}.ic svg{width:16px;height:16px}.danger{color:#b42318}.danger:hover{background:#b42318;color:white}.mock-body{padding:20px 14px;display:flex;gap:16px;color:#555;min-height:78px}.mock-body p{max-width:900px}.mock-body strong{font-weight:normal;color:#000}.selection{display:flex;justify-content:space-between;gap:16px;color:#555;padding-top:10px}.section{padding:24px 32px 28px;border-bottom:1px solid #000}.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:16px}.section-head p{color:#555}.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid #000;border-left:1px solid #000}.card{border-right:1px solid #000;border-bottom:1px solid #000;min-width:0;display:flex;flex-direction:column}.select{width:100%;border:0;border-bottom:1px solid #000;text-align:left;display:flex;justify-content:space-between;padding:7px 10px;gap:8px}.select[aria-pressed=true]{background:#000;color:#fff}.check{visibility:hidden}.select[aria-pressed=true] .check{visibility:visible}.large{height:112px;display:flex;align-items:center;justify-content:center;gap:32px}.specimen{text-align:center}.specimen svg{display:block;width:40px;height:40px;margin:auto}.specimen small{display:block;color:#555;margin-top:8px}.mini{height:32px;display:flex;align-items:center;justify-content:center;gap:14px;border-block:1px solid #ddd}.mini-label{font-size:11px;color:#555}.mini-group{display:flex;gap:6px;align-items:center}.card-text{padding:12px 10px 16px;flex:1}.card-text h3{font-size:13px;margin:0 0 5px}.card-text p{color:#555;font-size:12px;line-height:18px}.recommend{display:inline-block;margin-top:10px;color:#1a7e37;font-size:11px}.invert .mini{background:#000;color:white}.invert .mini-label{color:#aaa}.invert .mini .ic:hover{background:#fff;color:#000}.footer{padding:20px 32px 28px;display:flex;gap:32px;justify-content:space-between;color:#555}.footer p{max-width:820px}.footer strong{color:#000}dialog{padding:20px;border:1px solid #000;width:440px;max-width:calc(100% - 32px);font:inherit}dialog::backdrop{background:#0005}.dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}.dialog-body{padding:20px 0;color:#555}.dialog-footer{display:flex;justify-content:flex-end}dialog button:not(.ic){padding:5px 10px}svg{overflow:visible}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}@media(min-width:1600px){body{max-width:1600px;margin:auto;border-inline:1px solid #000}}@media(max-width:1050px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.section-head{display:block}.section-head p{margin-top:6px}}@media(max-width:640px){header{display:block;padding:20px}.intro{margin-top:14px}.workbench,.section{padding:20px 12px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.orb-header{gap:5px}.status span{display:none}.actions{gap:3px}.bench-head{align-items:start}.bench-head span{display:none}.selection{display:block}.footer{padding:20px;display:block}.footer p+p{margin-top:12px}.large{gap:24px}.mini{gap:8px}.orb-name{max-width:135px}.mock-body{font-size:12px}.mini-group{gap:2px}}
+</style>
+</head>
+<body>
+<header><div><div class="eyebrow">PI-ORB / HEADER ICON STUDY</div><h1>One header. Ten choices.</h1></div><p class="intro">Five upload marks. Five start / stop pairs.<br>Select independently to compare them together. The header uses 16px icons in 20px controls.</p></header>
+<section class="workbench" aria-label="Combined header preview">
+<div class="bench-head"><h2>In context</h2><span>Click the lifecycle icon to switch states.</span><button id="contrast" aria-pressed="false">Invert specimens</button></div>
+<div class="mock"><div class="orb-header"><strong class="orb-name">Investigate latency</strong><span id="pen"></span><span class="status" id="status"></span><span class="spacer"></span><div class="actions"><button class="ic" id="upload" aria-label="Upload files" title="Upload files"></button><button class="ic" id="lifecycle"></button><span id="archive"></span><span id="bin"></span></div></div><div class="mock-body"><span>orb</span><p><strong>The parser buffers the whole input before processing it.</strong><br>A sample export and a trace would let me check the slowdown.</p></div></div>
+<div class="selection"><span id="selected-upload"></span><span id="selected-life"></span></div>
+</section>
+<section class="section"><div class="section-head"><h2>Upload / choose one</h2><p>All five open the same upload dialog.</p></div><div class="grid" id="uploads"></div></section>
+<section class="section"><div class="section-head"><h2>Start + stop / choose a pair</h2><p>Start on the left; stop on the right. Only the available action appears in the header.</p></div><div class="grid" id="lifecycles"></div></section>
+<footer class="footer"><p><strong>My pick: U1 + L2.</strong> The tray arrow is the clearest upload convention; solid play / stop survives the small size best. L1 is the quieter alternative if matching the existing outline controls matters more.</p><p>Visual prototype only.<br>No uploads or lifecycle calls.</p></footer>
+<dialog id="dialog"><div class="dialog-head"><h2>Upload to orb</h2><button class="ic" id="close" aria-label="Close upload" title="Close upload"></button></div><button id="choose">Choose files…</button><div class="dialog-body" id="file-list">/workspace/uploads/</div><div class="dialog-footer"><span class="intro">Preview only · nothing uploads</span></div></dialog>
+<input type="file" multiple hidden id="picker"><div class="sr" id="announcement" aria-live="polite"></div>
+<script>
+const $=id=>document.getElementById(id);
+const path=d=>`<path d="${d}"/>`;
+const svg=body=>`<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true" focusable="false">${body}</svg>`;
+const paths={pen:'M3 10 10 3l3 3-7 7H3z M8 5l3 3',archive:'M3 6v7h10V6 M2 3h12v3H2z M6 9h4',x:'m4 4 8 8m0-8-8 8'};
+const utilities={pen:svg(path(paths.pen)),archive:svg(path(paths.archive)),bin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="square" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 9v11h12V9M10 10v6M14 10v6"/></svg>'};
+const uploads=[
+{name:'Tray arrow',body:path('M3 10v3h10v-3 M8 10V2 M5 5l3-3 3 3'),note:'The standard upload mark. Clear direction, crisp at 16px, close to the existing utility family.',recommended:true},
+{name:'File arrow',body:path('M9 2H3v12h5 M9 2v4h4 M9 2l4 4 M12 14V8 M10 10l2-2 2 2'),note:'Emphasizes a file rather than a transfer tray. More specific, but the folded page adds small-size detail.'},
+{name:'Into the orb',body:path('M9 2h5v12H9 M2 8h8 M7 5l3 3-3 3'),note:'An arrow entering a destination. Reads as “bring in,” though it can also resemble a sign-in action.'},
+{name:'Cloud arrow',body:path('M4 11H3a2 2 0 0 1-.5-4A3.5 3.5 0 0 1 9 4.5a2.5 2.5 0 0 1 4.5 2A2.3 2.3 0 0 1 13 11h-1 M8 14V8 M6 10l2-2 2 2'),note:'Familiar remote-upload imagery. Softer than the square utilities; may imply cloud publishing, not orb-local files.'},
+{name:'Add file',body:path('M9 2H3v12h5 M9 2v4h4 M9 2l4 4 M9 11h5 M11.5 8.5v5'),note:'A document with a plus. Quiet and concrete, but can suggest creating an empty file instead of uploading one.'}
+];
+const circle='<circle cx="8" cy="8" r="6"/>';
+const lifecycles=[
+{name:'Outline transport',start:path('M5 3l7 5-7 5z'),stop:path('M4 4h8v8H4z'),note:'Play and stop, drawn like the other utilities. Lightest visual weight; the empty square is slightly less emphatic.'},
+{name:'Solid transport',start:'<path d="M5 3l7 5-7 5z" fill="currentColor" stroke="none"/>',stop:'<path d="M4 4h8v8H4z" fill="currentColor" stroke="none"/>',note:'Fastest recognition and strongest 16px silhouettes. Slightly heavier than the neighboring outline controls.',recommended:true},
+{name:'Circled transport',start:circle+'<path d="m6.5 5 4 3-4 3z" fill="currentColor" stroke="none"/>',stop:circle+'<path d="M6 6h4v4H6z" fill="currentColor" stroke="none"/>',note:'Contains the action in a round control mark. Reads as a button immediately, but is busier beside the status tile.'},
+{name:'Power on / off',start:path('M8 1.5v6 M4.5 3.5a5.5 5.5 0 1 0 7 0'),stop:circle+path('M5 8h6'),note:'Machine semantics instead of media semantics. Power-on is familiar; a ring with a minus is a less universal off mark.'},
+{name:'Toggle switch',start:'<rect x="1.5" y="4" width="13" height="8" rx="4"/><circle cx="10.5" cy="8" r="2" fill="currentColor" stroke="none"/>',stop:'<rect x="1.5" y="4" width="13" height="8" rx="4"/><circle cx="5.5" cy="8" r="2" fill="currentColor" stroke="none"/>',note:'Shows the target setting: on to start, off to stop. Visually distinct, but risks being read as current state rather than an action.'}
+];
+let selectedUpload=0,selectedLife=1,running=true;
+function utility(name,label){return `<span class="ic ${name==='bin'?'danger':''}" role="img" aria-label="${label}" title="${label}">${utilities[name]}</span>`;}
+$('pen').innerHTML=utility('pen','Rename (context only)');$('archive').innerHTML=utility('archive','Archive (context only)');$('bin').innerHTML=utility('bin','Delete (context only)');$('close').innerHTML=svg(path(paths.x));
+function update(){
+ $('upload').innerHTML=svg(uploads[selectedUpload].body);
+ $('lifecycle').innerHTML=svg(lifecycles[selectedLife][running?'stop':'start']);
+ $('lifecycle').setAttribute('aria-label',running?'Stop orb':'Start orb');$('lifecycle').title=running?'Stop orb':'Start orb';
+ $('status').innerHTML=`<svg class="tile" viewBox="0 0 16 16" aria-hidden="true"><rect width="16" height="16" fill="${running?'#1a7e37':'#777'}"/>${running?'<circle cx="8" cy="8" r="4" fill="none" stroke="white" stroke-width="1.5"/>':'<path d="M4 8h8" stroke="white" stroke-width="1.5"/>'}</svg><span>${running?'running':'stopped'}</span>`;
+ $('status').setAttribute('aria-label',running?'Running':'Stopped');
+ $('selected-upload').textContent=`U${selectedUpload+1} / ${uploads[selectedUpload].name}`;
+ $('selected-life').textContent=`L${selectedLife+1} / ${lifecycles[selectedLife].name}`;
+ document.querySelectorAll('#uploads .select').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===selectedUpload)));
+ document.querySelectorAll('#lifecycles .select').forEach((b,i)=>b.setAttribute('aria-pressed',String(i===selectedLife)));
+}
+function showUpload(){ $('dialog').showModal(); }
+function build(items,id,isLife){items.forEach((item,i)=>{
+ const card=document.createElement('article');card.className='card';
+ const choice=document.createElement('button');choice.className='select';choice.setAttribute('aria-label',`Select ${isLife?'L':'U'}${i+1}: ${item.name}`);choice.innerHTML=`<span>${isLife?'L':'U'}${i+1}</span><span class="check" aria-hidden="true">✓</span>`;choice.onclick=()=>{if(isLife)selectedLife=i;else selectedUpload=i;update();};
+ const large=document.createElement('div');large.className='large';large.innerHTML=isLife?`<div class="specimen">${svg(item.start)}<small>start</small></div><div class="specimen">${svg(item.stop)}<small>stop</small></div>`:`<div class="specimen">${svg(item.body)}</div>`;
+ const mini=document.createElement('div');mini.className='mini';mini.innerHTML='<span class="mini-label">16px</span>';
+ const group=document.createElement('div');group.className='mini-group';
+ for(const action of isLife?['start','stop']:['upload']){const b=document.createElement('button');b.className='ic';b.innerHTML=svg(isLife?item[action]:item.body);b.title=`${action==='upload'?'Upload files':action==='start'?'Start orb':'Stop orb'} — ${item.name}`;b.setAttribute('aria-label',b.title);b.onclick=()=>{if(isLife){selectedLife=i;running=action==='start';update();$('announcement').textContent=`Preview: orb ${running?'running':'stopped'}`;}else{selectedUpload=i;update();showUpload();}};group.append(b);}
+ if(!isLife)group.insertAdjacentHTML('beforeend',utility('archive','Archive (context only)')+utility('bin','Delete (context only)'));
+ mini.append(group);
+ const text=document.createElement('div');text.className='card-text';text.innerHTML=`<h3>${item.name}</h3><p>${item.note}</p>${item.recommended?'<span class="recommend">Recommended</span>':''}`;
+ card.append(choice,large,mini,text);$(id).append(card);
+});}
+build(uploads,'uploads',false);build(lifecycles,'lifecycles',true);update();
+$('upload').onclick=showUpload;$('lifecycle').onclick=()=>{running=!running;update();$('announcement').textContent=`Preview: orb ${running?'running':'stopped'}`;};
+$('contrast').onclick=()=>{const on=document.body.classList.toggle('invert');$('contrast').setAttribute('aria-pressed',String(on));};
+$('close').onclick=()=>$('dialog').close();$('choose').onclick=()=>{$('picker').value='';$('picker').click();};
+$('picker').onchange=()=>{if(!$('picker').files.length)return;$('file-list').replaceChildren();for(const file of $('picker').files){const p=document.createElement('p');p.textContent=file.name;$('file-list').append(p);}};
+</script>
+</body>
+</html>

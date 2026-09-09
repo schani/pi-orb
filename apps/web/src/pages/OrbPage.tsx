@@ -20,6 +20,7 @@ import { OrbIndex } from "../components/OrbIndex.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
 import { StateTile } from "../components/StateTile.tsx";
+import { useWorkspaceUploads } from "../components/useWorkspaceUploads.tsx";
 import {
   type ApiError,
   archiveOrb,
@@ -476,6 +477,7 @@ function OrbConversation({
   const [orb, setOrb] = useState<OrbView | null>(() =>
     initial.orb.isOk() ? initial.orb.value : null,
   );
+  const uploads = useWorkspaceUploads(orbId, orb?.state === "running");
   const [ageNow, setAgeNow] = useState(() => Date.now());
   const [orbError, setOrbError] = useState<ApiError | null>(() =>
     initial.orb.isErr() ? initial.orb.error : null,
@@ -936,14 +938,27 @@ function OrbConversation({
           </span>
         )}
         <span className="orb-header-actions">
+          {uploads.button}
           {canStart && (
-            <button type="button" className="text-action" onClick={() => runLifecycle(startOrb)}>
-              start
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Start orb"
+              title="start"
+              onClick={() => runLifecycle(startOrb)}
+            >
+              <Icon name="start" />
             </button>
           )}
           {canStop && (
-            <button type="button" className="text-action" onClick={() => runLifecycle(stopOrb)}>
-              stop
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Stop orb"
+              title="stop"
+              onClick={() => runLifecycle(stopOrb)}
+            >
+              <Icon name="stop" />
             </button>
           )}
           <button
@@ -973,6 +988,7 @@ function OrbConversation({
           </button>
         </span>
       </header>
+      {uploads.progress}
 
       {orb?.stateDetail?.type === "discarding_failed_compute" && (
         <OrbNotice>

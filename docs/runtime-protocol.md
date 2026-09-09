@@ -24,6 +24,10 @@ Persistence is deliberately separate: the control plane never derives replica wr
 
 **MCP boot configuration (2026-09-08).** `GET /runtime/v1/mcp` is a control-plane route authenticated with the existing incarnation bearer. It returns that orb's project catalog `{revision, servers}` containing secret references, not resolved keys. The runtime resolves them against its project-secret boot snapshot and adopts changes on next process start. This adds no WebSocket frames or first-message gate. MCP tool output and configuration-adoption records use normal session history and replication (`docs/mcp.md`).
 
+## Workspace-upload transport (implemented 2026-09-09)
+
+Arbitrary browser files use the separate streaming HTTP path in `docs/workspace-uploads.md`; they do not become image blocks, base64 frames, or live WebSocket commands. Runtime upload actions carry an incarnation header, persist immutable chunks on the workspace, and return only bounded progress metadata. After every file in a picker selection is stored or cancelled, the control plane submits one normal inbox message listing the successful paths, with wake suppressed. The selection's immutable batch identity deduplicates notification across retries and recovery; file completion does not enqueue per-file messages. This reuses ordinary turn/steer delivery and replication rather than introducing context-only harness mutations. Running-only admission and transfer-wide idle protection are lifecycle rules, not agent busy activity.
+
 ## Transport and control-plane handoff
 
 The browser opens `/api/orbs/{orbId}/live` only after the normal control-plane HTTP API reports the orb as running. It offers the WebSocket subprotocol `pi-orb.runtime.v1`.

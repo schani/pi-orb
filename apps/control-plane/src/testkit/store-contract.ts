@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { HarnessSessionMetadata, HistoryRecord } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, ok } from "neverthrow";
@@ -53,6 +54,7 @@ const orb: OrbRow = {
   replicationCursor: null,
   replicatedHeadId: null,
   lastBusyAt: null,
+  uploadActiveUntil: null,
   stopReason: null,
   lastMintAt: null,
   stateChangedAt: 1_000,
@@ -123,6 +125,104 @@ export function storeSemanticsContractTests(
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
+
+    it("atomically registers immutable upload batch membership", async () => {
+      await store.insertProject(task, project);
+      await store.insertOrb(task, { ...orb, state: "running" });
+      const first = { id: "a0000000-0000-4000-8000-000000000001", name: "same.bin", size: 7 };
+      const second = { ...first, id: "b0000000-0000-4000-8000-000000000002" };
+      const batch = { id: first.id, files: [first, second] };
+      const created = await store.uploads.createBatch(task, orb.id, batch, 2001);
+      expect(created.isOk(), created.isErr() ? JSON.stringify(created.error) : "").toBe(true);
+      const admitted = created._unsafeUnwrap();
+      expect(admitted).toHaveLength(2);
+      expect(admitted.every((row) => row.batchId === batch.id && row.activeUntil === 302001)).toBe(
+        true,
+      );
+      expect(
+        (
+          await store.uploads.createBatch(task, orb.id, { ...batch, files: [second, first] }, 2002)
+        )._unsafeUnwrap(),
+      ).toHaveLength(2);
+      expect(
+        (await store.uploads.createBatch(task, orb.id, { ...batch, files: [first] }, 2003)).isErr(),
+      ).toBe(true);
+      expect(
+        (
+          await store.uploads.createBatch(task, orb.id, { id: second.id, files: [second] }, 2003)
+        ).isErr(),
+      ).toBe(true);
+      expect(
+        (
+          await store.uploads.createBatch(task, orb.id, { ...batch, files: [first, first] }, 2003)
+        ).isErr(),
+      ).toBe(true);
+      expect((await store.uploads.admit(task, orb.id, second, 2004))._unsafeUnwrap().batchId).toBe(
+        batch.id,
+      );
+      expect((await store.uploads.list(task, orb.id))._unsafeUnwrap()).toHaveLength(2);
+    });
+
+    it("persists upload leases, fences idle CAS, and never wakes from upload notification", async () => {
+      await store.insertProject(task, project);
+      await store.insertOrb(task, { ...orb, state: "running" });
+      const spec = { id: "a0000000-0000-4000-8000-000000000001", name: "sample.bin", size: 7 };
+      const admitted = (await store.uploads.admit(task, orb.id, spec, 2001))._unsafeUnwrap();
+      expect(admitted).toMatchObject({
+        ...spec,
+        offset: 0,
+        status: "transferring",
+        activeUntil: 302001,
+      });
+      const current = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(current !== null);
+      expect(
+        (
+          await store.casTransition(task, {
+            orbId: orb.id,
+            expectedStateVersion: current.stateVersion,
+            toState: "stopping",
+            stopReason: "idle",
+            now: 2001,
+          })
+        ).isErr(),
+      ).toBe(true);
+      expect(
+        (await store.uploads.admit(task, orb.id, { ...spec, name: "different.bin" }, 2002)).isErr(),
+      ).toBe(true);
+      const stored = await store.uploads.record(
+        task,
+        admitted,
+        { offset: 7, path: "/workspace/uploads/sample.bin", status: "stored" },
+        2003,
+      );
+      expect(stored.isOk()).toBe(true);
+      const latest = (await store.getOrb(task, orb.id))._unsafeUnwrap();
+      assert(latest !== null);
+      expect(
+        (
+          await store.casTransition(task, {
+            orbId: orb.id,
+            expectedStateVersion: latest.stateVersion,
+            toState: "stopped",
+            now: 2004,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect((await store.uploads.admit(task, orb.id, spec, 2005)).isErr()).toBe(true);
+      const message = {
+        orbId: orb.id,
+        messageId: spec.id,
+        content: [{ type: "text" as const, text: "uploaded sample.bin" }],
+        now: 2005,
+        wake: false,
+      };
+      expect((await store.enqueueOrbMessage(task, message))._unsafeUnwrap().message.autoStart).toBe(
+        false,
+      );
+      expect((await store.enqueueOrbMessage(task, message))._unsafeUnwrap().duplicate).toBe(true);
+      expect((await store.listOrbMessages(task, orb.id))._unsafeUnwrap()).toHaveLength(1);
+    });
 
     it("atomically spawns with immutable retry identity and fences retired callers", async () => {
       expect((await store.insertProject(task, project)).isOk()).toBe(true);

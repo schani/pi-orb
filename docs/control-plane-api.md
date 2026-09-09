@@ -1,5 +1,9 @@
 # Projects and the control-plane API
 
+## Workspace file uploads (implemented 2026-09-09)
+
+`/api/v1/orbs/:orbId/uploads` and its per-transfer `status`, `chunk`, `finish`, and `cancel` actions implement running-only, streaming browser uploads. The control plane persists metadata and forwards raw byte streams to the private runtime; it never buffers whole files or routes file bytes through the message inbox. The metadata POST atomically registers a selection's complete batch membership. Once every file is stored or cancelled, one message lists the successful paths with compute wake suppressed. The complete HTTP shapes, durable transfer states, activity/idle-stop rules, and validation are in `docs/workspace-uploads.md`.
+
 ## Project model
 
 The first version requires no local checkout or user-operated CLI: lifecycle and conversation input are web-driven. A narrow CLI inside each running orb can read sibling-orb metadata and replicated transcripts so the agent can coordinate with prior work.
@@ -9,7 +13,7 @@ A user registers a project in the web UI with:
 - a project name;
 - a public Git repository URL.
 
-An orb's first checkout clones the project's repository into its filesystem; restarting an existing checkout preserves it. There is no local upload, dirty-state patch, sync-back workflow, clone cache, prepared snapshot, or other checkout optimization initially. The initial clone uses the repository's default branch; the resolved commit should be recorded for observability.
+An orb's first checkout clones the project's repository into its filesystem; restarting an existing checkout preserves it. There is no local-checkout upload, dirty-state patch, sync-back workflow, clone cache, prepared snapshot, or other checkout optimization initially. The initial clone uses the repository's default branch; the resolved commit should be recorded for observability.
 
 Repository URL validation is strict allowlisting, decided as follows:
 

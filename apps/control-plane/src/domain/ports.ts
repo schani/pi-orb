@@ -29,6 +29,7 @@ import type {
   ProjectDeletionProgress,
   ProjectRow,
 } from "./orb.ts";
+import type { WorkspaceUploadStore } from "./workspace-uploads.ts";
 
 /** In-process adapter context; never serialized on the wire. */
 export interface OperationContext {
@@ -159,6 +160,7 @@ export interface CommitPullBatchParams {
  * each other's correctness fields.
  */
 export interface ControlPlaneStore {
+  readonly uploads: WorkspaceUploadStore;
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError>;
   listProjects(task: SimulationTask): ResultAsync<ProjectRow[], StoreError>;
   listProjectsInState(
@@ -233,6 +235,8 @@ export interface ControlPlaneStore {
       messageId: string;
       content: readonly MessageInputBlock[];
       now: number;
+      /** Upload notifications never request compute startup. */
+      wake?: boolean;
     },
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
@@ -991,6 +995,9 @@ export interface OrbResourceCleaner {
 }
 
 export interface ControlPlaneDeps {
+  readonly workspaceUploadRuntime?: (
+    task: SimulationTask,
+  ) => import("./workspace-uploads.ts").UploadRuntime;
   readonly store: ControlPlaneStore;
   readonly hostProvider: OrbHostProvider;
   readonly resourceCleaner: OrbResourceCleaner;

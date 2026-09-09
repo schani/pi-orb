@@ -48,6 +48,7 @@ import {
   HttpTailscaleAuthKeyMinter,
   type TailscaleHostOptions,
 } from "./adapters/tailscale/client.ts";
+import { uploadRequest } from "./adapters/workspace-upload-http.ts";
 import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
 import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/constants.ts";
@@ -85,6 +86,7 @@ import { registerMcpRoutes } from "./http/mcp-routes.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 import { registerWebAssets } from "./http/web-assets.ts";
+import { registerWorkspaceUploadRoutes } from "./http/workspace-upload-routes.ts";
 import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
 
 const env = (name: string, fallback: string): string => {
@@ -431,6 +433,10 @@ async function main(): Promise<void> {
           root: hosting?.store.root ?? join(homedir(), ".pi-orb", "hosting"),
         });
   const deps: ControlPlaneDeps = {
+    workspaceUploadRuntime: (task) => ({
+      status: (row) => uploadRequest(task, deps, row, "status"),
+      finish: (row) => uploadRequest(task, deps, row, "finish"),
+    }),
     store: database.store,
     hostProvider,
     resourceCleaner:
@@ -494,6 +500,8 @@ async function main(): Promise<void> {
         ? err("Project secrets unavailable")
         : probeMcp(config, snapshot.value.values);
     });
+
+    registerWorkspaceUploadRoutes(app, httpTask, deps);
     // Cloud deployment serves the built web UI from the same process; local
     // development keeps the vite dev server + proxy instead.
     const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";

@@ -24,6 +24,9 @@ import {
   SystemViewSchema,
   type UpdateOrbRequest,
   type UpdateProjectRequest,
+  type UploadBatch,
+  WorkspaceUploadSchema,
+  WorkspaceUploadsSchema,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import { type Static, type TSchema, Type } from "typebox";
@@ -157,6 +160,43 @@ async function apiFetch<S extends TSchema>(
   }
   return ok(body);
 }
+
+export const listWorkspaceUploads = (orbId: string) =>
+  apiFetch(WorkspaceUploadsSchema, `/api/v1/orbs/${orbId}/uploads`, {
+    signal: AbortSignal.timeout(30_000),
+  });
+export const beginWorkspaceUploadBatch = (orbId: string, spec: UploadBatch, signal: AbortSignal) =>
+  apiFetch(WorkspaceUploadsSchema, `/api/v1/orbs/${orbId}/uploads`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(spec),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+  });
+export const workspaceUploadAction = (
+  orbId: string,
+  id: string,
+  action: "status" | "chunk" | "finish" | "cancel",
+  signal: AbortSignal,
+  chunk?: { body: Blob; offset: number },
+) =>
+  apiFetch(
+    WorkspaceUploadSchema,
+    `/api/v1/orbs/${orbId}/uploads/${id}/${action}${chunk ? `?offset=${chunk.offset}` : ""}`,
+    {
+      method:
+        action === "status"
+          ? "GET"
+          : action === "chunk"
+            ? "PUT"
+            : action === "cancel"
+              ? "DELETE"
+              : "POST",
+      signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
+      ...(chunk
+        ? { headers: { "content-type": "application/octet-stream" }, body: chunk.body }
+        : {}),
+    },
+  );
 
 const ProjectListSchema = ListResponseSchema(ProjectViewSchema);
 const OrbListSchema = ListResponseSchema(OrbViewSchema);

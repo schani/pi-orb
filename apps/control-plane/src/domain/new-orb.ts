@@ -32,6 +32,7 @@ export function newOrbRow(
     replicationCursor: null,
     replicatedHeadId: null,
     lastBusyAt: null,
+    uploadActiveUntil: null,
     stopReason: null,
     lastMintAt: null,
     stateChangedAt: now,

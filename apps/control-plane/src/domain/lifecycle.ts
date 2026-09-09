@@ -22,6 +22,7 @@ import type {
   ProvisionedOrbHost,
 } from "./ports.ts";
 import { pollOrbUntilCaughtUp } from "./replication.ts";
+import { recoverUploads } from "./workspace-uploads.ts";
 
 export type ReconcileOutcome =
   | { readonly type: "noop" }
@@ -1276,6 +1277,10 @@ async function reconcileRunning(
   // runtime sees one user message with blank-line separators and one stable
   // batch ID; later arrivals form the next batch rather than changing an
   // in-flight retry's payload.
+  if (deps.workspaceUploadRuntime) {
+    // Transfer recovery is independent of model activity and cannot request wake.
+    await recoverUploads(task, deps.store, deps.workspaceUploadRuntime(task), orb.id);
+  }
   const pendingBatch = await deps.store.claimNextOrbMessageBatch(task, {
     orbId: orb.id,
     now: task.wallNow(),
@@ -1368,6 +1373,7 @@ async function reconcileRunning(
   const now = task.wallNow();
   const lastActivityAt = Math.max(
     orb.lastBusyAt ?? 0,
+    orb.uploadActiveUntil ?? 0,
     orb.stateChangedAt,
     deps.control.getLastVisibleAt(orb.id) ?? 0,
   );

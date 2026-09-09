@@ -26,6 +26,7 @@ import type {
   SpawnOrbParams,
 } from "../../domain/ports.ts";
 import { arrayParam, jsonParam, type PgRow, type PostgreSQLClient } from "./client.ts";
+import { PgWorkspaceUploads } from "./workspace-uploads.ts";
 
 function toMs(value: unknown): number {
   if (value instanceof Date) return value.getTime();
@@ -74,6 +75,7 @@ function mapOrbRow(row: PgRow): OrbRow {
       row["replication_cursor"] === null ? null : String(row["replication_cursor"]),
     replicatedHeadId: row["replicated_head_id"] === null ? null : String(row["replicated_head_id"]),
     lastBusyAt: row["last_busy_at"] == null ? null : toMs(row["last_busy_at"]),
+    uploadActiveUntil: row["upload_active_until"] == null ? null : toMs(row["upload_active_until"]),
     stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
     lastMintAt: row["last_mint_at"] == null ? null : toMs(row["last_mint_at"]),
     stateChangedAt: toMs(row["state_changed_at"]),
@@ -154,9 +156,11 @@ const stateConflict = (currentState?: OrbState): StateConflict => ({
 /** PostgreSQL `ControlPlaneStore` (docs/history-replication.md/docs/stack.md). */
 export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   private readonly db: PostgreSQLClient;
+  readonly uploads: PgWorkspaceUploads;
 
   constructor(db: PostgreSQLClient) {
     this.db = db;
+    this.uploads = new PgWorkspaceUploads(db);
   }
 
   getProject(_task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError> {
@@ -605,6 +609,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       messageId: string;
       content: OrbMessageRow["content"];
       now: number;
+      wake?: boolean;
     },
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
@@ -639,7 +644,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       // the version the intent was admitted against: a `failed` orb wakes only
       // for an intent naming its current failure, so a new send retries once
       // and a stranded intent never does.
-      const autoStart = state === "stopping" || state === "stopped" || state === "failed";
+      const autoStart =
+        params.wake !== false &&
+        (state === "stopping" || state === "stopped" || state === "failed");
       const inserted = await query(
         `INSERT INTO orb_messages
            (orb_id, message_id, content, status, auto_start, wake_state_version,
@@ -1222,7 +1229,15 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       values.push(params.stopReason);
       index += 1;
     }
-    return this.casUpdate(params.orbId, params.expectedStateVersion, sets, values);
+    return this.casUpdate(
+      params.orbId,
+      params.expectedStateVersion,
+      sets,
+      values,
+      params.stopReason === "idle"
+        ? "(upload_active_until IS NULL OR upload_active_until <= $4)"
+        : undefined,
+    );
   }
 
   casUpdateFields(

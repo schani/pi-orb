@@ -9,6 +9,7 @@ import { startTailscale } from "./tailscale/daemon.ts";
 import { readTailscaleEnv } from "./tailscale/env.ts";
 import { TerminalManager } from "./terminal/manager.ts";
 import { checkTestLaunchFailure } from "./test-launch-failure.ts";
+import { registerUploadRoutes } from "./uploads/routes.ts";
 
 const env = (name: string, fallback?: string): string => {
   const value = process.env[name];
@@ -57,6 +58,11 @@ async function main(): Promise<void> {
     hookEnv: agent.hookEnvSource(),
   });
   const app = buildRuntimeServer(agent, terminalManager);
+  await registerUploadRoutes(app, {
+    workDir,
+    incarnation: env("PI_ORB_HOST_INCARNATION", "0"),
+    ready: () => agent.getHealth().status === "ready",
+  });
   const configuredPort = Number(env("PI_ORB_RUNTIME_PORT", "8080"));
   if (!Number.isInteger(configuredPort) || configuredPort < 1 || configuredPort > 65_535) {
     console.error("PI_ORB_RUNTIME_PORT must be an integer from 1 through 65535");

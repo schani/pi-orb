@@ -1106,6 +1106,28 @@ h3 {
   gap: 6px;
 }
 
+.workspace-uploads {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--k);
+  background: var(--g1);
+}
+.workspace-upload-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 4px 0;
+}
+.workspace-upload-row > span:first-child {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.workspace-upload-actions {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+}
+
 .orb-header-actions {
   margin-left: auto;
   display: flex;

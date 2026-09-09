@@ -32,6 +32,7 @@ const orb: OrbRow = {
   replicationCursor: null,
   replicatedHeadId: null,
   lastBusyAt: null,
+  uploadActiveUntil: null,
   stopReason: null,
   lastMintAt: null,
   stateChangedAt: 1_700_000_000_000,

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -107,6 +107,41 @@ const SCENARIO = {
         match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
         steps: [
           { type: "text", content: "Completed the spawned task." },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
+        match: { userMessage: { regex: "^The user uploaded files:" } },
+        steps: [
+          {
+            type: "toolCall",
+            name: "bash",
+            arguments: {
+              command:
+                "find ../uploads -name e2e-upload.bin -exec sha256sum {} \\; && find ../uploads -name e2e-sidecar.txt -exec cat {} \\;",
+            },
+          },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
+        match: {
+          toolResultContains: {
+            regex:
+              createHash("sha256")
+                .update(Buffer.alloc(4 * 1024 * 1024 + 13, 0xa7))
+                .digest("hex") + "[\\s\\S]*UPLOAD_SIDECAR",
+          },
+        },
+        steps: [
+          { type: "text", content: "UPLOAD_VERIFIED" },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
+        match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+        steps: [
+          { type: "text", content: "Verified the uploaded file." },
           { type: "stop", status: "completed" },
         ],
       },
@@ -1805,9 +1840,46 @@ describe("full slice E2E", () => {
       const page = await browser.newPage();
       await page.goto(`${base}/#/orbs/${spawnedOrbId}`);
       await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
+      const choosing = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: "Upload files", exact: true }).click();
+      await (await choosing).setFiles([
+        {
+          name: "e2e-upload.bin",
+          mimeType: "application/octet-stream",
+          buffer: Buffer.alloc(4 * 1024 * 1024 + 13, 0xa7),
+        },
+        {
+          name: "e2e-sidecar.txt",
+          mimeType: "text/plain",
+          buffer: Buffer.from("UPLOAD_SIDECAR\n"),
+        },
+      ]);
+      await expectPage(page.getByRole("dialog")).toHaveCount(0);
+      await expectPage(page.getByText("UPLOAD_VERIFIED", { exact: true })).toBeVisible({
+        timeout: 30_000,
+      });
+      const uploadMessages = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/messages`);
+      const acceptedUploads = (uploadMessages.body["items"] as { content: unknown }[]).filter(
+        (row) => JSON.stringify(row.content).includes("The user uploaded files:"),
+      );
+      expect(acceptedUploads).toHaveLength(1);
+      expect(JSON.stringify(acceptedUploads[0]?.content)).toContain("e2e-upload.bin");
+      expect(JSON.stringify(acceptedUploads[0]?.content)).toContain("e2e-sidecar.txt");
     } finally {
       await browser.close();
     }
+
+    await waitFor(
+      "upload notification inference recorded",
+      async () => {
+        const recorded: unknown = await fakeControl(fake.sessionKey, "/requests");
+        return Array.isArray(recorded) &&
+          recorded.some((call) => call.status === 200 && call.matchedRuleIndex === 9)
+          ? true
+          : null;
+      },
+      { timeoutMs: 30_000, intervalMs: 200 },
+    );
 
     await writeWorkspaceFiles(secondOrbId, 0, {
       "repo/archived.html": "archived-hosted-file",

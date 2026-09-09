@@ -59,4 +59,4 @@ This is an alternative to the full service above, not its web-server command. Fo
 npm run dev:frontend
 ```
 
-Open http://localhost:5173. The seeded orb streams a simulated echo for each message, simulates `!`/`!!` shell commands, the floating binary terminal, and turn notifications, and keeps fixture history only in memory until Vite restarts. It does not exercise the process host provider, Pi, SQLite replication, credentials, or model inference. See [docs/web-ui.md](docs/web-ui.md).
+Open http://localhost:5173. The seeded orb streams a simulated echo for each message, simulates `!`/`!!` shell commands, the floating binary terminal, and turn notifications, and keeps fixture history only in memory until Vite restarts. It does not exercise the process host provider, Pi, SQLite replication, credentials, or model inference. After fixture-backend or shared-protocol changes, restart the entire frontend process and verify the changed operation on the actual shared preview; Vite reload failure can leave an old API serving HTTP 200. See [docs/web-ui.md](docs/web-ui.md).

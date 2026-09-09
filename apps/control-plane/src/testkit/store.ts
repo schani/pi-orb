@@ -1,4 +1,9 @@
-import type { HarnessSessionMetadata, HistoryRecord, OrbState } from "@pi-orb/protocol";
+import {
+  type HarnessSessionMetadata,
+  type HistoryRecord,
+  type OrbState,
+  UPLOAD_LEASE_MS,
+} from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import type {
@@ -61,6 +66,143 @@ const invariant = (message: string): StoreError => ({
  * from named failpoints, so schedules and outages replay exactly.
  */
 export class InMemoryControlPlaneStore implements ControlPlaneStore {
+  private readonly uploadRows = new Map<
+    string,
+    import("../domain/workspace-uploads.ts").UploadRow
+  >();
+  readonly uploads: import("../domain/workspace-uploads.ts").WorkspaceUploadStore = {
+    list: (task, orbId) =>
+      this.access(task, FAILPOINTS.storeRead, "list uploads", () =>
+        [...this.uploadRows.values()].filter((r) => r.orbId === orbId),
+      ),
+    createBatch: (task, orbId, batch, now) =>
+      this.access(task, FAILPOINTS.storeWrite, "create upload batch", () => {
+        const orb = this.orbs.get(orbId);
+        if (
+          orb?.state !== "running" ||
+          orb.hostDiscardThroughIncarnation !== null ||
+          !batch.files.length ||
+          new Set(batch.files.map((file) => file.id)).size !== batch.files.length
+        )
+          return null;
+        const previous = [...this.uploadRows.values()].filter(
+          (row) =>
+            row.orbId === orbId &&
+            (row.batchId === batch.id || batch.files.some((file) => file.id === row.id)),
+        );
+        if (previous.length)
+          return previous.length === batch.files.length &&
+            previous.every(
+              (row) =>
+                row.batchId === batch.id &&
+                batch.files.some(
+                  (file) => file.id === row.id && file.name === row.name && file.size === row.size,
+                ),
+            )
+            ? previous
+            : null;
+        const rows = batch.files.map((file) => ({
+          ...file,
+          orbId,
+          batchId: batch.id,
+          offset: 0,
+          path: null,
+          sha256: null,
+          status: "transferring" as const,
+          incarnation: orb.hostIncarnation,
+          activeUntil: now + UPLOAD_LEASE_MS,
+          error: null,
+        }));
+        for (const row of rows) this.uploadRows.set(`${orbId}/${row.id}`, row);
+        this.orbs.set(orbId, {
+          ...orb,
+          stateVersion:
+            orb.stateVersion +
+            (orb.uploadActiveUntil !== null && orb.uploadActiveUntil > now ? 0 : 1),
+          uploadActiveUntil: Math.max(orb.uploadActiveUntil ?? 0, now + UPLOAD_LEASE_MS),
+          lastBusyAt: Math.max(orb.lastBusyAt ?? 0, now),
+        });
+        return rows;
+      }).andThen((rows) =>
+        rows === null ? errAsync({ type: "state_conflict" as const }) : okAsync(rows),
+      ),
+    admit: (task, orbId, spec, now) =>
+      this.access(task, FAILPOINTS.storeWrite, "admit upload", () => {
+        const orb = this.orbs.get(orbId);
+        const key = `${orbId}/${spec.id}`;
+        const old = this.uploadRows.get(key);
+        if (
+          orb?.state !== "running" ||
+          orb.hostDiscardThroughIncarnation !== null ||
+          (old &&
+            (old.name !== spec.name || old.size !== spec.size || old.status === "cancelled")) ||
+          (!old &&
+            [...this.uploadRows.values()].some(
+              (row) => row.orbId === orbId && row.batchId === spec.id,
+            ))
+        )
+          return null;
+        if (old && ["stored", "notified"].includes(old.status)) return old;
+        const row = {
+          ...spec,
+          batchId: spec.id,
+          orbId,
+          offset: 0,
+          path: null,
+          sha256: null,
+          status: "transferring" as const,
+          ...old,
+          incarnation: orb.hostIncarnation,
+          activeUntil: now + UPLOAD_LEASE_MS,
+          error: null,
+        };
+        const active = [...this.uploadRows.values()].some(
+          (r) =>
+            r.orbId === orbId &&
+            ["transferring", "finalizing"].includes(r.status) &&
+            r.activeUntil > now,
+        );
+        this.uploadRows.set(key, row);
+        this.orbs.set(orbId, {
+          ...orb,
+          stateVersion: orb.stateVersion + (active ? 0 : 1),
+          uploadActiveUntil: Math.max(orb.uploadActiveUntil ?? 0, row.activeUntil),
+          lastBusyAt: Math.max(orb.lastBusyAt ?? 0, now),
+        });
+        return row;
+      }).andThen((r) => (r === null ? errAsync({ type: "state_conflict" as const }) : okAsync(r))),
+    record: (task, row, patch, now) =>
+      this.access(task, FAILPOINTS.storeWrite, "record upload", () => {
+        const orb = this.orbs.get(row.orbId);
+        const key = `${row.orbId}/${row.id}`;
+        const old = this.uploadRows.get(key);
+        if (
+          !orb ||
+          !old ||
+          ["archiving", "archived", "deleting"].includes(orb.state) ||
+          (orb.hostIncarnation !== row.incarnation && patch.status !== "notified") ||
+          old.incarnation !== row.incarnation
+        )
+          return null;
+        if (["notified", "cancelled"].includes(old.status)) return old;
+        const next = { ...old, ...patch, offset: Math.max(old.offset, patch.offset ?? 0) };
+        if (old.status === "stored" && !["stored", "notified"].includes(next.status)) return old;
+        if (old.status === "finalizing" && next.status === "transferring")
+          next.status = "finalizing";
+        const terminal = ["stored", "notified", "cancelled"].includes(next.status);
+        if (terminal) next.activeUntil = now;
+        this.uploadRows.set(key, next);
+        this.orbs.set(orb.id, {
+          ...orb,
+          stateVersion: orb.stateVersion + (terminal ? 1 : 0),
+          uploadActiveUntil: [...this.uploadRows.values()]
+            .filter((r) => r.orbId === orb.id && ["transferring", "finalizing"].includes(r.status))
+            .reduce<number | null>((max, r) => Math.max(max ?? 0, r.activeUntil), null),
+          lastBusyAt: Math.max(orb.lastBusyAt ?? 0, now),
+        });
+        return next;
+      }).andThen((r) => (r === null ? errAsync({ type: "state_conflict" as const }) : okAsync(r))),
+  };
   private readonly projects = new Map<string, ProjectRow>();
   private readonly orbs = new Map<string, OrbRow>();
   private readonly replicas = new Map<string, OrbReplica>();
@@ -576,6 +718,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       messageId: string;
       content: OrbMessageRow["content"];
       now: number;
+      wake?: boolean;
     },
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
@@ -599,7 +742,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       // delivery now, a wake intent — never a lifecycle transition; the
       // reconciler's backstop owns that (docs/lifecycle.md, 2026-08-11).
       const autoStart =
-        orb.state === "stopping" || orb.state === "stopped" || orb.state === "failed";
+        params.wake !== false &&
+        (orb.state === "stopping" || orb.state === "stopped" || orb.state === "failed");
       const message: OrbMessageRow = {
         orbId: params.orbId,
         messageId: params.messageId,
@@ -1217,7 +1361,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   ): ResultAsync<OrbRow, StoreError | StateConflict> {
     return this.access(task, FAILPOINTS.storeWrite, `cas transition to ${params.toState}`, () => {
       const orb = this.orbs.get(params.orbId);
-      if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
+      const uploading =
+        params.stopReason === "idle" &&
+        [...this.uploadRows.values()].some(
+          (r) =>
+            r.orbId === params.orbId &&
+            ["transferring", "finalizing"].includes(r.status) &&
+            r.activeUntil > params.now,
+        );
+      if (uploading || orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
         return { conflict: true as const, currentState: orb?.state };
       }
       const updated: OrbRow = {

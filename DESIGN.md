@@ -109,6 +109,7 @@ Subsystem designs:
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
+- [docs/workspace-uploads.md](docs/workspace-uploads.md) — streaming browser uploads into orb-local files, inbox notifications, idle protection, and recovery
 - [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard Command-K Find architecture, selected Index card design, and presentation study
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
 - [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
@@ -139,6 +140,9 @@ Tracking:
 - [docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md](docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md) — DST-discovered signing-key orphan leak, retry ownership fix, and preserved failure trace
 
 Reference material:
+
+- [docs/postmortems/2026-09-09-stale-frontend-preview.md](docs/postmortems/2026-09-09-stale-frontend-preview.md) — failed Vite reload left an old fixture API serving a new browser client; restart and verify the actual shared service
+- [docs/postmortems/2026-09-09-upload-e2e-script-order.md](docs/postmortems/2026-09-09-upload-e2e-script-order.md) — upload validation exposed an ordered mock-inference script defect; all inference consumers need explicit acceptance barriers
 
 - [docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md](docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md) — failed initial enrollment, composed-DST reproduction, and incarnation-fenced key revocation
 - [docs/postmortems/2026-09-07-mixed-generation-drain-restart.md](docs/postmortems/2026-09-07-mixed-generation-drain-restart.md) — cross-revision restart and stale-provision races found by DST

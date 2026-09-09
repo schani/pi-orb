@@ -377,6 +377,217 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("uploads arbitrary files in chunks without touching the draft and hides upload when stopped", async () => {
+    const page = await browser.newPage();
+    await page.goto(`${origin}/${ORB_HASH}`);
+    const draft = page.getByPlaceholder(/Message the orb/);
+    await draft.fill("Keep this draft");
+    const chunks: Promise<number>[] = [];
+    page.on("response", (response) => {
+      const request = response.request();
+      if (request.method() === "PUT" && request.url().includes("/chunk?")) {
+        const offset = Number(new URL(request.url()).searchParams.get("offset"));
+        // Routing the finish request omits browser-added Content-Length from
+        // Playwright's request view. Measure bytes counted by the server instead.
+        chunks.push(response.json().then((row: { offset: number }) => row.offset - offset));
+      }
+    });
+    let release = () => {};
+    let arrived = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const finishing = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    await page.route("**/uploads/*/finish", async (route) => {
+      arrived();
+      await gate;
+      await route.continue();
+    });
+    try {
+      const choosing = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: "Upload files", exact: true }).click();
+      await (await choosing).setFiles({
+        name: "fixture.bin",
+        mimeType: "application/octet-stream",
+        buffer: Buffer.alloc(4 * 1024 * 1024 + 13, 0xff),
+      });
+      await finishing;
+      await expectPage(page.getByRole("dialog")).toHaveCount(0);
+      await expectPage(page.getByRole("region", { name: "File transfers" })).toContainText(
+        "finalizing",
+      );
+      expectPage(await Promise.all(chunks)).toEqual([4 * 1024 * 1024, 13]);
+    } finally {
+      release();
+    }
+    await expectPage(page.getByRole("region", { name: "File transfers" })).toHaveCount(0);
+    await expectPage(draft).toHaveValue("Keep this draft");
+    await expectPage(page.locator(".history")).toContainText("The user uploaded a file");
+    await page.getByRole("button", { name: "Stop orb", exact: true }).click();
+    await expectPage(page.getByRole("button", { name: "Start orb", exact: true })).toBeVisible();
+    await expectPage(page.getByRole("button", { name: "Upload files", exact: true })).toHaveCount(
+      0,
+    );
+    await page.getByRole("button", { name: "Start orb", exact: true }).click();
+    await expectPage(page.getByRole("button", { name: "Upload files", exact: true })).toBeVisible();
+    await page.close();
+  });
+
+  it("sends one message for a multi-file selection, including after one file needs retry", async () => {
+    const page = await browser.newPage();
+    let batchId = "";
+    let secondId = "";
+    let registrations = 0;
+    let failSecond = true;
+    await page.route("**/uploads", async (route) => {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON() as {
+          id: string;
+          files: { id: string; name: string }[];
+        };
+        batchId = body.id;
+        secondId = body.files.find((file) => file.name === "batch-second.bin")?.id ?? "";
+        registrations++;
+      }
+      await route.continue();
+    });
+    await page.route("**/uploads/*/chunk?*", async (route) => {
+      if (failSecond && route.request().url().includes(secondId)) {
+        failSecond = false;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "unavailable", message: "second file interrupted", retryable: true },
+          }),
+        });
+      } else await route.continue();
+    });
+    const messages = async () => {
+      const response = await page.request.get(
+        `${origin}/api/v1/orbs/${ORB_HASH.split("/").at(-1)}/messages`,
+      );
+      return (
+        (await response.json()) as { items: { id: string; content: unknown }[] }
+      ).items.filter((row) => row.id === batchId);
+    };
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const choosing = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: "Upload files", exact: true }).click();
+      await (await choosing).setFiles(
+        ["batch-first.bin", "batch-second.bin"].map((name) => ({
+          name,
+          mimeType: "application/octet-stream",
+          buffer: Buffer.from([0, 255, 1]),
+        })),
+      );
+      const transfers = page.getByRole("region", { name: "File transfers" });
+      await expectPage(transfers).toContainText("stored · notification pending");
+      await expectPage(transfers).toContainText("second file interrupted");
+      expectPage(await messages()).toHaveLength(0);
+      await transfers
+        .locator(".workspace-upload-row")
+        .filter({ hasText: "batch-second.bin" })
+        .getByRole("button", { name: "retry", exact: true })
+        .click();
+      await expectPage(transfers).toHaveCount(0);
+      const accepted = await messages();
+      expectPage(accepted).toHaveLength(1);
+      expectPage(JSON.stringify(accepted[0]?.content)).toContain("batch-first.bin");
+      expectPage(JSON.stringify(accepted[0]?.content)).toContain("batch-second.bin");
+      expectPage(registrations).toBe(1);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("starts another selection while an earlier upload is still sending", async () => {
+    const page = await browser.newPage();
+    let release = () => {};
+    let arrived = () => {};
+    let holdFirst = true;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sending = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    await page.route("**/uploads/*/chunk?*", async (route) => {
+      if (holdFirst) {
+        holdFirst = false;
+        arrived();
+        await gate;
+      }
+      await route.continue();
+    });
+    const choose = async (name: string) => {
+      const choosing = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: "Upload files", exact: true }).click();
+      await (await choosing).setFiles({
+        name,
+        mimeType: "application/octet-stream",
+        buffer: Buffer.from([1, 0, 255]),
+      });
+    };
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      await choose("held-first.bin");
+      await sending;
+      await choose("independent-second.bin");
+      await expectPage(page.locator(".history")).toContainText("independent-second.bin");
+      await expectPage(page.getByRole("region", { name: "File transfers" })).toContainText(
+        "held-first.bin",
+      );
+      release();
+      await expectPage(page.getByRole("region", { name: "File transfers" })).toHaveCount(0);
+      await expectPage(page.locator(".history")).toContainText("held-first.bin");
+    } finally {
+      release();
+      await page.close();
+    }
+  });
+
+  it("keeps automatic-upload failures inline and retries the same file identity", async () => {
+    const page = await browser.newPage();
+    let failChunk = true;
+    const ids = new Set<string>();
+    await page.route("**/uploads/*/chunk?*", async (route) => {
+      ids.add(new URL(route.request().url()).pathname.split("/").at(-2) ?? "");
+      if (failChunk) {
+        failChunk = false;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "unavailable", message: "test upload interruption", retryable: true },
+          }),
+        });
+      } else await route.continue();
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const choosing = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: "Upload files", exact: true }).click();
+      await (await choosing).setFiles({
+        name: "retry-direct.bin",
+        mimeType: "application/octet-stream",
+        buffer: Buffer.from([0, 255, 1]),
+      });
+      const transfers = page.getByRole("region", { name: "File transfers" });
+      await expectPage(transfers).toContainText("test upload interruption");
+      await expectPage(page.getByRole("dialog")).toHaveCount(0);
+      await transfers.getByRole("button", { name: "retry", exact: true }).click();
+      await expectPage(transfers).toHaveCount(0);
+      await expectPage(page.locator(".history")).toContainText("retry-direct.bin");
+      expectPage(ids.size).toBe(1);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("keeps the index and conversation visible until an orb switch is ready", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
