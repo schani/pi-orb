@@ -237,7 +237,15 @@ OpenTofu 1.12.6 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.
 and provider lock files are read-only. The 240-minute job budget accommodates
 checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
 The shared checks stage builds its own Docker E2E runtime image rather than relying
-on a pre-existing runner cache. Registry access uses the same refreshing keyless
+on a pre-existing runner cache. Checks do not inherit the release's result-directory
+or fixture-recorder variables; only smoke receives the real fixture recorder.
+The workflow `exec`s the release command for signal delivery, but hard cancellation
+still requires evidence-backed inspection of remote work and lock ownership.
+The first full run was cancelled in checks after discovering inherited test context
+could corrupt local evidence; no application change occurred. The reproduction,
+fix and exact-generation cleanup are in
+`docs/postmortems/2026-09-09-release-test-environment.md`.
+Registry access uses the same refreshing keyless
 identity as deployment.
 
 An empty `validate_release` input performs a release. An explicit release ID or

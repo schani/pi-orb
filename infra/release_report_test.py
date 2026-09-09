@@ -93,6 +93,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(len(actions), 5)
         self.assertTrue(all(re.fullmatch(r'[A-Za-z0-9_./-]+@[a-f0-9]{40}', action) for action in actions))
         self.assertEqual(workflow.count('./infra/release.sh'), 1)
+        self.assertIn('exec ./infra/release.sh "${args[@]}"', workflow)
         self.assertIn('args+=(--validate "$VALIDATE_RELEASE")', workflow)
         self.assertIn('python3 -m infra.release_report', workflow)
         self.assertIn('path: ${{ runner.temp }}/release-artifact/release.json', workflow)

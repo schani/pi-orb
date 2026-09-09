@@ -38,6 +38,12 @@ remain failures rather than compatibility fallbacks. Its integration test owns a
 OS-assigned port for the child's lifetime and waits for explicit IPC readiness;
 it does not reserve and release a port or assume startup finishes within a poll count.
 
+Release subprocess fixtures must own their output paths and must not inherit
+`PI_ORB_RELEASE_RESULT_DIR` or `PI_ORB_RELEASE_RECORD` from the invoking workflow.
+Passing assertions did not detect an overwritten parent record in the first full
+workflow; the isolated sentinel reproduction and fix are recorded in
+`docs/postmortems/2026-09-09-release-test-environment.md`.
+
 Release guards have deterministic coverage for conditional activation, malformed
 or regressed authority, stale/positive/missing retirement metrics, pagination,
 pending compute operations, classified cloud failures, recovery identity and

@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixtures: string[] = [];
 
@@ -69,7 +69,10 @@ esac\n`,
     'echo "docker:$*" >> "$CALL_LOG"\ntest "$1" = info || test "$1" = build\n',
   );
   executable(join(bin, "uuidgen"), "echo 00000000-0000-4000-8000-000000000001\n");
-  executable(join(bin, "npm"), 'echo "npm:$*" >> "$CALL_LOG"\n');
+  executable(
+    join(bin, "npm"),
+    'test -z "${PI_ORB_RELEASE_RESULT_DIR:-}"\ntest -z "${PI_ORB_RELEASE_RECORD:-}"\necho "npm:$*" >> "$CALL_LOG"\n',
+  );
   executable(
     join(bin, "gcloud"),
     `echo "gcloud:$*" >> "$CALL_LOG"
@@ -195,7 +198,13 @@ esac
   return { root, log, policy };
 }
 
+beforeEach(() => {
+  vi.stubEnv("PI_ORB_RELEASE_RESULT_DIR", undefined);
+  vi.stubEnv("PI_ORB_RELEASE_RECORD", undefined);
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const fixture of fixtures.splice(0)) rmSync(fixture, { force: true, recursive: true });
 });
 
@@ -349,6 +358,8 @@ describe("infra/release.sh", () => {
         PATH: `${join(root, "bin")}:${process.env.PATH}`,
         PROJECT: "test-project",
         TMPDIR: join(root, "tmp"),
+        PI_ORB_RELEASE_RESULT_DIR: join(root, "owned-results"),
+        PI_ORB_RELEASE_RECORD: join(root, "parent-record-must-not-reach-checks.json"),
       },
     });
 

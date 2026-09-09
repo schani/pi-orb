@@ -79,7 +79,7 @@ jobs:
           set -euo pipefail
           args=(--yes)
           if [ -n "$VALIDATE_RELEASE" ]; then args+=(--validate "$VALIDATE_RELEASE"); fi
-          ./infra/release.sh "${args[@]}"
+          exec ./infra/release.sh "${args[@]}"
       - name: Prepare allowlisted result and job summary
         if: always()
         env:

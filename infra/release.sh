@@ -142,8 +142,6 @@ RECORD="$RESULT_DIR/release.json"
 state init "$release_id" "$head_commit" "$PROJECT" "$REGION" "$ZONE" "$workflow_url"
 if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; else state previous; fi
 state publish
-export PI_ORB_RELEASE_RECORD="$RECORD"
-
 tofu -chdir="$INFRA" init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET" -backend-config=prefix=static-plane
 export PI_ORB_OPS_URL=$(tofu -chdir="$INFRA" output -raw ops_url)
 export PI_ORB_ISSUER_URL=$(tofu -chdir="$INFRA" output -raw issuer_url)
@@ -166,12 +164,12 @@ if [ -z "$VALIDATE" ]; then
   plan_and_guard "$WORK_DIR/current.tfvars" "$WORK_DIR/preflight.tfplan"
   python3 -m infra.release_retire inventory "$RECORD"
   stage checks
-  release_run_child npm ci
-  release_run_child npm run typecheck
-  release_run_child npm run lint
-  release_run_child npm test
-  release_run_child docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
-  release_run_child npm run test:e2e
+  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm ci
+  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run typecheck
+  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run lint
+  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm test
+  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
+  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run test:e2e
   stage build
   release_run_child "$INFRA/build-push.sh" > "$WORK_DIR/release.tfvars"
   state vars "$WORK_DIR/release.tfvars"
@@ -218,6 +216,7 @@ release_run_child python3 -m infra.release_retire wait "$RECORD"
 stage activate
 state activate
 stage lifecycle
+export PI_ORB_RELEASE_RECORD="$RECORD"
 release_run_child "$INFRA/smoke.sh"
 stage identity
 # Reuse this repository's already-admitted project to exercise real federation,
