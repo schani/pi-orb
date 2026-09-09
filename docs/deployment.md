@@ -212,8 +212,8 @@ artifacts, all four serving image/revision identities, lifecycle generations
 (the issuer deliberately has none), stage verdicts, retirement evidence and
 fixture outcomes. Apply is conservatively marked unvalidated before invocation.
 `--validate RELEASE_ID|latest` creates a new record referencing the original,
-checks deployment identity, and runs only retirement/activation/validation—not
-build, migrations or apply. The original failure is never rewritten into success.
+checks deployment identity, and runs only post-apply IAP repair/revision pruning,
+retirement/activation/validation—not build, migrations or infrastructure apply. The original failure is never rewritten into success.
 
 Successful smoke fixtures are deleted and verified absent; failed fixtures remain
 for diagnosis and cost accounting. Peer preview health is mandatory through the
@@ -232,7 +232,7 @@ not duplicate the deployment algorithm. The first-release policy is recorded in
 
 The workflow checks out the dispatched SHA, verifies it is still `origin/main`,
 and creates local branch `main` at that exact SHA before authentication. The shared
-command repeats the freshness check. Node 24.6.0, SDK 583.0.0 and checksum-verified
+command repeats the freshness check. Node 24.6.0, SDK 583.0.0 with its explicit beta component and checksum-verified
 OpenTofu 1.12.6 are pinned; actions use immutable SHAs, the runner is Ubuntu 24.04,
 and provider lock files are read-only. The 240-minute job budget accommodates
 checks, fresh native acceptance, migration/apply and up to 75 minutes of retirement.
@@ -246,7 +246,12 @@ could corrupt local evidence; no application change occurred. The reproduction,
 fix and exact-generation cleanup are in
 `docs/postmortems/2026-09-09-release-test-environment.md`.
 Registry access uses the same refreshing keyless
-identity as deployment.
+identity as deployment. Preflight also reads the browser IAP policy to verify
+beta command availability and scoped access before mutation. The first successful
+infrastructure apply exposed this missing component during reconciliation;
+`docs/postmortems/2026-09-09-release-iap-sdk-component.md` preserves the failed run.
+A separate `repair` phase now distinguishes reconciliation from infrastructure
+apply and runs during validation-only recovery as well.
 
 An empty `validate_release` input performs a release. An explicit release ID or
 `latest` invokes validation-only recovery. Inputs enter through quoted environment

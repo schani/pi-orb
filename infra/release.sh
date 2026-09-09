@@ -146,6 +146,11 @@ tofu -chdir="$INFRA" init -input=false -lockfile=readonly -backend-config="bucke
 export PI_ORB_OPS_URL=$(tofu -chdir="$INFRA" output -raw ops_url)
 export PI_ORB_ISSUER_URL=$(tofu -chdir="$INFRA" output -raw issuer_url)
 "$INFRA/api.sh" /api/v1/system | jq -e '.hostProvider == "gce"' >/dev/null
+# This read proves both the beta command dependency and scoped policy access
+# before any build, migration or apply—not after changing serving services.
+gcloud beta iap web get-iam-policy --project="$PROJECT" --resource-type=cloud-run \
+  --service=pi-orb --region="$REGION" --format=json > "$WORK_DIR/iap-preflight.json"
+jq -e 'type == "object" and ((.bindings // []) | type == "array")' "$WORK_DIR/iap-preflight.json" >/dev/null
 
 plan_and_guard() {
   local vars=$1 plan=$2
@@ -206,10 +211,12 @@ if [ -z "$VALIDATE" ]; then
   stage apply
   APPLY_ATTEMPTED=true
   release_run_child tofu -chdir="$INFRA" apply -input=false "$WORK_DIR/release.tfplan"
-  "$INFRA/deploy.sh"
-  IAP_REPAIRED=true
-  state snapshot
 fi
+
+stage repair
+"$INFRA/deploy.sh"
+IAP_REPAIRED=true
+if [ -z "$VALIDATE" ]; then state snapshot; else state check; fi
 
 stage retire
 release_run_child python3 -m infra.release_retire wait "$RECORD"

@@ -32,6 +32,11 @@ application without rebuilding, migrating or applying infrastructure. `latest`
 selects the latest recorded attempt. It verifies all four serving image/revision
 identities and lifecycle generations, preserves the original failure record,
 and creates a separate validation result naming both deployed and runner commits.
+It completes IAP reconciliation and old-revision pruning in a separate `repair`
+phase before retirement, including failures after apply but before the initial
+serving snapshot. The original accepted image/generation must match all four roles.
+The SDK beta component is required; a read-only IAP policy request checks it before
+any build or mutation.
 Do not use it merely to obtain green from an unexplained failure.
 
 The unsafe `--quiesce` path is removed. No normal release pauses the browser.

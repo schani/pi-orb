@@ -145,7 +145,7 @@ class Cloud:
 
 
 SERVICES = ("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")
-PHASES = ("preflight", "checks", "build", "plan", "schema", "apply", "retire", "activate", "lifecycle", "identity", "complete")
+PHASES = ("preflight", "checks", "build", "plan", "schema", "apply", "repair", "retire", "activate", "lifecycle", "identity", "complete")
 OUTCOMES = ("running", "failed-before-apply", "applied-but-unvalidated", "validated")
 FIELDS = {"schemaVersion", "releaseId", "commit", "runnerCommit", "project", "region", "zone", "workflowUrl", "validatesRelease",
           "startedAt", "finishedAt", "phase", "outcome", "exitCode", "applyAttempted", "gates", "artifacts",

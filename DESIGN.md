@@ -151,6 +151,7 @@ Reference material:
 - [docs/postmortems/2026-09-07-native-foundation-release-contracts.md](docs/postmortems/2026-09-07-native-foundation-release-contracts.md) — first native rollout contract failures and fixes
 - [docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md](docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md) — native boot blocked by Rust DNS resolver behavior
 - [docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md](docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md) — retained-workspace boot dropped by a systemd ordering cycle
+- [docs/postmortems/2026-09-09-release-iap-sdk-component.md](docs/postmortems/2026-09-09-release-iap-sdk-component.md) — missing SDK beta commands stopped reconciliation after successful apply
 - [docs/postmortems/2026-09-09-release-test-environment.md](docs/postmortems/2026-09-09-release-test-environment.md) — inherited release context let passing contract tests overwrite their caller's evidence
 - [docs/postmortems/2026-09-09-native-cleanup-dst-io.md](docs/postmortems/2026-09-09-native-cleanup-dst-io.md) — real diagnostic IO and a busy observer escaped deterministic cleanup scheduling
 - [docs/postmortems/2026-09-09-credential-probe-role-reset.md](docs/postmortems/2026-09-09-credential-probe-role-reset.md) — ambient SQL role targeted the production password; restoration and explicit-target safeguards

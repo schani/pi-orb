@@ -85,6 +85,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertNotRegex(workflow, r'(?m)^  (push|pull_request):')
         self.assertIn('cancel-in-progress: false', workflow)
         self.assertIn('timeout-minutes: 240', workflow)
+        self.assertIn('install_components: beta', workflow)
         self.assertIn('ref: ${{ github.sha }}', workflow)
         self.assertIn('git checkout -B main "$GITHUB_SHA"', workflow)
         self.assertIn('test "$GITHUB_SHA" = "$(git rev-parse origin/main)"', workflow)

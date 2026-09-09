@@ -68,6 +68,7 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
         with:
           version: '583.0.0'
+          install_components: beta
       - name: Configure keyless registry access
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
       - name: Run the authoritative release transaction

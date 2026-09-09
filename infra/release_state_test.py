@@ -114,6 +114,20 @@ class ReleaseStateTest(unittest.TestCase):
         self.assertEqual(cloud.source, before)
         self.assertEqual(cloud.writes, [])
 
+    def test_validation_recovers_post_apply_failure_before_snapshot(self):
+        cloud = FakeCloud()
+        cloud.source = record()
+        cloud.source['serving'] = None
+        cloud.source['phase'] = 'apply'
+        cloud.source['gates'] = {'apply': 'failed'}
+        before = copy.deepcopy(cloud.source)
+        result = recover(cloud, record(), 'release-42')
+        self.assertIsNone(result.error)
+        self.assertEqual(result.value['serving'], record()['serving'])
+        self.assertEqual(cloud.source, before)
+        cloud.changed = True
+        self.assertIsNotNone(recover(cloud, record(), 'release-42').error)
+
     def test_validation_refuses_changed_revisions(self):
         cloud = FakeCloud()
         cloud.source = record()

@@ -80,6 +80,7 @@ if [ "$1" = auth ]; then echo token; exit 0; fi
 if [ "$1 $2" = "storage cp" ]; then exit "\${MOCK_LOCK_STATUS:-0}"; fi
 if [ "$1 $2 $3" = "storage objects describe" ]; then echo 42; exit 0; fi
 if [ "$1 $2" = "storage rm" ]; then exit 0; fi
+if [ "$1 $2 $3 $4 $5" = "beta iap web get-iam-policy --project=test-project" ]; then echo '{}'; exit "\${MOCK_IAP_PREFLIGHT_STATUS:-0}"; fi
 if [ "$1 $2 $3" = "secrets versions describe" ]; then echo projects/test/secrets/database/versions/1; exit 0; fi
 if [ "$1 $2 $3" = "run jobs create" ]; then exit "\${MOCK_SCHEMA_STATUS:-0}"; fi
 cat <<'JSON'
@@ -398,11 +399,34 @@ describe("infra/release.sh", () => {
     expect(result.status, result.stderr).toBe(0);
     const calls = readFileSync(log, "utf8");
     expect(calls).toContain("release-original");
+    expect(calls).toMatch(
+      /infra.release_state stage[^\n]* repair[\s\S]*deploy:[\s\S]*infra.release_state check[\s\S]*infra.release_retire wait/,
+    );
     expect(calls).toContain("infra.release_state activate");
     expect(calls).toContain("wif-smoke");
     expect(calls).not.toMatch(
       /\nbuild\n|docker:build|npm:|tofu:.* plan |tofu:.* apply |run jobs create/,
     );
+  });
+
+  it("refuses missing IAP tooling or policy access before checks and builds", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+        MOCK_IAP_PREFLIGHT_STATUS: "1",
+      },
+    });
+    expect(result.status).not.toBe(0);
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("beta iap web get-iam-policy");
+    expect(calls).not.toMatch(/npm:|\nbuild\n|run jobs create|tofu:.* apply/);
+    expect(calls).toContain("gcloud:storage rm");
   });
 
   it("retains the global lock after an uncertain migration job", () => {
