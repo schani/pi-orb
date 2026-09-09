@@ -33,6 +33,25 @@ function makeFixture(): { root: string; log: string } {
   mkdirSync(scratch);
   copyFileSync(resolve("infra/release.sh"), join(infra, "release.sh"));
   copyFileSync(resolve("infra/release-child.sh"), join(infra, "release-child.sh"));
+  copyFileSync(resolve("infra/check-database-plan.jq"), join(infra, "check-database-plan.jq"));
+  executable(join(infra, "api.sh"), `echo '{"hostProvider":"gce"}'\n`);
+  executable(
+    join(bin, "python3"),
+    `node - "$@" <<'NODE'
+const fs = require('node:fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(process.env.CALL_LOG, 'record:' + a.join(' ') + '\\n');
+if (a[0] !== '-m' || a[1] !== 'infra.release_state') process.exit(0);
+const [action, path, ...rest] = a.slice(2);
+if (action === 'init') fs.writeFileSync(path, JSON.stringify({commit:rest[1],phase:'preflight',artifacts:{control_plane_image:'registry/control@sha256:abc',deploy_generation:201}}));
+if (action === 'preflight-vars') fs.writeFileSync(rest[0], 'deploy_generation = 200\\n');
+if (action === 'stage') {
+ const record = JSON.parse(fs.readFileSync(path));
+ record.phase = rest[0]; fs.writeFileSync(path, JSON.stringify(record));
+}
+NODE
+`,
+  );
   chmodSync(join(infra, "release.sh"), 0o755);
 
   executable(
@@ -46,6 +65,8 @@ function makeFixture(): { root: string; log: string } {
 esac\n`,
   );
   executable(join(bin, "docker"), 'test "$1" = info\n');
+  executable(join(bin, "uuidgen"), "echo 00000000-0000-4000-8000-000000000001\n");
+  executable(join(bin, "npm"), 'echo "npm:$*" >> "$CALL_LOG"\n');
   executable(
     join(bin, "gcloud"),
     `echo "gcloud:$*" >> "$CALL_LOG"
@@ -53,6 +74,8 @@ if [ "$1" = auth ]; then echo token; exit 0; fi
 if [ "$1 $2" = "storage cp" ]; then exit "\${MOCK_LOCK_STATUS:-0}"; fi
 if [ "$1 $2 $3" = "storage objects describe" ]; then echo 42; exit 0; fi
 if [ "$1 $2" = "storage rm" ]; then exit 0; fi
+if [ "$1 $2 $3" = "secrets versions describe" ]; then echo projects/test/secrets/database/versions/1; exit 0; fi
+if [ "$1 $2 $3" = "run jobs create" ]; then exit "\${MOCK_SCHEMA_STATUS:-0}"; fi
 cat <<'JSON'
 {"spec":{"template":{"spec":{"containers":[{"env":[{"name":"PI_ORB_HOST_SPEC_GENERATION","value":"200"}]}]}}}}
 JSON
@@ -96,13 +119,13 @@ JSON
   *"foundation output -json"*)
     if [ "\${MOCK_FOUNDATION_STATUS:-}" = missing ]; then echo '{}'; else
       cat <<JSON
-{"foundation_schema_version":{"value":1},"project":{"value":"$PROJECT"},"region":{"value":"$REGION"},"zone":{"value":"us-central1-a"},"image_builder_service_account_email":{"value":"builder@example.com"},"image_build_subnetwork":{"value":"projects/test-project/regions/us-central1/subnetworks/pi-orb-image-build"},"pi_orb_network":{"value":"projects/test-project/global/networks/pi-orb"},"orb_subnetwork_resource":{"value":"regions/us-central1/subnetworks/pi-orb-us-central1"},"run_egress_subnetwork":{"value":"projects/test-project/regions/us-central1/subnetworks/pi-orb-run-egress"},"run_egress_cidr":{"value":"10.10.16.0/26"}}
+{"foundation_schema_version":{"value":1},"project":{"value":"$PROJECT"},"region":{"value":"$REGION"},"zone":{"value":"us-central1-a"},"image_builder_service_account_email":{"value":"builder@example.com"},"image_build_subnetwork":{"value":"projects/test-project/regions/us-central1/subnetworks/pi-orb-image-build"},"pi_orb_network":{"value":"projects/test-project/global/networks/pi-orb"},"orb_subnetwork_resource":{"value":"regions/us-central1/subnetworks/pi-orb-us-central1"},"run_egress_subnetwork":{"value":"projects/test-project/regions/us-central1/subnetworks/pi-orb-run-egress"},"run_egress_cidr":{"value":"10.10.16.0/26"},"control_plane_service_account_email":{"value":"cp@example.com"},"trusted_pi_orb_project_id":{"value":"trusted-project"},"pi_orb_workload_identity_provider":{"value":"projects/123/locations/global/workloadIdentityPools/orbs/providers/pi"},"deployer_service_account_email":{"value":"deployer@example.com"}}
 JSON
     fi
     ;;
-  *"output -raw zone"*)
-    echo us-central1-a
-    ;;
+  *"output -raw zone"*) echo us-central1-a ;;
+  *"output -raw ops_url"*) echo https://ops.example ;;
+  *"output -raw issuer_url"*) echo https://issuer.example ;;
 esac
 `,
   );
@@ -327,20 +350,61 @@ describe("infra/release.sh", () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("deploy generation:    201");
+    expect(result.stdout).toContain("generation 201");
     const calls = readFileSync(log, "utf8");
     expect(calls).toMatch(
-      /gcloud:storage cp[\s\S]*build[\s\S]*tofu:.* init[\s\S]*tofu:.* plan[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*smoke[\s\S]*wif-smoke[\s\S]*gcloud:storage rm/,
+      /gcloud:storage cp[\s\S]*tofu:.* init[\s\S]*tofu:.* plan[\s\S]*\nbuild[\s\S]*tofu:.* plan[\s\S]*run jobs create[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*infra.release_retire wait[\s\S]*infra.release_state activate[\s\S]*smoke[\s\S]*wif-smoke[\s\S]*gcloud:storage rm/,
     );
     // The workload-identity smoke runs inside the lock, after the lifecycle
     // smoke, and is handed the project and zone its GCE legs need.
     expect(calls).toContain("wif-smoke:test-project:us-central1-a");
     expect(calls).toContain("plan-mode:600");
     expect(calls).not.toContain("--iap-only");
-    const planPath = calls.match(/tofu:.* plan .* -out=([^ ]+)/)?.[1];
+    const planPath = calls.match(/tofu:.* plan .* -out=([^ ]*\/release\.tfplan)/)?.[1];
     expect(planPath).toBeDefined();
     expect(calls).toContain(`tofu:-chdir=${join(root, "infra")} apply -input=false ${planPath}`);
     expect(readdirSync(join(root, "tmp"))).toEqual([]);
+  });
+
+  it("validation-only neither builds, migrates nor applies", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--validate", "release-original"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+      },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("release-original");
+    expect(calls).toContain("infra.release_state activate");
+    expect(calls).toContain("wif-smoke");
+    expect(calls).not.toMatch(/\nbuild\n|tofu:.* plan |tofu:.* apply |run jobs create/);
+  });
+
+  it("retains the global lock after an uncertain migration job", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        MOCK_SCHEMA_STATUS: "7",
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("lock retained");
+    const calls = readFileSync(log, "utf8");
+    expect(calls).not.toMatch(/tofu:.* apply |gcloud:storage rm|\nwif-smoke/);
+    expect(calls).toContain("--max-retries=0");
+    expect(calls).toContain("--wait");
   });
 
   it("repairs IAP, skips smoke, and preserves a failed apply status", () => {

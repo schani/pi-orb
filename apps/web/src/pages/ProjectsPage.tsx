@@ -196,12 +196,20 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
     refresh();
   }, [refresh]);
 
-  // Deployment facts never change while the page is open, so they are fetched
-  // once; until they arrive the footer holds its line and says nothing.
   useEffect(() => {
-    void getSystem().then((result) => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refreshSystem = async (): Promise<void> => {
+      const result = await getSystem();
+      if (stopped) return;
       if (result.isOk()) setSystem(result.value);
-    });
+      timer = setTimeout(() => void refreshSystem(), 10_000);
+    };
+    void refreshSystem();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -433,6 +441,15 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
             <span>{system.databaseKind}</span>
             <span className="dashboard-footer-separator">·</span>
             <span>v{system.version}</span>
+            {system.deploymentStatus !== undefined && (
+              <a href="https://github.com/schani/pi-orb/actions/workflows/deploy.yml">
+                {system.deploymentStatus === "awaiting-activation"
+                  ? "Deployment awaiting activation"
+                  : system.deploymentStatus === "superseded"
+                    ? "Deployment superseded"
+                    : "Deployment activation unavailable"}
+              </a>
+            )}
           </>
         )}
       </div>

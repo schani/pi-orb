@@ -37,7 +37,10 @@ release_run_child node --experimental-strip-types packages/native-image/src/cli.
 # Recheck both provenance and acceptance before publishing the release artifact.
 node infra/native-image-vars.mjs "$IMAGE_BUILD_DIR/manifest.json" "$COMMIT" "$PROJECT" > "$IMAGE_BUILD_DIR/native.tfvars"
 CP_IMAGE="$REPO/control-plane:$TAG"
-docker build --platform linux/amd64 -q -f apps/control-plane/Dockerfile -t "$CP_IMAGE" . >&2
+docker build --platform linux/amd64 -q -f apps/control-plane/Dockerfile \
+  --label "org.opencontainers.image.revision=$COMMIT" \
+  --label "org.opencontainers.image.source=https://github.com/schani/pi-orb" \
+  -t "$CP_IMAGE" . >&2
 docker push -q "$CP_IMAGE" >&2
 CP=$(docker inspect --format='{{index .RepoDigests 0}}' "$CP_IMAGE")
 if ! [[ "$CP" =~ ^[^[:space:]]+@sha256:[a-f0-9]{64}$ ]]; then

@@ -40,6 +40,7 @@ umask 077
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 API="$DIR/api.sh"
+source "$DIR/smoke-fixtures.sh"
 
 OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-3600} # two lifecycle boots, stops, SSH and federation
 RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-900}  # lifecycle create/start deadline
@@ -85,15 +86,17 @@ check_deadline() {
 cleanup() {
   local status=$?
   trap - EXIT
-  # Preserve failed fixtures for diagnosis, but always remove local credentials.
-  # Successful fixture cleanup remains best effort without replacing the verdict.
+  # Failure evidence stays in the cloud; credential scratch is always removed.
   if [ "$status" -eq 0 ]; then
-    if [ -n "$MINT_ORB" ]; then "$API" "/api/v1/orbs/$MINT_ORB" '' DELETE >/dev/null 2>&1 || true; fi
-    if [ -n "$STOPPED_ORB" ]; then "$API" "/api/v1/orbs/$STOPPED_ORB" '' DELETE >/dev/null 2>&1 || true; fi
-    if [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; then
-      "$API" "/api/v1/projects/$PROJECT_ID" '' DELETE >/dev/null 2>&1 || true
+    if [ -n "$MINT_ORB" ]; then fixture_delete orb "$MINT_ORB" || status=1; fi
+    if [ -n "$STOPPED_ORB" ]; then fixture_delete orb "$STOPPED_ORB" || status=1; fi
+    if [ "$status" -eq 0 ] && [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; then
+      fixture_delete project "$PROJECT_ID" || status=1
     fi
   elif [ -n "$MINT_ORB$STOPPED_ORB$PROJECT_ID" ]; then
+    [ -z "$MINT_ORB" ] || fixture_record orb "$MINT_ORB" retained || true
+    [ -z "$STOPPED_ORB" ] || fixture_record orb "$STOPPED_ORB" retained || true
+    if [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; then fixture_record project "$PROJECT_ID" retained || true; fi
     echo "Failed fixtures retained for diagnosis: project=$PROJECT_ID orbs=$MINT_ORB,$STOPPED_ORB" >&2
     echo "Delete only these test fixtures after preserving evidence; they may still incur compute/storage charges." >&2
   fi
@@ -107,7 +110,7 @@ trap cleanup EXIT
 # node is not optional here the way jq is elsewhere: verifying an RS256
 # signature against the served JWKS is the point of the mint leg, and a shell
 # that cannot do that would be asserting nothing.
-for command in curl gcloud node tofu uuidgen; do
+for command in curl gcloud node tofu uuidgen jq python3; do
   command -v "$command" >/dev/null 2>&1 ||
     fail "preflight" "missing required command '$command'"
 done
@@ -322,6 +325,12 @@ PROBE_B64=$(b64 "$WORK_DIR/probe.js")
 
 create_project() {
   local pid=$1 name=$2 response got
+  if [ "$PROJECT_IS_DISPOSABLE" != true ]; then
+    response=$(api "/api/v1/projects/$pid") || fail "reuse-project" "API unavailable"
+    jq -e --arg id "$pid" '.id == $id' <<<"$response" >/dev/null || fail "reuse-project" "trusted project does not exist"
+    return 0
+  fi
+  fixture_record project "$pid" requested
   response=$(api /api/v1/projects \
     "$(printf '{"id":"%s","name":"%s","repositoryUrl":"%s"}' \
       "$pid" "$name" "https://github.com/octocat/Hello-World")") ||
@@ -329,15 +338,18 @@ create_project() {
   got=$(printf '%s' "$response" | jget id) ||
     fail "create-project" "unparseable response: $response"
   [ "$got" = "$pid" ] || fail "create-project" "unexpected response: $response"
+  fixture_record project "$pid" created
 }
 
 create_orb() {
   local pid=$1 oid=$2 response got
+  fixture_record orb "$oid" requested
   response=$(api "/api/v1/projects/$pid/orbs" "$(printf '{"id":"%s"}' "$oid")") ||
     fail "create-orb" "api.sh failed"
   got=$(printf '%s' "$response" | jget id) ||
     fail "create-orb" "unparseable response: $response"
   [ "$got" = "$oid" ] || fail "create-orb" "unexpected response: $response"
+  fixture_record orb "$oid" created
   say "orb created: $oid"
 }
 
@@ -510,6 +522,23 @@ case "$MINT_INCARNATION" in
 esac
 say "  minting from $MINT_INSTANCE (incarnation $MINT_INCARNATION)"
 wait_for_ssh "$MINT_INSTANCE"
+
+# Use the already-owned peer, not an optional tailnet client on the CI runner.
+preview=$(api "/api/v1/orbs/$STOPPED_ORB" | jget previewHost) || fail "peer-preview" "cannot read preview host"
+[[ "$preview" =~ ^[a-zA-Z0-9.-]+$ ]] && [ "${#preview}" -le 253 ] || fail "peer-preview" "invalid or absent preview host"
+preview_deadline=$(( $(date +%s) + 60 ))
+while :; do
+  check_deadline "peer-preview"
+  preview_response=$(orb_ssh "$MINT_INSTANCE" "sudo python3 - /usr/bin/tailscale '$preview'" < "$DIR/smoke_preview.py" 2> "$WORK_DIR/preview.err") || preview_response=""
+  preview_code=$(printf '%s\n' "$preview_response" | tail -n1)
+  preview_body=$(printf '%s\n' "$preview_response" | sed '$d')
+  if [ "$preview_code" = 200 ] && jq -e '.status == "ready"' <<<"$preview_body" >/dev/null 2>&1; then
+    say "peer preview health: HTTP 200 ready"
+    break
+  fi
+  [ "$(date +%s)" -lt "$preview_deadline" ] || fail "peer-preview" "peer never returned HTTP 200 ready"
+  sleep "$POLL_INTERVAL"
+done
 
 mint() { # mint <audience> <out-file>
   local audience=$1 out=$2

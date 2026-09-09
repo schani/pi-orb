@@ -39,6 +39,7 @@ import {
 import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
 import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
+import { createReleaseActivationReader } from "./adapters/release-activation.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
@@ -65,6 +66,7 @@ import {
 import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
+import { waitForReleaseActivation } from "./domain/release-activation.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
 import {
@@ -163,6 +165,7 @@ async function main(): Promise<void> {
   }
   const role = configuredRole as ControlPlaneRole;
   const browserRole = role === "all" || role === "browser";
+  const activationBucket = browserRole ? env("PI_ORB_RELEASE_ACTIVATION_BUCKET", "") : "";
   // "ops": the browser API surface for tooling, with no background loops,
   // no migrations, and no web assets — invoker-IAM keeps it private.
   const opsRole = role === "ops";
@@ -224,7 +227,9 @@ async function main(): Promise<void> {
   const database = openedDatabase.value;
   // Only the single-instance browser role migrates; the runtime and issuer
   // roles' queries fail retryably until the schema exists.
-  if (browserRole) {
+  // Production's release job migrates before any new service consumes schema.
+  // Local development still initializes its own database.
+  if (browserRole && activationBucket === "") {
     const migrated = await database.migrate();
     if (migrated.isErr()) {
       bootTask.error("migration failed:", migrated.error.message);
@@ -354,6 +359,7 @@ async function main(): Promise<void> {
   // the composition below takes, so the footer names the provider actually
   // constructed rather than the string that was typed.
   const systemView: SystemView = {
+    ...(activationBucket === "" ? {} : { deploymentStatus: "awaiting-activation" as const }),
     hostProvider:
       providerKind === "gce" ? "gce" : providerKind === "process" ? "process" : "docker",
     databaseKind: databaseKind === "pglite" ? "pglite" : "postgres",
@@ -626,6 +632,22 @@ async function main(): Promise<void> {
   // Only the browser-role service runs them — it is the always-on one; the
   // scale-to-zero runtime service must not depend on background work.
   if (browserRole) {
+    if (activationBucket !== "") {
+      const activated = await waitForReleaseActivation(
+        new ControlPlaneTask("release-activation"),
+        createReleaseActivationReader(activationBucket, createGcsTokenProvider()),
+        specGeneration,
+        stop.signal,
+        (status) => {
+          if (status === null) delete systemView.deploymentStatus;
+          else systemView.deploymentStatus = status;
+        },
+      );
+      if (!activated) {
+        await closeResources();
+        return;
+      }
+    }
     const runReconcileTask: ReconcileTaskRunner = (orbId, operation) =>
       operation(new ControlPlaneTask(`reconciler:${orbId}`));
     const loops: readonly Promise<void>[] = [

@@ -9,7 +9,9 @@
 **/*.tfstate.*
 **/*.plan
 **/*.plan.*
+**/*.tfplan
+**/*.tfplan.*
 **/.env*
-gha-creds-*.json
+**/gha-creds-*.json
 test-failures
 **/__pycache__

@@ -9,7 +9,7 @@ does share the one read/write database credential, `docs/deployment.md`).
 
 ## Deploy workflow
 
-First adopt/apply the separately authorized foundation (`infra/foundation/README.md`). Archive existing orbs before the native rollout. The release refuses an unapplied or mismatched foundation.
+First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Bootstrap status (2026-09-09):** GitHub keyless authentication is live-verified; the published workflow remains authentication-only until application rollout safety and credential containment are live-validated.
 
 The supported manual deployment is one command from the repository root:
 
@@ -17,37 +17,50 @@ The supported manual deployment is one command from the repository root:
 
 It requires a clean `main` checkout exactly matching freshly fetched
 `origin/main`, shows the exact OpenTofu plan, and requires typing `deploy` before
-applying. `./infra/release.sh --yes` is the non-interactive form intended for a
-future serialized CI job.
+applying. `./infra/release.sh --yes` is the non-interactive form shared with CI.
 
-For the reviewed first native rollout after archiving every orb,
-`./infra/release.sh --quiesce` disables the browser after apply, requires fresh
-zero-instance metrics for every recorded browser revision, restores its prior
-scaling mode, and then runs smokes. Missing metrics fail closed; handled errors
-and signals restore scaling and repair IAP. This path awaits live validation.
+`./infra/release.sh --validate RELEASE_ID` explicitly validates the recorded
+application without rebuilding, migrating or applying infrastructure. `latest`
+selects the latest recorded attempt. It verifies all four serving image/revision
+identities and lifecycle generations, preserves the original failure record,
+and creates a separate validation result naming both deployed and runner commits.
+Do not use it merely to obtain green from an unexplained failure.
+
+The unsafe `--quiesce` path is removed. No normal release pauses the browser.
+New autonomous loops wait behind a startup barrier while HTTP remains available;
+only independently observed old-process retirement permits activation.
 
 The script owns the complete transaction. Native image versions use
 `v-<short-commit>` so every Git hash forms a valid GCE resource-name segment.
 
 The stages are:
 
-1. rebuild and boot-validate the native VM image, then push the digest-pinned control-plane container;
-2. clamp `deploy_generation` above the generation currently serving in Cloud
-   Run, then create and apply an exact saved OpenTofu plan;
-3. repair IAP after every attempted apply (`deploy.sh --iap-only` on apply
-   failure), and after success delete drained browser revisions;
-4. run the live create → running → stop → start → stop smoke test;
-5. run the live workload-identity smoke (`smoke-workload-identity.sh`).
+1. verify tools, Docker, auth, foundation, ops access and a non-mutating application plan; install locked dependencies and run typecheck, lint, unit and E2E checks before building;
+2. build/boot-validate native images and push the digest-pinned, source-labelled control-plane image;
+3. clamp generation above serving and published authority, create the exact saved plan, and reject database/credential changes;
+4. run migrations using that image in a one-task Cloud Run job, with retries disabled, before any new service consumes schema;
+5. apply, preserve native IAP, reconcile its exact accessor policy, and delete non-serving browser revision metadata;
+6. require explicit zero active/idle counts for old browser revisions, including deleted-but-live revisions discovered through Monitoring, and no unfinished pi-orb compute mutations; publish activation only after rechecking serving identity;
+7. run lifecycle and identity smokes, mandatory peer-to-peer preview health and actual GCP federation through this repository's admitted project; verify successful fixture deletion and unchanged serving identity.
 
 Generated variables and the binary plan live under `umask 077` in a mode-0700
 temporary directory and are removed on exit; they must never be retained because
 OpenTofu plans embed state secrets. A generation-matched object at
 `gs://pi-orb-tfstate-<project>/static-plane/release.lock` serializes the complete
-manual transaction across workstations and runners; a same-workstation lock
-fails even earlier. The object records only commit, host, PID, and start time.
-If a process is killed without running traps and leaves the object behind,
-verify no release is active before removing that object. The future GitHub
-workflow must use the same lock in addition to its native concurrency group.
+transaction across workstations and runners; a same-workstation lock fails even
+earlier. The object identifies the release, commit, workflow, host, PID and start.
+An uncertain migration execution deliberately retains this lock: inspect the
+recorded Cloud Run job before unlocking. Never infer safety from an expired shell
+or deleted revision. GitHub concurrency is additional protection, not a substitute.
+
+Token-free records live in `static-plane/releases/RELEASE_ID.json`, with a
+`latest.json` pointer, and in the printed local result directory. They distinguish
+failed-before-apply, applied-but-unvalidated and validated; an interrupted apply
+is conservatively unvalidated. Schema changes may have committed even before an
+application apply—there is no automatic migration rollback. Failed smoke fixtures
+remain for diagnosis, with ownership/cleanup outcomes in the result. Local
+credential scratch is removed on handled exits. Never upload the workspace,
+state, saved plans or raw diagnostic directories.
 
 `build-push.sh`, `deploy.sh`, `smoke.sh`, and `smoke-workload-identity.sh` remain
 implementation stages for diagnostics; they are not separate operator steps. The native build boots a fresh VM and requires runtime readiness, correct ownership/storage, and disabled Docker services before accepting the image. Release validates its manifest against the exact source commit and project. Rebuild an image independently using `infra/native-vm/README.md`; the accepted manifest and logs remain under `.context/native-image-release/`.

@@ -1,7 +1,6 @@
 # The four Cloud Run services (docs/credentials.md "Cloud exposure"): one image,
-# role env var as the hard route allowlist. IAP on the browser service is
-# enabled by deploy.sh (gcloud) — the provider's IAP-on-Cloud-Run support
-# is still settling; revisit when it is stable.
+# role env var as the hard route allowlist. Native IAP remains enabled in the
+# same service update as every application revision.
 
 locals {
   hosting_env = {
@@ -122,6 +121,7 @@ resource "google_cloud_run_v2_service" "browser" {
   name                = local.browser_service_name
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
+  iap_enabled         = true
   deletion_protection = false
 
   traffic {
@@ -149,6 +149,10 @@ resource "google_cloud_run_v2_service" "browser" {
       env {
         name  = "PI_ORB_ROLE"
         value = "browser"
+      }
+      env {
+        name  = "PI_ORB_RELEASE_ACTIVATION_BUCKET"
+        value = local.foundation.state_bucket
       }
       env {
         name  = "PI_ORB_BROKER_URL"

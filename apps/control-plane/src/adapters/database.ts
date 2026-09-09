@@ -14,7 +14,7 @@ import { PgClient, type PostgreSQLClient } from "./pg/client.ts";
 import { PostgreSQLCredentialPointerStore } from "./pg/credential-pointers.ts";
 import { PostgreSQLHostingStore } from "./pg/hosting.ts";
 import { PostgreSQLMcpStore } from "./pg/mcp.ts";
-import { runMigrations } from "./pg/migrate.ts";
+import { type MigrationObserver, runMigrations } from "./pg/migrate.ts";
 import { PGliteClient } from "./pg/pglite-client.ts";
 import { PostgreSQLProjectSecretPointerStore } from "./pg/project-secrets.ts";
 import { PostgreSQLSigningKeyStore } from "./pg/signing-keys.ts";
@@ -27,7 +27,7 @@ export interface ControlPlaneDatabase {
   readonly signingKeys: SigningKeyStore;
   readonly hosting: HostingStore;
   readonly mcp: McpStore;
-  migrate(): ResultAsync<string[], StoreError>;
+  migrate(observe?: MigrationObserver): ResultAsync<string[], StoreError>;
   close(): ResultAsync<void, StoreError>;
 }
 
@@ -44,7 +44,7 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     signingKeys: new PostgreSQLSigningKeyStore(client),
     hosting: new PostgreSQLHostingStore(client),
     mcp: new PostgreSQLMcpStore(client),
-    migrate: () => runMigrations(client),
+    migrate: (observe) => runMigrations(client, observe),
     close: () => client.end(),
   };
 }

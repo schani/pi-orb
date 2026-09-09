@@ -19,6 +19,13 @@ export const SystemViewSchema = Type.Object(
     ]),
     databaseKind: Type.Union([Type.Literal("pglite"), Type.Literal("postgres")]),
     version: Type.String(),
+    deploymentStatus: Type.Optional(
+      Type.Union([
+        Type.Literal("awaiting-activation"),
+        Type.Literal("activation-unavailable"),
+        Type.Literal("superseded"),
+      ]),
+    ),
   },
   closed,
 );

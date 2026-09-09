@@ -50,7 +50,7 @@ import {
  * PGlite + process-provider composition and exercises the same scenario.
  */
 
-const PG_CONTAINER = "pi-orb-e2e-pg";
+const PG_CONTAINER = `pi-orb-e2e-pg-${randomUUID()}`;
 const PG_PORT = 5436;
 const CP_PORT = 7144;
 const NETWORK = "pi-orb";
@@ -549,7 +549,6 @@ beforeAll(async () => {
   // With a warm layer cache this takes seconds.
   await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
 
-  await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
   await docker([
     "run",
     "--detach",

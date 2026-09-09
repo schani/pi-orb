@@ -10,6 +10,14 @@ was checked against current production state. The three tracked files
 comparison confirmed that it still matched the current production credential.
 Only the count and match verdict were printed, never the password, URL or hash.
 
+The full binary plans were subsequently decoded using OpenTofu 1.12.5 and their
+archived provider lock (Google 6.50.0). Newer tool/schema readers failed and those
+first diagnostics were retained. The decoded planned/prior values and inline
+environment fields showed database credential material, not an additional
+populated credential family. Sensitive-field flags are not evidence of a populated
+secret: for example, the root-password field was marked sensitive but unset.
+Only allowlisted field names were printed. Private plan scratch was removed.
+
 The repository is public. Neither private Cloud SQL networking nor deleting
 the files makes that credential secret again. History rewrites also cannot
 recall copies, so credential rotation is required independently of repository
@@ -23,6 +31,11 @@ renamed artifacts, without printing content. CI runs it before dependency
 installation. Git and Docker ignore rules exclude generated Google credentials,
 plans, state, local evidence and provider caches. The committed non-secret
 pi-orb external-account configuration remains allowed.
+
+A later diagnostic accidentally cleared the production password through ambient
+SQL role state. It was restored from the unchanged canonical secret; the temporary
+login was deleted and fresh connectivity verified. This restored availability,
+not secrecy (`docs/postmortems/2026-09-09-credential-probe-role-reset.md`).
 
 At this checkpoint credential rotation is not complete. Its outcome and any
 additional exposed credentials must be verified separately; remaining work is

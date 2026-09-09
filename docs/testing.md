@@ -15,6 +15,24 @@
 - The live-only Luna turn-summary coordinator is DST-covered: inference is detached from operation completion, accepts later turns while earlier summaries are pending, and retains originating operation IDs under varied completion schedules. Luna errors and timeouts are consumed without mutating agent/runtime state. Browser Notification API behavior is an ordinary frontend-adapter test concern rather than a simulation target (decided 2026-08-06).
 - Static HTML under `design-prototypes/` is deliberately excluded from Biome linting: it is non-shipping concept material, while production web code remains subject to the full accessibility rules (decided 2026-08-09).
 
+## Local validation ownership (2026-09-09)
+
+In native coding orbs, use `sudo systemctl start docker` so Docker attaches to the
+configured persistent containerd store. Do not substitute a bare daemon command.
+After restart, inspect both processes and containers before acting: daemon startup
+can auto-start an interrupted fixture. Preserve its data and first failure logs.
+Long validation needs a tracked process and durable exit status, not an outer
+command deadline shorter than the configured tests. Full-slice PostgreSQL fixtures
+are execution-unique and setup never deletes a previous run's database.
+Evidence: `docs/postmortems/2026-09-09-local-e2e-docker-startup.md`.
+
+Release guards have deterministic coverage for conditional activation, malformed
+or regressed authority, stale/positive/missing retirement metrics, pagination,
+pending compute operations, classified cloud failures, recovery identity and
+allowlisted results. Shell contract tests require checks/E2E and migrations before
+apply, preserve uncertain migration locks, and forbid build/apply in validation-only
+mode. These tests do not substitute for a successful live release.
+
 ## Native VM coverage requirement (decided 2026-09-05)
 
 The native VM production integration, including its image-regeneration command, requires thorough unit and DST coverage before deployment. The experiment's live checks and existing suites do not establish coverage of the new implementation.

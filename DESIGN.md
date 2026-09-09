@@ -147,6 +147,8 @@ Reference material:
 - [docs/postmortems/2026-09-07-native-foundation-release-contracts.md](docs/postmortems/2026-09-07-native-foundation-release-contracts.md) — first native rollout contract failures and fixes
 - [docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md](docs/postmortems/2026-09-07-native-rust-dns-bootstrap.md) — native boot blocked by Rust DNS resolver behavior
 - [docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md](docs/postmortems/2026-09-07-native-workspace-systemd-cycle.md) — retained-workspace boot dropped by a systemd ordering cycle
+- [docs/postmortems/2026-09-09-credential-probe-role-reset.md](docs/postmortems/2026-09-09-credential-probe-role-reset.md) — ambient SQL role targeted the production password; restoration and explicit-target safeguards
+- [docs/postmortems/2026-09-09-local-e2e-docker-startup.md](docs/postmortems/2026-09-09-local-e2e-docker-startup.md) — wrong containerd store and interrupted local validation; preserve evidence and owned fixtures
 - [docs/postmortems/2026-09-09-tracked-deployment-credentials.md](docs/postmortems/2026-09-09-tracked-deployment-credentials.md) — live credential confirmed in public plan archives; artifact containment and rotation status
 - [docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md](docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md) — interrupted release exited before builder cleanup
 - [docs/references/amp-orb-lessons.md](docs/references/amp-orb-lessons.md) — lessons from Amp's “Putting an Agent in an Orb”

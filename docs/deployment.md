@@ -17,7 +17,7 @@ Decisions about where the control plane runs and how infrastructure is managed. 
 - The control plane, orb runtime, shared protocol, and web UI will be written in TypeScript on Node.js 24.
 - **Manual-release entry point (decided and implemented 2026-08-09):** operators deploy only through `infra/release.sh`, a single command that requires a clean latest `origin/main` commit and composes the existing build/boot-gate/push, exact temporary OpenTofu plan/apply, mandatory exact-IAP reconciliation, drained-revision cleanup, and live smoke stages. Ordinary apply errors and interruption signals repair IAP with `infra/deploy.sh --iap-only` before returning failure. `umask 077` plus a mode-0700 temporary directory protects generated variables and the binary plan until they are deleted on exit. A generation-matched object in the static-plane state bucket serializes the whole transaction across workstations/runners; while holding it, the script clamps the next generation above the currently serving revision. A same-host lock fails earlier. A trap-bypassing process death can leave a stale GCS lock that requires operator verification before removal.
 - **Release cancellation waits for owned cleanup (corrected 2026-09-07):** each shell layer tracks its direct child, handles one termination signal, ignores duplicates, terminates the child and waits. The native build wrapper invokes the Node builder directly rather than adding an npm process that can exit before the builder's abort cleanup. A process-group SIGINT regression requires builder cleanup to finish before either wrapper exits (`docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md`).
-- **Reviewed maintenance drain (decided 2026-09-06; live-validated 2026-09-07):** `infra/release.sh --quiesce` is an optional first-native-rollout path for a deployment whose orbs have already been archived. After the saved-plan apply, it records every browser revision, rejects traffic tags, disables the whole browser service with manual scaling zero, and requires a fresh zero active-plus-idle instance-count sample for every recorded revision before revision cleanup. It restores the prior automatic or manual scaling on success, failure, and handled signals before smoke tests. Missing or stale Monitoring data blocks the release: revision deletion, log silence, and elapsed time do not prove that an old reconciler exited. Normal releases remain available throughout deployment and do not use this flag.
+- **Former maintenance drain (introduced 2026-09-06, retired 2026-09-09):** `--quiesce` disabled the browser and required explicit zero-instance metrics, with shell-trap restoration. It rejected the required `files` tag and had no restoration independent of the caller. The option, helper and tests are removed rather than promoted into unattended deployment. The retained rule is that deletion, log silence and elapsed time never prove old-process retirement; any future deliberate pause requires a verified independent restoration watchdog.
 - **Project-secret storage (implemented 2026-08-28; live cloud validation pending):** OpenTofu creates the shared `pi-orb-credential-project-secrets` Secret Manager parent and grants the control-plane service account secret accessor plus version manager. Browser/ops roles write immutable project bundles, the runtime role reads exact versions for boot snapshots, and the browser role's project finalizer enumerates/destroys project-owned versions. No new Cloud Run environment variable or orb-host provider input exists; all roles derive the parent through the existing secret-prefix contract (`docs/credentials.md`). The live GSM/GCE validation is tracked in `TODO.md`.
 - **Public OIDC issuer service (implemented 2026-08-21; live-validated 2026-08-26):** a fourth Cloud Run service `pi-orb-issuer` runs the `PI_ORB_ROLE=issuer` branch of the same image with `INGRESS_TRAFFIC_ALL` and `invoker_iam_disabled = true` — the deployment's first and only deliberately public, unauthenticated surface. This is not an exception to the IAP rule above. That rule protects the *unauthenticated control plane*: the browser API exposes and mutates orb state, so it must never be directly reachable. The issuer serves exactly two documents — an OIDC discovery document and a JWKS — whose entire purpose is to be fetched anonymously by strangers, because a relying party verifying a pi-orb token holds no pi-orb credential to present. Both are public by construction, cacheable, and secret-free. Three properties bound it: the role env var is a hard route allowlist, so no orb data or mutation route is even registered; the service runs as its own `pi-orb-issuer` service account whose only secret access is the database URL (the public JWKs live in `oidc_signing_keys`), so "unauthenticated" and "can read private keys" are different identities; and its environment is trimmed to the three variables the role reads. Private signing keys live in the Secret Manager parent secret `pi-orb-credential-oidc-signing-key` — the id is fixed by `GsmSecretStore`'s `<prefix>-<provider>` addressing — readable only by the control-plane account that mints. **Where that boundary stops (POC limitation, recorded 2026-08-22):** it is a Secret Manager boundary, not a database one. The database URL the issuer reads *is* the deployment's single full read/write application credential, so at the PostgreSQL layer this internet-facing service holds the same rights as every other service — it could read `orbs.runtime_token_hash` or write `oidc_signing_keys` if its code asked; what prevents that today is the route allowlist and the trimmed environment, not the credential. Provisioning a read-only PostgreSQL role for the issuer (`SELECT` on `oidc_signing_keys` only) is tracked in `TODO.md` before the separately bootstrapped GCP federation tier is enabled. Commit `f36914e` passed the provider-neutral live cloud smoke, including mint, public verification, stopped-orb denial, and unknown-bearer denial; see `docs/postmortems/2026-08-26-workload-identity-cloud-release-gates.md`. `docs/workload-identity.md`, `docs/workload-identity-recipes.md`.
 - **`PI_ORB_OIDC_ISSUER_URL` is computed by OpenTofu, never supplied (decided 2026-08-21; corrected and live-validated 2026-08-26):** since stage 2B the `runtime` and `issuer` roles refuse to boot without a valid issuer URL, which made "the deploy that ships this image must also set it" a live deployment hazard. A Cloud Run service cannot reference its own `.uri`, so `local.oidc_issuer_url` in `infra/oidc.tf` builds the deterministic URL Cloud Run v2 assigns a new service — `https://<service>-<project-number>.<region>.run.app`, from `data.google_project` — and both services read that one local. One apply therefore cannot ship a minting image without the matching issuer identity, and no release step has to remember anything: the hazard is removed structurally rather than documented. Live evidence showed that Cloud Run reports the hashed canonical address in `.uri` while `.urls` contains both that address and the working deterministic address. The invariant is therefore membership of the computed trust anchor in `.urls`, plus the live discovery/JWKS gate — never equality with `.uri`. The implementation asserts membership and exports the same deterministic local as `issuer_url`; commit `f36914e` passed that postcondition and verified a minted token against discovery and JWKS at the deterministic origin. Rejected: an operator-supplied variable (a hand-copied trust anchor whose drift is a silent trust migration) and a two-phase apply. `tofu output -raw issuer_url` is the operator-facing form. Incident: `docs/postmortems/2026-08-26-workload-identity-cloud-release-gates.md`.
@@ -112,13 +112,83 @@ The first useful milestone is “start one release and receive one trustworthy r
 The GitHub provider admits only the numeric repository/owner and manual `main`
 workflow specified in `infra/foundation/github.tf`. The initial `Deploy`
 workflow is deliberately authentication-only while application release safety
-is implemented. Existing orb federation remains unchanged.
+is implemented. Run `34359863108` passed real keyless project and hosting-bucket
+reads at commit `0502c53`; the same commit passed CI and E2E. The temporary
+administrator login was then revoked and orb federation rechecked successfully.
+Existing orb federation remains unchanged.
 
 Tracked plan archives were confirmed to contain the live database credential;
 see `docs/postmortems/2026-09-09-tracked-deployment-credentials.md`. CI rejects
 tracked state/plan/credential artifacts, and Docker excludes them from build
 contexts. Only structurally constructed token-free release records may be
 uploaded. Deleting archives does not substitute for credential rotation.
+
+### Credential mutation safety (2026-09-09)
+
+A disposable credential probe inherited the production ownership role and used
+`RESET ROLE; ALTER ROLE CURRENT_USER PASSWORD NULL`, inadvertently clearing the
+production password. Fifty browser authentication errors were observed; the
+canonical secret restored connectivity, and the temporary login was removed.
+Incident and exact times: `docs/postmortems/2026-09-09-credential-probe-role-reset.md`.
+
+Destructive credential targets must be explicit, validated identifiers, never
+ambient SQL role expressions. Experiments use disposable owner roles, not
+production ownership. Any production credential mutation requires independently
+armed recovery whose authority does not depend on this application's issuer,
+and must execute the exact tested procedure. The original credential remains
+exposed despite restoration. No rotation completion is claimed.
+
+### Implemented release safety design (2026-09-09; application rollout not yet live-validated)
+
+The external entry point reuses `infra/release.sh`. A read-only application plan,
+ops access and retirement inventory precede expensive image builds. Google
+provider `7.21.0` manages `iap_enabled = true` natively, eliminating the deliberate
+out-of-band detach/repair window; exact IAP accessor reconciliation is retained.
+
+The browser starts HTTP but waits before starting **all five autonomous loops**.
+Its one-object GCS reader accepts only its exact generation from
+`static-plane/releases/active.json`. Missing, malformed or unavailable authority
+fails closed, and a process that observes a later generation never opens after a
+subsequent regression. Pending/unavailable/superseded activation is visible in the
+dashboard footer, with edge-only `lifecycle:` events. This is a startup barrier,
+not a per-mutation lease. The supported release must establish retirement before
+publishing authority; out-of-band deployments and late-side-effect compensation
+remain distinct from this operational boundary.
+
+Before apply, retirement inventory includes revision metadata and positive
+Monitoring samples, so already-deleted live controllers are not invisible. After
+apply and pruning, all pages are read and both active and idle states must have
+explicit zero evidence after the recorded boundary. Newly observed old revisions
+join the inventory. Previously recorded zero evidence can be reused, but newer
+positive samples refute it. Pending pi-orb instance/disk/image operations also
+block activation. The 75-minute operational cap permits natural Cloud Run
+retirement without a UI pause (the observed incident took roughly 44 minutes);
+time passing is never the proof. Failure leaves new loops gated and HTTP available.
+
+A one-task, no-retry Cloud Run job runs migrations from the accepted image before
+any new service consumes schema. Production browser startup no longer migrates;
+local development still does. Migration filenames and outcomes are logged without
+raw database errors. An uncertain job execution retains the global release lock
+and job identity for inspection. Successful jobs are removed. There is no
+automatic rollback of committed schema changes, nor a promise of compatibility
+for arbitrary breaking runtime/schema changes.
+
+`release_state.py` constructs and validates token-free records, including nested
+allowlists, before publishing. It records source and runner commits, accepted
+artifacts, all four serving image/revision identities, lifecycle generations
+(the issuer deliberately has none), stage verdicts, retirement evidence and
+fixture outcomes. Apply is conservatively marked unvalidated before invocation.
+`--validate RELEASE_ID|latest` creates a new record referencing the original,
+checks deployment identity, and runs only retirement/activation/validation—not
+build, migrations or apply. The original failure is never rewritten into success.
+
+Successful smoke fixtures are deleted and verified absent; failed fixtures remain
+for diagnosis and cost accounting. Peer preview health is mandatory through the
+already-owned minting orb's Tailscale daemon, not conditional on runner networking.
+The release's federation leg uses this repository's existing admitted project and
+shared deployer, exercising only read-only APIs. It creates/deletes its own two
+orbs, never that shared project. This does not bootstrap the separate experimental
+STS tier or add identity authority.
 
 ## Current proposal: deploy from GitHub Actions
 

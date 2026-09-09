@@ -7,8 +7,21 @@ from infra.artifact_guard import inspect
 
 class ArtifactGuardTest(unittest.TestCase):
     def test_rejects_names_even_when_empty(self):
-        for name in ["deploy.plan", "plan.tfstate.backup", "deploy.plan.json", "gha-creds-123.json", ".terraform/state"]:
+        for name in ["deploy.plan", "deploy.tfplan", "deploy.tfplan.json", "plan.tfstate.backup", "deploy.plan.json", "gha-creds-123.json", ".terraform/state"]:
             self.assertIsNotNone(inspect(Path(name)))
+
+    def test_rejects_google_credentials_but_allows_the_reviewed_executable_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "account.json"
+            for body in [
+                '{"type":"authorized_user","refresh_token":"sentinel"}',
+                '{"type":"service_account","private_key":"sentinel"}',
+                '{"type":"external_account","credential_source":{"headers":{"Authorization":"sentinel"}}}',
+            ]:
+                path.write_text(body)
+                self.assertIsNotNone(inspect(path))
+            path.write_text('{"type":"external_account","credential_source":{"executable":{"command":"/usr/local/bin/pi-orb-gcp-identity"}}}')
+            self.assertIsNone(inspect(path))
 
     def test_recognizes_renamed_archive_without_reading_secret_values(self):
         with tempfile.TemporaryDirectory() as directory:

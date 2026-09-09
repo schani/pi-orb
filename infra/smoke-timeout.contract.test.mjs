@@ -12,10 +12,8 @@ test("live smoke deadlines cover native lifecycle bounds", () => {
   const smoke = readFileSync(new URL("./smoke.sh", import.meta.url), "utf8");
   const running = seconds(smoke, "RUNNING_TIMEOUT");
   const stopped = seconds(smoke, "STOPPED_TIMEOUT");
-  const tailnet = seconds(smoke, "TAILNET_TIMEOUT");
-  const health = seconds(smoke, "HEALTH_TIMEOUT");
   assert.equal(running, 900);
-  assert(seconds(smoke, "OVERALL_TIMEOUT") >= 2 * running + 2 * stopped + tailnet + health);
+  assert(seconds(smoke, "OVERALL_TIMEOUT") >= 2 * running + 2 * stopped);
 
   const identity = readFileSync(new URL("./smoke-workload-identity.sh", import.meta.url), "utf8");
   const identityRunning = seconds(identity, "RUNNING_TIMEOUT");
@@ -33,14 +31,13 @@ test("live smoke deadlines cover native lifecycle bounds", () => {
   assert.match(replacement, /^boot_deadline_seconds=900\b/m);
 });
 
-test("preview smoke distinguishes userspace dialing from kernel networking", () => {
-  const smoke = readFileSync(new URL("./smoke.sh", import.meta.url), "utf8");
-  assert.match(smoke, /status --json \| jget TUN/);
-  assert.match(smoke, /False\|false\)[\s\S]*?transport=userspace/);
-  assert.match(smoke, /True\|true\) transport=kernel/);
-  assert.match(smoke, /python3 "\$DIR\/smoke_preview\.py" "\$ts" "\$preview"/);
-  assert.match(smoke, /curl -sS --max-time 10/);
-  assert.equal(seconds(smoke, "HEALTH_TIMEOUT"), 60);
+test("preview health is mandatory and uses an owned peer instead of runner tailnet credentials", () => {
+  const smoke = readFileSync(new URL("./smoke-workload-identity.sh", import.meta.url), "utf8");
+  assert.match(smoke, /sudo python3 - \/usr\/bin\/tailscale/);
+  assert.match(smoke, /< "\$DIR\/smoke_preview\.py"/);
+  assert.match(smoke, /preview_deadline=\$\(\( \$\(date \+%s\) \+ 60 \)\)/);
+  assert.match(smoke, /fail "peer-preview"/);
+  assert.match(smoke, /\.status == "ready"/);
 });
 
 test("ops API bearer travels through stdin, not curl arguments", () => {

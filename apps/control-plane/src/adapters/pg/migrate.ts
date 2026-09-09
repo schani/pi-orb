@@ -21,7 +21,12 @@ const readMigrations = Result.fromThrowable(
 );
 
 /** Numbered hand-written SQL migrations with a tiny runner (docs/stack.md). */
-export function runMigrations(db: PostgreSQLClient): ResultAsync<string[], StoreError> {
+export type MigrationObserver = (name: string, stage: "started" | "applied") => void;
+
+export function runMigrations(
+  db: PostgreSQLClient,
+  observe?: MigrationObserver,
+): ResultAsync<string[], StoreError> {
   const dir = join(dirname(fileURLToPath(import.meta.url)), "migrations");
   const run = async (): Promise<Result<string[], StoreError>> => {
     const migrations = readMigrations(dir);
@@ -36,6 +41,7 @@ export function runMigrations(db: PostgreSQLClient): ResultAsync<string[], Store
     const ran: string[] = [];
     for (const migration of migrations.value) {
       if (applied.has(migration.name)) continue;
+      observe?.(migration.name, "started");
       const outcome = await db.transaction<void, StoreError>(async (query, execute) => {
         const executed = await execute(migration.sql);
         if (executed.isErr()) return err(executed.error);
@@ -47,6 +53,7 @@ export function runMigrations(db: PostgreSQLClient): ResultAsync<string[], Store
       });
       if (outcome.isErr()) return err(outcome.error);
       ran.push(migration.name);
+      observe?.(migration.name, "applied");
     }
     return ok(ran);
   };

@@ -9,7 +9,7 @@ import zipfile
 
 
 def inspect(path: Path) -> str | None:
-    if re.search(r"\.(?:tfstate|plan)(?:\.|$)", path.name) or (
+    if re.search(r"\.(?:tfstate|tfplan|plan)(?:\.|$)", path.name) or (
         path.name.startswith("gha-creds-") and path.suffix == ".json"
     ) or ".terraform" in path.parts:
         return "forbidden artifact name"
@@ -22,6 +22,14 @@ def inspect(path: Path) -> str | None:
             value = json.loads(path.read_bytes())
         except (ValueError, UnicodeError):
             return None
+        if isinstance(value, dict):
+            if value.get("type") in ("authorized_user", "service_account") and ("refresh_token" in value or "private_key" in value):
+                return "Google credential material"
+            source = value.get("credential_source")
+            if value.get("type") == "external_account" and isinstance(source, dict):
+                headers = source.get("headers")
+                if isinstance(headers, dict) and any(key.lower() == "authorization" for key in headers):
+                    return "bearer-bearing external-account configuration"
         if isinstance(value, dict) and "terraform_version" in value and (
             {"resources", "values", "planned_values", "resource_changes"} & value.keys()
         ):
