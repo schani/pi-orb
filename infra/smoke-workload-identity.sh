@@ -85,13 +85,17 @@ check_deadline() {
 cleanup() {
   local status=$?
   trap - EXIT
-  # Best effort, and never allowed to change the reported status: a smoke that
-  # passed must not fail on tidy-up, and a smoke that failed must keep its own
-  # first-failure message.
-  if [ -n "$MINT_ORB" ]; then "$API" "/api/v1/orbs/$MINT_ORB" '' DELETE >/dev/null 2>&1 || true; fi
-  if [ -n "$STOPPED_ORB" ]; then "$API" "/api/v1/orbs/$STOPPED_ORB" '' DELETE >/dev/null 2>&1 || true; fi
-  if [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; then
-    "$API" "/api/v1/projects/$PROJECT_ID" '' DELETE >/dev/null 2>&1 || true
+  # Preserve failed fixtures for diagnosis, but always remove local credentials.
+  # Successful fixture cleanup remains best effort without replacing the verdict.
+  if [ "$status" -eq 0 ]; then
+    if [ -n "$MINT_ORB" ]; then "$API" "/api/v1/orbs/$MINT_ORB" '' DELETE >/dev/null 2>&1 || true; fi
+    if [ -n "$STOPPED_ORB" ]; then "$API" "/api/v1/orbs/$STOPPED_ORB" '' DELETE >/dev/null 2>&1 || true; fi
+    if [ "$PROJECT_IS_DISPOSABLE" = true ] && [ -n "$PROJECT_ID" ]; then
+      "$API" "/api/v1/projects/$PROJECT_ID" '' DELETE >/dev/null 2>&1 || true
+    fi
+  elif [ -n "$MINT_ORB$STOPPED_ORB$PROJECT_ID" ]; then
+    echo "Failed fixtures retained for diagnosis: project=$PROJECT_ID orbs=$MINT_ORB,$STOPPED_ORB" >&2
+    echo "Delete only these test fixtures after preserving evidence; they may still incur compute/storage charges." >&2
   fi
   [ -n "$WORK_DIR" ] && rm -rf "$WORK_DIR"
   exit "$status"
