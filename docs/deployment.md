@@ -97,7 +97,7 @@ The deployed image `pi-orb-image-v-db8cb5d-ebd0a574514547e9` occupies 1,369,020,
 
 ## Automation priorities after the orb-local release
 
-**Implementation authorized (2026-09-09):** the user requested the complete one-button deployment path, requiring only necessary authentication. Use a manually triggered external workflow; do not enable deployment on every push or automatic rollback. The scope below is accepted; GitHub admission is complete, and full-workflow live validation remains pending. Harden the existing release command before adding unattended deployment. Most of the happy path is already scripted; this release's manual work was failure diagnosis, environment recovery and proving old-controller retirement, not typing deployment commands.
+**Implementation authorized (2026-09-09):** the user requested the complete one-button deployment path, requiring only necessary authentication. Use a manually triggered external workflow; do not enable deployment on every push or automatic rollback. The scope below is accepted; GitHub admission and live deployment/recovery validation are complete; the failed initial attempts remain preserved. Harden the existing release command before adding unattended deployment. Most of the happy path is already scripted; this release's manual work was failure diagnosis, environment recovery and proving old-controller retirement, not typing deployment commands.
 
 1. **Remove rollout interference first.** Stale revisions must lose autonomous lifecycle authority, not merely disappear from revision inventory. The existing lifecycle-fencing and tagged-maintenance work in `TODO.md` remains the safety prerequisite. Where maintenance is necessary, the independently verified restoration watchdog is mandatory; prefer avoiding downtime when quiescence is already proven.
 2. **Make prerequisites reproducible and fail early.** Provision pinned deployment tools through repository setup; check tool availability, Docker readiness and scoped cloud access before an expensive build. The missing hosting-bucket permission and missing OpenTofu executable should be actionable preflight failures, not late surprises. Foundation permission changes stay separately administered.
@@ -112,7 +112,7 @@ The first useful milestone is “start one release and receive one trustworthy r
 The GitHub provider admits only the numeric repository/owner and manual `main`
 workflow specified in `infra/foundation/github.tf`. The initial `Deploy`
 workflow was deliberately authentication-only while application release safety
-was implemented; the full transaction is now wired below but not yet live-validated. Run `34359863108` passed real keyless project and hosting-bucket
+was implemented; the full transaction and explicit recovery have now been exercised live as recorded below. Run `34359863108` passed real keyless project and hosting-bucket
 reads at commit `0502c53`; the same commit passed CI and E2E. The temporary
 administrator login was then revoked and orb federation rechecked successfully.
 Existing orb federation remains unchanged.
@@ -171,7 +171,39 @@ not yet qualified for production. Isolated tests must use disposable owner roles
 Acceptance and implementation work remain in `TODO.md`; this proposal does not
 authorize another ad hoc production probe.
 
-### Implemented release safety design (2026-09-09; application rollout not yet live-validated)
+### Live deployment and recovery outcome (2026-09-09)
+
+Application source `32d82e5`, including MCP and workspace uploads, serves on all
+four roles at generation `1788991246` (the issuer deliberately has none).
+Run `34407362332` passed checks/E2E, native acceptance, the protected saved plan,
+and migrations, then updated all four services. Its missing-beta-component
+reconciliation failure remains `applied-but-unvalidated` in the original record.
+
+After the tooling/preflight and shared repair-phase correction, validation-only
+run `34411745647` at runner commit `95118b4` completed successfully at
+`2026-09-09T23:10:45Z`. It did not rebuild, migrate or reapply infrastructure.
+IAP remained native-enabled with exactly `domain:heyglide.com`; old revision
+`pi-orb-00049-dpj` was pruned at 22:22:11 but still had one active instance at
+22:57. Explicit zero active and idle counts at 23:00 permitted activation.
+No UI pause or time-only retirement assumption was used.
+
+Lifecycle assertions passed in 200 seconds; identity assertions passed in 152
+seconds, including real STS/deployer federation, a read-only GCP request and
+peer-preview HTTP 200/`ready` through the owned orb's daemon. Successful cleanup
+was then verified: one disposable project and all three smoke orbs were deleted.
+The release lock is absent, serving identities match the validated record, and
+the original failure is unchanged. The sole uploaded artifact is the validated,
+allowlisted release JSON. CI/E2E passed on `95118b4`; local unit count was 1,598.
+
+Evidence: `static-plane/releases/r-1788992497-4fabfbfe-b386-4272-96f6-1af9b21d8a09.json`
+and `https://github.com/schani/pi-orb/actions/runs/34411745647`, with private
+snapshots/logs under `.context/workflow-release/`. This establishes the normal
+build/migration/apply stages and explicit recovery through final gates; it does
+not relabel the original full run green or claim a second fresh full deployment.
+Dedicated hosted-file and upload streaming/memory qualification remains separate
+in `TODO.md`. The database password was left unchanged per user decision.
+
+### Implemented release safety design (2026-09-09; live-validated)
 
 The external entry point reuses `infra/release.sh`. A read-only application plan,
 ops access and retirement inventory precede expensive image builds. Google
@@ -225,7 +257,7 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
-**Implemented 2026-09-09; full application workflow not yet live-validated.**
+**Implemented and live-exercised 2026-09-09 through normal apply plus successful explicit recovery.**
 `.github/workflows/deploy.yml` calls the authoritative `infra/release.sh`; it does
 not duplicate the deployment algorithm. The first-release policy is recorded in
 `docs/open-questions.md` (question 40).

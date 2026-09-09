@@ -9,7 +9,7 @@ does share the one read/write database credential, `docs/deployment.md`).
 
 ## Deploy workflow
 
-First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Status (2026-09-09):** GitHub keyless authentication is live-verified. The full manual workflow is wired; its first application run remains unvalidated. The user deferred database password rotation; release plans must preserve the existing credential.
+First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Status (2026-09-09):** GitHub keyless authentication is live-verified. The manual workflow is operational. Normal build/migration/apply completed in run `34407362332`; its IAP-tooling failure is preserved. Corrected validation-only recovery `34411745647` passed all remaining gates at 23:10:45 UTC, with verified fixture cleanup and no remaining release lock. Application source `32d82e5` serves at generation `1788991246`; workflow/recovery fixes are in `95118b4`. No rebuild, migration or apply was repeated to obtain green. The user deferred database password rotation; release plans must preserve the existing credential.
 
 In GitHub Actions, select **Deploy → Run workflow → main**, leaving
 `validate_release` empty for a new deployment. Supply a recorded release ID or

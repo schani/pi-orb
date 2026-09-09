@@ -49,4 +49,14 @@ The record reader already supports a post-apply failure before the initial servi
 snapshot: it obtains the actual revisions only after proving their images and
 generations match the accepted artifacts. Added regression coverage verifies this
 case, rejects mismatches, and leaves the original failure untouched. Full live
-recovery is a separate verdict; this correction alone does not claim it passed.
+recovery is a separate verdict; this correction alone did not establish it.
+
+## Verified recovery
+
+Run `34411745647`, runner `95118b4`, finished validated at 23:10:45 UTC without
+rebuilding, rerunning migrations or reapplying infrastructure. IAP repair and
+revision pruning passed; the old browser remained active after deletion until
+explicit zero active/idle samples at 23:00 permitted activation. Lifecycle,
+identity, real GCP federation and peer-preview gates passed. All smoke fixtures
+were verified deleted, serving identities were unchanged, and the release lock
+was absent. The original `34407362332` failure record remains unchanged.
