@@ -247,7 +247,9 @@ record fields and the runner commit before exporting exactly `release.json`.
 No diagnostic directory, state, plan, credential file or source bundle is uploaded.
 The job summary distinguishes transaction failure from recorded gate success,
 links durable evidence, and lists retained fixtures/costs. Failure before record
-creation is explicit and never fabricates a successful deployment.
+creation is explicit and never fabricates a successful deployment. A successful
+transaction step without completed, validated release evidence fails the reporter
+rather than producing a green workflow with a missing or unfinished record.
 
 The shared command runs checks and full-slice E2E for the exact dispatched commit,
 then preserves the release sequence as one serialized critical section:

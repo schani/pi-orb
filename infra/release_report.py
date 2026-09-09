@@ -10,10 +10,14 @@ def report(record, commit, outcome):
         return fail("invalid", "invalid workflow result context")
     lines = ["## Release", f"Runner commit: `{commit}`", f"Transaction step: **{outcome}**"]
     if record is None:
+        if outcome == "success":
+            return fail("invalid", "successful transaction has no release evidence")
         lines.append("No release record was created. No validated deployment is established by this run.")
         return Result("\n\n".join(lines) + "\n")
     if not validate_record(record) or record["runnerCommit"] != commit:
         return fail("invalid", "refusing to export an invalid or foreign release record")
+    if outcome == "success" and (record["outcome"] != "validated" or record["phase"] != "complete" or record["exitCode"] != 0 or record["finishedAt"] is None):
+        return fail("invalid", "successful transaction has no completed validation evidence")
     lines.extend([
         f"Release: `{record['releaseId']}`",
         f"Source commit: `{record['commit']}`",

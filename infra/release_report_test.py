@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from infra.release_report import export, report
-from infra.release_state_test import record
+from infra.release_state_test import STAMP, record
 
 
 class ReportTest(unittest.TestCase):
@@ -21,10 +21,21 @@ class ReportTest(unittest.TestCase):
         value = record()
         value['commit'] = 'a' * 40
         value['validatesRelease'] = 'release-original'
+        value.update(outcome='validated', phase='complete', exitCode=0, finishedAt=STAMP)
         result = report(value, 'b' * 40, 'success')
         self.assertIsNone(result.error)
         self.assertIn('original record is unchanged', result.value)
         self.assertIn('a' * 40, result.value)
+
+    def test_success_requires_completed_validation_evidence(self):
+        self.assertIsNotNone(report(None, 'b' * 40, 'success').error)
+        self.assertIsNotNone(report(record(), 'b' * 40, 'success').error)
+        completed = record()
+        completed.update(outcome='validated', phase='complete', exitCode=0, finishedAt=STAMP)
+        self.assertIsNone(report(completed, 'b' * 40, 'success').error)
+        for key, value in (('outcome', 'applied-but-unvalidated'), ('phase', 'retire'), ('exitCode', 1), ('finishedAt', None)):
+            broken = {**completed, key: value}
+            self.assertIsNotNone(report(broken, 'b' * 40, 'success').error)
 
     def test_rejects_foreign_records_unknown_nested_data_and_injection(self):
         for change in (
