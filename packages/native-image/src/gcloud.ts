@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 import { promisify } from "node:util";
 import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
@@ -28,6 +28,7 @@ export interface CleanupTiming {
 
 export class GcloudImageBuildEffects implements ImageBuildEffects {
   private commandNumber = 0;
+  private readonly sshDirectoriesOwned = new Set<string>();
   private readonly commandRunner: CommandRunner;
   private readonly cleanupTiming: CleanupTiming;
 
@@ -143,7 +144,10 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
       [
         "compute",
         "ssh",
-        instance,
+        `pi-orb-build@${instance}`,
+        `--ssh-key-file=${input.outputDir}/build-ssh/key`,
+        "--quiet",
+        "--ssh-flag=-oBatchMode=yes",
         `--project=${input.project}`,
         `--zone=${input.zone}`,
         "--tunnel-through-iap",
@@ -167,8 +171,50 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     const workspaceImage = this.name(input, "workspace-image");
     const common = [`--project=${input.project}`, `--zone=${input.zone}`];
     switch (`${stage}:${action}`) {
+      case "cleanup:delete-ssh-key":
+        return this.sshDirectoriesOwned.has(input.outputDir)
+          ? ResultAsync.fromPromise(
+              rm(`${input.outputDir}/build-ssh`, { recursive: true, force: true }),
+              (cause): ImageBuildError => ({
+                type: "image_build_failed",
+                stage,
+                message: `failed to remove build SSH key: ${String(cause)}`,
+              }),
+            ).map(() => {
+              this.sshDirectoriesOwned.delete(input.outputDir);
+              return undefined;
+            })
+          : okAsync(undefined);
       case "prerequisites:check":
-        return this.execute(input, stage, "tar", ["--version"], signal)
+        return ResultAsync.fromPromise(
+          mkdir(`${input.outputDir}/build-ssh`, { mode: 0o700 }),
+          (cause): ImageBuildError => ({
+            type: "image_build_failed",
+            stage,
+            message: `failed to create private build SSH directory: ${String(cause)}`,
+          }),
+        )
+          .andThen(() => {
+            this.sshDirectoriesOwned.add(input.outputDir);
+            return this.execute(
+              input,
+              stage,
+              "ssh-keygen",
+              [
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                "pi-orb-build",
+                "-f",
+                `${input.outputDir}/build-ssh/key`,
+              ],
+              signal,
+            );
+          })
+          .andThen(() => this.execute(input, stage, "tar", ["--version"], signal))
           .andThen(() =>
             this.gcloud(
               input,
@@ -220,8 +266,11 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             "compute",
             "scp",
             `${input.outputDir}/source.tar.gz`,
-            `${builder}:source.tar.gz`,
+            `pi-orb-build@${builder}:source.tar.gz`,
             ...common,
+            `--ssh-key-file=${input.outputDir}/build-ssh/key`,
+            "--quiet",
+            "--scp-flag=-oBatchMode=yes",
             "--tunnel-through-iap",
           ],
           signal,
@@ -277,7 +326,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             "create",
             workspaceDisk,
             ...common,
-            "--size=10GB",
+            "--size=50GB",
             "--type=pd-balanced",
             `--labels=${this.labels(input)}`,
             "--format=json",
@@ -304,7 +353,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           input,
           stage,
           builder,
-          'set -eu; disk=/dev/disk/by-id/google-pi-orb-workspace-template; test -b "$disk"; filesystem=; if filesystem=$(sudo blkid -p -o value -s TYPE "$disk"); then test -z "$filesystem"; else test $? -eq 2; fi; sudo mkfs.ext4 -F -L pi-orb-workspace "$disk"; mount_dir=$(mktemp -d); sudo mount "$disk" "$mount_dir"; test -z "$(sudo find "$mount_dir" -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit)"; sudo umount "$mount_dir"; rmdir "$mount_dir"',
+          'set -eu; disk=/dev/disk/by-id/google-pi-orb-workspace-template; test -b "$disk"; filesystem=; if filesystem=$(sudo blkid -p -o value -s TYPE "$disk"); then test -z "$filesystem"; else test $? -eq 2; fi; sudo mkfs.ext4 -F -L pi-orb-workspace "$disk"; mount_dir=$(mktemp -d); sudo mount "$disk" "$mount_dir"; test -z "$(sudo find "$mount_dir" -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit)"; sudo umount "$mount_dir"; rmdir "$mount_dir"; sudo e2fsck -f -n "$disk"',
           signal,
         ).map(() => undefined);
       case "capture:detach-workspace-disk":
@@ -339,7 +388,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             "create",
             data,
             ...common,
-            "--size=20GB",
+            "--size=50GB",
             "--type=pd-balanced",
             `--image=${workspaceImage}`,
             `--labels=${this.labels(input)}`,

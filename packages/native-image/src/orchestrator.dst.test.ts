@@ -68,6 +68,8 @@ class SimEffects implements ImageBuildEffects {
     return ResultAsync.fromPromise(
       (async () => {
         await this.task.checkpoint(input.operationId, stage, action);
+        if (stage === "prerequisites" && action === "check")
+          this.shared.resources.set(`${input.operationId}:ssh-key`, input.operationId);
         if (this.injectFailpoints && stage !== "cleanup")
           await this.task.failpoint("native-image-stage-failure", stage, action);
         if (this.cancellation?.action === `${stage}:${action}`)

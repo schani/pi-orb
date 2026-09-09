@@ -2,9 +2,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import { ID_TOKEN_PATH } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { BrokerEnv } from "../broker/endpoint.ts";
-import { HttpIdTokenEndpoint, MINT_REQUEST_TIMEOUT_MS } from "./endpoint.ts";
+import { HttpIdTokenEndpoint } from "./endpoint.ts";
 import { CLI_ID_TOKEN_CONSTANTS, type IdTokenEndpointResult } from "./token.ts";
 
 /**
@@ -86,6 +86,7 @@ async function mint(audience: string, ttlSeconds?: number): Promise<IdTokenEndpo
   return await endpoint.mint(
     new NoSimulationTask("id-token-endpoint-test", false),
     ttlSeconds === undefined ? { audience } : { audience, ttlSeconds },
+    CLI_ID_TOKEN_CONSTANTS.retryWindowMs,
   );
 }
 
@@ -164,24 +165,70 @@ describe("id-token HTTP endpoint", () => {
       runtimeToken: "runtime-bearer",
     });
 
+    const timeoutMs = 50;
     const startedAt = Date.now();
-    const outcome = await endpoint.mint(new NoSimulationTask("silent", false), { audience: "ok" });
+    const outcome = await endpoint.mint(
+      new NoSimulationTask("silent", false),
+      { audience: "ok" },
+      timeoutMs,
+    );
     const elapsedMs = Date.now() - startedAt;
 
     expect(outcome).toEqual({
       kind: "retryable",
-      message: `control plane did not answer within ${MINT_REQUEST_TIMEOUT_MS}ms`,
+      message: `control plane did not answer within ${timeoutMs}ms`,
     });
-    expect(elapsedMs).toBeGreaterThanOrEqual(MINT_REQUEST_TIMEOUT_MS - 1);
+    expect(elapsedMs).toBeGreaterThanOrEqual(timeoutMs - 1);
 
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => silent.close(() => resolve()));
   });
 
-  it("leaves room in the CLI's budget for a retry after one timeout", () => {
-    // The timeout is the transport's share of `retryWindowMs`, not the whole
-    // of it: a single non-answering attempt must not exhaust the invocation.
-    expect(MINT_REQUEST_TIMEOUT_MS).toBeLessThan(CLI_ID_TOKEN_CONSTANTS.retryWindowMs / 2);
+  it("uses the remaining budget for both headers and a stalled body", async () => {
+    const controller = new AbortController();
+    const deadline = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+    const originalFetch = globalThis.fetch;
+    let notifyHeaders: () => void = () => undefined;
+    const headers = new Promise<void>((resolve) => {
+      notifyHeaders = resolve;
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (...args) => {
+      const response = await originalFetch(...args);
+      notifyHeaders();
+      return response;
+    });
+    const sockets: Socket[] = [];
+    const partial = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"token":');
+    });
+    partial.on("connection", (socket) => sockets.push(socket));
+    await new Promise<void>((resolve) => partial.listen(0, "127.0.0.1", resolve));
+    try {
+      const { port } = partial.address() as AddressInfo;
+      const endpoint = new HttpIdTokenEndpoint({
+        controlPlaneUrl: `http://127.0.0.1:${port}`,
+        runtimeToken: "runtime-bearer",
+      });
+      const outcome = endpoint.mint(
+        new NoSimulationTask("partial", false),
+        { audience: "ok" },
+        8_123,
+      );
+      await headers;
+      expect(deadline).toHaveBeenCalledExactlyOnceWith(8_123);
+      controller.abort();
+      expect(await outcome).toEqual({
+        kind: "retryable",
+        message: "control plane did not answer within 8123ms",
+      });
+    } finally {
+      controller.abort();
+      fetchSpy.mockRestore();
+      deadline.mockRestore();
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => partial.close(() => resolve()));
+    }
   });
 
   it("maps an unreachable control plane to a retryable outcome, never a throw", async () => {
@@ -190,9 +237,13 @@ describe("id-token HTTP endpoint", () => {
       controlPlaneUrl: "http://127.0.0.1:1",
       runtimeToken: "runtime-bearer",
     });
-    const outcome = await endpoint.mint(new NoSimulationTask("unreachable", false), {
-      audience: "ok",
-    });
+    const outcome = await endpoint.mint(
+      new NoSimulationTask("unreachable", false),
+      {
+        audience: "ok",
+      },
+      CLI_ID_TOKEN_CONSTANTS.retryWindowMs,
+    );
     expect(outcome.kind).toBe("retryable");
   });
 });

@@ -4,17 +4,22 @@ set -euo pipefail
 
 test "$(id -u orb)" = 2000
 test "$(id -g orb)" = 2000
+test "$(getent passwd orb | cut -d: -f6)" = /workspace/home
+test "$(id -u pi-orb-build)" != 2000
+test "$(getent passwd pi-orb-build | cut -d: -f6)" = /home/pi-orb-build
+case "$(getent shadow pi-orb-build | cut -d: -f2)" in
+  '!'*) ;;
+  *) echo 'build administrator password is not locked' >&2; exit 1 ;;
+esac
 sudo -u orb sudo -n true
 
 findmnt --noheadings --output SOURCE --target /workspace | grep -q '/dev/'
 workspace_device=$(readlink -f /dev/disk/by-id/google-pi-orb-data)
 filesystem_metadata=$(tune2fs -l "$workspace_device")
-block_size=$(printf '%s\n' "$filesystem_metadata" | awk -F: '/^Block size:/{gsub(/ /,"",$2); print $2}')
 filesystem_bytes=$(printf '%s\n' "$filesystem_metadata" | awk -F: '/^Block count:/{count=$2} /^Block size:/{size=$2} END{gsub(/ /,"",count); gsub(/ /,"",size); printf "%.0f\n", count*size}')
 device_bytes=$(blockdev --getsize64 "$workspace_device")
-test "$filesystem_bytes" -gt $((10 * 1024 * 1024 * 1024))
-test "$device_bytes" -ge "$filesystem_bytes"
-test $((device_bytes - filesystem_bytes)) -lt "$block_size"
+test "$device_bytes" -eq $((50 * 1024 * 1024 * 1024))
+test "$filesystem_bytes" -eq "$device_bytes"
 test "$(stat -c %u:%g /workspace)" = 2000:2000
 test "$(stat -c %a /workspace/home)" = 700
 test "$(stat -c %U:%G:%a /run/pi-orb/environment)" = root:root:600

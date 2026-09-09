@@ -353,6 +353,7 @@ export async function buildNativeImage(
     "delete-builder",
     "delete-data",
     "delete-workspace-disk",
+    "delete-ssh-key",
     ...(primaryFailure && runtimeCaptureAttempted ? ["delete-image"] : []),
     ...(primaryFailure && workspaceCaptureAttempted ? ["delete-workspace-image"] : []),
   ];
@@ -360,7 +361,7 @@ export async function buildNativeImage(
     progress({ stage: "cleanup", action, status: "started" });
     const result = await effects.run("cleanup", action, input, new AbortController().signal);
     if (result.isErr() && primaryFailure === undefined) primaryFailure = result.error;
-    if (result.isOk()) progress({ stage: "cleanup", action, status: "succeeded" });
+    progress({ stage: "cleanup", action, status: result.isOk() ? "succeeded" : "failed" });
   }
   if (
     primaryFailure !== undefined &&

@@ -126,6 +126,9 @@ Tracking:
 - [TODO.md](TODO.md) — the actionable backlog: bugs, hardening, agreed follow-ups
 - [docs/open-questions.md](docs/open-questions.md) — undecided design questions (frozen numbering)
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
+- [docs/postmortems/2026-09-08-identity-cold-start.md](docs/postmortems/2026-09-08-identity-cold-start.md) — short HTTP attempt caps abandon queued mint requests and self-throttle behind runtime API cold starts
+- [docs/postmortems/2026-09-08-workspace-image-readonly-check.md](docs/postmortems/2026-09-08-workspace-image-readonly-check.md) — captured workspace template fails resize after a successful read-only check
+- [docs/postmortems/2026-09-08-orb-local-release-builder-user.md](docs/postmortems/2026-09-08-orb-local-release-builder-user.md) — orb-local release blocked by implicit SSH username and runtime account collision
 - [docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md](docs/postmortems/2026-09-05-signing-key-bootstrap-orphans.md) — DST-discovered signing-key orphan leak, retry ownership fix, and preserved failure trace
 
 Reference material:

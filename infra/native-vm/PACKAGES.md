@@ -28,9 +28,12 @@ before capture. The installed guest publishes boot edges directly and the image
 acceptance test verifies the guest-attribute copy.
 
 The guest validates `/dev/disk/by-id/google-pi-orb-data` before mounting it. It
-accepts only ext4, runs a noninteractive filesystem check, and grows the filesystem
-to the device size. It never formats a runtime disk. Missing, unsupported, and
-damaged filesystems fail closed; existing 50 GiB user disks remain intact. Boot edges are written to the serial journal, the
+requires a 50 GiB disk containing an ext4 filesystem of exactly that size. It only
+reads admission metadata: no formatting, resizing, or offline repair on runtime
+disks. Missing, unsupported and mismatched filesystems fail closed; normal ext4
+mount/journal handling remains unchanged for retained 50 GiB user disks. A forced
+read-only integrity check runs on the empty template during image construction,
+not on every retained-workspace restart. Boot edges are written to the serial journal, the
 `pi-orb/boot-status` guest attribute, and the `pi-orb-boot` Cloud Logging log.
 Cloud publication uses the already prescribed Google Cloud CLI and adds no image
 package.
