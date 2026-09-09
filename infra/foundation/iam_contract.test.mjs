@@ -121,6 +121,22 @@ test("hosting bucket management excludes other buckets and direct object permiss
   );
 });
 
+test("GitHub admission is the manual main workflow of the exact numeric repository", () => {
+  const github = readFileSync(new URL("./github.tf", import.meta.url), "utf8");
+  for (const condition of [
+    "assertion.repository_id == '1307054237'",
+    "assertion.repository_owner_id == '61363'",
+    "assertion.ref == 'refs/heads/main'",
+    "assertion.event_name == 'workflow_dispatch'",
+    "assertion.workflow_ref == 'schani/pi-orb/.github/workflows/deploy.yml@refs/heads/main'",
+  ])
+    assert(github.includes(condition));
+  assert.match(github, /https:\/\/token\.actions\.githubusercontent\.com/);
+  assert.match(github, /attribute\.repository_id\/1307054237/);
+  assert.match(github, /roles\/iam\.workloadIdentityUser/);
+  assert.doesNotMatch(github, /roles\/owner|roles\/editor|allAuthenticatedUsers/);
+});
+
 test("blanket recurring network and IAP roles are absent", () => {
   const roles = iam.match(/deployer_project_roles = toset\(\[[\s\S]*?\]\)/)?.[0];
   assert(roles);

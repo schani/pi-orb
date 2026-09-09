@@ -124,6 +124,26 @@ Verify the new grant in an empty HOME/gcloud configuration through the real resu
 hook before revoking the administrator's temporary login. Already-running orbs
 receive the updated shared IAM grant; they do not need new personal credentials.
 
+### GitHub one-button deployment admission (2026-09-09)
+
+`github.tf` admits only `schani/pi-orb/.github/workflows/deploy.yml` dispatched
+manually from `main`. The provider checks immutable repository ID `1307054237`
+and owner ID `61363`, ref, event and workflow ref together. It grants
+`workloadIdentityUser` on the existing scoped deployer, not new project roles.
+No GitHub repository secret or service-account key is required. Adding this
+identity is a one-time foundation administrator operation; an already
+authenticated orb cannot grant new identities authority.
+
+The control-plane account can read exactly
+`static-plane/releases/active.json` in the state bucket. It cannot list or read
+Terraform state through that conditional grant. This token-free generation
+record is the startup barrier for autonomous browser loops; only the release
+controller may publish it after independently establishing old-process retirement.
+
+The bootstrap `Deploy` workflow initially verifies keyless access only. It must
+not apply an application release until the rollout, recording and validation
+stages have been implemented and tested.
+
 The application root retains its `static-plane` state prefix and reads the `foundation` state prefix from
 `var.foundation_state_bucket`. Its project, region, and zone must match the
 foundation outputs. Releases should read `zone`, `state_bucket`,

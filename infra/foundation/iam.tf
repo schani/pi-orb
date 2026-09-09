@@ -3,6 +3,18 @@ resource "google_service_account" "orb_vm" {
   display_name = "pi-orb orb VM (minimal)"
 }
 
+# Reading this one token-free object grants startup authority, not access to
+# Terraform state or other release artifacts. Only the deployer can publish it.
+resource "google_storage_bucket_iam_member" "control_plane_release_activation" {
+  bucket = var.state_bucket
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.control_plane.email}"
+  condition {
+    title      = "release-activation-only"
+    expression = "resource.name == 'projects/_/buckets/${var.state_bucket}/objects/static-plane/releases/active.json'"
+  }
+}
+
 resource "google_service_account" "control_plane" {
   account_id   = "pi-orb-control-plane"
   display_name = "pi-orb control plane"

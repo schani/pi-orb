@@ -18,6 +18,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Reject tracked deployment credentials, plans and state
+        run: python3 infra/artifact_guard.py
+
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:

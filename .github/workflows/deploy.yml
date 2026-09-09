@@ -1,0 +1,39 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pi-orb-production-release
+  cancel-in-progress: false
+
+jobs:
+  authorization:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Reject tracked deployment credentials, plans and state
+        run: python3 infra/artifact_guard.py
+      - name: Authenticate the GitHub deployment identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/1077475695242/locations/global/workloadIdentityPools/pi-orb-github/providers/deploy
+          service_account: pi-orb-amp-deployer@playground-dev-6ae7.iam.gserviceaccount.com
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+        with:
+          version: '583.0.0'
+      - name: Verify keyless access without applying an application release
+        run: |
+          gcloud projects describe playground-dev-6ae7 --format='value(projectId)'
+          gcloud storage buckets describe gs://pi-orb-hosting-playground-dev-6ae7 --format='value(name)'
+          echo 'GitHub keyless deployment identity verified. Application release stages are not enabled yet.' >> "$GITHUB_STEP_SUMMARY"
