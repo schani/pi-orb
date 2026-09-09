@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { promisify } from "node:util";
 import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
@@ -21,6 +22,26 @@ export type CommandRunner = (
   args: string[],
   options: { signal: AbortSignal; maxBuffer: number; timeout: number; killSignal: NodeJS.Signals },
 ) => Promise<RunResult>;
+export interface CommandLogError {
+  readonly type: "command_log_write_failed";
+  readonly message: string;
+}
+export type CommandLogWriter = (
+  path: string,
+  contents: string,
+) => ResultAsync<void, CommandLogError>;
+
+const writeCommandLog: CommandLogWriter = (path, contents) =>
+  ResultAsync.fromPromise(
+    mkdir(dirname(path), { recursive: true }).then(() =>
+      writeFile(path, contents, { mode: 0o600 }),
+    ),
+    (cause): CommandLogError => ({
+      type: "command_log_write_failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+    }),
+  );
+
 export interface CleanupTiming {
   now(): number;
   wait(milliseconds: number, signal: AbortSignal): Promise<void>;
@@ -31,6 +52,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
   private readonly sshDirectoriesOwned = new Set<string>();
   private readonly commandRunner: CommandRunner;
   private readonly cleanupTiming: CleanupTiming;
+  private readonly commandLogWriter: CommandLogWriter;
 
   constructor(
     commandRunner: CommandRunner = execFileAsync,
@@ -38,9 +60,11 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
       now: Date.now,
       wait: (milliseconds, signal) => setTimeout(milliseconds, undefined, { signal }),
     },
+    commandLogWriter: CommandLogWriter = writeCommandLog,
   ) {
     this.commandRunner = commandRunner;
     this.cleanupTiming = cleanupTiming;
+    this.commandLogWriter = commandLogWriter;
   }
 
   now(): string {
@@ -105,12 +129,17 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             message: failure.message,
           });
         }
-        await mkdir(input.outputDir, { recursive: true });
-        await writeFile(
+        const recorded = await this.commandLogWriter(
           `${input.outputDir}/${sequence}-${stage}-${command.replaceAll("/", "-")}.log`,
           `$ ${command} ${args.join(" ")}\n${output.stdout}${output.stderr}`,
-          { mode: 0o600 },
         );
+        if (recorded.isErr()) {
+          return err({
+            type: "image_build_failed",
+            stage,
+            message: `failed to preserve command log: ${recorded.error.message}`,
+          });
+        }
         return outcome;
       })(),
       (cause): ImageBuildError => ({

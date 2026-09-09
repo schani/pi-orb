@@ -26,6 +26,18 @@ command deadline shorter than the configured tests. Full-slice PostgreSQL fixtur
 are execution-unique and setup never deletes a previous run's database.
 Evidence: `docs/postmortems/2026-09-09-local-e2e-docker-startup.md`.
 
+Native-image adapter DST must inject command-log persistence as well as command
+execution and clocks. Model resource state outlives its creating task; an idle
+checkpoint-only observer must not prevent virtual-time progress. The 2026-09-09
+CI failure and pre-fix replay are recorded in
+`docs/postmortems/2026-09-09-native-cleanup-dst-io.md`.
+
+The disposable native-image validation broker implements every mandatory boot
+read: project secrets, model credentials and an empty MCP catalog. Unknown calls
+remain failures rather than compatibility fallbacks. Its integration test owns an
+OS-assigned port for the child's lifetime and waits for explicit IPC readiness;
+it does not reserve and release a port or assume startup finishes within a poll count.
+
 Release guards have deterministic coverage for conditional activation, malformed
 or regressed authority, stale/positive/missing retirement metrics, pagination,
 pending compute operations, classified cloud failures, recovery identity and
