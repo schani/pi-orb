@@ -5,6 +5,7 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 ## Embedding decisions
 
 - Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`. Pi packages use [0.85.1](https://github.com/earendil-works/pi/releases/tag/v0.85.1) for GPT-6 Astra support (decided 2026-09-05).
+- Pi SDK upgrades are routine and may be made whenever needed (user decision 2026-09-08). The pinned version makes validation reproducible; it is not a constraint on new integration designs.
 - The orb runtime is a Node.js service that owns the Pi SDK session and exposes a harness-agnostic HTTP/WebSocket protocol.
 - The Pi adapter translates Pi-native persisted session entries into the shared history schema.
 - A Pi extension may still be useful for Pi-specific instrumentation, but it is not the infrastructure supervisor.
@@ -15,6 +16,28 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 - Completed agent turns are summarized asynchronously by OpenAI's Luna model through a separate inference call. The turn-summary prompt requires one plain-text, past-tense sentence of no more than 15 words (and at most 180 characters), without a preamble or Markdown. The orb runtime resolves request authentication through its existing `ModelRuntime`, while the shared `@pi-orb/luna` package owns Luna model selection, no-tool/minimal-reasoning request policy, response parsing, and typed provider failures for both turn summaries and control-plane orb auto-naming. The adapter captures a bounded turn view after Pi settles, excluding reasoning and raw tool output, broadcasts completion/idle first, and only then queues Luna. The call never touches `AgentSession`, session history, operation outcome, or runtime health; failures are error-logged and produce no notification (decided 2026-08-06). Runtime logs record summary queued, completed (including live-connection count), skipped, and failed boundaries without logging transcript or summary content, so a missing browser notification can be localized to capture, inference, live delivery, permission, or browser construction (observability added 2026-08-07).
 
 **Boot notification extension (implemented 2026-09-05).** Session attachment now invokes the pure `pi/boot-notification.ts` decision for every boot: silent baseline for a fresh conversation, a combined restart/interruption resume, a visible non-triggering crash-loop decline, or an immediately turn-triggering between-turn restart notice. `pi-orb.host-restarted` is a visible Pi custom message; Pi converts it to **user role**, not system role, in model requests. Execution identity determines whether it can say all old processes died (`docs/host-provider.md`). The notification claims the existing operation/turn-start barrier before the SDK call, so concurrent inbox input steers that operation rather than starting a competing one. Full session history retains boot identity and the automatic-turn budget across compaction; notification turns do not get another auto-resume attempt. Details and rationale: `docs/lifecycle.md`.
+
+## First-party Pi extensions (implemented 2026-09-08)
+
+The user approved a pi-orb-owned MCP extension and requested a principled mechanism for subsequent first-party extensions, without a new plugin framework. MCP scope, implementation and client-library findings are in `docs/mcp.md`.
+
+Use **Pi's existing named inline extension factories**, registered through our existing `DefaultResourceLoader`. Layout:
+
+```text
+apps/orb-runtime/src/pi/extensions/
+  index.ts        # explicit composition list, not filesystem discovery
+  mcp.ts          # Pi tool/lifecycle adapter
+```
+
+`createOrbExtensions(deps): InlineExtension[]` returns named factories, for example `{ name: "pi-orb:mcp", factory: createMcpExtension(deps.mcp) }`. Pass the array to `DefaultResourceLoader.extensionFactories`, preserving normal user/project resource discovery. These are ordinary statically imported TypeScript modules shipped with the runtime, not separately installed packages or files copied into persistent guest settings. Adding a first-party extension means adding its module and one entry to this list. No registry database, manifest schema, dependency container, version negotiation, extension settings UI or hot reload layer is needed.
+
+Factories close over only the services they need; do not expose the whole runtime or a generic service locator. Keep Pi-specific tool schemas/content/event translation in the extension. MCP connection ownership and typed errors belong in the runtime's normal domain modules with transport adapters beside them, so DST exercises those services without mocking Pi itself. Use real Pi contract tests to verify the thin extension and its loading, not a second custom extension API.
+
+Register tools synchronously in the factory; do not open connections or start timers there. Bind the session's extensions explicitly with `bindExtensions` before admitting input; `session_start` initializes session-local state and `session_shutdown` closes it. Lazy MCP I/O starts only on a tool call. The host owns bounded, awaited shutdown through the Pi lifecycle API rather than assuming synchronous `dispose()` awaits asynchronous cleanup. The runtime awaits `extensionRunner.emit({type: "session_shutdown", reason: "quit"})`, closes MCP ownership idempotently, then calls `dispose()` before closing Fastify. SDK network operations have deadlines; supervisor termination remains the final bound for misbehaving discovered extensions. All entry points into cleanup must be idempotent, with no parallel independent connection owner.
+
+MCP inventory is appended by the resource loader, not only a `before_agent_start` handler: queued `sendCustomMessage` turns bypass that hook. Configuration-adoption edges and extension handler errors are retained in session history (`docs/mcp.md`).
+
+Use namespaced platform extension/tool names and an explicit collision policy: a first-party tool must not silently replace a discovered user/project tool or vice versa. Report first-party load/bind failure as a visible runtime initialization failure, not a silently absent capability; an upstream MCP connection failure remains a connection-level error and does not fail the whole runtime. Errors must be sanitized and durably observable. No TUI context is fabricated: first-party extensions use ordinary tool results and existing product status/history paths. Contract tests pin additive discovery, exactly-once startup binding, tool-name collision handling, shutdown ordering, and visible failure behavior.
 
 ## In-orb spawning (decided and implemented 2026-09-08)
 

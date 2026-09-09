@@ -28,7 +28,6 @@ import {
   enqueueOrbMessage,
   getOrb,
   getOrbHistory,
-  getProject,
   listHostedFiles,
   listOrbMessages,
   startOrb,
@@ -392,6 +391,7 @@ interface OrbLoad {
 }
 
 export function OrbPage({ orbId }: { orbId: string }) {
+  const [projectName, setProjectName] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<OrbLoad | null>(null);
   useEffect(() => {
     if (loaded?.orbId === orbId) return;
@@ -407,6 +407,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
   return (
     <div className="orb-page">
       <OrbIndex
+        onProjectNameChange={setProjectName}
         projectId={loaded?.orb.isOk() ? loaded.orb.value.projectId : null}
         orbId={orbId}
         pending={pending}
@@ -414,13 +415,26 @@ export function OrbPage({ orbId }: { orbId: string }) {
       {loaded === null ? (
         <div className="orb-main" aria-busy="true" />
       ) : (
-        <OrbConversation key={loaded.orbId} initial={loaded} pending={pending} />
+        <OrbConversation
+          key={loaded.orbId}
+          initial={loaded}
+          pending={pending}
+          projectName={projectName}
+        />
       )}
     </div>
   );
 }
 
-function OrbConversation({ initial, pending }: { initial: OrbLoad; pending: boolean }) {
+function OrbConversation({
+  initial,
+  pending,
+  projectName,
+}: {
+  initial: OrbLoad;
+  pending: boolean;
+  projectName: string | null;
+}) {
   const orbId = initial.orbId;
   const [state, dispatch] = useReducer(reducer, initial, (load) =>
     reducer(
@@ -446,7 +460,6 @@ function OrbConversation({ initial, pending }: { initial: OrbLoad; pending: bool
   const [orb, setOrb] = useState<OrbView | null>(() =>
     initial.orb.isOk() ? initial.orb.value : null,
   );
-  const [projectName, setProjectName] = useState<string | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
   const [orbError, setOrbError] = useState<ApiError | null>(() =>
     initial.orb.isErr() ? initial.orb.error : null,
@@ -599,18 +612,6 @@ function OrbConversation({ initial, pending }: { initial: OrbLoad; pending: bool
   useEffect(() => {
     orbNameRef.current = orb?.name ?? null;
   }, [orb?.name]);
-
-  useEffect(() => {
-    const projectId = orb?.projectId;
-    if (projectId === undefined) return;
-    let cancelled = false;
-    void getProject(projectId).then((result) => {
-      if (!cancelled) setProjectName(result.isOk() ? result.value.name : null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [orb?.projectId]);
 
   useEffect(() => {
     if (renaming) renameInputRef.current?.focus();

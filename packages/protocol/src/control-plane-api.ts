@@ -53,7 +53,10 @@ export const CreateProjectRequestSchema = Type.Object(
 export type CreateProjectRequest = Static<typeof CreateProjectRequestSchema>;
 
 export const UpdateProjectRequestSchema = Type.Object(
-  { name: Type.String({ minLength: 1, maxLength: PROJECT_NAME_MAX_CHARS }) },
+  {
+    name: Type.String({ minLength: 1, maxLength: PROJECT_NAME_MAX_CHARS }),
+    repositoryUrl: Type.String(),
+  },
   closed,
 );
 export type UpdateProjectRequest = Static<typeof UpdateProjectRequestSchema>;

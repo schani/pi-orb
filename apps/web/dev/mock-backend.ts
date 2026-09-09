@@ -15,6 +15,7 @@ import {
   type ServerFrame,
   TERMINAL_SUBPROTOCOL,
   TerminalClientControlSchema,
+  validateRepositoryUrl,
 } from "@pi-orb/protocol";
 import { Check } from "typebox/value";
 import type { Plugin } from "vite";
@@ -459,7 +460,21 @@ async function handleApi(
         });
         return true;
       }
-      const updated = { ...project, name, updatedAt: now() };
+      const repository = validateRepositoryUrl(
+        body !== null &&
+          typeof body === "object" &&
+          "repositoryUrl" in body &&
+          typeof body.repositoryUrl === "string"
+          ? body.repositoryUrl
+          : "",
+      );
+      if (repository.isErr()) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: repository.error.message, retryable: false },
+        });
+        return true;
+      }
+      const updated = { ...project, name, repositoryUrl: repository.value.url, updatedAt: now() };
       state.projects.set(projectId, updated);
       sendJson(response, 200, updated);
       return true;

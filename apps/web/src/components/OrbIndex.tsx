@@ -1,8 +1,10 @@
-import type { OrbView } from "@pi-orb/protocol";
+import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import { useEffect, useState } from "react";
 import { getProject, listOrbs } from "../lib/api.ts";
 import { FAVICON_HREFS } from "../lib/favicon.ts";
 import { formatProjectOrbAge, projectOrbGlyph, splitProjectOrbs } from "../lib/project-orbs.ts";
+import { ProjectHeader } from "./ProjectHeader.tsx";
+import { ProjectNewOrbLink } from "./ProjectNewOrbLink.tsx";
 import { StateTile } from "./StateTile.tsx";
 
 /** Project-scoped chrome survives conversation switches, including its scroll position. */
@@ -10,22 +12,28 @@ export function OrbIndex({
   projectId,
   orbId,
   pending,
+  onProjectNameChange,
 }: {
   projectId: string | null;
   orbId: string;
   pending: boolean;
+  onProjectNameChange: (name: string | null) => void;
 }) {
-  const [projectName, setProjectName] = useState<string | null>(null);
+  const [project, setProject] = useState<ProjectView | null>(null);
   const [orbs, setOrbs] = useState<OrbView[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    setProjectName(null);
+    setProject(null);
+    onProjectNameChange(null);
     setOrbs(null);
     if (projectId === null) return;
     let cancelled = false;
     let inFlight = false;
     void getProject(projectId).then((result) => {
-      if (!cancelled && result.isOk()) setProjectName(result.value.name);
+      if (!cancelled && result.isOk()) {
+        setProject(result.value);
+        onProjectNameChange(result.value.name);
+      }
     });
     const poll = async () => {
       if (inFlight) return;
@@ -40,7 +48,7 @@ export function OrbIndex({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [projectId]);
+  }, [projectId, onProjectNameChange]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 10_000);
     return () => window.clearInterval(timer);
@@ -51,9 +59,23 @@ export function OrbIndex({
         <img src={FAVICON_HREFS.neutral} width={16} height={16} alt="" />
         pi-orb
       </a>
-      <div className="sect">
-        <span className="trunc">{projectName ?? "project"}</span>
-      </div>
+      {project !== null && project.id === projectId ? (
+        <ProjectHeader
+          key={project.id}
+          project={project}
+          onChanged={(changed) => {
+            setProject(changed);
+            onProjectNameChange(changed.name);
+            if (changed.state === "deleting") window.location.hash = "#/";
+          }}
+        />
+      ) : (
+        <div className="project-head">
+          <div className="project-head-line project-head-name">
+            <h2 className="project-name">project</h2>
+          </div>
+        </div>
+      )}
       {orbs !== null &&
         splitProjectOrbs(orbs).working.map((entry) => {
           const glyph = projectOrbGlyph(entry.state, entry.activity);
@@ -74,10 +96,8 @@ export function OrbIndex({
           );
         })}
       {projectId !== null && (
-        <div className="sect">
-          <a className="text-action" href={`#/projects/${projectId}/orbs/new`}>
-            new orb
-          </a>
+        <div className="project-new-orb-row">
+          <ProjectNewOrbLink projectId={projectId} disabled={project?.state === "deleting"} />
         </div>
       )}
     </nav>

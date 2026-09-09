@@ -15,7 +15,7 @@ import {
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { okAsync } from "neverthrow";
+import { err, okAsync } from "neverthrow";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
@@ -28,6 +28,7 @@ import {
 } from "./adapters/github-oauth/client.ts";
 import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
 import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
+import { probeMcp } from "./adapters/mcp-probe.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
 import { readIssuerUrl } from "./adapters/oidc/issuer-url.ts";
 import {
@@ -63,6 +64,7 @@ import {
 } from "./domain/loops.ts";
 import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
+import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
 import {
@@ -77,6 +79,7 @@ import {
 } from "./http/hosting-routes.ts";
 import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
+import { registerMcpRoutes } from "./http/mcp-routes.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 import { registerWebAssets } from "./http/web-assets.ts";
@@ -479,6 +482,12 @@ async function main(): Promise<void> {
     // publishes keys and must not be able to change them
     // (docs/workload-identity.md).
     registerRoutes(app, httpTask, deps, viewConfig, systemView, signingKeyDeps);
+    registerMcpRoutes(app, httpTask, database.mcp, async (projectId, config) => {
+      const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);
+      return snapshot.isErr()
+        ? err("Project secrets unavailable")
+        : probeMcp(config, snapshot.value.values);
+    });
     // Cloud deployment serves the built web UI from the same process; local
     // development keeps the vite dev server + proxy instead.
     const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";
@@ -502,6 +511,7 @@ async function main(): Promise<void> {
       nameGenerator: deps.nameGenerator,
       nameLeaseMs: deps.nameLeaseMs,
       projectSecrets: deps.projectSecrets,
+      mcp: database.mcp,
       mint: {
         store: deps.store,
         // The signer reads the active key row per signature and caches only

@@ -9,7 +9,7 @@ A user registers a project in the web UI with:
 - a project name;
 - a public Git repository URL.
 
-Starting an orb for the project performs a fresh clone into the orb filesystem. There is no local upload, dirty-state patch, sync-back workflow, clone cache, prepared snapshot, or other checkout optimization initially. The initial clone uses the repository's default branch; the resolved commit should be recorded for observability.
+An orb's first checkout clones the project's repository into its filesystem; restarting an existing checkout preserves it. There is no local upload, dirty-state patch, sync-back workflow, clone cache, prepared snapshot, or other checkout optimization initially. The initial clone uses the repository's default branch; the resolved commit should be recorded for observability.
 
 Repository URL validation is strict allowlisting, decided as follows:
 
@@ -17,7 +17,7 @@ Repository URL validation is strict allowlisting, decided as follows:
 - the hostname must be on a fixed allowlist, initially `github.com`, `gitlab.com`, `bitbucket.org`, and `codeberg.org`; extending the list is configuration, not a design change;
 - HTTPS userinfo (credential-bearing URLs), explicit ports, and IP-literal hosts are rejected; the only accepted scp-style user is the conventional literal `git`;
 - the path must match the host's repository shape (for example `/{owner}/{repo}` with an optional `.git`);
-- validation runs at project creation and is re-run by the runtime immediately before cloning, because the first slice's database is writable by anyone who can reach the control plane.
+- validation runs at project creation and General-settings updates, and is re-run by the runtime immediately before cloning, because the first slice's database is writable by anyone who can reach the control plane.
 
 This forecloses local paths, `file://` URLs, credential leakage into the database and logs, and SSRF against internal networks or cloud metadata endpoints.
 
@@ -51,6 +51,9 @@ DELETE /api/v1/projects/:projectId
 GET  /api/v1/projects/:projectId/secrets
 PUT  /api/v1/projects/:projectId/secrets/:name
 DELETE /api/v1/projects/:projectId/secrets/:name
+GET  /api/v1/projects/:projectId/mcp
+PUT  /api/v1/projects/:projectId/mcp
+POST /api/v1/projects/:projectId/mcp/describe
 
 GET  /api/v1/projects/:projectId/orbs
 POST /api/v1/projects/:projectId/orbs
@@ -109,7 +112,7 @@ This is intentionally not implemented by calling `/api/v1/*`: the cloud runtime 
 
 `POST /runtime/v1/orb/archive` is the mutation behind plain `pi-orb archive`. It accepts `{}` (or no body), derives the target from the per-incarnation bearer, and returns non-cacheable `202 { "orbId": "<caller-id>", "state": "archiving" }` at durable acceptance, never after waiting for completion. Extra fields are `400`; invalid identity is `401`; incompatible lifecycle/changed caller authority is `409`; store failures use sanitized `503`/`500` responses. Errors have `{ "error": { "code": "...", "message": "...", "retryable": false } }`, with `retryable` reflecting the failure. New requests require `running`; an authorized `archiving` retry is idempotent. Caller hash/incarnation and absence of a discard fence are checked at the database mutation, not merely at HTTP authentication. It grants no sibling mutation authority and does not enable browser `/api/v1/*` routes on the runtime role. CLI failure after a lost response explicitly reports unknown acceptance. The agent prompt permits use only on user request. Irreversible file loss, turn completion, sealing, and observability: `docs/orb-archival.md`.
 
-`PATCH /api/v1/projects/:projectId` renames an active project. Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters; renaming a deleting project conflicts. This narrow update keeps the repository URL immutable. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
+`PATCH /api/v1/projects/:projectId` atomically updates an active project's `{ name, repositoryUrl }` (both required; decided 2026-09-09). Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters. Repository URLs use the creation allowlist/normalization rules above; invalid input returns 400 before either field changes. Updating a deleting project conflicts. The single SQL update fences both fields against deletion and persists `updatedAt`; DST and storage contracts cover that fence. The prior name-only update and immutable repository decision are superseded by General settings. Name changes appear immediately; the repository change affects future fresh checkouts, never rewriting an existing orb's Git remote or workspace. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
 
 The browser generates project, orb, and queued-message UUIDs with the shared `generateUuid()` helper and includes them in create requests. The helper uses `crypto.randomUUID()` when available and falls back to `crypto.getRandomValues()` because plain-HTTP tailnet origins are not secure contexts and may not expose `randomUUID`; browser code must not call `crypto.randomUUID()` directly (`docs/postmortems/2026-08-10-send-anytime-plain-http-randomuuid.md`).
 
@@ -208,6 +211,10 @@ interface OrbHistoryView {
 ### Project secrets (decided and implemented 2026-08-28)
 
 Projects gain one write-only secret inventory inherited by every current and future orb. `GET .../secrets` returns revision, names, and update timestamps only; `PUT .../secrets/:name` accepts `{ value }` to create or replace a POSIX-named entry; `DELETE` removes it. No browser response reveals a current value or value-derived fingerprint. Mutations conflict once project deletion starts. The runtime receives the complete resolved set through the separate bearer-authenticated boot snapshot in `docs/credentials.md`; browser APIs never call that route. Missing projects preserve the requested URL and return the ordinary project-specific `404`.
+
+### Project MCP (implemented 2026-09-08)
+
+`GET .../mcp` returns `{revision, servers}` with secret references, never resolved headers. `PUT` atomically replaces that project's catalog using the expected revision; deletion-fenced or stale writes return 409, missing projects 404, malformed/duplicate entries 400, and unavailable storage 503. `POST .../mcp/describe` accepts one configuration and returns a bounded `{description}` after authenticated public-HTTPS inspection using project secrets. It does not persist the candidate or perform OAuth. All successful responses are non-cacheable. The separate incarnation-authenticated `GET /runtime/v1/mcp` returns only the caller's project catalog; it grants no configuration-write authority. Exact configuration fields, limits, probe network restrictions and restart-only adoption: `docs/mcp.md`.
 
 ### Send-anytime messages (decided and implemented 2026-08-10)
 

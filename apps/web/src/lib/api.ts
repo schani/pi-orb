@@ -26,7 +26,7 @@ import {
   type UpdateProjectRequest,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
-import type { Static, TSchema } from "typebox";
+import { type Static, type TSchema, Type } from "typebox";
 import { Check } from "typebox/value";
 import {
   beginSessionRequest,
@@ -65,6 +65,28 @@ export function describeApiError(error: ApiError): string {
 
 function describeThrown(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+import { type McpCatalog, McpCatalogSchema, type McpConfig } from "@pi-orb/protocol";
+
+export function getProjectMcp(projectId: string) {
+  return apiFetch(McpCatalogSchema, `/api/v1/projects/${encodeURIComponent(projectId)}/mcp`, {
+    cache: "no-store",
+  });
+}
+export function saveProjectMcp(projectId: string, catalog: McpCatalog) {
+  return apiFetch(McpCatalogSchema, `/api/v1/projects/${encodeURIComponent(projectId)}/mcp`, {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify(catalog),
+  });
+}
+export function describeProjectMcp(projectId: string, config: McpConfig) {
+  return apiFetch(
+    Type.Object({ description: Type.String() }),
+    `/api/v1/projects/${encodeURIComponent(projectId)}/mcp/describe`,
+    { method: "POST", headers: jsonHeaders, body: JSON.stringify(config) },
+  );
 }
 
 const jsonHeaders = { "content-type": "application/json" } as const;

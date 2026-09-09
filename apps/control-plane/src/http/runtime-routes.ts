@@ -4,6 +4,7 @@ import {
   type IdTokenErrorBody,
   IdTokenRequestSchema,
   type IdTokenResponseBody,
+  MCP_RUNTIME_PATH,
   ORB_INSPECTION_LIST_PATH,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
@@ -38,6 +39,7 @@ import {
 } from "../domain/broker.ts";
 import type { MintError, StoreError } from "../domain/errors.ts";
 import type { CommandError } from "../domain/lifecycle.ts";
+import type { McpStore } from "../domain/mcp.ts";
 import type { OrbRow } from "../domain/orb.ts";
 import { generateOrbName, normalizeOrbName } from "../domain/orb-naming.ts";
 import type {
@@ -51,6 +53,7 @@ import type {
 } from "../domain/ports.ts";
 import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
+import { sendMcpError } from "./mcp-routes.ts";
 
 export interface RuntimeRouteDeps {
   readonly appOrigin: string;
@@ -72,6 +75,7 @@ export interface RuntimeRouteDeps {
   /** Identity issuance (docs/workload-identity.md); its own store lookup. */
   readonly mint: MintDeps;
   readonly projectSecrets: ProjectSecretsDeps;
+  readonly mcp?: McpStore;
 }
 
 const unauthorized: TokenErrorBody = { error: "unauthorized" };
@@ -329,6 +333,25 @@ export function registerRuntimeRoutes(
     }
     return reply.status(202).send({ orbId: result.value.id, state: "archiving" });
   });
+
+  if (deps.mcp) {
+    const mcp = deps.mcp;
+    app.get(MCP_RUNTIME_PATH, async (request, reply) => {
+      const auth = await authenticate(request.headers.authorization);
+      if (auth.kind === "unavailable")
+        return reply.status(503).send({
+          error: {
+            code: "unavailable",
+            message: "MCP configuration unavailable",
+            retryable: true,
+          },
+        });
+      if (auth.kind !== "orb") return sendUnauthorized(reply);
+      reply.header("cache-control", "no-store");
+      const result = await mcp.read(task, auth.orb.projectId);
+      return result.isErr() ? sendMcpError(reply, result.error) : reply.send(result.value);
+    });
+  }
 
   app.get(PROJECT_SECRETS_RUNTIME_PATH, async (request, reply) => {
     const auth = await authenticate(request.headers.authorization);

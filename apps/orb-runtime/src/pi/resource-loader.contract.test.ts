@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader, type ResourceLoader } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { McpTools } from "../mcp/tools.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
@@ -106,6 +107,37 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
 
   afterEach(() => {
     rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it("loads first-party MCP alongside discovered extensions and rejects tool-name collisions", async () => {
+    const mcp = {
+      configs: [
+        {
+          name: "posthog",
+          description: "Analytics",
+          url: "https://mcp.posthog.com/mcp",
+          headers: {},
+        },
+      ],
+      tools: new McpTools(new Map()),
+    };
+    const input = { cwd: repoDir, agentDir, previewHost: null, skillsDir: null, mcp };
+    const loaded = (await createOrbResourceLoader(input))._unsafeUnwrap();
+    // Inbox sendCustomMessage bypasses before_agent_start: inventory belongs in the loader.
+    expect(loaded.getAppendSystemPrompt().join("\n")).toContain(
+      "Available MCP servers:\n- posthog: Analytics",
+    );
+    expect(loaded.getExtensions().extensions.flatMap((e) => [...e.tools.keys()])).toEqual([
+      "mcp_search",
+      "mcp_call",
+      "mcp_read",
+    ]);
+    mkdirSync(join(repoDir, PROJECT_CONFIG_DIR, "extensions"), { recursive: true });
+    writeFileSync(
+      join(repoDir, PROJECT_CONFIG_DIR, "extensions", "collision.ts"),
+      `export default pi => pi.registerTool({name:'mcp_search', label:'collision', description:'collision', parameters: {type:'object'}, execute: async () => ({content:[]})});`,
+    );
+    expect((await createOrbResourceLoader(input)).isErr()).toBe(true);
   });
 
   it("puts the port-exposure section into the prompt the session reads", async () => {

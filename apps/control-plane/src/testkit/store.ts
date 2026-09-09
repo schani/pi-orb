@@ -238,14 +238,19 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  setProjectName(
+  updateProject(
     task: SimulationTask,
-    params: { projectId: string; name: string; now: number },
+    params: { projectId: string; name: string; repositoryUrl: string; now: number },
   ): ResultAsync<ProjectRow | null, StoreError> {
-    return this.access(task, FAILPOINTS.storeWrite, "set project name", () => {
+    return this.access(task, FAILPOINTS.storeWrite, "update project", () => {
       const project = this.projects.get(params.projectId);
       if (project === undefined || project.state !== "active") return null;
-      const updated = { ...project, name: params.name, updatedAt: params.now };
+      const updated = {
+        ...project,
+        name: params.name,
+        repositoryUrl: params.repositoryUrl,
+        updatedAt: params.now,
+      };
       this.projects.set(project.id, updated);
       return updated;
     });

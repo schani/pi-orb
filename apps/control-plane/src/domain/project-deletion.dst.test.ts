@@ -49,6 +49,56 @@ function seed(
 }
 
 describe("project deletion (DST)", () => {
+  it("atomically fences name and repository edits against deletion", async () => {
+    await runDst({ name: "project-metadata-delete-race", iterations: 30 }, async (sim) => {
+      const harness = makeHarness();
+      const original = makeProjectRow(PROJECT);
+      harness.store.seedProject(original);
+      let edited = false;
+      const result = await sim.runTasks([
+        {
+          name: "edit",
+          f: async (task) => {
+            const saved = await harness.store.updateProject(task, {
+              projectId: PROJECT,
+              name: "new name",
+              repositoryUrl: "https://github.com/acme/new",
+              now: task.wallNow(),
+            });
+            expect(saved.isOk()).toBe(true);
+            edited = saved.isOk() && saved.value !== null;
+          },
+        },
+        {
+          name: "delete",
+          f: async (task) => {
+            expect(
+              (
+                await harness.store.requestProjectDeletion(task, {
+                  projectId: PROJECT,
+                  now: task.wallNow(),
+                  cleanupAfter: task.wallNow(),
+                })
+              ).isOk(),
+            ).toBe(true);
+            const late = await harness.store.updateProject(task, {
+              projectId: PROJECT,
+              name: "too late",
+              repositoryUrl: "https://github.com/acme/late",
+              now: task.wallNow(),
+            });
+            expect(late.isOk() && late.value === null).toBe(true);
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.projectSnapshot(PROJECT)).toMatchObject({
+        state: "deleting",
+        name: edited ? "new name" : original.name,
+        repositoryUrl: edited ? "https://github.com/acme/new" : original.repositoryUrl,
+      });
+    });
+  });
   it("fences a child upload racing permanent project deletion", async () => {
     await runDst({ name: "project-delete-hosting-race", iterations: 20 }, async (sim) => {
       const orbId = ORBS[0];

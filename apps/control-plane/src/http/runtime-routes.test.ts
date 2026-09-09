@@ -3,6 +3,7 @@ import {
   ID_TOKEN_PATH,
   IdTokenErrorSchema,
   IdTokenResponseSchema,
+  MCP_RUNTIME_PATH,
   ORB_INSPECTION_LIST_PATH,
   ORB_NAME_TRIGGER_PATH,
   OrbInspectionErrorSchema,
@@ -90,6 +91,26 @@ describe("runtime broker routes", () => {
       nameGenerator,
       nameLeaseMs: 30_000,
       projectSecrets: { pointers: projectSecretPointers, secrets },
+      mcp: {
+        read: (_task, projectId) =>
+          okAsync({
+            revision: 1,
+            servers: [
+              {
+                name: "scoped",
+                description: projectId,
+                url: "https://example.com/mcp",
+                headers: {},
+              },
+            ],
+          }),
+        replace: () =>
+          errAsync({
+            type: "mcp_config_error",
+            code: "unavailable",
+            message: "not exposed to runtime",
+          }),
+      },
       mint: {
         store,
         signer,
@@ -375,6 +396,37 @@ describe("runtime broker routes", () => {
     const body = response.json();
     expect(typeof body.accessToken).toBe("string");
     expect(body.generation).toBe(1);
+  });
+
+  it("derives MCP project scope from incarnation authorization, never caller query parameters", async () => {
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+    const result = await app.inject({
+      method: "GET",
+      url: `${MCP_RUNTIME_PATH}?projectId=other-project`,
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(result.statusCode).toBe(200);
+    expect(result.json().servers[0].description).toBe(PROJECT);
+    expect(result.headers["cache-control"]).toBe("no-store");
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: MCP_RUNTIME_PATH,
+          headers: { authorization: "Bearer wrong-incarnation" },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: MCP_RUNTIME_PATH,
+          headers: { authorization: `Bearer ${TOKEN}` },
+          payload: { revision: 0, servers: [] },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 
   it("rejects old runtime authorization whenever a discard fence exists", async () => {

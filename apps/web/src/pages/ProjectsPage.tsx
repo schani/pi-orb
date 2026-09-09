@@ -7,27 +7,21 @@ import {
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
 import { Icon } from "../components/Icons.tsx";
-import { ProjectSecretKeyIcon } from "../components/ProjectSecretKeyIcon.tsx";
-import { ProjectSecretsModal } from "../components/ProjectSecretsModal.tsx";
+import { ProjectHeader } from "../components/ProjectHeader.tsx";
+import { ProjectNewOrbLink } from "../components/ProjectNewOrbLink.tsx";
 import { StateTile } from "../components/StateTile.tsx";
 import {
   type ApiError,
   archiveOrb,
   createProject,
   deleteOrb,
-  deleteProject,
   describeApiError,
   getSystem,
   listOrbs,
-  listProjectSecrets,
   listProjects,
-  updateProject,
 } from "../lib/api.ts";
 import { buildDashboardSearchSource } from "../lib/dashboard-search-source.ts";
-import {
-  projectDeletionConfirmation,
-  projectDeletionProgressText,
-} from "../lib/project-deletion.ts";
+import { projectDeletionProgressText } from "../lib/project-deletion.ts";
 import {
   dashboardTotals,
   formatProjectOrbAge,
@@ -36,7 +30,6 @@ import {
   projectOrbGlyph,
   splitProjectOrbs,
 } from "../lib/project-orbs.ts";
-import { formatProjectSecretCount } from "../lib/project-secret-metadata.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -44,26 +37,6 @@ type OrbListState =
   | { type: "loading" }
   | { type: "loaded"; items: OrbView[] }
   | { type: "failed"; error: ApiError };
-
-interface NewOrbLinkProps {
-  projectId: string;
-  disabled: boolean;
-}
-
-function NewOrbLink({ projectId, disabled }: NewOrbLinkProps) {
-  if (disabled) {
-    return (
-      <button type="button" className="text-action" disabled>
-        new orb
-      </button>
-    );
-  }
-  return (
-    <a className="project-new-orb" href={`#/projects/${projectId}/orbs/new`}>
-      new orb
-    </a>
-  );
-}
 
 interface OrbEntryProps {
   orb: OrbView;
@@ -155,9 +128,6 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [orbLists, setOrbLists] = useState<Record<string, OrbListState | undefined>>({});
-  const [projectSecretCounts, setProjectSecretCounts] = useState<
-    Record<string, number | null | undefined>
-  >({});
   const [system, setSystem] = useState<SystemView | null>(null);
 
   const [name, setName] = useState("");
@@ -165,13 +135,6 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
   const [urlError, setUrlError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [deletingProject, setDeletingProject] = useState<string | null>(null);
-  const [secretsProject, setSecretsProject] = useState<ProjectView | null>(null);
-  const [renamingProject, setRenamingProject] = useState<string | null>(null);
-  const [projectRenameText, setProjectRenameText] = useState("");
-  const [projectRenameError, setProjectRenameError] = useState<string | null>(null);
-  const [savingProjectName, setSavingProjectName] = useState(false);
-  const projectRenameInputRef = useRef<HTMLInputElement>(null);
   const [deletingOrb, setDeletingOrb] = useState<string | null>(null);
   const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
@@ -214,18 +177,9 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
       }
       return next;
     });
-    const [orbEntries, secretEntries] = await Promise.all([
-      Promise.all(
-        result.value.items.map(
-          async (project) => [project.id, await listOrbs(project.id)] as const,
-        ),
-      ),
-      Promise.all(
-        result.value.items.map(
-          async (project) => [project.id, await listProjectSecrets(project.id)] as const,
-        ),
-      ),
-    ]);
+    const orbEntries = await Promise.all(
+      result.value.items.map(async (project) => [project.id, await listOrbs(project.id)] as const),
+    );
     setOrbLists(
       Object.fromEntries(
         orbEntries.map(([projectId, orbsResult]) => [
@@ -233,14 +187,6 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
           orbsResult.isOk()
             ? ({ type: "loaded", items: orbsResult.value.items } satisfies OrbListState)
             : ({ type: "failed", error: orbsResult.error } satisfies OrbListState),
-        ]),
-      ),
-    );
-    setProjectSecretCounts(
-      Object.fromEntries(
-        secretEntries.map(([projectId, secretsResult]) => [
-          projectId,
-          secretsResult.isOk() ? secretsResult.value.items.length : null,
         ]),
       ),
     );
@@ -257,10 +203,6 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
       if (result.isOk()) setSystem(result.value);
     });
   }, []);
-
-  useEffect(() => {
-    if (renamingProject !== null) projectRenameInputRef.current?.focus();
-  }, [renamingProject]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setAgeNow(Date.now()), 10_000);
@@ -319,44 +261,6 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
     setName("");
     setRepositoryUrl("");
     refresh();
-  };
-
-  const onRenameProject = async (project: ProjectView) => {
-    const trimmedName = projectRenameText.trim();
-    if (trimmedName === "") {
-      setProjectRenameError("project name is required");
-      return;
-    }
-    setSavingProjectName(true);
-    setProjectRenameError(null);
-    const result = await updateProject(project.id, { name: trimmedName });
-    setSavingProjectName(false);
-    if (result.isErr()) {
-      setProjectRenameError(describeApiError(result.error));
-      return;
-    }
-    const renamed = result.value;
-    setProjects(
-      (current) => current?.map((item) => (item.id === project.id ? renamed : item)) ?? null,
-    );
-    setRenamingProject(null);
-  };
-
-  const updateProjectSecretCount = useCallback((projectId: string, count: number) => {
-    setProjectSecretCounts((current) => ({ ...current, [projectId]: count }));
-  }, []);
-
-  const onDeleteProject = async (project: ProjectView) => {
-    if (!window.confirm(projectDeletionConfirmation(project.name))) return;
-    setDeletingProject(project.id);
-    setFormError(null);
-    const result = await deleteProject(project.id);
-    setDeletingProject(null);
-    if (result.isErr()) {
-      setFormError(describeApiError(result.error));
-      return;
-    }
-    await refresh();
   };
 
   const onArchiveOrb = async (orb: OrbView) => {
@@ -448,93 +352,16 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
               className={`project-column${deleting ? " project-column-deleting" : ""}`}
               key={project.id}
             >
-              <div className="project-head">
-                {renamingProject === project.id ? (
-                  <form
-                    className="project-rename-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void onRenameProject(project);
-                    }}
-                  >
-                    <input
-                      ref={projectRenameInputRef}
-                      aria-label="project name"
-                      value={projectRenameText}
-                      maxLength={80}
-                      onChange={(event) => setProjectRenameText(event.target.value)}
-                    />
-                    <button type="submit" disabled={savingProjectName}>
-                      {savingProjectName ? "saving…" : "save"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={savingProjectName}
-                      onClick={() => {
-                        setRenamingProject(null);
-                        setProjectRenameError(null);
-                      }}
-                    >
-                      cancel
-                    </button>
-                  </form>
-                ) : (
-                  <div className="project-head-line project-head-name">
-                    <h2
-                      className="project-name"
-                      data-project-heading
-                      tabIndex={project.id === focusedProjectId ? -1 : undefined}
-                    >
-                      {project.name}
-                    </h2>
-                    <button
-                      type="button"
-                      className="icon-button"
-                      aria-label={`Rename ${project.name}`}
-                      title="rename project"
-                      disabled={deleting}
-                      onClick={() => {
-                        setProjectRenameText(project.name);
-                        setProjectRenameError(null);
-                        setRenamingProject(project.id);
-                      }}
-                    >
-                      <Icon name="pen" />
-                    </button>
-                  </div>
-                )}
-                <div className="project-head-line project-meta">
-                  <span className="project-repo" title={project.repositoryUrl}>
-                    {project.repositoryUrl}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    className="project-secrets-metadata"
-                    disabled={deleting}
-                    onClick={() => setSecretsProject(project)}
-                  >
-                    <ProjectSecretKeyIcon className="project-secrets-metadata-icon" />
-                    {formatProjectSecretCount(projectSecretCounts[project.id])}
-                  </button>
-                </div>
-                <div className="project-head-line">
-                  <NewOrbLink projectId={project.id} disabled={deleting} />
-                  <button
-                    type="button"
-                    className="icon-button danger"
-                    aria-label={`Delete ${project.name}`}
-                    title="delete project"
-                    disabled={deleting || deletingProject === project.id}
-                    onClick={() => void onDeleteProject(project)}
-                  >
-                    <Icon name="bin" />
-                  </button>
-                </div>
-              </div>
-              {renamingProject === project.id && projectRenameError !== null && (
-                <div className="banner banner-error project-column-error">{projectRenameError}</div>
-              )}
+              <ProjectHeader
+                project={project}
+                onChanged={async (changed) => {
+                  setProjects(
+                    (current) =>
+                      current?.map((item) => (item.id === changed.id ? changed : item)) ?? null,
+                  );
+                  await refresh();
+                }}
+              />
               {deleting ? (
                 <div className="project-progress">
                   {project.deletionProgress === undefined
@@ -557,6 +384,9 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
                   )}
                 </>
               )}
+              <div className="project-new-orb-row">
+                <ProjectNewOrbLink projectId={project.id} disabled={deleting} />
+              </div>
               {orbCreateError !== null && orbCreateError.projectId === project.id && (
                 <div className="banner banner-error project-column-error">
                   {orbCreateError.message}
@@ -606,14 +436,6 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
           </>
         )}
       </div>
-
-      {secretsProject !== null && (
-        <ProjectSecretsModal
-          project={secretsProject}
-          onCountChange={updateProjectSecretCount}
-          onClose={() => setSecretsProject(null)}
-        />
-      )}
     </main>
   );
 }

@@ -41,6 +41,8 @@ npm run dev --workspace @pi-orb/web
 
 Open http://localhost:5173. Projects, lifecycle operations, Pi sessions, runtime HTTP/WebSockets, replication, and model calls use the real application paths. State defaults to `~/.pi-orb/local`; override the independent paths with `PI_ORB_PGLITE_PATH` and `PI_ORB_PROCESS_STATE_DIR`. Orb runtimes are unsandboxed child processes and must only run trusted repositories.
 
+When serving a built UI with `PI_ORB_WEB_DIST`, do not rebuild that directory under the running service: static asset routes are registered at startup. Start the service against the completed build, checking active process-hosted orbs before restarting it. For iterative UI work use Vite as shown above. Verify referenced JS/CSS responses and actual browser rendering, not just the index response. Incident and rationale: [docs/postmortems/2026-09-09-live-web-rebuild.md](docs/postmortems/2026-09-09-live-web-rebuild.md).
+
 ### Launch work from an orb
 
 ```sh

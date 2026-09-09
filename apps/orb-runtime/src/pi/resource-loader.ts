@@ -5,11 +5,13 @@ import {
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { RuntimeHooks } from "@pi-orb/protocol";
-import { errAsync, Result, ResultAsync } from "neverthrow";
+import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
 import type { HookEnvReport } from "../hooks/env-file.ts";
 import { bootHookPrompt } from "../hooks/prompt.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
+import { createOrbExtensions } from "./extensions/index.ts";
+import { type McpExtensionDeps, mcpInventoryPrompt } from "./extensions/mcp.ts";
 
 type LoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
 
@@ -25,6 +27,7 @@ export interface OrbResourceLoaderInput {
   readonly hookEnv?: HookEnvReport | null;
   /** Provider-supplied install directory; tests may use null to disable it. */
   readonly skillsDir: string | null;
+  readonly mcp?: McpExtensionDeps;
 }
 
 /**
@@ -42,16 +45,19 @@ export interface OrbResourceLoaderInput {
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
   const previewHost = input.previewHost ?? null;
   const hookPrompt = bootHookPrompt(input.hooks ?? {}, input.hookEnv ?? null);
+  const mcpPrompt = mcpInventoryPrompt(input.mcp?.configs ?? []);
   return {
     cwd: input.cwd,
     agentDir: input.agentDir,
     ...(input.settingsManager !== undefined ? { settingsManager: input.settingsManager } : {}),
+    extensionFactories: createOrbExtensions(input.mcp ? { mcp: input.mcp } : {}),
     additionalSkillPaths: input.skillsDir === null ? [] : [input.skillsDir],
     appendSystemPromptOverride: (base: string[]): string[] => [
       ...base,
       environmentPrompt,
       ...(previewHost !== null ? [portExposurePrompt(previewHost)] : []),
       ...(hookPrompt !== null ? [hookPrompt] : []),
+      ...(mcpPrompt !== null ? [mcpPrompt] : []),
     ],
   };
 }
@@ -78,5 +84,17 @@ export function createOrbResourceLoader(
     toMessage,
   )()
     .asyncAndThen((loader) => ResultAsync.fromPromise(loader.reload(), toMessage).map(() => loader))
-    .map((loader): ResourceLoader => loader);
+    .andThen((loader) => {
+      const loaded = loader.getExtensions();
+      if (loaded.errors.length > 0)
+        return err(`Pi extension load failed: ${loaded.errors.map((e) => e.path).join(", ")}`);
+      const names = new Set<string>();
+      for (const extension of loaded.extensions) {
+        for (const name of extension.tools.keys()) {
+          if (names.has(name)) return err(`Pi extension tool name collision: ${name}`);
+          names.add(name);
+        }
+      }
+      return ok<ResourceLoader, string>(loader);
+    });
 }

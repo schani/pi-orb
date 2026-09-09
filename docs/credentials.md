@@ -102,6 +102,8 @@ The first configurable environment surface supports **project-scoped secrets onl
 
 A secret protects its value in control-plane storage, browser APIs, UI, logs, and infrastructure metadata; it cannot hide the value from repository code after becoming an environment variable. Every process in the orb can read it. Workload identity (`docs/workload-identity.md`) and capability-specific broker grants remain preferred where available.
 
+**MCP clarification (user decision 2026-09-08).** Project-associated MCP servers may use ordinary project secrets for API keys, including long-lived keys readable by the orb. This is the existing project-secret exposure model, not a requirement for a credential-hiding gateway. MCP configuration stores secret references and resolves HTTP headers in memory; OAuth refresh tokens remain control-plane-owned. MCP connections and credentials are project-scoped, not globally inherited. Implementation and provider findings: `docs/mcp.md`. Catalog/header changes and key rotation are adopted at process start. The browser's authenticated metadata probe can access only public HTTPS destinations; orb tool traffic is direct, with resolved headers held in memory and redirects disabled.
+
 ### Simplified storage model
 
 Treat the project's complete secret set as **one immutable JSON bundle**, not one independently brokered capability or Secret Manager resource per name:

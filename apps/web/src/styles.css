@@ -199,9 +199,10 @@ textarea:focus {
   color: var(--g2);
 }
 
+/* One neutral highlight stays visible on both paper and inverted surfaces. */
 ::selection {
-  background: var(--k);
-  color: var(--w);
+  background: var(--g2);
+  color: var(--k);
 }
 
 :focus-visible {
@@ -450,8 +451,7 @@ h3 {
   white-space: nowrap;
 }
 
-/* The name owns the column: 18px on a 24px line, with the pen scaled to match.
-   The rename form holds the same line so the head does not jump. */
+/* Shared dashboard/index identity: 18px on a 24px line, with matching utility icons. */
 .project-head-name {
   height: 24px;
 }
@@ -480,61 +480,15 @@ h3 {
   color: var(--g3);
 }
 
-.project-meta {
-  color: var(--g3);
-}
-
-.project-meta .project-repo {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .project-new-orb {
+  text-transform: uppercase;
   font-weight: 700;
   border-bottom: 0;
 }
 
-.project-secrets-metadata {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  border: 0;
-  border-bottom: 1px solid var(--g2);
-  padding: 0;
-  line-height: 16px;
-  color: var(--g3);
-  background: transparent;
-}
-
-.project-secrets-metadata:disabled {
-  color: var(--g2);
-  border-bottom-style: dotted;
-  cursor: not-allowed;
-}
-
-.project-secrets-metadata-icon {
-  width: 13px;
-  height: 13px;
-  flex: none;
-}
-
-.project-rename-form {
-  display: flex;
-  height: 24px;
-  align-items: center;
-  gap: 6px;
-}
-
-.project-rename-form input {
-  min-width: 0;
-  flex: 1;
-}
-
-.project-rename-form button {
-  flex: none;
-  line-height: 16px;
+.project-new-orb-row {
+  padding: 0 10px;
+  line-height: var(--row);
 }
 
 .project-progress {
@@ -877,12 +831,14 @@ h3 {
   color: var(--g2);
 }
 
-/* ---------- project secrets ---------- */
+/* ---------- project config ---------- */
 
 .project-secrets-backdrop {
   position: fixed;
   z-index: 80;
   inset: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
   background: rgb(0 0 0 / 35%);
 }
 
@@ -927,6 +883,18 @@ h3 {
 .project-secrets-lock svg {
   width: 13px;
   height: 13px;
+}
+
+.project-config-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--k);
+}
+
+.project-config-tabs [aria-selected="true"] {
+  background: var(--k);
+  color: var(--w);
 }
 
 .project-secrets-body {
@@ -990,6 +958,20 @@ h3 {
   flex: none;
 }
 
+.project-mcp-form,
+.project-general-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.project-mcp-form textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+}
+
 /* ---------- orb page: two panes filling the viewport ---------- */
 
 .orb-page {
@@ -1044,8 +1026,11 @@ h3 {
 }
 
 /* The brand row owns the top of the index, so the project name sits below it. */
-.orb-index > .sect {
+.orb-index > .project-head {
+  position: sticky;
+  z-index: 3;
   top: 24px;
+  background: var(--w);
 }
 
 .ix-row {

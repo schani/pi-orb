@@ -8,6 +8,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
+- **Investigate control-plane shutdown with pending device login** (`docs/postmortems/2026-09-09-live-web-rebuild.md`). The local process service closed HTTP after SIGTERM but remained alive beyond the shutdown wait with one device-login-pending orb and no running child runtime. Reproduce with controlled scheduling, identify the outstanding shutdown owner, and ensure bounded cancellation/drain without losing persisted state.
+
 
 - **Finish live Tailscale enrollment recovery and port status** (`docs/postmortems/2026-09-05-tailscale-invalid-key-at-first-boot.md`). The provision-time revocation race is reproduced and fixed locally with composed DST and sanitized lifecycle key-decision edges (2026-09-05). Deploy and correlate competing provision calls/key revocations for the affected orb; provide workspace-preserving fresh-key recovery and verify it through a tailnet-side HTTP request. Add durable enrollment/recovery outcomes, user-visible degraded port status, and avoid asserting reachability in the agent prompt solely from configured env. Safely reclaim proven-unused attempt keys without revoking a potentially installed key; same-incarnation surplus keys currently expire or are collected by higher-incarnation mint/deletion. Rotate the affected runtime bearer exposed by the sibling agent's diagnostic environment dump; never log credential values.
 
@@ -29,6 +31,8 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 - **Corroborate a suspected control-plane egress partition across orbs before an unreachable-runtime restart** (`docs/postmortems/2026-08-05-egress-blip-false-unreachable-restart.md`). Since 2026-09-07 provider delay alone cannot trigger a restart and a fresh health request is required before restart. The remaining ambiguity is a partition where provider access succeeds while both runtime requests receive no response. Use bounded fleet-level evidence without turning healthy polling into log noise.
 
 ## Follow-ups
+
+- **Qualify real MCP provider accounts** (`docs/mcp.md`). Authenticated PostHog discovery/search is verified (2026-09-09: one tool, 265 resources); it still needs a read-only tool call and serialized-context measurement. Cloudflare and Datadog still need scoped credentials, authenticated inventories, read-only calls and context measurements. Public docs/schema-count estimates are not those measurements. Check site/project pinning and provider IP restrictions; do not claim provider-account qualification from fake HTTPS tests.
 
 - **Live-validate hosted files before cloud release** (`docs/hosting.md`): run the opt-in GCS contract against an isolated test bucket; verify the tagged files hostname uses the browser service's IAP policy, rejects unauthorized GET/HEAD/conditional reads, and exposes no app routes. Measure request/response streaming, backpressure, cancellation, and bounded memory through Cloud Run/IAP, then verify archive retention and permanent orb/project deletion against real GCS objects. Local tests do not establish these platform properties.
 

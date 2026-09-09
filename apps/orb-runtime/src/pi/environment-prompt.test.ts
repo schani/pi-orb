@@ -35,6 +35,13 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("retry the same prompt/name with the reported `--id`");
   });
 
+  it("explains browser-owned MCP setup even without configured servers", () => {
+    expect(environmentPrompt).toContain(
+      "To add an MCP server, ask the user to open the project's config gear in the dashboard or orb view and use the MCPs and Secrets tabs; changes apply on the orb's next start.",
+    );
+    expect(environmentPrompt).not.toContain("pi-orb mcp add");
+  });
+
   it("documents the boot hooks the repository may own", () => {
     // The failure fragment (`hooks/prompt.ts`) is appended only when a hook
     // broke; an agent that never sees one must still know the convention

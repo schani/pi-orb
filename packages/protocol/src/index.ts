@@ -4,6 +4,7 @@ export * from "./frames.ts";
 export * from "./history.ts";
 export * from "./hosting.ts";
 export * from "./json.ts";
+export * from "./mcp.ts";
 export * from "./orb-archive.ts";
 export * from "./orb-inspection.ts";
 export * from "./orb-naming.ts";

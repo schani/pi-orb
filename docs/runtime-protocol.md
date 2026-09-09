@@ -22,6 +22,8 @@ Persistence is deliberately separate: the control plane never derives replica wr
 
 **Boot notifications (2026-09-05).** Ready health's optional `turnResume.outcome` now also accepts `notified_restart`, alongside `resumed`, `declined_already_resumed`, and `resume_failed`. It identifies an immediately triggered between-turn restart-context turn, not human input. The notice/decline/failure itself is a durable history record and uses the existing live publication/replication paths; no new request or event frame is introduced. A boot-triggered turn owns the ordinary busy operation and turn-start barrier before readiness can admit competing input. Runtime-local decisions and accurate host-versus-runtime wording: `docs/lifecycle.md`; complete health example: `docs/host-provider.md`.
 
+**MCP boot configuration (2026-09-08).** `GET /runtime/v1/mcp` is a control-plane route authenticated with the existing incarnation bearer. It returns that orb's project catalog `{revision, servers}` containing secret references, not resolved keys. The runtime resolves them against its project-secret boot snapshot and adopts changes on next process start. This adds no WebSocket frames or first-message gate. MCP tool output and configuration-adoption records use normal session history and replication (`docs/mcp.md`).
+
 ## Transport and control-plane handoff
 
 The browser opens `/api/orbs/{orbId}/live` only after the normal control-plane HTTP API reports the orb as running. It offers the WebSocket subprotocol `pi-orb.runtime.v1`.

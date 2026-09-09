@@ -49,15 +49,31 @@ describe("project deletion HTTP API", () => {
     const renamed = await app.inject({
       method: "PATCH",
       url: "/api/v1/projects/project-http",
-      payload: { name: "  cloud   smoke  " },
+      payload: { name: "  cloud   smoke  ", repositoryUrl: "git@github.com:acme/new.git" },
     });
     expect(renamed.statusCode).toBe(200);
     expect(renamed.json().name).toBe("cloud smoke");
+    expect(renamed.json().repositoryUrl).toBe("https://github.com/acme/new.git");
+    for (const repositoryUrl of [
+      "https://evil.test/acme/repo",
+      "https://github.com/acme/repo/tree/main",
+      "https://key@github.com/acme/repo",
+    ]) {
+      const invalidUrl = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/projects/project-http",
+        payload: { name: "must not change", repositoryUrl },
+      });
+      expect(invalidUrl.statusCode).toBe(400);
+      expect(
+        (await app.inject({ method: "GET", url: "/api/v1/projects/project-http" })).json(),
+      ).toMatchObject({ name: "cloud smoke", repositoryUrl: "https://github.com/acme/new.git" });
+    }
 
     const invalid = await app.inject({
       method: "PATCH",
       url: "/api/v1/projects/project-http",
-      payload: { name: "   " },
+      payload: { name: "   ", repositoryUrl: "https://github.com/acme/new" },
     });
     expect(invalid.statusCode).toBe(400);
 
@@ -65,7 +81,7 @@ describe("project deletion HTTP API", () => {
     const tooLate = await app.inject({
       method: "PATCH",
       url: "/api/v1/projects/project-http",
-      payload: { name: "too late" },
+      payload: { name: "too late", repositoryUrl: "https://github.com/acme/new" },
     });
     expect(tooLate.statusCode).toBe(409);
   });

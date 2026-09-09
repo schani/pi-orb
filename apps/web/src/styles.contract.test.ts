@@ -10,7 +10,17 @@ function rule(selector: string): string {
   return match?.[1] ?? "";
 }
 
+describe("shared text selection", () => {
+  it("uses a contrasting neutral highlight on both paper and inverted controls", () => {
+    expect(rule("::selection")).toContain("background: var(--g2)");
+    expect(rule("::selection")).toContain("color: var(--k)");
+  });
+});
+
 describe("dashboard layout contract", () => {
+  it("uppercases the shared new-orb control", () => {
+    expect(rule(".project-new-orb")).toContain("text-transform: uppercase");
+  });
   it("lays projects out as fixed-width columns that fill rows from the left", () => {
     expect(rule(".dashboard")).toContain("grid-template-columns: repeat(auto-fill, 316px)");
     expect(rule(".dashboard")).toContain("grid-auto-rows: minmax(min-content, 1fr)");

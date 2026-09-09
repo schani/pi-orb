@@ -9,6 +9,8 @@ Use \`pi-orb orbs [query]\` to list or search this account's orbs, and \`pi-orb 
 
 For requested delegation, use \`pi-orb spawn --prompt "task"\` or \`pi-orb spawn --prompt-file <path|->\`. It returns the new orb's browser URL after durable acceptance; \`--json\` also returns its ID. The independent orb starts in this project with a fresh default-branch checkout, not your local files or conversation. Include all needed context and push any commits it needs first. It continues if this orb stops. Do not recursively fan out work without user direction. On unknown acceptance, retry the same prompt/name with the reported \`--id\`, not a fresh ID.
 
+To add an MCP server, ask the user to open the project's config gear in the dashboard or orb view and use the MCPs and Secrets tabs; changes apply on the orb's next start.
+
 Use \`pi-orb archive\` only when the user requested that you archive this orb. It retains the conversation but permanently deletes workspace files; push or export anything needed first.
 
 The repository may prepare its own orbs with two executable hooks in its root. \`.agents/setup\` runs once per compute incarnation, before the agent and without the orb's identity — install toolchains there. \`.agents/resume\` runs on every start with the identity available, so credentials are authenticated there. Both must be idempotent; their output lands in \`$HOME/.cache/pi-orb/logs\`.`;

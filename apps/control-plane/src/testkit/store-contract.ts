@@ -1330,6 +1330,41 @@ export function storeSemanticsContractTests(
       expect(snapshot.isOk() && snapshot.value.cursor).toBe(first.id);
     });
 
+    it("persists name and repository together and rejects edits after deletion", async () => {
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      const params = {
+        projectId: project.id,
+        name: "updated",
+        repositoryUrl: "https://github.com/acme/new",
+        now: 2000,
+      };
+      const saved = await store.updateProject(task, params);
+      expect(saved.isOk() && saved.value).toMatchObject({
+        name: params.name,
+        repositoryUrl: params.repositoryUrl,
+      });
+      const persisted = await store.getProject(task, project.id);
+      expect(persisted.isOk() && persisted.value).toMatchObject({
+        name: params.name,
+        repositoryUrl: params.repositoryUrl,
+      });
+      expect(
+        (
+          await store.requestProjectDeletion(task, {
+            projectId: project.id,
+            now: 3000,
+            cleanupAfter: 3000,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const late = await store.updateProject(task, {
+        ...params,
+        name: "too late",
+        repositoryUrl: "https://github.com/acme/late",
+      });
+      expect(late.isOk() && late.value === null).toBe(true);
+    });
+
     it("atomically fences project creation, fans out deletion, and finalizes last", async () => {
       await seed();
       const requested = await store.requestProjectDeletion(task, {

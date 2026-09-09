@@ -70,13 +70,16 @@ async function main(): Promise<void> {
     shuttingDown = true;
     // A resume hook still running past its blocking window stops with the orb.
     agent.shutdownHooks();
-    void app.close().then(
-      () => process.exit(0),
-      (error: unknown) => {
-        console.error(`shutdown after ${reason} failed:`, error);
-        process.exit(1);
-      },
-    );
+    void agent
+      .closeExtensions()
+      .then(() => app.close())
+      .then(
+        () => process.exit(0),
+        (error: unknown) => {
+          console.error(`shutdown after ${reason} failed:`, error);
+          process.exit(1);
+        },
+      );
   };
   process.on("disconnect", () => shutdown("supervisor disconnect"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));

@@ -47,6 +47,336 @@ describe("frontend-only browser behavior", () => {
     await vite?.close();
   });
 
+  it.each(["MCPs", "Secrets"])("keeps %s field focus across dashboard refreshes", async (modal) => {
+    const page = await browser.newPage();
+    await page.clock.install();
+    let refreshed = false;
+    await page.route("**/api/v1/projects", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      if (refreshed) body.items[0].name = "Refreshed project";
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/v1/projects/*/mcp", (route) =>
+      route.fulfill({ json: { revision: 0, servers: [] } }),
+    );
+    try {
+      await page.goto(`${origin}/`);
+      await page
+        .getByRole("button", { name: /^Configure / })
+        .first()
+        .click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByRole("tab", { name: modal, exact: true }).click();
+      const endpoint = dialog.getByLabel(modal === "MCPs" ? "Endpoint" : "secret value", {
+        exact: true,
+      });
+      await endpoint.fill("https://example.com/mcp");
+      refreshed = true;
+      await page.clock.runFor(2000);
+      await expectPage(
+        page.getByRole("heading", { name: "Refreshed project", exact: true }),
+      ).toBeVisible();
+      await expectPage(endpoint).toBeFocused();
+      await expectPage(endpoint).toHaveValue("https://example.com/mcp");
+      if (modal === "MCPs") {
+        await dialog.getByLabel("Description", { exact: true }).fill("Analytics");
+        await page.clock.runFor(2000);
+        await expectPage(dialog.getByLabel("Description", { exact: true })).toBeFocused();
+      }
+      await page.keyboard.press("Escape");
+      await expectPage(dialog).toHaveCount(0);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it.each(["", ORB_HASH])(
+    "preserves MCP drafts while adding a secret from config at %s",
+    async (hash) => {
+      const page = await browser.newPage();
+      let saved: unknown;
+      let releaseSecrets = () => {};
+      let releaseSave = () => {};
+      const saveAllowed = new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      });
+      const secretsLoaded = new Promise<void>((resolve) => {
+        releaseSecrets = resolve;
+      });
+      await page.route("**/api/v1/projects/*/secrets", async (route) => {
+        const response = await route.fetch();
+        await secretsLoaded;
+        await route.fulfill({ response });
+      });
+      await page.route("**/api/v1/projects/*/mcp", async (route) => {
+        if (route.request().method() === "PUT") {
+          saved = route.request().postDataJSON();
+          await route.fulfill({ json: { ...route.request().postDataJSON(), revision: 1 } });
+        } else await route.fulfill({ json: { revision: 0, servers: [] } });
+      });
+      await page.route("**/api/v1/projects/*/mcp/describe", (route) =>
+        route.fulfill({ json: { description: "Analytics" } }),
+      );
+      await page.route("**/api/v1/projects/*/secrets/TOKEN", async (route) => {
+        expectPage(route.request().postDataJSON()).toEqual({ value: "test-value" });
+        await saveAllowed;
+        await route.fulfill({
+          json: { revision: 1, items: [{ name: "TOKEN", updatedAt: new Date(0).toISOString() }] },
+        });
+      });
+      try {
+        await page.goto(`${origin}/${hash}`);
+        const gear = page.getByRole("button", { name: /^Configure / }).first();
+        await expectPage(gear).toBeVisible();
+        expectPage(
+          await gear.evaluate((element) => {
+            const heading = element.parentElement
+              ?.querySelector(".project-name, .trunc")
+              ?.getBoundingClientRect();
+            const button = element.getBoundingClientRect();
+            return heading
+              ? Math.abs(heading.y + heading.height / 2 - button.y - button.height / 2)
+              : Infinity;
+          }),
+        ).toBeLessThanOrEqual(1);
+        await gear.click();
+        const dialog = page.getByRole("dialog");
+        const mcp = dialog.getByRole("tabpanel", { name: "MCPs", exact: true });
+        await expectPage(dialog.getByRole("tab", { name: "General", exact: true })).toBeFocused();
+        await dialog.getByRole("tab", { name: "MCPs", exact: true }).click();
+        expectPage(JSON.parse(await mcp.getByLabel("Header bindings").inputValue())).toEqual({
+          Authorization: { secret: "TOKEN", prefix: "Bearer " },
+        });
+        await mcp.getByLabel("Provider", { exact: true }).selectOption("posthog");
+        await expectPage(mcp.getByLabel("Header bindings")).toHaveValue(/POSTHOG_KEY/);
+        await mcp.getByLabel("Provider", { exact: true }).selectOption("");
+        expectPage(JSON.parse(await mcp.getByLabel("Header bindings").inputValue())).toEqual({
+          Authorization: { secret: "TOKEN", prefix: "Bearer " },
+        });
+        await mcp.getByLabel("Name", { exact: true }).fill("custom");
+        await mcp.getByLabel("Endpoint", { exact: true }).fill("https://example.com/mcp");
+        await mcp.getByLabel("Description", { exact: true }).fill("Analytics");
+        await mcp.getByLabel("Header bindings").fill('{"unfinished":');
+        await dialog.getByRole("tab", { name: "Secrets", exact: true }).click();
+        const secrets = dialog.getByRole("tabpanel", { name: "Secrets", exact: true });
+        await secrets.getByLabel("name", { exact: true }).fill("TOKEN");
+        await secrets.getByLabel("secret value", { exact: true }).fill("test-value");
+        const saveSecret = secrets.getByRole("button", { name: "save secret", exact: true });
+        await expectPage(saveSecret).toBeDisabled();
+        releaseSecrets();
+        await expectPage(saveSecret).toBeEnabled();
+        await saveSecret.click();
+        await expectPage(dialog).toBeFocused();
+        await expectPage(dialog.getByRole("tab", { name: "MCPs", exact: true })).toBeDisabled();
+        await expectPage(
+          dialog.getByRole("button", { name: "Close project config" }),
+        ).toBeDisabled();
+        await page.keyboard.press("Tab");
+        await expectPage(dialog).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expectPage(dialog).toBeVisible();
+        releaseSave();
+        await expectPage(
+          secrets.locator(".project-secret-name").filter({ hasText: /^TOKEN$/ }),
+        ).toBeVisible();
+        await dialog.getByRole("tab", { name: "MCPs", exact: true }).click();
+        await expectPage(mcp.getByLabel("Name", { exact: true })).toHaveValue("custom");
+        await expectPage(mcp.getByLabel("Endpoint", { exact: true })).toHaveValue(
+          "https://example.com/mcp",
+        );
+        await expectPage(mcp.getByLabel("Description", { exact: true })).toHaveValue("Analytics");
+        await expectPage(mcp.getByLabel("Header bindings")).toHaveValue('{"unfinished":');
+        const headers = { Authorization: { secret: "TOKEN", prefix: "Bearer " } };
+        await mcp.getByLabel("Header bindings").fill(JSON.stringify(headers));
+        await mcp.getByRole("button", { name: "save", exact: true }).click();
+        await expectPage(mcp.getByRole("button", { name: "edit", exact: true })).toBeVisible();
+        expectPage(JSON.parse(await mcp.getByLabel("Header bindings").inputValue())).toEqual(
+          headers,
+        );
+        await expectPage(mcp.getByLabel("Provider", { exact: true })).toHaveValue("");
+        expectPage(saved).toEqual({
+          revision: 0,
+          servers: [
+            { name: "custom", url: "https://example.com/mcp", description: "Analytics", headers },
+          ],
+        });
+        await mcp.getByRole("button", { name: "edit", exact: true }).click();
+        await mcp.getByLabel("Description", { exact: true }).fill("Edited draft");
+        const mcpTab = dialog.getByRole("tab", { name: "MCPs", exact: true });
+        await mcpTab.focus();
+        await page.keyboard.press("ArrowRight");
+        await expectPage(dialog.getByRole("tab", { name: "Secrets", exact: true })).toBeFocused();
+        await expectPage(secrets).toBeVisible();
+        await page.keyboard.press("Home");
+        await expectPage(dialog.getByRole("tab", { name: "General", exact: true })).toBeFocused();
+        await page.keyboard.press("ArrowRight");
+        await expectPage(mcpTab).toBeFocused();
+        await expectPage(mcp.getByLabel("Name", { exact: true })).toHaveAttribute("readonly", "");
+        await expectPage(mcp.getByLabel("Description", { exact: true })).toHaveValue(
+          "Edited draft",
+        );
+        await page.keyboard.press("Escape");
+        await expectPage(dialog).toHaveCount(0);
+        await expectPage(gear).toBeFocused();
+        await expectPage(page.locator(".project-repo")).toHaveCount(0);
+      } finally {
+        releaseSecrets();
+        releaseSave();
+        await page.close();
+      }
+    },
+  );
+
+  it.each(["", ORB_HASH])(
+    "shares project header and validates General settings at %s",
+    async (hash) => {
+      const page = await browser.newPage();
+      const response = await page.request.get(`${origin}/api/v1/projects`);
+      let project = (await response.json()).items[0];
+      const requests: unknown[] = [];
+      await page.route("**/api/v1/projects", (route) =>
+        route.fulfill({ json: { items: [project] } }),
+      );
+      await page.route(`**/api/v1/projects/${project.id}`, async (route) => {
+        if (route.request().method() === "PATCH") {
+          const update = route.request().postDataJSON();
+          requests.push(update);
+          if (requests.length === 1) {
+            await route.fulfill({
+              status: 503,
+              json: {
+                error: { code: "unavailable", message: "Could not save project", retryable: true },
+              },
+            });
+            return;
+          }
+          project = { ...project, ...update };
+        }
+        await route.fulfill({ json: project });
+      });
+      try {
+        await page.goto(`${origin}/${hash}`);
+        const header = page.locator(".project-head").first();
+        await expectPage(header.getByRole("button", { name: /^Configure / })).toBeVisible();
+        await expectPage(header.locator(".project-name")).toHaveCSS("font-size", "18px");
+        await expectPage(header.getByRole("button")).toHaveCount(2);
+        expectPage(
+          await header
+            .locator("use")
+            .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href"))),
+        ).toEqual(["#i-gear", "#i-bin"]);
+        expectPage(
+          await header.evaluate((node) =>
+            node.parentElement?.lastElementChild?.classList.contains("project-new-orb-row"),
+          ),
+        ).toBe(true);
+        await header.getByRole("button", { name: /^Configure / }).click();
+        const dialog = page.getByRole("dialog");
+        const general = dialog.getByRole("tabpanel", { name: "General", exact: true });
+        await general.getByLabel("Name", { exact: true }).fill("Updated project");
+        await general
+          .getByLabel("Repository URL", { exact: true })
+          .fill("https://github.com/acme/repo/tree/main");
+        await expectPage(general.getByRole("button", { name: "save", exact: true })).toBeDisabled();
+        await expectPage(general.getByRole("alert")).toBeVisible();
+        expectPage(requests).toHaveLength(0);
+        await dialog.getByRole("tab", { name: "Secrets", exact: true }).click();
+        await dialog.getByRole("tab", { name: "General", exact: true }).click();
+        await expectPage(general.getByLabel("Name", { exact: true })).toHaveValue(
+          "Updated project",
+        );
+        await expectPage(general.getByLabel("Repository URL", { exact: true })).toHaveValue(
+          "https://github.com/acme/repo/tree/main",
+        );
+        await general
+          .getByLabel("Repository URL", { exact: true })
+          .fill("git@github.com:acme/new.git");
+        await expectPage(general.getByRole("button", { name: "save", exact: true })).toBeEnabled();
+        await general.getByRole("button", { name: "save", exact: true }).click();
+        await expectPage(general.getByRole("alert")).toBeVisible();
+        await expectPage(general.getByLabel("Name", { exact: true })).toHaveValue(
+          "Updated project",
+        );
+        await expectPage(general.getByLabel("Repository URL", { exact: true })).toHaveValue(
+          "git@github.com:acme/new.git",
+        );
+        await dialog.getByRole("tab", { name: "Secrets", exact: true }).click();
+        await dialog.getByRole("tab", { name: "General", exact: true }).click();
+        await expectPage(general.getByRole("alert")).toBeVisible();
+        await general.getByRole("button", { name: "save", exact: true }).click();
+        await expectPage(
+          header.getByRole("heading", { name: "Updated project", exact: true }),
+        ).toBeVisible();
+        expectPage(requests).toEqual([
+          { name: "Updated project", repositoryUrl: "https://github.com/acme/new.git" },
+          { name: "Updated project", repositoryUrl: "https://github.com/acme/new.git" },
+        ]);
+        await expectPage(general.getByLabel("Repository URL", { exact: true })).toHaveValue(
+          "https://github.com/acme/new.git",
+        );
+        if (hash) await expectPage(page).toHaveTitle(/Updated project/);
+        await dialog.getByRole("button", { name: "Close project config" }).click();
+        await header.getByRole("button", { name: /^Configure / }).click();
+        await expectPage(
+          page
+            .getByRole("tabpanel", { name: "General", exact: true })
+            .getByLabel("Name", { exact: true }),
+        ).toHaveValue("Updated project");
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  it("keeps native selection visible on normal and inverted surfaces", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/`);
+      await expectPage(
+        page.getByRole("heading", { name: "New project", exact: true }),
+      ).toBeVisible();
+      const styles = await page.locator("body").evaluate((body) => {
+        const document = body.ownerDocument;
+        const window = document.defaultView;
+        if (window === null) return [];
+        const surfaces: (typeof body)[] = [];
+        for (const tag of ["input", "textarea"] as const) {
+          const control = document.createElement(tag);
+          control.value = "Selected text";
+          document.body.append(control);
+          control.focus();
+          control.setSelectionRange(0, 8);
+          surfaces.push(control);
+        }
+        const dark = document.createElement("span");
+        dark.className = "user-code";
+        dark.textContent = "Selected code";
+        document.body.append(dark);
+        const range = document.createRange();
+        range.selectNodeContents(dark);
+        document.getSelection()?.removeAllRanges();
+        document.getSelection()?.addRange(range);
+        surfaces.push(dark, document.body);
+        const results = surfaces.map((element) => {
+          if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") element.focus();
+          const selected = window.getComputedStyle(element, "::selection");
+          return { background: selected.backgroundColor, color: selected.color };
+        });
+        for (const element of surfaces) if (element !== document.body) element.remove();
+        return results;
+      });
+      expectPage(styles).toEqual(
+        Array.from({ length: 4 }, () => ({
+          background: "rgb(153, 153, 153)",
+          color: "rgb(0, 0, 0)",
+        })),
+      );
+    } finally {
+      await page.close();
+    }
+  });
+
   it("keeps the index and conversation visible until an orb switch is ready", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);

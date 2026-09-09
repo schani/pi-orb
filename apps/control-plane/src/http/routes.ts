@@ -405,9 +405,16 @@ export function registerRoutes(
             ),
           );
       }
-      const updated = await deps.store.setProjectName(task, {
+      const repository = validateRepositoryUrl(body.repositoryUrl);
+      if (repository.isErr()) {
+        return reply
+          .status(400)
+          .send(httpError("invalid_request", repository.error.message, false));
+      }
+      const updated = await deps.store.updateProject(task, {
         projectId: request.params.projectId,
         name,
+        repositoryUrl: repository.value.url,
         now: task.wallNow(),
       });
       if (updated.isErr()) {

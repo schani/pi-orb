@@ -42,6 +42,10 @@ import type { HookEnvSource } from "../hooks/env-file.ts";
 import type { HookSpawner } from "../hooks/ports.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
+import { fetchMcpCatalog, resolveMcpHeaders } from "../mcp/boot.ts";
+import { McpConnection } from "../mcp/service.ts";
+import { McpTools } from "../mcp/tools.ts";
+import { HttpMcpTransport } from "../mcp/transport.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
@@ -166,6 +170,8 @@ export class PiOrbAgent {
   private health: RuntimeHealth;
   private sessionManager: PiSessionManager | null = null;
   private session: PiSession | null = null;
+  private shutdownExtensions: (() => Promise<void>) | null = null;
+  private closingExtensions: Promise<void> | null = null;
   private liveHistory: LiveHistoryPublisher | null = null;
   private checkoutCommit = "";
   private executionId: string | null = null;
@@ -267,6 +273,11 @@ export class PiOrbAgent {
   /** Terminates a resume hook that outlived its blocking window. */
   shutdownHooks(): void {
     this.hooks?.shutdown();
+  }
+
+  closeExtensions(): Promise<void> {
+    this.closingExtensions ??= this.shutdownExtensions?.() ?? Promise.resolve();
+    return this.closingExtensions;
   }
 
   subscribe(listener: FrameListener): () => void {
@@ -485,6 +496,21 @@ export class PiOrbAgent {
     // (docs/orb-setup-hook.md).
     const hookEnv = await this.hooks.applyHookEnv(process.env);
 
+    const catalog = await fetchMcpCatalog(broker);
+    if (catalog.isErr())
+      return err(this.failed("mcp_config_unavailable", catalog.error.message, true));
+    const mcpTask = new NoSimulationTask(`mcp-${this.options.orbId}`, false);
+    const mcpTools = new McpTools(
+      new Map(
+        catalog.value.servers.map((config) => {
+          const headers = resolveMcpHeaders(config, projectSecrets.value.values);
+          const transport = headers.isOk()
+            ? new HttpMcpTransport(config.url, headers.value)
+            : { connect: async () => err(headers.error) };
+          return [config.name, new McpConnection(mcpTask, transport)] as const;
+        }),
+      ),
+    );
     const agentDir = join(this.options.workDir, "pi-agent");
     // SSE keeps the first E2E deterministic; the fake refuses the WebSocket
     // transport (docs/PI-CODEX-E2E.md).
@@ -500,6 +526,7 @@ export class PiOrbAgent {
       hooks: this.hooks.report(),
       hookEnv,
       skillsDir: this.options.skillsDir,
+      mcp: { configs: catalog.value.servers, tools: mcpTools },
     });
     if (loaderResult.isErr()) {
       return err(this.failed("session_init_failed", loaderResult.error, true));
@@ -518,6 +545,69 @@ export class PiOrbAgent {
     );
     if (sessionResult.isErr()) {
       return err(this.failed("session_init_failed", sessionResult.error, true));
+    }
+    const sdkSession = sessionResult.value.session;
+    let binding = true;
+    let startupExtensionError = false;
+    const bound = await ResultAsync.fromPromise(
+      sdkSession.bindExtensions({
+        mode: "print",
+        onError: (error) => {
+          startupExtensionError ||= binding;
+          const saved = Result.fromThrowable(
+            () =>
+              sessionManager.appendCustomMessageEntry(
+                "pi-orb:extension-error",
+                `Pi extension failed: ${error.extensionPath} (${error.event})`,
+                true,
+              ),
+            () => "Cannot record Pi extension failure",
+          )();
+          if (saved.isErr())
+            this.health = this.failed("extension_error_record_failed", saved.error, false);
+        },
+      }),
+      () => "Pi extensions could not start",
+    );
+    binding = false;
+    if (bound.isErr() || startupExtensionError) {
+      await mcpTools.close();
+      sdkSession.dispose();
+      return err(this.failed("extension_init_failed", "Pi extensions could not start", false));
+    }
+    this.shutdownExtensions = async () => {
+      await ResultAsync.fromPromise(
+        sdkSession.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }),
+        () => "Pi extension shutdown failed",
+      );
+      await mcpTools.close();
+      Result.fromThrowable(
+        () => sdkSession.dispose(),
+        () => "Pi disposal failed",
+      )();
+    };
+    const adoption = Result.fromThrowable(
+      () => {
+        const entries = sessionManager.getEntries();
+        const previous = entries.findLast(
+          (entry) => entry.type === "custom" && entry.customType === "pi-orb:mcp-config",
+        );
+        const data = {
+          revision: catalog.value.revision,
+          servers: catalog.value.servers.map((server) => server.name),
+          secretRevision: projectSecrets.value.revision,
+        };
+        if (
+          (catalog.value.servers.length > 0 || previous) &&
+          (previous?.type !== "custom" || JSON.stringify(previous.data) !== JSON.stringify(data))
+        )
+          sessionManager.appendCustomEntry("pi-orb:mcp-config", data);
+      },
+      () => "Cannot record MCP configuration adoption",
+    )();
+    if (adoption.isErr()) {
+      await this.closeExtensions();
+      return err(this.failed("mcp_config_record_failed", adoption.error, false));
     }
     const summarizer = this.options.turnSummarizer ?? new LunaTurnSummarizer(modelRuntime, model);
     this.attachSession(sessionResult.value.session, sessionManager, summarizer);

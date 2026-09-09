@@ -22,6 +22,7 @@ import {
   selectedAppSearchIndex,
   shouldCloseAppSearchForActivation,
 } from "../lib/app-search.ts";
+import { useInitialFocus } from "../lib/use-initial-focus.ts";
 
 interface SearchRegistration {
   owner: symbol;
@@ -87,6 +88,7 @@ export function AppSearchDialog({
   onSelect,
 }: AppSearchDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  useInitialFocus(inputRef);
   const dialogRef = useRef<HTMLDivElement>(null);
   const resultRefs = useRef(new Map<string, HTMLAnchorElement>());
   const lastPointerPosition = useRef<{ x: number; y: number } | null>(null);
@@ -96,7 +98,6 @@ export function AppSearchDialog({
   const selectedKey = visibleMatches[selectedIndex]?.key ?? null;
 
   useEffect(() => {
-    inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
 
