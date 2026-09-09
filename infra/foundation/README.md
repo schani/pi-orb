@@ -103,6 +103,27 @@ Neither grant can mutate the foundation image-build VPC or firewall. These
 grants pass local provider validation; a bootstrap using only the WIF deployer must still
 prove the complete permission set before production use.
 
+Hosting-bucket deployment permissions are foundation-owned and apply to the shared
+federated deployer, so every admitted orb in this repository project receives them
+without a personal Google login. The application still owns the hosting bucket
+and its control-plane object-access policy. A custom role limits bucket metadata
+and IAM management to exactly `pi-orb-hosting-PROJECT`; neither new role includes
+direct object permissions. Managing that bucket's IAM is nevertheless high trust:
+the deployer can change who can access its files. A separate create-only role is
+project-scoped because GCS checks `storage.buckets.create` on the project before
+a bucket exists. It can create another bucket, but does not grant management of
+other existing buckets. This is an explicit platform-granularity limitation, not
+a claim that bucket creation can be restricted to one future name. Contract tests
+pin the permission sets and exact-name/type management condition.
+
+`.agents/resume` installs the committed non-secret executable-source configuration
+and registers the same federated account on every start. A one-time administrator
+login is only for reviewing/applying changes to foundation authority; never copy
+that login to other orbs or store a personal refresh token in project secrets.
+Verify the new grant in an empty HOME/gcloud configuration through the real resume
+hook before revoking the administrator's temporary login. Already-running orbs
+receive the updated shared IAM grant; they do not need new personal credentials.
+
 The application root retains its `static-plane` state prefix and reads the `foundation` state prefix from
 `var.foundation_state_bucket`. Its project, region, and zone must match the
 foundation outputs. Releases should read `zone`, `state_bucket`,

@@ -283,6 +283,8 @@ what makes the next orb's gcloud identity cost zero steps. The `--cred-file` log
 because setup has no identity, and `apps/orb-runtime/src/pi/skills.test.ts` asserts that
 structurally. A second baked skill, `boot-hooks`, is the general authoring guide for those files.
 
+**Persistent deployment access reaffirmed 2026-09-09:** this repository's committed hooks already configure project-wide federation. Additional deployment permissions belong on the shared service account in the separately administered foundation, not in per-orb personal logins. After fixing the missing hosting-bucket grant, the actual resume hook ran twice in an empty HOME/gcloud configuration, passed an application plan with federation alone, and preserved the denial of state-bucket mutation and project-IAM administration. The temporary administrator login was revoked. Existing and future admitted project orbs receive the same durable IAM grant without sharing a refresh token. The exact permission scope and platform limitations are recorded in `docs/deployment.md` and `docs/postmortems/2026-09-09-release-hosting-bucket-iam.md`.
+
 The CLI retries only outcomes a later attempt can change — the first-boot 401 before the bearer
 hash commits, the per-orb floor, and transient issuer/network failures — inside one 10-second
 budget with the `gh` helper's 250 ms/2 s backoff, honoring `Retry-After` but never sleeping past
