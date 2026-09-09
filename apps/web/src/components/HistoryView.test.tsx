@@ -16,6 +16,42 @@ function message(id: string, role: "user" | "assistant", text: string): HistoryR
 }
 
 describe("HistoryView turn structure", () => {
+  it.each([false, true])("shows durable provider failures with partial output: %s", (partial) => {
+    const record: HistoryRecord = {
+      ...message("failure", "assistant", ""),
+      type: "message",
+      role: "assistant",
+      content: partial ? [{ type: "text", text: "Partial answer" }] : [],
+      finishReason: "error",
+      overflow: {
+        native: { message: { errorMessage: "Codex error: The usage limit has been reached" } },
+      },
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Codex error: The usage limit has been reached");
+    expect(html.includes("Partial answer")).toBe(partial);
+  });
+
+  it.each([{}, { native: null }, { native: { message: { errorMessage: " " } } }])(
+    "shows a fallback when failure details are absent: %j",
+    (overflow) => {
+      const record: HistoryRecord = {
+        ...message("failure", "assistant", ""),
+        type: "message",
+        role: "assistant",
+        content: [],
+        finishReason: "error",
+        overflow,
+      };
+      const html = renderToStaticMarkup(
+        <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+      );
+      expect(html).toContain("Model response failed.");
+    },
+  );
   it("gives each user record its own prefixed record and groups adjacent agent-side records", () => {
     const records: HistoryRecord[] = [
       message("u1", "user", "first question"),

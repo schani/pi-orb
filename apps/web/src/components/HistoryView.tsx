@@ -190,6 +190,19 @@ function isDisplayedCustomMessage(record: EventRecord): boolean {
   return native["display"] === true;
 }
 
+function assistantFailure(record: MessageRecord): string | null {
+  if (record.role !== "assistant" || record.finishReason !== "error") return null;
+  const native = record.overflow["native"];
+  if (typeof native === "object" && native !== null && !Array.isArray(native)) {
+    const message = native["message"];
+    if (typeof message === "object" && message !== null && !Array.isArray(message)) {
+      const error = message["errorMessage"];
+      if (typeof error === "string" && error.trim() !== "") return error;
+    }
+  }
+  return "Model response failed.";
+}
+
 function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): ReactNode[] {
   const nodes: ReactNode[] = [];
   let runIndex = 0;
@@ -244,6 +257,15 @@ function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): 
       // collapse the body's prose gap against adjacent activity rows.
       if (block.type === "reasoning") nodes.push(...rendered);
       else nodes.push(<div key={`${record.id}-${index}`}>{rendered}</div>);
+    }
+    const failure = assistantFailure(record);
+    if (failure !== null) {
+      flushTools();
+      nodes.push(
+        <p className="error-text" role="alert" key={`${record.id}-error`}>
+          <PlainChatText>{failure}</PlainChatText>
+        </p>,
+      );
     }
   }
   flushTools();

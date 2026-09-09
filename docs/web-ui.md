@@ -21,6 +21,12 @@ The first UI needs to display at least:
 
 Remaining UI questions include rendering unknown content blocks, large/truncated tool output, and image storage. Transient token deltas are ephemeral presentation events and are reconstructed after reconnect through ordinary live events; they are not stored in PostgreSQL.
 
+## Model-response failures (decided and implemented 2026-09-09)
+
+An assistant record with `finishReason: error` renders its persisted Pi `overflow.native.message.errorMessage` as plain error text at the end of that response, even when its content is empty. Missing or blank details fall back to `Model response failed.` Partial output remains visible. The same rendering handles live-committed records and replicated history, including existing conversations; no transient toast or new persistence path is needed. A failure is a visible boundary for tool grouping. Orb lifecycle `running` still means the host is running, not that inference succeeded.
+
+Field evidence: orbs `8176acfe-95ce-478c-8e1d-63594bdd8701` and `e2c6bc36-27ee-4901-9b84-d98abb1d5c61` durably recorded `Codex error: The usage limit has been reached`, but the UI rendered only message content, producing blank assistant turns. The durable record already provided the diagnosis; presentation discarded it. Rendering regressions cover empty and partial failed responses and missing native details. The frontend-only playground seeds three examples: a quota failure, a connection failure with partial output, and a failure without details (the generic fallback). These use the ordinary history renderer, not fixture-specific UI.
+
 ## Markdown tables (decided and implemented 2026-09-08)
 
 Transcript tables use natural column sizing with whole-word wrapping, top-aligned padded cells, left-aligned headers unless Markdown specifies alignment, and horizontal row rules. Each semantic table sits inside a keyboard-focusable horizontal scroll region. When its minimum content width exceeds the transcript, only the table scrolls; ordinary prose still wraps anywhere to contain long tokens. Applying that prose rule to tables was rejected after a field screenshot showed service names and even headers squeezed into fragments while a verbose column consumed the width. No truncation, content rewriting, or forced no-wrap for entire cells: prose can still wrap at normal word boundaries. This is static browser presentation with no autonomous decisions or new telemetry; rendering and CSS contract tests cover the policy.

@@ -268,6 +268,40 @@ function initialState(): MockState {
       overflow: {},
     },
   ];
+  for (const example of [
+    {
+      prompt: "Quota failure",
+      error: "Codex error: The usage limit has been reached",
+      partial: "",
+    },
+    {
+      prompt: "Provider failure after partial output",
+      error: "Provider connection interrupted",
+      partial: "Here is the beginning of the answer.",
+    },
+    { prompt: "Failure without provider details", error: "", partial: "" },
+  ]) {
+    const userId = randomUUID();
+    records.push({
+      id: userId,
+      parentId: records.at(-1)?.id ?? null,
+      timestamp: createdAt,
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: example.prompt }],
+      overflow: {},
+    });
+    records.push({
+      id: randomUUID(),
+      parentId: userId,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      finishReason: "error",
+      content: example.partial ? [{ type: "text", text: example.partial }] : [],
+      overflow: { native: { message: { errorMessage: example.error } } },
+    });
+  }
   return {
     projects: new Map([[project.id, project]]),
     orbs: new Map([
