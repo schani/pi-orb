@@ -1,0 +1,15 @@
+.git
+.context
+.amp
+**/node_modules
+**/dist
+**/coverage
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.plan
+**/*.plan.*
+**/.env*
+gha-creds-*.json
+test-failures
+**/__pycache__

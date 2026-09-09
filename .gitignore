@@ -9,3 +9,10 @@ __pycache__/
 .env*
 .amp/gcp-external-account.json
 .amp/gcp-env
+.context/
+.terraform/
+*.plan
+*.plan.*
+*.tfstate
+*.tfstate.*
+gha-creds-*.json
