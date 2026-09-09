@@ -110,8 +110,9 @@ test("hosting bucket management excludes other buckets and direct object permiss
   );
   assert.match(binding, /google_service_account\.deployer\.email/);
   assert(binding.includes('resource.type == \\"storage.googleapis.com/Bucket\\"'));
-  assert(
-    binding.includes('resource.name == \\"projects/_/buckets/pi-orb-hosting-${var.project}\\"'),
+  assert.match(
+    binding,
+    /resource\.name == \\"projects\/_\/buckets\/pi-orb-hosting-\$\{var\.project\}\\"/,
   );
   assert.doesNotMatch(binding, /startsWith|\|\|/);
   assert.doesNotMatch(
