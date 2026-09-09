@@ -164,6 +164,11 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       });
       return { ...state, liveBlocks };
     }
+    case "output_retired": {
+      const liveBlocks = new Map(state.liveBlocks);
+      for (const id of event.blockIds) liveBlocks.delete(id);
+      return { ...state, liveBlocks };
+    }
     case "tool_state": {
       const tools = new Map(state.tools);
       tools.set(event.callId, {

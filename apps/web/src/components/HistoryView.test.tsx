@@ -183,7 +183,7 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain("considering live evidence");
   });
 
-  it("does not duplicate a live block that has already become persisted", () => {
+  it("does not hide a new live block merely because its text matches history", () => {
     const html = renderToStaticMarkup(
       <HistoryView
         records={[
@@ -210,7 +210,7 @@ describe("HistoryView turn structure", () => {
       />,
     );
 
-    expect(html.match(/same reasoning/g)).toHaveLength(1);
+    expect(html.match(/same reasoning/g)).toHaveLength(2);
     expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
   });
 

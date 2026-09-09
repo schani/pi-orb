@@ -21,6 +21,8 @@ The first UI needs to display at least:
 
 Remaining UI questions include rendering unknown content blocks, large/truncated tool output, and image storage. Transient token deltas are ephemeral presentation events and are reconstructed after reconnect through ordinary live events; they are not stored in PostgreSQL.
 
+**Streaming lifetime correction (2026-09-09).** Green thinking rows represent transient output, not independent active jobs. On `output_retired`, remove the named blocks after their complete history has arrived; do not infer retirement by comparing text with historical messages. A new response can legitimately repeat old text, and final normalized text can differ from its streamed form. This replaces the text-equality suppression that left stale green rows below newer commands. Protocol and scheduling invariants: `docs/runtime-protocol.md`; incident: `docs/postmortems/2026-09-09-stale-thinking.md`.
+
 ## Model-response failures (decided and implemented 2026-09-09)
 
 An assistant record with `finishReason: error` renders its persisted Pi `overflow.native.message.errorMessage` as plain error text at the end of that response, even when its content is empty. Missing or blank details fall back to `Model response failed.` Partial output remains visible. The same rendering handles live-committed records and replicated history, including existing conversations; no transient toast or new persistence path is needed. A failure is a visible boundary for tool grouping. Orb lifecycle `running` still means the host is running, not that inference succeeded.

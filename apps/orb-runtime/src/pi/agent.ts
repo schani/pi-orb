@@ -197,6 +197,7 @@ export class PiOrbAgent {
   private shellOutput = "";
   private shellOutputTruncated = false;
   private readonly liveBlocks = new Map<string, LiveBlock>();
+  private outputMessageSequence = 0;
   private readonly liveTools = new Map<string, LiveTool>();
   private readonly listeners = new Set<FrameListener>();
   private readonly pendingInboxMessages = new Map<
@@ -835,6 +836,26 @@ export class PiOrbAgent {
         this.settleTurnStart();
         break;
       }
+      case "message_start": {
+        if (event.message.role === "assistant") this.outputMessageSequence++;
+        break;
+      }
+      case "message_end": {
+        if (event.message.role !== "assistant" || this.operationId === null) break;
+        const operationId = this.operationId;
+        const blockIds = [...this.liveBlocks.keys()];
+        // Pi appends ordinary messages after notifying subscribers. Retire
+        // their stream only after the complete history has been published.
+        queueMicrotask(() => {
+          if (this.operationId !== operationId) return;
+          if (this.liveHistory?.flushPersisted().isErr()) return;
+          for (const id of blockIds) this.liveBlocks.delete(id);
+          if (blockIds.length > 0) {
+            this.broadcastEvent({ type: "output_retired", operationId, blockIds });
+          }
+        });
+        break;
+      }
       case "message_update": {
         if (this.operationId === null) break;
         const message = event.message as { role?: string; content?: unknown };
@@ -846,7 +867,7 @@ export class PiOrbAgent {
             typed.type === "text" ? "text" : typed.type === "thinking" ? "reasoning" : null;
           if (blockType === null) return;
           const text = blockType === "text" ? (typed.text ?? "") : (typed.thinking ?? "");
-          const blockId = `${this.operationId}-${index}`;
+          const blockId = `${this.operationId}-${this.outputMessageSequence}-${index}`;
           const existing = this.liveBlocks.get(blockId);
           if (existing !== undefined && existing.text === text) return;
           const revision = (existing?.revision ?? 0) + 1;

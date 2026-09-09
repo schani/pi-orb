@@ -383,18 +383,6 @@ function renderTurn(turn: Turn, live?: LiveAgentContent, busy = false): ReactNod
   }
 }
 
-function liveBlockAlreadyPersisted(block: LiveBlock, records: readonly HistoryRecord[]): boolean {
-  const persistedType = block.blockType === "reasoning" ? "reasoning" : "text";
-  return records.some(
-    (record) =>
-      record.type === "message" &&
-      record.role === "assistant" &&
-      record.content.some(
-        (content) => content.type === persistedType && content.text === block.text,
-      ),
-  );
-}
-
 function persistedToolCallIds(records: readonly HistoryRecord[]): Set<string> {
   const ids = new Set<string>();
   for (const record of records) {
@@ -420,10 +408,7 @@ export function HistoryView({
   const shellBlocks = liveBlocks.filter((block) => block.blockType === "shell");
   const turns = groupTurns(records);
   const finalTurn = turns[turns.length - 1];
-  const finalAgentRecords = finalTurn?.kind === "agent" ? finalTurn.records : [];
-  const agentBlocks = liveBlocks
-    .filter((block) => block.blockType !== "shell")
-    .filter((block) => !liveBlockAlreadyPersisted(block, finalAgentRecords));
+  const agentBlocks = liveBlocks.filter((block) => block.blockType !== "shell");
   const committedToolCallIds = persistedToolCallIds(records);
   const uncommittedTools = tools.filter((tool) => !committedToolCallIds.has(tool.callId));
   const hasAgentLive = agentBlocks.length > 0 || uncommittedTools.length > 0;

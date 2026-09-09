@@ -599,7 +599,7 @@ describe("frontend-only browser behavior", () => {
     await composer.fill(draft);
 
     await page.getByRole("button", { name: "expire session" }).click();
-    const ribbon = page.getByRole("alert");
+    const ribbon = page.locator(".session-ribbon");
     await expectPage(ribbon).toContainText("session expired");
     await expectPage(composer).toHaveValue(draft);
 
