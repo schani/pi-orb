@@ -138,6 +138,31 @@ armed recovery whose authority does not depend on this application's issuer,
 and must execute the exact tested procedure. The original credential remains
 exposed despite restoration. No rotation completion is claimed.
 
+### Current credential-recovery proposal (2026-09-09; not implemented)
+
+The proposed recovery authority is a separate GitHub Actions job using the
+already-admitted GitHub identity, not an orb token or a database session. It must
+remain usable when pi-orb's issuer or database authentication fails. The controller
+and recovery job belong to one generation-checked release-lock transaction;
+readiness and terminal outcomes are durable, token-free records, not shell traps.
+A stale guard must not act on a later transaction.
+
+Password changes use the Cloud SQL Admin API with explicit project, instance and
+user identifiers. SQL password statements and ambient-role selectors are excluded.
+Recovery reads the authoritative current credential from Secret Manager rather
+than reviving a captured, subsequently retired password. The restore target and
+secret identity require independent validation before any write.
+
+The proposed cutover prepares a distinct login with the stable owner's privileges,
+proves a fresh connection with the exact intended ownership identity before
+publishing its URL, and retains the old working credential until all four service
+roles have moved and old consumers have retired. Revocation is a separate explicit
+final step; successful preparation is not successful rotation. The exact ownership
+configuration, recovery handshake, cancellation behavior and retirement proof are
+not yet qualified for production. Isolated tests must use disposable owner roles.
+Acceptance and implementation work remain in `TODO.md`; this proposal does not
+authorize another ad hoc production probe.
+
 ### Implemented release safety design (2026-09-09; application rollout not yet live-validated)
 
 The external entry point reuses `infra/release.sh`. A read-only application plan,
