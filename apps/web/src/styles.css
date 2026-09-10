@@ -150,6 +150,10 @@ button.icon-button {
   background: transparent;
 }
 
+.device-code-copy {
+  vertical-align: middle;
+}
+
 button.icon-button:hover:not(:disabled) {
   background: var(--k);
   color: var(--w);
@@ -1316,10 +1320,12 @@ h3 {
   right: 2px;
 }
 
+.device-code-copy[data-state="copied"],
 .markdown-code-copy[data-state="copied"] {
   color: var(--ok);
 }
 
+.device-code-copy[data-state="failed"],
 .markdown-code-copy[data-state="failed"] {
   color: var(--bad);
 }

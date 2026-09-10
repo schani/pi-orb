@@ -379,7 +379,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
   }
 }
 
-/** Copies the device-login code; flips its label briefly as feedback. */
+/** Copies the device-login code without replacing the icon with text. */
 function CopyCodeButton({ code }: { code: string }) {
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   useEffect(() => {
@@ -390,13 +390,22 @@ function CopyCodeButton({ code }: { code: string }) {
   return (
     <button
       type="button"
-      className="text-action"
+      className="icon-button device-code-copy"
+      data-state={copyStatus}
+      aria-label={
+        copyStatus === "copied"
+          ? "Copied device code"
+          : copyStatus === "failed"
+            ? "Copy failed—try again"
+            : "Copy device code"
+      }
+      aria-live="polite"
       title={copyStatus === "failed" ? "Clipboard access is unavailable" : "Copy device code"}
       onClick={() => {
         copyToClipboard(code).then((result) => setCopyStatus(result.isOk() ? "copied" : "failed"));
       }}
     >
-      {copyStatus === "copied" ? "copied" : copyStatus === "failed" ? "copy failed" : "copy"}
+      <Icon name="copy" />
     </button>
   );
 }
