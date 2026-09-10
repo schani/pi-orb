@@ -9,7 +9,7 @@ import {
   type RuntimeEvent,
   type ServerFrame,
 } from "@pi-orb/protocol";
-import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Composer, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
@@ -461,6 +461,9 @@ function OrbConversation({
         : { type: "history_failed", error: load.history.error },
     ),
   );
+  const historyRecords = useMemo(() => [...state.records.values()], [state.records]);
+  const liveBlocks = useMemo(() => [...state.liveBlocks.values()], [state.liveBlocks]);
+  const tools = useMemo(() => [...state.tools.values()], [state.tools]);
   const draftStorageErrorShown = useRef(false);
 
   useEffect(() => {
@@ -1090,9 +1093,9 @@ function OrbConversation({
       )}
 
       <HistoryView
-        records={[...state.records.values()]}
-        liveBlocks={[...state.liveBlocks.values()]}
-        tools={[...state.tools.values()]}
+        records={historyRecords}
+        liveBlocks={liveBlocks}
+        tools={tools}
         busy={isLiveBusy(orb?.state, state)}
         queuedMessages={queuedMessages}
       />

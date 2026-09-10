@@ -305,21 +305,49 @@ function initialState(): MockState {
       overflow: { native: { message: { errorMessage: example.error } } },
     });
   }
+  const longOrb: OrbView = {
+    ...orb,
+    id: "frontend-long-history",
+    name: "Long history · typing performance",
+  };
+  const longRecords: HistoryRecord[] = [];
+  for (let index = 0; index < 200; index += 1) {
+    longRecords.push({
+      id: `long-history-${index}`,
+      parentId: longRecords.at(-1)?.id ?? null,
+      timestamp: createdAt,
+      type: "message",
+      role: index % 2 === 0 ? "user" : "assistant",
+      content: [
+        {
+          type: "text",
+          text:
+            index % 2 === 0
+              ? `Review iteration ${index / 2 + 1}.`
+              : `## Review ${Math.ceil(index / 2)}\n\nThe **transcript** stays unchanged while the composer updates. Check [the source](https://example.com/source) and these results.\n\n| Check | Result |\n| --- | --- |\n| Types | Passed |\n| Tests | Passed |\n\n- Keep draft updates immediate.\n- Preserve live output.\n\n\`\`\`ts\nconst iteration = ${index};\nconsole.log(iteration);\n\`\`\``,
+        },
+      ],
+      overflow: {},
+    });
+  }
   return {
     projects: new Map([[project.id, project]]),
     orbs: new Map([
       [orb.id, orb],
+      [longOrb.id, longOrb],
       [authOrb.id, authOrb],
       [archivedOrb.id, archivedOrb],
     ]),
     histories: new Map([
       [orb.id, records],
+      [longOrb.id, longRecords],
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),
     uploads: new Map(),
     messages: new Map([
       [orb.id, []],
+      [longOrb.id, []],
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),

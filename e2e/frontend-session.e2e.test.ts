@@ -21,6 +21,21 @@ describe("frontend-only browser behavior", () => {
       root: WEB_ROOT,
       configFile: join(WEB_ROOT, "vite.config.ts"),
       mode: "frontend",
+      plugins: [
+        {
+          name: "test-history-render-count",
+          enforce: "pre",
+          transform(code, id) {
+            if (!id.endsWith("/components/HistoryView.tsx")) return;
+            // Count function executions, not DOM mutations: React can reparse the
+            // entire transcript without changing a single DOM node.
+            return code.replace(
+              "const representedMessageIds =",
+              'Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1); const representedMessageIds =',
+            );
+          },
+        },
+      ],
       server: { host: "127.0.0.1", port: 0 },
     });
     await vite.listen();
@@ -583,6 +598,62 @@ describe("frontend-only browser behavior", () => {
       await expectPage(transfers).toHaveCount(0);
       await expectPage(page.locator(".history")).toContainText("retry-direct.bin");
       expectPage(ids.size).toBe(1);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("skips unchanged long history while typing and still renders sent/live messages", async () => {
+    const page = await browser.newPage();
+    try {
+      // Hold live replay and inbox responses before navigation: an initial
+      // sync can otherwise race the typing assertion and legitimately render.
+      let releaseLive = () => {};
+      await page.routeWebSocket("**/orbs/frontend-long-history/live", (socket) => {
+        const server = socket.connectToServer();
+        const buffered: (string | Buffer)[] = [];
+        let released = false;
+        server.onMessage((message) => {
+          if (released) socket.send(message);
+          else buffered.push(message);
+        });
+        releaseLive = () => {
+          released = true;
+          for (const message of buffered) socket.send(message);
+          buffered.length = 0;
+        };
+      });
+      await page.route("**/api/v1/orbs/frontend-long-history/messages", (route) => route.abort());
+      await page.goto(`${origin}/#/orbs/frontend-long-history`);
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
+      await expectPage(page.locator(".history")).toContainText("Review 100");
+      // The fixture is idle. Gate background history/inbox refreshes so this
+      // assertion measures only draft updates, not unrelated polling commits.
+      await page.route("**/api/v1/orbs/frontend-long-history/history", (route) => route.abort());
+      const before = await page.evaluate(
+        () => Reflect.get(globalThis, "__historyRenders") as number,
+      );
+      expectPage(before).toBeGreaterThan(0);
+      await composer.pressSequentially("typing must not reparse history");
+      await expectPage(composer).toHaveValue("typing must not reparse history");
+      expectPage(await page.evaluate(() => Reflect.get(globalThis, "__historyRenders"))).toBe(
+        before,
+      );
+      await page.unroute("**/api/v1/orbs/frontend-long-history/history");
+      await page.unroute("**/api/v1/orbs/frontend-long-history/messages");
+      releaseLive();
+      await composer.press("Control+Enter");
+      await expectPage(composer).toHaveValue("");
+      await expectPage(page.locator(".history .rec-you").last()).toContainText(
+        "typing must not reparse history",
+      );
+      await expectPage(page.locator(".history .rec-orb").last()).toContainText(
+        "typing must not reparse history",
+      );
+      expectPage(
+        await page.evaluate(() => Reflect.get(globalThis, "__historyRenders")),
+      ).toBeGreaterThan(before);
     } finally {
       await page.close();
     }

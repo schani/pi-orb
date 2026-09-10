@@ -6,7 +6,7 @@ import type {
   MessageRecord,
   OrbMessageView,
 } from "@pi-orb/protocol";
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { representedInboxMessageIds } from "../lib/queued-messages.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
@@ -394,7 +394,7 @@ function persistedToolCallIds(records: readonly HistoryRecord[]): Set<string> {
   return ids;
 }
 
-export function HistoryView({
+export const HistoryView = memo(function HistoryView({
   records,
   liveBlocks,
   tools,
@@ -480,4 +480,4 @@ export function HistoryView({
       )}
     </div>
   );
-}
+});
