@@ -257,7 +257,7 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
-**Production finding (2026-09-11; IAM corrected, application recovery pending):** `72fb304` passed checks/E2E,
+**Production finding (2026-09-11; corrected and deployed):** `72fb304` passed checks/E2E,
 image acceptance and migration, then partially applied because the shared deployer
 lacks `logging.exclusions.create` for the MCP OAuth callback exclusion. All four
 services updated and the exit path repaired IAP, but retirement, activation and
@@ -274,8 +274,14 @@ create/update/delete permissions. The one-time administrator apply installed exa
 resources under the release lock. Isolated federation passed the authority
 preflight and negative project-IAM/custom-role administration checks; the
 administrator login was then revoked and ordinary federation passed again.
-Production application recovery remains pending. Preserve the callback-log protection and the separate
-foundation-administrator boundary rather than bypassing either. Evidence:
+GitHub run `34562396846` subsequently deployed `f7e5641` with every gate passed,
+including retirement of both older browser revisions, activation, lifecycle
+smoke and live STS/deployer federation. Its durable outcome is `validated`, all
+release fixtures were deleted, and independent Logging API inspection verified
+the enabled callback exclusion with the exact expected filter. This was a full
+keyless GitHub release after revoking the administrator login, not validation-only
+or relabeling the original failed run. Preserve the callback-log protection and
+the separate foundation-administrator boundary rather than bypassing either. Evidence:
 `docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`.
 
 **Implemented and live-exercised 2026-09-09 through normal apply plus successful explicit recovery.**

@@ -35,10 +35,10 @@ sinks retain their query strings.
 Preserve the exclusion rather than removing it to make apply pass, and establish
 callback log protection before treating this release as usable.
 Validation-only recovery does not apply missing infrastructure and therefore
-cannot repair this failure by itself. The actionable recovery and preflight work
-is tracked in `TODO.md`.
+cannot repair this failure by itself. The full release recovery below completed
+the incident's recovery and preflight work.
 
-## Correction (foundation applied; application recovery pending)
+## Correction (foundation applied; application recovery validated)
 
 The user required autonomous GitHub deployment, not personal authentication per
 release. The foundation now declares a custom role containing exactly
@@ -46,7 +46,7 @@ release. The foundation now declares a custom role containing exactly
 existing shared deployer. This is project-level exclusion policy authority; it
 is not restricted to one exclusion name. Logging Admin, IAM administration and
 recurring personal credentials are rejected as unnecessary. The one-time grant
-must still be reviewed/applied by the separate foundation administrator.
+requires review/apply by the separate foundation administrator.
 
 `infra/release_preflight.py` uses the real federated identity's read-only project
 `testIamPermissions` call before checks/build/migration/apply. Missing permissions
@@ -74,4 +74,33 @@ the read-only authority preflight; negative checks confirmed no
 The personal login was revoked immediately, the normal account was reset to the
 federated deployer, and its preflight passed again. This establishes permanent
 shared authority for both GitHub and project orbs without recurring personal
-credentials, not successful application recovery.
+credentials. Application recovery was verified separately below.
+
+## Successful autonomous GitHub release
+
+[Run 34562396846](https://github.com/schani/pi-orb/actions/runs/34562396846)
+performed a fresh full release of `f7e56413b71d7e8c61ef374d499f9f4eca7bf1ed`
+after the administrator login had been revoked. It ran independently through an
+orb runtime restart; no second dispatch or runner intervention was necessary.
+The transaction ran from 04:30:38 to 05:39:54 UTC and recorded `validated`,
+`exitCode: 0`, with every gate passed: preflight, checks/E2E, build, plan, schema,
+apply, repair, retire, activate, lifecycle, identity and complete.
+
+The record is
+`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789101031-dbce69e8-1985-4ee4-b2ab-470376c6b47b.json`,
+also attached to the workflow. Generation `1789102874` serves container digest
+`sha256:14854730dda3837ea47eb87512d66ba54ed6146d416ea82c917d4889dc6a4b38`
+on browser `pi-orb-00052-rmh`, ops `pi-orb-ops-00049-jjf`, runtime API
+`pi-orb-runtime-api-00054-sbd`, and issuer `pi-orb-issuer-00014-hb8`.
+Retirement recorded explicit active/idle zeroes for `pi-orb-00050-c4w` at 04:48
+and `pi-orb-00051-f7v` at 05:28 before activation. Identity smoke included actual
+GCP STS exchange, deployer impersonation, read-only API access and wrong-audience
+rejection. All four recorded fixtures (one project, three orbs) were deleted.
+
+Independent post-release Logging API inspection confirmed `mcp-oauth-callback`
+exists, is enabled, and has exactly
+`httpRequest.requestUrl:"/api/v1/mcp/oauth/callback"` as its filter. This validates
+the default-sink configuration, not real-provider OAuth consent or every other
+sink's behavior. Those qualification tasks remain in `TODO.md`. The original
+run remains failed and applied-but-unvalidated; the successful fresh release
+does not overwrite or relabel its evidence.
