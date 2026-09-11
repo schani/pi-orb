@@ -124,7 +124,7 @@ Verify the new grant in an empty HOME/gcloud configuration through the real resu
 hook before revoking the administrator's temporary login. Already-running orbs
 receive the updated shared IAM grant; they do not need new personal credentials.
 
-### Release logging-exclusion authority (2026-09-11; live apply pending)
+### Release logging-exclusion authority (2026-09-11; applied and federation-verified)
 
 `google_project_iam_custom_role.deployer_logging_exclusions` grants only
 `logging.exclusions.create/get/update/delete` to the shared federated deployer.
@@ -152,7 +152,13 @@ denial. The preflight verdict is recorded in the existing durable release gate.
 The browser service also depends on the actual exclusion and OAuth secret IAM,
 so an unsuccessful first creation cannot publish a new browser revision ahead
 of those protections. Additional logging sinks still require qualification.
-Incident: `docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`.
+Live adoption applied exactly the custom role and additive member binding under
+the generation-matched release lock: two creates, no changes or deletes. An
+isolated gcloud configuration using federation passed the authority preflight
+and confirmed no project-IAM/custom-role administration permissions. The
+administrator login was revoked, and the normal federated preflight passed again.
+Application recovery is recorded separately in
+`docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`.
 
 ### GitHub one-button deployment admission (2026-09-09)
 

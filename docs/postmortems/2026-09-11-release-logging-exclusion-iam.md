@@ -25,7 +25,7 @@ Readiness does not establish release validation or controller activation.
 
 ## Safety and recovery status
 
-Recovery is blocked on separately administered foundation authority. The orb
+Recovery was initially blocked on separately administered foundation authority. The orb
 and GitHub runner use the same scoped deployer; neither may expand its own IAM.
 No automatic retry or permission broadening was performed. Do not exercise real
 MCP OAuth callbacks while the required default-sink exclusion is absent; this
@@ -38,7 +38,7 @@ Validation-only recovery does not apply missing infrastructure and therefore
 cannot repair this failure by itself. The actionable recovery and preflight work
 is tracked in `TODO.md`.
 
-## Correction (implemented locally; live foundation apply pending)
+## Correction (foundation applied; application recovery pending)
 
 The user required autonomous GitHub deployment, not personal authentication per
 release. The foundation now declares a custom role containing exactly
@@ -61,4 +61,17 @@ revision from the failed release or qualify additional sinks.
 regressions, and OpenTofu foundation formatting/validation passed. A read-only
 live preflight reproduced missing create/update/delete (get is already granted).
 No foundation mutation or release retry was attempted without administrator
-access. This is a tested correction, not evidence of successful live recovery.
+access.
+
+The human subsequently supplied a temporary administrator login. With the same
+generation-matched GCS release lock held, a full foundation plan was inspected
+and programmatically restricted to exactly two creates: the custom role and its
+additive shared-deployer binding. The exact saved plan applied successfully with
+zero changed or destroyed resources, and the release lock was released.
+An isolated gcloud configuration using the committed federated credential passed
+the read-only authority preflight; negative checks confirmed no
+`resourcemanager.projects.setIamPolicy` or `iam.roles.create/update` permissions.
+The personal login was revoked immediately, the normal account was reset to the
+federated deployer, and its preflight passed again. This establishes permanent
+shared authority for both GitHub and project orbs without recurring personal
+credentials, not successful application recovery.

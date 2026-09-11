@@ -257,7 +257,7 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
-**Production finding (2026-09-11; recovery blocked):** `72fb304` passed checks/E2E,
+**Production finding (2026-09-11; IAM corrected, application recovery pending):** `72fb304` passed checks/E2E,
 image acceptance and migration, then partially applied because the shared deployer
 lacks `logging.exclusions.create` for the MCP OAuth callback exclusion. All four
 services updated and the exit path repaired IAP, but retirement, activation and
@@ -270,8 +270,11 @@ IAM. This avoids recurring personal logins without allowing the deployer to
 expand its own authority. The role is project-wide exclusion management, not
 Logging Admin or an unsupported exact-name claim. Local infrastructure tests and
 OpenTofu foundation validation passed; live preflight reproduced the missing
-create/update/delete permissions. One-time administrator apply and production
-recovery remain pending. Preserve the callback-log protection and the separate
+create/update/delete permissions. The one-time administrator apply installed exactly the two additive IAM
+resources under the release lock. Isolated federation passed the authority
+preflight and negative project-IAM/custom-role administration checks; the
+administrator login was then revoked and ordinary federation passed again.
+Production application recovery remains pending. Preserve the callback-log protection and the separate
 foundation-administrator boundary rather than bypassing either. Evidence:
 `docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`.
 
