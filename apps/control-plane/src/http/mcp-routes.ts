@@ -55,7 +55,14 @@ export function registerMcpRoutes(
     async (request, reply) => {
       if (
         !Check(McpCatalogSchema, request.body) ||
-        new Set(request.body.servers.map((c) => c.name)).size !== request.body.servers.length
+        new Set(request.body.servers.map((c) => c.name)).size !== request.body.servers.length ||
+        new Set(request.body.servers.flatMap((c) => (c.oauth ? [c.oauth.id] : []))).size !==
+          request.body.servers.filter((c) => c.oauth).length ||
+        request.body.servers.some(
+          (c) =>
+            c.oauth &&
+            Object.keys(c.headers).some((name) => name.toLowerCase() === "authorization"),
+        )
       ) {
         return reply.status(400).send({
           error: {

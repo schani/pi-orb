@@ -2,6 +2,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { SimulationTask } from "determined";
 import { err, ok, Result, ResultAsync, type Result as TypedResult } from "neverthrow";
+import type { McpCredentialResolver } from "./oauth.ts";
 import { mapMcpSdkError as failure } from "./sdk-error.ts";
 import {
   type McpError,
@@ -18,15 +19,20 @@ const DEADLINE = 30_000;
 export class HttpMcpTransport implements McpTransport {
   private readonly url: string;
   private readonly headers: Record<string, string>;
-  constructor(url: string, headers: Record<string, string>) {
+  private readonly credentials: McpCredentialResolver | undefined;
+  constructor(url: string, headers: Record<string, string>, credentials?: McpCredentialResolver) {
     this.url = url;
     this.headers = headers;
+    this.credentials = credentials;
   }
 
   async connect(
     _task: SimulationTask,
     signal: AbortSignal,
   ): Promise<TypedResult<McpSession, McpError>> {
+    let authFailure: McpError | null = null;
+    let operationTask = _task;
+    const credentials = this.credentials;
     const initialized = Result.fromThrowable(
       () => ({
         client: new Client(
@@ -35,6 +41,29 @@ export class HttpMcpTransport implements McpTransport {
         ),
         transport: new StreamableHTTPClientTransport(new URL(this.url), {
           requestInit: { headers: this.headers, redirect: "error" },
+          ...(credentials
+            ? {
+                fetch: async (input: string | URL, init?: RequestInit) => {
+                  const token = await credentials.resolve(operationTask, init?.signal ?? signal);
+                  if (token.isErr()) {
+                    authFailure = token.error;
+                    // Fetch must reject on local failure; immediately mapped back to the typed error.
+                    return Promise.reject(new Error("MCP credential unavailable"));
+                  }
+                  const headers = new Headers(init?.headers);
+                  headers.set("Authorization", `Bearer ${token.value.accessToken}`);
+                  const response = await fetch(input, { ...init, headers, redirect: "error" });
+                  if (response.status === 401) {
+                    credentials.rejected(token.value.generation);
+                    authFailure = mcpError(
+                      "unavailable",
+                      "MCP authorization rejected; reconnect in project MCP settings if the next explicit attempt fails",
+                    );
+                  } else if (response.ok) credentials.accepted();
+                  return response;
+                },
+              }
+            : {}),
           reconnectionOptions: {
             maxRetries: 0,
             maxReconnectionDelay: 0,
@@ -53,9 +82,18 @@ export class HttpMcpTransport implements McpTransport {
     );
     if (result.isErr()) {
       await ResultAsync.fromPromise(client.close(), failure);
-      return err(result.error);
+      return err(authFailure ?? result.error);
     }
-    return ok(new HttpMcpSession(client));
+    const session = new HttpMcpSession(client);
+    return ok({
+      perform: async (task, operation, abort) => {
+        authFailure = null;
+        operationTask = task;
+        const performed = await session.perform(task, operation, abort);
+        return authFailure ? err(authFailure) : performed;
+      },
+      close: () => session.close(),
+    });
   }
 }
 

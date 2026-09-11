@@ -902,7 +902,78 @@ h3 {
 }
 
 .project-secrets-body {
-  padding: 0 10px 10px;
+  padding: 8px 10px 10px;
+}
+
+.project-secrets-body > .project-secret-form:first-child {
+  margin-top: 0;
+}
+
+.project-secrets-body > .project-secret-form:last-child {
+  margin-bottom: 0;
+}
+
+.project-mcp-ledger {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+.project-mcp-ledger label {
+  display: block;
+  min-width: 0;
+  color: var(--g3);
+}
+.project-mcp-ledger input,
+.project-mcp-ledger select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.project-mcp-ledger select {
+  height: var(--row);
+  color: var(--k);
+}
+.project-mcp-ledger .mcp-full {
+  grid-column: 1 / -1;
+}
+.mcp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--k);
+}
+.mcp-action-space {
+  flex: 1;
+}
+.mcp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.mcp-presets[hidden] {
+  display: none;
+}
+.mcp-add-area {
+  margin-top: 8px;
+}
+.mcp-add-area:first-child {
+  margin-top: 0;
+}
+.mcp-add-area > .project-mcp-ledger:last-child {
+  margin-bottom: 0;
+}
+.mcp-add-heading {
+  border-bottom: 1px solid var(--g2);
+}
+.project-mcp-connection > summary[aria-disabled="true"] {
+  cursor: wait;
+}
+@media (max-width: 560px) {
+  .project-mcp-ledger {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .project-secret-row {
@@ -962,18 +1033,10 @@ h3 {
   flex: none;
 }
 
-.project-mcp-form,
 .project-general-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-}
-
-.project-mcp-form textarea {
-  display: block;
-  width: 100%;
-  resize: vertical;
-  font-family: inherit;
 }
 
 /* ---------- orb page: two panes filling the viewport ---------- */
@@ -1428,6 +1491,20 @@ h3 {
   color: var(--g3);
   background: var(--g1);
   border-top: 1px solid var(--g2);
+}
+
+/* MCP forms share the chat disclosure, with form gutters and an inverted focus row. */
+.project-mcp-connection .reasoning-body {
+  padding-top: 4px;
+  padding-bottom: 8px;
+}
+.project-mcp-connection > summary:focus-visible {
+  background: var(--k);
+  color: var(--w);
+}
+.project-mcp-connection > summary:focus-visible .activity-rail-marker,
+.project-mcp-connection > summary:focus-visible .activity-rail-headline {
+  color: inherit;
 }
 
 .tool-activity-call:not(details),

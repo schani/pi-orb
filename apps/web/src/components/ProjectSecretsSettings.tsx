@@ -1,4 +1,6 @@
 import {
+  type McpCatalog,
+  mcpSecretUsers,
   PROJECT_SECRET_MAX_VALUE_BYTES,
   PROJECT_SECRET_NAME_PATTERN,
   type ProjectSecretList,
@@ -8,6 +10,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
   deleteProjectSecret,
   describeApiError,
+  getProjectMcp,
   listProjectSecrets,
   putProjectSecret,
 } from "../lib/api.ts";
@@ -16,6 +19,7 @@ import { ProjectSecretKeyIcon } from "./ProjectSecretKeyIcon.tsx";
 export interface ProjectSecretsSettingsProps {
   readonly project: Pick<ProjectView, "id" | "name">;
   readonly saving: boolean;
+  readonly active?: boolean;
   readonly setSaving: (saving: boolean) => void;
 }
 
@@ -25,12 +29,39 @@ export function ProjectSecretsSettings({
   project,
   saving,
   setSaving,
+  active = true,
 }: ProjectSecretsSettingsProps) {
   const [snapshot, setSnapshot] = useState<ProjectSecretList>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [mcp, setMcp] = useState<McpCatalog | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    let current = true;
+    let request = 0;
+    const refresh = () => {
+      const revision = ++request;
+      void getProjectMcp(project.id).then((result) => {
+        if (!current || revision !== request) return;
+        if (result.isOk()) {
+          setMcp(result.value);
+          setUsageError(null);
+        } else {
+          setMcp(null);
+          setUsageError(describeApiError(result.error));
+        }
+      });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      current = false;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [active, project.id]);
   const nameInput = useRef<HTMLInputElement>(null);
   const valueInput = useRef<HTMLInputElement>(null);
   const focusAfterSave = useRef(false);
@@ -100,36 +131,45 @@ export function ProjectSecretsSettings({
         <p className="muted">loading…</p>
       ) : (
         <div className="project-secrets-list">
-          {snapshot.items.map((item) => (
-            <div className="project-secret-row" key={item.name}>
-              <span className="project-secret-name">
-                <span className="project-secrets-lock">
-                  <ProjectSecretKeyIcon />
+          {snapshot.items.map((item) => {
+            const users = mcpSecretUsers(mcp?.servers ?? [], item.name);
+            return (
+              <div className="project-secret-row" key={item.name}>
+                <span className="project-secret-name">
+                  <span className="project-secrets-lock">
+                    <ProjectSecretKeyIcon />
+                  </span>
+                  {item.name}
                 </span>
-                {item.name}
-              </span>
-              <span className="project-secret-updated">
-                updated {new Date(item.updatedAt).toLocaleDateString()}
-              </span>
-              <span className="project-secret-actions">
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => {
-                    setName(item.name);
-                    setValue("");
-                    setError(null);
-                    queueMicrotask(() => valueInput.current?.focus());
-                  }}
-                >
-                  replace
-                </button>
-                <button type="button" disabled={saving} onClick={() => void remove(item.name)}>
-                  remove
-                </button>
-              </span>
-            </div>
-          ))}
+                <span className="project-secret-updated">
+                  {users.length
+                    ? `used by ${users.join(", ")}`
+                    : `updated ${new Date(item.updatedAt).toLocaleDateString()}`}
+                </span>
+                <span className="project-secret-actions">
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => {
+                      setName(item.name);
+                      setValue("");
+                      setError(null);
+                      queueMicrotask(() => valueInput.current?.focus());
+                    }}
+                  >
+                    replace
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving || mcp === null || users.length > 0}
+                    onClick={() => void remove(item.name)}
+                  >
+                    remove
+                  </button>
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
       <form className="project-secret-form" onSubmit={(event) => void save(event)}>
@@ -162,7 +202,16 @@ export function ProjectSecretsSettings({
           {saving ? "saving…" : "save secret"}
         </button>
       </form>
-      {error !== null && <div className="banner banner-error">{error}</div>}
+      {usageError && (
+        <div className="banner banner-error" role="alert">
+          Cannot check MCP usage. {usageError}
+        </div>
+      )}
+      {error !== null && (
+        <div className="banner banner-error" role="alert">
+          {error}
+        </div>
+      )}
     </div>
   );
 }

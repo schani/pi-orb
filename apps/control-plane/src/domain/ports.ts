@@ -656,7 +656,7 @@ export interface ProjectSecretPointerStore {
     task: SimulationTask,
     projectId: string,
   ): ResultAsync<ProjectSecretPointerRow | null, StoreError | ProjectConflict>;
-  /** CAS write allowed only while the parent project is active. */
+  /** Active-project CAS; atomically refuses removal of names referenced by the current MCP catalog. */
   casWriteProjectSecretPointer(
     task: SimulationTask,
     projectId: string,

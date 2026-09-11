@@ -78,6 +78,25 @@ describe("hosting HTTP access policy", () => {
     ).toEqual({ kind: "reject", reason: "files_wrong_host" });
   });
 
+  it("allows only the OAuth callback GET across sites, never a files-host or websocket bypass", () => {
+    const policy = configured()._unsafeUnwrap();
+    const request = {
+      method: "GET",
+      path: "/api/v1/mcp/oauth/callback?code=synthetic",
+      host: "pi-orb.example.test",
+      secFetchSite: "cross-site",
+    };
+    expect(policy.decide(request)).toEqual({ kind: "allow", surface: "app" });
+    expect(policy.decide({ ...request, method: "POST" }).kind).toBe("reject");
+    expect(policy.decide({ ...request, path: "/api/v1/mcp/oauth/callback/other" }).kind).toBe(
+      "reject",
+    );
+    expect(policy.decide({ ...request, upgrade: "websocket" }).kind).toBe("reject");
+    expect(policy.decide({ ...request, host: "files.pi-orb.example.test" }).kind).toBe(
+      "isolated_not_found",
+    );
+  });
+
   it("allows same-origin and explicit Vite development browser requests", () => {
     const policy = configured()._unsafeUnwrap();
     for (const origin of [

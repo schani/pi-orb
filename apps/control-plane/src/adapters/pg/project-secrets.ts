@@ -1,5 +1,7 @@
+import { McpCatalogSchema, mcpSecretUsers } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { Check } from "typebox/value";
 import type {
   ProjectConflict,
   ProjectSecretPointerConflict,
@@ -86,6 +88,44 @@ export class PostgreSQLProjectSecretPointerStore implements ProjectSecretPointer
       const state = project.value.rows[0]?.["state"];
       if (state === undefined) return err(projectConflict("not_found"));
       if (state !== "active") return err(projectConflict("deleting"));
+      // Catalog replacement takes the same parent lock: reference checks and deletion publish atomically.
+      const before = await query("SELECT * FROM project_secret_pointers WHERE project_id = $1", [
+        projectId,
+      ]);
+      if (before.isErr()) return err(before.error);
+      const pointer = before.value.rows[0] ? mapRow(before.value.rows[0]) : null;
+      if ((pointer?.rowVersion ?? null) !== expectedRowVersion)
+        return err({ type: "project_secret_pointer_conflict" as const });
+      const removed = Object.keys(pointer?.entries ?? {}).filter(
+        (name) => !Object.hasOwn(next.entries, name),
+      );
+      if (removed.length) {
+        const stored = await query(
+          "SELECT revision, servers FROM project_mcp WHERE project_id = $1",
+          [projectId],
+        );
+        if (stored.isErr()) return err(stored.error);
+        const catalog = {
+          revision: Number(stored.value.rows[0]?.["revision"] ?? 0),
+          servers: stored.value.rows[0]?.["servers"] ?? [],
+        };
+        if (!Check(McpCatalogSchema, catalog))
+          return err({
+            type: "store_error" as const,
+            code: "corruption" as const,
+            message: "Invalid MCP catalog",
+            retryable: false,
+          });
+        const used = removed.filter((name) => mcpSecretUsers(catalog.servers, name).length > 0);
+        if (used.length)
+          return err({
+            type: "project_secret_in_use" as const,
+            secrets: used,
+            servers: [
+              ...new Set(used.flatMap((name) => mcpSecretUsers(catalog.servers, name))),
+            ].sort(),
+          });
+      }
       const result =
         expectedRowVersion === null
           ? await query(

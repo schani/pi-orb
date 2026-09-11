@@ -2,6 +2,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { StoreError } from "./errors.ts";
 import { logProjectEvent } from "./log.ts";
+import { deleteProjectMcpOAuth } from "./mcp-oauth-cleanup.ts";
 import type { ProjectRow } from "./orb.ts";
 import type { ControlPlaneDeps } from "./ports.ts";
 import { deleteAllProjectSecrets } from "./project-secrets.ts";
@@ -150,6 +151,9 @@ export async function reconcileProjectDeletionOnce(
       ...(secretsDeleted.error.type === "project_secret_corruption" ? { invariant: true } : {}),
     };
   }
+  const oauthDeleted = await deleteProjectMcpOAuth(task, deps.projectSecrets.secrets, projectId);
+  if (oauthDeleted.isErr())
+    return { type: "retryable", message: "MCP OAuth secret cleanup unavailable" };
   const finalized = await deps.store.finalizeProjectDeletion(task, {
     projectId,
     expectedStateVersion: repaired.value.project.stateVersion,

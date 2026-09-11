@@ -1,4 +1,5 @@
 import { NoSimulationTask } from "determined";
+import { ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 
 const outsideTask = new NoSimulationTask("project secrets assertions", false);
@@ -8,6 +9,7 @@ import { makeProjectSecretsHarness } from "../testkit/project-secrets.ts";
 import { runDst } from "../testkit/sim.ts";
 import {
   deleteAllProjectSecrets,
+  deleteProjectSecret,
   getProjectSecretSnapshot,
   putProjectSecret,
 } from "./project-secrets.ts";
@@ -23,6 +25,98 @@ function expectSnapshot(
 }
 
 describe("project secrets (DST)", () => {
+  it("serializes MCP reference publication against deletion without dangling references", async () => {
+    await runDst({ name: "mcp-secret-reference-versus-delete", iterations: 80 }, async (sim) => {
+      const h = makeProjectSecretsHarness(PROJECT, OTHER);
+      (await putProjectSecret(outsideTask, h.deps, PROJECT, "TOKEN", "private"))._unsafeUnwrap();
+      let deleted = false;
+      let referenced = false;
+      const servers = [
+        {
+          name: "example",
+          url: "https://example.com/mcp",
+          description: "Example",
+          headers: { "X-Api-Key": { secret: "TOKEN" } },
+        },
+      ];
+      const result = await sim.runTasks([
+        {
+          name: "catalog-writer",
+          f: async (task) => {
+            referenced = (await h.pointers.replaceMcp(task, PROJECT, servers)).isOk();
+          },
+        },
+        {
+          name: "secret-deleter",
+          f: async (task) => {
+            const result = await deleteProjectSecret(task, h.deps, PROJECT, "TOKEN");
+            deleted = result.isOk();
+            if (result.isErr()) expect(result.error.type).toBe("project_secret_conflict");
+          },
+        },
+      ]);
+      expect(result.isOk()).toBe(true);
+      expect(deleted && referenced).toBe(false);
+      expect(deleted || referenced).toBe(true);
+      const snapshot = expectSnapshot(await getProjectSecretSnapshot(outsideTask, h.deps, PROJECT));
+      if (referenced) expect(snapshot["TOKEN"]).toBe("private");
+      else expect(snapshot["TOKEN"]).toBeUndefined();
+      expect(h.secrets.liveVersions("project-secrets")).toHaveLength(1);
+    });
+  });
+  it("rejects deletion when an MCP attaches after the replacement bundle was staged", async () => {
+    await runDst(
+      { name: "mcp-reference-during-staged-secret-delete", iterations: 30 },
+      async (sim) => {
+        const h = makeProjectSecretsHarness(PROJECT);
+        (await putProjectSecret(outsideTask, h.deps, PROJECT, "TOKEN", "private"))._unsafeUnwrap();
+        const commit = h.pointers.casWriteProjectSecretPointer.bind(h.pointers);
+        let staged = false;
+        let attached = false;
+        h.pointers.casWriteProjectSecretPointer = (...args) =>
+          new ResultAsync(
+            (async () => {
+              staged = true;
+              while (!attached)
+                await args[0].sleep(1, "wait for MCP attachment before deletion commit");
+              return commit(...args);
+            })(),
+          );
+        const result = await sim.runTasks([
+          {
+            name: "deleter",
+            f: async (task) => {
+              expect(
+                (await deleteProjectSecret(task, h.deps, PROJECT, "TOKEN"))._unsafeUnwrapErr().type,
+              ).toBe("project_secret_conflict");
+            },
+          },
+          {
+            name: "attacher",
+            f: async (task) => {
+              while (!staged) await task.sleep(1, "wait for staged deletion bundle");
+              (
+                await h.pointers.replaceMcp(task, PROJECT, [
+                  {
+                    name: "service",
+                    url: "https://example.com/mcp",
+                    description: "Service",
+                    headers: { Authorization: { secret: "TOKEN", prefix: "Bearer " } },
+                  },
+                ])
+              )._unsafeUnwrap();
+              attached = true;
+            },
+          },
+        ]);
+        expect(result.isOk()).toBe(true);
+        expect(
+          expectSnapshot(await getProjectSecretSnapshot(outsideTask, h.deps, PROJECT))["TOKEN"],
+        ).toBe("private");
+        expect(h.secrets.liveVersions("project-secrets")).toHaveLength(1);
+      },
+    );
+  });
   it("linearizes concurrent writers on same and different names", async () => {
     await runDst({ name: "project-secrets-concurrent-writers", iterations: 60 }, async (sim) => {
       const harness = makeProjectSecretsHarness(PROJECT, OTHER);

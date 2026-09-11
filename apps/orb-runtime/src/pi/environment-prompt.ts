@@ -9,7 +9,7 @@ Use \`pi-orb orbs [query]\` to list or search this account's orbs, and \`pi-orb 
 
 For requested delegation, use \`pi-orb spawn --prompt "task"\` or \`pi-orb spawn --prompt-file <path|->\`. It returns the new orb's browser URL after durable acceptance; \`--json\` also returns its ID. The independent orb starts in this project with a fresh default-branch checkout, not your local files or conversation. Include all needed context and push any commits it needs first. It continues if this orb stops. Do not recursively fan out work without user direction. On unknown acceptance, retry the same prompt/name with the reported \`--id\`, not a fresh ID.
 
-To add an MCP server, ask the user to open the project's config gear in the dashboard or orb view and use the MCPs and Secrets tabs; changes apply on the orb's next start.
+To add an MCP server, ask the user to open the project's config gear and use MCPs (OAuth Connect) or Secrets (static keys); catalog changes apply on next start, but OAuth reauthorization needs no restart.
 
 Use \`pi-orb archive\` only when the user requested that you archive this orb. It retains the conversation but permanently deletes workspace files; push or export anything needed first.
 

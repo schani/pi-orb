@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { type Browser, chromium, expect as expectPage } from "@playwright/test";
@@ -83,6 +84,8 @@ describe("frontend-only browser behavior", () => {
         .click();
       const dialog = page.getByRole("dialog");
       await dialog.getByRole("tab", { name: modal, exact: true }).click();
+      if (modal === "MCPs")
+        await dialog.getByRole("button", { name: "add server", exact: true }).click();
       const endpoint = dialog.getByLabel(modal === "MCPs" ? "Endpoint" : "secret value", {
         exact: true,
       });
@@ -95,9 +98,12 @@ describe("frontend-only browser behavior", () => {
       await expectPage(endpoint).toBeFocused();
       await expectPage(endpoint).toHaveValue("https://example.com/mcp");
       if (modal === "MCPs") {
-        await dialog.getByLabel("Description", { exact: true }).fill("Analytics");
+        const name = dialog
+          .getByRole("tabpanel", { name: "MCPs", exact: true })
+          .getByLabel("Name", { exact: true });
+        await name.fill("analytics");
         await page.clock.runFor(2000);
-        await expectPage(dialog.getByLabel("Description", { exact: true })).toBeFocused();
+        await expectPage(name).toBeFocused();
       }
       await page.keyboard.press("Escape");
       await expectPage(dialog).toHaveCount(0);
@@ -111,6 +117,7 @@ describe("frontend-only browser behavior", () => {
     async (hash) => {
       const page = await browser.newPage();
       let saved: unknown;
+      let tokenSaved = false;
       let releaseSecrets = () => {};
       let releaseSave = () => {};
       const saveAllowed = new Promise<void>((resolve) => {
@@ -122,7 +129,16 @@ describe("frontend-only browser behavior", () => {
       await page.route("**/api/v1/projects/*/secrets", async (route) => {
         const response = await route.fetch();
         await secretsLoaded;
-        await route.fulfill({ response });
+        const body = await response.json();
+        await route.fulfill({
+          response,
+          json: tokenSaved
+            ? {
+                ...body,
+                items: [...body.items, { name: "TOKEN", updatedAt: new Date(0).toISOString() }],
+              }
+            : body,
+        });
       });
       await page.route("**/api/v1/projects/*/mcp", async (route) => {
         if (route.request().method() === "PUT") {
@@ -136,6 +152,7 @@ describe("frontend-only browser behavior", () => {
       await page.route("**/api/v1/projects/*/secrets/TOKEN", async (route) => {
         expectPage(route.request().postDataJSON()).toEqual({ value: "test-value" });
         await saveAllowed;
+        tokenSaved = true;
         await route.fulfill({
           json: { revision: 1, items: [{ name: "TOKEN", updatedAt: new Date(0).toISOString() }] },
         });
@@ -160,19 +177,17 @@ describe("frontend-only browser behavior", () => {
         const mcp = dialog.getByRole("tabpanel", { name: "MCPs", exact: true });
         await expectPage(dialog.getByRole("tab", { name: "General", exact: true })).toBeFocused();
         await dialog.getByRole("tab", { name: "MCPs", exact: true }).click();
-        expectPage(JSON.parse(await mcp.getByLabel("Header bindings").inputValue())).toEqual({
-          Authorization: { secret: "TOKEN", prefix: "Bearer " },
-        });
-        await mcp.getByLabel("Provider", { exact: true }).selectOption("posthog");
-        await expectPage(mcp.getByLabel("Header bindings")).toHaveValue(/POSTHOG_KEY/);
-        await mcp.getByLabel("Provider", { exact: true }).selectOption("");
-        expectPage(JSON.parse(await mcp.getByLabel("Header bindings").inputValue())).toEqual({
-          Authorization: { secret: "TOKEN", prefix: "Bearer " },
-        });
+        await mcp.getByRole("button", { name: "add server", exact: true }).click();
+        await mcp.getByRole("button", { name: "preset", exact: true }).click();
+        await mcp.getByRole("button", { name: "PostHog", exact: true }).click();
+        await expectPage(mcp.getByLabel("Token secret", { exact: true })).toHaveValue(
+          "POSTHOG_KEY",
+        );
         await mcp.getByLabel("Name", { exact: true }).fill("custom");
         await mcp.getByLabel("Endpoint", { exact: true }).fill("https://example.com/mcp");
-        await mcp.getByLabel("Description", { exact: true }).fill("Analytics");
-        await mcp.getByLabel("Header bindings").fill('{"unfinished":');
+        await expectPage(mcp.getByLabel("Token secret", { exact: true })).toHaveValue(
+          "POSTHOG_KEY",
+        );
         await dialog.getByRole("tab", { name: "Secrets", exact: true }).click();
         const secrets = dialog.getByRole("tabpanel", { name: "Secrets", exact: true });
         await secrets.getByLabel("name", { exact: true }).fill("TOKEN");
@@ -200,23 +215,25 @@ describe("frontend-only browser behavior", () => {
         await expectPage(mcp.getByLabel("Endpoint", { exact: true })).toHaveValue(
           "https://example.com/mcp",
         );
-        await expectPage(mcp.getByLabel("Description", { exact: true })).toHaveValue("Analytics");
-        await expectPage(mcp.getByLabel("Header bindings")).toHaveValue('{"unfinished":');
-        const headers = { Authorization: { secret: "TOKEN", prefix: "Bearer " } };
-        await mcp.getByLabel("Header bindings").fill(JSON.stringify(headers));
-        await mcp.getByRole("button", { name: "save", exact: true }).click();
-        await expectPage(mcp.getByRole("button", { name: "edit", exact: true })).toBeVisible();
-        expectPage(JSON.parse(await mcp.getByLabel("Header bindings").inputValue())).toEqual(
-          headers,
+        await expectPage(mcp.getByLabel("Token secret", { exact: true })).toHaveValue(
+          "POSTHOG_KEY",
         );
-        await expectPage(mcp.getByLabel("Provider", { exact: true })).toHaveValue("");
+        const headers = { Authorization: { secret: "TOKEN", prefix: "Bearer " } };
+        await mcp.getByLabel("Token secret", { exact: true }).selectOption("TOKEN");
+        await mcp.getByRole("button", { name: "add server", exact: true }).click();
+        await expectPage(mcp.locator("summary").filter({ hasText: "custom" })).toBeVisible();
+        await expectPage(mcp.getByLabel("Token secret", { exact: true })).toHaveValue("TOKEN");
         expectPage(saved).toEqual({
           revision: 0,
           servers: [
             { name: "custom", url: "https://example.com/mcp", description: "Analytics", headers },
           ],
         });
-        await mcp.getByRole("button", { name: "edit", exact: true }).click();
+        const summary = mcp.locator("summary").filter({ hasText: "custom" });
+        await expectPage(summary).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expectPage(mcp.getByLabel("Description", { exact: true })).toBeHidden();
+        await page.keyboard.press("Enter");
         await mcp.getByLabel("Description", { exact: true }).fill("Edited draft");
         const mcpTab = dialog.getByRole("tab", { name: "MCPs", exact: true });
         await mcpTab.focus();
@@ -242,6 +259,168 @@ describe("frontend-only browser behavior", () => {
       }
     },
   );
+
+  it("exercises the real ledger UI, fixture OAuth, disclosure ownership and consistent tab spacing", async () => {
+    const page = await browser.newPage();
+    const projectId = randomUUID();
+    const connectionId = randomUUID();
+    try {
+      const created = await page.request.post(`${origin}/api/v1/projects`, {
+        data: {
+          id: projectId,
+          name: "MCP ledger test",
+          repositoryUrl: "https://github.com/example/ledger",
+        },
+      });
+      expectPage(created.status()).toBe(201);
+      const secretCreated = await page.request.put(
+        `${origin}/api/v1/projects/${projectId}/secrets/TOKEN`,
+        { data: { value: "fixture-token" } },
+      );
+      expectPage(secretCreated.status()).toBe(200);
+      expectPage(
+        (
+          await page.request.put(`${origin}/api/v1/projects/${projectId}/secrets/EXTRA`, {
+            data: { value: "extra-fixture" },
+          })
+        ).status(),
+      ).toBe(200);
+      const seeded = await page.request.put(`${origin}/api/v1/projects/${projectId}/mcp`, {
+        data: {
+          revision: 0,
+          servers: [
+            {
+              name: "alpha",
+              url: "https://example.com/mcp",
+              description: "Alpha",
+              headers: {},
+              oauth: { id: connectionId },
+            },
+            {
+              name: "beta",
+              url: "https://example.org/mcp",
+              description: "Beta",
+              headers: { Authorization: { secret: "TOKEN", prefix: "Bearer " } },
+            },
+          ],
+        },
+      });
+      expectPage(seeded.status()).toBe(200);
+      const blocked = await page.request.delete(
+        `${origin}/api/v1/projects/${projectId}/secrets/TOKEN`,
+      );
+      expectPage(blocked.status()).toBe(409);
+      expectPage((await blocked.json()).error.message).toContain("beta");
+      await page.goto(`${origin}/#/projects/${projectId}/mcp`);
+      const dialog = page.getByRole("dialog");
+      const mcp = dialog.getByRole("tabpanel", { name: "MCPs", exact: true });
+      const alpha = mcp
+        .locator("details")
+        .filter({ has: page.locator("summary", { hasText: "alpha" }) });
+      const beta = mcp
+        .locator("details")
+        .filter({ has: page.locator("summary", { hasText: "beta" }) });
+      await expectPage(alpha.locator("summary")).toContainText("authorization required");
+      await expectPage(mcp.locator(".mcp-add-heading")).toHaveCount(0);
+      await alpha.locator("summary").focus();
+      await page.keyboard.press("Enter");
+      await alpha.getByLabel("Description", { exact: true }).fill("Kept while collapsed");
+      await beta.locator("summary").click();
+      await expectPage(mcp.locator("details[open]")).toHaveCount(1);
+      await alpha.locator("summary").click();
+      await expectPage(alpha.getByLabel("Description", { exact: true })).toHaveValue(
+        "Kept while collapsed",
+      );
+      await alpha.getByRole("button", { name: "connect", exact: true }).click();
+      await expectPage(page).toHaveURL(/mcp-preview-consent=/);
+      await expectPage(alpha.locator("summary")).toContainText("connected");
+      await alpha.locator("summary").click();
+      await alpha.getByRole("button", { name: "disconnect", exact: true }).click();
+      await expectPage(alpha.locator("summary")).toContainText("authorization required");
+      await mcp
+        .locator(".mcp-add-area")
+        .getByRole("button", { name: "add server", exact: true })
+        .click();
+      const add = mcp.locator(".mcp-add-area");
+      await add.getByLabel("Name", { exact: true }).fill("new-service");
+      await add.getByLabel("Endpoint", { exact: true }).fill("https://example.net/mcp");
+      await add.getByRole("button", { name: "add & connect", exact: true }).click();
+      await expectPage(mcp.locator("summary").filter({ hasText: "new-service" })).toContainText(
+        "connected",
+      );
+      await dialog.getByRole("tab", { name: "Secrets", exact: true }).click();
+      const secretRow = dialog
+        .getByRole("tabpanel", { name: "Secrets", exact: true })
+        .locator(".project-secret-row")
+        .filter({ hasText: "TOKEN" });
+      await expectPage(secretRow).toContainText("used by beta");
+      await expectPage(
+        secretRow.getByRole("button", { name: "remove", exact: true }),
+      ).toBeDisabled();
+      await expectPage(
+        secretRow.getByRole("button", { name: "replace", exact: true }),
+      ).toBeEnabled();
+      await dialog.getByRole("tab", { name: "MCPs", exact: true }).click();
+      await beta.locator("summary").click();
+      const tokenSelect = beta.getByLabel("Token secret", { exact: true });
+      await expectPage(tokenSelect).toHaveJSProperty("tagName", "SELECT");
+      await expectPage(tokenSelect.locator('option[value="TOKEN"]')).toBeEnabled();
+      await expectPage(tokenSelect.locator("option")).toHaveText([
+        "Select a secret",
+        "EXTRA",
+        "TOKEN",
+      ]);
+      const spacing = [];
+      for (const tab of ["MCPs", "Secrets", "General"]) {
+        await dialog.getByRole("tab", { name: tab, exact: true }).click();
+        const body = dialog
+          .getByRole("tabpanel", { name: tab, exact: true })
+          .locator(".project-secrets-body");
+        spacing.push(
+          await body.evaluate((el) => {
+            const css = el.ownerDocument.defaultView?.getComputedStyle(el);
+            return [css?.paddingTop, css?.paddingRight, css?.paddingBottom, css?.paddingLeft];
+          }),
+        );
+      }
+      expectPage(spacing).toEqual(Array(3).fill(["8px", "10px", "10px", "10px"]));
+      const current = await (
+        await page.request.get(`${origin}/api/v1/projects/${projectId}/mcp`)
+      ).json();
+      expectPage(
+        (
+          await page.request.put(`${origin}/api/v1/projects/${projectId}/mcp`, {
+            data: {
+              ...current,
+              servers: current.servers.filter((s: { name: string }) => s.name !== "beta"),
+            },
+          })
+        ).status(),
+      ).toBe(200);
+      await dialog.getByRole("tab", { name: "Secrets", exact: true }).click();
+      await expectPage(
+        secretRow.getByRole("button", { name: "remove", exact: true }),
+      ).toBeEnabled();
+      page.once("dialog", (dialog) => dialog.accept());
+      await secretRow.getByRole("button", { name: "remove", exact: true }).click();
+      await expectPage(secretRow).toHaveCount(0);
+      expectPage(
+        (
+          await page.request.put(`${origin}/api/v1/projects/${projectId}/mcp`, {
+            data: { ...current, revision: current.revision + 1 },
+          })
+        ).status(),
+      ).toBe(409);
+      await dialog.getByRole("tab", { name: "MCPs", exact: true }).click();
+      await page.setViewportSize({ width: 390, height: 844 });
+      expectPage(
+        await dialog.evaluate((el) => el.getBoundingClientRect().width),
+      ).toBeLessThanOrEqual(366);
+    } finally {
+      await page.request.delete(`${origin}/api/v1/projects/${projectId}`);
+      await page.close();
+    }
+  });
 
   it.each(["", ORB_HASH])(
     "shares project header and validates General settings at %s",

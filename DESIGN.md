@@ -113,7 +113,7 @@ Subsystem designs:
 - [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard Command-K Find architecture, selected Index card design, and presentation study
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
 - [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
-- [docs/mcp.md](docs/mcp.md) — project-scoped remote MCP configuration, static secret-backed headers, first-party Pi tools, DST-first direct transport, and provider qualification
+- [docs/mcp.md](docs/mcp.md) — project-scoped remote MCP configuration, static secret-backed headers, connection-scoped OAuth broker, first-party Pi tools, DST-first direct transport, and provider qualification
 - [docs/orb-setup-hook.md](docs/orb-setup-hook.md) — repository-owned `.agents/setup` / `.agents/resume` boot hooks, matched to Amp's convention: triggers per compute incarnation, identity-free setup, user-visible failure
 - [docs/workload-identity.md](docs/workload-identity.md) — requirements for orb-issued OIDC identity and keyless federation with cloud providers and private services
 - [docs/workload-identity-recipes.md](docs/workload-identity-recipes.md) — relying-party integration recipes for that identity: GCP workload identity federation, AWS web-identity roles, and generic OIDC verification

@@ -262,6 +262,13 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
         })
       ).status,
     ).toBe(200);
+    const blockedDeletion = await api(
+      cp.baseUrl,
+      "DELETE",
+      `/api/v1/projects/${project}/secrets/MCP_KEY`,
+    );
+    expect(blockedDeletion.status).toBe(409);
+    expect(JSON.stringify(blockedDeletion.body)).toContain("used by MCP fixture");
     expect((await api(cp.baseUrl, "GET", `/api/v1/projects/${other}/mcp`)).body).toEqual({
       revision: 0,
       servers: [],
@@ -405,6 +412,24 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
       revision: 2,
       servers: [],
     });
+    expect(
+      (await api(cp.baseUrl, "DELETE", `/api/v1/projects/${project}/secrets/MCP_KEY`)).status,
+    ).toBe(200);
+    expect(
+      (
+        await api(cp.baseUrl, "PUT", `/api/v1/projects/${project}/mcp`, {
+          revision: 2,
+          servers: [
+            {
+              name: "missing",
+              description: "Missing secret",
+              url: "https://example.com/mcp",
+              headers: { Authorization: { secret: "MCP_KEY", prefix: "Bearer " } },
+            },
+          ],
+        })
+      ).status,
+    ).toBe(409);
   } catch (error) {
     console.error(cp.logs.join(""));
     console.error("MCP requests", JSON.stringify(calls));

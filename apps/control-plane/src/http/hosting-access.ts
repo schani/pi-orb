@@ -165,7 +165,11 @@ export function createHostingAccessPolicy(
         return { kind: "reject", reason: "files_wrong_host" };
       }
 
-      if (isProtectedAppRequest(path, request.upgrade)) {
+      // OAuth returns by cross-site navigation. Only this GET is exempt;
+      // its single-use state, browser cookie and PKCE own authorization.
+      const oauthCallback =
+        method === "GET" && path === "/api/v1/mcp/oauth/callback" && request.upgrade === undefined;
+      if (isProtectedAppRequest(path, request.upgrade) && !oauthCallback) {
         if (request.origin !== undefined) {
           const origin = parseOrigin(request.origin, "trustedBrowserOrigins");
           if (origin.isErr()) return { kind: "reject", reason: "untrusted_origin" };

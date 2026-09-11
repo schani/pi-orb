@@ -7,6 +7,10 @@ import {
   ClientFrameSchema,
   EnqueueOrbMessageRequestSchema,
   type HistoryRecord,
+  type McpCatalog,
+  McpCatalogSchema,
+  mcpSecretUsers,
+  missingMcpSecrets,
   type OrbHistoryView,
   type OrbMessageView,
   type OrbView,
@@ -40,6 +44,8 @@ interface MockState {
   startupTimers: Map<string, NodeJS.Timeout>;
   projectSecrets: Map<string, Map<string, { value: string; updatedAt: string }>>;
   projectSecretRevisions: Map<string, number>;
+  projectMcp: Map<string, McpCatalog>;
+  mcpGrants: Set<string>;
 }
 
 function initialState(): MockState {
@@ -357,12 +363,48 @@ function initialState(): MockState {
       [
         PROJECT_ID,
         new Map([
+          ["POSTHOG_KEY", { value: "fixture-posthog-secret", updatedAt: createdAt }],
+          ["MCP_TOKEN", { value: "fixture-mcp-secret", updatedAt: createdAt }],
           ["NPM_TOKEN", { value: "fixture-npm-secret", updatedAt: createdAt }],
           ["SENTRY_AUTH_TOKEN", { value: "fixture-sentry-secret", updatedAt: createdAt }],
         ]),
       ],
     ]),
     projectSecretRevisions: new Map([[PROJECT_ID, 1]]),
+    projectMcp: new Map([
+      [
+        PROJECT_ID,
+        {
+          revision: 1,
+          servers: [
+            {
+              name: "cloudflare",
+              url: "https://mcp.cloudflare.com/mcp",
+              description: "Cloudflare MCP",
+              headers: {},
+              oauth: { id: "10000000-0000-4000-8000-000000000001" },
+            },
+            {
+              name: "datadog",
+              url: "https://mcp.us5.datadoghq.com/v1/mcp",
+              description: "Datadog MCP",
+              headers: {},
+              oauth: { id: "10000000-0000-4000-8000-000000000002" },
+            },
+            {
+              name: "posthog",
+              url: "https://mcp.posthog.com/mcp",
+              description: "PostHog MCP",
+              headers: { Authorization: { secret: "POSTHOG_KEY", prefix: "Bearer " } },
+            },
+          ],
+        },
+      ],
+    ]),
+    mcpGrants: new Set([
+      `${PROJECT_ID}/10000000-0000-4000-8000-000000000001`,
+      `${PROJECT_ID}/10000000-0000-4000-8000-000000000002`,
+    ]),
   };
 }
 
@@ -426,6 +468,102 @@ async function handleApi(
     sendJson(response, 200, { items: [...state.projects.values()] });
     return true;
   }
+  const mcpRoute =
+    /^\/api\/v1\/projects\/([^/]+)\/mcp(?:\/(describe)|\/([^/]+)\/oauth(?:\/(connect|disconnect))?)?$/.exec(
+      path,
+    );
+  if (mcpRoute) {
+    const projectId = decodeURIComponent(mcpRoute[1] ?? "");
+    if (!state.projects.has(projectId)) {
+      notFound(response);
+      return true;
+    }
+    const catalog = state.projectMcp.get(projectId) ?? { revision: 0, servers: [] };
+    if (mcpRoute[2] === "describe" && request.method === "POST") {
+      const body = await readJson(request);
+      const name =
+        body && typeof body === "object" && "name" in body && typeof body.name === "string"
+          ? body.name
+          : "Fixture";
+      sendJson(response, 200, { description: `${name} MCP` });
+      return true;
+    }
+    const id = mcpRoute[3];
+    if (id) {
+      if (!catalog.servers.some((server) => server.oauth?.id === id)) {
+        notFound(response);
+        return true;
+      }
+      const key = `${projectId}/${id}`;
+      if (request.method === "POST" && mcpRoute[4] === "connect") {
+        state.mcpGrants.add(key);
+        sendJson(response, 200, {
+          url: `/?mcp-preview-consent=${randomUUID()}#/projects/${encodeURIComponent(projectId)}/mcp`,
+        });
+        return true;
+      }
+      if (request.method === "POST" && mcpRoute[4] === "disconnect") state.mcpGrants.delete(key);
+      else if (request.method !== "GET" || mcpRoute[4]) {
+        notFound(response);
+        return true;
+      }
+      sendJson(response, 200, { status: state.mcpGrants.has(key) ? "connected" : "auth_required" });
+      return true;
+    }
+    if (request.method === "GET") {
+      sendJson(response, 200, catalog);
+      return true;
+    }
+    if (request.method === "PUT") {
+      const body = await readJson(request);
+      if (
+        !Check(McpCatalogSchema, body) ||
+        new Set(body.servers.map((s) => s.name)).size !== body.servers.length
+      ) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "Invalid MCP catalog", retryable: false },
+        });
+        return true;
+      }
+      if (body.revision !== catalog.revision) {
+        sendJson(response, 409, {
+          error: {
+            code: "conflict",
+            message: "MCP catalog changed; reload before saving",
+            retryable: false,
+          },
+        });
+        return true;
+      }
+      const missing = missingMcpSecrets(
+        body.servers,
+        Object.fromEntries(state.projectSecrets.get(projectId) ?? []),
+      );
+      if (missing.length) {
+        sendJson(response, 409, {
+          error: {
+            code: "conflict",
+            message: `MCP secrets don't exist: ${missing.join(", ")}`,
+            retryable: false,
+          },
+        });
+        return true;
+      }
+      for (const old of catalog.servers)
+        if (
+          old.oauth &&
+          !body.servers.some((s) => s.oauth?.id === old.oauth?.id && s.url === old.url)
+        )
+          state.mcpGrants.delete(`${projectId}/${old.oauth.id}`);
+      const next = { ...body, revision: catalog.revision + 1 };
+      state.projectMcp.set(projectId, next);
+      sendJson(response, 200, next);
+      return true;
+    }
+    notFound(response);
+    return true;
+  }
+
   const projectSecretsRoute = /^\/api\/v1\/projects\/([^/]+)\/secrets(?:\/([^/]+))?$/.exec(path);
   if (projectSecretsRoute !== null) {
     const projectId = decodeURIComponent(projectSecretsRoute[1] ?? "");
@@ -482,6 +620,17 @@ async function handleApi(
       return true;
     }
     if (method === "DELETE" && secretName !== null) {
+      const users = mcpSecretUsers(state.projectMcp.get(projectId)?.servers ?? [], secretName);
+      if (users.length) {
+        sendJson(response, 409, {
+          error: {
+            code: "conflict",
+            message: `Cannot delete ${secretName}: used by MCP ${users.join(", ")}`,
+            retryable: false,
+          },
+        });
+        return true;
+      }
       if (secrets.delete(secretName)) {
         state.projectSecretRevisions.set(
           projectId,
@@ -564,6 +713,9 @@ async function handleApi(
         state.projects.delete(projectId);
         state.projectSecrets.delete(projectId);
         state.projectSecretRevisions.delete(projectId);
+        state.projectMcp.delete(projectId);
+        for (const grant of state.mcpGrants)
+          if (grant.startsWith(`${projectId}/`)) state.mcpGrants.delete(grant);
       }, 1_000);
       sendJson(response, 202, deleting);
       return true;

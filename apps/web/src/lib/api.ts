@@ -70,7 +70,35 @@ function describeThrown(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-import { type McpCatalog, McpCatalogSchema, type McpConfig } from "@pi-orb/protocol";
+import {
+  type McpCatalog,
+  McpCatalogSchema,
+  type McpConfig,
+  McpOAuthStartSchema,
+  McpOAuthStatusSchema,
+} from "@pi-orb/protocol";
+
+export function getMcpOAuthStatus(projectId: string, id: string) {
+  return apiFetch(
+    McpOAuthStatusSchema,
+    `/api/v1/projects/${encodeURIComponent(projectId)}/mcp/${encodeURIComponent(id)}/oauth`,
+    { cache: "no-store" },
+  );
+}
+export function connectMcpOAuth(projectId: string, id: string) {
+  return apiFetch(
+    McpOAuthStartSchema,
+    `/api/v1/projects/${encodeURIComponent(projectId)}/mcp/${encodeURIComponent(id)}/oauth/connect`,
+    { method: "POST", headers: jsonHeaders, body: "{}" },
+  );
+}
+export function disconnectMcpOAuth(projectId: string, id: string) {
+  return apiFetch(
+    McpOAuthStatusSchema,
+    `/api/v1/projects/${encodeURIComponent(projectId)}/mcp/${encodeURIComponent(id)}/oauth/disconnect`,
+    { method: "POST", headers: jsonHeaders, body: "{}" },
+  );
+}
 
 export function getProjectMcp(projectId: string) {
   return apiFetch(McpCatalogSchema, `/api/v1/projects/${encodeURIComponent(projectId)}/mcp`, {

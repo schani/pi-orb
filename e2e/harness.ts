@@ -376,12 +376,13 @@ export async function startControlPlane(options: {
   authDir?: string;
   hostingRoot?: string;
   webDist?: string;
+  entry?: string;
 }): Promise<ControlPlaneHandle> {
   const authDir = options.authDir ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const ownedHostingRoot = options.hostingRoot === undefined;
   const hostingRoot = options.hostingRoot ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   const logs: string[] = [];
-  const child = spawn("node", ["apps/control-plane/src/main.ts"], {
+  const child = spawn("node", [options.entry ?? "apps/control-plane/src/main.ts"], {
     cwd: join(import.meta.dirname, ".."),
     env: {
       ...process.env,

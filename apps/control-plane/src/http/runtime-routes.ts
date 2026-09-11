@@ -40,6 +40,7 @@ import {
 import type { MintError, StoreError } from "../domain/errors.ts";
 import type { CommandError } from "../domain/lifecycle.ts";
 import type { McpStore } from "../domain/mcp.ts";
+import type { McpOAuth } from "../domain/mcp-oauth.ts";
 import type { OrbRow } from "../domain/orb.ts";
 import { generateOrbName, normalizeOrbName } from "../domain/orb-naming.ts";
 import type {
@@ -53,6 +54,7 @@ import type {
 } from "../domain/ports.ts";
 import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
+import { oauthBinding, sendOAuthError } from "./mcp-oauth-routes.ts";
 import { sendMcpError } from "./mcp-routes.ts";
 
 export interface RuntimeRouteDeps {
@@ -76,6 +78,7 @@ export interface RuntimeRouteDeps {
   readonly mint: MintDeps;
   readonly projectSecrets: ProjectSecretsDeps;
   readonly mcp?: McpStore;
+  readonly mcpOAuth?: McpOAuth;
 }
 
 const unauthorized: TokenErrorBody = { error: "unauthorized" };
@@ -336,6 +339,64 @@ export function registerRuntimeRoutes(
 
   if (deps.mcp) {
     const mcp = deps.mcp;
+    if (deps.mcpOAuth) {
+      const oauth = deps.mcpOAuth;
+      app.post<{ Params: { id: string }; Body: { url?: string; rejectedGeneration?: number } }>(
+        `${MCP_RUNTIME_PATH}/:id/token`,
+        async (request, reply) => {
+          reply.header("cache-control", "no-store");
+          const auth = await authenticate(request.headers.authorization);
+          if (auth.kind === "unavailable")
+            return reply.code(503).send({
+              error: { code: "unavailable", message: "MCP OAuth unavailable", retryable: true },
+            });
+          if (auth.kind !== "orb") return sendUnauthorized(reply);
+          const binding = await oauthBinding(task, mcp, auth.orb.projectId, request.params.id);
+          if (binding.isErr()) return sendOAuthError(reply, binding.error);
+          if (
+            !request.body ||
+            request.body.url !== binding.value.url ||
+            (request.body.rejectedGeneration !== undefined &&
+              !Number.isSafeInteger(request.body.rejectedGeneration))
+          )
+            return reply.code(409).send({
+              error: {
+                code: "conflict",
+                message: "MCP configuration changed; restart orb",
+                retryable: false,
+              },
+            });
+          const result = await oauth.token(
+            task,
+            binding.value,
+            request.body.rejectedGeneration === undefined
+              ? { reason: "startup" }
+              : { reason: "rejected", staleGeneration: request.body.rejectedGeneration },
+          );
+          if (result.isErr())
+            return sendOAuthError(
+              reply,
+              result.error,
+              `${deps.appOrigin}/#/projects/${binding.value.projectId}/mcp`,
+            );
+          const stillAuthorized = await authenticate(request.headers.authorization);
+          if (stillAuthorized.kind === "unavailable")
+            return reply.code(503).send({
+              error: { code: "unavailable", message: "MCP OAuth unavailable", retryable: true },
+            });
+          if (
+            stillAuthorized.kind !== "orb" ||
+            stillAuthorized.orb.projectId !== binding.value.projectId
+          )
+            return sendUnauthorized(reply);
+          return reply.send({
+            accessToken: result.value.accessToken,
+            expiresAt: result.value.expiresAt,
+            generation: result.value.generation,
+          });
+        },
+      );
+    }
     app.get(MCP_RUNTIME_PATH, async (request, reply) => {
       const auth = await authenticate(request.headers.authorization);
       if (auth.kind === "unavailable")

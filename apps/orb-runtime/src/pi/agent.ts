@@ -43,6 +43,7 @@ import type { HookSpawner } from "../hooks/ports.ts";
 import { BootHookRunner } from "../hooks/runner.ts";
 import { NodeHookSpawner } from "../hooks/spawner.ts";
 import { fetchMcpCatalog, resolveMcpHeaders } from "../mcp/boot.ts";
+import { HttpMcpTokenEndpoint, McpCredentialResolver } from "../mcp/oauth.ts";
 import { McpConnection } from "../mcp/service.ts";
 import { McpTools } from "../mcp/tools.ts";
 import { HttpMcpTransport } from "../mcp/transport.ts";
@@ -506,7 +507,15 @@ export class PiOrbAgent {
         catalog.value.servers.map((config) => {
           const headers = resolveMcpHeaders(config, projectSecrets.value.values);
           const transport = headers.isOk()
-            ? new HttpMcpTransport(config.url, headers.value)
+            ? new HttpMcpTransport(
+                config.url,
+                headers.value,
+                config.oauth
+                  ? new McpCredentialResolver(
+                      new HttpMcpTokenEndpoint(broker, config.oauth.id, config.url),
+                    )
+                  : undefined,
+              )
             : { connect: async () => err(headers.error) };
           return [config.name, new McpConnection(mcpTask, transport)] as const;
         }),

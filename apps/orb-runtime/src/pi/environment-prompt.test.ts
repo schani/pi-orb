@@ -37,7 +37,7 @@ describe("runtime environment prompt", () => {
 
   it("explains browser-owned MCP setup even without configured servers", () => {
     expect(environmentPrompt).toContain(
-      "To add an MCP server, ask the user to open the project's config gear in the dashboard or orb view and use the MCPs and Secrets tabs; changes apply on the orb's next start.",
+      "To add an MCP server, ask the user to open the project's config gear and use MCPs (OAuth Connect) or Secrets (static keys); catalog changes apply on next start, but OAuth reauthorization needs no restart.",
     );
     expect(environmentPrompt).not.toContain("pi-orb mcp add");
   });

@@ -11,12 +11,14 @@ export function ProjectConfigModal({
   project,
   onClose,
   onChanged,
+  initialTabIndex = 0,
 }: {
   project: ProjectView;
+  initialTabIndex?: number;
   onClose: () => void;
   onChanged: (project: ProjectView) => void | Promise<void>;
 }) {
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(initialTabIndex);
   const [saving, updateSaving] = useState(false);
   const dialog = useRef<HTMLElement>(null);
   const setSaving = (next: boolean) => {
@@ -73,9 +75,11 @@ export function ProjectConfigModal({
         <header className="project-secrets-header">
           <div>
             <h2 id="project-config-title">Config for {project.name}</h2>
-            <p>
-              {tab === 0 ? "Repository applies to new checkouts" : "Changes apply on next start"}
-            </p>
+            {tab !== 1 && (
+              <p>
+                {tab === 0 ? "Repository applies to new checkouts" : "Changes apply on next start"}
+              </p>
+            )}
           </div>
           <button
             className="project-secrets-close"
@@ -91,7 +95,7 @@ export function ProjectConfigModal({
           {TABS.map((name, index) => (
             <button
               key={name}
-              ref={index === 0 ? initialTab : undefined}
+              ref={index === initialTabIndex ? initialTab : undefined}
               type="button"
               role="tab"
               id={`project-config-tab-${index}`}
@@ -142,8 +146,10 @@ export function ProjectConfigModal({
           hidden={tab !== 1}
         >
           <ProjectMcpSettings
+            key={project.id}
             projectId={project.id}
             projectName={project.name}
+            active={tab === 1}
             saving={saving}
             setSaving={setSaving}
           />
@@ -154,7 +160,13 @@ export function ProjectConfigModal({
           aria-labelledby="project-config-tab-2"
           hidden={tab !== 2}
         >
-          <ProjectSecretsSettings project={project} saving={saving} setSaving={setSaving} />
+          <ProjectSecretsSettings
+            key={project.id}
+            project={project}
+            active={tab === 2}
+            saving={saving}
+            setSaving={setSaving}
+          />
         </div>
       </section>
     </div>

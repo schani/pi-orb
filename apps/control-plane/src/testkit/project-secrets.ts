@@ -1,3 +1,4 @@
+import { type McpConfig, mcpSecretUsers, missingMcpSecrets } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import type {
@@ -44,6 +45,27 @@ function gate<T>(
 
 export class FakeProjectSecretPointerStore implements ProjectSecretPointerStore {
   private readonly rows = new Map<string, ProjectSecretPointerRow>();
+  private readonly catalogs = new Map<string, readonly McpConfig[]>();
+
+  catalog(projectId: string): readonly McpConfig[] {
+    return this.catalogs.get(projectId) ?? [];
+  }
+
+  replaceMcp(task: SimulationTask, projectId: string, servers: readonly McpConfig[]) {
+    return gate(task, FAILPOINTS.storeWrite, "MCP reference commit", () => {
+      if (
+        this.states.get(projectId) !== "active" ||
+        missingMcpSecrets(servers, this.rows.get(projectId)?.entries ?? {}).length
+      )
+        return false;
+      this.catalogs.set(projectId, servers);
+      return true;
+    }).andThen((committed) =>
+      committed
+        ? okAsync(undefined)
+        : errAsync({ type: "project_conflict" as const, reason: "concurrent_change" as const }),
+    );
+  }
   private readonly states = new Map<string, "active" | "deleting">();
   private readonly writes = new Map<string, ProjectSecretPointerRow[]>();
 
@@ -109,6 +131,19 @@ export class FakeProjectSecretPointerStore implements ProjectSecretPointerStore 
       if ((current?.rowVersion ?? null) !== expectedRowVersion) {
         return errAsync({ type: "project_secret_pointer_conflict" as const });
       }
+      const removed = Object.keys(current?.entries ?? {}).filter(
+        (name) =>
+          !Object.hasOwn(next.entries, name) &&
+          mcpSecretUsers(this.catalog(projectId), name).length,
+      );
+      if (removed.length)
+        return errAsync({
+          type: "project_secret_in_use" as const,
+          secrets: removed,
+          servers: [
+            ...new Set(removed.flatMap((name) => mcpSecretUsers(this.catalog(projectId), name))),
+          ],
+        });
       const row: ProjectSecretPointerRow = {
         projectId,
         rowVersion: (current?.rowVersion ?? 0) + 1,

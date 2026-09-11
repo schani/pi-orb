@@ -58,6 +58,10 @@ DELETE /api/v1/projects/:projectId/secrets/:name
 GET  /api/v1/projects/:projectId/mcp
 PUT  /api/v1/projects/:projectId/mcp
 POST /api/v1/projects/:projectId/mcp/describe
+GET  /api/v1/projects/:projectId/mcp/:id/oauth
+POST /api/v1/projects/:projectId/mcp/:id/oauth/connect
+POST /api/v1/projects/:projectId/mcp/:id/oauth/disconnect
+GET  /api/v1/mcp/oauth/callback
 
 GET  /api/v1/projects/:projectId/orbs
 POST /api/v1/projects/:projectId/orbs
@@ -214,11 +218,13 @@ interface OrbHistoryView {
 
 ### Project secrets (decided and implemented 2026-08-28)
 
-Projects gain one write-only secret inventory inherited by every current and future orb. `GET .../secrets` returns revision, names, and update timestamps only; `PUT .../secrets/:name` accepts `{ value }` to create or replace a POSIX-named entry; `DELETE` removes it. No browser response reveals a current value or value-derived fingerprint. Mutations conflict once project deletion starts. The runtime receives the complete resolved set through the separate bearer-authenticated boot snapshot in `docs/credentials.md`; browser APIs never call that route. Missing projects preserve the requested URL and return the ordinary project-specific `404`.
+Projects gain one write-only secret inventory inherited by every current and future orb. `GET .../secrets` returns revision, names, and update timestamps only; `PUT .../secrets/:name` accepts `{ value }` to create or replace a POSIX-named entry; `DELETE` removes it unless a header in the project's saved MCP catalog references it; then it returns HTTP 409 naming the using servers. Replacement remains allowed. The check and pointer publication share a project-row transaction lock with MCP catalog writes. No browser response reveals a current value or value-derived fingerprint. Mutations conflict once project deletion starts. The runtime receives the complete resolved set through the separate bearer-authenticated boot snapshot in `docs/credentials.md`; browser APIs never call that route. Missing projects preserve the requested URL and return the ordinary project-specific `404`.
 
 ### Project MCP (implemented 2026-09-08)
 
-`GET .../mcp` returns `{revision, servers}` with secret references, never resolved headers. `PUT` atomically replaces that project's catalog using the expected revision; deletion-fenced or stale writes return 409, missing projects 404, malformed/duplicate entries 400, and unavailable storage 503. `POST .../mcp/describe` accepts one configuration and returns a bounded `{description}` after authenticated public-HTTPS inspection using project secrets. It does not persist the candidate or perform OAuth. All successful responses are non-cacheable. The separate incarnation-authenticated `GET /runtime/v1/mcp` returns only the caller's project catalog; it grants no configuration-write authority. Exact configuration fields, limits, probe network restrictions and restart-only adoption: `docs/mcp.md`.
+`GET .../mcp` returns `{revision, servers}` with secret references, never resolved headers. `PUT` atomically replaces that project's catalog using the expected revision; deletion-fenced, stale, or missing-secret-reference writes return 409, missing projects 404, malformed/duplicate entries 400, and unavailable storage 503. `POST .../mcp/describe` accepts one configuration and returns a bounded `{description}` after authenticated public-HTTPS inspection using project secrets. It does not persist the candidate or perform OAuth. All successful responses are non-cacheable. The separate incarnation-authenticated `GET /runtime/v1/mcp` returns only the caller's project catalog; it grants no configuration-write authority. Exact configuration fields, limits, probe network restrictions and restart-only catalog adoption: `docs/mcp.md`.
+
+OAuth (implemented locally 2026-09-10) adds `oauth: {id}` to a catalog entry. Status returns `{status: "connected" | "pending" | "auth_required"}`; same-origin JSON `connect` starts a bounded browser ceremony and returns `{url}`, and `disconnect` fences the grant and returns `{status: "auth_required"}`. The stable callback is `${PI_ORB_APP_ORIGIN}/api/v1/mcp/oauth/callback`, with single-use hashed state, browser-cookie binding and PKCE. Success returns to the existing Config dialog at `/#/projects/:projectId/mcp`; callback validation failures redirect to a clean error page. Tokens and verifiers are never browser API data. The incarnation-authenticated `POST /runtime/v1/mcp/:id/token` derives the project, checks the current catalog ID/URL and reauthenticates after broker work; body `{url, rejectedGeneration?}`, response `{accessToken, expiresAt, generation}`. Authorization repair does not restart an existing orb or replay the failed MCP operation. Detailed storage, errors, safety, cleanup and provider gates: `docs/mcp.md`.
 
 ### Send-anytime messages (decided and implemented 2026-08-10)
 

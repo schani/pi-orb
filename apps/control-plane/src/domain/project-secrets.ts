@@ -249,6 +249,14 @@ async function mutateProjectSecret(
       await deps.secrets.destroySecret(task, PROJECT_SECRETS_PROVIDER, written.value.version);
       return err(fromProjectConflict(committed.error));
     }
+    if (committed.error.type === "project_secret_in_use") {
+      await deps.secrets.destroySecret(task, PROJECT_SECRETS_PROVIDER, written.value.version);
+      return err(
+        conflict(
+          `Cannot delete ${committed.error.secrets.join(", ")}: used by MCP ${committed.error.servers.join(", ")}`,
+        ),
+      );
+    }
     if (committed.error.type === "project_secret_pointer_conflict") {
       await deps.secrets.destroySecret(task, PROJECT_SECRETS_PROVIDER, written.value.version);
       continue;

@@ -110,10 +110,14 @@ export interface ProjectConflict {
 // ---------------------------------------------------------------------------
 // Project secrets (docs/credentials.md)
 
-/** CAS on one project's project-secret pointer lost to another writer. */
-export interface ProjectSecretPointerConflict {
-  readonly type: "project_secret_pointer_conflict";
-}
+/** Publication lost its CAS or would remove an MCP dependency under the project lock. */
+export type ProjectSecretPointerConflict =
+  | { readonly type: "project_secret_pointer_conflict" }
+  | {
+      readonly type: "project_secret_in_use";
+      readonly secrets: readonly string[];
+      readonly servers: readonly string[];
+    };
 
 export type ProjectSecretError =
   | { readonly type: "project_secret_not_found"; readonly message: string }

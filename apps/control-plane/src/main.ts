@@ -28,6 +28,7 @@ import {
 } from "./adapters/github-oauth/client.ts";
 import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
 import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
+import { createMcpOAuthFetch, SdkMcpOAuth } from "./adapters/mcp-oauth.ts";
 import { probeMcp } from "./adapters/mcp-probe.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
 import { readIssuerUrl } from "./adapters/oidc/issuer-url.ts";
@@ -64,6 +65,8 @@ import {
   type ReconcileTaskRunner,
   reconcileLoop,
 } from "./domain/loops.ts";
+import { McpOAuth, type McpOAuthProtocol } from "./domain/mcp-oauth.ts";
+import { mcpOAuthCleanupLoop } from "./domain/mcp-oauth-garbage.ts";
 import { spawnOrb } from "./domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
@@ -82,6 +85,7 @@ import {
 } from "./http/hosting-routes.ts";
 import { registerIssuerRoutes } from "./http/issuer-routes.ts";
 import { registerLiveProxy } from "./http/live-proxy.ts";
+import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./http/mcp-oauth-routes.ts";
 import { registerMcpRoutes } from "./http/mcp-routes.ts";
 import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
@@ -134,7 +138,9 @@ const { version: CONTROL_PLANE_VERSION }: { version: string } = createRequire(im
   "../package.json",
 );
 
-async function main(): Promise<void> {
+export async function main(
+  adapters: { mcpOAuthProtocol?: (callback: string) => McpOAuthProtocol } = {},
+): Promise<void> {
   const bootTask = new NoSimulationTask("boot", true);
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
   const databaseKind = env("PI_ORB_DATABASE_KIND", "postgresql");
@@ -469,6 +475,16 @@ async function main(): Promise<void> {
   };
 
   const app = Fastify({ logger: false });
+  const oauthNetwork = createMcpOAuthFetch();
+  const mcpOAuth = new McpOAuth(
+    database.mcpOAuth,
+    secrets,
+    adapters.mcpOAuthProtocol?.(`${appOrigin}${MCP_OAUTH_CALLBACK}`) ??
+      new SdkMcpOAuth(`${appOrigin}${MCP_OAUTH_CALLBACK}`, oauthNetwork.fetcher),
+  );
+  app.addHook("onClose", async () => {
+    await oauthNetwork.close();
+  });
   if (hostingRole && hostingAccess !== null)
     registerHostingAccessGuard(app, hostingAccess, appOrigin);
   // Commands issued over HTTP log their transitions too (docs/lifecycle.md).
@@ -494,6 +510,7 @@ async function main(): Promise<void> {
     // publishes keys and must not be able to change them
     // (docs/workload-identity.md).
     registerRoutes(app, httpTask, deps, viewConfig, systemView, signingKeyDeps);
+    registerMcpOAuthRoutes(app, httpTask, database.mcp, mcpOAuth, appOrigin);
     registerMcpRoutes(app, httpTask, database.mcp, async (projectId, config) => {
       const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);
       return snapshot.isErr()
@@ -526,6 +543,7 @@ async function main(): Promise<void> {
       nameLeaseMs: deps.nameLeaseMs,
       projectSecrets: deps.projectSecrets,
       mcp: database.mcp,
+      mcpOAuth,
       mint: {
         store: deps.store,
         // The signer reads the active key row per signature and caches only
@@ -669,6 +687,12 @@ async function main(): Promise<void> {
       projectDeletionLoop(new ControlPlaneTask("project-deletion"), deps, stop.signal),
       orphanSweepLoop(new ControlPlaneTask("sweeper"), deps, stop.signal),
       hostingCleanupLoop(new ControlPlaneTask("hosting-cleanup"), deps, stop.signal),
+      mcpOAuthCleanupLoop(
+        new ControlPlaneTask("mcp-credential-cleanup"),
+        database.mcpOAuth,
+        secrets,
+        stop.signal,
+      ),
     ];
     try {
       await Promise.all(loops);
@@ -683,4 +707,4 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) void main();

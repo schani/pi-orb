@@ -5,17 +5,21 @@ import { SessionRibbon } from "./components/SessionRibbon.tsx";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
+import { ProjectMcpPage } from "./pages/ProjectMcpPage.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage.tsx";
 
 export type Route =
   | { page: "projects"; focusedProjectId: string | null }
   | { page: "create_orb"; projectId: string }
+  | { page: "mcp"; projectId: string }
   | { page: "orb"; orbId: string }
   | { page: "not_found" };
 
 export function parseRoute(hash: string): Route {
   const path = hash.startsWith("#") ? hash.slice(1) : hash;
   if (path === "" || path === "/") return { page: "projects", focusedProjectId: null };
+  const mcpMatch = /^\/projects\/([^/]+)\/mcp$/.exec(path);
+  if (mcpMatch?.[1]) return { page: "mcp", projectId: mcpMatch[1] };
   const createMatch = /^\/projects\/([^/]+)\/orbs\/new$/.exec(path);
   const projectId = createMatch?.[1];
   if (projectId !== undefined) return { page: "create_orb", projectId };
@@ -40,7 +44,9 @@ function readHash(): string {
 function AppRoutes() {
   const hash = useSyncExternalStore(subscribeToHash, readHash);
   const route = parseRoute(hash);
-  return route.page === "projects" ? (
+  return route.page === "mcp" ? (
+    <ProjectMcpPage key={route.projectId} projectId={route.projectId} />
+  ) : route.page === "projects" ? (
     <ProjectsPage focusedProjectId={route.focusedProjectId} />
   ) : route.page === "create_orb" ? (
     <CreateOrbPage key={route.projectId} projectId={route.projectId} />
