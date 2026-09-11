@@ -63,6 +63,38 @@ describe("frontend-only browser behavior", () => {
     await vite?.close();
   });
 
+  it("opens the OAuth return dialog over the loaded dashboard and preserves it on close", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/#/projects/frontend-fixture-project/mcp`);
+      const dialog = page.getByRole("dialog");
+      await expectPage(dialog.getByRole("tab", { name: "MCPs", exact: true })).toBeFocused();
+      const dashboard = page.locator(".dashboard");
+      await expectPage(
+        dashboard.getByRole("link", { name: "Frontend Playground", exact: true }),
+      ).toBeVisible();
+      await dashboard.evaluate((element) => {
+        element.setAttribute("data-continuity", "retained");
+      });
+      await dialog.getByRole("button", { name: "Close project config" }).click();
+      await expectPage(page).toHaveURL(`${origin}/#/projects/frontend-fixture-project`);
+      await expectPage(dialog).toHaveCount(0);
+      await expectPage(dashboard).toHaveAttribute("data-continuity", "retained");
+      await page.goBack();
+      await expectPage(dialog.getByRole("tab", { name: "MCPs", exact: true })).toBeFocused();
+      await expectPage(dashboard).toHaveAttribute("data-continuity", "retained");
+      await page.goto(`${origin}/#/projects/missing-project/mcp`);
+      await expectPage(page.getByText("Project doesn't exist", { exact: true })).toBeVisible();
+      await expectPage(page).toHaveURL(`${origin}/#/projects/missing-project/mcp`);
+      await expectPage(dialog).toHaveCount(0);
+      await expectPage(
+        page.getByRole("link", { name: "Back to dashboard", exact: true }),
+      ).toBeVisible();
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each(["MCPs", "Secrets"])("keeps %s field focus across dashboard refreshes", async (modal) => {
     const page = await browser.newPage();
     await page.clock.install();

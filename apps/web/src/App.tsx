@@ -5,7 +5,6 @@ import { SessionRibbon } from "./components/SessionRibbon.tsx";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
-import { ProjectMcpPage } from "./pages/ProjectMcpPage.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage.tsx";
 
 export type Route =
@@ -44,10 +43,11 @@ function readHash(): string {
 function AppRoutes() {
   const hash = useSyncExternalStore(subscribeToHash, readHash);
   const route = parseRoute(hash);
-  return route.page === "mcp" ? (
-    <ProjectMcpPage key={route.projectId} projectId={route.projectId} />
-  ) : route.page === "projects" ? (
-    <ProjectsPage focusedProjectId={route.focusedProjectId} />
+  return route.page === "mcp" || route.page === "projects" ? (
+    <ProjectsPage
+      focusedProjectId={route.page === "mcp" ? route.projectId : route.focusedProjectId}
+      mcpConfigOpen={route.page === "mcp"}
+    />
   ) : route.page === "create_orb" ? (
     <CreateOrbPage key={route.projectId} projectId={route.projectId} />
   ) : route.page === "orb" ? (

@@ -7,6 +7,7 @@ import {
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
 import { Icon } from "../components/Icons.tsx";
+import { ProjectConfigModal } from "../components/ProjectConfigModal.tsx";
 import { ProjectHeader } from "../components/ProjectHeader.tsx";
 import { ProjectNewOrbLink } from "../components/ProjectNewOrbLink.tsx";
 import { StateTile } from "../components/StateTile.tsx";
@@ -122,9 +123,13 @@ function ProjectArchive({ items, ...entry }: Omit<OrbEntryProps, "orb"> & { item
 
 interface ProjectsPageProps {
   focusedProjectId?: string | null;
+  mcpConfigOpen?: boolean;
 }
 
-export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
+export function ProjectsPage({
+  focusedProjectId = null,
+  mcpConfigOpen = false,
+}: ProjectsPageProps) {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
   const [loadError, setLoadError] = useState<ApiError | null>(null);
   const [orbLists, setOrbLists] = useState<Record<string, OrbListState | undefined>>({});
@@ -231,8 +236,9 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
     }
     lastFocusedProjectIdRef.current = focusedProjectId;
     focusedProjectRef.current?.scrollIntoView({ block: "center" });
-    focusedProjectRef.current?.querySelector<HTMLElement>("[data-project-heading]")?.focus();
-  }, [focusedProjectId, projects]);
+    if (!mcpConfigOpen)
+      focusedProjectRef.current?.querySelector<HTMLElement>("[data-project-heading]")?.focus();
+  }, [focusedProjectId, projects, mcpConfigOpen]);
 
   // Keep names and activity current, including when no lifecycle work is pending.
   useEffect(() => {
@@ -315,6 +321,9 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
   );
   const ordered = projects === null ? [] : orderProjects(projects, loadedOrbs);
   const totals = dashboardTotals(projects ?? [], loadedOrbs);
+  const configProject = mcpConfigOpen
+    ? projects?.find((project) => project.id === focusedProjectId)
+    : undefined;
 
   return (
     <main className="projects-page">
@@ -432,6 +441,23 @@ export function ProjectsPage({ focusedProjectId = null }: ProjectsPageProps) {
           </form>
         </section>
       </div>
+
+      {configProject && (
+        <ProjectConfigModal
+          key={configProject.id}
+          project={configProject}
+          initialTabIndex={1}
+          onChanged={(changed) => {
+            setProjects(
+              (current) =>
+                current?.map((project) => (project.id === changed.id ? changed : project)) ?? null,
+            );
+          }}
+          onClose={() => {
+            window.location.hash = `/projects/${configProject.id}`;
+          }}
+        />
+      )}
 
       <div className="dashboard-footer">
         {system !== null && (
