@@ -125,6 +125,8 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-11-release-logging-exclusion-iam.md](docs/postmortems/2026-09-11-release-logging-exclusion-iam.md) — partially applied release blocked by missing callback-log exclusion authority
+
 - [TODO.md](TODO.md) — the actionable backlog: bugs, hardening, agreed follow-ups
 - [docs/open-questions.md](docs/open-questions.md) — undecided design questions (frozen numbering)
 - [docs/postmortems/2026-09-09-live-web-rebuild.md](docs/postmortems/2026-09-09-live-web-rebuild.md) — blank dashboard from rebuilding a live static root; immutable build and asset/browser validation rules

@@ -257,6 +257,24 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Production finding (2026-09-11; recovery blocked):** `72fb304` passed checks/E2E,
+image acceptance and migration, then partially applied because the shared deployer
+lacks `logging.exclusions.create` for the MCP OAuth callback exclusion. All four
+services updated and the exit path repaired IAP, but retirement, activation and
+live gates did not run. A successful plan is not proof of resource-create
+permission; validation-only recovery cannot supply missing infrastructure.
+The correction adds a foundation-owned custom exclusion CRUD role for the shared
+GitHub/orb deployer, a read-only authority preflight before expensive work or
+mutation, and a browser dependency on the callback exclusion and OAuth secret
+IAM. This avoids recurring personal logins without allowing the deployer to
+expand its own authority. The role is project-wide exclusion management, not
+Logging Admin or an unsupported exact-name claim. Local infrastructure tests and
+OpenTofu foundation validation passed; live preflight reproduced the missing
+create/update/delete permissions. One-time administrator apply and production
+recovery remain pending. Preserve the callback-log protection and the separate
+foundation-administrator boundary rather than bypassing either. Evidence:
+`docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`.
+
 **Implemented and live-exercised 2026-09-09 through normal apply plus successful explicit recovery.**
 `.github/workflows/deploy.yml` calls the authoritative `infra/release.sh`; it does
 not duplicate the deployment algorithm. The first-release policy is recorded in

@@ -164,6 +164,7 @@ plan_and_guard() {
 }
 
 if [ -z "$VALIDATE" ]; then
+  python3 -m infra.release_preflight "$PROJECT"
   # Real scoped permission reads, including bucket IAM, precede expensive builds.
   state preflight-vars "$WORK_DIR/current.tfvars"
   plan_and_guard "$WORK_DIR/current.tfvars" "$WORK_DIR/preflight.tfplan"

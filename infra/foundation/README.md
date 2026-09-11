@@ -124,6 +124,36 @@ Verify the new grant in an empty HOME/gcloud configuration through the real resu
 hook before revoking the administrator's temporary login. Already-running orbs
 receive the updated shared IAM grant; they do not need new personal credentials.
 
+### Release logging-exclusion authority (2026-09-11; live apply pending)
+
+`google_project_iam_custom_role.deployer_logging_exclusions` grants only
+`logging.exclusions.create/get/update/delete` to the shared federated deployer.
+This is a project-level grant: it can change other project exclusions, not only
+`mcp-oauth-callback`. It does not grant sink/bucket administration, log deletion,
+or IAM changes. Do not describe it as an exact-name restriction or substitute
+`roles/logging.admin`. Exclusion management is necessary for the application
+root's callback-query protection and remains high-trust logging policy authority.
+
+A foundation administrator must review and apply this role and its additive
+member binding once, using the normal saved-plan workflow above. Both GitHub
+Actions and admitted project orbs then inherit the grant through the existing
+service account; no personal login, new GitHub secret, or new WIF admission is
+needed for recurring releases. The release must not administer its own grant.
+Verify as the federated identity with:
+
+```sh
+python3 -m infra.release_preflight playground-dev-6ae7
+```
+
+This read-only permission test runs in every full release before checks, builds,
+migrations and apply, with missing permission names and the foundation remedy
+in the workflow log. It does not create a probe exclusion or blindly retry a
+denial. The preflight verdict is recorded in the existing durable release gate.
+The browser service also depends on the actual exclusion and OAuth secret IAM,
+so an unsuccessful first creation cannot publish a new browser revision ahead
+of those protections. Additional logging sinks still require qualification.
+Incident: `docs/postmortems/2026-09-11-release-logging-exclusion-iam.md`.
+
 ### GitHub one-button deployment admission (2026-09-09)
 
 `github.tf` admits only `schani/pi-orb/.github/workflows/deploy.yml` dispatched

@@ -200,6 +200,26 @@ resource "google_artifact_registry_repository_iam_member" "deployer_writer" {
   member     = "serviceAccount:${google_service_account.deployer.email}"
 }
 
+# Logging exclusion permissions are checked at project scope. Do not grant
+# Logging Admin: the release needs no sink, bucket, log deletion or IAM writes.
+resource "google_project_iam_custom_role" "deployer_logging_exclusions" {
+  role_id     = "piOrbLoggingExclusions"
+  title       = "pi-orb release logging exclusions"
+  description = "Manage request-log exclusions required by application releases."
+  permissions = [
+    "logging.exclusions.create",
+    "logging.exclusions.get",
+    "logging.exclusions.update",
+    "logging.exclusions.delete",
+  ]
+}
+
+resource "google_project_iam_member" "deployer_logging_exclusions" {
+  project = var.project
+  role    = google_project_iam_custom_role.deployer_logging_exclusions.name
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
 locals {
   deployer_project_roles = toset([
     "roles/cloudsql.admin",
