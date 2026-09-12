@@ -18,7 +18,7 @@ The subsequent browser-body diagnostic already contained only one completion.
 MCP diagnostics contained exactly two `tools/call` requests, one per orb; model
 request diagnostics showed each completion rule (1 and 4) consumed once.
 
-## Diagnosis: test synchronization, not duplicated durable output
+## Initial diagnosis (superseded): test synchronization, not duplicated durable output
 
 The protocol deliberately publishes committed history **before** sending
 `output_retired` for the corresponding transient block. The browser applies
@@ -41,7 +41,7 @@ reproduces the old strict-selector failure, verifies the new matcher still
 rejects persistent duplicates, and then explicitly delivers the one-copy DOM.
 No timing-dependent model replay or sleep is necessary to reproduce the defect.
 
-## Fix and validation
+## Initial selector-only fix and validation (superseded)
 
 The three MCP completion checks now use a visible-element filtered locator and
 an array `toHaveText([expected])` assertion. Unlike single-element visibility,
@@ -63,3 +63,58 @@ reducer/render regression plus all four adapter retirement schedules; and
 The MCP browser/real-Pi/HTTPS test passed in 106 seconds, including both orbs,
 credential rotation and foreign-project isolation. No production retry or full
 release is claimed by this focused validation.
+
+## Corrected diagnosis and atomic implementation (2026-09-12)
+
+The user correctly challenged the test-only diagnosis: lack of duplicated durable
+history does not make duplicated presentation acceptable. The renderer really
+could show both copies, and tolerating that window in tests hid a protocol/UI
+oversight. The stream block IDs and native history IDs existed, but the frame
+omitted their replacement relationship. Preserve the earlier investigation as
+evidence of the misclassification, not as the current design decision.
+
+Tests were changed first. They required one rendered paragraph across commit,
+no retiring blocks in any post-commit browser/reconnect snapshot, and survival
+of a newer response (including repeated text). All five initial assertions
+failed deterministically against the old handoff. Additional explicit tests
+exposed snapshot-before-microtask and HTTP-repair-before-socket races. Failure
+logs are preserved locally as `/tmp/atomic-handoff-red-controlled.log`,
+`/tmp/atomic-snapshot-red-controlled.log`, and
+`/tmp/atomic-http-prepatch-red.log`; reproduction is the committed finite
+schedule matrix, not a random trace. The original snapshot fixture lacked the
+SDK baseline-append method and was corrected before attributing its readiness
+failure to the product.
+
+Each history frame now carries a required `retiredBlockIds` array. The browser
+inserts history and removes these exact block IDs atomically. Pi's adapter binds
+the native message object to its message-scoped IDs at `message_end`, then
+consumes that association only after successful mapping/publication. The SDK
+passes that same object to SessionManager; a real SDK contract test verifies
+identity across append and mapping even when two messages have identical text.
+No new persistent ledger, text comparison or timing-based buffer is required.
+The runtime removes matching reconnect blocks before broadcasting the frame.
+Snapshot reads drain pending publication before supplying the history/live pair;
+failed mapping leaves live output intact. While a socket is open, its ordered
+frames exclusively own history updates. Disconnected HTTP repair clears stale
+transient blocks rather than showing them alongside repaired committed history.
+
+The separate `output_retired` event, overlap-tolerant MCP assertions and browser
+test that enshrined the duplicate DOM are removed. Strict MCP assertions are
+restored. The deterministic adapter/writer/reducer matrix covers sixteen
+combinations: next response before/after commit, immediate/backpressured delivery,
+explicit snapshot/microtask publication, and a blocking mapping failpoint. It
+records every observable frame state rather than relying on React batching.
+Renderer tests require a single copy through handoff and preserve a legitimately
+repeated later response; replica-repair tests include the before-first-patch
+case. This is a direct POC contract change; older runtimes must restart, not use
+a compatibility event alias.
+
+Final validation: typecheck and lint passed; 43 targeted protocol, publisher,
+renderer and finite-schedule tests passed; the complete Docker-backed E2E suite
+passed all 91 tests with strict MCP selectors restored, including after the
+final HTTP-before-first-patch fence. The full unit/DST run had 1,651 passing tests
+and five skips but also exposed an independent deletion/discard scenario-ordering
+failure. Its trace was preserved and targeted replay reproduced it; see
+`docs/postmortems/2026-09-12-delete-discard-dst-ordering.md`. The earlier full
+unit run was green, but it does not clear this later failure. No deployment was
+performed, and the separate DST blocker remains in `TODO.md`.

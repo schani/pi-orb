@@ -259,9 +259,12 @@ STS tier or add identity authority.
 
 **Release gate finding (2026-09-12):** run `34711432756` stopped in checks before
 build/migration/apply; production was unchanged. MCP E2E's strict completion
-selector rejected the transient history-before-output-retirement DOM. The test
-assertion is corrected with deterministic frame/render and browser regressions;
-focused MCP E2E passed, but no new deployment is implied. Evidence:
+selector exposed the transient history-before-output-retirement duplicate DOM.
+The initial overlap-tolerant assertion was insufficient and is superseded by an
+atomic history-frame handoff carrying explicit retired block IDs. Strict MCP
+assertions are restored with deterministic adapter/writer/reducer schedules and
+renderer/replica-repair regressions. This changes the runtime protocol directly;
+no new production deployment is implied. Evidence:
 `docs/postmortems/2026-09-12-mcp-completion-selector.md`.
 
 **Production finding (2026-09-11; corrected and deployed):** `72fb304` passed checks/E2E,

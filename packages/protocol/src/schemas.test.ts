@@ -270,6 +270,26 @@ describe("runtime HTTP schemas", () => {
 });
 
 describe("frame schemas", () => {
+  it("requires atomic retirement identities and rejects the former separate event", () => {
+    const frame = {
+      v: 1,
+      type: "history.record",
+      at: "now",
+      record: messageRecord,
+      headId: "rec-2",
+    };
+    expect(Check(ServerFrameSchema, frame)).toBe(false);
+    expect(Check(ServerFrameSchema, { ...frame, retiredBlockIds: ["message-block"] })).toBe(true);
+    expect(Check(ServerFrameSchema, { ...frame, retiredBlockIds: [1] })).toBe(false);
+    expect(
+      Check(ServerFrameSchema, {
+        v: 1,
+        type: "runtime.event",
+        at: "now",
+        event: { type: "output_retired", operationId: "op", blockIds: ["message-block"] },
+      }),
+    ).toBe(false);
+  });
   it("accepts client hello and requests", () => {
     expect(
       Check(ClientFrameSchema, {
@@ -411,6 +431,7 @@ describe("frame schemas", () => {
       Check(ServerFrameSchema, {
         v: 1,
         type: "history.record",
+        retiredBlockIds: [],
         at: "2026-07-20T10:00:00.000Z",
         record: messageRecord,
         headId: "rec-2",

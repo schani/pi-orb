@@ -165,11 +165,6 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       });
       return { ...state, liveBlocks };
     }
-    case "output_retired": {
-      const liveBlocks = new Map(state.liveBlocks);
-      for (const id of event.blockIds) liveBlocks.delete(id);
-      return { ...state, liveBlocks };
-    }
     case "tool_state": {
       const tools = new Map(state.tools);
       tools.set(event.callId, {
@@ -234,9 +229,12 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
     case "history.record": {
       const records = new Map(state.records);
       records.set(frame.record.id, frame.record);
+      const liveBlocks = new Map(state.liveBlocks);
+      for (const id of frame.retiredBlockIds) liveBlocks.delete(id);
       return {
         ...state,
         records,
+        liveBlocks,
         afterRecordId: frame.record.id,
         headId: frame.headId ?? frame.record.id,
       };
@@ -299,6 +297,9 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       };
     }
     case "history_refreshed": {
+      // Replica repair has no live-block identities. An open socket owns the
+      // ordered handoff, including patches still in flight when HTTP arrives.
+      if (state.connection === "open") return state;
       const merged = mergeReplicatedHistory(
         {
           records: [...state.records.values()],
@@ -312,6 +313,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         records: new Map(merged.records.map((record) => [record.id, record])),
         afterRecordId: merged.afterRecordId,
         headId: merged.headId,
+        liveBlocks: new Map(),
         historyError: null,
       };
     }
@@ -611,10 +613,9 @@ function OrbConversation({
         const records = [...transcript.records.values()];
         setQueuedMessages(messagesAwaitingHistory(result.value.items, records));
 
-        // `delivered` is committed in the same transaction as replicated
-        // history, but the independent WebSocket may not have supplied that
-        // record to this tab. Converge from PostgreSQL instead of hiding the
-        // provisional turn or requiring a browser reload.
+        // `delivered` and replicated history commit together. PostgreSQL can
+        // repair a disconnected tab without hiding provisional turns. The
+        // reducer fences responses against a socket that has since reopened.
         if (
           transcript.historyLoaded &&
           hasDeliveredMessageAwaitingHistory(result.value.items, records) &&

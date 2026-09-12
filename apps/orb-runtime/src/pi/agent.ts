@@ -199,6 +199,7 @@ export class PiOrbAgent {
   private shellOutputTruncated = false;
   private readonly liveBlocks = new Map<string, LiveBlock>();
   private outputMessageSequence = 0;
+  private readonly messageBlocks = new WeakMap<object, string[]>();
   private readonly liveTools = new Map<string, LiveTool>();
   private readonly listeners = new Set<FrameListener>();
   private readonly pendingInboxMessages = new Map<
@@ -679,7 +680,7 @@ export class PiOrbAgent {
         console.error(`Luna summary failed for operation ${operationId}: ${error.message}`);
       },
     });
-    this.liveHistory = new LiveHistoryPublisher(manager, (record) => {
+    this.liveHistory = new LiveHistoryPublisher(manager, (record, sourceMessage) => {
       const native = record.overflow["native"];
       if (typeof native === "object" && native !== null && !Array.isArray(native)) {
         const details = native["details"];
@@ -695,9 +696,15 @@ export class PiOrbAgent {
           if (typeof batchId === "string") this.pendingInboxMessages.delete(batchId);
         }
       }
+      const retiredBlockIds =
+        sourceMessage === null ? [] : (this.messageBlocks.get(sourceMessage) ?? []);
+      if (sourceMessage !== null) this.messageBlocks.delete(sourceMessage);
+      // Update reconnect state before publishing the indivisible browser handoff.
+      for (const id of retiredBlockIds) this.liveBlocks.delete(id);
       this.broadcast({
         v: 1,
         type: "history.record",
+        retiredBlockIds,
         at: new Date().toISOString(),
         record,
         headId: record.id,
@@ -851,18 +858,13 @@ export class PiOrbAgent {
       }
       case "message_end": {
         if (event.message.role !== "assistant" || this.operationId === null) break;
-        const operationId = this.operationId;
-        const blockIds = [...this.liveBlocks.keys()];
-        // Pi appends ordinary messages after notifying subscribers. Retire
-        // their stream only after the complete history has been published.
-        queueMicrotask(() => {
-          if (this.operationId !== operationId) return;
-          if (this.liveHistory?.flushPersisted().isErr()) return;
-          for (const id of blockIds) this.liveBlocks.delete(id);
-          if (blockIds.length > 0) {
-            this.broadcastEvent({ type: "output_retired", operationId, blockIds });
-          }
-        });
+        // Pi stores this same message object in its session entry after notifying
+        // subscribers. Bind identity now, before persistence or a newer response.
+        const prefix = `${this.operationId}-${this.outputMessageSequence}-`;
+        this.messageBlocks.set(
+          event.message,
+          [...this.liveBlocks.keys()].filter((id) => id.startsWith(prefix)),
+        );
         break;
       }
       case "message_update": {
@@ -1075,6 +1077,10 @@ export class PiOrbAgent {
     if (manager === null || this.health.status !== "ready") {
       return err({ type: "snapshot_error", message: "session is not ready" });
     }
+    // A reconnect can snapshot between Pi append and the scheduled publication.
+    // Drain that boundary before pairing persisted records with liveView().
+    const flushed = this.liveHistory?.flushPersisted();
+    if (flushed?.isErr()) return err({ type: "snapshot_error", message: flushed.error.message });
     const header = mapPiSessionHeader(manager.getHeader());
     if (header.isErr()) {
       return err({ type: "snapshot_error", message: header.error.message });

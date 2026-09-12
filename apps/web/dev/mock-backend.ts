@@ -1222,6 +1222,7 @@ function completeEcho(
   send(session.socket, {
     v: 1,
     type: "history.record",
+    retiredBlockIds: [`${operationId}-text`],
     at: now(),
     record,
     headId: record.id,
@@ -1310,6 +1311,7 @@ function completeShell(
   send(session.socket, {
     v: 1,
     type: "history.record",
+    retiredBlockIds: [],
     at: now(),
     record,
     headId: record.id,
@@ -1554,6 +1556,7 @@ function handleAction(
     type: "history.record",
     at: now(),
     record: userRecord,
+    retiredBlockIds: [],
     headId: userRecord.id,
   });
   send(
@@ -1675,6 +1678,7 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
       send(socket, {
         v: 1,
         type: "history.record",
+        retiredBlockIds: [],
         at: now(),
         record,
         headId: record.id,

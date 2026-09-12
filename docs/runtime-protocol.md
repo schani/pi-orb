@@ -202,7 +202,22 @@ interface ToolStateEvent {
 }
 ```
 
-**Streaming output retirement (decided and implemented 2026-09-09).** Assistant block IDs include an operation ID, message sequence, and content index; content indices alone are not unique across the many responses in one busy operation. After Pi persists an assistant message, publish its complete history before sending `output_retired { operationId: string, blockIds: string[] }`. This critical (non-coalescible) event deletes exactly those blocks from the browser; the runtime deletes the same blocks from reconnect state. Retirement captures IDs before yielding to Pi's persistence microtask, so an immediately following response cannot be deleted. Message-scoped IDs also prevent outbound patch coalescing across retirement. Shell output retains its operation lifetime. Regression coverage explicitly enumerates retirement before/after the next response and immediate/backpressured delivery, without wall-clock scheduling. Evidence: `docs/postmortems/2026-09-09-stale-thinking.md`.
+**Atomic streaming output handoff (decided and implemented 2026-09-12).** Assistant block IDs include an operation ID, message sequence, and content index. Each `history.record` carries required `retiredBlockIds: string[]`; synchronization and unrelated records use `[]`. The runtime removes exactly those blocks from reconnect state before broadcasting this single critical frame. The browser adds the record and deletes those blocks in one reducer update, so no render contains both representations of the same response. No text equality, grace period, or presentation buffer is involved. A later response may legitimately repeat the same text.
+
+```ts
+interface HistoryRecordFrame {
+  v: 1;
+  type: "history.record";
+  at: string;
+  record: HistoryRecord;
+  headId: string | null;
+  retiredBlockIds: string[];
+}
+```
+
+Pi's `message_end` and its persisted entry share the same message object (pinned SDK contract test). The adapter captures only that message sequence's block IDs before Pi appends, associates them by object identity in a weak map, and consumes the association when mapping/publication succeeds. A mapping failure leaves live output intact. Snapshot reads synchronously flush pending publication before pairing complete history with live state. Browser HTTP replica repair applies only while disconnected and clears stale transient output; an open socket exclusively owns history ordering, including patches still in flight. A stale HTTP response must not jump ahead of an atomic socket commit.
+
+**Superseded approach:** the 2026-09-09 separate `output_retired` event fixed permanently stale reasoning but left an observable two-frame duplicate-render window. It is removed, not retained as a compatibility path. Tolerating the overlap in the MCP E2E selector was an insufficient correction and has been reverted. Shell output retains its operation lifetime. Sixteen explicit deterministic schedules enumerate next-response timing, backpressure, snapshot versus microtask publication, and a mapping failpoint; they inspect every delivered frame and reconnect state. Evidence: `docs/postmortems/2026-09-09-stale-thinking.md`, `docs/postmortems/2026-09-12-mcp-completion-selector.md`.
 
 Complete records use `history.record` both during synchronization and live operation. They improve UI responsiveness, but the control plane ignores them for persistence. A successful `operation_finished` event is sent only after all complete history records caused by that operation have been emitted.
 
@@ -282,7 +297,7 @@ Other harness adapters must provide the same durable client-message identity in 
 
 ### Observability and deterministic tests
 
-Queued messages are user-visible resources: `GET .../messages` restores their durable statuses after reload, and the UI shows each item once as a muted user turn with queued/steering state while delivery is pending. A delivered item remains provisional in that browser until the runtime record carrying its message ID has actually been applied locally; delivery status alone cannot retire it because inbox polling and live history are independent channels. Several gray turns may therefore collapse into one committed squashed user turn. A `failed` message is the exception that stays: it has no runtime record to collapse into, so it remains rendered with its reason until the user acts on it. Autonomous wake and dispatch decisions produce edge-only `lifecycle:` records containing orb ID and message ID but never message content.
+Queued messages are user-visible resources: `GET .../messages` restores their durable statuses after reload, and the UI shows each item once as a muted user turn with queued/steering state while delivery is pending. A delivered item remains provisional in that browser until the runtime record carrying its message ID has actually been applied locally; delivery status alone cannot retire it because inbox polling and live history are independent channels. Disconnected tabs can repair from PostgreSQL; open sockets exclusively own history ordering, so a concurrent HTTP response cannot bypass an atomic output handoff. Several gray turns may therefore collapse into one committed squashed user turn. A `failed` message is the exception that stays: it has no runtime record to collapse into, so it remains rendered with its reason until the user acts on it. Autonomous wake and dispatch decisions produce edge-only `lifecycle:` records containing orb ID and message ID but never message content.
 
 The required deterministic schedules are all implemented in `apps/control-plane/src/domain/lifecycle.dst.test.ts` (2026-08-11). Every one of them asserts the same invariant set: exactly one replicated record per delivered batch, every message ID marked delivered exactly once, nothing lost, FIFO preserved, and no second agent turn started — checked against the runtime's own session as well as the replica, because a duplicate turn exists before replication observes it.
 

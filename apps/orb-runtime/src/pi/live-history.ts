@@ -16,11 +16,14 @@ type PersistenceBoundary = AgentSessionEvent["type"];
  */
 export class LiveHistoryPublisher {
   private readonly source: PiEntrySource;
-  private readonly publish: (record: HistoryRecord) => void;
+  private readonly publish: (record: HistoryRecord, sourceMessage: object | null) => void;
   private readonly knownIds = new Set<string>();
   private flushScheduled = false;
 
-  constructor(source: PiEntrySource, publish: (record: HistoryRecord) => void) {
+  constructor(
+    source: PiEntrySource,
+    publish: (record: HistoryRecord, sourceMessage: object | null) => void,
+  ) {
     this.source = source;
     this.publish = publish;
     for (const entry of source.getEntries()) {
@@ -50,7 +53,15 @@ export class LiveHistoryPublisher {
       // HTTP pull fail; it must never be skipped in the live stream.
       if (mapped.isErr()) return err(mapped.error);
       this.knownIds.add(mapped.value.id);
-      this.publish(mapped.value);
+      const sourceMessage =
+        typeof entry === "object" &&
+        entry !== null &&
+        "message" in entry &&
+        typeof entry.message === "object" &&
+        entry.message !== null
+          ? entry.message
+          : null;
+      this.publish(mapped.value, sourceMessage);
     }
     return ok(undefined);
   }

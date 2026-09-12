@@ -1,13 +1,23 @@
 # Testing strategy
 
-**Completion assertions (2026-09-12):** history publication precedes live-output
-retirement; a browser can observe both paragraphs between those frames. Do not
-use a strict single-element visibility assertion as an atomic-handoff guarantee.
-For completion text, a visible-element list assertion must retry the intermediate
-count mismatch and still require exactly one exact match. Never select `.first()`
-to hide persistent duplicates. The MCP regression holds both frame boundaries
-explicitly and reproduces the original selector failure in Chromium. Evidence:
+**Atomic output assertions (2026-09-12, corrected after initial misdiagnosis):**
+streamed output and its committed record must not coexist at any observable
+frame boundary. Sixteen explicit schedules drive the real Pi adapter, outbound
+writer and browser reducer across backpressure, next-message timing,
+snapshot/microtask publication and a mapping failpoint. Renderer tests enforce
+one paragraph through handoff while preserving a later identical response;
+HTTP repair tests prevent cross-channel reordering. The SDK contract pins native
+message object identity across append/mapping. The overlap-tolerant browser
+assertion and its obsolete regression are removed; strict MCP completion checks
+are restored. No text matching, sleep, larger timeout, or randomized hope of
+hitting the handoff substitutes for these checkpoints. Evidence:
 `docs/postmortems/2026-09-12-mcp-completion-selector.md`.
+
+**Independent validation blocker (2026-09-12):** the `delete-supersedes-discard`
+trace reproduces a scenario that expects pending discard after the reconciler
+has already completed it. Explicit test ordering, not a green random rerun, is
+required before deployment. Evidence:
+`docs/postmortems/2026-09-12-delete-discard-dst-ordering.md`.
 
 ## Decisions
 

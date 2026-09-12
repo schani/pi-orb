@@ -32,7 +32,14 @@ export function computeSyncFrames(
   let representedHead: string | null = mode === "after" ? effectiveAfter : null;
   for (const record of snapshot.records.slice(startIndex)) {
     representedHead = record.id;
-    frames.push({ v: 1, type: "history.record", at, record, headId: representedHead });
+    frames.push({
+      v: 1,
+      type: "history.record",
+      at,
+      record,
+      retiredBlockIds: [],
+      headId: representedHead,
+    });
   }
   if (snapshot.headId !== null && startIndex >= snapshot.records.length) {
     // Caught-up reconnect: the client cursor already represents the head.
