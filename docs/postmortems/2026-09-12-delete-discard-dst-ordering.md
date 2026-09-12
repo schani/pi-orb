@@ -15,7 +15,7 @@ scenario (not every unrelated scenario in the file) with:
 ```sh
 DST_REPLAY=test-failures/delete-supersedes-discard-1789255100335-8.json \
   npx vitest run apps/control-plane/src/domain/orb-deletion.dst.test.ts \
-  -t 'permanent delete supersedes'
+  -t 'permanent deletion completes'
 ```
 
 Targeted replay reproduced the same failure. A first file-wide replay also
@@ -47,8 +47,20 @@ those final outcomes either.
 
 ## Status
 
-The trace remains preserved and the scenario unchanged. This blocks deployment
-until the scenario explicitly controls the intended pending-discard ordering
-and separately covers completion-before-deletion without dropping its cleanup
-invariants. The actionable item is in `TODO.md`. No green rerun of the full suite
-or timeout increase was used to clear it.
+**Resolved (2026-09-12).** The user chose one scenario asserting the invariant
+valid under either ordering, trusting DST to explore both rather than forcing
+or splitting schedules. The earlier proposal to hold discard pending and cover
+completion separately was not selected. The scenario still requires successful
+deletion and `state: deleting`; its marker may be `0` (pending) or `null`
+(finalized), never another incarnation. All eventual orb-row, host, filesystem
+and replica cleanup assertions are unchanged. Its name now describes deletion
+racing discard, while the internal trace name is retained for reproducibility.
+
+Before the change, targeted replay reproduced the original assertion failure.
+After the change, the same trace passed that assertion and exhausted its recorded
+events at the first cleanup wait: the original failure had ended the trace before
+cleanup. This is evidence that the recorded failing prefix is accepted, not a
+claim that a truncated trace replay validated cleanup. The unchanged 30-iteration
+scenario, all five deletion DST tests, and the full unit/DST/infrastructure suite
+then passed. The original trace remains committed. No timeout was increased and
+no cleanup invariant was removed. The deployment blocker is resolved.

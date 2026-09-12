@@ -8,8 +8,6 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 ## Bugs
 
-- **Make deletion/discard DST ordering explicit before deployment** (`docs/postmortems/2026-09-12-delete-discard-dst-ordering.md`). Replay `test-failures/delete-supersedes-discard-1789255100335-8.json` with the exact `permanent delete supersedes` test. The reconciler completes discard before deletion commits, but the scenario expects its discard marker to remain pending. Add explicit scheduling for the pending-discard case and separately cover already-completed discard, preserving final host/filesystem/replica cleanup invariants. A passing random rerun does not clear this blocker.
-
 - **Investigate control-plane shutdown with pending device login** (`docs/postmortems/2026-09-09-live-web-rebuild.md`). The local process service closed HTTP after SIGTERM but remained alive beyond the shutdown wait with one device-login-pending orb and no running child runtime. Reproduce with controlled scheduling, identify the outstanding shutdown owner, and ensure bounded cancellation/drain without losing persisted state.
 
 - **Make frontend preview reloads fail safely** (`docs/postmortems/2026-09-09-stale-frontend-preview.md`). Automate full process replacement for fixture-backend/shared-protocol changes rather than relying on cached Vite config reloads; do not keep a stale API silently serving after reload failure. Make the failure visible, account for ephemeral fixture data, and add regression coverage that changes a protocol export while the service is running and verifies the actual served browser/API contract. The immediate manual full-restart and served-feature verification rule is documented in `docs/web-ui.md`.

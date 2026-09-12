@@ -13,10 +13,13 @@ are restored. No text matching, sleep, larger timeout, or randomized hope of
 hitting the handoff substitutes for these checkpoints. Evidence:
 `docs/postmortems/2026-09-12-mcp-completion-selector.md`.
 
-**Independent validation blocker (2026-09-12):** the `delete-supersedes-discard`
-trace reproduces a scenario that expects pending discard after the reconciler
-has already completed it. Explicit test ordering, not a green random rerun, is
-required before deployment. Evidence:
+**Deletion/discard invariant correction (2026-09-12):** the
+`delete-supersedes-discard` trace reproduced an assertion requiring pending discard
+after the reconciler had completed it. The user selected a single DST scenario
+that accepts either pending incarnation `0` or finalized `null`, retaining
+successful deletion and all eventual cleanup assertions. DST explores the
+orderings rather than forcing them. The recorded failing prefix now passes its
+assertion; the complete scenario and full suite passed. Evidence:
 `docs/postmortems/2026-09-12-delete-discard-dst-ordering.md`.
 
 ## Decisions

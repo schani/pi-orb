@@ -117,4 +117,6 @@ and five skips but also exposed an independent deletion/discard scenario-orderin
 failure. Its trace was preserved and targeted replay reproduced it; see
 `docs/postmortems/2026-09-12-delete-discard-dst-ordering.md`. The earlier full
 unit run was green, but it does not clear this later failure. No deployment was
-performed, and the separate DST blocker remains in `TODO.md`.
+performed. The separate DST blocker was subsequently resolved by the
+user-selected invariant correction, with all final cleanup checks retained and
+the full suite passing; see the deletion/discard postmortem above.
