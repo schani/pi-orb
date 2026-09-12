@@ -417,7 +417,7 @@ interface OrbLoad {
 }
 
 export function OrbPage({ orbId }: { orbId: string }) {
-  const [projectName, setProjectName] = useState<string | null>(null);
+  const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [loaded, setLoaded] = useState<OrbLoad | null>(null);
   useEffect(() => {
     if (loaded?.orbId === orbId) return;
@@ -433,7 +433,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
   return (
     <div className="orb-page">
       <OrbIndex
-        onProjectNameChange={setProjectName}
+        onProjectChange={setProject}
         projectId={loaded?.orb.isOk() ? loaded.orb.value.projectId : null}
         orbId={orbId}
         pending={pending}
@@ -445,7 +445,9 @@ export function OrbPage({ orbId }: { orbId: string }) {
           key={loaded.orbId}
           initial={loaded}
           pending={pending}
-          projectName={projectName}
+          projectName={
+            loaded.orb.isOk() && project?.id === loaded.orb.value.projectId ? project.name : null
+          }
         />
       )}
     </div>

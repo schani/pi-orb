@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type Browser, chromium, expect as expectPage } from "@playwright/test";
+import { type Browser, chromium, expect as expectPage, type Page } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
@@ -10,6 +10,16 @@ const ORB_HASH = "#/orbs/frontend-fixture-orb";
 let vite: ViteDevServer;
 let browser: Browser;
 let origin: string;
+
+async function removeFixtureOrb(page: Page, orbId: string) {
+  const response = await page.request.delete(`${origin}/api/v1/orbs/${orbId}`);
+  if (response.status() === 404) return;
+  expectPage(response.status()).toBe(202);
+  // Deletion is asynchronous. A 202 does not release this test's fixture ownership.
+  await expectPage
+    .poll(async () => (await page.request.get(`${origin}/api/v1/orbs/${orbId}`)).status())
+    .toBe(404);
+}
 
 /**
  * Browser E2E for the exact cross-boundary path that unit tests cannot prove:
@@ -195,7 +205,8 @@ describe("frontend-only browser behavior", () => {
         await expectPage(gear).toBeVisible();
         expectPage(
           await gear.evaluate((element) => {
-            const heading = element.parentElement
+            const heading = element
+              .closest(".project-head-line")
               ?.querySelector(".project-name, .trunc")
               ?.getBoundingClientRect();
             const button = element.getBoundingClientRect();
@@ -491,12 +502,12 @@ describe("frontend-only browser behavior", () => {
           await header
             .locator("use")
             .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href"))),
-        ).toEqual(["#i-gear", "#i-bin"]);
+        ).toEqual(hash === ORB_HASH ? ["#i-plus", "#i-gear", "#i-bin"] : ["#i-gear", "#i-bin"]);
         expectPage(
           await header.evaluate((node) =>
             node.parentElement?.lastElementChild?.classList.contains("project-new-orb-row"),
           ),
-        ).toBe(true);
+        ).toBe(hash !== ORB_HASH);
         await header.getByRole("button", { name: /^Configure / }).click();
         const dialog = page.getByRole("dialog");
         const general = dialog.getByRole("tabpanel", { name: "General", exact: true });
@@ -870,12 +881,395 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("creates from + without unmounting the workspace or clearing the draft", async () => {
+    const page = await browser.newPage();
+    await page.clock.install();
+    let createdId: string | undefined;
+    let releaseCreate = () => {};
+    let releaseHistory = () => {};
+    let releaseList = () => {};
+    let createArrived = () => {};
+    let historyArrived = () => {};
+    let listArrived = () => {};
+    const createGate = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const listGate = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    const createRequested = new Promise<void>((resolve) => {
+      createArrived = resolve;
+    });
+    const historyRequested = new Promise<void>((resolve) => {
+      historyArrived = resolve;
+    });
+    const listRequested = new Promise<void>((resolve) => {
+      listArrived = resolve;
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("keep this draft while creating");
+      await expectPage(
+        index.getByRole("link", { name: "New orb in scratchpad", exact: true }),
+      ).toBeVisible();
+      const indexNode = await index.elementHandle();
+      const historyNode = await page.locator(".history").elementHandle();
+      const composerNode = await composer.elementHandle();
+      const transcript = await page.locator(".history").innerText();
+      await page.route("**/api/v1/projects/frontend-scratchpad-project/orbs", async (route) => {
+        if (route.request().method() === "POST") {
+          createdId = route.request().postDataJSON().id;
+          createArrived();
+          await createGate;
+          await route.continue();
+        } else {
+          const response = await route.fetch();
+          listArrived();
+          await listGate;
+          await route.fulfill({ response });
+        }
+      });
+      await page.route("**/api/v1/orbs/*/history", async (route) => {
+        if (createdId !== undefined && route.request().url().includes(`/orbs/${createdId}/`)) {
+          const response = await route.fetch();
+          historyArrived();
+          await historyGate;
+          await route.fulfill({ response });
+        } else await route.continue();
+      });
+      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await createRequested;
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      await expectPage(
+        index.getByRole("button", { name: "Creating orb in scratchpad", exact: true }),
+      ).toBeDisabled();
+      await expectPage(index.getByRole("status")).toContainText("creating orb…");
+      expectPage(await indexNode?.evaluate((node) => node.isConnected)).toBe(true);
+      expectPage(await historyNode?.evaluate((node) => node.isConnected)).toBe(true);
+      expectPage(await composerNode?.evaluate((node) => node.isConnected)).toBe(true);
+      await expectPage(composer).toHaveValue("keep this draft while creating");
+      expectPage(await page.locator(".history").innerText()).toBe(transcript);
+      // Snapshot an empty list before acceptance; it must not erase the accepted row later.
+      await page.clock.runFor(2000);
+      await listRequested;
+      releaseCreate();
+      await historyRequested;
+      const newRow = index.locator(`a[href="#/orbs/${createdId}"]`);
+      await expectPage(newRow).toHaveAttribute("aria-current", "page");
+      await expectPage(index).toHaveAttribute("aria-busy", "true");
+      await expectPage(page.locator(".orb-main")).toHaveAttribute("inert", "");
+      expectPage(await historyNode?.evaluate((node) => node.isConnected)).toBe(true);
+      await expectPage(composer).toHaveValue("keep this draft while creating");
+      const staleResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/projects/frontend-scratchpad-project/orbs") &&
+          response.request().method() === "GET",
+      );
+      releaseList();
+      await (await staleResponse).finished();
+      await page.clock.runFor(32);
+      await expectPage(newRow).toHaveAttribute("aria-current", "page");
+      releaseHistory();
+      await expectPage(index).toHaveAttribute("aria-busy", "false");
+      await expectPage(page.locator(".orb-name")).toHaveText("untitled orb");
+      expectPage(await indexNode?.evaluate((node) => node.isConnected)).toBe(true);
+      await expectPage(composer).toHaveValue("");
+      await page.goBack();
+      await expectPage(page.locator(".orb-name")).toHaveText("Frontend Playground");
+      await expectPage(composer).toHaveValue("keep this draft while creating");
+    } finally {
+      releaseCreate();
+      releaseHistory();
+      releaseList();
+      if (createdId !== undefined) await removeFixtureOrb(page, createdId);
+      await page.close();
+    }
+  });
+
+  it("retries creation with the same ID and never overrides a later orb selection", async () => {
+    const page = await browser.newPage();
+    const attempts: string[] = [];
+    let release = () => {};
+    let arrived = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requested = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    await page.route("**/api/v1/projects/frontend-scratchpad-project/orbs", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      attempts.push(route.request().postDataJSON().id);
+      if (attempts.length === 1) {
+        await route.fulfill({
+          status: 503,
+          json: {
+            error: { code: "unavailable", message: "Creation unavailable", retryable: true },
+          },
+        });
+      } else {
+        arrived();
+        await gate;
+        await route.continue();
+      }
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("draft survives failure");
+      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await expectPage(index.getByRole("alert")).toContainText("Failed to create orb");
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      await expectPage(composer).toHaveValue("draft survives failure");
+      await index.getByRole("button", { name: "retry", exact: true }).click();
+      await requested;
+      expectPage(attempts).toHaveLength(2);
+      expectPage(attempts[1]).toBe(attempts[0]);
+      await index.locator('a[href="#/orbs/frontend-offline-sync"]').click();
+      await expectPage(page.locator(".orb-name")).toHaveText("Offline sync");
+      release();
+      await expectPage(index.locator(`a[href="#/orbs/${attempts[0]}"]`)).toBeVisible();
+      await expectPage(page).toHaveURL(`${origin}/#/orbs/frontend-offline-sync`);
+      await expectPage(index.getByRole("alert")).toHaveCount(0);
+      await expectPage(
+        index.getByRole("button", { name: "Creating orb in scratchpad", exact: true }),
+      ).toHaveCount(0);
+    } finally {
+      release();
+      if (attempts[0] !== undefined) await removeFixtureOrb(page, attempts[0]);
+      await page.close();
+    }
+  });
+
+  it("keeps modified + clicks native without navigating the source workspace", async () => {
+    const page = await browser.newPage();
+    let popup: typeof page | undefined;
+    let createdId: string | undefined;
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      const node = await index.elementHandle();
+      // Native modified-link tabs have no opener: observe the context, not window.open/popups.
+      const opened = page.context().waitForEvent("page");
+      await index
+        .getByRole("link", { name: "New orb in scratchpad", exact: true })
+        .click({ modifiers: [process.platform === "darwin" ? "Meta" : "Control"] });
+      popup = await opened;
+      await expectPage(popup).toHaveURL(/#\/orbs\/[0-9a-f-]+$/);
+      createdId = popup.url().split("/orbs/")[1];
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      expectPage(await node?.evaluate((element) => element.isConnected)).toBe(true);
+    } finally {
+      if (createdId !== undefined) await removeFixtureOrb(page, createdId);
+      await popup?.close();
+      await page.close();
+    }
+  });
+
+  it("keeps the fleet mounted across projects, opens archives, and creates from the title plus", async () => {
+    const page = await browser.newPage();
+    let release = () => {};
+    let createdId: string | undefined;
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      await expectPage(index.locator(".ix-project")).toHaveCount(4);
+      await expectPage(index.locator(".project-new-orb-row")).toHaveCount(0);
+      await expectPage(index.getByRole("link", { name: /^New orb in / })).toHaveCount(4);
+      const geometry = await index.locator(".project-head-name").evaluateAll((heads) =>
+        heads.map((head) => {
+          const actions = head.querySelector(".project-head-actions");
+          return actions === null
+            ? -1
+            : head.getBoundingClientRect().right - actions.getBoundingClientRect().right;
+        }),
+      );
+      expectPage(geometry).toEqual([0, 0, 0, 0]);
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("original project draft");
+      const indexNode = await index.elementHandle();
+      const destination = index.locator('a[href="#/orbs/frontend-offline-sync"]');
+      const destinationNode = await destination.elementHandle();
+      let arrived = () => {};
+      const requested = new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route("**/api/v1/orbs/frontend-offline-sync/history", async (route) => {
+        const response = await route.fetch();
+        arrived();
+        await gate;
+        await route.fulfill({ response });
+      });
+      await index.evaluate((node) => {
+        node.style.maxHeight = "240px";
+      });
+      await destination.click();
+      await requested;
+      const scrollTop = await index.evaluate((node) => node.scrollTop);
+      await expectPage(destination).toHaveAttribute("aria-current", "page");
+      await expectPage(page.locator(".orb-main")).toHaveAttribute("inert", "");
+      await expectPage(composer).toHaveValue("original project draft");
+      release();
+      await expectPage(index).toHaveAttribute("aria-busy", "false");
+      await expectPage(page.locator(".orb-name")).toHaveText("Offline sync");
+      await expectPage(page).toHaveTitle("fieldnotes · Offline sync");
+      expectPage(
+        await indexNode?.evaluate(
+          (node) => node === node.ownerDocument.querySelector(".orb-index"),
+        ),
+      ).toBe(true);
+      expectPage(await destinationNode?.evaluate((node) => node.isConnected)).toBe(true);
+      expectPage(await index.evaluate((node) => node.scrollTop)).toBe(scrollTop);
+      await composer.fill("fieldnotes draft");
+      await page.goBack();
+      await expectPage(composer).toHaveValue("original project draft");
+      await destination.click();
+      await expectPage(composer).toHaveValue("fieldnotes draft");
+      await index.getByRole("button", { name: "Configure homelab", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await expectPage(dialog).toHaveAccessibleName("Config for homelab");
+      await dialog.getByRole("button", { name: "Close project config" }).click();
+      await index
+        .getByRole("region", { name: "Frontend playground", exact: true })
+        .locator(".project-archive > summary")
+        .click();
+      await index.locator('a[href="#/orbs/frontend-archived-orb"]').click();
+      await expectPage(page.locator(".orb-name")).toHaveText("Finished design exploration");
+      await expectPage(page.locator(".composer")).toHaveCount(0);
+      await expectPage(index.locator('[aria-current="page"]')).toHaveAttribute(
+        "href",
+        "#/orbs/frontend-archived-orb",
+      );
+      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await expectPage(page).toHaveURL(/#\/orbs\/[0-9a-f-]+$/);
+      createdId = page.url().split("/orbs/")[1];
+      await expectPage(page.locator(".orb-name")).toHaveText("untitled orb");
+      const created = await page.request.get(`${origin}/api/v1/orbs/${createdId}`);
+      expectPage((await created.json()).projectId).toBe("frontend-scratchpad-project");
+    } finally {
+      release();
+      if (createdId !== undefined) await removeFixtureOrb(page, createdId);
+      await page.close();
+    }
+  });
+
+  it("retains stale fleet rows, recovers partial failures, and fences old polls after config saves", async () => {
+    const page = await browser.newPage();
+    await page.clock.install();
+    let failOrbs = false;
+    let failProjects = false;
+    let holdProjects = false;
+    let renamed = false;
+    let calls = 0;
+    let release = () => {};
+    let arrived = () => {};
+    const requested = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/projects/frontend-fieldnotes-project/orbs", async (route) => {
+      if (failOrbs) await route.fulfill({ status: 503, json: {} });
+      else await route.continue();
+    });
+    await page.route("**/api/v1/projects", async (route) => {
+      calls += 1;
+      if (failProjects) {
+        await route.fulfill({ status: 503, json: {} });
+        return;
+      }
+      const response = await route.fetch();
+      const body = await response.json();
+      if (renamed)
+        body.items.find((p: { id: string }) => p.id === "frontend-fieldnotes-project").name =
+          "Fieldnotes renamed";
+      if (holdProjects) {
+        arrived();
+        await gate;
+      }
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/v1/projects/frontend-fieldnotes-project", async (route) => {
+      if (route.request().method() !== "PATCH") {
+        await route.continue();
+        return;
+      }
+      const response = await page.request.get(
+        `${origin}/api/v1/projects/frontend-fieldnotes-project`,
+      );
+      renamed = true;
+      await route.fulfill({ json: { ...(await response.json()), name: "Fieldnotes renamed" } });
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      const destination = index.locator('a[href="#/orbs/frontend-offline-sync"]');
+      await expectPage(destination).toBeVisible();
+      failOrbs = true;
+      await page.clock.runFor(2000);
+      await expectPage(index.getByRole("alert")).toContainText("Orb list is stale");
+      await expectPage(destination).toBeVisible();
+      failOrbs = false;
+      await page.clock.runFor(2000);
+      await expectPage(index.getByRole("alert")).toHaveCount(0);
+      failProjects = true;
+      await page.clock.runFor(2000);
+      await expectPage(index.getByRole("alert")).toContainText("Project list is stale");
+      await expectPage(destination).toBeVisible();
+      failProjects = false;
+      holdProjects = true;
+      await page.clock.runFor(2000);
+      await requested;
+      const heldCalls = calls;
+      await page.clock.runFor(6000);
+      expectPage(calls).toBe(heldCalls);
+      await index.getByRole("button", { name: "Configure fieldnotes", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      const general = dialog.getByRole("tabpanel", { name: "General", exact: true });
+      await general.getByLabel("Name", { exact: true }).fill("Fieldnotes renamed");
+      await general.getByRole("button", { name: "save", exact: true }).click();
+      await expectPage(
+        index.getByRole("heading", { name: "Fieldnotes renamed", exact: true }),
+      ).toBeVisible();
+      const oldResponse = page.waitForResponse("**/api/v1/projects");
+      holdProjects = false;
+      release();
+      await (await oldResponse).finished();
+      await page.clock.runFor(32);
+      await expectPage(
+        index.getByRole("heading", { name: "Fieldnotes renamed", exact: true }),
+      ).toBeVisible();
+      await page.clock.runFor(2000);
+      await expectPage(index.getByRole("alert")).toHaveCount(0);
+      await expectPage(
+        index.getByRole("heading", { name: "Fieldnotes renamed", exact: true }),
+      ).toBeVisible();
+      await dialog.getByRole("button", { name: "Close project config" }).click();
+    } finally {
+      release();
+      await page.close();
+    }
+  });
+
   it("keeps the index and conversation visible until an orb switch is ready", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
     const composer = page.getByPlaceholder(/Message the orb/);
     await composer.fill("draft for the first orb");
-    const index = page.getByRole("navigation", { name: "Project orbs" });
+    const index = page.getByRole("navigation", { name: "All project orbs" });
     const destination = index.locator('a[href="#/orbs/frontend-auth-copy-test"]');
     await expectPage(destination).toBeVisible();
     const indexNode = await index.elementHandle();
@@ -926,7 +1320,7 @@ describe("frontend-only browser behavior", () => {
   it("discards a superseded orb load and preserves missing-resource URLs", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
-    const index = page.getByRole("navigation", { name: "Project orbs" });
+    const index = page.getByRole("navigation", { name: "All project orbs" });
     const destination = index.locator('a[href="#/orbs/frontend-auth-copy-test"]');
     await expectPage(destination).toBeVisible();
     let release = () => {};

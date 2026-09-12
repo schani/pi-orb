@@ -336,15 +336,64 @@ function initialState(): MockState {
       overflow: {},
     });
   }
+  const fleetProjects: ProjectView[] = ["fieldnotes", "homelab", "scratchpad"].map((name) => ({
+    ...project,
+    id: `frontend-${name}-project`,
+    name,
+    repositoryUrl: `https://github.com/example/${name}`,
+  }));
+  const fleetOrbs: OrbView[] = [
+    {
+      ...orb,
+      id: "frontend-offline-sync",
+      projectId: "frontend-fieldnotes-project",
+      name: "Offline sync",
+      state: "stopped",
+    },
+    {
+      ...orb,
+      id: "frontend-editor-shortcuts",
+      projectId: "frontend-fieldnotes-project",
+      name: "Editor shortcuts",
+      state: "stopped",
+    },
+    {
+      ...orb,
+      id: "frontend-backup-check",
+      projectId: "frontend-homelab-project",
+      name: "Backup verification",
+      state: "failed",
+      lastError: "Backup destination is unavailable.",
+    },
+  ];
+  const fleetHistories: [string, HistoryRecord[]][] = fleetOrbs.map((entry) => [
+    entry.id,
+    [
+      {
+        id: `${entry.id}-welcome`,
+        parentId: null,
+        timestamp: createdAt,
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: `Ready to work on ${entry.name?.toLowerCase()}.` }],
+        overflow: {},
+      },
+    ],
+  ]);
   return {
-    projects: new Map([[project.id, project]]),
+    projects: new Map([
+      [project.id, project],
+      ...fleetProjects.map((entry): [string, ProjectView] => [entry.id, entry]),
+    ]),
     orbs: new Map([
+      ...fleetOrbs.map((entry): [string, OrbView] => [entry.id, entry]),
       [orb.id, orb],
       [longOrb.id, longOrb],
       [authOrb.id, authOrb],
       [archivedOrb.id, archivedOrb],
     ]),
     histories: new Map([
+      ...fleetHistories,
       [orb.id, records],
       [longOrb.id, longRecords],
       [authOrb.id, []],
@@ -352,6 +401,7 @@ function initialState(): MockState {
     ]),
     uploads: new Map(),
     messages: new Map([
+      ...fleetOrbs.map((entry): [string, OrbMessageView[]] => [entry.id, []]),
       [orb.id, []],
       [longOrb.id, []],
       [authOrb.id, []],

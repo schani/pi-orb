@@ -1,4 +1,5 @@
 export type IconName =
+  | "plus"
   | "pen"
   | "archive"
   | "bin"
@@ -13,6 +14,7 @@ export type IconName =
   | "stop";
 
 const PATHS: Record<IconName, string> = {
+  plus: "M8 3v10M3 8h10",
   gear: "M6.5 1.5h3l.5 2 1.5 1 2-.5 1.5 2.5-1.5 1.5v1l1.5 1.5-1.5 2.5-2-.5-1.5 1-.5 2h-3l-.5-2-1.5-1-2 .5L1 10.5 2.5 9V8L1 6.5 2.5 4l2 .5 1.5-1z M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0",
   upload: "M3 10v3h10v-3 M8 10V2 M5 5l3-3 3 3",
   start: "M5 3l7 5-7 5z",

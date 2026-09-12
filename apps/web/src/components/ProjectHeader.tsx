@@ -1,16 +1,19 @@
 import type { ProjectView } from "@pi-orb/protocol";
-import { useEffect, useRef, useState } from "react";
+import { type MouseEventHandler, useEffect, useRef, useState } from "react";
 import { deleteProject, describeApiError } from "../lib/api.ts";
 import { projectDeletionConfirmation } from "../lib/project-deletion.ts";
 import { Icon } from "./Icons.tsx";
 import { ProjectConfigButton } from "./ProjectConfigButton.tsx";
+import { ProjectNewOrbLink } from "./ProjectNewOrbLink.tsx";
 
 /** Identical project identity and actions on the dashboard and in the orb index. */
 export function ProjectHeader({
   project,
   onChanged,
+  orbCreation,
 }: {
   project: ProjectView;
+  orbCreation?: { pending: boolean; onClick: MouseEventHandler<HTMLAnchorElement> };
   onChanged: (project: ProjectView) => void | Promise<void>;
 }) {
   const active = useRef(true);
@@ -39,17 +42,27 @@ export function ProjectHeader({
         <h2 className="project-name" data-project-heading tabIndex={-1}>
           {project.name}
         </h2>
-        <ProjectConfigButton project={project} disabled={disabled} onChanged={onChanged} />
-        <button
-          type="button"
-          className="icon-button danger"
-          aria-label={`Delete ${project.name}`}
-          title="delete project"
-          disabled={disabled}
-          onClick={() => void remove()}
-        >
-          <Icon name="bin" />
-        </button>
+        <span className="project-head-actions">
+          {orbCreation && (
+            <ProjectNewOrbLink
+              projectId={project.id}
+              disabled={disabled || orbCreation.pending}
+              iconLabel={`${orbCreation.pending ? "Creating orb in" : "New orb in"} ${project.name}`}
+              onClick={orbCreation.onClick}
+            />
+          )}
+          <ProjectConfigButton project={project} disabled={disabled} onChanged={onChanged} />
+          <button
+            type="button"
+            className="icon-button danger"
+            aria-label={`Delete ${project.name}`}
+            title="delete project"
+            disabled={disabled}
+            onClick={() => void remove()}
+          >
+            <Icon name="bin" />
+          </button>
+        </span>
       </div>
       {error !== null && (
         <div role="alert" className="banner banner-error project-column-error">

@@ -54,7 +54,7 @@ describe("dashboard layout contract", () => {
 
   it("keeps every orb entry on its line grid behind its state hue", () => {
     expect(rule(".orb-entry")).toContain("border-left: 2px solid var(--g2)");
-    expect(rule(".orb-entry-del")).toContain("border-left-style: dotted");
+    expect(rule(".orb-entry-del,\n.ix-row-del")).toContain("border-left-style: dotted");
     expect(rule(".orb-entry-title")).toContain("height: 22px");
     expect(rule(".orb-entry-meta")).toContain("height: var(--row)");
     expect(rule(".orb-entry-error")).toContain("color: var(--bad)");
@@ -104,6 +104,15 @@ describe("orb workspace layout contract", () => {
     expect(rule(".ix-row")).toContain("grid-template-columns: 16px minmax(0, 1fr) auto");
     expect(rule(".ix-row")).toContain("border-left: 2px solid var(--g2)");
     expect(rule(".ix-row-current,\n.ix-row-current:hover")).toContain("background: var(--k)");
+  });
+
+  it("keeps stacked project actions and headers on the existing grid", () => {
+    expect(rule(".orb-index .project-head-actions")).toContain("margin-left: auto");
+    expect(rule(".orb-index .project-head-actions")).toContain("gap: 4px");
+    expect(rule("a.project-new-orb-icon")).toContain("width: 24px");
+    expect(rule("a.project-new-orb-icon")).toContain("height: 24px");
+    expect(rule(".ix-project > .project-head")).toContain("top: 24px");
+    expect(rule(".ix-project + .ix-project")).toContain("border-top: 1px solid var(--k)");
   });
 
   it("spans the user band across the record's prefix column", () => {
