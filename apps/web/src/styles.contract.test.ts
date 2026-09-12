@@ -123,11 +123,32 @@ describe("orb workspace layout contract", () => {
     expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--g2)");
   });
 
-  it("stacks the terminal title bar above the emulator", () => {
-    expect(rule(".orb-terminal-window")).toContain("display: flex");
-    expect(rule(".orb-terminal-window")).toContain("flex-direction: column");
-    expect(rule(".orb-terminal-header")).toContain("flex: 0 0 20px");
-    expect(rule(".orb-terminal-header")).toContain("background: var(--k)");
+  it("overlays a full-width headerless terminal immediately below the orb header", () => {
+    const terminal = rule(".orb-terminal-window");
+    expect(terminal).toContain("position: absolute");
+    expect(terminal).toContain("top: 100%");
+    expect(terminal).toContain("left: -1px");
+    expect(terminal).toContain("width: calc(100% + 1px)");
+    expect(terminal).toContain("border: 1px solid var(--k)");
+    expect(rule(".orb-terminal-resize")).toContain("bottom: 0");
+    expect(rule(".orb-terminal-resize")).toContain("cursor: ns-resize");
+    expect(rule(".orb-terminal-body")).toContain("overflow: clip");
+    expect(terminal).toContain("padding: 13px 0");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("padding: 0 15px");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain(
+      "scroll-snap-type: y mandatory",
+    );
+    expect(rule(".orb-terminal-emulator .term-row")).toContain("scroll-snap-align: start");
+    expect(rule(".orb-terminal-resize:focus-visible")).toContain("background: transparent");
+    expect(rule(".orb-terminal-resize:focus-visible")).toContain("outline: 0");
+    expect(terminal).not.toMatch(/animation|transition/);
+    expect(rule(".orb-terminal-window.orb-terminal-hidden")).toContain("visibility: hidden");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("flex: none");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("border-radius: 0");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("box-shadow: none");
+    expect(css).not.toMatch(/orb-terminal-(header|launcher|controls)/);
+    expect(rule(".orb-header-actions")).toContain("gap: 8px");
+    expect(rule("button.icon-button")).toContain("width: 20px");
   });
 
   it("uses one rail-row geometry for reasoning and every tool category", () => {

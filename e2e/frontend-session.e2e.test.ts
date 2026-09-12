@@ -825,6 +825,317 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("toggles a headerless terminal shade without moving history or replacing its session", async () => {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const controls: { type: string; cols: number; rows: number }[] = [];
+    const inputs: Buffer[] = [];
+    let connections = 0;
+    let closedConnections = 0;
+    page.on("websocket", (socket) => {
+      if (!socket.url().endsWith("/frontend-long-history/terminal")) return;
+      connections += 1;
+      socket.on("close", () => {
+        closedConnections += 1;
+      });
+      socket.on("framesent", ({ payload }) => {
+        if (typeof payload === "string") controls.push(JSON.parse(payload));
+        else inputs.push(payload);
+      });
+    });
+    // Keep unrelated initial live replay/inbox commits out of the geometry
+    // assertion. The terminal still uses the fixture's real socket adapter.
+    await page.routeWebSocket("**/orbs/frontend-long-history/live", (socket) => {
+      socket.connectToServer().onMessage(() => {});
+    });
+    await page.route("**/orbs/frontend-long-history/messages", (route) =>
+      route.fulfill({ json: { items: [] } }),
+    );
+    const geometry = () =>
+      page.locator("body").evaluate((body) => {
+        const document = body.ownerDocument;
+        const history = document.querySelector(".history")?.getBoundingClientRect();
+        const composer = document.querySelector(".composer")?.getBoundingClientRect();
+        return {
+          scroll: document.defaultView?.scrollY,
+          history: history && { top: history.top, width: history.width, height: history.height },
+          composer: composer && { top: composer.top, height: composer.height },
+        };
+      });
+    try {
+      await page.goto(`${origin}/#/orbs/frontend-long-history`);
+      await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("draft survives terminal toggles");
+      await page.locator("body").evaluate(async (body) => {
+        const window = body.ownerDocument.defaultView;
+        if (window === null) return;
+        await new Promise<void>((resolve) => {
+          window.addEventListener("scroll", () => window.requestAnimationFrame(() => resolve()), {
+            once: true,
+          });
+          window.scrollTo(0, 1200);
+        });
+      });
+      const before = await geometry();
+      const header = page.locator(".orb-header");
+      const actionBoxes = await header
+        .locator(".orb-header-actions > button")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => {
+            const box = button.getBoundingClientRect();
+            return { x: box.x, width: box.width };
+          }),
+        );
+      expectPage(actionBoxes).toHaveLength(5);
+      actionBoxes.forEach((box, index) => {
+        expectPage(box.width).toBe(20);
+        if (index > 0) expectPage(box.x - (actionBoxes[index - 1]?.x ?? 0)).toBe(28);
+      });
+      await page.keyboard.press("Meta+j");
+      const panel = page.getByRole("complementary", { name: "Interactive terminal" });
+      await expectPage(panel).toContainText("frontend fixture terminal");
+      await expectPage(panel.locator("header")).toHaveCount(0);
+      await expectPage(panel.locator("button")).toHaveCount(0);
+      await expectPage(panel).toHaveCSS("animation-name", "none");
+      await expectPage(panel).toHaveCSS("transition-duration", "0s");
+      await expectPage(panel).toHaveCSS("border-top-width", "1px");
+      await expectPage(panel).toHaveCSS("border-left-width", "1px");
+      await expectPage(panel).toHaveCSS("border-right-width", "1px");
+      await expectPage(panel).toHaveCSS("border-bottom-width", "1px");
+      await expectPage(panel.locator(".wterm")).toHaveCSS("box-shadow", "none");
+      await expectPage(panel.locator(".orb-terminal-loading")).toHaveCount(0);
+      const headerBox = await header.boundingBox();
+      const panelBox = await panel.boundingBox();
+      // Overlay the existing header/index rules, rather than drawing an
+      // adjacent second pixel. The right edge still ends at the header edge.
+      expectPage(panelBox?.x).toBe((headerBox?.x ?? 0) - 1);
+      expectPage(panelBox?.width).toBe((headerBox?.width ?? 0) + 1);
+      expectPage(panelBox?.y).toBe((headerBox?.y ?? 0) + (headerBox?.height ?? 0) - 1);
+      expectPage(await geometry()).toEqual(before);
+      // StrictMode can legitimately mount, dispose, and mount again before
+      // the first greeting. The invariant is no replacement AFTER readiness.
+      const connectionsBeforeHide = connections;
+      const closedBeforeHide = closedConnections;
+      const opensBeforeHide = controls.filter((control) => control.type === "terminal.open").length;
+      expectPage(opensBeforeHide).toBeGreaterThan(0);
+      await page.keyboard.type("SESSION_KEPT");
+      await expectPage(panel).toContainText("SESSION_KEPT");
+      // Escape is terminal input, not a window-manager shortcut (vim needs it).
+      await page.keyboard.press("Escape");
+      await expectPage(panel).toBeVisible();
+      await expectPage.poll(() => inputs.some((input) => input.includes(27))).toBe(true);
+      const inputCount = inputs.length;
+      const emulator = await panel.locator(".wterm").elementHandle();
+      await page.keyboard.press("Meta+j");
+      await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+      expectPage(await geometry()).toEqual(before);
+      await expectPage(composer).toHaveValue("draft survives terminal toggles");
+      await expectPage(composer).toBeFocused();
+      await composer.dispatchEvent("keydown", { key: "j", metaKey: true, repeat: true });
+      await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+      await page.keyboard.press("Meta+j");
+      await expectPage(panel).toContainText("SESSION_KEPT");
+      expectPage(inputs).toHaveLength(inputCount);
+      expectPage(
+        await emulator?.evaluate((node) => node === node.ownerDocument.querySelector(".wterm")),
+      ).toBe(true);
+      expectPage(connections).toBe(connectionsBeforeHide);
+      expectPage(closedConnections).toBe(closedBeforeHide);
+      expectPage(controls.filter((control) => control.type === "terminal.open")).toHaveLength(
+        opensBeforeHide,
+      );
+      expectPage(await geometry()).toEqual(before);
+      // Fill scrollback: scrollTop being a multiple of 20 alone is not
+      // sufficient if padding scrolls with the grid (the old first row was -7px).
+      for (let line = 0; line < 30; line += 1) await page.keyboard.press("Enter");
+      await page.keyboard.type("SCROLLBACK_READY");
+      await expectPage(panel).toContainText("SCROLLBACK_READY");
+      const rowEdges = () =>
+        panel.locator(".wterm").evaluate((node) => {
+          const viewport = node.getBoundingClientRect();
+          const visible = [...node.querySelectorAll(".term-row")]
+            .map((row) => row.getBoundingClientRect())
+            .filter((row) => row.bottom > viewport.top && row.top < viewport.bottom);
+          return {
+            first: visible[0]?.top === viewport.top,
+            last: visible.at(-1)?.bottom === viewport.bottom,
+          };
+        });
+      await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
+      const scrollStart = await panel.locator(".wterm").evaluate((node) => {
+        node.setAttribute("data-scroll-ended", "false");
+        node.addEventListener("scrollend", () => node.setAttribute("data-scroll-ended", "true"), {
+          once: true,
+        });
+        return node.scrollTop;
+      });
+      await panel.locator(".wterm").hover();
+      await page.mouse.wheel(0, -53);
+      await expectPage(panel.locator(".wterm")).toHaveAttribute("data-scroll-ended", "true");
+      expectPage(await panel.locator(".wterm").evaluate((node) => node.scrollTop)).toBeLessThan(
+        scrollStart,
+      );
+      expectPage(await rowEdges()).toEqual({ first: true, last: true });
+      const focusBeforeDrag = await page.locator(":focus").elementHandle();
+      const edge = panel.getByRole("separator", { name: "Resize terminal" });
+      const startHeight = panelBox?.height ?? 0;
+      const startEmulatorHeight = await panel
+        .locator(".wterm")
+        .evaluate((node) => node.clientHeight);
+      const resizeCount = () =>
+        controls.filter((control) => control.type === "terminal.resize").length;
+      const beforeDrag = resizeCount();
+      const edgeBox = await edge.boundingBox();
+      const x = (edgeBox?.x ?? 0) + (edgeBox?.width ?? 0) / 2;
+      const y = (edgeBox?.y ?? 0) + 4;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      expectPage(
+        await focusBeforeDrag?.evaluate((node) => node === node.ownerDocument.activeElement),
+      ).toBe(true);
+      await expectPage(edge).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expectPage(panel).toHaveCSS("border-bottom-width", "1px");
+      await page.mouse.move(x, y + 8);
+      await expectPage(panel).toHaveCSS("height", `${startHeight}px`);
+      await page.mouse.move(x, y + 49);
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      await page.mouse.move(x, y + 51);
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 60}px`);
+      await edge.dispatchEvent("pointercancel", { pointerId: 2 });
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 60}px`);
+      await expectPage(panel.locator(".wterm")).toHaveCSS("height", `${startEmulatorHeight}px`);
+      expectPage(resizeCount()).toBe(beforeDrag);
+      expectPage((await panel.boundingBox())?.y).toBe(panelBox?.y);
+      expectPage((await panel.boundingBox())?.width).toBe(panelBox?.width);
+      expectPage(await geometry()).toEqual(before);
+      await page.mouse.up();
+      expectPage(
+        await focusBeforeDrag?.evaluate((node) => node === node.ownerDocument.activeElement),
+      ).toBe(true);
+      await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
+      await expectPage.poll(resizeCount).toBe(beforeDrag + 1);
+      await expectPage(panel.locator(".wterm")).toHaveCSS(
+        "height",
+        `${startEmulatorHeight + 60}px`,
+      );
+      await edge.press("ArrowUp");
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      await expectPage.poll(resizeCount).toBe(beforeDrag + 2);
+      await expectPage(edge).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expectPage(edge).toHaveCSS("outline-width", "0px");
+      await composer.focus();
+      const cancelBox = await edge.boundingBox();
+      const cancelY = (cancelBox?.y ?? 0) + 4;
+      await page.mouse.move(x, cancelY);
+      await page.mouse.down();
+      await page.mouse.move(x, cancelY - 61);
+      await expectPage(panel).toHaveCSS("height", `${startHeight - 20}px`);
+      await edge.dispatchEvent("pointercancel", { pointerId: 1 });
+      await page.mouse.up();
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      expectPage(resizeCount()).toBe(beforeDrag + 2);
+      await expectPage(composer).toBeFocused();
+      await expectPage(panel).toHaveCSS("border-bottom-width", "1px");
+      await page.keyboard.press("Meta+j");
+      await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+      await page.keyboard.press("Meta+j");
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      await expectPage(panel).toContainText("SESSION_KEPT");
+      expectPage(connections).toBe(connectionsBeforeHide);
+      const firstCols = controls[0]?.cols;
+      await page.setViewportSize({ width: 1000, height: 600 });
+      await expectPage
+        .poll(() =>
+          controls.some(
+            (control) => control.type === "terminal.resize" && control.cols !== firstCols,
+          ),
+        )
+        .toBe(true);
+      const resizedHeader = await header.boundingBox();
+      await expectPage
+        .poll(async () => (await panel.boundingBox())?.width)
+        .toBe((resizedHeader?.width ?? 0) + 1);
+      const resizedPanel = await panel.boundingBox();
+      const composerBox = await page.locator(".composer").boundingBox();
+      expectPage((resizedPanel?.y ?? 0) + (resizedPanel?.height ?? 0)).toBeLessThanOrEqual(
+        composerBox?.y ?? 0,
+      );
+      const emulatorHeight = await panel.locator(".wterm").evaluate((node) => node.clientHeight);
+      expectPage(emulatorHeight % 20).toBe(0);
+      await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
+      // Deliberately stop only this page's admission view; no shared fixture
+      // lifecycle mutation can interfere with later cases.
+      await page.route("**/api/v1/orbs/frontend-long-history", async (route) => {
+        const response = await route.fetch();
+        const orb = await response.json();
+        await route.fulfill({ response, json: { ...orb, state: "stopped" } });
+      });
+      await expectPage(header.getByRole("button", { name: "Start orb" })).toBeVisible();
+      await expectPage(page.locator(".orb-terminal-window")).toHaveCount(0);
+      await expectPage(header.getByRole("button", { name: /^(Open|Hide) terminal$/ })).toHaveCount(
+        0,
+      );
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("keeps delayed terminal readiness hidden and exposes an explicit retry after exit", async () => {
+    const page = await browser.newPage();
+    let accept = () => {};
+    let exit = () => {};
+    let opens = 0;
+    await page.routeWebSocket("**/orbs/frontend-fixture-orb/terminal", (socket) => {
+      socket.onMessage((data) => {
+        if (typeof data !== "string") return;
+        const control = JSON.parse(data);
+        if (control.type !== "terminal.open") return;
+        opens += 1;
+        accept = () => {
+          socket.send(
+            JSON.stringify({
+              v: 1,
+              type: "terminal.ready",
+              cols: control.cols,
+              rows: control.rows,
+            }),
+          );
+          socket.send(Buffer.from("READY_AFTER_HIDE\r\n# "));
+        };
+        exit = () =>
+          socket.send(JSON.stringify({ v: 1, type: "terminal.exit", exitCode: 7, signal: 0 }));
+      });
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const header = page.locator(".orb-header");
+      await header.getByRole("button", { name: "Open terminal", exact: true }).click();
+      await expectPage.poll(() => opens).toBe(1);
+      await header.getByRole("button", { name: "Hide terminal", exact: true }).click();
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("keep focus here");
+      accept();
+      await expectPage(page.locator(".orb-terminal-window")).toContainText("READY_AFTER_HIDE");
+      await expectPage(composer).toBeFocused();
+      await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+      await header.getByRole("button", { name: "Open terminal", exact: true }).click();
+      exit();
+      await expectPage(page.locator(".orb-terminal-window").getByRole("alert")).toContainText(
+        "Terminal exited with code 7.",
+      );
+      await page.getByRole("button", { name: "New terminal", exact: true }).click();
+      await expectPage.poll(() => opens).toBe(2);
+      accept();
+      await expectPage(page.locator(".orb-terminal-window")).toContainText("READY_AFTER_HIDE");
+      await expectPage(page.getByRole("button", { name: "New terminal", exact: true })).toHaveCount(
+        0,
+      );
+      await expectPage(composer).toHaveValue("keep focus here");
+    } finally {
+      await page.close();
+    }
+  });
+
   it("skips unchanged long history while typing and still renders sent/live messages", async () => {
     const page = await browser.newPage();
     try {
@@ -1467,7 +1778,7 @@ describe("frontend-only browser behavior", () => {
     expectPage(await working.evaluate((el) => el.getBoundingClientRect().width)).toBe(
       await caret.evaluate((el) => el.getBoundingClientRect().width),
     );
-    await page.getByRole("button", { name: "terminal", exact: true }).click();
+    await page.getByRole("button", { name: "Open terminal", exact: true }).click();
     await expectPage(caret).toBeHidden();
     const terminalCursor = page.locator(".term-cursor").first();
     await expectPage(terminalCursor).toBeAttached();

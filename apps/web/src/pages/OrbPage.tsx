@@ -951,7 +951,8 @@ function OrbConversation({
             {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
           </span>
         )}
-        <span className="orb-header-actions">
+        <div className="orb-header-actions">
+          <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
           {uploads.button}
           {canStart && (
             <button
@@ -1000,7 +1001,7 @@ function OrbConversation({
           >
             <Icon name="bin" />
           </button>
-        </span>
+        </div>
       </header>
       {uploads.progress}
 
@@ -1131,7 +1132,6 @@ function OrbConversation({
           }
         />
       )}
-      <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
     </main>
   );
 }
