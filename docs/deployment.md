@@ -257,6 +257,13 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Release gate finding (2026-09-12):** run `34711432756` stopped in checks before
+build/migration/apply; production was unchanged. MCP E2E's strict completion
+selector rejected the transient history-before-output-retirement DOM. The test
+assertion is corrected with deterministic frame/render and browser regressions;
+focused MCP E2E passed, but no new deployment is implied. Evidence:
+`docs/postmortems/2026-09-12-mcp-completion-selector.md`.
+
 **Production finding (2026-09-11; corrected and deployed):** `72fb304` passed checks/E2E,
 image acceptance and migration, then partially applied because the shared deployer
 lacks `logging.exclusions.create` for the MCP OAuth callback exclusion. All four

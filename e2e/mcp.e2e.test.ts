@@ -299,9 +299,11 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
         })
       ).status,
     ).toBe(202);
-    await expectPage(page.getByText("MCP_CHECK_COMPLETE", { exact: true })).toBeVisible({
-      timeout: 60_000,
-    });
+    // History arrives before output_retired. A list assertion retries the
+    // transient two-copy handoff while still requiring exactly one visible copy.
+    await expectPage(
+      page.getByText("MCP_CHECK_COMPLETE", { exact: true }).filter({ visible: true }),
+    ).toHaveText(["MCP_CHECK_COMPLETE"], { timeout: 60_000 });
     // A streamed completion is not the replication boundary. Wait for its durable marker.
     const encoded = await waitFor(
       "replicated MCP completion",
@@ -355,9 +357,9 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
     await expectPage(index).toHaveAttribute("aria-busy", "false");
     await page.getByPlaceholder("Message the orb…").fill("MCP check");
     await page.getByPlaceholder("Message the orb…").press("Control+Enter");
-    await expectPage(page.getByText("MCP_CHECK_COMPLETE", { exact: true })).toBeVisible({
-      timeout: 60_000,
-    });
+    await expectPage(
+      page.getByText("MCP_CHECK_COMPLETE", { exact: true }).filter({ visible: true }),
+    ).toHaveText(["MCP_CHECK_COMPLETE"], { timeout: 60_000 });
     expect(calls.filter((c) => c.method === "tools/call").map((c) => c.authorization)).toEqual([
       "Bearer synthetic-first",
       "Bearer synthetic-second",
@@ -388,9 +390,9 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
     await expectPage(index).toHaveAttribute("aria-busy", "false");
     await page.getByPlaceholder("Message the orb…").fill("MCP isolation");
     await page.getByPlaceholder("Message the orb…").press("Control+Enter");
-    await expectPage(page.getByText("MCP_ISOLATION_COMPLETE", { exact: true })).toBeVisible({
-      timeout: 60_000,
-    });
+    await expectPage(
+      page.getByText("MCP_ISOLATION_COMPLETE", { exact: true }).filter({ visible: true }),
+    ).toHaveText(["MCP_ISOLATION_COMPLETE"], { timeout: 60_000 });
     const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
       matchedRuleIndex: number | null;
       body: { tools?: { name: string }[]; instructions?: string };

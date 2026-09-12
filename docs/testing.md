@@ -1,5 +1,14 @@
 # Testing strategy
 
+**Completion assertions (2026-09-12):** history publication precedes live-output
+retirement; a browser can observe both paragraphs between those frames. Do not
+use a strict single-element visibility assertion as an atomic-handoff guarantee.
+For completion text, a visible-element list assertion must retry the intermediate
+count mismatch and still require exactly one exact match. Never select `.first()`
+to hide persistent duplicates. The MCP regression holds both frame boundaries
+explicitly and reproduces the original selector failure in Chromium. Evidence:
+`docs/postmortems/2026-09-12-mcp-completion-selector.md`.
+
 ## Decisions
 
 - Deterministic simulation testing is a first-class requirement from the beginning, not a later hardening phase.

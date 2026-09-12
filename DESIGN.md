@@ -125,6 +125,8 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-12-mcp-completion-selector.md](docs/postmortems/2026-09-12-mcp-completion-selector.md) — test synchronization across history publication and live-output retirement
+
 - [docs/postmortems/2026-09-11-release-logging-exclusion-iam.md](docs/postmortems/2026-09-11-release-logging-exclusion-iam.md) — partially applied release blocked by missing callback-log exclusion authority
 
 - [TODO.md](TODO.md) — the actionable backlog: bugs, hardening, agreed follow-ups
