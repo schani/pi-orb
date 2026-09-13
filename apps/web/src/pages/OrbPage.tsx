@@ -55,6 +55,8 @@ import {
   requestNotificationPermission,
   showTurnNotification,
 } from "../lib/turn-notifications.ts";
+import { usePhoneLayout } from "../lib/use-phone-layout.ts";
+import { usePhoneViewport } from "../lib/use-phone-viewport.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -419,6 +421,8 @@ interface OrbLoad {
 }
 
 export function OrbPage({ orbId }: { orbId: string }) {
+  const pageRef = useRef<HTMLDivElement>(null);
+  usePhoneViewport(pageRef);
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [loaded, setLoaded] = useState<OrbLoad | null>(null);
   useEffect(() => {
@@ -433,7 +437,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
   }, [orbId, loaded]);
   const pending = loaded?.orbId !== orbId;
   return (
-    <div className="orb-page">
+    <div className="orb-page" ref={pageRef}>
       <OrbIndex
         onProjectChange={setProject}
         projectId={loaded?.orb.isOk() ? loaded.orb.value.projectId : null}
@@ -466,6 +470,9 @@ function OrbConversation({
   projectName: string | null;
 }) {
   const orbId = initial.orbId;
+  const phone = usePhoneLayout();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollContentRef = useRef<HTMLDivElement>(null);
   const [state, dispatch] = useReducer(reducer, initial, (load) =>
     reducer(
       initialState(load.orbId),
@@ -513,6 +520,7 @@ function OrbConversation({
   );
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
+  const [phoneActions, setPhoneActions] = useState(false);
   const [renameText, setRenameText] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
   const [notifications, setNotifications] = useState<BrowserNotificationPermission>(() =>
@@ -659,22 +667,54 @@ function OrbConversation({
     const onScroll = () => {
       pinnedRef.current = isPinnedAfterScroll(
         {
-          scrollY: window.scrollY,
-          viewportHeight: window.innerHeight,
-          contentHeight: document.documentElement.scrollHeight,
+          scrollY: phone ? (scrollRef.current?.scrollTop ?? 0) : window.scrollY,
+          viewportHeight: phone ? (scrollRef.current?.clientHeight ?? 0) : window.innerHeight,
+          contentHeight: phone
+            ? (scrollRef.current?.scrollHeight ?? 0)
+            : document.documentElement.scrollHeight,
         },
         autoScrollYRef.current,
       );
       autoScrollYRef.current = null;
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-  // No dependency array: any render may have grown the page (records, live
-  // stream, tool chips). Run before paint so another fast stream update cannot
-  // make the previous bottom position look like the reader scrolled up.
+    const target = phone ? scrollRef.current : window;
+    const readerIntent = () => {
+      pinnedRef.current = false;
+      autoScrollYRef.current = null;
+    };
+    target?.addEventListener("scroll", onScroll, { passive: true });
+    if (phone) {
+      target?.addEventListener("pointerdown", readerIntent, { passive: true });
+      target?.addEventListener("wheel", readerIntent, { passive: true });
+      target?.addEventListener("pointerup", onScroll, { passive: true });
+    }
+    return () => {
+      target?.removeEventListener("scroll", onScroll);
+      target?.removeEventListener("pointerdown", readerIntent);
+      target?.removeEventListener("wheel", readerIntent);
+      target?.removeEventListener("pointerup", onScroll);
+    };
+  }, [phone]);
   useLayoutEffect(() => {
-    if (state.historyLoaded && pinnedRef.current) {
+    const scroller = scrollRef.current;
+    if (!phone || !scroller) return;
+    // Observe actual geometry, not React renders. Polling/typing must never write
+    // scrollTop into an asynchronously scrolling WebKit layer, even at the same offset.
+    const observer = new ResizeObserver(() => {
+      if (!pinnedRef.current) return;
+      const target = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      if (Math.abs(scroller.scrollTop - target) <= 1) return;
+      scroller.scrollTop = target;
+      autoScrollYRef.current = scroller.scrollTop;
+    });
+    observer.observe(scroller);
+    if (scrollContentRef.current) observer.observe(scrollContentRef.current);
+    return () => observer.disconnect();
+  }, [phone]);
+  // Preserve desktop document pinning. Phone scrolling is owned exclusively by
+  // the geometry observer above, never by unrelated component renders.
+  useLayoutEffect(() => {
+    if (!phone && state.historyLoaded && pinnedRef.current) {
       const target = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
       autoScrollYRef.current = target;
       window.scrollTo({ top: target });
@@ -907,7 +947,10 @@ function OrbConversation({
 
   return (
     <main className="orb-main" inert={pending} aria-busy={pending}>
-      <header className="orb-header">
+      <header className="orb-header" data-phone-actions={phoneActions}>
+        <a className="orb-phone-home" href="#/" aria-label="Dashboard" title="dashboard">
+          <Icon name="back" />
+        </a>
         {renaming ? (
           <form
             className="orb-rename-form"
@@ -949,9 +992,20 @@ function OrbConversation({
         {glyph !== null && lifecycleWord !== null && (
           <span className="orb-life">
             <StateTile glyph={glyph} decorative />
-            {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
+            <span className="orb-life-word">
+              {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
+            </span>
           </span>
         )}
+        <button
+          type="button"
+          className="icon-button orb-phone-menu"
+          aria-label="Orb actions"
+          aria-expanded={phoneActions}
+          onClick={() => setPhoneActions((open) => !open)}
+        >
+          <Icon name="more" />
+        </button>
         <div className="orb-header-actions">
           <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
           {uploads.button}
@@ -1004,117 +1058,133 @@ function OrbConversation({
           </button>
         </div>
       </header>
-      {uploads.progress}
+      <div className="orb-transcript-scroll" ref={scrollRef}>
+        <div className="orb-transcript-content" ref={scrollContentRef}>
+          {uploads.progress}
 
-      {orb?.stateDetail?.type === "discarding_failed_compute" && (
-        <OrbNotice>
-          Discarding failed compute while preserving the workspace…
-          {orb.stateDetail.retrying && " (retrying)"}
-          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-        </OrbNotice>
-      )}
-      {orb?.stateDetail?.type === "replacing_stale_compute" && (
-        <OrbNotice>
-          Replacing compute for an updated host specification while preserving the workspace…
-          {orb.stateDetail.retrying && " (retrying)"}
-          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-        </OrbNotice>
-      )}
-      {orb?.stateDetail?.type === "deleting_resources" && (
-        <OrbNotice>
-          Permanently deleting orb resources…
-          {orb.stateDetail.retrying && " (retrying)"}
-          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-        </OrbNotice>
-      )}
-      {orb?.stateDetail?.type === "archiving_orb" && (
-        <OrbNotice>
-          {orb.stateDetail.phase === "waiting_for_idle"
-            ? "Archiving: waiting for the agent to become idle…"
-            : orb.stateDetail.phase === "sealing_history"
-              ? "Archiving: sealing complete history…"
-              : "Archiving: permanently removing runtime resources…"}
-          {orb.stateDetail.retrying && " (retrying)"}
-          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-        </OrbNotice>
-      )}
-      {orb?.stateDetail?.type === "draining_history" && (
-        <OrbNotice>
-          Stopping: draining history…
-          {orb.stateDetail.retrying && " (retrying)"}
-          {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
-        </OrbNotice>
-      )}
-      {orb?.stateDetail?.type === "waiting_for_runtime" && (
-        <OrbNotice>
-          Waiting for the runtime…
-          {orb.stateDetail.hostState !== null && ` host ${orb.stateDetail.hostState}`}
-          {orb.stateDetail.secondsSinceHostRunning !== null &&
-            ` for ${orb.stateDetail.secondsSinceHostRunning}s`}
-          {` — ${orb.stateDetail.probeAttempts} probes`}
-          {orb.stateDetail.lastProbeError !== undefined &&
-            ` — last error: ${orb.stateDetail.lastProbeError}`}
-        </OrbNotice>
-      )}
-      {orb?.stateDetail?.type === "running_setup" && (
-        <OrbNotice>
-          Running the repository's <code>.agents/setup</code>…
-          {` for ${orb.stateDetail.secondsRunning}s`}
-        </OrbNotice>
-      )}
-      {orb?.stateDetail?.type === "setup_failed" && (
-        <OrbNotice error>
-          The repository's <code>.agents/{orb.stateDetail.hook}</code>{" "}
-          {orb.stateDetail.reason === "timeout"
-            ? "ran past its deadline and was stopped"
-            : orb.stateDetail.reason === "hook_not_executable"
-              ? "is not executable"
-              : "failed"}
-          . The orb started anyway; its log is at <code>{orb.stateDetail.logPath}</code>.
-        </OrbNotice>
-      )}
-      {orb?.actionRequired !== undefined && (
-        <OrbNotice>
-          {orb.actionRequired.type === "github_device_login"
-            ? "GitHub device login required."
-            : "OpenAI device login required."}{" "}
-          Visit{" "}
-          <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
-            {orb.actionRequired.verificationUri}
-          </a>{" "}
-          and enter <span className="user-code">{orb.actionRequired.userCode}</span>
-          <CopyCodeButton code={orb.actionRequired.userCode} />
-          {expiresIn !== null && <span className="muted"> expires in {expiresIn}</span>}
-        </OrbNotice>
-      )}
-      <OrbFailureBanner message={orb?.lastError} />
-      <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
-      {orbError !== null && <OrbNotice error>{describeApiError(orbError)}</OrbNotice>}
-      {state.serverError !== null && (
-        <OrbNotice error>
-          runtime error {state.serverError.code}: {state.serverError.message}
-        </OrbNotice>
-      )}
-      {state.requestError !== null && (
-        <OrbNotice error>
-          request rejected ({state.requestError.code}): {state.requestError.message}
-        </OrbNotice>
-      )}
-      {state.notice !== null && <OrbNotice>{state.notice}</OrbNotice>}
-      {state.historyError !== null && (
-        <OrbNotice error>history unavailable: {describeApiError(state.historyError)}</OrbNotice>
-      )}
+          {orb?.stateDetail?.type === "discarding_failed_compute" && (
+            <OrbNotice>
+              Discarding failed compute while preserving the workspace…
+              {orb.stateDetail.retrying && " (retrying)"}
+              {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+            </OrbNotice>
+          )}
+          {orb?.stateDetail?.type === "replacing_stale_compute" && (
+            <OrbNotice>
+              Replacing compute for an updated host specification while preserving the workspace…
+              {orb.stateDetail.retrying && " (retrying)"}
+              {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+            </OrbNotice>
+          )}
+          {orb?.stateDetail?.type === "deleting_resources" && (
+            <OrbNotice>
+              Permanently deleting orb resources…
+              {orb.stateDetail.retrying && " (retrying)"}
+              {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+            </OrbNotice>
+          )}
+          {orb?.stateDetail?.type === "archiving_orb" && (
+            <OrbNotice>
+              {orb.stateDetail.phase === "waiting_for_idle"
+                ? "Archiving: waiting for the agent to become idle…"
+                : orb.stateDetail.phase === "sealing_history"
+                  ? "Archiving: sealing complete history…"
+                  : "Archiving: permanently removing runtime resources…"}
+              {orb.stateDetail.retrying && " (retrying)"}
+              {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+            </OrbNotice>
+          )}
+          {orb?.stateDetail?.type === "draining_history" && (
+            <OrbNotice>
+              Stopping: draining history…
+              {orb.stateDetail.retrying && " (retrying)"}
+              {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
+            </OrbNotice>
+          )}
+          {orb?.stateDetail?.type === "waiting_for_runtime" && (
+            <OrbNotice>
+              Waiting for the runtime…
+              {orb.stateDetail.hostState !== null && ` host ${orb.stateDetail.hostState}`}
+              {orb.stateDetail.secondsSinceHostRunning !== null &&
+                ` for ${orb.stateDetail.secondsSinceHostRunning}s`}
+              {` — ${orb.stateDetail.probeAttempts} probes`}
+              {orb.stateDetail.lastProbeError !== undefined &&
+                ` — last error: ${orb.stateDetail.lastProbeError}`}
+            </OrbNotice>
+          )}
+          {orb?.stateDetail?.type === "running_setup" && (
+            <OrbNotice>
+              Running the repository's <code>.agents/setup</code>…
+              {` for ${orb.stateDetail.secondsRunning}s`}
+            </OrbNotice>
+          )}
+          {orb?.stateDetail?.type === "setup_failed" && (
+            <OrbNotice error>
+              The repository's <code>.agents/{orb.stateDetail.hook}</code>{" "}
+              {orb.stateDetail.reason === "timeout"
+                ? "ran past its deadline and was stopped"
+                : orb.stateDetail.reason === "hook_not_executable"
+                  ? "is not executable"
+                  : "failed"}
+              . The orb started anyway; its log is at <code>{orb.stateDetail.logPath}</code>.
+            </OrbNotice>
+          )}
+          {orb?.actionRequired !== undefined && (
+            <OrbNotice>
+              {orb.actionRequired.type === "github_device_login"
+                ? "GitHub device login required."
+                : "OpenAI device login required."}{" "}
+              Visit{" "}
+              <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
+                {orb.actionRequired.verificationUri}
+              </a>{" "}
+              and enter <span className="user-code">{orb.actionRequired.userCode}</span>
+              <CopyCodeButton code={orb.actionRequired.userCode} />
+              {expiresIn !== null && <span className="muted"> expires in {expiresIn}</span>}
+            </OrbNotice>
+          )}
+          <OrbFailureBanner message={orb?.lastError} />
+          <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
+          {orbError !== null && <OrbNotice error>{describeApiError(orbError)}</OrbNotice>}
+          <div className="orb-composer-feedback-original">
+            {state.serverError !== null && (
+              <OrbNotice error>
+                runtime error {state.serverError.code}: {state.serverError.message}
+              </OrbNotice>
+            )}
+            {state.requestError !== null && (
+              <OrbNotice error>
+                request rejected ({state.requestError.code}): {state.requestError.message}
+              </OrbNotice>
+            )}
+            {state.notice !== null && <OrbNotice>{state.notice}</OrbNotice>}
+          </div>
+          {state.historyError !== null && (
+            <OrbNotice error>history unavailable: {describeApiError(state.historyError)}</OrbNotice>
+          )}
 
-      <HistoryView
-        records={historyRecords}
-        liveBlocks={liveBlocks}
-        tools={tools}
-        busy={isLiveBusy(orb?.state, state)}
-        queuedMessages={queuedMessages}
-      />
-
+          <HistoryView
+            records={historyRecords}
+            liveBlocks={liveBlocks}
+            tools={tools}
+            busy={isLiveBusy(orb?.state, state)}
+            queuedMessages={queuedMessages}
+          />
+        </div>
+      </div>
       {orb?.state !== "archived" && orb?.state !== "archiving" && (
         <Composer
+          feedback={[
+            state.serverError === null
+              ? null
+              : `runtime error ${state.serverError.code}: ${state.serverError.message}`,
+            state.requestError === null
+              ? null
+              : `request rejected (${state.requestError.code}): ${state.requestError.message}`,
+            state.notice,
+          ]
+            .filter((message) => message !== null)
+            .join(" · ")}
           text={state.composerText}
           mode={state.composerMode}
           onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}

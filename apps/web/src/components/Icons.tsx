@@ -9,9 +9,17 @@ export type IconName =
   | "upload"
   | "start"
   | "stop"
-  | "terminal";
+  | "terminal"
+  | "fold"
+  | "send"
+  | "back"
+  | "more";
 
 const PATHS: Record<IconName, string> = {
+  fold: "m3 6 5 5 5-5",
+  send: "M8 13V3M3 8l5-5 5 5",
+  back: "M10 3 5 8l5 5",
+  more: "M3 8h1m3 0h1m3 0h1",
   plus: "M8 3v10M3 8h10",
   gear: "M6.5 1.5h3l.5 2 1.5 1 2-.5 1.5 2.5-1.5 1.5v1l1.5 1.5-1.5 2.5-2-.5-1.5 1-.5 2h-3l-.5-2-1.5-1-2 .5L1 10.5 2.5 9V8L1 6.5 2.5 4l2 .5 1.5-1z M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0",
   upload: "M3 10v3h10v-3 M8 10V2 M5 5l3-3 3 3",

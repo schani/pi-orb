@@ -1277,7 +1277,7 @@ a.project-new-orb-icon:focus-visible {
   flex-direction: column;
 }
 
-.orb-main > .history {
+.orb-transcript-content > .history {
   flex: 1 0 auto;
 }
 
@@ -1805,7 +1805,7 @@ a.project-new-orb-icon:focus-visible {
   background: transparent;
 }
 
-.composer-line > .text-action {
+.composer-line > .composer-abort {
   align-self: start;
 }
 
@@ -1927,4 +1927,247 @@ a.project-new-orb-icon:focus-visible {
 
 .orb-terminal-emulator .term-row {
   scroll-snap-align: start;
+}
+
+/* Side rail is phone-only; desktop keeps its four-line prompt and index. */
+.composer-phone-pad,
+.composer-phone-rail,
+.composer-phone-feedback,
+.orb-phone-home,
+button.orb-phone-menu {
+  display: none;
+}
+
+.orb-composer-feedback-original,
+.orb-transcript-scroll,
+.orb-transcript-content {
+  display: contents;
+}
+
+@media (max-width: 600px) {
+  html:has(.orb-page),
+  body:has(.orb-page) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  #root:has(.orb-page) {
+    min-height: 0;
+  }
+
+  .app:has(.orb-page) {
+    position: fixed;
+    top: var(--phone-viewport-top, 0px);
+    left: 0;
+    width: 100%;
+    height: var(--phone-viewport-height, 100dvh);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-page {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-main {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-transcript-content {
+    display: flow-root;
+  }
+
+  .orb-transcript-scroll {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: none;
+  }
+
+  .orb-index {
+    display: none;
+  }
+
+  .orb-header {
+    position: relative;
+    height: auto;
+    min-height: 44px;
+    flex-wrap: wrap;
+    gap: 0 8px;
+    padding: 0 12px;
+  }
+
+  .app:has(> .session-ribbon) .orb-header {
+    top: auto;
+  }
+
+  .orb-phone-home,
+  button.orb-phone-menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border: 0;
+  }
+
+  .orb-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .orb-header > .icon-button:not(.orb-phone-menu) {
+    width: 44px;
+    height: 44px;
+  }
+
+  .orb-life-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .orb-header-actions {
+    display: none;
+    width: 100%;
+    justify-content: flex-end;
+    border-top: 1px solid var(--g2);
+    gap: 8px;
+  }
+
+  .orb-header[data-phone-actions="true"] .orb-header-actions {
+    display: flex;
+  }
+
+  .orb-header-actions > button.icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .orb-rename-form {
+    flex-wrap: wrap;
+  }
+
+  .orb-rename-form input {
+    width: 80px;
+    font-size: 16px;
+  }
+
+  .orb-main:has(.composer) .orb-composer-feedback-original {
+    display: none;
+  }
+
+  .composer {
+    position: relative;
+    bottom: auto;
+    flex: none;
+    padding: 0 12px env(safe-area-inset-bottom);
+  }
+
+  .composer-phone-feedback {
+    max-height: 80px;
+    overflow-y: auto;
+    display: block;
+    padding: 4px 0;
+    color: var(--bad);
+    overflow-wrap: anywhere;
+  }
+
+  .composer-phone-pad {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 12px;
+    height: 44px;
+  }
+
+  .composer-open {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    background: var(--w);
+  }
+
+  .composer-draft-preview {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--g3);
+  }
+
+  .composer-phone-pad > button.icon-button,
+  .composer-phone-rail > button.icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .composer:not([data-expanded="true"]) .composer-line,
+  .composer:not([data-expanded="true"]) .composer-attachments,
+  .composer[data-expanded="true"] .composer-phone-pad,
+  .composer-line > .composer-abort {
+    display: none;
+  }
+
+  .composer-line {
+    grid-template-columns: 32px minmax(0, 1fr) 44px;
+  }
+
+  .composer-line > .composer-prefix {
+    padding-top: 12px;
+  }
+
+  .composer-input {
+    height: 88px;
+    min-height: 88px;
+    padding: 12px 0;
+    resize: none;
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  .composer-input[data-block-caret="true"] {
+    caret-color: auto;
+  }
+
+  .composer-caret {
+    display: none;
+  }
+
+  .composer-phone-rail {
+    display: flex;
+    flex-direction: column;
+  }
+
+  button.composer-send {
+    color: var(--w);
+    background: var(--k);
+  }
+
+  button.composer-send:disabled {
+    color: var(--g2);
+    background: var(--g1);
+  }
+
+  .composer-attachments {
+    max-height: 80px;
+    overflow-y: auto;
+    margin-top: 4px;
+  }
+
+  .composer-attachment-remove {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

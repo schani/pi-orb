@@ -8,6 +8,7 @@ function render(
   mode: "message" | "shell" | "excluded_shell",
   withImage = false,
   canSend = true,
+  canAbort = false,
 ): string {
   return renderToStaticMarkup(
     <Composer
@@ -19,7 +20,7 @@ function render(
       onImageRemove={noop}
       canSend={canSend}
       onSend={noop}
-      canAbort={false}
+      canAbort={canAbort}
       onAbort={noop}
       onShellAttachmentBlocked={noop}
     />,
@@ -57,7 +58,29 @@ describe("Composer shell presentation", () => {
     expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
   });
 
-  it("offers no send control: ⌘⏎ is the only send gesture", () => {
-    expect(render("message")).not.toContain("<button");
+  it("uses the shared X icon for abort with an accessible action name", () => {
+    const html = render("message", false, true, true);
+    expect(html).toContain('class="icon-button composer-abort"');
+    expect(html).toContain('aria-label="abort"');
+    expect(html).toContain('title="abort"');
+    expect(html).toContain('href="#i-x"');
+    expect(html).not.toContain(">abort</button>");
+    expect(render("message")).not.toContain('class="icon-button composer-abort"');
+  });
+
+  it("places touch send in the phone-only side rail, retaining four desktop lines", () => {
+    const html = render("message");
+    expect(html).toContain('class="composer-phone-rail"');
+    expect(html).toContain('aria-label="Send message"');
+    expect(html).toContain('href="#i-fold"');
+    expect(html).toContain('href="#i-send"');
+    expect(html).toContain('data-expanded="false"');
+    expect(html).toMatch(/<textarea[^>]*rows="4"/);
+  });
+
+  it("disables phone send under the same admission and attachment rules", () => {
+    expect(render("message", false, false)).toMatch(/aria-label="Send message"[^>]*disabled=""/);
+    expect(render("shell", true)).toMatch(/aria-label="Run command"[^>]*disabled=""/);
+    expect(render("shell")).not.toMatch(/aria-label="Run command"[^>]*disabled=""/);
   });
 });

@@ -1775,7 +1775,7 @@ export function mockBackendPlugin(): Plugin {
         {
           tag: "style",
           children:
-            ".frontend-fixture-auth-control{position:fixed;z-index:200;right:12px;bottom:12px;display:flex;align-items:center;gap:8px;padding:7px 9px;background:#221c12;color:#f8f3e9;border-radius:6px;box-shadow:0 7px 24px rgb(34 28 18/.25);font:10px ui-monospace,monospace}.frontend-fixture-auth-control button{padding:4px 7px;border:1px solid #f8f3e9;border-radius:4px;color:inherit;background:transparent;font:inherit}",
+            ".frontend-fixture-auth-control{position:fixed;z-index:200;right:12px;bottom:12px;display:flex;align-items:center;gap:8px;padding:7px 9px;background:#221c12;color:#f8f3e9;border-radius:6px;box-shadow:0 7px 24px rgb(34 28 18/.25);font:10px ui-monospace,monospace}.frontend-fixture-auth-control button{padding:4px 7px;border:1px solid #f8f3e9;border-radius:4px;color:inherit;background:transparent;font:inherit}@media(max-width:600px){.frontend-fixture-auth-control{display:none}}",
         },
         {
           tag: "script",

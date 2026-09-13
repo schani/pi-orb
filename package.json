@@ -21,7 +21,8 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "test:e2e": "vitest run --config e2e/vitest.config.ts",
-    "test:e2e:frontend": "vitest run --config e2e/vitest.config.ts e2e/frontend-session.e2e.test.ts",
+    "test:e2e:frontend": "vitest run --config e2e/vitest.config.ts e2e/frontend-session.e2e.test.ts e2e/frontend-mobile.e2e.test.ts",
+    "test:e2e:mobile": "vitest run --config e2e/vitest.config.ts e2e/frontend-mobile.e2e.test.ts",
     "native-image:build": "npm run build --workspace @pi-orb/native-image --"
   },
   "devDependencies": {

@@ -91,7 +91,7 @@ describe("orb workspace layout contract", () => {
     expect(rule(".app")).toContain("flex-direction: column");
     expect(rule(".orb-page")).toContain("flex: 1");
     expect(rule(".orb-page")).toContain("grid-template-columns: 236px minmax(0, 1fr)");
-    expect(rule(".orb-main > .history")).toContain("flex: 1 0 auto");
+    expect(rule(".orb-transcript-content > .history")).toContain("flex: 1 0 auto");
     expect(rule(".composer")).toContain("position: sticky");
     expect(rule(".composer")).toContain("z-index: 30");
     expect(rule(".composer")).toContain("bottom: 0");
