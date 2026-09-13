@@ -29,3 +29,25 @@ Local dependency/browser installation, all seven preflight contracts and all
 14 mobile browser cases (Chromium and WebKit) passed. Live release validation
 is recorded in `docs/deployment.md`; this local finding alone is not a deployment
 success claim.
+
+## Live release and recovery
+
+Corrected full run `34730567562` for `7fdbc9b` passed the browser-install step,
+all checks (including both engines), build, plan, schema, application apply and
+IAP repair. The four services updated successfully. At 02:40:04 UTC the
+retirement observer failed a Cloud Monitoring HTTP request with the adapter's
+`cloud request unavailable` classification after waiting since 02:04. This
+classification does not distinguish timeout, DNS or another transport failure;
+no more specific underlying cause is established by the preserved log. The
+runner recorded applied-but-unvalidated and released its lock, without activating
+the new generation or running smoke. No retirement guard or timeout was weakened.
+
+A separate read-only Monitoring query succeeded and returned explicit active and
+idle zeroes for the old `pi-orb-00053-rtt` revision at 02:40; pending compute
+operations were empty. Rather than repeating build/apply, validation-only GitHub
+run `34733669858` targeted the exact failed release ID. It independently verified
+the serving deployment, repeated the repair/retirement checks, activated the same
+generation and passed lifecycle and identity gates. Its record is `validated`;
+all four fixtures were deleted. `docs/deployment.md` records the exact digest,
+generation and durable recovery-record identity. Both failed full-run records
+remain failed and unmodified; successful recovery does not relabel them green.
