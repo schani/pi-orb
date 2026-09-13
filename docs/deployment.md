@@ -257,6 +257,13 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Browser prerequisite correction (2026-09-13):** run `34729281559` for `301c543`
+stopped before apply because the new mobile WebKit suite lacked its executable.
+The authoritative release now installs both managed engines and system libraries
+via `npm run test:e2e:install` after `npm ci`, as does the standalone E2E workflow.
+Both engines remain mandatory. Evidence:
+`docs/postmortems/2026-09-13-release-webkit-prerequisite.md`.
+
 **Validated release (2026-09-13):** GitHub run
 [34726749434](https://github.com/schani/pi-orb/actions/runs/34726749434) deployed
 `858301d24a3cc25b5e0dd99328363fd849654b1e`, including the atomic output handoff

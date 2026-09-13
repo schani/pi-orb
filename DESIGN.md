@@ -125,6 +125,8 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-13-release-webkit-prerequisite.md](docs/postmortems/2026-09-13-release-webkit-prerequisite.md) — missing managed browser dependency in unattended release checks
+
 - [docs/postmortems/2026-09-12-delete-discard-dst-ordering.md](docs/postmortems/2026-09-12-delete-discard-dst-ordering.md) — preserved DST failure from an unforced discard/deletion intermediate-state assumption
 
 - [docs/postmortems/2026-09-12-mcp-completion-selector.md](docs/postmortems/2026-09-12-mcp-completion-selector.md) — test synchronization across history publication and live-output retirement
