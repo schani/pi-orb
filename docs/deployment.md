@@ -257,6 +257,20 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Validated release (2026-09-13):** GitHub run
+[34726749434](https://github.com/schani/pi-orb/actions/runs/34726749434) deployed
+`858301d24a3cc25b5e0dd99328363fd849654b1e`, including the atomic output handoff
+and deletion/discard DST invariant correction. The full transaction completed
+at 00:47:18 UTC with `validated`, exit code 0, and every gate passed. Generation
+`1789259399` serves container digest
+`sha256:76fc88af44f126ccccc5ca4ef4445247ce510717aa4fefc10b905670222af036`.
+The prior browser revision had explicit active/idle zeroes at 00:36 before
+activation; all four recorded release fixtures were deleted. Durable evidence:
+`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789257530-814003a4-972c-47b3-a777-08e6c827394e.json`.
+The previous failed run remains preserved; this was a fresh full deployment,
+not a validation-only relabeling. Older orb runtimes require restart for the
+direct protocol change (`docs/runtime-protocol.md`).
+
 **Release gate finding (2026-09-12):** run `34711432756` stopped in checks before
 build/migration/apply; production was unchanged. MCP E2E's strict completion
 selector exposed the transient history-before-output-retirement duplicate DOM.
