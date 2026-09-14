@@ -49,6 +49,7 @@ RUN case "$TARGETARCH" in \
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY vendor vendor
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/

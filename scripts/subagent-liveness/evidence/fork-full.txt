@@ -1,0 +1,93 @@
+
+ RUN  v3.2.7 /workspace/pi-packages/packages/pi-subagents
+
+ ✓ test/lifecycle/host-cancellation.test.ts (4 tests) 13ms
+ ✓ test/lifecycle/subagent-manager.test.ts (87 tests) 203ms
+ ✓ test/lifecycle/subagent.test.ts (163 tests) 214ms
+stderr | test/settings.test.ts > settings persistence > returns {} when both files are malformed JSON
+[pi-subagents] Ignoring malformed settings at /tmp/pi-settings-global-DXSuQI/subagents.json: Unexpected token 'o', "not json {{" is not valid JSON
+[pi-subagents] Ignoring malformed settings at /tmp/pi-settings-project-9mUuGu/.pi/subagents.json: Unexpected token 'a', "also not json" is not valid JSON
+
+ ✓ test/settings.test.ts (115 tests) 112ms
+ ✓ test/ui/transcript-content.test.ts (34 tests) 290ms
+ ✓ test/ui/session-navigator.test.ts (20 tests) 200ms
+ ✓ test/lifecycle/subagent-session.test.ts (48 tests) 64ms
+ ✓ test/composition-root.test.ts (12 tests) 80ms
+ ✓ test/service/service-adapter.test.ts (41 tests) 53ms
+ ✓ test/config/custom-agents.test.ts (40 tests) 61ms
+ ✓ test/session/env.test.ts (3 tests) 67ms
+ ✓ test/ui/agent-widget.test.ts (30 tests) 45ms
+ ✓ test/tools/get-result-tool.test.ts (30 tests) 56ms
+ ✓ test/widget-renderer.test.ts (23 tests) 57ms
+ ✓ test/tools/foreground-runner.test.ts (20 tests) 71ms
+ ✓ test/observation/renderer.test.ts (31 tests) 42ms
+ ✓ test/observation/subagent-events-observer.test.ts (27 tests) 36ms
+ ✓ test/tools/agent-tool.test.ts (32 tests) 45ms
+ ✓ test/observation/notification.test.ts (60 tests) 27ms
+ ✓ test/config/agent-types.test.ts (33 tests) 27ms
+ ✓ test/lifecycle/create-subagent-session.test.ts (27 tests) 79ms
+ ✓ test/layered-settings.test.ts (15 tests) 22ms
+ ✓ test/helpers/subagent-session-io.test.ts (18 tests) 17ms
+ ✓ test/ui/subagents-settings.test.ts (21 tests) 25ms
+ ✓ test/observation/composite-subagent-observer.test.ts (13 tests) 20ms
+ ✓ test/lifecycle/subagent-state.test.ts (99 tests) 39ms
+ ✓ test/print-mode.test.ts (1 test) 37ms
+ ✓ test/tools/background-spawner.test.ts (9 tests) 15ms
+ ✓ test/helpers/mock-session.test.ts (12 tests) 20ms
+ ✓ test/observation/host-wake.test.ts (3 tests) 13ms
+ ✓ test/lifecycle/child-shutdown.test.ts (11 tests) 19ms
+ ✓ test/tools/spawn-config.test.ts (24 tests) 16ms
+ ✓ test/lifecycle/workspace-bracket.test.ts (19 tests) 16ms
+ ✓ test/session/prompts.test.ts (50 tests) 16ms
+ ✓ test/observation/record-observer.test.ts (14 tests) 19ms
+ ✓ test/tools/result-renderer.test.ts (51 tests) 12ms
+ ✓ test/session/model-resolver.test.ts (39 tests) 17ms
+ ✓ test/helpers/make-subagent.test.ts (16 tests) 14ms
+ ✓ test/helpers/make-deps.test.ts (13 tests) 15ms
+ ✓ test/config/thinking-level.test.ts (21 tests) 10ms
+ ✓ test/observation/outcome-delivery.test.ts (50 tests) 11ms
+ ✓ test/tools/helpers.test.ts (27 tests) 12ms
+ ✓ test/ui/bounded-lines.test.ts (11 tests) 15ms
+ ✓ test/tools/get-result-renderer.test.ts (24 tests) 14ms
+ ✓ test/handlers/lifecycle.test.ts (8 tests) 19ms
+ ✓ test/tools/steer-tool.test.ts (7 tests) 13ms
+ ✓ test/config/invocation-config.test.ts (24 tests) 13ms
+ ✓ test/helpers/make-workspace.test.ts (7 tests) 10ms
+ ✓ test/lifecycle/concurrency-limiter.test.ts (13 tests) 19ms
+ ✓ test/helpers/manager-stubs.test.ts (6 tests) 8ms
+ ✓ test/helpers/tmp-settings-dirs.test.ts (6 tests) 10ms
+ ✓ test/lifecycle/parent-snapshot.test.ts (14 tests) 13ms
+ ✓ test/handlers/interrupt.test.ts (10 tests) 9ms
+ ✓ test/session/session-config.test.ts (21 tests) 14ms
+ ✓ test/debug.test.ts (5 tests) 9ms
+ ✓ test/session/context.test.ts (19 tests) 9ms
+ ✓ test/ui/session-navigation.test.ts (13 tests) 16ms
+ ✓ test/lifecycle/child-lifecycle.test.ts (7 tests) 12ms
+ ✓ test/session/provider-inheritance.test.ts (6 tests) 8ms
+ ✓ test/runtime.test.ts (15 tests) 13ms
+ ✓ test/helpers/capture-warn.test.ts (3 tests) 6ms
+ ✓ test/helpers/ui-stubs.test.ts (4 tests) 9ms
+ ✓ test/tools/get-result-report.test.ts (28 tests) 13ms
+ ✓ test/lifecycle/run-listeners.test.ts (7 tests) 10ms
+ ✓ test/session/package-exclusions.test.ts (14 tests) 12ms
+ ✓ test/agent-conversation.test.ts (11 tests) 9ms
+ ✓ test/handlers/widget-events.test.ts (8 tests) 12ms
+ ✓ test/session/content-items.test.ts (8 tests) 5ms
+ ✓ test/config/background-mode.test.ts (7 tests) 5ms
+ ✓ test/service/service.test.ts (7 tests) 6ms
+ ✓ test/helpers/transcript-fixtures.test.ts (5 tests) 9ms
+ ✓ test/session/ask-parent-tool.test.ts (4 tests) 8ms
+ ✓ test/display.test.ts (8 tests) 5ms
+ ✓ test/lifecycle/turn-limits.test.ts (6 tests) 6ms
+ ✓ test/session/notify-parent-tool.test.ts (7 tests) 10ms
+ ✓ test/lifecycle/usage.test.ts (8 tests) 8ms
+ ✓ test/helpers/make-spawn-config.test.ts (6 tests) 7ms
+ ✓ test/helpers/make-model.test.ts (2 tests) 5ms
+ ✓ test/session/session-dir.test.ts (4 tests) 6ms
+ ✓ test/helpers/make-navigable.test.ts (2 tests) 4ms
+
+ Test Files  80 passed (80)
+      Tests  1771 passed (1771)
+   Start at  23:33:21
+   Duration  16.73s (transform 1.85s, setup 0ms, collect 23.10s, tests 2.61s, environment 21ms, prepare 8.30s)
+

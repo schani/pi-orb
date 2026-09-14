@@ -1,0 +1,539 @@
+
+ RUN  v3.2.7 /workspace/pi-packages/packages/pi-subagents
+
+stderr | test/settings.test.ts > settings persistence > returns {} when both files are malformed JSON
+[pi-subagents] Ignoring malformed settings at /tmp/pi-settings-global-e36khf/subagents.json: Unexpected token 'o', "not json {{" is not valid JSON
+[pi-subagents] Ignoring malformed settings at /tmp/pi-settings-project-oJ3yC2/.pi/subagents.json: Unexpected token 'a', "also not json" is not valid JSON
+
+ ✓ test/settings.test.ts (115 tests) 120ms
+ ❯ test/lifecycle/subagent-manager.test.ts (87 tests | 1 failed) 230ms
+   ✓ SubagentManager > spawn > type resolution > stores the canonical type for case-variant input 14ms
+   ✓ SubagentManager > spawn > type resolution > falls back to general-purpose for an unknown type 1ms
+   ✓ SubagentManager > spawn > type resolution > throws for a known-but-disabled type 2ms
+   ✓ SubagentManager > spawn > type resolution > reports the canonical casing in the disabled-agent error for case-insensitive input 1ms
+   ✓ SubagentManager > spawn > type resolution > does not create a record for a rejected spawn 1ms
+   ✓ SubagentManager > spawn > background-mode resolution > defers to frontmatter declaring background when the request is a default 2ms
+   ✓ SubagentManager > spawn > background-mode resolution > defers to frontmatter declaring foreground when the request is a default 2ms
+   ✓ SubagentManager > spawn > background-mode resolution > ignores frontmatter declaring foreground when the request is explicit 2ms
+   ✓ SubagentManager > spawn > background-mode resolution > ignores frontmatter declaring background when the request is explicit 2ms
+   ✓ SubagentManager > spawn > background-mode resolution > stamps the resolved mode on the record when it resolves to background 1ms
+   ✓ SubagentManager > spawn > background-mode resolution > stamps the resolved mode on the record when it resolves to foreground 1ms
+   ✓ SubagentManager > spawn > background-mode resolution > queues a resolved-background agent behind a full concurrency limit 1ms
+   ✓ SubagentManager > spawnAndWait > type resolution > stores the canonical type for case-variant input 1ms
+   ✓ SubagentManager > spawnAndWait > type resolution > rejects for a known-but-disabled type 1ms
+   ✓ SubagentManager > spawnAndWait > foreground commitment > stamps isBackground false on the record 1ms
+   ✓ SubagentManager > spawnAndWait > foreground commitment > stays foreground for an agent whose frontmatter declares runInBackground: true 1ms
+   ✓ SubagentManager > spawnAndWait > foreground commitment > claims the outcome before the run can terminate 1ms
+   ✓ SubagentManager > spawnAndWait > foreground commitment > runs immediately rather than queueing behind a full concurrency limit 1ms
+   ✓ SubagentManager > concurrency > queueing with injected stubs > queues excess background agents and drains them in order 54ms
+   ✓ SubagentManager > concurrency > queueing with injected stubs > gives a queued agent an awaitable promise at spawn (before its slot opens) 1ms
+   ✓ SubagentManager > concurrency > queueing with injected stubs > abort removes a queued agent without ever running it 1ms
+   ✓ SubagentManager > concurrency > queueing with injected stubs > onStart fires when agent transitions from queued to running 53ms
+   ✓ SubagentManager > concurrency > stopping a queued agent > abort() on a queued agent notifies onSubagentCompleted 1ms
+   ✓ SubagentManager > concurrency > stopping a queued agent > abortAll() notifies onSubagentCompleted for queued agents 1ms
+   ✓ SubagentManager > concurrency > stopping a queued agent > notifies exactly once, even after the stopped agent's slot frees 1ms
+   ✓ SubagentManager > observer notifications > completion callbacks > does not let onComplete errors turn a completed agent into a failed run 1ms
+   ✓ SubagentManager > observer notifications > onSubagentCreated > fires onSubagentCreated when a background agent is spawned 1ms
+   ✓ SubagentManager > observer notifications > onSubagentCreated > does not fire onSubagentCreated for foreground agents 1ms
+   ✓ SubagentManager > observer notifications > onSubagentCreated > fires onSubagentCreated before onSubagentStarted for background agents 1ms
+   ✓ SubagentManager > observer notifications > lifecycle observer forwarding > forwards onSessionCreated from spawn options observer to Agent 1ms
+   ✓ SubagentManager > observer notifications > lifecycle observer forwarding > forwards onSessionCreated for foreground agents 1ms
+   ✓ SubagentManager > observer notifications > toolCallId notification wiring > wires toolCallId on spawn when provided 1ms
+   ✓ SubagentManager > observer notifications > toolCallId notification wiring > toolCallId is undefined when absent 0ms
+   ✓ SubagentManager > observer notifications > consumed state versus onComplete ordering > marking consumed after awaiting still suppresses the nudge (flush-time re-check) 2ms
+   ✓ SubagentManager > observer notifications > consumed state versus onComplete ordering > marking consumed before await suppresses the nudge (schedule-time guard) 1ms
+   ✓ SubagentManager > observer notifications > consumed state versus onComplete ordering > onComplete is called for foreground agents 1ms
+   ✓ SubagentManager > observer notifications > consumed state versus onComplete ordering > sends no nudge for a foreground completion 2ms
+   ✓ SubagentManager > observer notifications > consumed state versus onComplete ordering > sends no nudge when the parent turn is interrupted before a foreground agent terminates 1ms
+   ✓ SubagentManager > session retention and teardown > cleanup timer > does not keep the process alive on its own 0ms
+   ✓ SubagentManager > session retention and teardown > clearCompleted > clearCompleted removes completed records 1ms
+   ✓ SubagentManager > session retention and teardown > clearCompleted > clearCompleted does not remove running or queued agents 0ms
+   ✓ SubagentManager > session retention and teardown > clearCompleted > clearCompleted calls dispose on sessions of removed records 1ms
+   ✓ SubagentManager > session retention and teardown > clearCompleted > clearCompleted removes error and stopped records 1ms
+   ✓ SubagentManager > session retention and teardown > teardown awaits each child's shutdown > clearCompleted resolves only after the removed record's teardown settles 1ms
+   ✓ SubagentManager > session retention and teardown > teardown awaits each child's shutdown > clearCompleted drops the record before awaiting its teardown 1ms
+   ✓ SubagentManager > session retention and teardown > teardown awaits each child's shutdown > dispose resolves only after every record's teardown settles 1ms
+   ✓ SubagentManager > session retention and teardown > teardown awaits each child's shutdown > dispose tears down every record even when one teardown rejects 2ms
+   ✓ SubagentManager > session retention and teardown > consumption-aware session release sweep > releases a consumed agent's session 10 min after consumption but keeps the record 3ms
+   ✓ SubagentManager > session retention and teardown > consumption-aware session release sweep > holds an unconsumed agent's session past 10 min and releases it at the cap 2ms
+   ✓ SubagentManager > session retention and teardown > consumption-aware session release sweep > never releases a running or queued agent's session 2ms
+   ✓ SubagentManager > session retention and teardown > consumption-aware session release sweep > honors a custom retention policy from getRetentionPolicy 2ms
+   ✓ SubagentManager > session retention and teardown > consumption-aware session release sweep > leaves records in place after release (getRecord still resolves them) 2ms
+   ✓ SubagentManager > session retention and teardown > subagent session state > sets record.subagentSession with session and outputFile after session creation 1ms
+   ✓ SubagentManager > session retention and teardown > subagent session state > record.subagentSession is undefined before the session is created 0ms
+   ✓ SubagentManager > record initialization > lifetime usage and compaction count are eagerly initialized > spawn initializes lifetimeUsage to zeros and compactionCount to 0 1ms
+   ✓ SubagentManager > record initialization > lifetime usage and compaction count are eagerly initialized > record observer accumulates assistant usage into record.lifetimeUsage 2ms
+   ✓ SubagentManager > record initialization > lifetime usage and compaction count are eagerly initialized > record observer increments compactionCount on compaction_end events 5ms
+   ✓ SubagentManager > record initialization > lifetime usage and compaction count are eagerly initialized > resume() also accumulates usage and increments compactions on the same record 1ms
+   ✓ SubagentManager > record initialization > getRunConfig threads defaultMaxTurns and graceTurns into the turn loop > passes defaultMaxTurns and graceTurns from getRunConfig to runTurnLoop 1ms
+   ✓ SubagentManager > record initialization > getRunConfig threads defaultMaxTurns and graceTurns into the turn loop > omits defaultMaxTurns and graceTurns from runTurnLoop when no getRunConfig is provided 1ms
+   ✓ SubagentManager > record initialization > parent session threading > threads parentSession from AgentSpawnConfig to the factory params 1ms
+   ✓ SubagentManager > dependency injection via options bag > calls the injected factory when spawning an agent 1ms
+   ✓ SubagentManager > dependency injection via options bag > calls resumeTurnLoop on the SubagentSession when resuming an agent 1ms
+   ✓ SubagentManager > dependency injection via options bag > fires onSubagentResumed when a background agent is resumed 1ms
+   ✓ SubagentManager > dependency injection via options bag > fires onSubagentResumed when a foreground agent is resumed 1ms
+   ✓ SubagentManager > registerWorkspaceProvider > returns a disposer and exposes the registered provider via getter 0ms
+   ✓ SubagentManager > registerWorkspaceProvider > throws when a provider is already registered 1ms
+   ✓ SubagentManager > registerWorkspaceProvider > disposer clears the slot, allowing re-registration 0ms
+   ✓ SubagentManager > registerWorkspaceProvider > relays a held workspace's notice to the manager observer when the session is released 1ms
+   ✓ SubagentManager > registerWorkspaceProvider > stale disposer does not evict a later provider 0ms
+   ✓ SubagentManager > resume > refused > reports an id no record answers to 0ms
+   ✓ SubagentManager > resume > refused > reports a run that has not settled 1ms
+   ✓ SubagentManager > resume > refused > reports a session released by the retention sweep 1ms
+   ✓ SubagentManager > resume > refused > reports a workspace torn down at run end, which the old guard let through 1ms
+   ✓ SubagentManager > resume > refused > starts no turn loop for a refused resume 1ms
+   ✓ SubagentManager > resume > accepted > returns the resumed record 1ms
+   ✓ SubagentManager > resume > accepted > reports a resumed run that failed as resumed, carrying the error 1ms
+   ✓ SubagentManager > resume > accepted > leaves the outcome unclaimed by default 1ms
+   ✓ SubagentManager > resume > accepted > claims the outcome before the turn loop starts when the caller asks 1ms
+   ✓ SubagentManager > resume > accepted > tells the observer a resume started, before it reports one finished 1ms
+   × SubagentManager > resume > accepted > forwards the caller's signal to the resumed turn loop 17ms
+     → expected "spy" to be called with arguments: [ 'continue', …(1) ][90m
+
+Received: 
+
+[1m  1st spy call:
+
+[22m[2mCompared values have no visual difference.[22m
+[39m[90m
+
+Number of calls: [1m1[22m
+[39m
+   ✓ resolveRetentionWindow > an outcome the parent never collected > holds for the long window, measured from completion 0ms
+   ✓ resolveRetentionWindow > an outcome the parent never collected > measures from zero when the record has no completion time 0ms
+   ✓ resolveRetentionWindow > an outcome the parent collected > holds for the short window, measured from collection 0ms
+   ✓ resolveRetentionWindow > an outcome the parent collected > measures from completion when that is the later of the two 0ms
+   ✓ resolveRetentionWindow > a collected outcome that still carries an unanswered question > holds for the long window, because the parent has not finished with it 0ms
+   ✓ resolveRetentionWindow > a collected outcome that still carries an unanswered question > measures from completion rather than collection, as an uncollected outcome does 0ms
+ ❯ test/lifecycle/subagent.test.ts (163 tests | 2 failed) 256ms
+   ✓ Subagent — constructor > sets required fields from init 3ms
+   ✓ Subagent — constructor > starts with a fresh abort controller and zeroed stats 2ms
+   ✓ Subagent — constructor > defaults to a fresh queued state when none is supplied 1ms
+   ✓ Subagent — constructor > always creates its own AbortController 0ms
+   ✓ Subagent — constructor > toolCallId reflects execution.parentSession.toolCallId 0ms
+   ✓ Subagent — constructor > toolCallId is undefined when parentSession.toolCallId is absent 0ms
+   ✓ Subagent — constructor > toolCallId is undefined when parentSession is absent 0ms
+   ✓ convenience getters > live-activity getters > turnCount defaults to 1 (delegates to SubagentState) 0ms
+   ✓ convenience getters > live-activity getters > activeTools defaults to an empty map (delegates to SubagentState) 0ms
+   ✓ convenience getters > live-activity getters > responseText defaults to empty string (delegates to SubagentState) 0ms
+   ✓ convenience getters > live-activity getters > maxTurns returns execution.maxTurns 0ms
+   ✓ convenience getters > live-activity getters > maxTurns returns undefined when execution.maxTurns is not set 0ms
+   ✓ convenience getters > live-activity getters > turnCount reflects state mutations via incrementTurnCount 0ms
+   ✓ convenience getters > live-activity getters > activeTools reflects state mutations via addActiveTool 1ms
+   ✓ convenience getters > live-activity getters > responseText reflects state mutations via appendResponseText 0ms
+   ✓ convenience getters > consumption getters > consumed defaults to false and consumedAt undefined (delegates to SubagentState) 0ms
+   ✓ convenience getters > consumption getters > markConsumed delegates to SubagentState 0ms
+   ✓ convenience getters > outputFile > returns undefined when subagentSession is not set 0ms
+   ✓ convenience getters > outputFile > returns outputFile from subagentSession when set 2ms
+   ✓ convenience getters > outputFile > returns undefined when subagentSession is set but outputFile is undefined 1ms
+   ✓ Subagent — session-encapsulation methods > isSessionReady > returns false when no subagentSession 0ms
+   ✓ Subagent — session-encapsulation methods > isSessionReady > returns true when subagentSession is set 0ms
+   ✓ Subagent — session-encapsulation methods > steer > rejects with the observed status when the agent is not running 1ms
+   ✓ Subagent — session-encapsulation methods > steer > buffers the message and returns a buffered outcome when the session is not ready 0ms
+   ✓ Subagent — session-encapsulation methods > steer > delivers to the session and returns a delivered outcome when the session is ready 2ms
+   ✓ Subagent — session-encapsulation methods > getConversation > returns undefined when no session 0ms
+   ✓ Subagent — session-encapsulation methods > getConversation > delegates to SubagentSession.getConversation when session is ready 1ms
+   ✓ Subagent — session-encapsulation methods > getContextPercent > returns null when no session 0ms
+   ✓ Subagent — session-encapsulation methods > getContextPercent > delegates to SubagentSession.getContextPercent when session is ready 1ms
+   ✓ Subagent — session-encapsulation methods > subscribeToUpdates > returns undefined when no session 0ms
+   ✓ Subagent — session-encapsulation methods > subscribeToUpdates > delegates to SubagentSession.subscribe when session is ready 1ms
+   ✓ Subagent — session-encapsulation methods > messages > returns empty array when no session 0ms
+   ✓ Subagent — session-encapsulation methods > messages > delegates to SubagentSession.messages when session is ready 1ms
+   ✓ Subagent — session-encapsulation methods > agentMessages > returns empty array when no session 0ms
+   ✓ Subagent — session-encapsulation methods > agentMessages > delegates to SubagentSession.agentMessages when session is ready 1ms
+   ✓ Subagent — session-encapsulation methods > getToolDefinition > returns undefined when no session 0ms
+   ✓ Subagent — session-encapsulation methods > getToolDefinition > delegates to SubagentSession.getToolDefinition when session is ready 1ms
+   ✓ Subagent — steer buffer > starts with an empty steer buffer 0ms
+   ✓ Subagent — abort > returns false and does nothing when not running 0ms
+   ✓ Subagent — abort > fires the AbortController, marks stopped, and returns true when running 0ms
+   ✓ Subagent — abort > marks stopped and returns true even without an AbortController 0ms
+   ✓ Subagent — abort > returns false when already stopped 0ms
+   ✓ Subagent — abort > returns false when completed 0ms
+   ✓ Subagent — completeRun > transitions to completed for a normal result 0ms
+   ✓ Subagent — completeRun > transitions to aborted when result.aborted is true 0ms
+   ✓ Subagent — completeRun > transitions to steered when result.steered is true 0ms
+   ✓ Subagent — completeRun > fires observer.onRunFinished on completion 1ms
+   ✓ Subagent — failRun > transitions to error state 0ms
+   ✓ Subagent — failRun > fires observer.onRunFinished on failure 0ms
+   ✓ Subagent — stopQueued > transitions to stopped and records that the agent never started 0ms
+   ✓ Subagent — stopQueued > fires observer.onRunFinished once, like every other terminal transition 0ms
+   ✓ Subagent — stopQueued > leaves stoppedWhileQueued false for a running agent aborted mid-run 0ms
+   ✓ Subagent — disposeSession > disposes the wrapped SubagentSession 1ms
+   ✓ Subagent — disposeSession > resolves only after the child's teardown settles 1ms
+   ✓ Subagent — disposeSession > swallows a failing teardown so the caller's cleanup continues 1ms
+   ✓ Subagent — disposeSession > is a no-op when no session was created 0ms
+   ✓ Subagent — releaseSession > disposes the wrapped session and clears it (isSessionReady false) 1ms
+   ✓ Subagent — releaseSession > captures outputFile so the getter still resolves it after release 0ms
+   ✓ Subagent — releaseSession > sets sessionReleased (default false) 1ms
+   ✓ Subagent — releaseSession > clears the session before awaiting teardown, so a racing sweep releases once 0ms
+   ✓ Subagent — releaseSession > is a no-op on a second release — does not re-dispose, keeps the captured outputFile 0ms
+   ✓ Subagent — releaseSession > disposeSession after release is a no-op (session already cleared) 0ms
+   ✓ Subagent — releaseSession > swallows a failing teardown but still marks the session released 1ms
+   ✓ Subagent — releaseSession > is a no-op when no session was created (sessionReleased stays false) 0ms
+   ✓ Subagent.run() — happy path > transitions through running → completed 1ms
+   ✓ Subagent.run() — happy path > fires observer callbacks in order: onStarted → onSessionCreated → onRunFinished 1ms
+   ✓ Subagent.run() — happy path > sets the subagentSession with a session 1ms
+   ✓ Subagent.run() — happy path > flushes pending steers when session is created 1ms
+   ✓ Subagent.run() — workspace provider > prepares the workspace and threads its cwd into the factory params 1ms
+   ✓ Subagent.run() — workspace provider > calls prepare with exactly the run-start context 1ms
+   ✓ Subagent.run() — workspace provider > appends the dispose resultAddendum to the result 1ms
+   ✓ Subagent.run() — workspace provider > falls back to baseCwd (cwd undefined) when prepare returns undefined 3ms
+   ✓ Subagent.run() — workspace provider > marks error and fires onRunFinished when prepare rejects 1ms
+   ✓ Subagent.run() — workspace provider > disposes with status error when the turn loop throws 2ms
+   ✓ Subagent — workspaceDisposed > is false before the agent has run 1ms
+   ✓ Subagent — workspaceDisposed > is true after a run that disposed a prepared workspace 0ms
+   ✓ Subagent — workspaceDisposed > stays false for an agent that never had a workspace 1ms
+   ✓ Subagent — workspaceDisposed > stays false when the provider declined to supply a workspace 0ms
+   ✓ Subagent — resumeRefusal > refuses nothing for an agent whose session is live and workspace intact 0ms
+   ✓ Subagent — resumeRefusal > reports no-session for an agent that never got one 0ms
+   ✓ Subagent — resumeRefusal > reports still-running for a live run whose session is ready 1ms
+   ✓ Subagent — resumeRefusal > prefers the live run over the missing session it has not created yet 0ms
+   ✓ Subagent — resumeRefusal > leaves a queued agent reporting no-session, which is what it has 0ms
+   ✓ Subagent — resumeRefusal > reports session-released once the retention sweep has freed the session 0ms
+   ✓ Subagent — resumeRefusal > reports workspace-disposed while the session is still live 1ms
+   ✓ Subagent — resumeRefusal > prefers the released session over the workspace when both are gone 1ms
+   ✓ Subagent — resumeRefusal > leaves a session-ready test fixture resumable 0ms
+   ✓ Subagent — workspace hold for a declared question > holds the workspace when a completed child declared a question 1ms
+   ✓ Subagent — workspace hold for a declared question > disposes an aborted run that declared a question 1ms
+   ✓ Subagent — workspace hold for a declared question > disposes a steered run that declared a question 1ms
+   ✓ Subagent — disposing a held workspace > disposes when the resumed child answers without asking again 1ms
+   ✓ Subagent — disposing a held workspace > keeps holding when the resumed child declares another question 1ms
+   ✓ Subagent — disposing a held workspace > disposes best-effort when the resume throws 1ms
+   ✓ Subagent — disposing a held workspace > disposes when the retention sweep releases the session 1ms
+   ✓ Subagent — disposing a held workspace > disposes when the record's session is torn down 1ms
+   ✓ Subagent — disposing a held workspace > leaves a running agent's workspace alone when its session is torn down 51ms
+   ✓ Subagent — disposing a held workspace > disposes a held workspace only once across release and teardown 1ms
+   ✓ Subagent — workspaceNotice > is undefined before the agent has run 1ms
+   ✓ Subagent — workspaceNotice > stays undefined after a run that folded its addendum into the result 1ms
+   ✓ Subagent — workspaceNotice > holds the addendum a failed run's disposal reported 0ms
+   ✓ Subagent — workspaceNotice > holds the addendum a failed resume's disposal reported 0ms
+   ✓ Subagent — workspaceNotice > holds the addendum the retention sweep's release reported 0ms
+   ✓ Subagent — workspaceNotice > holds the addendum a session teardown reported 1ms
+   ✓ Subagent — workspaceNotice > stays undefined when the quiet disposal reported nothing 0ms
+   ✓ Subagent — announcing a notice produced after the result was delivered > announces when the retention sweep releases the session 1ms
+   ✓ Subagent — announcing a notice produced after the result was delivered > announces when the record's session is torn down 0ms
+   ✓ Subagent — announcing a notice produced after the result was delivered > announces once across a release and the teardown that follows it 0ms
+   ✓ Subagent — announcing a notice produced after the result was delivered > announces nothing when the teardown reported nothing 1ms
+   ✓ Subagent — announcing a notice produced after the result was delivered > leaves a running agent's workspace — and its notice — alone 51ms
+   ✓ Subagent — announcing a notice produced after the result was delivered > does not announce for a failed run, whose own notification carries it 1ms
+   ✓ Subagent — announcing a notice produced after the result was delivered > does not announce for a failed resume, whose own notification carries it 1ms
+   ✓ Subagent.run() — error handling > transitions to error when the turn loop throws 1ms
+   ✓ Subagent.run() — error handling > transitions to error when the factory throws 0ms
+   ✓ Subagent.run() — abort signal forwarding > wires parent signal so aborting it stops the agent 1ms
+   ✓ Subagent.run() — RunConfig threading > passes defaultMaxTurns and graceTurns to runTurnLoop 1ms
+   ✓ Subagent — the ask-back recorder > hands the session factory a recorder for the child's question 1ms
+   ✓ Subagent — the ask-back recorder > records a question the child declares mid-run 1ms
+   ✓ Subagent — the ask-back recorder > keeps only the last question when the child asks twice 1ms
+   ✓ Subagent — the ask-back recorder > drops a recorded question when the run fails, so no carrier invites a resume 0ms
+   ✓ Subagent — the ask-back recorder > drops a recorded question when a resumed run fails 0ms
+   ✓ Subagent — the mid-run update channel > gives a background child a way to send its parent an update 1ms
+   ✓ Subagent — the mid-run update channel > reports a background child's update to the lifecycle observer 1ms
+   ✓ Subagent — the mid-run update channel > gives a foreground child the same channel, since where its update lands is not its concern 1ms
+   ✓ Subagent — the mid-run update channel > routing by who holds the outcome > holds an update for the carrier that claimed the run's outcome 1ms
+   ✓ Subagent — the mid-run update channel > routing by who holds the outcome > records the update for a carrier even when none has claimed the outcome 5ms
+   ✓ Subagent — the mid-run update channel > routing by who holds the outcome > tells the observer either way, because the update is a fact about the run 1ms
+   ✓ Subagent — the mid-run update channel > routing by who holds the outcome > keeps the channel live across a resume, whose parent is blocked awaiting it 1ms
+   ✓ Subagent — the mid-run update channel > withholds the channel when the operator turned mid-run updates off 1ms
+   ✓ Subagent — the mid-run update channel > still gives a foreground child the ask-back recorder 1ms
+   ✓ Subagent.start() — promise encapsulation > stores a run promise that resolves on completion 1ms
+   ✓ Subagent.start() — promise encapsulation > promise is undefined before start() is called 1ms
+   ✓ Subagent.start() — promise encapsulation > is a no-op when status is stopped (abort-while-queued guard) 0ms
+   ✓ Subagent.start() — promise encapsulation > is a no-op when status is completed 0ms
+   ✓ Subagent.scheduleVia() — eager promise capture > exposes the scheduler promise before the run starts (queued-awaitable) 1ms
+   ✓ Subagent.scheduleVia() — eager promise capture > runs guardedRun as the thunk — abort-while-queued is a no-op 0ms
+   ✓ Subagent.waitUntilSettled() > resolves immediately for an agent that has no run handle 0ms
+   ✓ Subagent.waitUntilSettled() > resolves immediately for an agent that already left the active set 1ms
+   ✓ Subagent.waitUntilSettled() > spans the queue slot and the run that follows it 1ms
+   ✓ Subagent.waitUntilSettled() > ends the wait on interrupt without cancelling the agent 1ms
+   ✓ Subagent.waitUntilSettled() > returns immediately when the signal is already aborted 0ms
+   ✓ Subagent — ask-back > records a declared question and leaves the result body untouched 1ms
+   ✓ Subagent — ask-back > leaves pendingQuestion undefined when the child asked nothing 1ms
+   ✓ Subagent — ask-back > records a question an aborted run declared before it ran out of turns 1ms
+   × Subagent — ask-back > completes the round trip: ask, answer by resuming, continue 34ms
+     → expected "spy" to be called with arguments: [ 'The project one.', undefined ][90m
+
+Received: 
+
+[1m  1st spy call:
+
+[22m[2m  [[22m
+[2m    "The project one.",[22m
+[32m-   undefined,[90m
+[31m+   AbortSignal {[90m
+[31m+     Symbol(kEvents): Map {},[90m
+[31m+     Symbol(events.maxEventTargetListeners): 0,[90m
+[31m+     Symbol(events.maxEventTargetListenersWarned): false,[90m
+[31m+     Symbol(kHandlers): Map {},[90m
+[31m+     Symbol(kAborted): false,[90m
+[31m+     Symbol(kReason): undefined,[90m
+[31m+     Symbol(kComposite): false,[90m
+[31m+   },[90m
+[2m  ][22m
+[39m[90m
+
+Number of calls: [1m1[22m
+[39m
+   ✓ Subagent — ask-back > records a follow-up question a resumed run declares 1ms
+   ✓ Subagent.resume() — happy path > transitions to completed and sets result from the resume response 1ms
+   × Subagent.resume() — happy path > passes the prompt and signal straight through to resumeTurnLoop 4ms
+     → expected AbortSignal { aborted: false } to be AbortSignal { aborted: false } // Object.is equality
+
+If it should pass with deep equality, replace "toBe" with "toStrictEqual"
+
+Expected: AbortSignal { aborted: false }
+Received: serializes to the same string
+
+   ✓ Subagent.resume() — happy path > resets transition state before resuming 1ms
+   ✓ Subagent.resume() — observer lifecycle > accumulates usage and compactions from session events during resume 1ms
+   ✓ Subagent.resume() — observer lifecycle > forwards compaction events through observer.onCompacted 1ms
+   ✓ Subagent.resume() — observer lifecycle > releases the observer subscription after resume completes 1ms
+   ✓ Subagent.resume() — observer lifecycle > fires observer.onResumeStarted once the resumed run is under way 1ms
+   ✓ Subagent.resume() — observer lifecycle > fires observer.onResumeStarted even when the resumed run fails 1ms
+   ✓ Subagent.resume() — observer lifecycle > fires observer.onResumeFinished once the resume completes 1ms
+   ✓ Subagent.resume() — observer lifecycle > fires observer.onResumeFinished when the resume errors 1ms
+   ✓ Subagent — provider failures reach the record > lands the provider's error on the record instead of a successful empty result 2ms
+   ✓ Subagent — provider failures reach the record > completes normally when the provider did not error 1ms
+   ✓ Subagent — provider failures reach the record > lands the provider's error even when overflow recovery stripped the errored turn 1ms
+   ✓ Subagent — provider failures reach the record > lands a resume's provider error on the record instead of the prior answer 3ms
+   ✓ Subagent.resume() — error handling > transitions to error without throwing when resumeTurnLoop rejects 1ms
+   ✓ Subagent.resume() — error handling > releases the observer subscription after resume errors 1ms
+   ✓ Subagent.resume() — error handling > throws when no session exists 1ms
+   ✓ Subagent.resume() — awaitable handle > republishes the promise getter for the in-flight resume 1ms
+ ✓ test/observation/notification.test.ts (60 tests) 32ms
+ ✓ test/lifecycle/subagent-session.test.ts (48 tests) 83ms
+ ✓ test/service/service-adapter.test.ts (41 tests) 55ms
+ ✓ test/lifecycle/subagent-state.test.ts (99 tests) 22ms
+ ✓ test/session/prompts.test.ts (50 tests) 21ms
+ ✓ test/ui/transcript-content.test.ts (34 tests) 274ms
+ ✓ test/tools/get-result-tool.test.ts (30 tests) 65ms
+ ✓ test/lifecycle/create-subagent-session.test.ts (27 tests) 38ms
+ ✓ test/ui/agent-widget.test.ts (30 tests) 53ms
+ ✓ test/tools/spawn-config.test.ts (24 tests) 17ms
+ ✓ test/tools/agent-tool.test.ts (32 tests) 48ms
+ ✓ test/session/session-config.test.ts (21 tests) 10ms
+ ✓ test/composition-root.test.ts (12 tests) 87ms
+ ✓ test/observation/subagent-events-observer.test.ts (27 tests) 35ms
+ ✓ test/widget-renderer.test.ts (23 tests) 48ms
+ ✓ test/config/custom-agents.test.ts (40 tests) 86ms
+ ✓ test/session/model-resolver.test.ts (39 tests) 16ms
+ ✓ test/tools/result-renderer.test.ts (51 tests) 17ms
+ ✓ test/observation/outcome-delivery.test.ts (50 tests) 14ms
+ ✓ test/ui/subagents-settings.test.ts (21 tests) 24ms
+ ✓ test/ui/session-navigator.test.ts (20 tests) 235ms
+ ✓ test/observation/renderer.test.ts (31 tests) 39ms
+ ✓ test/tools/foreground-runner.test.ts (20 tests) 40ms
+ ✓ test/config/agent-types.test.ts (33 tests) 30ms
+ ✓ test/config/invocation-config.test.ts (24 tests) 12ms
+ ✓ test/tools/helpers.test.ts (27 tests) 13ms
+ ✓ test/tools/get-result-report.test.ts (28 tests) 9ms
+ ✓ test/runtime.test.ts (15 tests) 10ms
+ ✓ test/observation/composite-subagent-observer.test.ts (13 tests) 23ms
+ ✓ test/observation/record-observer.test.ts (14 tests) 17ms
+ ✓ test/lifecycle/concurrency-limiter.test.ts (13 tests) 11ms
+ ✓ test/handlers/lifecycle.test.ts (8 tests) 13ms
+ ✓ test/tools/get-result-renderer.test.ts (24 tests) 13ms
+ ✓ test/lifecycle/workspace-bracket.test.ts (19 tests) 17ms
+ ✓ test/lifecycle/parent-snapshot.test.ts (14 tests) 11ms
+ ✓ test/layered-settings.test.ts (15 tests) 27ms
+ ✓ test/ui/session-navigation.test.ts (13 tests) 12ms
+ ✓ test/helpers/subagent-session-io.test.ts (18 tests) 25ms
+ ✓ test/tools/background-spawner.test.ts (9 tests) 19ms
+ ✓ test/session/package-exclusions.test.ts (14 tests) 10ms
+ ✓ test/session/context.test.ts (19 tests) 10ms
+ ✓ test/lifecycle/usage.test.ts (8 tests) 5ms
+ ✓ test/agent-conversation.test.ts (11 tests) 9ms
+ ✓ test/handlers/interrupt.test.ts (10 tests) 11ms
+ ✓ test/lifecycle/child-shutdown.test.ts (11 tests) 18ms
+ ✓ test/session/provider-inheritance.test.ts (6 tests) 10ms
+ ✓ test/display.test.ts (8 tests) 6ms
+ ✓ test/helpers/make-subagent.test.ts (16 tests) 15ms
+ ✓ test/helpers/mock-session.test.ts (12 tests) 19ms
+ ✓ test/helpers/make-deps.test.ts (13 tests) 15ms
+ ✓ test/tools/steer-tool.test.ts (7 tests) 14ms
+ ✓ test/lifecycle/child-lifecycle.test.ts (7 tests) 10ms
+ ❯ test/lifecycle/host-cancellation.test.ts (4 tests | 1 failed) 25ms
+   ✓ does not execute after cancellation during prepare, and cleans up before terminal 7ms
+   ✓ does not execute after cancellation during session, and cleans up before terminal 2ms
+   × does not acquire a session for an already-aborted initial signal 10ms
+     → expected "spy" to not be called at all, but actually been called 1 times[90m
+
+Received: 
+
+[1m  1st spy call:
+
+[22m    Array [
+      Object {
+        "askParent": [Function askParent],
+        "cwd": undefined,
+        "model": undefined,
+        "notifyParent": [Function anonymous],
+        "parentSession": undefined,
+        "snapshot": Object {
+          "cwd": "/test",
+          "model": undefined,
+          "modelRegistry": Object {
+            "find": [Function find],
+            "getAll": [Function getAll],
+          },
+          "systemPrompt": "test prompt",
+        },
+        "thinkingLevel": undefined,
+        "type": "general-purpose",
+      },
+    ]
+[39m[90m
+
+Number of calls: [1m1[22m
+[39m
+   ✓ owns a fresh abort signal for every resumed run 4ms
+ ✓ test/helpers/make-spawn-config.test.ts (6 tests) 5ms
+ ✓ test/print-mode.test.ts (1 test) 31ms
+ ✓ test/ui/bounded-lines.test.ts (11 tests) 13ms
+ ✓ test/session/content-items.test.ts (8 tests) 9ms
+ ✓ test/config/thinking-level.test.ts (21 tests) 15ms
+ ✓ test/handlers/widget-events.test.ts (8 tests) 8ms
+ ✓ test/service/service.test.ts (7 tests) 7ms
+ ✓ test/lifecycle/run-listeners.test.ts (7 tests) 9ms
+ ✓ test/config/background-mode.test.ts (7 tests) 8ms
+ ✓ test/session/env.test.ts (3 tests) 50ms
+ ✓ test/observation/host-wake.test.ts (3 tests) 18ms
+ ✓ test/helpers/make-workspace.test.ts (7 tests) 12ms
+ ✓ test/session/notify-parent-tool.test.ts (7 tests) 8ms
+ ✓ test/helpers/tmp-settings-dirs.test.ts (6 tests) 11ms
+ ✓ test/helpers/manager-stubs.test.ts (6 tests) 11ms
+ ✓ test/session/session-dir.test.ts (4 tests) 5ms
+ ✓ test/debug.test.ts (5 tests) 10ms
+ ✓ test/helpers/transcript-fixtures.test.ts (5 tests) 6ms
+ ✓ test/lifecycle/turn-limits.test.ts (6 tests) 6ms
+ ✓ test/helpers/ui-stubs.test.ts (4 tests) 10ms
+ ✓ test/helpers/make-model.test.ts (2 tests) 5ms
+ ✓ test/helpers/capture-warn.test.ts (3 tests) 10ms
+ ✓ test/session/ask-parent-tool.test.ts (4 tests) 9ms
+ ✓ test/helpers/make-navigable.test.ts (2 tests) 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/lifecycle/host-cancellation.test.ts > does not acquire a session for an already-aborted initial signal
+AssertionError: expected "spy" to not be called at all, but actually been called 1 times[90m
+
+Received: 
+
+[1m  1st spy call:
+
+[22m    Array [
+      Object {
+        "askParent": [Function askParent],
+        "cwd": undefined,
+        "model": undefined,
+        "notifyParent": [Function anonymous],
+        "parentSession": undefined,
+        "snapshot": Object {
+          "cwd": "/test",
+          "model": undefined,
+          "modelRegistry": Object {
+            "find": [Function find],
+            "getAll": [Function getAll],
+          },
+          "systemPrompt": "test prompt",
+        },
+        "thinkingLevel": undefined,
+        "type": "general-purpose",
+      },
+    ]
+[39m[90m
+
+Number of calls: [1m1[22m
+[39m
+ ❯ test/lifecycle/host-cancellation.test.ts:46:23
+     44|     execution: makeStubExecution({ signal: signal.signal, createSubage…
+     45|   await agent.run();
+     46|   expect(factory).not.toHaveBeenCalled();
+       |                       ^
+     47|   expect(agent.status).toBe("stopped");
+     48| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  test/lifecycle/subagent-manager.test.ts > SubagentManager > resume > accepted > forwards the caller's signal to the resumed turn loop
+AssertionError: expected "spy" to be called with arguments: [ 'continue', …(1) ][90m
+
+Received: 
+
+[1m  1st spy call:
+
+[22m[2mCompared values have no visual difference.[22m
+[39m[90m
+
+Number of calls: [1m1[22m
+[39m
+ ❯ test/lifecycle/subagent-manager.test.ts:1575:37
+    1573|         await manager.resume(id, "continue", { signal });
+    1574| 
+    1575|         expect(stub.resumeTurnLoop).toHaveBeenCalledWith("continue", s…
+       |                                     ^
+    1576|       });
+    1577|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  test/lifecycle/subagent.test.ts > Subagent — ask-back > completes the round trip: ask, answer by resuming, continue
+AssertionError: expected "spy" to be called with arguments: [ 'The project one.', undefined ][90m
+
+Received: 
+
+[1m  1st spy call:
+
+[22m[2m  [[22m
+[2m    "The project one.",[22m
+[32m-   undefined,[90m
+[31m+   AbortSignal {[90m
+[31m+     Symbol(kEvents): Map {},[90m
+[31m+     Symbol(events.maxEventTargetListeners): 0,[90m
+[31m+     Symbol(events.maxEventTargetListenersWarned): false,[90m
+[31m+     Symbol(kHandlers): Map {},[90m
+[31m+     Symbol(kAborted): false,[90m
+[31m+     Symbol(kReason): undefined,[90m
+[31m+     Symbol(kComposite): false,[90m
+[31m+   },[90m
+[2m  ][22m
+[39m[90m
+
+Number of calls: [1m1[22m
+[39m
+ ❯ test/lifecycle/subagent.test.ts:1552:31
+    1550|   await agent.resume("The project one.");
+    1551| 
+    1552|   expect(stub.resumeTurnLoop).toHaveBeenCalledWith("The project one.",…
+       |                               ^
+    1553|   expect(agent.status).toBe("completed");
+    1554|   expect(agent.result).toBe("Used the project config. Done.");
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  test/lifecycle/subagent.test.ts > Subagent.resume() — happy path > passes the prompt and signal straight through to resumeTurnLoop
+AssertionError: expected AbortSignal { aborted: false } to be AbortSignal { aborted: false } // Object.is equality
+
+If it should pass with deep equality, replace "toBe" with "toStrictEqual"
+
+Expected: AbortSignal { aborted: false }
+Received: serializes to the same string
+
+
+[2mCompared values have no visual difference.[22m
+
+ ❯ test/lifecycle/subagent.test.ts:1587:48
+    1585|   expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
+    1586|   expect(stub.resumeTurnLoop.mock.calls[0][0]).toBe("continue");
+    1587|   expect(stub.resumeTurnLoop.mock.calls[0][1]).toBe(signal);
+       |                                                ^
+    1588|  });
+    1589| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  3 failed | 77 passed (80)
+      Tests  4 failed | 1767 passed (1771)
+   Start at  23:31:41
+   Duration  16.90s (transform 1.71s, setup 0ms, collect 23.37s, tests 2.69s, environment 20ms, prepare 8.29s)
+

@@ -98,7 +98,7 @@ last value. Expand in the hook, as the `printf` above does, not in the file.
   should change, or a stale line will outlive the reason for it.
 - These names are the runtime's and a line naming one is ignored:
   `PI_ORB_RUNTIME_TOKEN`, `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`,
-  `PI_ORB_HOST_INCARNATION`, `PI_ORB_WORK_DIR`, `HOME`, `PATH`, `PI_ORB`,
+  `PI_ORB_HOST_INCARNATION`, `PI_ORB_WORK_DIR`, `PI_CODING_AGENT_DIR`, `HOME`, `PATH`, `PI_ORB`,
   `PI_ORB_TAILSCALE_AUTH_KEY`, `PI_ORB_TAILSCALE_HOSTNAME`,
   `PI_ORB_PREVIEW_HOST`, `PI_ORB_SKILLS_DIR`.
 - An unusable line is skipped, reported by number in `env.status.json` and in

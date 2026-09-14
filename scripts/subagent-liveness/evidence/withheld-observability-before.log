@@ -1,0 +1,53 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts (4 tests | 1 failed | 3 skipped) 17ms
+   ↓ keeps health, snapshot and operation busy through a leaf-only interval and root wake
+   × persists a withheld wake veto even after the child's execution hold has drained 15ms
+     → expected [ { customType: 'pi-orb.boot', …(1) } ] to deep equally contain { …(2) }
+   ↓ samples SDK readiness rather than clearing a continuation at an old settled event
+   ↓ turns child-only input into a root turn without changing the operation, then fences abort until drain
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/orb-runtime/src/pi/subagent-activity.dst.test.ts > persists a withheld wake veto even after the child's execution hold has drained
+AssertionError: expected [ { customType: 'pi-orb.boot', …(1) } ] to deep equally contain { …(2) }
+
+[32m- Expected:[39m 
+{
+  "customType": "pi-orb.subagent-run",
+  "data": {
+    "childId": "child",
+    "operationId": "op",
+    "phase": "wake_suppressed",
+  },
+}
+
+[31m+ Received:[39m 
+[
+  {
+    "customType": "pi-orb.boot",
+    "data": {
+      "executionId": null,
+      "incarnation": "0",
+      "runtimeInstanceId": "38b86699-dbd1-4cd3-82b1-2e3f80b2b94d",
+    },
+  },
+]
+
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:128:21
+    126|   await h.agent.abortOperation();
+    127|   expect(h.agent.mayWakeSubagent("child")).toBe(false);
+    128|   expect(h.records).toContainEqual({
+       |                     ^
+    129|     customType: "pi-orb.subagent-run",
+    130|     data: { childId: "child", operationId: "op", phase: "wake_suppress…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+   Start at  00:17:50
+   Duration  4.58s (transform 855ms, setup 0ms, collect 3.88s, tests 17ms, environment 0ms, prepare 217ms)
+

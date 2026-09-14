@@ -1,7 +1,14 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { HistoryRecord } from "@pi-orb/protocol";
-import { err, ok, type Result } from "neverthrow";
+import { err, ok, Result } from "neverthrow";
 import { type MappingError, mapPiEntry } from "./mapping.ts";
+
+export type HistoryPublishError =
+  | MappingError
+  | {
+      readonly type: "history_source_error";
+      readonly message: string;
+    };
 
 interface PiEntrySource {
   getEntries(): unknown[];
@@ -40,8 +47,16 @@ export class LiveHistoryPublisher {
   }
 
   /** Publish entries appended directly by SDK paths without agent lifecycle events. */
-  flushPersisted(): Result<void, MappingError> {
-    for (const entry of this.source.getEntries()) {
+  flushPersisted(): Result<void, HistoryPublishError> {
+    const entries = Result.fromThrowable(
+      () => this.source.getEntries(),
+      (cause): HistoryPublishError => ({
+        type: "history_source_error",
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
+    )();
+    if (entries.isErr()) return err(entries.error);
+    for (const entry of entries.value) {
       const id = this.entryId(entry);
       if (id !== null && this.knownIds.has(id)) continue;
 

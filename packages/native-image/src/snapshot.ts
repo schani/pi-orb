@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 export const UPLOADED_SOURCE_PATHS = [
   "package.json",
   "package-lock.json",
+  "vendor",
   "apps/orb-runtime",
   "packages/protocol",
   "packages/luna",

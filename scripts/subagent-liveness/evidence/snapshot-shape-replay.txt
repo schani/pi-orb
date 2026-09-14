@@ -1,0 +1,40 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts (3 tests | 1 failed) 18ms
+   × keeps health, snapshot and operation busy through a leaf-only interval and root wake 14ms
+     → expected { orbId: 'test', …(5) } to match object { activity: 'busy', …(1) }
+(8 matching properties omitted from actual)
+   ✓ samples SDK readiness rather than clearing a continuation at an old settled event 1ms
+   ✓ turns child-only input into a root turn without changing the operation, then fences abort until drain 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/orb-runtime/src/pi/subagent-activity.dst.test.ts > keeps health, snapshot and operation busy through a leaf-only interval and root wake
+AssertionError: expected { orbId: 'test', …(5) } to match object { activity: 'busy', …(1) }
+(8 matching properties omitted from actual)
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "activeOperationId": "op",[39m
+[2m    "activity": "busy",[22m
+[2m  }[22m
+
+ ❯ Object.f apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:48:50
+     46|       await task.checkpoint("root settles first"); h.settle();
+     47|       expect(h.agent.getHealth()).toMatchObject({ activity: "busy", op…
+     48|       expect(h.agent.snapshot()._unsafeUnwrap()).toMatchObject({ activ…
+       |                                                  ^
+     49|       await task.checkpoint("child cleanup and wake handoff");
+     50|       h.wake(); h.agent.releaseSubagent(child);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed (3)
+   Start at  23:38:28
+   Duration  1.87s (transform 357ms, setup 0ms, collect 1.60s, tests 18ms, environment 0ms, prepare 64ms)
+

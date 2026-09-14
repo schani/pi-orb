@@ -1,0 +1,113 @@
+From 6ad3a28132124e36c228887aaf549fd1c69e76e1 Mon Sep 17 00:00:00 2001
+From: pi-orb <pi-orb@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 23:39:02 +0000
+Subject: [PATCH 2/2] feat(pi-subagents): allow hosts to veto automatic parent
+ wakes at delivery
+
+---
+ packages/pi-subagents/src/index.ts            |  8 +++-
+ .../src/observation/notification.ts           |  3 ++
+ .../test/observation/host-wake.test.ts        | 37 +++++++++++++++++++
+ 3 files changed, 47 insertions(+), 1 deletion(-)
+ create mode 100644 packages/pi-subagents/test/observation/host-wake.test.ts
+
+diff --git a/packages/pi-subagents/src/index.ts b/packages/pi-subagents/src/index.ts
+index b18fc42a..88267595 100644
+--- a/packages/pi-subagents/src/index.ts
++++ b/packages/pi-subagents/src/index.ts
+@@ -60,7 +60,12 @@ import { AgentWidget } from "#src/ui/agent-widget";
+ import { SessionNavigatorHandler } from "#src/ui/session-navigator";
+ import { SubagentsSettingsHandler } from "#src/ui/subagents-settings";
+ 
+-export default function (pi: ExtensionAPI) {
++export interface SubagentsHostOptions {
++  /** Checked at actual automatic wake delivery, including previously withheld notifications. */
++  shouldWake?: (record: { readonly id: string }) => boolean;
++}
++
++export default function (pi: ExtensionAPI, host: SubagentsHostOptions = {}) {
+   // ---- Register custom notification renderer ----
+   pi.registerMessageRenderer<NotificationDetails>("subagent-notification", createNotificationRenderer());
+   pi.registerMessageRenderer<UpdateDetails>("subagent-update", createUpdateRenderer());
+@@ -80,6 +85,7 @@ export default function (pi: ExtensionAPI) {
+   // widget dependency — keeping the construction graph a cycle-free DAG.
+   const notifications = new NotificationManager(
+     (msg, opts) => pi.sendMessage(msg, opts),
++    host.shouldWake,
+   );
+ 
+   // Gate nudge delivery on the parent's agent run. agent_settled fires exactly
+diff --git a/packages/pi-subagents/src/observation/notification.ts b/packages/pi-subagents/src/observation/notification.ts
+index 887d867c..cb3b4967 100644
+--- a/packages/pi-subagents/src/observation/notification.ts
++++ b/packages/pi-subagents/src/observation/notification.ts
+@@ -237,6 +237,7 @@ export class NotificationManager implements NotificationSystem {
+       msg: { customType: string; content: string; display: boolean; details?: unknown },
+       opts?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
+     ) => void,
++    private readonly shouldWake: (record: { readonly id: string }) => boolean = () => true,
+   ) {}
+ 
+   sendCompletion(record: Subagent): void {
+@@ -370,6 +371,7 @@ export class NotificationManager implements NotificationSystem {
+   }
+ 
+   private emitUpdate(record: Subagent, message: string): void {
++    if (!this.shouldWake(record)) return;
+     if (!this.canAnnounceUpdate(record)) return;
+     // This channel is delivering the message, so no outcome carrier may repeat
+     // it — the record renders only what is still owed.
+@@ -391,6 +393,7 @@ export class NotificationManager implements NotificationSystem {
+   }
+ 
+   private emitIndividualNudge(record: Subagent): void {
++    if (!this.shouldWake(record)) return;
+     if (record.claimed) return;
+     if (record.consumed) return;
+ 
+diff --git a/packages/pi-subagents/test/observation/host-wake.test.ts b/packages/pi-subagents/test/observation/host-wake.test.ts
+new file mode 100644
+index 00000000..86471a6c
+--- /dev/null
++++ b/packages/pi-subagents/test/observation/host-wake.test.ts
+@@ -0,0 +1,37 @@
++import { expect, it, vi } from "vitest";
++import { NotificationManager } from "#src/observation/notification";
++import { SubagentEventsObserver } from "#src/observation/subagent-events-observer";
++import { createTestSubagent } from "#test/helpers/make-subagent";
++
++for (const withheld of [false, true]) {
++  it(`checks host permission at actual delivery (withheld=${withheld}) without losing terminal persistence`, () => {
++    const send = vi.fn(); const append = vi.fn();
++    let allowed = true;
++    const notifications = new NotificationManager(send, () => allowed);
++    const observer = new SubagentEventsObserver({ emit: vi.fn(), appendEntry: append, notifications });
++    const record = createTestSubagent();
++    if (withheld) notifications.onParentAgentStart();
++    else allowed = false;
++    observer.onSubagentCompleted(record);
++    allowed = false;
++    notifications.onParentAgentSettled();
++    expect(append).toHaveBeenCalledWith("subagents:record", expect.objectContaining({ id: record.id }));
++    expect(send).not.toHaveBeenCalled();
++    // A cancelled operation must not suppress later legitimate work.
++    allowed = true;
++    observer.onSubagentCompleted(createTestSubagent({ id: "later" }));
++    expect(send).toHaveBeenCalledTimes(1);
++  });
++}
++
++it("checks each queued update and completion independently", () => {
++  const send = vi.fn();
++  const notifications = new NotificationManager(send, (record) => record.id !== "cancelled");
++  notifications.onParentAgentStart();
++  notifications.sendUpdate(createTestSubagent({ id: "cancelled" }), "update");
++  notifications.sendCompletion(createTestSubagent({ id: "cancelled" }));
++  notifications.sendCompletion(createTestSubagent({ id: "other" }));
++  notifications.onParentAgentSettled();
++  expect(send).toHaveBeenCalledTimes(1);
++  expect(send.mock.calls[0][0].details.id).toBe("other");
++});
+-- 
+2.39.5
+

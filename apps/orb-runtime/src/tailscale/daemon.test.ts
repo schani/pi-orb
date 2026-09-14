@@ -15,7 +15,6 @@ describe("tailscaleStateDir", () => {
       "/workspace/.clone-tmp",
       "/workspace/pi-sessions",
       "/workspace/pi-agent",
-      "/workspace/pi-auth.json",
     ]) {
       expect(stateDir.startsWith(`${reserved}/`)).toBe(false);
       expect(stateDir).not.toBe(reserved);

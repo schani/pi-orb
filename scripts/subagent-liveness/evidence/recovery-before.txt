@@ -1,0 +1,26 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/orb-runtime/src/pi/subagent-recovery.test.ts [ apps/orb-runtime/src/pi/subagent-recovery.test.ts ]
+Error: Cannot find module './subagent-recovery.ts' imported from '/workspace/repo/apps/orb-runtime/src/pi/subagent-recovery.test.ts'
+ ❯ apps/orb-runtime/src/pi/subagent-recovery.test.ts:2:1
+      1| import { expect, it } from "vitest";
+      2| import { interruptedSubagents } from "./subagent-recovery.ts";
+       | ^
+      3| 
+      4| const admitted = (childId: string, operationId = "op") => ({ type: "cu…
+
+Caused by: Error: Failed to load url ./subagent-recovery.ts (resolved id: ./subagent-recovery.ts) in /workspace/repo/apps/orb-runtime/src/pi/subagent-recovery.test.ts. Does the file exist?
+ ❯ loadAndTransform node_modules/vite/dist/node/chunks/config.js:22739:33
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  23:45:56
+   Duration  264ms (transform 32ms, setup 0ms, collect 0ms, tests 0ms, environment 0ms, prepare 64ms)
+

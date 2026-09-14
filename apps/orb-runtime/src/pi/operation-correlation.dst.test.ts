@@ -43,6 +43,9 @@ type Landing = "turn" | "steer" | "rejected";
  */
 class FakePiSession {
   private streaming = false;
+  get isIdle(): boolean {
+    return !this.streaming;
+  }
   private readonly listeners: ((event: AgentSessionEvent) => void)[] = [];
   /** Turn Pi has begun but not yet announced, and who submitted it. */
   private unannounced: Submitter | null = null;

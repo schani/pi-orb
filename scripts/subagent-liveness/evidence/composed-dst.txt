@@ -1,0 +1,11 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+ ✓ apps/control-plane/src/domain/subagent-liveness.dst.test.ts (1 test) 844ms
+   ✓ composes real runtime child ownership with pull-derived idle-stop, without a browser  842ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  23:57:13
+   Duration  3.50s (transform 808ms, setup 0ms, collect 2.26s, tests 844ms, environment 0ms, prepare 123ms)
+

@@ -1,0 +1,46 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+ ✓ apps/orb-runtime/src/domain/subagent-work.dst.test.ts (3 tests) 63ms
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts (3 tests | 1 failed) 20ms
+   × keeps health, snapshot and operation busy through a leaf-only interval and root wake 16ms
+     → DST scenario "subagent-runtime-activity" failed at iteration 0 (trace: /workspace/repo/test-failures/subagent-runtime-activity-1789342693958-0.json, replay reproduces the failure): expected { orbId: 'test', …(5) } to match object { activity: 'busy', …(1) }
+(8 matching properties omitted from actual)
+   ✓ samples SDK readiness rather than clearing a continuation at an old settled event 1ms
+   ✓ turns child-only input into a root turn without changing the operation, then fences abort until drain 2ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/orb-runtime/src/pi/subagent-activity.dst.test.ts > keeps health, snapshot and operation busy through a leaf-only interval and root wake
+Error: DST scenario "subagent-runtime-activity" failed at iteration 0 (trace: /workspace/repo/test-failures/subagent-runtime-activity-1789342693958-0.json, replay reproduces the failure): expected { orbId: 'test', …(5) } to match object { activity: 'busy', …(1) }
+(8 matching properties omitted from actual)
+ ❯ runDst apps/orb-runtime/src/testkit/sim.ts:114:13
+    112|       }
+    113|       const message = error instanceof Error ? error.message : String(…
+    114|       throw new Error(
+       |             ^
+    115|         `DST scenario "${options.name}" failed at iteration ${i} ` +
+    116|           `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID …
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:41:3
+
+Caused by: AssertionError: expected { orbId: 'test', …(5) } to match object { activity: 'busy', …(1) }
+(8 matching properties omitted from actual)
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "activeOperationId": "op",[39m
+[2m    "activity": "busy",[22m
+[2m  }[22m
+
+ ❯ Object.f apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:48:50
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 5 passed (6)
+   Start at  23:38:12
+   Duration  1.90s (transform 410ms, setup 0ms, collect 1.69s, tests 83ms, environment 0ms, prepare 149ms)
+

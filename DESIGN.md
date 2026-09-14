@@ -80,7 +80,7 @@ The browser talks only to the control plane. In the unauthenticated first slice,
 
 An orb can launch another orb with a prompt through `pi-orb spawn` and receive its browser URL (implemented 2026-09-08). This creates independent same-project work with atomic durable prompt acceptance; see `docs/orb-spawning.md`.
 
-First-class child orbs/subagents are a product goal but not part of the first slice.
+First-class child orbs/subagents are a product goal but not part of the first slice. Local subagent integration is being validated in `docs/subagents.md` (2026-09-14): a minimal pinned gotgenes fork plus runtime-owned aggregate activity, preserving one user-facing root conversation with additional internal SDK sessions. It is not deployed.
 
 Likely future properties:
 
@@ -107,6 +107,7 @@ Subsystem designs:
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, frame union, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, the PostgreSQL schema
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
+- [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/workspace-uploads.md](docs/workspace-uploads.md) — streaming browser uploads into orb-local files, inbox notifications, idle protection, and recovery

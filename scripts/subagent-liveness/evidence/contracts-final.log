@@ -1,0 +1,13 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+ ✓ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts (7 tests) 223ms
+ ✓ apps/orb-runtime/src/pi/subagent-recovery.test.ts (6 tests) 6ms
+ ✓ apps/orb-runtime/src/pi/subagent-sdk.contract.test.ts (1 test) 18793ms
+   ✓ qualifies the installed fork and real Pi runtime adapter through eleven gated schedules  18791ms
+
+ Test Files  3 passed (3)
+      Tests  14 passed (14)
+   Start at  02:45:06
+   Duration  19.11s (transform 535ms, setup 0ms, collect 2.33s, tests 19.02s, environment 1ms, prepare 269ms)
+

@@ -1,0 +1,47 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+ ❯ apps/orb-runtime/src/hooks/env-file.test.ts (12 tests | 1 failed | 11 skipped) 10ms
+   ↓ the hook env file's path > lives in the persistent home, so it survives compute replacement
+   ↓ parsing the hook env file > reads one KEY=VALUE per line
+   ↓ parsing the hook env file > ignores blank lines and comments
+   ↓ parsing the hook env file > takes a value literally, expanding and interpreting nothing
+   ↓ parsing the hook env file > strips one matching pair of quotes and nothing more
+   ↓ parsing the hook env file > keeps the last value when a name repeats
+   ↓ parsing the hook env file > reports a line it cannot parse by number, never by content
+   × parsing the hook env file > cannot redirect child sessions away from the broker-only Pi auth store 9ms
+     → expected [] to deeply equal [ 'PI_CODING_AGENT_DIR' ]
+   ↓ parsing the hook env file > refuses every name the runtime owns
+   ↓ parsing the hook env file > also refuses dashboard-managed project-secret names for this boot
+   ↓ parsing the hook env file > owns the variables that would break the runtime's own contract
+   ↓ parsing the hook env file > is a no-op on an empty file
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/orb-runtime/src/hooks/env-file.test.ts > parsing the hook env file > cannot redirect child sessions away from the broker-only Pi auth store
+AssertionError: expected [] to deeply equal [ 'PI_CODING_AGENT_DIR' ]
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [[39m
+[32m-   "PI_CODING_AGENT_DIR",[39m
+[32m- ][39m
+[31m+ [][39m
+
+ ❯ apps/orb-runtime/src/hooks/env-file.test.ts:85:28
+     83|   it("cannot redirect child sessions away from the broker-only Pi auth…
+     84|     const parsed = parse("PI_CODING_AGENT_DIR=/other");
+     85|     expect(parsed.ignored).toEqual(["PI_CODING_AGENT_DIR"]);
+       |                            ^
+     86|     expect(parsed.entries.size).toBe(0);
+     87|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 skipped (12)
+   Start at  00:29:47
+   Duration  530ms (transform 147ms, setup 0ms, collect 288ms, tests 10ms, environment 0ms, prepare 63ms)
+

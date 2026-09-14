@@ -1,0 +1,14 @@
+{
+  "name": "pi-orb-subagent-liveness-experiment",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test liveness.test.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@gotgenes/pi-subagents": "21.7.0",
+    "neverthrow": "8.2.0"
+  }
+}

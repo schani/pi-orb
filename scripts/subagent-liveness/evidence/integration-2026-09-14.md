@@ -1,0 +1,27 @@
+# Integration validation, 2026-09-14
+
+Pi 0.85.1; upstream 21.7.0 at `b3b6159399f541fd0623f65818557dd3e707a34f`; fork commits `b8dbccdc` and `6ad3a28132124e36c228887aaf549fd1c69e76e1`. Immutable installed artifact: `vendor/gotgenes-pi-subagents-21.7.0-orb.1.tgz` (integrity in the root lockfile; SHA-256 `0dbdd1483b853c35915483709fbd2fa9956d42b4939778ba129ddd1a18b75ee4`). The fork's 80-file / 1,771-test suite passed; earlier red/fixed outputs are retained here.
+
+## Failures and causes (not dismissed by passing reruns)
+
+1. **Production OAuth inheritance defect.** `npm run test:e2e -- e2e/subagents.e2e.test.ts` first timed out waiting for `PARENT_SETTLED_0`. An instrumented reproduction retained the runtime workspace and root history. Only one model request occurred (the root launch); the child recorded terminal status `error` with `No API key found for openai-codex`. The parent was deliberately blocked on a FIFO which only a successfully started child could release. The fork copied provider registrations into a fresh ModelRuntime, but its standard agent-dir auth file differed from the root's `pi-auth.json`. Fix: pin `PI_CODING_AGENT_DIR=<workDir>/pi-agent` and use its broker-only `auth.json` for both root and children. No fork scope expansion or CLI login. The fixed browser test passed in 79.3 seconds, including both normal completion and cancellation.
+2. **Existing boot-test fake omitted the newly required `isIdle`.** The first full unit run had two deterministic failures in `boot-notification.contract.test.ts`, for SDK throw/reject. The adapter correctly refused to finish a session whose readiness was undefined. Set `isIdle: true` on that idle fake; the four boot contracts then passed. No readiness check or assertion was weakened.
+3. **New resume fixture deadlocked itself.** Its first run awaited `submitMessage` (which follows the full SDK run) before releasing the explicitly gated resumed child. Diagnostics stopped at `tool:two:entered`. Preserve the submitted ResultAsync, observe/abort/release the child, and await the result afterwards, just as the original first-turn fixture does. This test-synchronization fix passed in 2.4 seconds. The runner's teardown now prints its latest trace even on watchdog timeout; Node discards diagnostics emitted after the test has timed out.
+4. **Withheld-wake observability gap.** A source audit found that the bridge recorded a veto only while its active-run map still contained the child. A forced regression released the child hold, aborted the still-running root, then delivered the withheld notification; the expected root `wake_suppressed` record was absent. Move veto persistence into the runtime, whose execution correlation intentionally survives cleanup. The regression and all eight SDK schedules passed. A concurrent full-unit run also captured this newly added regression before the fix; that run is not a clean final-source result.
+
+5. **Aborted outcome was overwritten by SDK rejection.** A forced test rejected the root prompt after whole-operation abort, while a child still held cleanup ownership. `abandonAgentOperation` incorrectly changed the eventual outcome to `failed`. Preserve the already-latched `aborted` outcome; the new regression, runtime activity cases and all eight SDK schedules pass (`abort-outcome-before.txt` / `abort-outcome-after.txt`).
+
+6. **Hook config could redirect child auth.** The new runtime-owned `PI_CODING_AGENT_DIR` also needs the existing hook env-file fence. A parser regression demonstrated that it was accepted as an ordinary hook variable. Add it to the denylist; all 47 env-file/runner tests pass. The credential and hook documentation now include this protected name. The full suite then correctly caught the baked boot-hooks skill's missing copy of that contract; adding the name to the skill makes all 25 skill contracts pass.
+
+No sleep or timeout increase was used to fix ordering. The browser fixture uses owned temporary FIFOs. The real-SDK fixture uses explicit promises and lifecycle checkpoints. Earlier recorded DST traces were replayed before their fixes; their replay outputs remain in this directory and original traces remain under `test-failures/`.
+
+## Independent passing checks
+
+- Eight runtime-wired package/SDK schedules also pass with the characterization `node_modules` moved out of the tree: root `npm ci` alone supplies required CI dependencies (`sdk-clean-root.txt`).
+- Runtime/ledger DST and the composed control-plane idle-stop test pass. The composed test uses actual runtime activity, real poller/reconciler domain logic and simulated transport over three idle windows, then verifies idle-stop after child drain.
+- The targeted browser/process-provider E2E passes editing, child-only busy/reload, continuation, abort without resurrection, replicated outcomes/idle and stopped history.
+- Repository typecheck and lint pass (lint retains one pre-existing warning and one informational diagnostic).
+
+Full-suite results and remaining acceptance scope are summarized in `docs/subagents.md` / `TODO.md`. Docker is installed but its daemon socket is absent; no Docker/PostgreSQL or native/cloud qualification is claimed. No deployment was performed.
+
+Raw investigation outputs are retained in this orb's `.context/subagents/`; the OAuth diagnostic also retained `/tmp/pi-orb-subagents-e2e-Gni0wN`. Raw mock request headers are deliberately not copied here. These are disposable synthetic credentials, but headers are not necessary evidence for this defect.

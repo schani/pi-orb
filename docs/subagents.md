@@ -1,0 +1,189 @@
+# Local subagents: integration and DST-first acceptance
+
+## Status and provenance
+
+**Planning consolidated 2026-09-13; implementation in progress 2026-09-14, not deployed.** This document combines orb `b18fc524-632d-42cd-ab90-8b2ac55de80d` and the fork/minimal-change discussion in orb `58efed98-b832-4025-a899-7f43fed7ed72`. The executable backlog is in `TODO.md`; product decisions are recorded only in `docs/open-questions.md`: 62–64 are resolved. The earlier orb's provisional question 47 is not a valid reference in this checkout: 47 here concerns archival.
+
+The earlier orb recorded a real-package experiment using unmodified `@gotgenes/pi-subagents` 21.4.2 and Pi 0.85.1: seven explicitly gated scenarios, separate process/HOME/cwd per scenario, real SDK root/child sessions and extension loading, and a scripted in-process model. The `scripts/subagent-liveness/` harness has now been recovered from its transcript and rerun with locked dependencies against both 21.4.2 and 21.7.0. A subsequent targeted source check of the published 21.4.2 tarball verified default cwd, child JSONL persistence, root terminal records and the read-only transcript viewer (see below); this is not a full cancellation/integration audit. That historical audit is distinct from the implementation evidence below. Repository Pi upgrades are permitted; any chosen version must pass fresh contracts.
+
+## Implementation evidence (2026-09-14)
+
+- Selected **21.7.0** (`b3b6159399f541fd0623f65818557dd3e707a34f`) rather than 21.4.2 because it already publishes `subagents:resuming`, which gives the host a synchronous execution-admission boundary for explicit resume. Pi remains **0.85.1**.
+- Two local fork commits implement the targeted changes: `b8dbccdc` (startup/already-aborted cancellation and fresh resume cancellation ownership) and `6ad3a28132124e36c228887aaf549fd1c69e76e1` (actual-delivery `shouldWake({id})`). Failing regressions preceded the repairs; the fork suite passed **80 files / 1,771 tests**. GitHub fork creation initially returned HTTP 403 through the orb integration. On 2026-09-14 the user created `schani/pi-packages` manually; both commits are now published on its `pi-orb-integration` branch at `6ad3a28132124e36c228887aaf549fd1c69e76e1`. SSH was not configured in the orb, so publication used HTTPS with the existing broker-backed Git credential helper. The immutable installed artifact is unchanged.
+- `vendor/gotgenes-pi-subagents-21.7.0-orb.1.tgz` is the immutable installed artifact, with upstream source/license/provenance, root lockfile integrity and a reproducible esbuild recipe in `scripts/subagent-liveness/build-fork.sh`. The two patches are checked in alongside the recipe; no moving branch or boot-time package install is used. Both Docker and native source packaging include `vendor/` under a contract test.
+- `SubagentWork` owns execution tokens; `PiOrbAgent` samples actual root readiness and retains operation identity through child-only intervals, cleanup and the terminal/wake microtask handoff. The inline bridge uses public events/service only. Root-only inline platform extensions are not recursively loaded by children. Resume is preserved; a draining execution cannot be resumed prematurely.
+- Eleven runtime-wired real-package schedules cover the seven original cases plus explicit resume/whole-operation cancellation, broker credential refresh/failure in real child runtimes, and shutdown during blocked tool cleanup. They assert inherited file-discovered tools and exclusion of root-only inline extensions. A 200-schedule runtime DST races two terminals, successor admission, inbox delivery and abort while checking operation/gate/health/snapshot continuity and shell exclusion. Composed control-plane DST covers three idle windows, then 50 schedules with control-plane restart, an eight-hour wall-clock jump, delayed activity snapshots, failed pulls and post-commit failures. It uses the real poller/reconciler and production runtime activity owner, not a standalone boolean model; it does not claim exhaustive transport/crash coverage.
+- The process-provider browser E2E passed parent-settled/child-blocked activity, shared-filesystem editing, reload/snapshot handshake, automatic root continuation, cooperative abort without a subsequent inference, replicated idle/outcomes and stopped root history. Its first failure found a real integration defect: provider-registration inheritance did not supply credentials to a fresh child runtime. Both root and children now use the standard private `PI_CODING_AGENT_DIR=<workDir>/pi-agent`, with broker-only `auth.json` there. No CLI login or real refresh token is introduced. The failed run and diagnostic reproduction are retained; the fixed E2E passed.
+- The extended browser E2E kills the owned runtime PID during child-only work, verifies one visible interruption report and no child replay across two restarts, excludes private child text from replicated history, and archives the stopped orb with workspace deletion and retained interruption history. Its watchdog explicitly includes the existing deletion quarantine; it does not manufacture ordering with sleeps.
+- A forced history-read failure exposed an escaping SDK exception and a later duplicate terminal callback falsely completing the operation. `LiveHistoryPublisher.flushPersisted()` now returns a typed `history_source_error`; finalization requires ready health, retaining conservative activity after publication failure. The installed-SDK shutdown regression exposed upstream disposal returning before active tool cleanup. The host's pre-teardown handler fences/cancels through the normal operation API and awaits its public-event-owned runs before upstream clears its registry or observers. No additional fork seam was needed. Admission/start/cancellation/terminal/wake-suppression edges remain root history records.
+- Recovery scans full local root entries for admitted executions without a terminal outcome, including entries outside the compacted context. The existing visible restart notice records those children as interrupted once; it does not reopen or replay a child file. Cancellation and suppressed-wake edges are ordinary root entries. Veto persistence uses the runtime's retained correlation, not the bridge's active-run map: a withheld notification can be delivered after the child hold has drained. A cancellation-driven SDK prompt rejection cannot downgrade the latched aggregate outcome from `aborted` to `failed`; forced regressions cover both boundaries.
+
+**Initial validation round (2026-09-14):** `npm ci`, repository typecheck/lint, `npm test` (**214 files / 1,642 tests**, plus infra checks), eight installed-fork SDK schedules, and the full process-backend E2E suite (**29 passed / 2 Docker-only skips**) pass. The strengthened subagent browser test separately passes with an exact nine-model-request assertion; legitimate pending device-auth polls are not mistaken for inference failures. Lint retains one pre-existing warning and one informational diagnostic. Original failures and their causes remain in `scripts/subagent-liveness/evidence/`.
+
+Continuation evidence is indexed in `scripts/subagent-liveness/evidence/continuation-2026-09-14.md`. Docker's installed system service was inactive, not unavailable; it can be started with `sudo systemctl start docker`. The first full Docker/PostgreSQL run passed 84 tests and exposed one upload-assertion synchronization failure, preserved with its cause in that index.
+
+Remaining acceptance work is tracked only in `TODO.md`; these results do not imply deployment, native/cloud qualification, or full completion of the matrix below.
+
+## Requirements and direction
+
+- **Required (2026-09-05, reaffirmed here):** top-level orb activity remains busy when only a leaf subagent is working. This includes live browser status, runtime health, pull-derived activity and idle auto-stop with no browser attached. Silent work still counts.
+- **Required (2026-09-13):** DST/tests first. Establish executable invariants and reproductions before implementing each behavior, and test production coordination code rather than a parallel idealized state machine.
+- **Selected planning direction:** a narrow fork of gotgenes' `pi-packages` / `pi-subagents`, validated in pi-orb before upstream PRs. Upstream acceptance is not a shipping dependency. The earlier upstream-first recommendation is superseded.
+- **Scope clarified by the user (2026-09-13):** integrate the extension's existing functionality rather than inventing a restricted exploration product or adding workspace management. Children can edit in the shared checkout using the extension's normal agent/tool configuration. Keep agent-facing child tools and local session persistence, but do not expose child transcripts to the user or replicate those separate files to the cloud. Local in-process children remain distinct from independent child orbs. Existing exposed paths, including resume, need explicit adapter qualification and tests; earlier leaf-only/no-resume proposals are not authority to silently remove package functionality.
+- pi-orb owns operation identity, aggregate activity, inbox arbitration, durable visibility and product integration. The extension owns child execution. No plugin framework, private-state polling, monkey-patching, compatibility staging or new host provider.
+
+### Evidence and alternatives
+
+The seven earlier scenarios were parent-first, child-first, queued, cancel-running, cancel-starting, cancel-queued and spawn-failure. Each retained one aggregate busy period through the parent's completion wake and reopened the root session file to verify terminal records. These were finite controlled schedules, **not `determined` exploration, runtime E2E, or cancellation correctness tests**.
+
+The bridge retained admitted child IDs through terminal callbacks, releasing in a microtask after the callback's remaining synchronous persistence/wake scheduling. It sampled root `session.isIdle`; the child-first trace showed that an SDK `agent_settled` subscriber could already see `isIdle === false` because the extension had scheduled a continuation. Microtask ordering is a pinned adapter contract, not a general Pi liveness API.
+
+Three cancellation findings were distinct:
+
+1. Aborting during workspace preparation still allowed later child model/tool execution; the future signal binding missed the already-aborted signal.
+2. A running abort changed public status to stopped and made `hasRunning()` false / `waitForAll()` resolve before controlled tool cleanup finished.
+3. Cancelled-child completion woke the parent for another model turn.
+
+The initial loader failure was Node refusing native type stripping of a TypeScript package entry under `node_modules`. The harness imported the public API through a companion extension using Pi's normal loader. No package patch was needed for loading or the tested liveness bridge.
+
+Pi's bundled blocking subprocess example is smaller but prevents the parent from settling while its tool waits; it does not meet true background delegation. First-party SDK orchestration would duplicate a package we can adapt. Nicobailon's package offers broader workflows and detached runners but a larger lifetime/credential integration surface. Full child orbs remain separate from local subagents and the implemented independent `pi-orb spawn` command. Context isolation is not a permission sandbox; neither SDK sessions nor ordinary subprocesses provide one.
+
+## Smallest fork contract
+
+Two changes are the target, not a promise about an unaudited diff size:
+
+1. **Correct startup cancellation.** Cancellation is latched across preparation and session creation. Check it after each asynchronous acquisition and before prompting. Signal binding handles already-aborted and future-aborted signals. Merely calling `abort()` followed by an unconditional `prompt()` is incorrect. Clean up resources acquired before cancellation; queued cancellation executes no work.
+2. **Optional automatic parent-wake predicate.** Evaluate host permission immediately before scheduling automatic root inference, including delivery previously withheld in a queue. Preserve existing behavior when no predicate is supplied. Persist the terminal outcome regardless of permission. The predicate receives enough public run identity for the host's correlation map; extension code need not understand orb operation IDs. The decision-to-schedule boundary must not yield past host cancellation without rechecking. Batched notifications need explicit tests so suppressing an old batch cannot suppress a valid new operation or awaken an aborted one.
+
+Keep separately reviewable bug-fix and hook commits. Pin an immutable source/build with provenance and lockfile integrity, preserve the upstream license, and test the installed artifact through the actual production loader. Do not depend on a moving fork branch or install it dynamically in boot hooks. Fork owner/release artifact naming is packaging detail, not a reason to design another package-management system.
+
+**Deliberately excluded:** changing public `hasRunning()`/`waitForAll()` semantics, a new public `cancelling` state, generalized notification middleware, operation IDs in upstream, full lifecycle redesign, or introducing `determined` throughout upstream. Our host admission-to-terminal hold supplies draining; known early-return APIs cannot prove execution has stopped.
+
+This minimum has two acceptance conditions: every automatic wake crosses the hook, and the terminal boundary used by the host follows execution plus owned cleanup. Test both against real source/SDK. If either fails, prefer a narrow boundary fix or post-cleanup notification over building a workaround around private state. A synchronous predicate alone is insufficient if inference is queued elsewhere without a checked delivery boundary. Any necessary expansion must be documented with the failing trace before implementation.
+
+## Host ownership and operation contract
+
+Conceptually:
+
+```text
+agentBusy = root admission/preflight or root non-idle
+         OR admitted child run not yet drained
+         OR result persistence/wake handoff not yet settled
+orb operation busy = agentBusy OR foreground shell operation
+```
+
+Workspace uploads retain their existing separate lifecycle protection; they are not model streaming. Completed retained child sessions, arbitrary detached processes and unrelated dev servers do not count as child execution.
+
+Use an identity-indexed set/map, not counters or recent-output timestamps. Reserve a child hold synchronously at admission, before preparation can yield, including queued work. Correlate by root operation ID, child ID and run identity, fencing obsolete callbacks across shutdown/restart. Fail admission visibly if identity/ownership cannot be established. Duplicate terminal observations cannot release someone else's hold.
+
+One operation ID spans root completion, remaining children and completion-triggered root continuations. Root `agent_settled` retires only root activity and the applicable streaming blocks; it does not blindly finish the operation. Re-read actual root readiness because the extension's settled handlers can already have queued another turn. Do not display a fictitious streaming/thinking cursor while only children remain active.
+
+A child terminal handoff is ordered:
+
+```text
+execution and owned cleanup settle
+→ terminal result appended / ready for history publication
+→ permitted continuation reserved or wake suppression recorded
+→ child/handoff hold released
+→ evaluate aggregate idle
+```
+
+The pinned public-event/microtask bridge may implement this only if adapter contract tests prove that exact ordering for every enabled path. Host admission owns failure handling too: a rejected spawn must release exactly its own hold after recording its outcome. A persistence failure cannot silently turn into successful completion; surface a typed failure and retain conservative activity until owned execution is resolved, using existing runtime failure handling rather than inventing infinite retries.
+
+`getHealth()`, agent snapshot/live operation, history pull and browser status derive from the same activity source. Completion history is published before `operation_finished`. Exactly one aggregate finish/idle transition and one Luna summary scheduling decision occur per operation; Luna stays detached from liveness. Its input spans the aggregate operation, including persisted child outcomes, rather than only the parent's first answer. **Implemented 2026-09-14:** a summary-only Pi-adapter projection contributes each terminal child's status and description; raw child/tool output remains excluded under the existing bounded summary-input policy. The real-SDK contract exposed the earlier generic-event filtering that omitted these outcomes and now asserts one summary containing both delegated outcomes and the root follow-up. Child failures remain inspectable even if the root handles them and completes normally.
+
+### Inbox, shell and abort arbitration
+
+Aggregate busy and root ability to accept a turn are separate facts. Reuse the existing serialized mutation and turn-start barrier:
+
+- Root genuinely running: deliver user input as steering within the current operation.
+- Root idle but children busy: trigger a root turn within that same aggregate operation, not a new operation ID and not a steer that waits forever on an idle root.
+- Completion wake racing user input: serialize/reserve root admission so work is neither lost nor prompted twice into an already-running session. Preserve inbox message-ID deduplication and persisted delivery classification.
+- Whole-operation cancellation latched: leave new user input pending until that operation drains, then admit it as a new operation; old cancellation must not consume or suppress it.
+- Foreground shell admission still requires aggregate idle. Shell-specific abort behavior remains unchanged.
+
+Whole-operation abort fences admissions and automatic wakes first, then signals root and all queued/starting/running children, including a continuation that won the race before the fence. Return command acceptance without blocking the mutation executor on the full drain; otherwise cleanup events can deadlock behind abort. The operation remains visibly busy/cancelling until real drain. The host's `session_shutdown` handler runs before upstream teardown: use the same cancellation fence, then await the bridge's owned execution set becoming empty before disposing retained sessions or removing observers. Upstream `dispose()` alone awaits child extension hooks, not active tool cleanup; the installed-SDK shutdown contract pins this distinction. Individual child cancellation can still notify the parent; it is different from aborting everything. Cancellation outcome/reason and suppressed automatic wakes are retained durably without putting secrets or repeated status levels into history.
+
+## Session, credential and resource integration
+
+Use existing Pi extension loading/composition, with a narrow companion adapter to the package's public service. Install observers before any child can be admitted. Verify startup registration, tool collisions, one owner per root session, late/reload behavior and awaited shutdown. Disable child inheritance of root-only platform hooks: no duplicate boot notifications, summaries, subagent orchestration or recursively instantiated platform supervisors. Ordinary required tools/resources and approved MCP access need an explicit tested child profile, not blanket extension inheritance. **Observed 2026-09-14:** real child sessions load the file-discovered probe tools and omit a root-only inline lifecycle sentinel and orchestration tools. The first-party MCP factory is also root-inline and is not inherited by this baseline; approved child MCP access is not established by those tests. This is a qualification gap tracked in `TODO.md`, not a decision to forbid MCP tools in children.
+
+Child model/provider construction must use the runtime's broker-backed provider/auth wiring; in-process execution alone does not prove inheritance. Contract tests cover provider registration scope, credential reuse/refresh and unavailable/revoked credentials without token logging or automatic replay of side-effecting tool calls. Keep the initial model policy simple: inherit the root's selected model/provider unless an explicitly supported choice is qualified. No fresh CLI login files or credential copying.
+
+All first-party fallible boundaries return typed `Result`/`ResultAsync`; catch third-party rejection/throws immediately at the adapter. Domain orchestration accepts deterministic task/clock and narrow execution/history/root-admission ports, with no Pi/filesystem/network dependencies. Do not redesign the extension's unrelated error conventions just to enlarge an upstream diff.
+
+Reuse the extension's existing concurrency/settings and agent tool/model policies; do not invent additional pi-orb queue limits or an exploration-only profile without evidence of need. Children use the parent's cwd by default (`options.cwd ?? ctx.cwd`) and may edit the same checkout. Worktree isolation belongs to the optional `@gotgenes/pi-subagents-worktrees` companion, not core; pi-orb will not add it for this integration. Concurrent edits retain the extension's existing conflict risks. Children remain trusted orb code, not mutually sandboxed tenants.
+
+## Persistence, recovery and presentation contract
+
+Minimum durable data: admission, start, cancellation request, terminal/interrupted outcome, and automatic wake suppression where applicable; operation/child/run/root-session identities, model/provider, relevant workspace identity, and bounded sanitized failure reason. Prefer root-session custom entries projected through the existing normalized generic-event path and one-root replication cursor. Reuse gotgenes terminal records where sufficient rather than writing the same outcome twice; verify their shape before defining a projection. Do not promise full child transcript replication from the existence of local child session files.
+
+**Verified extension baseline (published 21.4.2, checked 2026-09-13):** each child has a full Pi JSONL session, normally under `<parent-session-directory>/<parent-session-basename>/tasks/`; an in-memory parent instead uses a temporary fallback. `create-subagent-session.ts` constructs a persisted `SessionManager`. `/subagents:sessions` exposes running and released-session transcripts in Pi's read-only per-entry viewer. Separately, `SubagentEventsObserver.persistAndNotify` appends `subagents:record` to the root containing id, type, description, status, result, error, startedAt and completedAt, then invokes completion notification. Those root entries do not contain the full child transcript. The extension has no control-plane/cloud replication feature.
+
+**Decided by the user (2026-09-13): no user-facing child transcripts and no child-transcript cloud replication.** Replication exists so the user can always see the root conversation; the extension's separate child JSONL files remain local implementation artifacts. Parent-session tool results, completion records and minimal lifecycle/recovery facts follow the existing root replication path. No child-history transport, cursor, database storage or transcript viewer is required. The earlier recommendation to port the extension's TUI transcript viewer into the web product was unnecessary scope expansion and is rejected. Question 63 records this correction.
+
+Root admission/outcome records must survive compaction and be available on reconnect and while stopped. Top-level activity and failures use existing status/root-history surfaces; there is no child-transcript UI. Do not display a fabricated parent thinking cursor during child-only work. Visibility comes from persisted/projected root facts, not guest stdout; child session files need no independent replication or archival retention guarantee.
+
+A restart after the parent settled can have unfinished children without a dangling root tool call. Recovery therefore inspects persisted child admissions, not only the existing root-tail detector. Lost in-process work becomes interrupted once, without silently replaying side effects. Compose with the existing boot-notification single-shot guard to avoid two competing recovery turns. Fence old-run callbacks, never reconstruct a live hold solely from an old persisted running row, and establish current activity before readiness is advertised. Durable append uses the existing history substrate; this feature does not claim to fix its separately tracked fsync/power-loss gap.
+
+**Cancellation/recovery decided (2026-09-13, question 64):** cooperative whole-operation abort fences admissions/wakes, cancels root and children, and remains visibly busy/cancelling until execution and cleanup drain. Existing whole-orb Stop is the escape hatch for an uncooperative tool; no child-only hard-kill guarantee is added. After runtime loss, record unfinished children as interrupted once without automatically replaying them, composing the report with the existing guarded root boot notification. Explicit agent-driven resume is distinct from automatic crash replay and remains subject to its adapter contracts.
+
+Controlled Stop drains/interrupts children under the existing host-stop contract; archive must account for terminal/interrupted root outcomes before sealing, not wait for impossible success from killed work. Permanent orb/project deletion owns local child artifacts through normal workspace cleanup. An in-process tool ignoring abort cannot be declared stopped merely because a signal was sent.
+
+Observability is part of acceptance: operation/child admission and outcome edges, cancellation scope, wake decision/reason, interruption and cleanup failures are reconstructable from replicated history and existing lifecycle events. No healthy-tick logs. Never log tokens or full task/model contents merely for correlation. Normalized history and stopped-view tests prove visibility after the browser/runtime disappears.
+
+## Tests-first architecture and acceptance matrix
+
+Three layers have distinct claims:
+
+1. **`determined` domain/composed DST:** production activity/cancellation/admission coordinator with scheduled root/child execution, history append, clock, transport and host boundaries. Compose real control-plane poll/lifecycle logic with the runtime activity owner through a simulated transport, not just a fake boolean called busy.
+2. **Pinned real-package/SDK contracts:** genuine child sessions and extension loader with a scripted model, explicit preparation/model/tool/cleanup/wake gates, fresh process/HOME/cwd. Prove the adapter's event and microtask assumptions. These tests do not pretend native SDK I/O is fully under `determined`.
+3. **Runtime/browser E2E and live qualification:** actual protocol, provider wiring, history pulls, web rendering and deployment boundaries. DST success cannot substitute for these.
+
+Required assertions apply after every relevant scheduling boundary, not only at the scenario's end:
+
+| Schedule/failure | Required invariant | Primary layer |
+| --- | --- | --- |
+| Parent settles before silent leaf | Busy remains true everywhere; same operation ID | SDK contract + runtime DST + E2E |
+| Child finishes before parent settles | Rescheduled root is not cleared by old `agent_settled` | SDK contract + DST |
+| Two simultaneous completions / queued successor | No lost hold, underflow, idle gap or duplicate root wake | DST + SDK contract |
+| Admission versus last completion | Child belongs to a live operation before execution can start | DST |
+| Workspace/session acquisition failure | Exactly one visible outcome, no child work after failed acquisition, no hold/resource leak | Both |
+| Cancel during each startup await / before signal binding | Zero subsequent model/tool execution; acquired resources cleaned | SDK regression + DST |
+| Cancel running tool while cleanup blocked | Status/drain API lies cannot release host busy; wait for actual cleanup | Both |
+| Cancel queued child | No session/model/tool starts; one terminal outcome | Both |
+| Abort versus immediate/withheld/batched wake | Persist results, no new root inference after abort fence | Both + E2E |
+| Abort versus already-started continuation | Continuation is cancelled/drained in the same operation | Both |
+| New user input versus child wake / abort | No invalid double prompt, message loss, orphan operation ID or old-generation suppression | Operation-correlation DST + E2E |
+| Duplicate/stale terminal callback | Idempotent release; cannot change later operation | DST + contract |
+| History append/publication failure or lost response | No false successful finish or lost acknowledged history; typed visible failure | DST + adapter contracts |
+| Root/child credential failure/refresh | Shared qualified broker path; no token leak or side-effect replay | Broker contracts + E2E |
+| Root shutdown / extension load collision | Awaited cleanup or explicit failure; no silently missing capability | SDK contracts |
+| No browser, multiple idle windows, clock jump, delayed pull | No idle auto-stop while owned leaf work remains; normal idle countdown after drain | Composed lifecycle DST |
+| Poller/control-plane restart / stale pre-stop snapshot | Aggregate activity and existing final-pull fence protect work | Composed DST |
+| Runtime crash after admission / completion before wake | Recovery outcome once; no automatic child replay or stuck hold | Persistence/recovery DST + E2E |
+| Stop/archive/delete race | No sealed history with unaccounted child outcomes; no child escapes workspace/host ownership | Composed DST + E2E |
+| Reconnect/backpressure/stopped view | Same operation/child facts, critical terminal records retained, no fake parent streaming | Protocol/UI contracts + browser E2E |
+| Capacity/tool profile / resume | Existing package limits and editing tools work; each resumed run has fresh ownership and cancellation; terminal `resumed` event is not admission | Unit + SDK contracts |
+
+Named checkpoints/failpoints include before/after admission reservation, preparation acquisition, session creation, cancellation fence, execution abort observation, cleanup settlement, terminal append, notification enqueue/dequeue/wake permission, root reservation/settled sampling, final hold release, snapshot/pull response, replica commit, idle-stop final check, shutdown and recovery append. Model acceptance separately from response delivery so crash/ack-loss windows exist. Native promises bridged to DST retain a simulated owner until their completion condition; no fixed-count checkpoint pumps.
+
+Preserve every first failure with source/fork/SDK versions, scenario/seed and full trace. Replay `DST_REPLAY=<trace> npx vitest run <suite>` before any fix; a green rerun is not clearance. Forced schedules pin known races, entropy exploration finds new ones, and healthy-progress versus deadline-adversarial scenarios have explicit premises. No sleeps to create ordering, blind assertion relaxation or larger timeouts to hide failures. Real subprocess/port/temp-directory ownership and teardown are explicit; watchdog timeouts detect deadlocks, not synchronize tests.
+
+### Delivery gates
+
+The ordered implementation steps and checkboxes live only in `TODO.md`. Each stage is test → demonstrated pre-fix failure → smallest implementation → replay/regression success, with evidence kept alongside version pins.
+
+The E2E acceptance path starts actual child work through the parent model's tool call, gates a child tool, lets the parent finish, proves child-only busy in health/live/pull, reconnects, then releases the child and verifies terminal history plus parent follow-up before one final idle/notification. A second path aborts at a controlled startup or cleanup boundary and asserts no resurrection; a third crashes during child-only work and verifies the selected recovery policy. No-browser idle protection is exercised with virtual time in composed DST rather than adding multi-minute sleeps to E2E. Include real broker-backed mock OAuth/inference, not only the experiment's in-memory provider. Isolate or explicitly synchronize Luna scripts so auxiliary inference cannot consume child rules.
+
+Install with `npm ci` before checks (and the recovered experiment's own locked install if separate). Release requires repository typecheck/lint/unit/DST, the pinned fork/SDK contracts in required CI rather than an optional script, frontend browser coverage, and `npm run test:e2e` for the runtime/harness changes. Run process and Docker/PostgreSQL compositions serially where resources collide; both substrate contracts are required if new SQL is introduced. Use normal SQL migrations if needed, with no dual-read rollout. Disposable native/cloud qualification then verifies real broker credentials, busy-through-leaf execution, visible abort and restart outcomes with exact build identities. No deployment is authorized by this implementation task.
+
+After validated real use, upstream the startup cancellation repair and wake predicate independently where practical. Keep the maintained fork until released upstream artifacts pass the same contracts; do not remove tests just because code moved upstream.
+
+## Source index
+
+- Prior conversation: orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, retrieved with `pi-orb transcript`.
+- Upstream: https://github.com/gotgenes/pi-packages/tree/main/packages/pi-subagents
+- Alternative: https://github.com/nicobailon/pi-subagents
+- Integration: `apps/orb-runtime/src/pi/agent.ts`, `apps/orb-runtime/src/pi/operation-correlation.dst.test.ts`, `docs/pi-adapter.md`.
+- Runtime/product contracts: `docs/runtime-protocol.md`, `docs/history-replication.md`, `docs/lifecycle.md`, `docs/web-ui.md`, `docs/credentials.md`, `docs/testing.md`.

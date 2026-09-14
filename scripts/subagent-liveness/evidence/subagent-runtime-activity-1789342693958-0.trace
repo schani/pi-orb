@@ -1,0 +1,10 @@
+{
+  "name": "subagent-runtime-activity",
+  "iteration": 0,
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    }
+  ]
+}

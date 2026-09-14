@@ -177,7 +177,7 @@ environment"). Rejected: a `pi-orb` subcommand to re-run hooks — executing the
     its last value. A shell-compatible parser is rejected: the runtime reads this file into its own
     process, and `$(…)` in a file a repository writes must not be a code path.
   - Entries may not override the variables the runtime owns — `PI_ORB_RUNTIME_TOKEN`,
-    `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`, `PI_ORB_WORK_DIR`, `HOME`,
+    `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`, `PI_ORB_WORK_DIR`, `PI_CODING_AGENT_DIR`, `HOME`,
     `PATH`, `PI_ORB`, and the Tailscale variables. Such an entry is ignored, and the runtime logs
     one edge per refused name, because a hook that could rewrite `PATH` would break every later
     boot in a way that looks like a platform bug.
@@ -329,7 +329,7 @@ last value. The runtime merges the file into its own environment immediately bef
 session is created, so both the agent's shells and every terminal inherit it; a line added later
 reaches new terminals immediately and the agent's tool shells at the next start. It cannot override
 `PI_ORB_RUNTIME_TOKEN`, `PI_ORB_CONTROL_PLANE_URL`, `PI_ORB_ID`, `PI_ORB_HOST_INCARNATION`,
-`PI_ORB_WORK_DIR`, `HOME`, `PATH`, `PI_ORB`, or the Tailscale variables; such a line is ignored and
+`PI_ORB_WORK_DIR`, `PI_CODING_AGENT_DIR`, `HOME`, `PATH`, `PI_ORB`, or the Tailscale variables; such a line is ignored and
 logged. An unusable line is skipped and reported by number, and the rest of the file still applies.
 The file is yours to maintain: it is never truncated for you, so rewrite rather than append if a
 value should change, and remember that a resume hook that runs past its 10-second window writes too

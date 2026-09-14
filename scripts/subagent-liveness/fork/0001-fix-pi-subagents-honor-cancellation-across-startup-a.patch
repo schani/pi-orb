@@ -1,0 +1,269 @@
+From b8dbccdc0ba13bad38dff389817ca8316bab6d96 Mon Sep 17 00:00:00 2001
+From: pi-orb <pi-orb@users.noreply.github.com>
+Date: Sun, 13 Sep 2026 23:39:02 +0000
+Subject: [PATCH 1/2] fix(pi-subagents): honor cancellation across startup and
+ resumed runs
+
+---
+ .../src/lifecycle/run-listeners.ts            |  1 +
+ .../src/lifecycle/subagent-session.ts         |  5 +-
+ .../pi-subagents/src/lifecycle/subagent.ts    | 29 ++++++--
+ .../test/lifecycle/host-cancellation.test.ts  | 72 +++++++++++++++++++
+ .../test/lifecycle/subagent-manager.test.ts   |  2 +-
+ .../test/lifecycle/subagent.test.ts           |  7 +-
+ 6 files changed, 107 insertions(+), 9 deletions(-)
+ create mode 100644 packages/pi-subagents/test/lifecycle/host-cancellation.test.ts
+
+diff --git a/packages/pi-subagents/src/lifecycle/run-listeners.ts b/packages/pi-subagents/src/lifecycle/run-listeners.ts
+index 76b75027..73ed5154 100644
+--- a/packages/pi-subagents/src/lifecycle/run-listeners.ts
++++ b/packages/pi-subagents/src/lifecycle/run-listeners.ts
+@@ -17,6 +17,7 @@ export class RunListeners {
+ 	 */
+ 	wireSignal(signal: AbortSignal | undefined, onAbort: () => void): void {
+ 		if (!signal) return;
++		if (signal.aborted) { onAbort(); return; }
+ 		const listener = () => onAbort();
+ 		signal.addEventListener("abort", listener, { once: true });
+ 		this.detach = () => signal.removeEventListener("abort", listener);
+diff --git a/packages/pi-subagents/src/lifecycle/subagent-session.ts b/packages/pi-subagents/src/lifecycle/subagent-session.ts
+index 6b342085..a7226b92 100644
+--- a/packages/pi-subagents/src/lifecycle/subagent-session.ts
++++ b/packages/pi-subagents/src/lifecycle/subagent-session.ts
+@@ -97,6 +97,7 @@ export class SubagentSession {
+ 
+   /** Drive the initial run's turn loop; emits `completed` on success. */
+   async runTurnLoop(prompt: string, opts: TurnLoopOptions): Promise<TurnLoopResult> {
++    if (opts.signal?.aborted) return { responseText: "", aborted: true, steered: false };
+     const session = this._session;
+ 
+     // Track turns for graceful max_turns enforcement.
+@@ -153,6 +154,7 @@ export class SubagentSession {
+ 
+   /** Re-prompt the same session (resume); does not emit `completed`. */
+   async resumeTurnLoop(prompt: string, signal?: AbortSignal): Promise<string> {
++    if (signal?.aborted) return "";
+     const session = this._session;
+     const collector = collectResponseText(session);
+     const cleanupAbort = forwardAbortSignal(session, signal);
+@@ -342,6 +344,7 @@ function forwardAbortSignal(
+   const onAbort = (): void => {
+     void session.abort();
+   };
+-  signal.addEventListener("abort", onAbort, { once: true });
++  if (signal.aborted) onAbort();
++  else signal.addEventListener("abort", onAbort, { once: true });
+   return () => signal.removeEventListener("abort", onAbort);
+ }
+diff --git a/packages/pi-subagents/src/lifecycle/subagent.ts b/packages/pi-subagents/src/lifecycle/subagent.ts
+index 0409b29e..23ada052 100644
+--- a/packages/pi-subagents/src/lifecycle/subagent.ts
++++ b/packages/pi-subagents/src/lifecycle/subagent.ts
+@@ -165,7 +165,7 @@ export class Subagent {
+ 	canBeSteered(): boolean { return this.state.canBeSteered(); }
+ 	get maxTurns(): number | undefined { return this.execution.maxTurns; }
+ 
+-	readonly abortController: AbortController;
++	abortController: AbortController;
+ 	private _promise?: Promise<void>;
+ 	/** Handle on the agent's current run — the initial run, or the live resume that replaced it. */
+ 	get promise(): Promise<void> | undefined { return this._promise; }
+@@ -326,6 +326,10 @@ export class Subagent {
+ 		this.markRunning(Date.now());
+ 		this.execution.observer?.onStarted?.(this);
+ 		this.listeners.wireSignal(this.execution.signal, () => this.abort());
++		if (this.abortController.signal.aborted) {
++			await this.finishCancelledStartup();
++			return;
++		}
+ 
+ 		// Guard the await so the no-provider path stays synchronous, preserving
+ 		// the original run() timing: the factory is called in the same turn as
+@@ -346,6 +350,10 @@ export class Subagent {
+ 			}
+ 		}
+ 
++		if (this.abortController.signal.aborted) {
++			await this.finishCancelledStartup();
++			return;
++		}
+ 		const runConfig = this.execution.getRunConfig?.();
+ 		try {
+ 			this.subagentSession = await this.execution.createSubagentSession({
+@@ -366,6 +374,10 @@ export class Subagent {
+ 			return;
+ 		}
+ 
++		if (this.abortController.signal.aborted) {
++			await this.finishCancelledStartup();
++			return;
++		}
+ 		this.flushPendingSteers();
+ 		this.listeners.attachObserver(subscribeSubagentObserver(this.subagentSession, this.state, {
+ 			onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+@@ -385,6 +397,13 @@ export class Subagent {
+ 		}
+ 	}
+ 
++	/** A cancelled acquisition never enters the prompt phase; terminal follows cleanup. */
++	private async finishCancelledStartup(): Promise<void> {
++		this._pendingSteers = [];
++		await this.releaseSession();
++		this.completeRun({ responseText: "", aborted: true, steered: false });
++	}
++
+ 	/**
+ 	 * Whether this run gets the mid-run update channel.
+ 	 *
+@@ -469,8 +488,8 @@ export class Subagent {
+ 	 * The returned promise always resolves (errors are captured internally) and is
+ 	 * published as the `promise` getter, so waiters track the resume rather than
+ 	 * the settled handle of the original run.
+-	 * The parent signal flows straight through to resumeTurnLoop — resume does not
+-	 * route through this.abortController.
++	 * Each resume owns a fresh abort controller, with the parent signal forwarded
++	 * into it, so both host cancellation and parent cancellation stop that run.
+ 	 */
+ 	resume(prompt: string, signal?: AbortSignal): Promise<void> {
+ 		const subagentSession = this.subagentSession;
+@@ -487,13 +506,15 @@ export class Subagent {
+ 	/** The resume body. Always resolves — errors terminate through failResume(). */
+ 	private async runResume(subagentSession: SubagentSession, prompt: string, signal?: AbortSignal): Promise<void> {
+ 		this.resetForResume(Date.now());
++		this.abortController = new AbortController();
++		this.listeners.wireSignal(signal, () => this.abort());
+ 		this.execution.observer?.onResumeStarted?.(this);
+ 		this.listeners.attachObserver(subscribeSubagentObserver(subagentSession, this.state, {
+ 			onCompact: (info) => this.execution.observer?.onCompacted?.(this, info),
+ 		}));
+ 
+ 		try {
+-			this.completeResume(await subagentSession.resumeTurnLoop(prompt, signal));
++			this.completeResume(await subagentSession.resumeTurnLoop(prompt, this.abortController.signal));
+ 		} catch (err) {
+ 			this.failResume(err);
+ 		}
+diff --git a/packages/pi-subagents/test/lifecycle/host-cancellation.test.ts b/packages/pi-subagents/test/lifecycle/host-cancellation.test.ts
+new file mode 100644
+index 00000000..0ac51f7b
+--- /dev/null
++++ b/packages/pi-subagents/test/lifecycle/host-cancellation.test.ts
+@@ -0,0 +1,72 @@
++import { expect, it, vi } from "vitest";
++import { Subagent } from "#src/lifecycle/subagent";
++import { makeStubExecution } from "#test/helpers/make-subagent";
++import { createSubagentSessionStub, toSubagentSession } from "#test/helpers/mock-session";
++
++function gate<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
++
++for (const boundary of ["prepare", "session"] as const) {
++  it(`does not execute after cancellation during ${boundary}, and cleans up before terminal`, async () => {
++    const entered = gate<void>();
++    const release = gate<void>();
++    const order: string[] = [];
++    const stub = createSubagentSessionStub();
++    const factory = vi.fn(async () => {
++      if (boundary === "session") { entered.resolve(); await release.promise; }
++      return toSubagentSession(stub);
++    });
++    const agent = new Subagent({ id: "a", type: "general-purpose", description: "test", isBackground: true,
++      execution: makeStubExecution({ createSubagentSession: factory,
++        getWorkspaceProvider: () => ({ prepare: async () => {
++          if (boundary === "prepare") { entered.resolve(); await release.promise; }
++          return { cwd: "/test", dispose: () => { order.push("cleanup"); } };
++        } }),
++        observer: { onRunFinished: () => { order.push("terminal"); } },
++      }),
++    });
++    agent.start();
++    await entered.promise;
++    expect(agent.abort()).toBe(true);
++    expect(order).toEqual([]);
++    release.resolve();
++    await agent.promise;
++    expect(stub.runTurnLoop).not.toHaveBeenCalled();
++    expect(order).toEqual(["cleanup", "terminal"]);
++    if (boundary === "prepare") expect(factory).not.toHaveBeenCalled();
++    expect(agent.status).toBe("stopped");
++  });
++}
++
++it("does not acquire a session for an already-aborted initial signal", async () => {
++  const signal = new AbortController(); signal.abort();
++  const factory = vi.fn(async () => toSubagentSession(createSubagentSessionStub()));
++  const agent = new Subagent({ id: "a", type: "general-purpose", description: "test", isBackground: true,
++    execution: makeStubExecution({ signal: signal.signal, createSubagentSession: factory }) });
++  await agent.run();
++  expect(factory).not.toHaveBeenCalled();
++  expect(agent.status).toBe("stopped");
++});
++
++it("owns a fresh abort signal for every resumed run", async () => {
++  const stub = createSubagentSessionStub();
++  const signals: AbortSignal[] = [];
++  let entered = gate<void>();
++  let release = gate<void>();
++  stub.resumeTurnLoop.mockImplementation(async (_prompt, signal) => {
++    signals.push(signal!); entered.resolve(); await release.promise; return "done";
++  });
++  const agent = new Subagent({ id: "a", type: "general-purpose", description: "test", isBackground: true,
++    execution: makeStubExecution({ createSubagentSession: async () => toSubagentSession(stub) }) });
++  await agent.run();
++  for (let run = 0; run < 2; run++) {
++    entered = gate<void>(); release = gate<void>();
++    const done = agent.resume("again");
++    await entered.promise;
++    expect(signals[run]?.aborted).toBe(false);
++    expect(agent.abort()).toBe(true);
++    expect(signals[run]?.aborted).toBe(true);
++    release.resolve(); await done;
++    expect(agent.status).toBe("stopped");
++  }
++  expect(signals[0]).not.toBe(signals[1]);
++});
+diff --git a/packages/pi-subagents/test/lifecycle/subagent-manager.test.ts b/packages/pi-subagents/test/lifecycle/subagent-manager.test.ts
+index ffb0ef8a..ae1fef5f 100644
+--- a/packages/pi-subagents/test/lifecycle/subagent-manager.test.ts
++++ b/packages/pi-subagents/test/lifecycle/subagent-manager.test.ts
+@@ -1572,7 +1572,7 @@ describe("SubagentManager", () => {
+ 
+         await manager.resume(id, "continue", { signal });
+ 
+-        expect(stub.resumeTurnLoop).toHaveBeenCalledWith("continue", signal);
++        expect(stub.resumeTurnLoop).toHaveBeenCalledWith("continue", manager.getRecord(id)!.abortController.signal);
+       });
+     });
+   });
+diff --git a/packages/pi-subagents/test/lifecycle/subagent.test.ts b/packages/pi-subagents/test/lifecycle/subagent.test.ts
+index 9fa1b854..fcb95881 100644
+--- a/packages/pi-subagents/test/lifecycle/subagent.test.ts
++++ b/packages/pi-subagents/test/lifecycle/subagent.test.ts
+@@ -1549,7 +1549,7 @@ describe("Subagent — ask-back", () => {
+ 
+ 		await agent.resume("The project one.");
+ 
+-		expect(stub.resumeTurnLoop).toHaveBeenCalledWith("The project one.", undefined);
++		expect(stub.resumeTurnLoop).toHaveBeenCalledWith("The project one.", agent.abortController.signal);
+ 		expect(agent.status).toBe("completed");
+ 		expect(agent.result).toBe("Used the project config. Done.");
+ 		// The question was answered, so it no longer stands.
+@@ -1578,13 +1578,14 @@ describe("Subagent.resume() — happy path", () => {
+ 		expect(agent.result).toBe("resumed");
+ 	});
+ 
+-	it("passes the prompt and signal straight through to resumeTurnLoop", async () => {
++	it("passes the prompt and a run-owned cancellation signal to resumeTurnLoop", async () => {
+ 		const { agent, stub } = createResumableAgent();
+ 		const signal = new AbortController().signal;
+ 		await agent.resume("continue", signal);
+ 		expect(stub.resumeTurnLoop).toHaveBeenCalledOnce();
+ 		expect(stub.resumeTurnLoop.mock.calls[0][0]).toBe("continue");
+-		expect(stub.resumeTurnLoop.mock.calls[0][1]).toBe(signal);
++		expect(stub.resumeTurnLoop.mock.calls[0][1]).toBe(agent.abortController.signal);
++		expect(agent.abortController.signal.aborted).toBe(false);
+ 	});
+ 
+ 	it("resets transition state before resuming", async () => {
+-- 
+2.39.5
+

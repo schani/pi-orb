@@ -12,6 +12,7 @@ import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 import { createOrbExtensions } from "./extensions/index.ts";
 import { type McpExtensionDeps, mcpInventoryPrompt } from "./extensions/mcp.ts";
+import type { SubagentHost } from "./extensions/subagents.ts";
 
 type LoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
 
@@ -28,6 +29,7 @@ export interface OrbResourceLoaderInput {
   /** Provider-supplied install directory; tests may use null to disable it. */
   readonly skillsDir: string | null;
   readonly mcp?: McpExtensionDeps;
+  readonly subagents?: SubagentHost;
 }
 
 /**
@@ -50,7 +52,10 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
     cwd: input.cwd,
     agentDir: input.agentDir,
     ...(input.settingsManager !== undefined ? { settingsManager: input.settingsManager } : {}),
-    extensionFactories: createOrbExtensions(input.mcp ? { mcp: input.mcp } : {}),
+    extensionFactories: createOrbExtensions({
+      ...(input.mcp ? { mcp: input.mcp } : {}),
+      ...(input.subagents ? { subagents: input.subagents } : {}),
+    }),
     additionalSkillPaths: input.skillsDir === null ? [] : [input.skillsDir],
     appendSystemPromptOverride: (base: string[]): string[] => [
       ...base,

@@ -1,0 +1,37 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts (7 tests | 1 failed) 201ms
+   × does not publish successful completion after a terminal history failure, even on a duplicate release 9ms
+     → injected SDK history read failure
+   ✓ arbitrates simultaneous child terminals, user input and abort without losing operation or inbox identity 150ms
+   ✓ keeps health, snapshot and operation busy through a leaf-only interval and root wake 39ms
+   ✓ persists a withheld wake veto even after the child's execution hold has drained 0ms
+   ✓ retains the aborted outcome when the SDK prompt rejects during child cleanup 0ms
+   ✓ samples SDK readiness rather than clearing a continuation at an old settled event 0ms
+   ✓ turns child-only input into a root turn without changing the operation, then fences abort until drain 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/orb-runtime/src/pi/subagent-activity.dst.test.ts > does not publish successful completion after a terminal history failure, even on a duplicate release
+Error: injected SDK history read failure
+ ❯ Object.getEntries apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:47:34
+     45|   const manager: PiSessionManager = {
+     46|     getEntries: () => {
+     47|       if (failHistoryRead) throw new Error("injected SDK history read …
+       |                                  ^
+     48|       return entries as ReturnType<PiSessionManager["getEntries"]>;
+     49|     },
+ ❯ LiveHistoryPublisher.flushPersisted apps/orb-runtime/src/pi/live-history.ts:44:37
+ ❯ PiOrbAgent.maybeFinishAgentOperation apps/orb-runtime/src/pi/agent.ts:1096:41
+ ❯ PiOrbAgent.releaseSubagent apps/orb-runtime/src/pi/agent.ts:1056:10
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:105:11
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed (7)
+   Start at  01:55:45
+   Duration  2.20s (transform 387ms, setup 0ms, collect 1.72s, tests 201ms, environment 0ms, prepare 69ms)
+

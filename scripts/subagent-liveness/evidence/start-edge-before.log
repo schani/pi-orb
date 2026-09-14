@@ -1,0 +1,60 @@
+{"event":"bridge:busy"}
+{"event":"parent:start","parentStarts":1}
+{"event":"model:root-launch"}
+{"event":"child:created","label":"new","hasRunning":true}
+{"event":"child:started","label":"new","hasRunning":true}
+{"event":"children:admitted","statuses":["running"]}
+{"event":"model:parent-final-entered"}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+false !== true
+
+    at file:///workspace/repo/scripts/subagent-liveness/scenario.mjs:450:24 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.6.0
+
+✖ parent-first (1540.837718ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1624.385262
+
+✖ failing tests:
+
+test at scripts/subagent-liveness/liveness.test.mjs:22:3
+✖ parent-first (1540.837718ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   code: 1,
+  -   code: 0,
+      signal: null
+    }
+  
+      at TestContext.<anonymous> (file:///workspace/repo/scripts/subagent-liveness/liveness.test.mjs:65:14)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { code: 1, signal: null },
+    expected: { code: 0, signal: null },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

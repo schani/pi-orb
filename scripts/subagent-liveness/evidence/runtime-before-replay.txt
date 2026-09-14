@@ -1,0 +1,71 @@
+
+ RUN  v3.2.7 /workspace/repo
+
+stderr | apps/orb-runtime/src/pi/subagent-activity.dst.test.ts > samples SDK readiness rather than clearing a continuation at an old settled event
+Luna summary skipped operation=op: no turn input was captured
+
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts (3 tests | 3 failed) 17ms
+   × keeps health, snapshot and operation busy through a leaf-only interval and root wake 7ms
+     → h.agent.admitSubagent is not a function
+   × samples SDK readiness rather than clearing a continuation at an old settled event 8ms
+     → expected { v: 1, orbId: 'test', …(5) } to match object { activity: 'busy' }
+(6 matching properties omitted from actual)
+   × turns child-only input into a root turn without changing the operation, then fences abort until drain 1ms
+     → h.agent.admitSubagent is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/orb-runtime/src/pi/subagent-activity.dst.test.ts > keeps health, snapshot and operation busy through a leaf-only interval and root wake
+TypeError: h.agent.admitSubagent is not a function
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:44:27
+     42|     const h = fixture();
+     43|     await h.agent.submitMessage([{ type: "text", text: "work" }], "op"…
+     44|     const child = h.agent.admitSubagent("child")._unsafeUnwrap();
+       |                           ^
+     45|     const run = await sim.runTasks([{ name: "root", f: async task => {
+     46|       await task.checkpoint("root settles first"); h.settle();
+ ❯ runDst apps/orb-runtime/src/testkit/sim.ts:85:5
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:41:3
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  apps/orb-runtime/src/pi/subagent-activity.dst.test.ts > samples SDK readiness rather than clearing a continuation at an old settled event
+AssertionError: expected { v: 1, orbId: 'test', …(5) } to match object { activity: 'busy' }
+(6 matching properties omitted from actual)
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "activity": "busy",[39m
+[31m+   "activity": "idle",[39m
+[2m  }[22m
+
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:64:31
+     62|   const h = fixture(); await h.agent.submitMessage([], "op");
+     63|   h.settledWithContinuation();
+     64|   expect(h.agent.getHealth()).toMatchObject({ activity: "busy" });
+       |                               ^
+     65|   h.settle(); expect(h.agent.getHealth()).toMatchObject({ activity: "i…
+     66| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  apps/orb-runtime/src/pi/subagent-activity.dst.test.ts > turns child-only input into a root turn without changing the operation, then fences abort until drain
+TypeError: h.agent.admitSubagent is not a function
+ ❯ apps/orb-runtime/src/pi/subagent-activity.dst.test.ts:70:25
+     68| it("turns child-only input into a root turn without changing the opera…
+     69|   const h = fixture(); await h.agent.submitMessage([], "op");
+     70|   const child = h.agent.admitSubagent("child")._unsafeUnwrap();
+       |                         ^
+     71|   h.settle();
+     72|   const delivery = await h.agent.deliverInboxMessage("batch", ["batch"…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed (3)
+   Start at  23:36:24
+   Duration  1.87s (transform 366ms, setup 0ms, collect 1.60s, tests 17ms, environment 0ms, prepare 70ms)
+

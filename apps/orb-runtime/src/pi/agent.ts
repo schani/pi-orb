@@ -13,6 +13,7 @@ import {
 import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
   type DeliverOrbMessageResponse,
+  type HistoryRecord,
   type MessageInputBlock,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
@@ -32,6 +33,7 @@ import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { AgentGateView } from "../domain/requests.ts";
 import { ensurePersistentRustToolchain } from "../domain/rust.ts";
+import { type SubagentError, type SubagentRun, SubagentWork } from "../domain/subagent-work.ts";
 import {
   buildTurnSummaryInput,
   type TurnSummarizer,
@@ -60,6 +62,7 @@ import { pickCodexModel } from "./model-select.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
 import { reportRustToolchainEdge } from "./rust-toolchain-reporter.ts";
 import { sessionFlushed } from "./session-flush.ts";
+import { interruptedSubagents } from "./subagent-recovery.ts";
 
 export interface PiOrbAgentOptions {
   readonly orbId: string;
@@ -102,7 +105,13 @@ export interface SnapshotError {
  */
 export type PiSession = Pick<
   AgentSession,
-  "subscribe" | "sendUserMessage" | "sendCustomMessage" | "executeBash" | "abort" | "abortBash"
+  | "subscribe"
+  | "sendUserMessage"
+  | "sendCustomMessage"
+  | "executeBash"
+  | "abort"
+  | "abortBash"
+  | "isIdle"
 >;
 
 /** The `SessionManager` surface the adapter reads, narrowed for the same reason. */
@@ -181,6 +190,10 @@ export class PiOrbAgent {
   private turnResume: RuntimeTurnResume | null = null;
   private operationId: string | null = null;
   private operationKind: "agent" | "shell" | null = null;
+  private readonly subagentWork = new SubagentWork();
+  private operationOutcome: "completed" | "aborted" | "failed" = "completed";
+  private operationError: string | undefined;
+  private abortSubagents: (() => Result<void, SubagentError>) | null = null;
   /**
    * Set while an accepted agent submission is waiting for Pi to begin its
    * turn; resolves at `agent_start` or when the submission fails. Pi only
@@ -422,13 +435,18 @@ export class PiOrbAgent {
     // (docs/credentials.md) — the only credential path on every provider.
     this.health = this.initializing("checking_auth");
     const mockOpenAi = this.options.mockOpenAi ?? null;
+    // The package creates independent child runtimes using Pi's standard
+    // agent-dir auth path. Give every session the same private broker-only
+    // credential store; provider registration inheritance alone is not auth.
+    const agentDir = join(this.options.workDir, "pi-agent");
+    process.env.PI_CODING_AGENT_DIR = agentDir;
     const brokerTask = new NoSimulationTask(`broker-${this.options.orbId}`, false);
     const brokerClient = new BrokerTokenClient(new HttpBrokerEndpoint(broker, "model"));
     const runtimeResult = await ResultAsync.fromPromise(
       ModelRuntime.create({
         // Private per-orb auth file: holds only the short-lived access token
         // and the synthetic broker marker, never a refresh token.
-        authPath: join(this.options.workDir, "pi-auth.json"),
+        authPath: join(agentDir, "auth.json"),
         // Codex resolves offline from the built-in catalog; the availability
         // sweep in ModelRuntime.login can stall boots for minutes.
         allowModelNetwork: false,
@@ -521,7 +539,6 @@ export class PiOrbAgent {
         }),
       ),
     );
-    const agentDir = join(this.options.workDir, "pi-agent");
     // SSE keeps the first E2E deterministic; the fake refuses the WebSocket
     // transport (docs/PI-CODEX-E2E.md).
     const settingsManager =
@@ -537,6 +554,7 @@ export class PiOrbAgent {
       hookEnv,
       skillsDir: this.options.skillsDir,
       mcp: { configs: catalog.value.servers, tools: mcpTools },
+      subagents: this,
     });
     if (loaderResult.isErr()) {
       return err(this.failed("session_init_failed", loaderResult.error, true));
@@ -796,8 +814,17 @@ export class PiOrbAgent {
       this.startAgentOperation(operationId, null);
       this.beginTurnStart();
     }
+    const interrupted = interruptedSubagents(loaded.value.entries);
+    const marker =
+      interrupted.length === 0
+        ? plan.marker
+        : {
+            ...plan.marker,
+            content: `${plan.marker.content} Local subagent runs (${interrupted.map((run) => run.childId).join(", ")}) were interrupted. They have not been automatically replayed; inspect existing work before deciding what is still needed.`,
+            details: { ...plan.marker.details, interruptedSubagents: interrupted },
+          };
     const send = ResultAsync.fromThrowable(
-      () => session.sendCustomMessage(plan.marker, { triggerTurn: plan.triggerTurn }),
+      () => session.sendCustomMessage(marker, { triggerTurn: plan.triggerTurn }),
       toError,
     );
     void send().mapErr((error) => {
@@ -935,21 +962,7 @@ export class PiOrbAgent {
       }
       case "agent_settled": {
         if (this.operationKind !== "agent") break;
-        const operationId = this.operationId;
-        const summaryInput = this.captureTurnSummaryInput();
-        this.finishAgentOperation(operationId, "completed");
-        if (operationId !== null && summaryInput !== null) {
-          // Agent completion is already visible and the runtime is idle. Luna runs strictly
-          // best-effort in the background and cannot change this operation's outcome.
-          console.log(
-            `Luna summary queued operation=${operationId} input_chars=${summaryInput.transcript.length}`,
-          );
-          this.summaryCoordinator?.enqueue(operationId, summaryInput);
-        } else if (operationId !== null) {
-          console.error(
-            `Luna summary skipped operation=${operationId}: no turn input was captured`,
-          );
-        }
+        this.maybeFinishAgentOperation();
         break;
       }
       default:
@@ -968,6 +981,8 @@ export class PiOrbAgent {
   private startAgentOperation(operationId: string, summaryStartIndex: number | null): void {
     this.operationId = operationId;
     this.operationKind = "agent";
+    this.operationOutcome = "completed";
+    this.operationError = undefined;
     this.activity = "busy";
     this.summaryStartIndex = summaryStartIndex;
     this.liveBlocks.clear();
@@ -978,7 +993,7 @@ export class PiOrbAgent {
 
   private finishAgentOperation(
     operationId: string | null,
-    outcome: "completed" | "failed",
+    outcome: "completed" | "aborted" | "failed",
     message?: string,
   ): void {
     this.operationId = null;
@@ -1006,8 +1021,91 @@ export class PiOrbAgent {
    */
   private abandonAgentOperation(operationId: string, message: string): void {
     if (this.operationId !== operationId || this.operationKind !== "agent") return;
-    this.summaryStartIndex = null;
-    this.finishAgentOperation(operationId, "failed", message);
+    if (this.operationOutcome !== "aborted") {
+      this.operationOutcome = "failed";
+      this.operationError = message;
+    }
+    this.settleTurnStart();
+    this.maybeFinishAgentOperation();
+  }
+
+  /** Public adapter seam: reserve before the extension can yield into child work. */
+  admitSubagent(childId: string): Result<SubagentRun, SubagentError> {
+    if (this.operationOutcome === "aborted" || this.operationKind === "shell")
+      return err({
+        type: "subagent_admission_rejected",
+        message: "The current operation is not accepting subagents",
+      });
+    if (this.operationId === null)
+      this.startAgentOperation(randomUUID(), this.sessionManager?.getEntries().length ?? null);
+    const operationId = this.operationId;
+    if (operationId === null)
+      return err({
+        type: "subagent_admission_rejected",
+        message: "No agent operation owns this subagent",
+      });
+    return this.subagentWork.admit(childId, operationId).mapErr(
+      (): SubagentError => ({
+        type: "subagent_admission_rejected",
+        message: "Subagent already belongs to another operation",
+      }),
+    );
+  }
+
+  releaseSubagent(run: SubagentRun): void {
+    this.subagentWork.release(run);
+    this.maybeFinishAgentOperation();
+  }
+
+  mayWakeSubagent(childId: string): boolean {
+    const allowed =
+      this.operationOutcome !== "aborted" && this.subagentWork.mayWake(childId, this.operationId);
+    if (!allowed) {
+      // Withheld notifications can reach delivery after execution cleanup;
+      // correlation outlives the active hold so their veto is still durable.
+      const run = this.subagentWork.correlation(childId);
+      const saved = Result.fromThrowable(
+        () =>
+          this.sessionManager?.appendCustomEntry("pi-orb.subagent-run", {
+            ...(run ?? { childId }),
+            phase: "wake_suppressed",
+          }),
+        (error) => (error instanceof Error ? error.message : String(error)),
+      )();
+      if (saved.isErr()) this.subagentAdapterFailed(saved.error);
+    }
+    return allowed;
+  }
+
+  subagentAdapterFailed(message: string): void {
+    this.health = this.failed("subagent_adapter_failed", message, false);
+  }
+
+  bindSubagentAbort(abort: () => Result<void, SubagentError>): void {
+    this.abortSubagents = abort;
+  }
+
+  private maybeFinishAgentOperation(): void {
+    if (
+      this.health.status !== "ready" ||
+      this.operationKind !== "agent" ||
+      this.session === null ||
+      !this.session.isIdle ||
+      this.turnStart !== null ||
+      this.subagentWork.busy
+    )
+      return;
+    const published = this.liveHistory?.flushPersisted();
+    if (published?.isErr()) {
+      this.health = this.failed("subagent_history_failed", published.error.message, false);
+      return;
+    }
+    const operationId = this.operationId;
+    const summary = this.captureTurnSummaryInput();
+    const outcome = this.operationOutcome;
+    this.finishAgentOperation(operationId, outcome, this.operationError);
+    if (outcome === "completed" && operationId !== null && summary !== null)
+      this.summaryCoordinator?.enqueue(operationId, summary);
   }
 
   /** Resolves once no accepted submission is still waiting for `agent_start`. */
@@ -1036,14 +1134,33 @@ export class PiOrbAgent {
     this.summaryStartIndex = null;
     if (manager === null || startIndex === null) return null;
 
-    const records = [];
+    const records: HistoryRecord[] = [];
     for (const entry of manager.getEntries().slice(startIndex)) {
       const mapped = mapPiEntry(entry);
       if (mapped.isErr()) {
         console.error(`Luna summary input mapping failed: ${mapped.error.message}`);
         return null;
       }
-      records.push(mapped.value);
+      const data: unknown = entry.type === "custom" ? entry.data : null;
+      if (
+        entry.type === "custom" &&
+        entry.customType === "subagents:record" &&
+        data !== null &&
+        typeof data === "object" &&
+        "status" in data &&
+        (data.status === "completed" || data.status === "error") &&
+        "description" in data &&
+        typeof data.description === "string"
+      ) {
+        // Summary-only projection: include delegated outcome/intent, never
+        // separate child transcripts or raw child/tool output.
+        records.push({
+          ...mapped.value,
+          type: "message",
+          role: "tool",
+          content: [{ type: "text", text: `[subagent ${data.status}] ${data.description}` }],
+        });
+      } else records.push(mapped.value);
     }
     return buildTurnSummaryInput(records);
   }
@@ -1229,11 +1346,16 @@ export class PiOrbAgent {
         err({ message: "a foreground shell command is running", retryable: true }),
       );
     }
-    const delivery: "turn" | "steer" = this.activity === "busy" ? "steer" : "turn";
-    const operationId = delivery === "steer" ? (this.operationId ?? randomUUID()) : randomUUID();
+    if (this.operationKind === "agent" && this.operationOutcome === "aborted")
+      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
+        err({ message: "The previous operation is still cancelling", retryable: true }),
+      );
+    const delivery: "turn" | "steer" = session.isIdle ? "turn" : "steer";
+    const operationId = this.operationId ?? randomUUID();
     this.pendingInboxMessages.set(messageId, { delivery, operationId });
     if (delivery === "turn") {
-      this.startAgentOperation(operationId, manager.getEntries().length);
+      if (this.operationId === null)
+        this.startAgentOperation(operationId, manager.getEntries().length);
       this.beginTurnStart();
     }
     const piContent = content.map((block) =>
@@ -1426,8 +1548,47 @@ export class PiOrbAgent {
         (error) => ({ message: error instanceof Error ? error.message : String(error) }),
       );
     }
-    return ResultAsync.fromPromise(session.abort(), (error) => ({
-      message: error instanceof Error ? error.message : String(error),
-    }));
+    if (
+      this.operationId !== null &&
+      this.operationOutcome !== "aborted" &&
+      this.subagentWork.busy
+    ) {
+      const saved = Result.fromThrowable(
+        () =>
+          this.sessionManager?.appendCustomMessageEntry(
+            "pi-orb.subagents-cancelling",
+            "Cancelling delegated work.",
+            true,
+            {
+              operationId: this.operationId,
+              children: this.subagentWork.active.map((run) => run.childId),
+            },
+          ),
+        (error) => ({ message: String(error) }),
+      )();
+      if (saved.isErr()) this.subagentAdapterFailed(saved.error.message);
+      this.liveHistory?.observe("entry_appended");
+    }
+    this.operationOutcome = "aborted";
+    if (this.operationId !== null) this.subagentWork.cancel(this.operationId);
+    const children = this.abortSubagents?.();
+    // Abort acceptance must not hold the mutation executor while tools drain.
+    // The operation remains busy until root readiness and child holds settle.
+    void ResultAsync.fromThrowable(
+      async () => {
+        await session.abort();
+      },
+      (error) => ({
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    )()
+      .map(() => this.maybeFinishAgentOperation())
+      .mapErr((error) => {
+        this.health = this.failed("agent_abort_failed", error.message, false);
+        return error;
+      });
+    if (children?.isErr())
+      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() => err(children.error));
+    return ResultAsync.fromSafePromise(Promise.resolve());
   }
 }

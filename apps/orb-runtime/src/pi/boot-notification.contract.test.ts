@@ -53,6 +53,7 @@ it("persists a visible, model-visible user-role notice and deduplicates after re
   const { agent, manager, root } = fixture();
   let turns = 0;
   const pi: PiSession = {
+    isIdle: true,
     sendUserMessage: async () => undefined,
     abort: async () => undefined,
     abortBash: () => undefined,
@@ -133,6 +134,7 @@ it.each(["throw", "reject"])(
       return id;
     };
     const pi = {
+      isIdle: true,
       subscribe: () => () => undefined,
       sendCustomMessage: () => {
         if (mode === "throw") throw new Error("injected SDK failure");

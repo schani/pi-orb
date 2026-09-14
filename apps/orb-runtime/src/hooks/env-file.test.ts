@@ -80,6 +80,12 @@ describe("parsing the hook env file", () => {
     expect([...parsed.entries.keys()]).toEqual(["FOO", "OK"]);
   });
 
+  it("cannot redirect child sessions away from the broker-only Pi auth store", () => {
+    const parsed = parse("PI_CODING_AGENT_DIR=/other");
+    expect(parsed.ignored).toEqual(["PI_CODING_AGENT_DIR"]);
+    expect(parsed.entries.size).toBe(0);
+  });
+
   it("refuses every name the runtime owns", () => {
     const parsed = parseHookEnvFile(
       [...HOOK_ENV_DENIED.map((name) => `${name}=stolen`), "MINE=ok"].join("\n"),

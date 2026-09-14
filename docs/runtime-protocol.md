@@ -254,6 +254,10 @@ Delivery is strict FIFO with batching (decided 2026-08-10). When dispatch become
 
 That status is a product outcome, not an operator detail, so it is surfaced end to end: `OrbMessageView.status` reports `failed` with `error`, the orb page keeps every non-delivered message in view, and the web history renders such a message as a terminal user turn labelled `failed` with the reason beneath it, instead of a gray turn that stays "queued" forever. The reconciler additionally logs one `message-batch-failed` edge (`docs/lifecycle.md`).
 
+### Local-subagent activity (2026-09-14; under validation)
+
+`docs/subagents.md` requires one operation ID and busy status through root turns, leaf execution/cleanup and result-wake handoff. Aggregate busy must not be confused with root readiness: input during a child-only interval triggers a root turn within the existing operation, while input during whole-operation cancellation remains pending for the next operation. Completion history and child outcomes precede aggregate `operation_finished`; Luna remains detached and is scheduled only after aggregate settlement. The DST-first plan covers arbitration with existing inbox/turn-start barriers and consistent live/health/pull activity. The adapter now applies those same delivery rules to aggregate operation ownership; this is not a second protocol or a child-session replication endpoint.
+
 ### Atomic runtime delivery choice
 
 The existing per-orb reconciler is the dispatcher: inbox commit wakes it immediately, and later ordinary scans recover work after process death. No broker, queue service, or fourth background loop is added. When the orb is running it calls an authenticated, idempotent runtime HTTP operation keyed by the durable batch ID and carrying all constituent message IDs. The runtime serializes it through the same mutation executor as live shell and abort requests, then chooses from its authoritative activity at that instant:

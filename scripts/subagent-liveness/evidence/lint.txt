@@ -1,0 +1,48 @@
+
+> lint
+> biome check .
+
+e2e/full-slice.e2e.test.ts:131:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    129 │           toolResultContains: {
+    130 │             regex:
+  > 131 │               createHash("sha256")
+        │               ^^^^^^^^^^^^^^^^^^^^
+  > 132 │                 .update(Buffer.alloc(4 * 1024 * 1024 + 13, 0xa7))
+  > 133 │                 .digest("hex") + "[\\s\\S]*UPLOAD_SIDECAR",
+        │                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    134 │           },
+    135 │         },
+  
+  i Unsafe fix: Use a template literal.
+  
+     129  129 │             toolResultContains: {
+     130  130 │               regex:
+     131      │ - ··············createHash("sha256")
+          131 │ + ··············`${createHash("sha256")
+     132  132 │                   .update(Buffer.alloc(4 * 1024 * 1024 + 13, 0xa7))
+     133      │ - ················.digest("hex")·+·"[\\s\\S]*UPLOAD_SIDECAR",
+          133 │ + ················.digest("hex")}[\\s\\S]*UPLOAD_SIDECAR`,
+     134  134 │             },
+     135  135 │           },
+  
+
+apps/control-plane/src/infra-release.contract.test.ts:74:15 lint/suspicious/noTemplateCurlyInString ━━━━━━━━━━
+
+  ! Unexpected template string placeholder.
+  
+    72 │   executable(
+    73 │     join(bin, "npm"),
+  > 74 │     'test -z "${PI_ORB_RELEASE_RESULT_DIR:-}"\ntest -z "${PI_ORB_RELEASE_RECORD:-}"\necho "npm:$*" >> "$CALL_LOG"\n',
+       │               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    75 │   );
+    76 │   executable(
+  
+  i Turn the string into a template string.
+  
+
+Checked 556 files in 2s. No fixes applied.
+Found 1 warning.
+Found 1 info.

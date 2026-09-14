@@ -1,0 +1,52 @@
+
+> test:e2e
+> vitest run --config e2e/vitest.config.ts
+
+
+ RUN  v3.2.7 /workspace/repo
+
+stderr | e2e/full-slice.e2e.test.ts > full slice E2E > runs login, a scripted tool round trip, replication, and drain
+=== original failure === ExpectError: expect(locator).toBeVisible() failed
+
+Locator: getByText('UPLOAD_VERIFIED', { exact: true })
+Expected: visible
+Error: strict mode violation: getByText('UPLOAD_VERIFIED', { exact: true }) resolved to 2 elements:
+    1) <p>UPLOAD_VERIFIED</p> aka getByText('UPLOAD_VERIFIED').first()
+    2) <p>UPLOAD_VERIFIED</p> aka getByText('UPLOAD_VERIFIED').nth(1)
+
+Call log:
+  - Expect "to.be.visible" with timeout 30000ms
+  - waiting for getByText('UPLOAD_VERIFIED', { exact: true })
+
+    at captureRawStack [90m(/workspace/repo/[39mnode_modules/[4mplaywright-core[24m/lib/coreBundle.js:9681:17[90m)[39m
+    at callMatcherAsStep [90m(/workspace/repo/[39mnode_modules/[4mplaywright[24m/lib/matchers/expect.js:13310:57[90m)[39m
+    at Object.toBeVisible [90m(/workspace/repo/[39mnode_modules/[4mplaywright[24m/lib/matchers/expect.js:13300:23[90m)[39m
+    at runScenario [90m(/workspace/repo/[39me2e/full-slice.e2e.test.ts:1858:76[90m)[39m
+    at [90m/workspace/repo/[39me2e/full-slice.e2e.test.ts:664:7
+    at [90m/workspace/repo/[39mnode_modules/[4m@vitest[24m/runner/dist/chunk-hooks.js:752:20 {
+  matcherResult: {
+    message: [32m'expect(locator).toBeVisible() failed\n'[39m +
+      [32m'\n'[39m +
+      [32m"Locator: getByText('UPLOAD_VERIFIED', { exact: true })\n"[39m +
+      [32m'Expected: visible\n'[39m +
+      [32m"Error: strict mode violation: getByText('UPLOAD_VERIFIED', { exact: true }) resolved to 2 elements:\n"[39m +
+      [32m"    1) <p>UPLOAD_VERIFIED</p> aka getByText('UPLOAD_VERIFIED').first()\n"[39m +
+      [32m"    2) <p>UPLOAD_VERIFIED</p> aka getByText('UPLOAD_VERIFIED').nth(1)\n"[39m +
+      [32m'\n'[39m +
+      [32m'Call log:\n'[39m +
+      [32m'  - Expect "to.be.visible" with timeout 30000ms\n'[39m +
+      [32m"  - waiting for getByText('UPLOAD_VERIFIED', { exact: true })\n"[39m,
+    pass: [33mfalse[39m,
+    actual: [90mundefined[39m,
+    name: [32m'toBeVisible'[39m,
+    expected: [32m'visible'[39m,
+    log: [
+      [32m'  - Expect "to.be.visible" with timeout 30000ms'[39m,
+      [32m"  - waiting for getByText('UPLOAD_VERIFIED', { exact: true })"[39m
+    ],
+    timeout: [90mundefined[39m,
+    ariaSnapshot: [90mundefined[39m
+  }
+}
+
+stderr | e2e/full-slice.e2e.test.ts > full slice E2E > runs login, a scripted tool round trip, replication, and drain

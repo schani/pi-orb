@@ -1855,6 +1855,27 @@ describe("full slice E2E", () => {
         },
       ]);
       await expectPage(page.getByRole("dialog")).toHaveCount(0);
+      // History publication precedes output_retired. This assertion concerns
+      // the completed upload, not the intermediate live/history overlap.
+      await waitFor(
+        "upload reply persisted and operation drained",
+        async () => {
+          const history = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/history`);
+          const replies = (
+            history.body["records"] as { role?: string; content?: unknown }[]
+          ).filter(
+            (record) =>
+              record.role === "assistant" &&
+              JSON.stringify(record.content).includes("UPLOAD_VERIFIED"),
+          );
+          if (replies.length > 1)
+            throw new FatalProbeError("upload verification was inferred twice");
+          const view = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}`);
+          return replies.length === 1 && view.body["activity"] === "idle" ? true : null;
+        },
+        { timeoutMs: 30_000 },
+      );
+      await expectPage(page.getByRole("button", { name: "abort", exact: true })).toHaveCount(0);
       await expectPage(page.getByText("UPLOAD_VERIFIED", { exact: true })).toBeVisible({
         timeout: 30_000,
       });

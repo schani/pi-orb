@@ -1,0 +1,43 @@
+{"event":"bridge:busy"}
+{"event":"parent:start","parentStarts":1}
+{"event":"model:root-launch"}
+{"event":"child:created","label":"new","hasRunning":true}
+{"event":"child:started","label":"new","hasRunning":true}
+{"event":"children:admitted","statuses":["running"]}
+{"event":"model:parent-final-entered"}
+{"event":"model:child:one"}
+{"event":"tool:one:entered"}
+{"event":"parent:settled","parentSettles":1,"parentIdle":true,"bridgeBusy":true}
+{"event":"assert:parent-idle-orb-busy"}
+{"event":"tool:one:exited"}
+{"event":"model:child:one"}
+{"event":"child:terminal-callback","label":"one","lifecycle":"completed","parentIdle":true,"hasRunning":false,"persisted":false}
+{"event":"child:terminal-drained","label":"one","parentIdle":false,"persisted":true,"bridgeBusy":true}
+{"event":"parent:start","parentStarts":2}
+{"event":"model:followup-entered"}
+{"event":"bridge:idle"}
+{"event":"parent:settled","parentSettles":2,"parentIdle":true,"bridgeBusy":false}
+{"event":"assert:one-continuous-busy-period","activityEdges":["busy","idle"],"parentStarts":2,"parentSettles":2}
+{"event":"bridge:busy"}
+{"event":"parent:start","parentStarts":3}
+Luna summary completed operation=fixture-operation chars=9 live_connections=1
+{"event":"model:child:two"}
+{"event":"tool:two:entered"}
+{"event":"tool:two:abort-observed"}
+{"event":"tool:two:exited"}
+{"event":"child:terminal-callback","label":"one","lifecycle":"resumed","parentIdle":false,"hasRunning":false,"persisted":true}
+{"event":"child:terminal-drained","label":"one","parentIdle":false,"persisted":true,"bridgeBusy":true}
+{"event":"bridge:idle"}
+{"event":"parent:settled","parentSettles":3,"parentIdle":true,"bridgeBusy":false}
+{"event":"assert:explicit-resume-owns-fresh-cancellation-and-operation"}
+{"event":"PASS","scenario":"resume-cancel"}
+
+✔ resume-cancel (2437.813382ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2499.91082
