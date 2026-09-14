@@ -15,7 +15,7 @@ There was no local child failure preceding the independent spawn. No hidden reas
 
 `apps/orb-runtime/src/pi/environment-prompt.ts` still instructed: “For requested delegation, use `pi-orb spawn`.” This predated local subagent integration and contradicted the intended distinction. The fork and runtime ownership machinery worked; first-party agent guidance was wrong.
 
-The corrected prompt directs requested delegation to available local `subagent` / `get_subagent_result` tools. Independent orb creation requires an explicit request for a separate orb/workspace; missing local tools must be reported rather than silently replaced with an orb. This is model guidance, not a security boundary. Existing runtime sessions retain their loaded prompt until restarted; no running preview service was restarted during this correction.
+The initial correction directed delegation to local tools and reserved independent orbs for explicit requests. **Rejected by the user later on 2026-09-14:** this was overly prescriptive, and the delegation wording tests were unnecessary. The selected approach is one factual sentence describing independent orbs (fresh default-branch checkout, separate conversation, lifetime independent of the parent), leaving selection to the agent. The extension already supplies a `subagent` prompt snippet and detailed tool guidance for background/parallel execution, results, resume, steering, model selection and context inheritance; child profiles supply their own prompts. No duplicate selection policy is added. Existing runtime sessions retain their loaded prompt until restarted; no running preview service was restarted during these corrections.
 
 ## Tool disclosure cause and correction
 
@@ -25,6 +25,6 @@ A category containing one generic tool call now shows its input/output immediate
 
 ## Validation and rollout boundary
 
-Before repair, the prompt regression failed and all three generic-tool rendering cases failed. A browser regression reproduced the invisible output after opening the category. After repair, 30 focused unit tests and all 42 frontend browser tests pass. Private investigation snapshots and before/after logs remain under `.context/subagent-user-incident/`; no live credentials, raw session dumps or encrypted reasoning are exported.
+Before repair, the prompt regression failed and all three generic-tool rendering cases failed. A browser regression reproduced the invisible output after opening the category. After the initial repair, 30 focused unit tests and all 42 frontend browser tests passed. The two delegation wording tests were subsequently removed at the user's request; the UI regressions remain. Private investigation snapshots and before/after logs remain under `.context/subagent-user-incident/`; no live credentials, raw session dumps or encrypted reasoning are exported.
 
 The preview's built static directory was not rebuilt in place, and its controller/runtimes were not restarted. Source fixes do not silently update already loaded runtime prompts or an already served static build. A safe preview refresh must account for the user's current work. The original WebKit crash and other release gates are unchanged.

@@ -7,9 +7,7 @@ Python 3 (\`python\`, \`python3\`, and virtual environments) and Rust are availa
 
 Use \`pi-orb orbs [query]\` to list or search this account's orbs, and \`pi-orb transcript <orb-id>\` to read a specific orb's conversation. Beware: orb transcripts can be very long! Add \`--json\` for lossless structured output. An active orb's transcript is a replicated snapshot and may briefly lag its live output.
 
-For requested delegation, use the local \`subagent\` tool when available, and \`get_subagent_result\` to collect its result. Local subagents work in this orb's shared checkout and are owned by this operation. Do not substitute \`pi-orb spawn\` for a request to use subagents. If local subagent tools are unavailable, report that limitation rather than silently creating another orb.
-
-Only when the user explicitly requests a separate orb or independent workspace, use \`pi-orb spawn --prompt "task"\` or \`pi-orb spawn --prompt-file <path|->\`. It returns the new orb's browser URL after durable acceptance; \`--json\` also returns its ID. The independent orb starts in this project with a fresh default-branch checkout, not your local files or conversation. Include all needed context and push any commits it needs first. It continues if this orb stops. Do not recursively fan out work without user direction. On unknown acceptance, retry the same prompt/name with the reported \`--id\`, not a fresh ID.
+\`pi-orb spawn --prompt "task"\` creates an independent same-project orb with a fresh default-branch checkout and its own conversation; unlike local subagents, it does not share this checkout and keeps running if this orb stops.
 
 To add an MCP server, ask the user to open the project's config gear and use MCPs (OAuth Connect) or Secrets (static keys); catalog changes apply on next start, but OAuth reauthorization needs no restart.
 
