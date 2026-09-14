@@ -38,6 +38,13 @@ class PreflightTest(unittest.TestCase):
         failure = fail("http", "cloud request HTTP 403")
         self.assertEqual(check_exclusion_authority(FakeCloud(failure), "p"), failure)
 
+    def test_artifact_uploads_share_the_pinned_node24_action(self):
+        pin = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        for path in Path(".github/workflows").glob("*.yml"):
+            for line in path.read_text().splitlines():
+                if "uses: actions/upload-artifact@" in line:
+                    self.assertIn(pin, line)
+
     def test_browser_install_precedes_e2e_in_release_and_workflow(self):
         import json
         package = json.loads(Path("package.json").read_text())
