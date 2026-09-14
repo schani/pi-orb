@@ -7,9 +7,11 @@ npm ci
 npm ci --prefix scripts/subagent-liveness --ignore-scripts
 # Unmodified-package characterization (seven schedules):
 npm test --prefix scripts/subagent-liveness
-# Installed fork + production PiOrbAgent/extension bridge (eleven schedules):
+# Installed fork + production PiOrbAgent/extension bridge (twelve schedules):
 USE_RUNTIME=1 npm test --prefix scripts/subagent-liveness
 ```
+
+Runtime mode imports Pi through `apps/orb-runtime/src/testkit/pi-sdk.ts`, so installing the separate characterization tree cannot shadow production's SDK; a class-identity assertion guards that boundary.
 
 The latter is also required by the ordinary repository suite through `apps/orb-runtime/src/pi/subagent-sdk.contract.test.ts`. Node 24 is required. No model credentials or network inference are used here: each scenario owns a process, temporary HOME/cwd/configuration and scripted in-process model, while the real SDK creates/prompts/disposes child sessions and persists root outcomes.
 
@@ -27,6 +29,8 @@ The latter is also required by the ordinary repository suite through `apps/orb-r
 - `credential-refresh` (runtime only): expire the shared broker-only auth store after root settlement and before child construction; the independent child runtime refreshes through the inherited production broker provider and uses the new grant.
 - `credential-failure` (runtime only): reject that child refresh with `auth_required`; a durable error reaches the parent without child inference or tool execution, and credentials do not enter root history.
 - `shutdown-running` (runtime only): shut down while a child tool is blocked; whole-operation cancellation reaches it, teardown waits for cleanup, the outcome persists, and no parent inference is resurrected. One explicit event-loop boundary drains the scripted SDK's microtasks while the cleanup gate remains closed; it is not a timed grace period.
+
+- `inbox-child-only` (runtime only): deliver and deduplicate a real inbox message while only the child is working; hold that new root turn while the child completes, then permit the withheld completion wake. Submission acceptance and completion promises are observed separately, retaining one operation and one summary.
 
 Runtime scenarios also assert durable start edges, inherited file-discovered tools, absence of root orchestration tools in children, and one invocation of the root-inline lifecycle sentinel.
 
@@ -50,6 +54,6 @@ The script packages source/license/provenance and bundles public extension/servi
 
 ## Evidence limits
 
-See `docs/subagents.md`, `results.md`, and `evidence/`. Original passing characterization traces do not establish cancellation correctness. The first runtime-labeled run did not forward `USE_RUNTIME`; `runtime-sdk-wired.txt` is the corrected seven-scenario production-bridge evidence. Current contracts add resume, broker refresh/failure and awaited shutdown.
+See `docs/subagents.md`, `results.md`, and `evidence/`. Original passing characterization traces do not establish cancellation correctness. The first runtime-labeled run did not forward `USE_RUNTIME`; `runtime-sdk-wired.txt` is the corrected seven-scenario production-bridge evidence. Current contracts add resume, broker refresh/failure, awaited shutdown and child-only inbox/wake arbitration.
 
 Separate runtime/ledger and composed control-plane `determined` tests explore scheduling. `e2e/subagents.e2e.test.ts` uses the actual process provider, browser, installed fork and broker-backed mock inference with named-pipe gates: shared-file editing, child-only busy, reload, continuation, abort, crash/interruption across two restarts, private-child-text exclusion and archive cleanup with retained history. That E2E first found missing child OAuth credentials: inheriting provider registration without using the same private auth path was insufficient. Native/cloud qualification and the remaining acceptance matrix are not implied by these local tests; outstanding work lives only in `TODO.md`.

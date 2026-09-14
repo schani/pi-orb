@@ -4,6 +4,7 @@ import type { SimulationTask } from "determined";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { PiOrbAgent, type PiSession } from "../../../orb-runtime/src/pi/agent.ts";
+import { assertSubagentActivity } from "../../../orb-runtime/src/testkit/subagent-contract.ts";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import {
   makeHarness,
@@ -14,6 +15,7 @@ import {
 } from "../testkit/fixtures.ts";
 import { assertReplicaComplete } from "../testkit/invariants.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
+import { requestOrbArchive } from "./lifecycle.ts";
 import { pollLoop, reconcileLoop } from "./loops.ts";
 import type { OrbRuntimeClient } from "./ports.ts";
 
@@ -83,7 +85,7 @@ async function watchBusy(
   for (let i = 0; i < rounds; i++) {
     await task.sleep(TEST_CONSTANTS.historyPullIntervalMs, "silent leaf remains admitted");
     expect(harness.store.orbSnapshot("orb-a")?.state).toBe("running");
-    expect(agent.gateView()).toMatchObject({ activity: "busy", activeOperationId: "op" });
+    assertSubagentActivity(agent, "busy", "op");
   }
 }
 
@@ -120,6 +122,80 @@ it("composes real runtime child ownership with pull-derived idle-stop, without a
         },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+    },
+  );
+});
+
+it("cannot seal an active child's archive and retains its terminal record before deleting the workspace", async () => {
+  await runDst(
+    {
+      name: "subagent-active-archive",
+      iterations: 50,
+      lateTimerProbability: 0,
+      failpointProbabilities: {
+        [FAILPOINTS.runtimePull]: 0.03,
+        [FAILPOINTS.storeCommitAfter]: 0.03,
+      },
+    },
+    async (sim) => {
+      const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });
+      const { agent, settle } = runtime();
+      await agent.submitMessage([], "op");
+      const child = agent.admitSubagent("leaf")._unsafeUnwrap();
+      settle();
+      let terminalPersisted = false;
+      const store = new Proxy(harness.store, {
+        get(target, key) {
+          if (key === "sealOrbArchive")
+            return (...args: Parameters<typeof target.sealOrbArchive>) => {
+              expect(agent.gateView().activity).toBe("idle");
+              expect(terminalPersisted).toBe(true);
+              return target.sealOrbArchive(...args);
+            };
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const deps = { ...bindRuntime(harness, agent), store };
+      const stop = new AbortController();
+      const expected: string[] = [];
+      const result = await sim.runTasks([
+        { name: "reconciler", f: (task) => reconcileLoop(task, deps, stop.signal) },
+        {
+          name: "driver",
+          f: async (task) => {
+            seedRunningOrb(task, harness, "orb-a");
+            expected.push(harness.world.appendMessage("orb-a", "child admitted").id);
+            expect((await requestOrbArchive(task, deps, "orb-a")).isOk()).toBe(true);
+            for (let i = 0; i < 8; i++) {
+              await task.sleep(
+                TEST_CONSTANTS.historyPullIntervalMs,
+                "archive waits for silent child",
+              );
+              expect(harness.store.orbSnapshot("orb-a")?.state).toBe("archiving");
+              expect(harness.store.deletionSnapshot("orb-a")?.historySealedAt).toBeNull();
+              expect(harness.world.filesystemExists("orb-a")).toBe(true);
+            }
+            // Same persist-before-release contract pinned separately by the real
+            // SDK tests; here the simulated transport owns the history bytes.
+            expected.push(harness.world.appendMessage("orb-a", "child terminal persisted").id);
+            terminalPersisted = true;
+            await task.checkpoint("terminal persisted while host cleanup hold remains");
+            agent.releaseSubagent(child);
+            await waitUntil(
+              task,
+              "archive sealed then workspace removed",
+              () => harness.store.orbSnapshot("orb-a")?.state === "archived",
+              { timeoutMs: 120_000 },
+            );
+            stop.abort();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.store.replicaRecords("orb-a").map((record) => record.id)).toEqual(expected);
+      expect(harness.world.hostCount("orb-a")).toBe(0);
+      expect(harness.world.filesystemExists("orb-a")).toBe(false);
     },
   );
 });

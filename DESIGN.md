@@ -166,6 +166,7 @@ Reference material:
 - [docs/postmortems/2026-09-09-release-test-environment.md](docs/postmortems/2026-09-09-release-test-environment.md) — inherited release context let passing contract tests overwrite their caller's evidence
 - [docs/postmortems/2026-09-09-native-cleanup-dst-io.md](docs/postmortems/2026-09-09-native-cleanup-dst-io.md) — real diagnostic IO and a busy observer escaped deterministic cleanup scheduling
 - [docs/postmortems/2026-09-09-credential-probe-role-reset.md](docs/postmortems/2026-09-09-credential-probe-role-reset.md) — ambient SQL role targeted the production password; restoration and explicit-target safeguards
+- [docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md](docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md) — native WebKit compositor fault during local qualification; passing isolated probes do not clear it
 - [docs/postmortems/2026-09-09-local-e2e-docker-startup.md](docs/postmortems/2026-09-09-local-e2e-docker-startup.md) — wrong containerd store and interrupted local validation; preserve evidence and owned fixtures
 - [docs/postmortems/2026-09-09-tracked-deployment-credentials.md](docs/postmortems/2026-09-09-tracked-deployment-credentials.md) — live credential confirmed in public plan archives; artifact containment and rotation status
 - [docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md](docs/postmortems/2026-09-07-native-build-cancellation-cleanup.md) — interrupted release exited before builder cleanup

@@ -14,7 +14,13 @@ const scenarios = [
   "cancel-queued",
   "spawn-failure",
   ...(process.env.USE_RUNTIME === "1"
-    ? ["resume-cancel", "credential-refresh", "credential-failure", "shutdown-running"]
+    ? [
+        "resume-cancel",
+        "credential-refresh",
+        "credential-failure",
+        "shutdown-running",
+        "inbox-child-only",
+      ]
     : []),
 ];
 

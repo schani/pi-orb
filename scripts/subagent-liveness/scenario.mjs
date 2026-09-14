@@ -2,15 +2,6 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import {
-  createAgentSession,
-  createEventBus,
-  DefaultResourceLoader,
-  ModelRuntime,
-  SessionManager,
-  SettingsManager,
-} from "@earendil-works/pi-coding-agent";
 import { ResultAsync } from "neverthrow";
 import { assertSubagentActivity } from "../../apps/orb-runtime/src/testkit/subagent-contract.ts";
 
@@ -30,9 +21,35 @@ function gate() {
 
 const scenario = process.env.SCENARIO;
 const useRuntime = process.env.USE_RUNTIME === "1";
+// The characterization install must not shadow production's SDK when both
+// locked dependency trees are present (the README deliberately installs both).
+const sdk = useRuntime
+  ? await checked(import("../../apps/orb-runtime/src/testkit/pi-sdk.ts"))
+  : await checked(import("@earendil-works/pi-coding-agent"));
+const {
+  createAgentSession,
+  createEventBus,
+  DefaultResourceLoader,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+} = sdk;
+const { createAssistantMessageEventStream } = useRuntime
+  ? sdk
+  : await checked(import("@earendil-works/pi-ai"));
+if (useRuntime) {
+  const actual = await checked(import("../../apps/orb-runtime/src/testkit/pi-sdk.ts"));
+  assert.equal(
+    ModelRuntime === actual.ModelRuntime,
+    true,
+    "characterization dependencies shadowed the production SDK",
+  );
+}
 const credentialScenario = scenario === "credential-refresh" || scenario === "credential-failure";
 let rootExtensionStarts = 0;
 const summaryInputs = [];
+let inboxHandled = false;
+let inboxDelivery;
 let brokerGrants = 0;
 let rejectChildRefresh = scenario === "credential-failure";
 const { PiOrbAgent } = useRuntime ? await import("../../apps/orb-runtime/src/pi/agent.ts") : {};
@@ -79,6 +96,7 @@ const childGates = new Map([
 ]);
 const parentGate = gate();
 const followupGate = gate();
+const inboxGate = gate();
 const failureGate = gate();
 const trace = [];
 const waiters = [];
@@ -224,6 +242,15 @@ function scriptedStream(model, context, options) {
           ? output(model, call("probe_gate", { label: child }), "toolUse")
           : output(model, text(`child ${child} finished`), "stop");
       if (resumePhase) resumeToolSent = true;
+    } else if (
+      scenario === "inbox-child-only" &&
+      allText.includes("USER_DURING_CHILD") &&
+      !inboxHandled
+    ) {
+      inboxHandled = true;
+      note("model:inbox-entered");
+      await inboxGate.promise;
+      message = output(model, text("parent handled inbox"), "stop");
     } else if (resumePhase) {
       message = output(model, call("resume_child", {}), "toolUse");
     } else if (allText.includes("task-notification")) {
@@ -490,6 +517,22 @@ if (scenario === "child-first") {
   assert.equal(service.hasRunning(), true);
   if (runtime) assertSubagentActivity(runtime, "busy", "fixture-operation");
   note("assert:parent-idle-orb-busy");
+  if (scenario === "inbox-child-only") {
+    const content = [{ type: "text", text: "USER_DURING_CHILD" }];
+    // The SDK submission promise may include the root completion/wake chain.
+    // Observe acceptance separately; never await it while holding its tool gate.
+    inboxDelivery = runtime.deliverInboxMessage("fixture-inbox", ["fixture-inbox"], content);
+    await waitEvent("model:inbox-entered");
+    const duplicate = (
+      await runtime.deliverInboxMessage("fixture-inbox", ["fixture-inbox"], content)
+    )._unsafeUnwrap();
+    assert.equal(duplicate.duplicate, true);
+    assert.equal(duplicate.delivery, "turn");
+    assert.equal(duplicate.operationId, "fixture-operation");
+    assert.equal(parentStarts, 2);
+    assertSubagentActivity(runtime, "busy", "fixture-operation");
+    note("assert:child-only-inbox-is-one-deduplicated-root-turn");
+  }
   if (scenario === "shutdown-running") {
     assert.ok(runtime);
     let returnedBeforeCleanup = false;
@@ -574,6 +617,12 @@ const wholeAbort =
   (scenario === "cancel-running" ||
     scenario === "cancel-starting" ||
     scenario === "shutdown-running");
+if (scenario === "inbox-child-only") {
+  await until(() => terminalRows.length === ids.size);
+  assert.equal(terminalRows[0].parentIdle, false);
+  assert.equal(saw("model:followup-entered"), false);
+  inboxGate.resolve();
+}
 if (!wholeAbort) await waitEvent("model:followup-entered");
 await until(() => terminalRows.length === ids.size);
 // The real extension wakes the parent even for explicit cancellation.
@@ -618,6 +667,12 @@ assert.equal(
   ids.size,
 );
 if (runtime) assertSubagentActivity(runtime, "idle", null);
+if (inboxDelivery) {
+  const delivered = (await inboxDelivery)._unsafeUnwrap();
+  assert.equal(delivered.delivery, "turn");
+  assert.equal(delivered.operationId, "fixture-operation");
+  assert.equal(delivered.duplicate, false);
+}
 note("assert:one-continuous-busy-period", { activityEdges, parentStarts, parentSettles });
 if (useRuntime) {
   if (wholeAbort) assert.equal(summaryInputs.length, 0);

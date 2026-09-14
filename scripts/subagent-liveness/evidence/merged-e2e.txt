@@ -1,0 +1,139 @@
+
+> test:e2e
+> vitest run --config e2e/vitest.config.ts
+
+
+ RUN  v3.2.7 /workspace/repo
+
+ ✓ e2e/frontend-session.e2e.test.ts (27 tests) 100948ms
+   ✓ frontend-only browser behavior > opens the OAuth return dialog over the loaded dashboard and preserves it on close  3886ms
+   ✓ frontend-only browser behavior > keeps MCPs field focus across dashboard refreshes  2164ms
+   ✓ frontend-only browser behavior > keeps Secrets field focus across dashboard refreshes  2091ms
+   ✓ frontend-only browser behavior > preserves MCP drafts while adding a secret from config at   3013ms
+   ✓ frontend-only browser behavior > preserves MCP drafts while adding a secret from config at #/orbs/frontend-fixture-orb  3444ms
+   ✓ frontend-only browser behavior > exercises the real ledger UI, fixture OAuth, disclosure ownership and consistent tab spacing  5445ms
+   ✓ frontend-only browser behavior > shares project header and validates General settings at   2710ms
+   ✓ frontend-only browser behavior > shares project header and validates General settings at #/orbs/frontend-fixture-orb  2940ms
+   ✓ frontend-only browser behavior > keeps native selection visible on normal and inverted surfaces  1417ms
+   ✓ frontend-only browser behavior > uploads arbitrary files in chunks without touching the draft and hides upload when stopped  3264ms
+   ✓ frontend-only browser behavior > sends one message for a multi-file selection, including after one file needs retry  3902ms
+   ✓ frontend-only browser behavior > starts another selection while an earlier upload is still sending  3291ms
+   ✓ frontend-only browser behavior > keeps automatic-upload failures inline and retries the same file identity  2358ms
+   ✓ frontend-only browser behavior > toggles a headerless terminal shade without moving history or replacing its session  9698ms
+   ✓ frontend-only browser behavior > keeps delayed terminal readiness hidden and exposes an explicit retry after exit  2147ms
+   ✓ frontend-only browser behavior > skips unchanged long history while typing and still renders sent/live messages  7763ms
+   ✓ frontend-only browser behavior > creates from + without unmounting the workspace or clearing the draft  4671ms
+   ✓ frontend-only browser behavior > retries creation with the same ID and never overrides a later orb selection  4538ms
+   ✓ frontend-only browser behavior > keeps modified + clicks native without navigating the source workspace  4892ms
+   ✓ frontend-only browser behavior > keeps the fleet mounted across projects, opens archives, and creates from the title plus  5924ms
+   ✓ frontend-only browser behavior > retains stale fleet rows, recovers partial failures, and fences old polls after config saves  4511ms
+   ✓ frontend-only browser behavior > keeps the index and conversation visible until an orb switch is ready  2879ms
+   ✓ frontend-only browser behavior > discards a superseded orb load and preserves missing-resource URLs  2542ms
+   ✓ frontend-only browser behavior > inserts orb URLs at typed @ and preserves cancelled mentions and shell input  2732ms
+   ✓ frontend-only browser behavior > uses full-cell block cursors and keeps the composer caret aligned during native editing  2970ms
+   ✓ frontend-only browser behavior > shows the ribbon and recovers session, route, and composer draft in the same tab  2988ms
+   ✓ frontend-only browser behavior > shows hosted files on an archived orb and preserves a missing orb URL  1829ms
+ ✓ e2e/full-slice.e2e.test.ts (4 tests) 814051ms
+   ✓ full slice E2E > runs login, a scripted tool round trip, replication, and drain  280680ms
+   ✓ full slice E2E > replaces one deliberately failed incarnation only after explicit Start  193978ms
+   ✓ full slice E2E > leaves running compute untouched and replaces stale stopped compute on Start  123543ms
+   ✓ full slice E2E > surfaces a real clone failure, disposes compute, and never autonomously replaces it  97459ms
+stdout | e2e/interrupted-turn-resume.e2e.test.ts > interrupted-turn resume E2E > resumes a turn a docker kill interrupted mid-tool-call
+[resume] container back after 3068 ms
+
+stdout | e2e/interrupted-turn-resume.e2e.test.ts > interrupted-turn resume E2E > resumes a turn a docker kill interrupted mid-tool-call
+[resume] turn completed 11102 ms after the kill
+[resume] shape=dangling_tool_calls headRecordId=84af139e
+[resume] continuation text: DEFAULT_MATCH: the interrupted job is finished — E2E_RESUME_OK.
+
+stdout | e2e/interrupted-turn-resume.e2e.test.ts > interrupted-turn resume E2E > resumes a turn a docker kill interrupted mid-tool-call
+[resume] dangling call answered with "No result provided"
+
+ ✓ e2e/interrupted-turn-resume.e2e.test.ts (1 test) 64142ms
+   ✓ interrupted-turn resume E2E > resumes a turn a docker kill interrupted mid-tool-call  51068ms
+stdout | e2e/frontend-mobile.e2e.test.ts > phone frontend · chromium
+3:13:40 AM [vite] (client) Re-optimizing dependencies because vite config has changed
+
+ ❯ e2e/frontend-mobile.e2e.test.ts (14 tests | 1 failed) 45524ms
+   ✓ phone frontend · chromium > uses the phone side rail at 320px without changing desktop composition  4204ms
+   ✓ phone frontend · chromium > uses the phone side rail at 390px without changing desktop composition  2515ms
+   ✓ phone frontend · chromium > uses the phone side rail at 600px without changing desktop composition  2693ms
+   ✓ phone frontend · chromium > does not write phone scroll position during unrelated polling renders  1861ms
+   ✓ phone frontend · chromium > keeps phone transcript pixels after a native wheel scroll round trip  5124ms
+   ✓ phone frontend · chromium > owns phone scrolling in one viewport through keyboard resize and pan events  5375ms
+   ✓ phone frontend · chromium > aborts only from the collapsed phone pad and retains the draft  1518ms
+   × phone frontend · webkit > uses the phone side rail at 320px without changing desktop composition 3833ms
+     → page.goto: Page crashed
+Call log:
+  - navigating to "http://127.0.0.1:5173/#/orbs/frontend-fixture-orb", waiting until "load"
+
+   ✓ phone frontend · webkit > uses the phone side rail at 390px without changing desktop composition  3127ms
+   ✓ phone frontend · webkit > uses the phone side rail at 600px without changing desktop composition  2863ms
+   ✓ phone frontend · webkit > does not write phone scroll position during unrelated polling renders  1426ms
+   ✓ phone frontend · webkit > keeps phone transcript pixels after a native wheel scroll round trip  3695ms
+   ✓ phone frontend · webkit > owns phone scrolling in one viewport through keyboard resize and pan events  3377ms
+   ✓ phone frontend · webkit > aborts only from the collapsed phone pad and retains the draft  1498ms
+ ✓ e2e/mcp.e2e.test.ts (1 test) 110318ms
+   ✓ MCP traverses browser → real Pi → authenticated HTTPS; new same-project orbs reuse configuration  110316ms
+ ✓ e2e/mcp-oauth.e2e.test.ts (1 test) 166598ms
+   ✓ browser OAuth → two real Pi runtimes reuse the grant → rejection/refresh → reconnect → disconnect  166597ms
+ ✓ e2e/subagents.e2e.test.ts (1 test) 220486ms
+   ✓ keeps delegated work busy, drains or aborts, and reports crash interruption once without replay or child replication  220484ms
+ ✓ e2e/hosting-security.e2e.test.ts (1 test) 1083ms
+   ✓ hosted-file browser origin isolation > loads ordinary hosted assets while hosted script cannot reach the app surface  569ms
+ ✓ e2e/postgres-store.e2e.test.ts (55 tests) 20088ms
+   ✓ node-postgres (real server) store contract > atomically registers immutable upload batch membership  328ms
+   ✓ node-postgres (real server) store contract > persists upload leases, fences idle CAS, and never wakes from upload notification  361ms
+   ✓ node-postgres (real server) store contract > atomically spawns with immutable retry identity and fences retired callers  343ms
+   ✓ node-postgres (real server) store contract > serializes concurrent spawn retries and project deletion  318ms
+   ✓ node-postgres (real server) store contract > persists projects and performs lifecycle state-version CAS  314ms
+   ✓ node-postgres (real server) store contract > atomically fails, revokes runtime auth, and fences compute disposal  324ms
+   ✓ node-postgres (real server) store contract > leaves a hostless or same-spec orb untouched and conflicts on a stale version  302ms
+   ✓ node-postgres (real server) store contract > rejects stale provision commits across replacement request and finalization  348ms
+   ✓ node-postgres (real server) store contract > requests replacement at the generation boundary and reads a null committed generation as zero  304ms
+   ✓ node-postgres (real server) store contract > guards discard finalization and clears retained evidence on replacement commit  303ms
+   ✓ node-postgres (real server) store contract > admits exactly one of many concurrent mint-slot claims  327ms
+   ✓ node-postgres (real server) store contract > coordinates auto-naming and preserves a manual name  311ms
+   ✓ node-postgres (real server) store contract > durably queues a stopped-orb message, wakes it, and completes from replicated identity  324ms
+   ✓ node-postgres (real server) store contract > fails a rejected batch terminally and keeps the queue moving  317ms
+   ✓ node-postgres (real server) store contract > wakes a stopped orb for any outstanding wake intent, not only the oldest message  306ms
+   ✓ node-postgres (real server) store contract > wakes a failed orb once for a new send and never for a stranded intent  314ms
+   ✓ node-postgres (real server) store contract > atomically commits idempotent history and reconstructs its linear chain  300ms
+   ✓ node-postgres (real server) store contract > atomically fences project creation, fans out deletion, and finalizes last  335ms
+   ✓ node-postgres (real server) store contract > upgrades an in-progress archive when its project is deleted  307ms
+   ✓ node-postgres (real server) store contract > atomically requests and finalizes permanent deletion with history  306ms
+   ✓ node-postgres (real server) store contract > fences self-archive authority inside the write: {"runtimeTokenHash":"stale","hostIncarnation":2}  349ms
+   ✓ node-postgres (real server) signing key store contract > refuses transitions the timestamp completeness check forbids  313ms
+   ✓ node-postgres (real server) driver contract > rolls back partial spawn writes and retains deletion-safe provenance  309ms
+   ✓ node-postgres (real server) hosting store contract > claims one upload epoch and rejects a stale worker  326ms
+   ✓ node-postgres (real server) hosting store contract > hands an expired data-capable attempt to a fenced takeover  316ms
+   ✓ node-postgres (real server) hosting store contract > sweeps an expired unpublished attempt into cleanup ownership  303ms
+   ✓ node-postgres (real server) hosting store contract > does not reclaim an expired registered attempt after cleanup owns it  300ms
+   ✓ node-postgres (real server) hosting store contract > publishes one immutable object and retires the replaced generation atomically  376ms
+   ✓ node-postgres (real server) hosting store contract > unpublishes only the observed generation under current runtime authority  311ms
+   ✓ node-postgres (real server) hosting store contract > persists deletion inventory and cleanup claim epochs  325ms
+ ✓ e2e/harness-startup.e2e.test.ts (1 test) 31ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  e2e/frontend-mobile.e2e.test.ts > phone frontend · webkit > uses the phone side rail at 320px without changing desktop composition
+Error: page.goto: Page crashed
+Call log:
+  - navigating to "http://127.0.0.1:5173/#/orbs/frontend-fixture-orb", waiting until "load"
+
+ ❯ e2e/frontend-mobile.e2e.test.ts:84:20
+     82|       });
+     83|       try {
+     84|         await page.goto(`${origin}/${ORB_HASH}`);
+       |                    ^
+     85|         const composer = page.locator(".composer");
+     86|         const input = composer.getByRole("textbox", { name: "Message t…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 9 passed (10)
+      Tests  1 failed | 105 passed (106)
+   Start at  02:57:16
+   Duration  1551.56s (transform 1.05s, setup 0ms, collect 5.94s, tests 1543.27s, environment 2ms, prepare 774ms)
+

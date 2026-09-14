@@ -22,6 +22,6 @@ No sleep or timeout increase was used to fix ordering. The browser fixture uses 
 - The targeted browser/process-provider E2E passes editing, child-only busy/reload, continuation, abort without resurrection, replicated outcomes/idle and stopped history.
 - Repository typecheck and lint pass (lint retains one pre-existing warning and one informational diagnostic).
 
-Full-suite results and remaining acceptance scope are summarized in `docs/subagents.md` / `TODO.md`. Docker is installed but its daemon socket is absent; no Docker/PostgreSQL or native/cloud qualification is claimed. No deployment was performed.
+Full-suite results and remaining acceptance scope are summarized in `docs/subagents.md` / `TODO.md`. At this initial validation stage the Docker socket was absent. The continuation started the installed system service and exercised Docker/PostgreSQL; its results and the remaining WebKit release blocker are in `continuation-2026-09-14.md`. Native/cloud qualification is not claimed. No deployment was performed.
 
 Raw investigation outputs are retained in this orb's `.context/subagents/`; the OAuth diagnostic also retained `/tmp/pi-orb-subagents-e2e-Gni0wN`. Raw mock request headers are deliberately not copied here. These are disposable synthetic credentials, but headers are not necessary evidence for this defect.

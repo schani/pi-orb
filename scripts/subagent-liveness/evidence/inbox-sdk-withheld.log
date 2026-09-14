@@ -1,0 +1,39 @@
+{"event":"bridge:busy"}
+{"event":"parent:start","parentStarts":1}
+{"event":"model:root-launch"}
+{"event":"child:created","label":"new","hasRunning":true}
+{"event":"child:started","label":"new","hasRunning":true}
+{"event":"children:admitted","statuses":["running"]}
+{"event":"model:parent-final-entered"}
+{"event":"model:child:one"}
+{"event":"tool:one:entered"}
+{"event":"parent:settled","parentSettles":1,"parentIdle":true,"bridgeBusy":true}
+{"event":"assert:parent-idle-orb-busy"}
+{"event":"parent:start","parentStarts":2}
+{"event":"model:inbox-entered"}
+{"event":"assert:child-only-inbox-is-one-deduplicated-root-turn"}
+{"event":"tool:one:exited"}
+{"event":"model:child:one"}
+{"event":"child:terminal-callback","label":"one","lifecycle":"completed","parentIdle":false,"hasRunning":false,"persisted":false}
+{"event":"child:terminal-drained","label":"one","parentIdle":false,"persisted":true,"bridgeBusy":true}
+{"event":"parent:settled","parentSettles":2,"parentIdle":false,"bridgeBusy":true}
+{"event":"parent:start","parentStarts":3}
+{"event":"model:followup-entered"}
+{"event":"bridge:idle"}
+{"event":"summary:called"}
+{"event":"parent:settled","parentSettles":3,"parentIdle":true,"bridgeBusy":false}
+{"event":"assert:one-continuous-busy-period","activityEdges":["busy","idle"],"parentStarts":3,"parentSettles":3}
+{"event":"assert:one-summary-includes-aggregate-outcomes"}
+{"event":"assert:root-inline-extension-not-inherited"}
+Luna summary completed operation=fixture-operation chars=9 live_connections=1
+{"event":"PASS","scenario":"inbox-child-only"}
+
+✔ inbox-child-only (1600.407442ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1667.200254
