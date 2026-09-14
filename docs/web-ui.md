@@ -73,6 +73,32 @@ Remaining UI questions include rendering unknown content blocks, large/truncated
 
 **Streaming lifetime correction (2026-09-09).** Green thinking rows represent transient output, not independent active jobs. On `output_retired`, remove the named blocks after their complete history has arrived; do not infer retirement by comparing text with historical messages. A new response can legitimately repeat old text, and final normalized text can differ from its streamed form. This replaces the text-equality suppression that left stale green rows below newer commands. Protocol and scheduling invariants: `docs/runtime-protocol.md`; incident: `docs/postmortems/2026-09-09-stale-thinking.md`.
 
+## Subagent notification and live-count study (requested 2026-09-14)
+
+The user rejected the extension's terminal presentation and requested five interactive proposals for notifications plus five for the number of running subagents. [`design-prototypes/subagent-activity.html`](../design-prototypes/subagent-activity.html) uses the actual application stylesheet, 13px/20px monospace, white paper, black rules, existing Instrument tiles/utility paths, inversion and the 236px index. A proposed branching utility mark uses the same 16px square-ended geometry. Research controls and tradeoffs remain outside the product frame. No production rendering or runtime behavior changed. Selection is tracked in question 65 of `docs/open-questions.md`.
+
+Durable authenticated study: https://files---pi-orb-1077475695242.us-central1.run.app/s/58efed98-b832-4025-a899-7f43fed7ed72/studies/subagents/index.html . Its relative stylesheet is published from `apps/web/src/styles.css` at `studies/apps/web/src/styles.css`; the hosted study needs both files.
+
+**Notification proposals:**
+
+- **N1 Rail receipts:** one ordinary activity-rail disclosure per notice, one expansion for error/result/update and metadata. Familiar and chronological; repeated outcomes still consume separate rows.
+- **N2 Turn ledger:** an operation-scoped ruled list, with one task detail open at a time. Supports comparison; requires stable grouping and summarizes arrival positions rather than preserving a separate block at every arrival.
+- **N3 Plain receipts:** actual error/result text visible immediately without a surrounding box; the timestamp expands diagnostic metadata. No mandatory click to read, but long results consume more space.
+- **N4 On the tool call:** attach the outcome to its originating subagent tool row, with original request and notice available there, and no duplicate notification block. Needs explicit launch correlation and accessible update notification; late changes can occur above the reader.
+- **N5 Side inspector:** underlined receipt opens a bounded, independently scrollable inspector; another receipt replaces its contents, Escape restores focus. Stable transcript geometry at the cost of a separate reading surface; on phones it covers conversation content.
+
+**Running-count proposals:**
+
+- **C1 Header counter:** branching mark + number beside the orb identity, opening an anchored child roster. Persistent access, but consumes header width.
+- **C2 Live rail:** an expandable full-width row below the header, opening the roster in flow. Explicit, but spends a line during child work.
+- **C3 Composer counter:** count beside the draft, opening the roster upward without focusing/sending/clearing the draft. Close to parent steering; covers recent messages when open.
+- **C4 Turn gutter:** count below the current `orb` speaker prefix, opening the roster inside that turn. Strong work association; scrolls out of view with the turn.
+- **C5 Index tally:** current orb's selected index row owns the counter; it moves to the header on phones, where the index is absent. Keeps desktop conversation chrome quiet, but changes placement by device. This does not promise fleet-wide child counts.
+
+All ten candidates are independently selectable (25 combinations). The study exercises failures, success, progress updates and workspace notices, plus parent-active, child-only, queued, finishing, disconnected and settled live states. Counts exclude queued/finishing children; those remain inspectable. Unknown displays `—` and no stale roster, while known-empty indicators disappear. These are proposed count semantics, not a shipped protocol contract. No numeric tally is duplicated across product locations. No private child transcript, retry action or child-only Stop is introduced. The abbreviated sample conversation does not imply suppression/combining of the parent's ordinary acknowledgements.
+
+**Prototype validation:** 1,227 deterministic browser assertions pass in Chromium at 1280/390/320px: actual selector clicks, all 25 combinations, five notice types, six live states, detail expansion, ledger single-open behavior, inspector dismissal/focus return, draft/disclosure preservation, count changes and no horizontal overflow. The manual phone-width switch is also exercised. Screenshots were inspected. This is prototype evidence, not runtime/protocol qualification or a resolution of the separate WebKit release blocker.
+
 ## Model-response failures (decided and implemented 2026-09-09)
 
 An assistant record with `finishReason: error` renders its persisted Pi `overflow.native.message.errorMessage` as plain error text at the end of that response, even when its content is empty. Missing or blank details fall back to `Model response failed.` Partial output remains visible. The same rendering handles live-committed records and replicated history, including existing conversations; no transient toast or new persistence path is needed. A failure is a visible boundary for tool grouping. Orb lifecycle `running` still means the host is running, not that inference succeeded.

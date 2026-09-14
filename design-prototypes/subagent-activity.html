@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subagents — notification and activity study</title>
+<link rel="stylesheet" href="../apps/web/src/styles.css">
+<style>
+/* Product tokens, typography and utility paths come from Signal / Boards. */
+body { display: block; }
+.study { padding: 12px; border-bottom: 1px solid var(--k); }
+.study h1 { font-size: 13px; line-height: 20px; margin: 0 0 8px; }
+.study p { margin: 4px 0; color: var(--g3); }
+.choices { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; align-items: center; }
+.choices strong { width: 112px; font-size: 13px; }
+.choices button[aria-pressed="true"] { background: var(--k); color: var(--w); }
+.study label { display: inline-flex; gap: 8px; align-items: center; }
+.study select { border: 1px solid var(--k); max-width: 100%; }
+.study .settings { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
+.notes { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 12px; border-top: 1px solid var(--k); }
+.notes p { margin: 4px 0; }
+.notes h2 { margin: 0; font-size: 13px; }
+.notes .cost { color: var(--g3); }
+.preview { container-type: inline-size; margin: 16px 12px; border: 1px solid var(--k); min-width: 0; }
+.preview.phone { width: 390px; max-width: calc(100% - 24px); margin-inline: auto; }
+.screen { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 620px; }
+.index { border-right: 1px solid var(--k); }
+.index-home { height: 24px; padding: 0 12px; border-bottom: 1px solid var(--k); display: flex; align-items: center; }
+.project { display: flex; align-items: center; padding: 8px 12px 4px; gap: 8px; }
+.project strong { font-size: 18px; line-height: 24px; letter-spacing: .08em; }
+.project .context-icons { margin-left: auto; }
+.index-row { display: flex; gap: 6px; align-items: center; padding: 0 8px 0 10px; border-left: 2px solid var(--ok); min-height: 24px; }
+.index-row.current { background: var(--k); color: var(--w); }
+.index-row .row-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.index-row small { font: inherit; color: var(--g2); }
+.index-row .count-trigger { color: inherit; }
+.context-icons { display: inline-flex; align-items: center; gap: 8px; color: var(--g3); }
+.context-icons .danger { color: var(--bad); }
+.instrument { width: 16px; height: 16px; color: var(--ok); flex: none; }
+.pane { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.preview .orb-header { position: relative; top: auto; z-index: 2; }
+.preview .orb-name { flex: 1; min-width: 0; }
+.preview .orb-life { color: var(--g3); }
+.preview .orb-header .context-icons { margin-left: auto; }
+.thread { min-height: 410px; flex: 1; padding-bottom: 16px; }
+.preview .rec { padding-block: 6px; }
+.preview .rec.you { background: var(--g1); border-bottom: 1px solid var(--g2); border-top: 1px solid var(--g2); }
+.preview .rec p { margin: 0 0 8px; }
+.preview .rec p:last-child { margin-bottom: 0; }
+.preview .rec-bd { overflow-wrap: anywhere; }
+.preview .activity-rail-row { margin: 4px 0; }
+.preview summary { list-style: none; cursor: pointer; }
+.preview summary::-webkit-details-marker { display: none; }
+.preview .activity-rail-summary { color: var(--k); }
+.preview .activity-rail-row-failed .activity-rail-summary { color: var(--bad); }
+.detail { background: var(--g1); border-top: 1px solid var(--g2); padding: 8px; overflow-wrap: anywhere; }
+.detail p { white-space: pre-wrap; }
+.failure { color: var(--bad); }
+.meta { color: var(--g3); font-size: 13px; margin-top: 8px; }
+.preview .body-grid { display: grid; grid-template-columns: 1fr; gap: 4px; }
+.launches { margin: 4px 0; }
+.launches > summary { display: flex; gap: 8px; color: var(--g3); }
+.launches[open] > summary .arrow::before { content: "▾"; }
+.arrow::before { content: "▸"; }
+.launch { padding: 2px 8px; border-top: 1px solid var(--g2); }
+.launch summary { color: var(--g3); display: flex; gap: 8px; }
+.launch .detail { margin: 4px 0; }
+.ledger { border: 1px solid var(--g2); margin-block: 4px; }
+.ledger > details + details { border-top: 1px solid var(--g2); }
+.ledger summary { display: grid; grid-template-columns: 2ch minmax(0,1fr) auto; gap: 8px; padding: 0 8px; min-height: 20px; }
+.ledger summary:hover { background: var(--g1); }
+.ledger details[open] .arrow::before { content: "▾"; }
+.receipt { margin: 4px 0 12px; }
+.receipt > .receipt-title { display: flex; justify-content: space-between; gap: 12px; }
+.receipt p { margin: 0; }
+.receipt details { margin-top: 2px; color: var(--g3); }
+.receipt details > summary { width: fit-content; border-bottom: 1px solid var(--g2); }
+.receipt details .meta { margin-top: 4px; }
+.notice-link { width: 100%; border: 0; border-bottom: 1px solid var(--g2); padding: 0; display: flex; gap: 12px; justify-content: space-between; text-align: left; min-height: 20px; }
+.notice-link span:first-child { min-width: 0; }
+.notice-link span:last-child { flex: none; }
+.notice-link.failure { color: var(--bad); }
+.notice-link[aria-expanded="true"] { color: var(--w); background: var(--k); }
+.anchored { border: 1px solid var(--g2); }
+.anchored .launch { padding: 0; }
+.anchored .launch summary { padding: 0 8px; min-height: 20px; }
+.anchored .launch:first-child { border-top: 0; }
+.anchored .launch .detail { margin: 0; }
+.anchored .launch .arrival { margin-left: auto; flex: none; }
+.anchored .launch.failure summary { color: var(--bad); }
+.anchored .launch[open] .arrow::before { content: "▾"; }
+.count-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 0 4px; min-height: 20px; border: 0; color: var(--ok); flex: none; background: transparent; }
+.count-trigger .ic { flex: none; }
+.count-trigger[aria-expanded="true"] { color: var(--w); background: var(--k); }
+.count-trigger.uncertain, .count-trigger.waiting { color: var(--g3); }
+.preview .live-rail { border-bottom: 1px solid var(--g2); }
+.live-rail > .count-trigger { display: flex; justify-content: flex-start; width: 100%; padding: 0 12px; gap: 8px; }
+.live-rail > .count-trigger span:last-child { margin-left: auto; }
+.gutter-count { margin-top: 4px; padding: 0; max-width: 32px; gap: 2px; }
+.gutter-count .ic { width: 12px; height: 12px; }
+.inline-workers { margin-top: 8px; border-left: 1px solid var(--k); }
+.worker-list { padding: 4px 8px; }
+.worker-list details + details { border-top: 1px solid var(--g2); }
+.worker-list summary { display: grid; grid-template-columns: 2ch minmax(0,1fr) auto; gap: 8px; min-height: 24px; align-items: center; }
+.worker-list summary:hover { background: var(--g1); }
+.worker-list details[open] .arrow::before { content: "▾"; }
+.worker-list .phase { color: var(--g3); }
+.worker-list .running .phase { color: var(--ok); }
+.worker-detail { color: var(--g3); padding: 4px 0 8px 3ch; }
+.worker-list .unknown { margin: 4px 0; color: var(--g3); }
+.inspect-panel { position: absolute; z-index: 5; border: 1px solid var(--k); background: var(--w); width: min(400px, calc(100% - 24px)); max-height: calc(100% - 120px); overflow: auto; right: 12px; top: 30px; }
+.inspect-panel.notice-panel { top: 24px; right: 0; width: min(420px, 100%); }
+.inspect-panel.from-composer { top: auto; bottom: 100px; }
+.inspect-heading { display: flex; align-items: center; gap: 8px; padding: 2px 8px; border-bottom: 1px solid var(--k); }
+.inspect-heading strong { flex: 1; min-width: 0; }
+.inspect-panel .detail { border-top: 0; }
+.index-panel { left: 12px; right: auto; }
+.preview .composer { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--k); background: var(--w); position: relative; }
+.composer-prefix { text-align: right; font-weight: bold; }
+.preview .composer textarea { width: 100%; min-height: 80px; height: 80px; border: 0; resize: vertical; padding: 0; line-height: 20px; }
+.compose-actions { display: flex; align-items: flex-start; gap: 8px; }
+.phone-only { display: none; }
+.stream-cursor { display: inline-block; width: 1ch; height: 20px; background: var(--k); vertical-align: text-bottom; }
+.preview[data-live="disconnected"] .orb-life, .preview[data-live="disconnected"] .instrument { color: var(--g3); }
+.preview[data-live="disconnected"] .index-row { border-left-color: var(--g2); }
+.panel-close:focus-visible { color: var(--w); }
+@container (max-width: 600px) {
+  .screen { display: block; min-height: 680px; }
+  .index, .desktop-only { display: none !important; }
+  .phone-only { display: inline-flex; }
+  .preview .orb-header { height: 44px; gap: 6px; padding-inline: 8px; }
+  .preview .orb-header .orb-life { font-size: 0; gap: 0; }
+  .preview .orb-header .context-icons { gap: 0; }
+  .preview .pane { min-height: 680px; }
+  .preview .count-trigger { min-height: 44px; min-width: 44px; }
+  .preview .rec { padding-inline: 8px; gap: 8px; }
+  .preview .activity-rail-row > summary, .preview .ledger summary, .preview .launch summary, .preview .notice-link, .preview .worker-list summary { min-height: 44px; }
+  .preview .activity-rail-summary { white-space: normal; }
+  .preview .receipt-title { align-items: baseline; }
+  .preview .receipt details > summary { padding-block: 10px; }
+  .preview .ledger summary { grid-template-columns: 1ch minmax(0,1fr) auto; }
+  .preview .composer { min-height: 44px; padding: 0 8px; gap: 8px; align-items: center; }
+  .preview .composer textarea { height: 44px; min-height: 44px; resize: none; padding-block: 12px; font-size: 16px; }
+  .preview .compose-actions { align-items: center; gap: 0; }
+  .preview .compose-actions .context-icons { min-height: 44px; }
+  .preview .inspect-panel { top: 44px; max-height: calc(100% - 96px); }
+  .preview .inspect-panel.from-composer { top: auto; bottom: 44px; }
+  .preview .inspect-heading .icon-button { height: 44px; width: 44px; }
+  .preview .gutter-count { min-width: 32px; min-height: 44px; }
+  .preview .index-panel { left: auto; right: 12px; }
+}
+@media(max-width: 700px) {
+  .choices strong { width: 100%; }
+  .choices button { min-height: 36px; }
+  .notes { grid-template-columns: 1fr; gap: 12px; }
+  .study .settings { gap: 12px; }
+}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true"><defs>
+<symbol id="i-branch" viewBox="0 0 16 16"><path d="M3 3v9h5M3 5h5M8 3h5v4H8zM8 10h5v4H8z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></symbol>
+<symbol id="i-gear" viewBox="0 0 16 16"><path d="M6.5 1.5h3l.5 2 1.5 1 2-.5 1.5 2.5-1.5 1.5v1l1.5 1.5-1.5 2.5-2-.5-1.5 1-.5 2h-3l-.5-2-1.5-1-2 .5L1 10.5 2.5 9V8L1 6.5 2.5 4l2 .5 1.5-1z M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-upload" viewBox="0 0 16 16"><path d="M3 10v3h10v-3 M8 10V2 M5 5l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-stop" viewBox="0 0 16 16"><path d="M4 4h8v8H4z" fill="currentColor"/></symbol>
+<symbol id="i-terminal" viewBox="0 0 16 16"><path d="M3 4l4 4-4 4 M9 12h4" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-more" viewBox="0 0 16 16"><path d="M3 8h1m3 0h1m3 0h1" stroke="currentColor" stroke-width="1.5"/></symbol>
+</defs></svg>
+<section class="study">
+<h1>SUBAGENTS / TWO INDEPENDENT DESIGN CHOICES</h1>
+<p>Interactive study · simulated data only · no changes to running orbs</p>
+<div class="choices" id="notifications" aria-label="Notification proposals"></div>
+<div class="choices" id="counts" aria-label="Running-count proposals"></div>
+<div class="settings">
+<label>Notices <select id="scenario"><option value="failure">Three delayed failures</option><option value="success">Success</option><option value="update">Progress update</option><option value="workspace">Workspace notice</option><option value="mixed">Mixed outcomes</option></select></label>
+<label>Live state <select id="live"><option value="working">3 running · parent active</option><option value="leaf">3 running · parent quiet</option><option value="queued">0 running · 2 queued</option><option value="finishing">0 running · 1 finishing</option><option value="disconnected">Disconnected</option><option value="done">Settled</option></select></label>
+<button id="advance">Advance one child</button>
+<button id="reset">Reset live state</button>
+<button id="phone" aria-pressed="false">Phone width</button>
+</div>
+</section>
+<div id="preview" class="preview"></div>
+<section class="notes" aria-label="Design rationale"><div id="notification-notes"></div><div id="count-notes"></div></section>
+<section class="study">
+<p>Open the notice rows and the live count. Inspect a child; use Escape or the close control to dismiss an inspector. “Advance one child” exercises count changes without timers or runtime requests.</p>
+<p>Queued and finishing children are not counted as running. Unknown is “—”, not zero. Known-empty indicators disappear. The numeric count appears in one product location at a time.</p>
+<p>The sample conversation is abbreviated. These proposals do not suppress or combine the parent’s acknowledgement messages, or change notification delivery. No child transcripts, retry buttons, or child-only Stop controls are introduced.</p>
+</section>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const icon = (name) => `<svg class="ic" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+const notificationDesigns = [
+ ['Rail receipts', 'One standard activity-rail disclosure per notice. Open it once for the full error, result or update; close it to recover the transcript’s rhythm.', 'Smallest change. Chronological and familiar, but three failures still occupy three rows.'],
+ ['Turn ledger', 'One ruled ledger per parent operation. Each task is a row; opening another row closes the previous detail. New facts append in arrival order.', 'Easy to compare several children. Needs stable operation grouping; the ledger’s placement summarizes arrivals rather than reproducing each arrival position.'],
+ ['Plain receipts', 'No box around each outcome. The actual failure or bounded result is visible immediately; the underlined timestamp opens diagnostic metadata.', 'Best for reading without clicking. Longer results and multiple failures take more vertical space.'],
+ ['On the tool call', 'The originating subagent tool row acquires its outcome. Open that row for the notice and original request; there is no second notification block.', 'Least repetition. Requires explicit launch correlation and an accessible update announcement; a late outcome can land above the reader’s position.'],
+ ['Side inspector', 'A compact underlined receipt opens an inspector without expanding the transcript. Selecting another receipt replaces the inspector; Escape returns focus.', 'Keeps the transcript stable. Reading requires a separate surface; at phone width the inspector covers the conversation.']
+];
+const countDesigns = [
+ ['Header counter', 'A branching mark and number sit beside the orb’s identity. Click for the current child roster; inspect any row. Escape or outside click closes it.', 'Always reachable. Uses scarce header width, particularly on phones.'],
+ ['Live rail', 'A ruled row below the header says how many subagents are running. Expand it in place for the roster; it remains independent of transcript scrolling.', 'Most explicit and easiest to scan. Spends a full row while child work exists.'],
+ ['Composer counter', 'The count lives beside the message field. Click to open the roster upward, without focusing, sending or clearing the draft.', 'Close to where you steer the parent. Less visible when reading higher in the transcript; the roster overlays recent messages.'],
+ ['Turn gutter', 'The count sits under the current orb speaker prefix. Click to unfold the roster inside that live turn, not in a floating pane.', 'Connects the number directly to the work. Goes out of view when you scroll away from the current turn.'],
+ ['Index tally', 'The selected orb’s index row carries the counter. Click for its roster. On phones it moves to the header because there is no index.', 'Leaves desktop chat chrome untouched. The placement changes on phones; this proposal counts only the current orb, not the whole fleet.']
+];
+const params = new URLSearchParams(location.hash.slice(1));
+const choice = (key) => /^[1-5]$/.test(params.get(key) ?? '') ? Number(params.get(key)) : 1;
+const state = {n:choice('n'), c:choice('c'), scenario:'failure', live:'working', phone:false, countOpen:false, notice:null, draft:'', phases:['running','running','running']};
+for (const key of ['scenario','live']) if ([...$(key).options].some(o=>o.value===params.get(key))) state[key]=params.get(key);
+const titles = ['Check web deployment', 'Check runtime-api deployment', 'Check ops deployment'];
+const error = "Codex error: The 'gpt-5.4-mini' model is not supported when using Codex with a ChatGPT account.";
+const notices = [
+ {id:'156d2beb', task:'Count runtime-api code lines', status:'failed', text:error, time:'22:04:07', duration:'0.6s'},
+ {id:'7ff8b957', task:'Count ops code lines', status:'failed', text:error, time:'22:04:14', duration:'0.7s'},
+ {id:'c8c9457f', task:'Count issuer code lines', status:'failed', text:error, time:'22:04:21', duration:'0.6s'},
+ {id:'e1588e99', task:'Count web code lines', status:'completed', text:'9,863 nonblank source lines in apps/web/src. Test files and fixtures excluded.', time:'22:05:06', duration:'28s'},
+ {id:'5bc03a4b', task:'Check deployment entry points', status:'update', text:'All four service roles share the control-plane image. Checking role-specific startup paths next.', time:'22:08:12', duration:null},
+ {id:'6363cb37', task:'Inspect deployment configuration', status:'workspace', text:'Workspace cleanup finished. Changes remain in the shared checkout.', time:'22:08:24', duration:null}
+];
+function currentNotices() {
+ return state.scenario==='failure' ? notices.slice(0,3) : state.scenario==='success' ? [notices[3]] : state.scenario==='update' ? [notices[4]] : state.scenario==='workspace' ? [notices[5]] : [notices[0],...notices.slice(3)];
+}
+function resetLive() {
+ state.phases = state.live==='queued' ? ['queued','queued'] : state.live==='finishing' ? ['finishing'] : state.live==='done' ? [] : ['running','running','running'];
+ state.countOpen=false;
+}
+resetLive();
+function active() { return state.phases.map((phase,i)=>({phase,i})).filter(w=>w.phase!=='completed'); }
+function runningCount() { return state.live==='disconnected' ? null : state.phases.filter(p=>p==='running').length; }
+function showCount() { return runningCount()===null || active().length>0; }
+function isBusy() { return state.live!=='disconnected' && (active().length>0 || state.live==='working'); }
+function instrument() {
+ const inner=isBusy() ? '<circle cx="5" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="11" cy="8" r="1"/>' : '<circle cx="8" cy="8" r="3" fill="none" stroke="white" stroke-width="1.5"/>';
+ return `<svg class="instrument" viewBox="0 0 16 16" aria-label="${state.live==='disconnected'?'Runtime status unknown':isBusy()?'Busy':'Idle'}" role="img"><rect x="1" y="1" width="14" height="14" rx="2" fill="currentColor"/><g fill="white">${inner}</g></svg>`;
+}
+function detail(d, withMeta=true) {
+ return `<div class="detail"><p class="${d.status==='failed'?'failure':''}">${esc(d.text)}</p>${withMeta?metadata(d):''}</div>`;
+}
+function metadata(d) { return `<div class="meta">${esc(d.id)} · ${esc(d.time)}${d.duration?' · '+esc(d.duration):''}</div>`; }
+function rail(d) {
+ return `<details class="activity-rail-row ${d.status==='failed'?'activity-rail-row-failed':''}" data-notice="${d.id}"><summary><span class="activity-rail-marker"></span><span class="activity-rail-summary">${esc(d.task)}</span><span class="activity-rail-metric">${d.status}</span></summary>${detail(d)}</details>`;
+}
+function notificationBlock() {
+ const ns=currentNotices();
+ if(state.n===4) return '';
+ let body='';
+ if(state.n===1) body=ns.map(rail).join('');
+ if(state.n===2) body=`<div class="ledger">${ns.map(d=>`<details name="notice-ledger" data-notice="${d.id}"><summary><span class="arrow"></span><span>${esc(d.task)}</span><span class="${d.status==='failed'?'failure':''}">${d.status}</span></summary>${detail(d)}</details>`).join('')}</div>`;
+ if(state.n===3) body=ns.map(d=>`<article class="receipt" data-notice="${d.id}"><div class="receipt-title"><strong>${esc(d.task)}</strong><span class="${d.status==='failed'?'failure':''}">${d.status}</span></div><p class="${d.status==='failed'?'failure':''}">${esc(d.text)}</p><details data-meta="${d.id}"><summary>${d.time}</summary><div class="meta">${d.id}${d.duration?' · '+d.duration:''}</div></details></article>`).join('');
+ if(state.n===5) body=ns.map(d=>`<button class="notice-link ${d.status==='failed'?'failure':''}" data-inspect="${d.id}" aria-expanded="${state.notice===d.id}" aria-controls="notice-inspector"><span>${esc(d.task)}</span><span>${d.status}</span></button>`).join('');
+ return record('···',body);
+}
+function launches() {
+ if(state.n===4) return `<div class="anchored">${currentNotices().map(d=>`<details class="launch ${d.status==='failed'?'failure':''}" data-notice="${d.id}"><summary><span class="arrow"></span><span>subagent · ${esc(d.task)}</span><span class="arrival">${d.status}</span></summary>${detail(d)}<div class="detail"><p>Explore the assigned service in the shared checkout. Report findings to the parent.</p></div></details>`).join('')}</div>`;
+ return `<details class="launches"><summary><span class="arrow"></span>subagent <span>· delegated service checks</span></summary><div class="detail">Explore the assigned service in the shared checkout. Report findings to the parent.</div></details>`;
+}
+function record(who, body, extra='') { return `<div class="rec ${who==='you'?'you':''}" ${extra}><div class="rec-px">${who}</div><div class="rec-bd">${body}</div></div>`; }
+function countButton(where, extra='') {
+ if(!showCount()) return '';
+ const n=runningCount();
+ const label=n===null?'Subagent status unknown':`${n} running subagents${active().some(w=>w.phase==='queued')?'; queued work pending':''}${active().some(w=>w.phase==='finishing')?'; cleanup pending':''}`;
+ const contents=where==='rail'?`<span aria-hidden="true">${state.countOpen?'▾':'▸'}</span><span>subagents</span><span>${n===null?'—':n+' running'}</span>`:`${icon('branch')}<span>${n??'—'}</span>`;
+ return `<button class="count-trigger ${n===null?'uncertain':n===0?'waiting':''} ${extra}" data-count="${where}" aria-expanded="${state.countOpen}" aria-label="${label}" title="${label}" aria-controls="worker-inspector">${contents}</button>`;
+}
+function workers() {
+ if(runningCount()===null) return '<div class="worker-list"><p class="unknown">Subagent status unavailable.</p><p class="unknown">Last live snapshot: 22:08:12.</p></div>';
+ return `<div class="worker-list">${active().map(({phase,i})=>`<details class="${phase}" data-worker="${i}"><summary><span class="arrow"></span><span>${titles[i]}</span><span class="phase">${phase}</span></summary><div class="worker-detail">Explore · child-${i+1}${phase==='running'?'<br>Inspecting entry points in the shared checkout.':''}</div></details>`).join('')}</div>`;
+}
+function countPanel() {
+ if(!state.countOpen||!showCount()) return '';
+ if(state.c===2||state.c===4) return `<div id="worker-inspector" class="${state.c===4?'inline-workers':''}">${workers()}</div>`;
+ return `<section id="worker-inspector" class="inspect-panel ${state.c===3?'from-composer':''} ${state.c===5?'index-panel':''}" aria-label="Subagents"><div class="inspect-heading"><strong>SUBAGENTS</strong>${closeButton('count')}</div>${workers()}</section>`;
+}
+function closeButton(owner) { return `<button class="icon-button panel-close" data-close="${owner}" aria-label="Close ${owner==='count'?'subagents':'notification'}">${icon('x')}</button>`; }
+function noticePanel() {
+ if(!state.notice) return '';
+ const d=currentNotices().find(d=>d.id===state.notice);
+ if(!d) return '';
+ return `<section id="notice-inspector" class="inspect-panel notice-panel" role="dialog" aria-label="${esc(d.task)}"><div class="inspect-heading"><strong>${esc(d.task)}</strong>${closeButton('notice')}</div>${detail(d)}</section>`;
+}
+function updateControls() {
+ for(const [id,key,list,prefix] of [['notifications','n',notificationDesigns,'N'],['counts','c',countDesigns,'C']]) {
+  $(id).innerHTML=`<strong>${id==='notifications'?'NOTIFICATIONS':'RUNNING COUNT'}</strong>`+list.map((d,i)=>`<button data-choice="${key}" data-value="${i+1}" aria-pressed="${state[key]===i+1}">${prefix}${i+1} ${d[0]}</button>`).join('');
+ }
+ $('scenario').value=state.scenario; $('live').value=state.live;
+ $('phone').setAttribute('aria-pressed',String(state.phone));
+ $('advance').disabled=state.live==='disconnected'||active().length===0;
+ const note=(d,prefix,num)=>`<h2>${prefix}${num} / ${d[0].toUpperCase()}</h2><p>${d[1]}</p><p class="cost">${d[2]}</p>`;
+ $('notification-notes').innerHTML=note(notificationDesigns[state.n-1],'N',state.n);
+ $('count-notes').innerHTML=note(countDesigns[state.c-1],'C',state.c);
+ window.history.replaceState(null,'',`#n=${state.n}&c=${state.c}&scenario=${state.scenario}&live=${state.live}`);
+}
+function render() {
+ updateControls();
+ const p=$('preview');
+ const openDisclosures=[...p.querySelectorAll('details[open]')].flatMap(d=>['notice','meta','worker'].filter(k=>d.dataset[k]!==undefined).map(k=>`details[data-${k}="${d.dataset[k]}"]`));
+ p.classList.toggle('phone',state.phone); p.dataset.live=state.live;
+ const ctx=`<span class="context-icons desktop-only" aria-hidden="true">${icon('terminal')}${icon('upload')}${icon('stop')}</span><span class="context-icons phone-only" aria-hidden="true">${icon('more')}</span>`;
+ const isLeaf=state.live==='leaf';
+ const tail=state.live==='done'||(isLeaf&&!active().length)?'Deployment entry points verified.':isLeaf?'The deployment checks are delegated.':state.live==='disconnected'?'I’ll check the deployment entry points.':'I’ll check the deployment entry points. <span class="stream-cursor" aria-hidden="true"></span>';
+ const acknowledgement=state.scenario==='failure'||state.scenario==='mixed'?'Those failures are from the initial model choice. The replacement agents completed successfully.':state.scenario==='success'?'The frontend count matches my check.':state.scenario==='update'?'I’ll include the deployment findings when the checks finish.':'The workspace notice is recorded.';
+ const countInline=state.c===4?countButton('gutter','gutter-count'):'';
+ const liveTurn=`<div class="rec"><div class="rec-px">orb${countInline}</div><div class="rec-bd">${tail}${state.c===4?countPanel():''}</div></div>`;
+ p.innerHTML=`<div class="screen"><aside class="index"><div class="index-home">PI-ORB</div><div class="project"><strong>ORBYU</strong><span class="context-icons" aria-hidden="true">${icon('plus')}${icon('gear')}</span></div><div class="index-row current">${instrument()}<span class="row-name">Project services</span>${state.c===5&&showCount()?countButton('index'):'<small>8m</small>'}</div><div class="index-row">${instrument()}<span class="row-name">Review runtime protocol</span><small>2h</small></div></aside><div class="pane"><header class="orb-header"><strong class="orb-name">Project services</strong><span class="orb-life">${instrument()}<span>running${isBusy()?' · busy':''}</span></span>${state.c===1?countButton('header'):state.c===5?countButton('phone-index','phone-only'):''}${ctx}</header>${state.c===2&&showCount()?`<div class="live-rail">${countButton('rail')}${countPanel()}</div>`:''}<main class="thread">${record('you','In separate subagents, count the source lines for each service.')}${record('orb',launches())}${record('orb','The service roles share one backend codebase.<br><br><strong>22,914</strong> backend lines · <strong>9,863</strong> frontend lines.')}${notificationBlock()}${record('orb',acknowledgement)}${record('you','Now check how those services are deployed.')}${liveTurn}</main><div class="composer"><span class="composer-prefix">&gt;</span><textarea aria-label="Message the orb" placeholder="Message the orb…">${esc(state.draft)}</textarea><span class="compose-actions">${state.c===3?countButton('composer'):''}<span class="context-icons" aria-hidden="true">${icon('x')}</span></span></div>${![2,4].includes(state.c)?countPanel():''}${noticePanel()}</div></div>`;
+ for(const selector of openDisclosures) { const d=p.querySelector(selector); if(d) d.open=true; }
+}
+let returnFocus=null;
+function closeInspectors() {
+ if(!state.notice&&!state.countOpen) return;
+ const target=returnFocus;
+ state.countOpen=false; state.notice=null; render();
+ if(target) document.querySelector(target)?.focus({preventScroll:true});
+}
+document.addEventListener('click',(e)=>{
+ const t=e.target.closest('button');
+ if(!t) {
+  if(state.countOpen&&![2,4].includes(state.c)&&!e.target.closest('.inspect-panel')) closeInspectors();
+  else if(state.notice&&!e.target.closest('.inspect-panel')) closeInspectors();
+  return;
+ }
+ if(t.dataset.choice) {
+  state[t.dataset.choice]=Number(t.dataset.value); state.countOpen=false; state.notice=null;
+  render(); document.querySelector(`[data-choice="${t.dataset.choice}"][data-value="${t.dataset.value}"]`)?.focus({preventScroll:true});
+ } else if(t.dataset.count) {
+  returnFocus=`[data-count="${t.dataset.count}"]`; state.notice=null; state.countOpen=!state.countOpen; render();
+  if(state.countOpen&&![2,4].includes(state.c)) document.querySelector('[data-close="count"]')?.focus({preventScroll:true});
+  else document.querySelector(returnFocus)?.focus({preventScroll:true});
+ } else if(t.dataset.inspect) {
+  returnFocus=`[data-inspect="${t.dataset.inspect}"]`; state.countOpen=false; state.notice=state.notice===t.dataset.inspect?null:t.dataset.inspect; render();
+  (state.notice?document.querySelector('[data-close="notice"]'):document.querySelector(returnFocus))?.focus({preventScroll:true});
+ } else if(t.dataset.close) closeInspectors();
+ else if(t.id==='advance') {
+  const w=active()[0]; if(w) state.phases[w.i]=w.phase==='queued'?'running':'completed';
+  if(!showCount()) state.countOpen=false;
+  render(); $('advance').focus({preventScroll:true});
+ } else if(t.id==='reset') { resetLive();render(); }
+ else if(t.id==='phone') { state.phone=!state.phone;render(); }
+});
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape') closeInspectors();
+});
+$('scenario').addEventListener('change',e=>{state.scenario=e.target.value;state.notice=null;render();});
+$('live').addEventListener('change',e=>{state.live=e.target.value;resetLive();render();});
+$('preview').addEventListener('input',e=>{if(e.target.matches('textarea'))state.draft=e.target.value;});
+render();
+</script>
+</body>
+</html>
