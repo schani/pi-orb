@@ -29,6 +29,8 @@ checks need them; relying on runner-preinstalled Chromium did not provision
 WebKit. Both engines remain mandatory. Evidence:
 `docs/postmortems/2026-09-13-release-webkit-prerequisite.md`.
 
+**Stable browser update (2026-09-14):** pin Playwright **1.63.0**, supplying WebKit **26.6 / build 2359** on Linux amd64, in place of 1.62.1 / WebKit 26.5. All 41 frontend tests pass on the new toolchain. This is an upgrade experiment, not proof that the previously unreproduced compositor crash is fixed; evidence and unchanged release-blocking status are in `docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md`.
+
 ## Decisions
 
 - Deterministic simulation testing is a first-class requirement from the beginning, not a later hardening phase.

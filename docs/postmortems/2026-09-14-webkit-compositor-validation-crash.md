@@ -28,6 +28,14 @@ DEBUG=pw:browser npm run test:e2e -- e2e/frontend-mobile.e2e.test.ts -t 'webkit.
 
 The probes were intended to capture a fault/core, not obtain a green release result. They did not reproduce the crash and **do not clear the first failure**. An earlier diagnostic name filter matched zero tests and is not counted as evidence. No renderer flags, browser-version change, retry policy, weakened assertion, screenshot warm-up or timeout increase was applied.
 
+## Stable browser upgrade experiment — 2026-09-14
+
+At the user's request, updated the exact `@playwright/test` pin and lockfile from **1.62.1 to 1.63.0**, the current stable release. The managed WebKit changes from **26.5 / build 2336** to **26.6 / build 2359**; managed Chromium is now **153.0.8010.12 / build 1243**. `npm ci` and `playwright install --with-deps --no-remove chromium webkit` completed; the latter preserves older browser installations for diagnosis.
+
+With core dumps enabled and `DEBUG=pw:browser`, `npm run test:e2e:frontend` passes **41/41 tests** (27 session/desktop and 14 phone cases across Chromium/WebKit), including the original WebKit 320px case. Typecheck and lint pass. No test assertions, retries, renderer flags or timeouts changed. The full 106-case suite has not been rerun on this upgraded toolchain; its prior result belongs to Playwright 1.62.1.
+
+The [1.63.0 release notes](https://github.com/microsoft/playwright/releases/tag/v1.63.0) announce WebKit 26.6 but do not identify a fix matching this fault. Since the old build also passed subsequent probes, this result establishes compatibility with the newer stable build, **not a demonstrated crash fix**. Release-blocking status remains unchanged. Upgrade/install/browser logs are retained locally under `.context/webkit-upgrade/`.
+
 ## Retained artifacts and rule
 
 Raw logs remain under `.context/subagents-continuation/`: `merged-e2e.log`, `webkit-kernel-first.log`, `webkit-diagnostic-matched.log`, `webkit-probe-*.log` and `webkit-probes.txt`. Sanitized full-suite/kernel/probe-result copies are in `scripts/subagent-liveness/evidence/`, indexed by `continuation-2026-09-14.md`.
