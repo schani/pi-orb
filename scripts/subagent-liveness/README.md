@@ -43,19 +43,17 @@ Promises and explicit model/tool/lifecycle checkpoints establish ordering; the 6
 
 ## Fork reproduction
 
-The upstream base is `b3b6159399f541fd0623f65818557dd3e707a34f` (21.7.0). After the two locked installs above, reconstruct the exact commits (verified offline) and build:
+The upstream base is `b3b6159399f541fd0623f65818557dd3e707a34f` (21.7.0). The fork repository owns the five source commits; pi-orb does not duplicate them as patch files. After the two locked installs above, fetch the pinned source and build:
 
 ```bash
-git -C /path/to/pi-packages checkout --detach b3b6159399f541fd0623f65818557dd3e707a34f
-git -C /path/to/pi-packages -c user.name=pi-orb \
-  -c user.email=pi-orb@users.noreply.github.com -c commit.gpgSign=false \
-  am --committer-date-is-author-date /path/to/pi-orb/scripts/subagent-liveness/fork/*.patch
+git clone https://github.com/schani/pi-packages.git /path/to/pi-packages
+git -C /path/to/pi-packages checkout --detach 6d333b00670d778812b79bce2dd2e1db3f5f9692
 scripts/subagent-liveness/build-fork.sh /path/to/pi-packages
 ```
 
-The reconstructed HEAD must be `6d333b00670d778812b79bce2dd2e1db3f5f9692`; the recipe refuses another commit.
+The source HEAD must be `6d333b00670d778812b79bce2dd2e1db3f5f9692`; the recipe refuses another commit.
 
-The script packages source/license/provenance and bundles public extension/service entry points with esbuild 0.28.1; dependencies remain external. The TypeBox import maps to the SDK's `typebox` package. This avoids Node's prohibition on stripping dependency TypeScript without changing runtime loading policy. The root lockfile records the artifact integrity. The fork is published at https://github.com/schani/pi-packages/tree/pi-orb-integration, pinned to `6d333b00670d778812b79bce2dd2e1db3f5f9692` (2026-09-14). The user created it manually after the orb integration received HTTP 403 on fork creation. Exported patches and the checked-in artifact remain available for local installation.
+The script packages source/license/provenance and bundles public extension/service entry points with esbuild 0.28.1; dependencies remain external. The TypeBox import maps to the SDK's `typebox` package. This avoids Node's prohibition on stripping dependency TypeScript without changing runtime loading policy. The root lockfile records the artifact integrity. The fork is published at https://github.com/schani/pi-packages/tree/pi-orb-integration, pinned to `6d333b00670d778812b79bce2dd2e1db3f5f9692` (2026-09-14). The user created it manually after the orb integration received HTTP 403 on fork creation. The checked-in artifact supplies local installation without needing the fork checkout. A source rebuild uses the pinned fork commit above.
 
 ## Evidence limits
 

@@ -6,10 +6,10 @@ No production deployment was performed. This supplements the earlier integration
 
 - Pi **0.85.1**, gotgenes base **21.7.0**, upstream commit `b3b6159399f541fd0623f65818557dd3e707a34f`.
 - Published fork: `schani/pi-packages`, `pi-orb-integration`, **`6d333b00670d778812b79bce2dd2e1db3f5f9692`**.
-- Five patches: cancellation (`b8dbccdc`), actual-delivery wake veto (`6ad3a281`), explicit child factories (`9b0c61b6`), embedded cwd (`864a2764`), coherent explicit child loading (`6d333b00`).
+- Five fork commits: cancellation (`b8dbccdc`), actual-delivery wake veto (`6ad3a281`), explicit child factories (`9b0c61b6`), embedded cwd (`864a2764`), coherent explicit child loading (`6d333b00`).
 - Artifact: `vendor/gotgenes-pi-subagents-21.7.0-orb.4.tgz`.
 - SHA-256: `08f267e51ba025f410b1ae3875e754f40744d7ead30bde55e54b6ff35a497306`.
-- Offline patch application with author-date committer timestamps reproduced the exact published HEAD.
+- Historical qualification: offline patch application with author-date committer timestamps reproduced the exact published HEAD. The duplicate patch exports were subsequently removed from pi-orb at the user's request; source rebuilds check out the pinned fork commit directly.
 - Fork suite: **80 files / 1,773 tests passed**.
 
 The last fix rejects child loader errors before constructing a model runtime when the host supplies `childExtensions`, including an empty list. Without that option, upstream's default loading behavior is unchanged. The corrected real-SDK collision probe failed against the preserved `orb.3` Docker image (`completed` instead of `error`) and passed against installed `orb.4`, with no child inference or MCP connection acquisition.
