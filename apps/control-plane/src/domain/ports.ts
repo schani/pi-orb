@@ -595,6 +595,11 @@ export interface OrbRuntimeClient {
     baseUrl: string,
     context: OperationContext,
   ): ResultAsync<RuntimeHealth, RuntimeClientError>;
+  prepareIdleStop(
+    task: SimulationTask,
+    baseUrl: string,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").PrepareIdleStopResponse, RuntimeClientError>;
   pullHistory(
     task: SimulationTask,
     request: PullHistoryClientRequest,

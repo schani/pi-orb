@@ -73,6 +73,36 @@ describe("describeFetchError", () => {
 });
 
 describe("FetchRuntimeClient response evidence", () => {
+  it.each([true, false])("validates idle-stop admission response %s", async (prepared) => {
+    const fetch = vi.fn(async () => Response.json({ v: 1, prepared }));
+    vi.stubGlobal("fetch", fetch);
+    const result = await new FetchRuntimeClient().prepareIdleStop(task, "http://runtime.test", {
+      signal: new AbortController().signal,
+    });
+    expect(result._unsafeUnwrap()).toEqual({ v: 1, prepared });
+    expect(fetch).toHaveBeenCalledWith(
+      "http://runtime.test/v1/prepare-idle-stop",
+      expect.objectContaining({
+        method: "POST",
+        body: '{"v":1}',
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  });
+
+  it("does not mistake a malformed idle-stop response for permission to stop", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ v: 1, prepared: "true" })),
+    );
+    const result = await new FetchRuntimeClient().prepareIdleStop(task, "http://runtime.test", {
+      signal: new AbortController().signal,
+    });
+    expect(result.isErr() && result.error).toMatchObject({
+      code: "invalid_response",
+      answered: true,
+    });
+  });
   it("marks an HTTP error as answered", async () => {
     vi.stubGlobal(
       "fetch",

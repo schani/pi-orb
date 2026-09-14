@@ -1,4 +1,4 @@
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory, InlineExtension } from "@earendil-works/pi-coding-agent";
 import { getSubagentsService } from "@gotgenes/pi-subagents";
 import upstreamSubagents from "@gotgenes/pi-subagents/extension";
 import { Result } from "neverthrow";
@@ -14,7 +14,11 @@ export interface SubagentHost {
 }
 
 /** Public events and the fork's delivery hook; no private manager or promise access. */
-export function createSubagentsExtension(host: SubagentHost): ExtensionFactory {
+export function createSubagentsExtension(
+  host: SubagentHost,
+  cwd: string,
+  childExtensions: InlineExtension[] = [],
+): ExtensionFactory {
   return (pi) => {
     const runs = new Map<string, SubagentRun>();
     const terminal = new Set<SubagentRun>();
@@ -93,6 +97,8 @@ export function createSubagentsExtension(host: SubagentHost): ExtensionFactory {
       return shutdown;
     });
     upstreamSubagents(pi, {
+      cwd,
+      childExtensions,
       shouldWake: ({ id }) => host.mayWakeSubagent(id),
     });
     pi.on("session_start", () => {

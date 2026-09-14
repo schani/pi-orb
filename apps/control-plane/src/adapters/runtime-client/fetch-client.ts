@@ -1,5 +1,7 @@
 import {
   DeliverOrbMessageResponseSchema,
+  type PrepareIdleStopResponse,
+  PrepareIdleStopResponseSchema,
   type PullHistoryResponse,
   PullHistoryResponseSchema,
   type RuntimeHealth,
@@ -147,6 +149,30 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
           clientError("invalid_response", "health response failed schema validation", false, true),
         );
       }
+      return ok(body);
+    });
+  }
+
+  prepareIdleStop(
+    _task: SimulationTask,
+    baseUrl: string,
+    context: OperationContext,
+  ): ResultAsync<PrepareIdleStopResponse, RuntimeClientError> {
+    return this.request(`${baseUrl}/v1/prepare-idle-stop`, context, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ v: 1 }),
+    }).andThen(({ status, body }) => {
+      if (status !== 200) return err(this.mapErrorResponse(status, body));
+      if (!Check(PrepareIdleStopResponseSchema, body))
+        return err(
+          clientError(
+            "invalid_response",
+            "idle stop response failed schema validation",
+            false,
+            true,
+          ),
+        );
       return ok(body);
     });
   }

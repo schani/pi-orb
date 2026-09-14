@@ -1592,12 +1592,40 @@ async function reconcileStopping(
     return { type: "progressed" };
   }
 
+  // Close runtime admission before the final drain, not after its idle snapshot.
+  // Explicit Stop retains whole-host authority and does not require cooperation.
+  if (orb.stopReason === "idle") {
+    if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
+    const baseUrl = observation.runtimeAddress.baseUrl;
+    const prepared = await withDeadline(
+      task,
+      deps.constants.runtimeRequestTimeoutMs,
+      "prepare idle stop",
+      (context) => deps.runtimeClient.prepareIdleStop(task, baseUrl, context),
+    );
+    if (prepared.isErr()) {
+      if ("answered" in prepared.error && prepared.error.answered === true)
+        deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+      if (deps.control.getDrainStatus(orb.id)?.retrying !== true)
+        logOrbEvent(task, orb.id, "idle-stop-prepare-blocked", { message: prepared.error.message });
+      deps.control.setDrainStatus(orb.id, { retrying: true, message: prepared.error.message });
+      return retryable(prepared.error);
+    }
+    deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+    if (!prepared.value.prepared)
+      return transitionTo(task, deps, orb, "running", {
+        stopReason: null,
+        reason: "idle_stop_declined_busy",
+      });
+  }
+
   // The controlled-shutdown pull barrier (docs/history-replication.md).
   const outcome = await pollOrbUntilCaughtUp(task, deps, orb.id);
   switch (outcome.type) {
     case "caught_up": {
       logOrbEvent(task, orb.id, "drain-caught-up", {
         records: outcome.committedRecords,
+        idle_stop_prepared: orb.stopReason === "idle" ? true : undefined,
         after_retrying: deps.control.getDrainStatus(orb.id)?.retrying === true ? true : undefined,
       });
       deps.control.setDrainStatus(orb.id, { retrying: false });
@@ -1868,6 +1896,35 @@ async function reconcileArchiving(
       if (observed.value.state !== "running" || observed.value.runtimeAddress === undefined) {
         return waiting("readiness");
       }
+      const baseUrl = observed.value.runtimeAddress.baseUrl;
+      const prepared = await withDeadline(
+        task,
+        deps.constants.runtimeRequestTimeoutMs,
+        "prepare archive admission fence",
+        (context) => deps.runtimeClient.prepareIdleStop(task, baseUrl, context),
+      );
+      if (prepared.isErr()) {
+        if ("answered" in prepared.error && prepared.error.answered === true)
+          deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+        const message = `archive admission fence: ${prepared.error.message}`;
+        if (intent.value.lastError !== message)
+          logOrbEvent(task, orb.id, "archive-admission-blocked", { message });
+        await deps.store.recordOrbDeletionError(task, {
+          orbId: orb.id,
+          message,
+          now: task.wallNow(),
+        });
+        return retryable(prepared.error);
+      }
+      deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
+      if (!prepared.value.prepared) {
+        if (deps.control.getDrainStatus(orb.id)?.retrying !== true)
+          logOrbEvent(task, orb.id, "archive-waiting-for-work", { host: orb.hostRef });
+        deps.control.setDrainStatus(orb.id, {
+          retrying: true,
+          message: "waiting for admitted work",
+        });
+      } else deps.control.setDrainStatus(orb.id, { retrying: false });
       const pulled = await pollOrbUntilCaughtUp(task, deps, orb.id);
       if (pulled.type === "retryable") return retryable(pulled);
       if (pulled.type === "integrity") {
@@ -1880,13 +1937,18 @@ async function reconcileArchiving(
         return retryable(message);
       }
       if (pulled.type === "orb_gone") return { type: "conflict" };
-      if (deps.control.getLiveness(orb.id)?.activity === "busy") {
-        return waiting("drain_blocked");
-      }
+      // Archival owns its own pulls, including while active work declines the fence.
+      if (!prepared.value.prepared) return waiting("drain_blocked");
     }
     const current = await deps.store.getOrb(task, orb.id);
     if (current.isErr()) return retryable(current.error);
     if (current.value === null || current.value.state !== "archiving") return { type: "conflict" };
+    // A prepared old compute cannot authorize sealing a concurrent replacement.
+    if (
+      current.value.hostRef !== orb.hostRef ||
+      current.value.hostIncarnation !== orb.hostIncarnation
+    )
+      return { type: "conflict" };
     const sealed = await deps.store.sealOrbArchive(task, {
       orbId: orb.id,
       expectedStateVersion: current.value.stateVersion,
@@ -1899,6 +1961,7 @@ async function reconcileArchiving(
         ? { type: "conflict" }
         : retryable(sealed.error);
     logOrbEvent(task, orb.id, "archive-history-sealed", {
+      admission_fenced: hasNeverBeenReady(orb) ? undefined : true,
       cursor: current.value.replicationCursor,
       head: current.value.replicatedHeadId,
     });

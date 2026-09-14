@@ -1,4 +1,5 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:os";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -66,6 +67,7 @@ export class NodeSupervisorPorts implements SupervisorPorts<RuntimeChild> {
   private readonly command: readonly [string, ...string[]];
   private readonly healthUrl: string;
   private readonly diagnostic: string;
+  private readonly supervisorId = randomUUID();
 
   constructor(options: NodeSupervisorOptions = {}) {
     this.command = options.command ?? RUNTIME;
@@ -86,7 +88,12 @@ export class NodeSupervisorPorts implements SupervisorPorts<RuntimeChild> {
   spawn(): ResultType<RuntimeChild, SupervisorError> {
     const [executable, ...args] = this.command;
     const spawned = Result.fromThrowable(
-      () => spawn(executable, args, { detached: true, stdio: "inherit" }),
+      () =>
+        spawn(executable, args, {
+          detached: true,
+          stdio: "inherit",
+          env: { ...process.env, PI_ORB_SUPERVISOR_ID: this.supervisorId },
+        }),
       (cause) => failure("spawn_failed", cause),
     )();
     if (spawned.isErr()) return err(spawned.error);

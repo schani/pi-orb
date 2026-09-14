@@ -54,6 +54,13 @@ export function createMcpExtension(deps: McpExtensionDeps): ExtensionFactory {
     pi.on("session_shutdown", async () => {
       await deps.tools.close();
     });
+    return createMcpToolExtension(deps)(pi);
+  };
+}
+
+/** Borrow the root-owned connections; a child must never close siblings' resources. */
+export function createMcpToolExtension(deps: McpExtensionDeps): ExtensionFactory {
+  return (pi) => {
     pi.registerTool({
       name: "mcp_search",
       label: "MCP search",

@@ -4,6 +4,7 @@ export type RequestResult = RequestResultFrame["result"];
 
 /** What the request gate can see of the agent at decision time. */
 export interface AgentGateView {
+  readonly acceptingWork: boolean;
   readonly activity: "idle" | "busy";
   readonly headId: string | null;
   readonly activeOperationId: string | null;
@@ -25,6 +26,13 @@ export type RequestDecision =
  * executor, so the view is consistent at decision time.
  */
 export function decideRequest(view: AgentGateView, action: ClientAction): RequestDecision {
+  if (!view.acceptingWork)
+    return {
+      type: "reject",
+      code: "busy",
+      message: "runtime is preparing to stop",
+      retryable: true,
+    };
   switch (action.type) {
     case "message": {
       if (view.activity === "busy") {

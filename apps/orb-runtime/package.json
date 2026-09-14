@@ -10,7 +10,7 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1",
     "@fastify/websocket": "^11.0.0",
-    "@gotgenes/pi-subagents": "file:../../vendor/gotgenes-pi-subagents-21.7.0-orb.1.tgz",
+    "@gotgenes/pi-subagents": "file:../../vendor/gotgenes-pi-subagents-21.7.0-orb.4.tgz",
     "@modelcontextprotocol/client": "2.0.0",
     "@pi-orb/luna": "*",
     "@pi-orb/mock-openai": "*",

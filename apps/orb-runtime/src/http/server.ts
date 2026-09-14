@@ -7,6 +7,7 @@ import {
   type ClientRequest,
   DeliverOrbMessageRequestSchema,
   HISTORY_PULL_DEFAULT_LIMIT,
+  PrepareIdleStopRequestSchema,
   type RequestResultFrame,
   RUNTIME_SUBPROTOCOL,
   type RuntimeHttpError,
@@ -51,6 +52,19 @@ export function buildRuntimeServer(
   const registry = new RequestRegistry();
 
   app.get("/v1/health", async (_request, reply) => reply.status(200).send(agent.getHealth()));
+
+  app.post("/v1/prepare-idle-stop", async (request, reply) => {
+    if (!Check(PrepareIdleStopRequestSchema, request.body))
+      return reply
+        .status(400)
+        .send(runtimeError("invalid_request", "invalid idle stop request", false));
+    const prepared = agent.prepareIdleStop();
+    if (prepared.isErr())
+      return reply
+        .status(503)
+        .send(runtimeError("idle_stop_unavailable", prepared.error.message, true));
+    return reply.status(200).send({ v: 1, prepared: prepared.value });
+  });
 
   app.get<{ Querystring: { after?: string; limit?: string } }>(
     "/v1/history",

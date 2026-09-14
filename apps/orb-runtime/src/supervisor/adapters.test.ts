@@ -1,5 +1,8 @@
 import type { ChildProcess, ExecFileException } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { NoSimulationTask } from "determined";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -49,6 +52,32 @@ afterEach(() => {
 });
 
 describe("runtime supervisor adapters", () => {
+  it("supplies a stable admission lifetime to runtime restarts without claiming sandbox-wide process death", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-orb-supervisor-lifetime-"));
+    const path = join(root, "lifetimes");
+    const command = [
+      process.execPath,
+      "-e",
+      `require('node:fs').appendFileSync(${JSON.stringify(path)}, String(process.env.PI_ORB_SUPERVISOR_ID) + '\\n')`,
+    ] as const;
+    const ports = new NodeSupervisorPorts({ command });
+    try {
+      for (const owner of [ports, ports, new NodeSupervisorPorts({ command })]) {
+        const spawned = owner.spawn();
+        children.push(spawned);
+        expect((await owner.wait(spawned._unsafeUnwrap()))._unsafeUnwrap()).toEqual({
+          type: "exit",
+          code: 0,
+        });
+      }
+      const ids = readFileSync(path, "utf8").trim().split("\n");
+      expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
+      expect(ids[1]).toBe(ids[0]);
+      expect(ids[2]).not.toBe(ids[0]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it.each([
     ["null", null],
     ["an array", []],

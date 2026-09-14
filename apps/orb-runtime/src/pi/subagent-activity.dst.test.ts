@@ -2,6 +2,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { RuntimeEvent } from "@pi-orb/protocol";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
+import { OUTBOUND_CLOSE_CODE_BACKPRESSURE, OutboundWriter } from "../domain/outbound.ts";
 import { decideRequest } from "../domain/requests.ts";
 import { runDst } from "../testkit/sim.ts";
 import { assertSubagentActivity } from "../testkit/subagent-contract.ts";
@@ -99,6 +100,58 @@ function fixture(promptResult?: Promise<void>) {
     },
   };
 }
+
+it("backpressure closes a slow peer without stranding child cleanup or changing the outcome", async () => {
+  await runDst({ name: "subagent-outbound-backpressure", iterations: 50 }, async (sim) => {
+    const h = fixture();
+    await h.agent.submitMessage([], "op");
+    const child = h.agent.admitSubagent("leaf")._unsafeUnwrap();
+    h.settle();
+    const closed: number[] = [];
+    const writer = new OutboundWriter(
+      {
+        bufferedAmount: 1,
+        send: () => {
+          throw new Error("blocked sink must not send");
+        },
+        close: (code) => {
+          closed.push(code);
+        },
+      },
+      { highWaterMark: 0, maxCriticalBufferedBytes: 1 },
+    );
+    const unsubscribe = h.agent.subscribe((frame) => writer.enqueue(frame));
+    let cancelledWhileBusy = false;
+    const result = await sim.runTasks([
+      {
+        name: "terminal",
+        f: async (task) => {
+          await task.checkpoint("child cleanup complete");
+          h.agent.releaseSubagent(child);
+        },
+      },
+      {
+        name: "abort",
+        f: async (task) => {
+          await task.checkpoint("abort races terminal and slow peer");
+          cancelledWhileBusy = h.agent.gateView().activity === "busy";
+          await h.agent.abortOperation();
+        },
+      },
+    ]);
+    unsubscribe();
+    expect(result.isOk()).toBe(true);
+    expect(closed).toEqual([OUTBOUND_CLOSE_CODE_BACKPRESSURE]);
+    assertSubagentActivity(h.agent, "idle", null);
+    expect(h.events.filter((event) => event.type === "operation_finished")).toEqual([
+      {
+        type: "operation_finished",
+        operationId: "op",
+        outcome: cancelledWhileBusy ? "aborted" : "completed",
+      },
+    ]);
+  });
+});
 
 it("does not publish successful completion after a terminal history failure, even on a duplicate release", async () => {
   const h = fixture();

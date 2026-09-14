@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ResultAsync } from "neverthrow";
+import { ok, ResultAsync } from "neverthrow";
 import { assertSubagentActivity } from "../../apps/orb-runtime/src/testkit/subagent-contract.ts";
 
 // Executable characterization test. Assertion exceptions are the test framework
@@ -53,10 +53,49 @@ let inboxDelivery;
 let brokerGrants = 0;
 let rejectChildRefresh = scenario === "credential-failure";
 const { PiOrbAgent } = useRuntime ? await import("../../apps/orb-runtime/src/pi/agent.ts") : {};
-const { createSubagentsExtension } = useRuntime
-  ? await import("../../apps/orb-runtime/src/pi/extensions/subagents.ts")
+const { createOrbExtensions } = useRuntime
+  ? await import("../../apps/orb-runtime/src/pi/extensions/index.ts")
   : {};
+const loadFailure = scenario === "mcp-load-failure";
+const mcpScenario =
+  scenario === "mcp" || scenario === "mcp-shutdown" || scenario === "mcp-profile" || loadFailure;
+const useMcpTool = mcpScenario && scenario !== "mcp-profile";
+const shutdownScenario = scenario === "shutdown-running" || scenario === "mcp-shutdown";
+let mcpClosed = 0;
+let mcp;
+if (mcpScenario) {
+  const { NoSimulationTask } = await import("determined");
+  const { McpTools } = await import("../../apps/orb-runtime/src/mcp/tools.ts");
+  const { McpConnection } = await import("../../apps/orb-runtime/src/mcp/service.ts");
+  const connection = new McpConnection(new NoSimulationTask("child-mcp-contract", false), {
+    connect: async () =>
+      ok({
+        perform: async (_task, operation, signal) => {
+          assert.equal(operation.method, "tools/call");
+          assert.equal(operation.name, "probe");
+          const aborted = () => note("tool:one:abort-observed");
+          signal.addEventListener("abort", aborted, { once: true });
+          note("tool:one:entered");
+          await childGates.get("one").promise;
+          signal.removeEventListener("abort", aborted);
+          note("tool:one:exited");
+          return ok({ verified: true });
+        },
+        close: async () => {
+          mcpClosed++;
+          return ok(undefined);
+        },
+      }),
+  });
+  mcp = {
+    configs: [{ name: "approved", description: "fixture", url: "https://unused.invalid" }],
+    tools: new McpTools(new Map([["approved", connection]])),
+  };
+}
 const root = process.env.FIXTURE_ROOT;
+// Embedded runtime cwd differs from its checkout. Profile/settings discovery
+// must use the explicitly supplied session cwd, as the browser E2E does.
+if (mcpScenario) process.chdir(fileURLToPath(new URL("../../", import.meta.url)));
 const agentDir = process.env.PI_CODING_AGENT_DIR;
 mkdirSync(join(agentDir, "agents"), { recursive: true });
 mkdirSync(join(agentDir, "extensions"), { recursive: true });
@@ -66,7 +105,7 @@ writeFileSync(
 );
 writeFileSync(
   join(agentDir, "agents", "probe.md"),
-  "---\nname: probe\ndescription: Deterministic liveness child\ntools: probe_gate\n---\nExecute the test task.\n",
+  `---\nname: probe\ndescription: Deterministic liveness child\ntools: ${useMcpTool ? "mcp_call" : "probe_gate"}\n---\nExecute the test task.\n`,
 );
 writeFileSync(
   join(agentDir, "settings.json"),
@@ -83,6 +122,7 @@ const runtime = useRuntime
       orbId: "fixture",
       repositoryUrl: "https://example.com/repo",
       workDir: root,
+      executionId: "fixture-host-execution",
       skillsDir: null,
       broker: null,
     })
@@ -226,7 +266,8 @@ function scriptedStream(model, context, options) {
     let message;
     if (child !== null) {
       const names = context.tools.map((tool) => tool.name);
-      assert.ok(names.includes("probe_gate"));
+      assert.ok(names.includes(useMcpTool ? "mcp_call" : "probe_gate"));
+      if (scenario === "mcp-profile") assert.equal(names.includes("mcp_call"), false);
       for (const rootOnly of [
         "launch_children",
         "resume_child",
@@ -239,7 +280,13 @@ function scriptedStream(model, context, options) {
       note(`model:child:${child}`);
       message =
         toolResults.length === 0 || (child === "two" && resumePhase && !resumeToolSent)
-          ? output(model, call("probe_gate", { label: child }), "toolUse")
+          ? output(
+              model,
+              useMcpTool
+                ? call("mcp_call", { server: "approved", tool: "probe" })
+                : call("probe_gate", { label: child }),
+              "toolUse",
+            )
           : output(model, text(`child ${child} finished`), "stop");
       if (resumePhase) resumeToolSent = true;
     } else if (
@@ -360,7 +407,7 @@ const loader = new DefaultResourceLoader({
   ...(useRuntime
     ? {
         extensionFactories: [
-          { name: "pi-orb:subagents", factory: createSubagentsExtension(runtime) },
+          ...createOrbExtensions({ cwd: root, subagents: runtime, mcp }),
           {
             name: "root-only-contract",
             factory: (pi) => {
@@ -438,7 +485,20 @@ if (runtime)
 service = globalThis[Symbol.for("pi-orb:liveness-fixture")].getService();
 assert.ok(service);
 assert.equal(service.hasRunning(), false);
-if (scenario === "spawn-failure" || scenario === "cancel-starting" || credentialScenario) {
+if (loadFailure) {
+  // The parent is already loaded; a newly discovered child resource collides
+  // with the approved inline MCP capability on the child's fresh reload.
+  writeFileSync(
+    join(agentDir, "extensions", "mcp-collision.ts"),
+    `export default pi => pi.registerTool({ name: "mcp_call", label: "collision", description: "collision", parameters: { type: "object", properties: {} }, async execute() { return { content: [{ type: "text", text: "COLLIDING_TOOL_EXECUTED" }], details: {} }; } });`,
+  );
+}
+if (
+  scenario === "spawn-failure" ||
+  scenario === "cancel-starting" ||
+  credentialScenario ||
+  loadFailure
+) {
   service.registerWorkspaceProvider({
     async prepare() {
       note("workspace:prepare-entered");
@@ -493,8 +553,15 @@ if (useRuntime)
       ),
     true,
   );
+if (mcpScenario && !loadFailure) {
+  await until(() => saw("tool:one:entered") || terminalRows.length > 0);
+  assert.equal(saw("tool:one:entered"), true, service.getRecord(ids.get("one"))?.error);
+}
 await waitEvent(
-  scenario === "spawn-failure" || scenario === "cancel-starting" || credentialScenario
+  scenario === "spawn-failure" ||
+    scenario === "cancel-starting" ||
+    credentialScenario ||
+    loadFailure
     ? "workspace:prepare-entered"
     : "tool:one:entered",
 );
@@ -533,7 +600,7 @@ if (scenario === "child-first") {
     assertSubagentActivity(runtime, "busy", "fixture-operation");
     note("assert:child-only-inbox-is-one-deduplicated-root-turn");
   }
-  if (scenario === "shutdown-running") {
+  if (shutdownScenario) {
     assert.ok(runtime);
     let returnedBeforeCleanup = false;
     shuttingDown = checked(
@@ -547,6 +614,10 @@ if (scenario === "child-first") {
     // Yield one event-loop boundary while the explicit cleanup gate stays shut.
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(returnedBeforeCleanup, false, "shutdown returned before child tool cleanup");
+    if (mcpScenario) {
+      assert.equal(mcpClosed, 0);
+      assert.equal(runtime.mayWakeSubagent(ids.get("one")), false);
+    }
     assert.equal(runtime.getHealth().activity, "busy");
   }
   if (scenario === "cancel-running") {
@@ -602,7 +673,8 @@ if (scenario === "child-first") {
     writeFileSync(path, JSON.stringify(auth));
     failureGate.resolve();
   }
-  if (scenario === "spawn-failure") failureGate.resolve();
+  if (loadFailure) childGates.get("one").resolve();
+  if (scenario === "spawn-failure" || loadFailure) failureGate.resolve();
   else childGates.get("one").resolve();
 }
 
@@ -613,10 +685,7 @@ if (scenario === "queued") {
   childGates.get("two").resolve();
 }
 const wholeAbort =
-  runtime &&
-  (scenario === "cancel-running" ||
-    scenario === "cancel-starting" ||
-    scenario === "shutdown-running");
+  runtime && (scenario === "cancel-running" || scenario === "cancel-starting" || shutdownScenario);
 if (scenario === "inbox-child-only") {
   await until(() => terminalRows.length === ids.size);
   assert.equal(terminalRows[0].parentIdle, false);
@@ -628,6 +697,13 @@ await until(() => terminalRows.length === ids.size);
 // The real extension wakes the parent even for explicit cancellation.
 if (scenario === "cancel-running") note("assert:cancel-completion-wakes-parent");
 if (!wholeAbort) assert.equal(bridgeBusy, true);
+if (loadFailure) {
+  assert.equal(service.getRecord(ids.get("one")).status, "error");
+  assert.match(service.getRecord(ids.get("one")).error, /conflicts/);
+  assert.equal(saw("model:child:one"), false);
+  assert.equal(saw("tool:one:entered"), false);
+  note("assert:child-resource-collision-fails-before-inference");
+}
 if (scenario === "spawn-failure") {
   assert.equal(service.getRecord(ids.get("one")).status, "error");
   assert.match(service.getRecord(ids.get("one")).error, /injected workspace/);
@@ -680,7 +756,9 @@ if (useRuntime) {
     await waitEvent("summary:called");
     assert.equal(summaryInputs.length, 1);
     const status =
-      scenario === "spawn-failure" || scenario === "credential-failure" ? "error" : "completed";
+      scenario === "spawn-failure" || scenario === "credential-failure" || loadFailure
+        ? "error"
+        : "completed";
     assert.equal(
       summaryInputs[0].includes(`[subagent ${status}] one`),
       true,
@@ -732,11 +810,28 @@ if (scenario === "resume-cancel") {
   note("assert:explicit-resume-owns-fresh-cancellation-and-operation");
 }
 
+if (scenario === "idle-stop") {
+  assert.equal(runtime.prepareIdleStop()._unsafeUnwrap(), true);
+  assert.equal(runtime.admitSubagent("too-late").isErr(), true);
+  assert.equal((await runtime.submitMessage([], "too-late")).isErr(), true);
+  const before = trace.filter((row) => row.event.startsWith("model:")).length;
+  // Even an extension bypassing the HTTP gate must not start inference once
+  // the host has received permission to stop this idle runtime.
+  await checked(session.sendUserMessage([{ type: "text", text: "LATE_EXTENSION_PROMPT" }]));
+  assert.equal(trace.filter((row) => row.event.startsWith("model:")).length, before);
+  note("assert:idle-stop-fences-sdk-root-and-child-admission");
+}
+
 // Invoke the public extension runner's shutdown lifecycle before dispose, as
 // Pi's host does. This closes gotgenes's retention interval and child sessions.
+if (mcpScenario && !shuttingDown) assert.equal(mcpClosed, 0);
 if (shuttingDown) {
   await shuttingDown;
   note("assert:shutdown-awaits-child-cleanup");
 } else await checked(session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }));
+if (mcpScenario) {
+  assert.equal(mcpClosed, useMcpTool && !loadFailure ? 1 : 0);
+  note("assert:child-mcp-borrows-approved-root-service");
+}
 session.dispose();
 note("PASS", { scenario });

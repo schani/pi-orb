@@ -55,6 +55,7 @@ import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
 import { settleBootPrerequisites } from "./boot-prerequisites.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
+import { FileIdleStopFence, type IdleStopFence } from "./idle-stop-fence.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
@@ -84,6 +85,7 @@ export interface PiOrbAgentOptions {
   readonly incarnation?: string;
   /** Test seam; production reads the host/container execution identity at boot. */
   readonly executionId?: string | null;
+  readonly idleStopFence?: IdleStopFence;
   /** Test seam; production spawns the repository's boot hooks with `NodeHookSpawner`. */
   readonly hookSpawner?: HookSpawner;
   /** Test seam; production creates the Luna adapter from the orb's existing ModelRuntime. */
@@ -185,6 +187,9 @@ export class PiOrbAgent {
   private liveHistory: LiveHistoryPublisher | null = null;
   private checkoutCommit = "";
   private executionId: string | null = null;
+  private supervisorId: string | null = null;
+  private idleStopPrepared = false;
+  private readonly idleStopFence: IdleStopFence;
   private activity: "idle" | "busy" = "idle";
   /** This boot's interrupted-turn decision, when notable (docs/lifecycle.md). */
   private turnResume: RuntimeTurnResume | null = null;
@@ -225,6 +230,7 @@ export class PiOrbAgent {
 
   constructor(options: PiOrbAgentOptions) {
     this.options = options;
+    this.idleStopFence = options.idleStopFence ?? new FileIdleStopFence(options.workDir);
     this.health = this.initializing("booting");
   }
 
@@ -324,6 +330,9 @@ export class PiOrbAgent {
     if (identity.isErr())
       return err(this.failed("session_init_failed", identity.error.message, true));
     this.executionId = identity.value;
+    this.supervisorId = process.env["PI_ORB_SUPERVISOR_ID"] ?? null;
+    const fence = this.restoreIdleStopFence();
+    if (fence.isErr()) return err(this.failed("session_init_failed", fence.error.message, true));
     if (this.options.testLaunchFailure === true) {
       return err(
         this.failed(
@@ -790,6 +799,12 @@ export class PiOrbAgent {
       this.health = this.failed("session_init_failed", loaded.error.message, true);
       return;
     }
+    const fence = this.restoreIdleStopFence();
+    if (fence.isErr()) {
+      this.health = this.failed("session_init_failed", fence.error.message, true);
+      return;
+    }
+    if (fence.value) return;
     const plan = planBootNotification(loaded.value.entries, loaded.value.context, identity);
     if (plan.kind === "none") return;
     if (plan.kind === "baseline") {
@@ -870,6 +885,18 @@ export class PiOrbAgent {
 
     switch (event.type) {
       case "agent_start": {
+        if (this.idleStopPrepared) {
+          const session = this.session;
+          if (session !== null)
+            void ResultAsync.fromThrowable(
+              () => session.abort(),
+              (cause) => ({ message: String(cause) }),
+            )().mapErr((error) => {
+              this.health = this.failed("idle_stop_fence_failed", error.message, true);
+              return error;
+            });
+          break;
+        }
         // A submitted turn claimed its operation synchronously at acceptance,
         // and Pi re-emits agent_start for continuations inside the same run
         // (auto-retry, auto-compaction): neither may restart the operation or
@@ -1033,7 +1060,12 @@ export class PiOrbAgent {
 
   /** Public adapter seam: reserve before the extension can yield into child work. */
   admitSubagent(childId: string): Result<SubagentRun, SubagentError> {
-    if (this.operationOutcome === "aborted" || this.operationKind === "shell")
+    if (
+      this.health.status !== "ready" ||
+      this.idleStopPrepared ||
+      this.operationOutcome === "aborted" ||
+      this.operationKind === "shell"
+    )
       return err({
         type: "subagent_admission_rejected",
         message: "The current operation is not accepting subagents",
@@ -1061,7 +1093,9 @@ export class PiOrbAgent {
 
   mayWakeSubagent(childId: string): boolean {
     const allowed =
-      this.operationOutcome !== "aborted" && this.subagentWork.mayWake(childId, this.operationId);
+      !this.idleStopPrepared &&
+      this.operationOutcome !== "aborted" &&
+      this.subagentWork.mayWake(childId, this.operationId);
     if (!allowed) {
       // Withheld notifications can reach delivery after execution cleanup;
       // correlation outlives the active hold so their veto is still durable.
@@ -1221,8 +1255,66 @@ export class PiOrbAgent {
     });
   }
 
+  private restoreIdleStopFence(): Result<boolean, { message: string }> {
+    const lifetimeId = this.admissionLifetime();
+    if (lifetimeId === null) return ok(false);
+    return this.idleStopFence
+      .read()
+      .map((saved) => {
+        this.idleStopPrepared = saved === lifetimeId;
+        return this.idleStopPrepared;
+      })
+      .mapErr((error) => {
+        this.idleStopPrepared = true;
+        return error;
+      });
+  }
+
+  private admissionLifetime(): string | null {
+    const executionId =
+      this.options.executionId === undefined ? this.executionId : this.options.executionId;
+    if (executionId !== null) return `host:${executionId}`;
+    return this.supervisorId === null ? null : `supervisor:${this.supervisorId}`;
+  }
+
+  /** Claim an idle runtime before the control plane drains and stops its host.
+   * The execution-scoped fact survives supervisor restarts, but not a new host boot.
+   */
+  prepareIdleStop(): Result<boolean, { message: string }> {
+    if (this.health.status === "failed") return err({ message: this.health.error.message });
+    if (this.health.status !== "ready" || this.sessionManager === null)
+      return err({ message: "session is not ready" });
+    if (this.idleStopPrepared) return ok(true);
+    if (this.activity === "busy") return ok(false);
+    const lifetimeId = this.admissionLifetime();
+    if (lifetimeId === null) return err({ message: "admission lifetime is unavailable" });
+    // A failed append may have committed. Never reopen admission on an
+    // uncertain persistence outcome; health exposes the failure instead.
+    this.idleStopPrepared = true;
+    const persisted = this.idleStopFence.write(lifetimeId);
+    if (persisted.isErr()) {
+      this.health = this.failed("session_init_failed", persisted.error.message, true);
+      return err(persisted.error);
+    }
+    const saved = Result.fromThrowable(
+      () =>
+        this.sessionManager?.appendCustomEntry("pi-orb.idle-stop-prepared", {
+          lifetimeId,
+          runtimeInstanceId: this.runtimeInstanceId,
+        }),
+      (cause) => ({ message: String(cause) }),
+    )();
+    if (saved.isErr()) {
+      this.health = this.failed("session_init_failed", saved.error.message, true);
+      return err(saved.error);
+    }
+    this.liveHistory?.observe("message_end");
+    return ok(true);
+  }
+
   gateView(): AgentGateView {
     return {
+      acceptingWork: !this.idleStopPrepared,
       activity: this.activity,
       headId: this.sessionManager?.getLeafId() ?? null,
       activeOperationId: this.operationId,
@@ -1305,7 +1397,12 @@ export class PiOrbAgent {
   ): ResultAsync<DeliverOrbMessageResponse, { message: string; retryable: boolean }> {
     const session = this.session;
     const manager = this.sessionManager;
-    if (session === null || manager === null || this.health.status !== "ready") {
+    if (
+      this.idleStopPrepared ||
+      session === null ||
+      manager === null ||
+      this.health.status !== "ready"
+    ) {
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
         err({ message: "session is not ready", retryable: true }),
       );
@@ -1411,9 +1508,9 @@ export class PiOrbAgent {
     operationId: string,
   ): ResultAsync<void, { message: string }> {
     const session = this.session;
-    if (session === null) {
+    if (this.idleStopPrepared || session === null) {
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
-        err({ message: "session is not ready" }),
+        err({ message: "session is not accepting work" }),
       );
     }
     this.startAgentOperation(operationId, this.sessionManager?.getEntries().length ?? null);
@@ -1442,9 +1539,9 @@ export class PiOrbAgent {
     operationId: string,
   ): ResultAsync<void, { message: string }> {
     const session = this.session;
-    if (session === null) {
+    if (this.idleStopPrepared || session === null) {
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
-        err({ message: "session is not ready" }),
+        err({ message: "session is not accepting work" }),
       );
     }
 

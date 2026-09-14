@@ -5,7 +5,12 @@ import { source } from "../testkit/hosting.ts";
 import { runDst, waitUntil } from "../testkit/sim.ts";
 import { ControlState } from "./control-state.ts";
 import { publishHostedFile } from "./hosting.ts";
-import { requestOrbArchive, requestOrbDeletion, requestOrbStart } from "./lifecycle.ts";
+import {
+  reconcileOrbOnce,
+  requestOrbArchive,
+  requestOrbDeletion,
+  requestOrbStart,
+} from "./lifecycle.ts";
 import { reconcileLoop } from "./loops.ts";
 
 const ORB = "orb-archive";
@@ -162,6 +167,44 @@ describe("orb archival (DST)", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.store.replicaRecords(ORB).map((record) => record.id)).toEqual(expected);
       expect(harness.world.filesystemExists(ORB)).toBe(false);
+    });
+  });
+
+  it("does not use an old compute's preparation to seal a replacement", async () => {
+    await runDst({ name: "archive-fence-compute-replacement", iterations: 1 }, async (sim) => {
+      const h = makeHarness();
+      let replaced = false;
+      const deps = h.deps;
+      const pull = deps.runtimeClient.pullHistory.bind(deps.runtimeClient);
+      deps.runtimeClient.pullHistory = (...args) =>
+        pull(...args).map((value) => {
+          if (!replaced && value.records.length === 0) {
+            replaced = true;
+            const orb = h.store.orbSnapshot(ORB);
+            if (orb !== null)
+              h.store.seedOrb({
+                ...orb,
+                hostRef: "replacement",
+                hostIncarnation: orb.hostIncarnation + 1,
+                stateVersion: orb.stateVersion + 1,
+              });
+          }
+          return value;
+        });
+      const result = await sim.runTasks([
+        {
+          name: "archive",
+          f: async (task) => {
+            seedRunningOrb(task, h, ORB);
+            h.world.appendMessage(ORB, "retained session");
+            expect((await requestOrbArchive(task, deps, ORB)).isOk()).toBe(true);
+            await reconcileOrbOnce(task, deps, ORB);
+            expect(replaced).toBe(true);
+            expect(h.store.deletionSnapshot(ORB)?.historySealedAt).toBeNull();
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
     });
   });
 

@@ -6,6 +6,7 @@ import { okAsync } from "neverthrow";
 import { afterEach, expect, it } from "vitest";
 import { PiOrbAgent, type PiSession } from "./agent.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
+import { interruptedSubagents } from "./subagent-recovery.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -105,6 +106,175 @@ it("persists a visible, model-visible user-role notice and deduplicates after re
     }).kind,
   ).toBe("none");
 });
+
+it.each([false, true])(
+  "recovers child interruption across notification append/ack loss (committed=%s)",
+  async (committed) => {
+    const { agent, manager, root } = fixture();
+    manager.appendCustomEntry("pi-orb.subagent-run", {
+      childId: "lost-leaf",
+      operationId: "old-op",
+      phase: "admitted",
+    });
+    let failureSaved = (): void => {};
+    const failed = new Promise<void>((resolve) => {
+      failureSaved = resolve;
+    });
+    const append = manager.appendCustomMessageEntry.bind(manager);
+    manager.appendCustomMessageEntry = (...args) => {
+      const id = append(...args);
+      if (args[0] === "pi-orb.restart-notification-failed") failureSaved();
+      return id;
+    };
+    const pi = {
+      isIdle: true,
+      subscribe: () => () => undefined,
+      sendCustomMessage: (message: {
+        customType: string;
+        content: string;
+        display: boolean;
+        details: unknown;
+      }) => {
+        if (committed)
+          append(message.customType, message.content, message.display, message.details);
+        return Promise.reject(
+          new Error(committed ? "injected acknowledgement loss" : "injected append failure"),
+        );
+      },
+    } as unknown as PiSession;
+    agent.attachSession(pi, manager, { summarize: () => okAsync("") });
+    await failed;
+    expect(agent.getHealth()).toMatchObject({
+      status: "ready",
+      turnResume: { outcome: "resume_failed" },
+    });
+    const reopened = SessionManager.open(manager.getSessionFile() as string);
+    expect(interruptedSubagents(reopened.getEntries())).toEqual(
+      committed ? [] : [{ childId: "lost-leaf", operationId: "old-op" }],
+    );
+    const next = new PiOrbAgent({
+      skillsDir: null,
+      orbId: "boot-test",
+      repositoryUrl: "https://example.com/repo",
+      workDir: root,
+      broker: null,
+      executionId: "third-host",
+    });
+    let turns = 0;
+    next.attachSession(
+      {
+        ...pi,
+        sendCustomMessage: (message, options) => {
+          if (options?.triggerTurn) turns++;
+          reopened.appendCustomMessageEntry(
+            message.customType,
+            message.content,
+            message.display,
+            message.details,
+          );
+          return Promise.resolve();
+        },
+      },
+      reopened,
+      { summarize: () => okAsync("") },
+    );
+    expect(interruptedSubagents(reopened.getEntries())).toEqual([]);
+    // A failed append leaves the ordinary root restart notification unclaimed;
+    // a committed notice must not trigger that root turn again after ack loss.
+    expect(turns).toBe(committed ? 0 : 1);
+    const acknowledgements = reopened
+      .getEntries()
+      .filter(
+        (entry) =>
+          entry.type === "custom_message" &&
+          (entry.details as { interruptedSubagents?: unknown[] } | undefined)?.interruptedSubagents
+            ?.length,
+      );
+    expect(acknowledgements).toHaveLength(1);
+  },
+);
+
+it("keeps idle-stop admission fenced across runtime restart, reopening only on a new host execution", async () => {
+  const { agent, manager, root } = fixture();
+  manager.appendCustomEntry(BOOT_BASELINE_TYPE, {
+    runtimeInstanceId: agent.runtimeInstanceId,
+    executionId: "new-host",
+    incarnation: "0",
+  });
+  const pi = { isIdle: true, subscribe: () => () => undefined } as unknown as PiSession;
+  agent.attachSession(pi, manager, { summarize: () => okAsync("") });
+  expect(agent.prepareIdleStop()._unsafeUnwrap()).toBe(true);
+  expect(agent.prepareIdleStop()._unsafeUnwrap()).toBe(true);
+  expect((await agent.submitMessage([], "late")).isErr()).toBe(true);
+  expect((await agent.submitShell("echo forbidden", false, "late-shell")).isErr()).toBe(true);
+  expect((await agent.deliverInboxMessage("late-inbox", ["late-inbox"], [])).isErr()).toBe(true);
+  expect(agent.admitSubagent("late-child").isErr()).toBe(true);
+  const path = manager.getSessionFile() as string;
+  expect(
+    SessionManager.open(path)
+      .getEntries()
+      .filter(
+        (entry) => entry.type === "custom" && entry.customType === "pi-orb.idle-stop-prepared",
+      ),
+  ).toHaveLength(1);
+  for (const executionId of ["new-host", "next-host"]) {
+    const reopened = SessionManager.open(path);
+    const next = new PiOrbAgent({
+      skillsDir: null,
+      orbId: "boot-test",
+      repositoryUrl: "https://example.com/repo",
+      workDir: root,
+      broker: null,
+      executionId,
+    });
+    let notices = 0;
+    next.attachSession(
+      {
+        ...pi,
+        sendCustomMessage: (message) => {
+          notices++;
+          reopened.appendCustomMessageEntry(
+            message.customType,
+            message.content,
+            message.display,
+            message.details,
+          );
+          return Promise.resolve();
+        },
+      },
+      reopened,
+      { summarize: () => okAsync("") },
+    );
+    expect(next.gateView().acceptingWork).toBe(executionId === "next-host");
+    expect(notices).toBe(executionId === "next-host" ? 1 : 0);
+  }
+});
+
+it.each([false, true])(
+  "fails idle-stop admission closed on uncertain fence persistence (committed=%s)",
+  (committed) => {
+    const { agent, manager } = fixture();
+    manager.appendCustomEntry(BOOT_BASELINE_TYPE, {
+      runtimeInstanceId: agent.runtimeInstanceId,
+      executionId: "new-host",
+      incarnation: "0",
+    });
+    agent.attachSession(
+      { isIdle: true, subscribe: () => () => undefined } as unknown as PiSession,
+      manager,
+      { summarize: () => okAsync("") },
+    );
+    expect(agent.gateView().activity).toBe("idle");
+    const append = manager.appendCustomEntry.bind(manager);
+    manager.appendCustomEntry = (...args) => {
+      if (committed) append(...args);
+      throw new Error("injected idle-stop fence persistence failure");
+    };
+    expect(agent.prepareIdleStop().isErr()).toBe(true);
+    expect(agent.gateView().acceptingWork).toBe(false);
+    expect(agent.getHealth()).toMatchObject({ status: "failed" });
+  },
+);
 
 it("reports a typed initialization failure when session context cannot be read", () => {
   const { agent, manager } = fixture();

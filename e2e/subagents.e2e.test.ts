@@ -18,12 +18,12 @@ import {
   waitFor,
 } from "./harness.ts";
 
-it("keeps delegated work busy, drains or aborts, and reports crash interruption once without replay or child replication", async () => {
+it("keeps delegated work busy through abort, crash recovery and active-child archival without private replication", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-subagents-e2e-"));
-  for (const i of [0, 1, 2])
+  for (const i of [0, 1, 2, 3])
     for (const gate of ["ready", "release"]) execFileSync("mkfifo", [join(root, `${gate}-${i}`)]);
   const stop = { type: "stop", status: "completed" };
-  const rules = [0, 1, 2].flatMap((i) => [
+  const rulesFor = (i: number) => [
     {
       match: { userMessage: { regex: `^SUBAGENT_E2E_${i}$` } },
       steps: [
@@ -102,7 +102,8 @@ it("keeps delegated work busy, drains or aborts, and reports crash interruption 
           },
         ]
       : []),
-  ]);
+  ];
+  const rules = [0, 1, 2].flatMap(rulesFor);
   rules.push(
     {
       match: { userMessage: { regex: "Local subagent runs .* were interrupted" } },
@@ -111,6 +112,23 @@ it("keeps delegated work busy, drains or aborts, and reports crash interruption 
     {
       match: { userMessage: { regex: "^The agent runtime was restarted" } },
       steps: [{ type: "text", content: "SECOND_RESTART_COMPLETE" }, stop],
+    },
+    {
+      match: { userMessage: { regex: "^The agent runtime was restarted" } },
+      steps: [{ type: "text", content: "THIRD_RESTART_COMPLETE" }, stop],
+    },
+    ...rulesFor(3),
+    {
+      match: { toolResultContains: { regex: "CHILD_DONE_3" } },
+      steps: [{ type: "text", content: "ARCHIVE_LEAF_FINISHED" }, stop],
+    },
+    {
+      match: { userMessage: { regex: "task-notification" } },
+      steps: [{ type: "text", content: "ARCHIVE_DELEGATION_COMPLETE" }, stop],
+    },
+    {
+      match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+      steps: [{ type: "text", content: "Completed archived delegation." }, stop],
     },
   );
   const fake = await createFakeSession(`subagents-${randomUUID()}`, {
@@ -332,7 +350,56 @@ it("keeps delegated work busy, drains or aborts, and reports crash interruption 
     );
     expect(replicated).toContain("interruptedSubagents");
     expect(replicated).not.toContain("PRIVATE_CHILD_TRANSCRIPT_ONLY");
+    // Resume the retained workspace, then archive with an actually blocked child.
+    expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/start`)).status).toBe(202);
+    await waitFor(
+      "resume before active archive",
+      async () =>
+        (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["state"] === "running"
+          ? true
+          : null,
+      { timeoutMs: 300_000 },
+    );
+    await page.reload();
+    await expectPage(page.getByText("THIRD_RESTART_COMPLETE", { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    expect(
+      (
+        await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
+          content: [{ type: "text", text: "SUBAGENT_E2E_3" }],
+        })
+      ).status,
+    ).toBe(202);
+    await expectPage(page.getByText("PARENT_SETTLED_3", { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    await expectPage(page.locator(".orb-life")).toContainText("busy", { timeout: 30_000 });
+    const archiveChildId = rootEntries()
+      .filter(
+        (entry) =>
+          entry.customType === "pi-orb.subagent-run" && entry.data?.["phase"] === "admitted",
+      )
+      .at(-1)?.data?.["childId"];
+    expect(typeof archiveChildId).toBe("string");
     expect((await api(cp.baseUrl, "POST", `/api/v1/orbs/${orb}/archive`)).status).toBe(202);
+    await waitFor(
+      "archive explicitly declines preparation while the child owns work",
+      async () =>
+        cp.logs.join("").includes(`lifecycle: orb=${orb} archive-waiting-for-work`) ? true : null,
+      { timeoutMs: 60_000 },
+    );
+    expect(cp.logs.join("")).not.toContain(`lifecycle: orb=${orb} archive-history-sealed`);
+    expect(existsSync(workspace)).toBe(true);
+    expect(
+      rootEntries().some(
+        (entry) =>
+          entry.customType === "subagents:record" &&
+          entry.data?.["id"] === archiveChildId &&
+          entry.data?.["status"] === "completed",
+      ),
+    ).toBe(false);
+    await writeFile(`${root}/release-3`, "release\n");
     await waitFor(
       "archive seals root history and removes child workspace",
       async () =>
@@ -344,6 +411,21 @@ it("keeps delegated work busy, drains or aborts, and reports crash interruption 
       { timeoutMs: DEFAULT_LIFECYCLE_CONSTANTS.deletionQuarantineMs + 60_000 },
     );
     expect(existsSync(workspace)).toBe(false);
+    const archivedHistory = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body;
+    const archivedRecords = archivedHistory["records"] as {
+      overflow?: { native?: { customType?: string; data?: Record<string, unknown> } };
+    }[];
+    expect(
+      archivedRecords.filter(
+        (record) =>
+          record.overflow?.native?.customType === "subagents:record" &&
+          record.overflow.native.data?.["id"] === archiveChildId &&
+          record.overflow.native.data?.["status"] === "completed",
+      ),
+    ).toHaveLength(1);
+    expect(JSON.stringify(archivedHistory)).toContain("idle-stop-prepared");
+    expect(JSON.stringify(archivedHistory)).toContain("ARCHIVE_DELEGATION_COMPLETE");
+    expect(JSON.stringify(archivedHistory)).not.toContain("PRIVATE_CHILD_TRANSCRIPT_ONLY");
     expect(
       JSON.stringify((await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body),
     ).toContain("interruptedSubagents");

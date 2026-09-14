@@ -20,6 +20,11 @@ const scenarios = [
         "credential-failure",
         "shutdown-running",
         "inbox-child-only",
+        "mcp",
+        "mcp-shutdown",
+        "mcp-profile",
+        "idle-stop",
+        "mcp-load-failure",
       ]
     : []),
 ];

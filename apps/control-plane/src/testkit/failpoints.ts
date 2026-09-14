@@ -20,6 +20,7 @@ export const FAILPOINTS = {
   providerDestroy: "provider.destroy",
   providerObserve: "provider.observe",
   runtimeHealth: "runtime.health",
+  runtimePrepareIdleStop: "runtime.prepareIdleStop",
   runtimePull: "runtime.pull",
   /** Inbox delivery, which fails on its own axis from readiness health checks. */
   runtimeDeliverMessage: "runtime.deliver_message",

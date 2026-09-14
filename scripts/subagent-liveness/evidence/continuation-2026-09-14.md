@@ -37,4 +37,6 @@ No deployment. Main integration checkpoint `dd90350` and merge `48718af` are on 
 - Docker runtime image from the merged run: `sha256:4472a821d32e8e27516f3092679ce825ed57874590ce7debd5ef47dc20e04d1c`; vendored artifact integrity was rechecked unchanged after validation.
 - Merged full Docker/PostgreSQL/browser E2E: **105 passed / 1 failed** (10 files); the failure is the native WebKit crash above. Subagent crash/recovery/archive, all 55 PostgreSQL contracts, Docker full-slice and interrupted-turn recovery pass. This is **not** a clean release gate. The 20 isolated diagnostic probe successes are recorded as diagnostics only.
 
+Later MCP/resource, admission-fence and destructive-boundary qualification is recorded in `scripts/subagent-liveness/evidence/final-qualification-2026-09-14.md`; it supersedes the corresponding coverage gaps below, not the unresolved native WebKit failure.
+
 Raw local command logs are under `.context/subagents-continuation/` (ignored). Selected sanitized reproductions are copied beside this index. Remaining acceptance obligations are only in `TODO.md`: in particular, ordinary discovered tools/root-hook exclusion do not establish approved child MCP access, and active-child archival DST does not establish all browser/provider destructive races. Native/cloud and everyday-use qualification are not claimed.

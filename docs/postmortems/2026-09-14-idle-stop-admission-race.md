@@ -1,0 +1,31 @@
+# Idle-stop and archival admission races found in qualification
+
+**2026-09-14; deterministic validation finding, not a deployed incident.**
+
+A forced composed schedule admitted a real runtime child after the control plane entered `stopping` for idle. The final history pull saw that child as busy and retained its admission record, but `reconcileStopping()` stopped the host anyway: its drain barrier checked replica completeness, not authority to stop newly admitted work.
+
+The first trace is `scripts/subagent-liveness/evidence/final-idle-stop-first.json` (original `test-failures/subagent-final-idle-stop-admission-1789396123564-0.json`). It was replayed before modification and reproduced `expected stopped to be running`. The original trace remains retained. The regression now tests both sides of admission rather than requiring acceptance after a fence: work admitted before the fence survives; work arriving after it is rejected without execution. Preparation acknowledgement loss is forced too.
+
+## Decision
+
+Use an explicit runtime admission barrier before the final drain. Busy declines revoke the idle-stop attempt through a durable transition back to `running`. Accepted preparation closes all first-party work admission, plus SDK-originated root starts, while retaining read-only health/history access. Only then may the existing drain and host stop proceed. Explicit Stop remains authoritative over busy/uncooperative work.
+
+**Rejected:** checking activity once more after the drain. A delayed response or admission after that snapshot recreates the same gap. **Rejected:** reopening admission when preparation times out or persistence reports an error. Either operation may already have committed.
+
+The private `.idle-stop-fence` lifetime record survives runtime-only restart; a root `pi-orb.idle-stop-prepared` fact is its history audit, not the authoritative fence. **Additional finding:** Pi deliberately does not flush a session until its first assistant message, so a root-fact-only fence disappears on an unused orb's runtime restart. A tiny atomic-replace file behind an injected persistence port removes that dependency; the control-plane drain edge records preparation even when there is no flushed root history. Dedicated Docker/native guests use execution identity; unsandboxed process hosts use a supervisor identifier without changing conservative restart wording. Native bootstrap must explicitly declare its dedicated PID-1 boundary. A new lifetime opens admission again. Failed fence persistence keeps admission closed and reports failed readiness; preparation errors are edge-logged by the control plane.
+
+The installed-SDK counterexample also proved that HTTP gating alone is insufficient: a raw extension-triggered root prompt still reached inference after preparation. The `agent_start` guard now aborts that path before provider invocation. The regression failed with six model checkpoints instead of five, then passed with no additional model invocation.
+
+## Archival findings
+
+The same final-snapshot hole existed in archival: a child admitted after the last empty/idle response could lose its workspace while still busy. The initial `subagent-archive-final-admission` trace (`1789401937662-0`) and explicit replay both reproduced workspace absence. `scripts/subagent-liveness/evidence/final-archive-first.json` preserves that failure. Archival now uses the same preparation endpoint before its final drain; busy declines keep the intent pending, rather than cancelling archival. The edge `archive-waiting-for-work` makes that decision reconstructable without logging every poll. Preparation errors use the existing cleanup error surface; the seal edge records `admission_fenced:true`.
+
+A separate forced replacement after the final response showed `reconcileArchiving()` adopting the new row and sealing it with the old compute's permission. Trace `archive-fence-compute-replacement-1789403156477-0.json` was explicitly replayed before repair and is retained as `scripts/subagent-liveness/evidence/archive-compute-first.json`. Sealing now requires the prepared host reference/incarnation to remain current, then uses the existing state-version CAS. Earlier missing-import and class-method-spread failures in that new fixture were setup defects, not the product counterexample.
+
+The first archival repair returned immediately on a busy decline. That broke the existing self-archive contract: the ordinary poll loop does not own archiving orbs, so the reconciler must continue pulling while work remains. Both recorded `self-archive-busy-turn` failures were replayed. Adding an ordinary poller could not supply those pulls; the repair keeps archival's own pull before returning `drain_blocked`, without weakening the original busy/history assertions.
+
+The active-child browser case then exposed missing process-provider lifetime wiring. That provider launches/supervises the runtime directly, not through `NodeSupervisorPorts`; after the child completed, preparation returned `admission lifetime is unavailable` and correctly blocked destruction. A failing provider env regression preceded the repair. Its private metadata now carries a supervisor ID across crash relaunch/provider recovery, rotating only on stopped-to-running intent; dedicated guest execution identity remains separate. Provider contracts cover both lifetime boundaries. The browser fixture's earlier ordered-rule error was separate: each restart/delegation needs its own rule in execution order.
+
+## Qualification
+
+Composed DST, real-file restart/persistence contracts, HTTP/client-schema tests and an installed-SDK schedule cover the new boundary. The protocol is documented in `docs/runtime-protocol.md`. Remaining release gates are tracked only in `TODO.md`; this finding does not clear the separate native WebKit crash or authorize deployment.

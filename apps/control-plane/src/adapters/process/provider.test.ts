@@ -43,6 +43,7 @@ writeFileSync(process.env.OBSERVED_ENV_FILE, JSON.stringify({
   repositoryUrl: process.env.PI_ORB_REPOSITORY_URL,
   incarnation: process.env.PI_ORB_HOST_INCARNATION,
   container: process.env.PI_ORB_CONTAINER,
+  supervisorId: process.env.PI_ORB_SUPERVISOR_ID,
   workDir: process.env.PI_ORB_WORK_DIR,
   home: process.env.HOME,
   controlPlaneUrl: process.env.PI_ORB_CONTROL_PLANE_URL,
@@ -150,6 +151,7 @@ describe("ProcessOrbHostProvider", () => {
     expect(values.repositoryUrl).toBe(request.bootstrap.repositoryUrl);
     expect(values.incarnation).toBe(String(request.incarnation));
     expect(values.container).toBe("0");
+    expect(values.supervisorId).toMatch(/^[a-f0-9]{64}$/);
     expect(values.controlPlaneUrl).toBe("http://127.0.0.1:7100");
     expect(values.skillsDir).toBe("/opt/pi-orb/test-skills");
     const expectedWorkDir = join(root, "configured-state", request.orbId, "workspace");
@@ -234,6 +236,7 @@ describe("ProcessOrbHostProvider", () => {
         repositoryUrl: request.bootstrap.repositoryUrl,
         runtimeToken: "legacy-token",
         port: 43210,
+        supervisorId: "a".repeat(64),
         desiredState: "stopped",
       })}\n`,
     );
@@ -338,7 +341,7 @@ describe("ProcessOrbHostProvider", () => {
 
   it("retains token and workspace metadata across stop and start", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
-    const { provider } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
+    const { provider, root } = makeProvider({ OBSERVED_ENV_FILE: observedEnv });
     const first = await provider.provision(task, request, context);
     expect(first.isOk()).toBe(true);
     if (first.isErr()) return;
@@ -350,6 +353,7 @@ describe("ProcessOrbHostProvider", () => {
       }
     });
 
+    const firstLifetime = JSON.parse(readFileSync(observedEnv, "utf8")).supervisorId;
     expect((await provider.stop(task, first.value.ref, context)).isOk()).toBe(true);
     const stopped = await provider.observe(task, first.value.ref, context);
     expect(stopped.isOk() && stopped.value?.state).toBe("stopped");
@@ -368,6 +372,10 @@ describe("ProcessOrbHostProvider", () => {
     ).toBe(true);
     const reused = await provider.provision(task, request, context);
     expect(reused.isOk() && reused.value.runtimeTokenHash).toBe(first.value.runtimeTokenHash);
+    expect(
+      JSON.parse(readFileSync(join(root, "configured-state", request.orbId, "host.json"), "utf8"))
+        .supervisorId,
+    ).not.toBe(firstLifetime);
     rmSync(observedEnv, { force: true });
   });
 
@@ -441,12 +449,23 @@ describe("ProcessOrbHostProvider", () => {
   it("supervises an unexpectedly exited runtime in the control-plane process", async () => {
     const observedEnv = join(tmpdir(), `pi-orb-observed-${crypto.randomUUID()}.json`);
     const crashFile = join(tmpdir(), `pi-orb-crash-${crypto.randomUUID()}`);
-    const { provider } = makeProvider({
-      OBSERVED_ENV_FILE: observedEnv,
-      CRASH_ONCE_FILE: crashFile,
+    let releaseRelaunch: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseRelaunch = resolve;
     });
+    const { provider, root } = makeProvider(
+      {
+        OBSERVED_ENV_FILE: observedEnv,
+        CRASH_ONCE_FILE: crashFile,
+      },
+      { onCrashRelaunch: () => gate },
+    );
     const result = await provider.provision(task, request, context);
     expect(result.isOk()).toBe(true);
+    const initialLifetime = JSON.parse(
+      readFileSync(join(root, "configured-state", request.orbId, "host.json"), "utf8"),
+    ).supervisorId;
+    releaseRelaunch();
     await eventually(() => {
       try {
         return readFileSync(observedEnv).length > 0 ? true : null;
@@ -454,6 +473,11 @@ describe("ProcessOrbHostProvider", () => {
         return null;
       }
     });
+    const metadata = JSON.parse(
+      readFileSync(join(root, "configured-state", request.orbId, "host.json"), "utf8"),
+    );
+    expect(metadata.supervisorId).toBe(initialLifetime);
+    expect(JSON.parse(readFileSync(observedEnv, "utf8")).supervisorId).toBe(initialLifetime);
     const listed = await provider.listManagedHosts(task, context);
     expect(listed.isOk() && listed.value[0]?.state).toBe("running");
     rmSync(observedEnv, { force: true });
@@ -606,6 +630,7 @@ describe("ProcessOrbHostProvider host specification", () => {
         repositoryUrl: request.bootstrap.repositoryUrl,
         runtimeToken: "legacy-token",
         port: 43_210,
+        supervisorId: "a".repeat(64),
         desiredState: "stopped",
         ...overrides,
       })}\n`,

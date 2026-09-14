@@ -29,9 +29,11 @@ The confirmation copy must distinguish the operations: archive deletes the check
 
 Archival must not knowingly turn a lagging replica into the only copy. Before destructive cleanup it creates a durable **history seal**:
 
-1. stop accepting new live mutations and wait for the runtime to report `idle`, so an in-flight agent turn is not deliberately truncated;
+1. close live access and obtain `POST /v1/prepare-idle-stop` permission from the runtime; it declines while owned work remains and, on success, closes admission before any final snapshot;
 2. pull and commit complete history records until an empty pull, reusing the controlled-stop drain implementation;
-3. transactionally record the seal (time, cursor, and head) on the cleanup intent before destroying any host or filesystem.
+3. verify the prepared host reference/incarnation is still current, then transactionally record the seal (time, cursor, and head) with the existing state-version CAS before destroying any host or filesystem.
+
+**Decision and regressions (2026-09-14):** idle observation alone did not prevent late child admission, and an old compute's permission could otherwise seal a concurrent replacement. Archival keeps pulling while busy preparation is declined; the ordinary poll loop does not own archiving orbs. A failed/lost preparation response never authorizes sealing. `archive-waiting-for-work` logs the waiting edge, preparation errors use the existing cleanup error surface, and `archive-history-sealed admission_fenced=true` records the successful boundary. The private lifetime-scoped runtime fence survives runtime-only restart. See `docs/postmortems/2026-09-14-idle-stop-admission-race.md` and `docs/runtime-protocol.md`.
 
 A crash before the seal is recorded only causes another idempotent drain. A crash after it is recorded may safely resume resource destruction even if the host has already disappeared.
 
@@ -39,7 +41,7 @@ A stopped orb may have complete filesystem records beyond the database cursor be
 
 Replication-integrity failures, an unavailable authoritative filesystem, or a runtime that cannot be restored leave the orb visibly blocked in `archiving`; they do **not** destroy resources or silently accept a partial transcript. The user may repair the condition or choose permanent deletion. Ordinary retryable runtime/provider/store failures retry under injected clocks and typed errors.
 
-“Complete” means every complete harness record present after the runtime becomes idle and the pull-until-empty barrier succeeds. It cannot recover records already lost before archival, and it does not include transient streaming output that was never committed by the harness.
+“Complete” means every complete harness record present after runtime admission is fenced while idle and the pull-until-empty barrier succeeds. It cannot recover records already lost before archival, and it does not include transient streaming output that was never committed by the harness.
 
 ## Shared disposal machinery
 

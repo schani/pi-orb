@@ -99,6 +99,7 @@ class BootstrapTest(unittest.TestCase):
             target.write_text('sentinel')
             (runtime_dir / 'environment.new').symlink_to(target)
             bootstrap.write_environment(self.config(), workspace_dir, runtime_dir, lambda *_: None)
+            self.assertIn('PI_ORB_CONTAINER="1"', (runtime_dir / 'environment').read_text())
             self.assertEqual(target.read_text(), 'sentinel')
             self.assertFalse((runtime_dir / 'environment.new').exists())
 

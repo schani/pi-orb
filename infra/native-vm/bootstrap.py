@@ -33,6 +33,8 @@ def load_config(urlopen=urllib.request.urlopen):
 def write_environment(config, workspace=Path('/workspace'), runtime_directory=Path('/run/pi-orb'), chown=os.chown):
     config = dict(config)
     config.update({
+        # PID 1 is the VM lifetime boundary, as it is for the Docker runtime.
+        'PI_ORB_CONTAINER': '1',
         'PI_ORB': '1', 'PI_ORB_WORK_DIR': str(workspace), 'HOME': str(workspace / 'home'),
         'RUSTUP_HOME': str(workspace / 'home/.rustup'), 'CARGO_HOME': str(workspace / 'home/.cargo'),
         'PATH': str(workspace / 'home/.cargo/bin') + ':/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',

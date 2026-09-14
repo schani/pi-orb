@@ -1,0 +1,430 @@
+{
+  "name": "archive-fence-compute-replacement",
+  "iteration": 0,
+  "error": "expected 1767225600144.5662 to be null: expected false to be true // Object.is equality",
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: get orb",
+      "value": 0.38322133538201053
+    },
+    {
+      "type": "timer-create",
+      "id": 1,
+      "reason": "archive sleep: get orb",
+      "deadline": 2.9161066769100525
+    },
+    {
+      "type": "timer-fire",
+      "id": 1,
+      "reason": "archive sleep: get orb",
+      "virtualTime": 2.9161066769100525
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: request orb archive",
+      "value": 0.24959287385696172
+    },
+    {
+      "type": "timer-create",
+      "id": 2,
+      "reason": "archive sleep: request orb archive",
+      "deadline": 5.164071046194861
+    },
+    {
+      "type": "timer-fire",
+      "id": 2,
+      "reason": "archive sleep: request orb archive",
+      "virtualTime": 5.164071046194861
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: get orb",
+      "value": 0.5374342000195453
+    },
+    {
+      "type": "timer-create",
+      "id": 3,
+      "reason": "archive sleep: get orb",
+      "deadline": 8.851242046292587
+    },
+    {
+      "type": "timer-fire",
+      "id": 3,
+      "reason": "archive sleep: get orb",
+      "virtualTime": 8.851242046292587
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: get orb deletion",
+      "value": 0.3320308786637367
+    },
+    {
+      "type": "timer-create",
+      "id": 4,
+      "reason": "archive sleep: get orb deletion",
+      "deadline": 11.511396439611271
+    },
+    {
+      "type": "timer-fire",
+      "id": 4,
+      "reason": "archive sleep: get orb deletion",
+      "virtualTime": 11.511396439611271
+    },
+    {
+      "type": "timer-create",
+      "id": 5,
+      "reason": "archive deadline: observe host",
+      "deadline": 5011.511396439611
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: provider latency: observe",
+      "value": 0.04792151655109522
+    },
+    {
+      "type": "timer-create",
+      "id": 6,
+      "reason": "archive sleep: provider observe",
+      "deadline": 14.907472267166032
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9193600061706587
+    },
+    {
+      "type": "timer-fire",
+      "id": 6,
+      "reason": "archive sleep: provider observe",
+      "virtualTime": 14.907472267166032
+    },
+    {
+      "type": "timer-cancel",
+      "id": 5,
+      "reason": "archive deadline: observe host"
+    },
+    {
+      "type": "timer-create",
+      "id": 7,
+      "reason": "archive deadline: prepare archive admission fence",
+      "deadline": 3014.907472267166
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: runtime latency: prepare idle stop",
+      "value": 0.516263292735173
+    },
+    {
+      "type": "timer-create",
+      "id": 8,
+      "reason": "archive sleep: prepare idle stop",
+      "deadline": 26.23273812186949
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.45211459547685706
+    },
+    {
+      "type": "timer-fire",
+      "id": 8,
+      "reason": "archive sleep: prepare idle stop",
+      "virtualTime": 26.23273812186949
+    },
+    {
+      "type": "timer-cancel",
+      "id": 7,
+      "reason": "archive deadline: prepare archive admission fence"
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: get orb",
+      "value": 0.11740194708257667
+    },
+    {
+      "type": "timer-create",
+      "id": 9,
+      "reason": "archive sleep: get orb",
+      "deadline": 27.819747857282376
+    },
+    {
+      "type": "timer-fire",
+      "id": 9,
+      "reason": "archive sleep: get orb",
+      "virtualTime": 27.819747857282376
+    },
+    {
+      "type": "timer-create",
+      "id": 10,
+      "reason": "archive deadline: observe host for pull",
+      "deadline": 5027.819747857282
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: provider latency: observe",
+      "value": 0.8039867432705737
+    },
+    {
+      "type": "timer-create",
+      "id": 11,
+      "reason": "archive sleep: provider observe",
+      "deadline": 69.01908502081106
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8146693721980347
+    },
+    {
+      "type": "timer-fire",
+      "id": 11,
+      "reason": "archive sleep: provider observe",
+      "virtualTime": 69.01908502081106
+    },
+    {
+      "type": "timer-cancel",
+      "id": 10,
+      "reason": "archive deadline: observe host for pull"
+    },
+    {
+      "type": "timer-create",
+      "id": 12,
+      "reason": "archive deadline: history pull request",
+      "deadline": 3069.019085020811
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: runtime latency: pull history",
+      "value": 0.15084793966123056
+    },
+    {
+      "type": "timer-create",
+      "id": 13,
+      "reason": "archive sleep: pull history",
+      "deadline": 73.03604381403568
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5736941568578808
+    },
+    {
+      "type": "timer-fire",
+      "id": 13,
+      "reason": "archive sleep: pull history",
+      "virtualTime": 73.03604381403568
+    },
+    {
+      "type": "timer-cancel",
+      "id": 12,
+      "reason": "archive deadline: history pull request"
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: commit pull batch",
+      "value": 0.35476457261010375
+    },
+    {
+      "type": "timer-create",
+      "id": 14,
+      "reason": "archive sleep: commit pull batch",
+      "deadline": 75.80986667708619
+    },
+    {
+      "type": "timer-fire",
+      "id": 14,
+      "reason": "archive sleep: commit pull batch",
+      "virtualTime": 75.80986667708619
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: get orb",
+      "value": 0.23132025601068218
+    },
+    {
+      "type": "timer-create",
+      "id": 15,
+      "reason": "archive sleep: get orb",
+      "deadline": 77.9664679571396
+    },
+    {
+      "type": "timer-fire",
+      "id": 15,
+      "reason": "archive sleep: get orb",
+      "virtualTime": 77.9664679571396
+    },
+    {
+      "type": "timer-create",
+      "id": 16,
+      "reason": "archive deadline: observe host for pull",
+      "deadline": 5077.96646795714
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: provider latency: observe",
+      "value": 0.8096947291305951
+    },
+    {
+      "type": "timer-create",
+      "id": 17,
+      "reason": "archive sleep: provider observe",
+      "deadline": 119.45120441366936
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5033963269688994
+    },
+    {
+      "type": "timer-fire",
+      "id": 17,
+      "reason": "archive sleep: provider observe",
+      "virtualTime": 119.45120441366936
+    },
+    {
+      "type": "timer-cancel",
+      "id": 16,
+      "reason": "archive deadline: observe host for pull"
+    },
+    {
+      "type": "timer-create",
+      "id": 18,
+      "reason": "archive deadline: history pull request",
+      "deadline": 3119.4512044136695
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: runtime latency: pull history",
+      "value": 0.1252722067424834
+    },
+    {
+      "type": "timer-create",
+      "id": 19,
+      "reason": "archive sleep: pull history",
+      "deadline": 122.95664854851903
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7145228489060461
+    },
+    {
+      "type": "timer-fire",
+      "id": 19,
+      "reason": "archive sleep: pull history",
+      "virtualTime": 122.95664854851903
+    },
+    {
+      "type": "timer-cancel",
+      "id": 18,
+      "reason": "archive deadline: history pull request"
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: init or verify session",
+      "value": 0.8390690387284332
+    },
+    {
+      "type": "timer-create",
+      "id": 20,
+      "reason": "archive sleep: init or verify session",
+      "deadline": 128.15199374216118
+    },
+    {
+      "type": "timer-fire",
+      "id": 20,
+      "reason": "archive sleep: init or verify session",
+      "virtualTime": 128.15199374216118
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: get orb",
+      "value": 0.4216042811925761
+    },
+    {
+      "type": "timer-create",
+      "id": 21,
+      "reason": "archive sleep: get orb",
+      "deadline": 131.26001514812407
+    },
+    {
+      "type": "timer-fire",
+      "id": 21,
+      "reason": "archive sleep: get orb",
+      "virtualTime": 131.26001514812407
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: read history snapshot",
+      "value": 0.8733867866492406
+    },
+    {
+      "type": "timer-create",
+      "id": 22,
+      "reason": "archive sleep: read history snapshot",
+      "deadline": 136.62694908137027
+    },
+    {
+      "type": "timer-fire",
+      "id": 22,
+      "reason": "archive sleep: read history snapshot",
+      "virtualTime": 136.62694908137027
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: get orb",
+      "value": 0.6908750555693275
+    },
+    {
+      "type": "timer-create",
+      "id": 23,
+      "reason": "archive sleep: get orb",
+      "deadline": 141.08132435921692
+    },
+    {
+      "type": "timer-fire",
+      "id": 23,
+      "reason": "archive sleep: get orb",
+      "virtualTime": 141.08132435921692
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: get orb",
+      "value": 0.4969554024050452
+    },
+    {
+      "type": "timer-create",
+      "id": 24,
+      "reason": "archive sleep: get orb",
+      "deadline": 144.56610137124215
+    },
+    {
+      "type": "timer-fire",
+      "id": 24,
+      "reason": "archive sleep: get orb",
+      "virtualTime": 144.56610137124215
+    },
+    {
+      "type": "entropy",
+      "name": "archive random number: store latency: seal orb archive",
+      "value": 0.9206470420079537
+    },
+    {
+      "type": "timer-create",
+      "id": 25,
+      "reason": "archive sleep: seal orb archive",
+      "deadline": 150.16933658128193
+    },
+    {
+      "type": "timer-fire",
+      "id": 25,
+      "reason": "archive sleep: seal orb archive",
+      "virtualTime": 150.16933658128193
+    }
+  ]
+}

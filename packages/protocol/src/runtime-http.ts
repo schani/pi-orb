@@ -146,6 +146,14 @@ export const PullHistoryResponseSchema = Type.Object(
 );
 export type PullHistoryResponse = Static<typeof PullHistoryResponseSchema>;
 
+export const PrepareIdleStopRequestSchema = Type.Object({ v: Type.Literal(1) }, closed);
+export type PrepareIdleStopRequest = Static<typeof PrepareIdleStopRequestSchema>;
+export const PrepareIdleStopResponseSchema = Type.Object(
+  { v: Type.Literal(1), prepared: Type.Boolean() },
+  closed,
+);
+export type PrepareIdleStopResponse = Static<typeof PrepareIdleStopResponseSchema>;
+
 export const DeliverOrbMessageRequestSchema = Type.Object(
   {
     v: Type.Literal(1),
@@ -180,6 +188,7 @@ export const RuntimeHttpErrorSchema = Type.Object(
           Type.Literal("cursor_not_found"),
           Type.Literal("history_unavailable"),
           Type.Literal("message_unavailable"),
+          Type.Literal("idle_stop_unavailable"),
         ]),
         message: Type.String(),
         retryable: Type.Boolean(),

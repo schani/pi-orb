@@ -17,7 +17,7 @@ import {
   waitFor,
 } from "./harness.ts";
 
-it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project orbs reuse configuration", async () => {
+it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-project orbs reuse configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-mcp-e2e-"));
   const key = join(root, "key.pem");
   const cert = join(root, "cert.pem");
@@ -106,9 +106,44 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
     auth: { accountId: "mcp-test", device: { manualApprove: true } },
     model: {
       rules: [
-        ...[0, 1].flatMap(() => [
+        ...[0, 1].flatMap((index) => [
+          ...(index === 1
+            ? [
+                {
+                  match: { userMessage: { regex: "^MCP check$" } },
+                  steps: [
+                    {
+                      type: "toolCall",
+                      name: "bash",
+                      arguments: {
+                        command:
+                          "mkdir -p .pi/agents && printf '%s\\n' '---' 'name: mcp-worker' 'description: Approved MCP worker' 'tools: mcp_search,mcp_call,mcp_read' '---' 'Use the approved MCP tools.' > .pi/agents/mcp-worker.md && echo MCP_PROFILE_READY",
+                      },
+                    },
+                    { type: "stop", status: "completed" },
+                  ],
+                },
+                {
+                  match: { toolResultContains: { regex: "MCP_PROFILE_READY" } },
+                  steps: [
+                    {
+                      type: "toolCall",
+                      name: "subagent",
+                      arguments: {
+                        subagent_type: "mcp-worker",
+                        prompt: "MCP_CHILD_CHECK",
+                        description: "Check approved MCP capabilities",
+                        run_in_background: false,
+                        inherit_context: false,
+                      },
+                    },
+                    { type: "stop", status: "completed" },
+                  ],
+                },
+              ]
+            : []),
           {
-            match: { userMessage: { regex: "^MCP check$" } },
+            match: { userMessage: { regex: index === 1 ? "MCP_CHILD_CHECK" : "^MCP check$" } },
             steps: [
               { type: "toolCall", name: "mcp_search", arguments: { server: "fixture", limit: 4 } },
               {
@@ -137,10 +172,21 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
           {
             match: { toolResultContains: { regex: "MCP_CALL_OK" } },
             steps: [
-              { type: "text", content: "MCP_CHECK_COMPLETE" },
+              { type: "text", content: index === 1 ? "MCP_CHILD_COMPLETE" : "MCP_CHECK_COMPLETE" },
               { type: "stop", status: "completed" },
             ],
           },
+          ...(index === 1
+            ? [
+                {
+                  match: { toolResultContains: { regex: "MCP_CHILD_COMPLETE" } },
+                  steps: [
+                    { type: "text", content: "MCP_CHECK_COMPLETE" },
+                    { type: "stop", status: "completed" },
+                  ],
+                },
+              ]
+            : []),
           {
             match: {
               userMessage: { regex: "^Write a single short desktop-notification sentence" },
@@ -369,7 +415,7 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
           matchedRuleIndex: number | null;
           status: number;
         }[];
-        return requests.some((request) => request.matchedRuleIndex === 5 && request.status === 200)
+        return requests.some((request) => request.matchedRuleIndex === 8 && request.status === 200)
           ? true
           : null;
       },
@@ -393,9 +439,26 @@ it("MCP traverses browser → real Pi → authenticated HTTPS; new same-project 
     });
     const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
       matchedRuleIndex: number | null;
-      body: { tools?: { name: string }[]; instructions?: string };
+      body: {
+        tools?: { name: string }[];
+        instructions?: string;
+        input?: { role?: string; content?: { text?: string }[] }[];
+      };
     }[];
-    const isolatedRequest = requests.find((request) => request.matchedRuleIndex === 6);
+    const requestFor = (prompt: string) =>
+      requests.find((request) =>
+        request.body.input?.some(
+          (item) => item.role === "user" && item.content?.some((block) => block.text === prompt),
+        ),
+      );
+    const childRequest = requestFor("MCP_CHILD_CHECK");
+    expect(childRequest).toBeDefined();
+    expect(childRequest?.body.instructions).toContain("MCP E2E inventory");
+    expect(childRequest?.body.tools?.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(["mcp_search", "mcp_call", "mcp_read"]),
+    );
+    expect(childRequest?.body.tools?.some((tool) => tool.name === "subagent")).toBe(false);
+    const isolatedRequest = requestFor("MCP isolation");
     expect(isolatedRequest).toBeDefined();
     expect(isolatedRequest?.body.tools?.some((tool) => tool.name.startsWith("mcp_"))).toBe(false);
     expect(isolatedRequest?.body.instructions).not.toContain("MCP E2E inventory");

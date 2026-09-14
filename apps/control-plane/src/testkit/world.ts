@@ -205,6 +205,8 @@ interface PendingInboxBatch {
 }
 
 interface FakeHost {
+  /** Execution-scoped admission fence, retained across runtime-only restarts. */
+  idleStopPrepared: boolean;
   ref: OrbHostRef;
   orbId: string;
   incarnation: number;
@@ -930,6 +932,7 @@ export class FakeWorld {
       runtimeToken,
       specGeneration,
       specFingerprint,
+      idleStopPrepared: false,
       preemptedAtMonotonic: null,
       preemptionSoftWindowMs: DEFAULT_PREEMPTION_SOFT_WINDOW_MS,
     };
@@ -1028,6 +1031,7 @@ export class FakeWorld {
     state.host.preemptedAtMonotonic = null;
     if (state.host.state === "running") return;
     state.host.state = "running";
+    state.host.idleStopPrepared = false;
     state.host.lastStartedAt = task.wallNow();
     this.bootRuntime(task, state.host.orbId);
   }
@@ -1642,6 +1646,8 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
       const state = this.world.resolveRuntime(request.baseUrl, task);
       if (state === null) return errAsync(clientError("unreachable", "no runtime", true));
       const orbId = state.host?.orbId ?? "";
+      if (state.host?.idleStopPrepared)
+        return errAsync(clientError("http_error", "runtime is preparing to stop", true, true));
       if (script.kind === "crash_before_enqueue") {
         // The request reached the runtime; nothing of it survives.
         this.world.crashRuntimeBeforeEnqueue(task, orbId);
@@ -1676,6 +1682,25 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
       const state = this.world.resolveRuntime(baseUrl, task);
       if (state === null) return errAsync(clientError("unreachable", "no runtime", true));
       return okAsync(this.world.runtimeHealth(task, state));
+    });
+  }
+
+  prepareIdleStop(
+    task: SimulationTask,
+    baseUrl: string,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").PrepareIdleStopResponse, RuntimeClientError> {
+    return this.req(task, FAILPOINTS.runtimePrepareIdleStop, "prepare idle stop", context, () => {
+      const state = this.world.resolveRuntime(baseUrl, task);
+      if (state === null || state.host === null)
+        return errAsync(clientError("unreachable", "no runtime", true));
+      const health = this.world.runtimeHealth(task, state);
+      if (health.status !== "ready")
+        return errAsync(clientError("http_error", "runtime not ready", true, true));
+      if (state.host.idleStopPrepared) return okAsync({ v: 1 as const, prepared: true });
+      if (health.activity === "busy") return okAsync({ v: 1 as const, prepared: false });
+      state.host.idleStopPrepared = true;
+      return okAsync({ v: 1 as const, prepared: true });
     });
   }
 

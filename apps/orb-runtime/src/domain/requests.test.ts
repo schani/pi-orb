@@ -16,12 +16,14 @@ const shellAction = (expectedHeadId: string | null): ClientAction => ({
 });
 
 const idleView = (headId: string | null): AgentGateView => ({
+  acceptingWork: true,
   activity: "idle",
   headId,
   activeOperationId: null,
 });
 
 const busyView = (headId: string | null, operationId: string): AgentGateView => ({
+  acceptingWork: true,
   activity: "busy",
   headId,
   activeOperationId: operationId,

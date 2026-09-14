@@ -53,6 +53,7 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
     agentDir: input.agentDir,
     ...(input.settingsManager !== undefined ? { settingsManager: input.settingsManager } : {}),
     extensionFactories: createOrbExtensions({
+      cwd: input.cwd,
       ...(input.mcp ? { mcp: input.mcp } : {}),
       ...(input.subagents ? { subagents: input.subagents } : {}),
     }),

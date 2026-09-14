@@ -70,6 +70,7 @@ interface HostMetadata {
   readonly port: number;
   /** Process-group leader PID, persisted so disposal survives provider restart. */
   readonly processGroupId: number | null;
+  readonly supervisorId: string;
   readonly desiredState: "running" | "stopped";
 }
 
@@ -186,6 +187,8 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         typeof parsed.repositoryUrl !== "string" ||
         typeof parsed.runtimeToken !== "string" ||
         typeof parsed.port !== "number" ||
+        typeof parsed.supervisorId !== "string" ||
+        !/^[a-f0-9]{64}$/.test(parsed.supervisorId) ||
         (processGroupId !== null &&
           (!Number.isSafeInteger(processGroupId) || processGroupId <= 0)) ||
         (parsed.desiredState !== "running" && parsed.desiredState !== "stopped")
@@ -208,6 +211,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         runtimeToken: parsed.runtimeToken,
         port: parsed.port,
         processGroupId,
+        supervisorId: parsed.supervisorId,
         desiredState: parsed.desiredState,
       });
     } catch (error) {
@@ -308,6 +312,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       PI_ORB_HOST_INCARNATION: String(metadata.incarnation),
       // An unsandboxed process host cannot assert container-wide process loss.
       PI_ORB_CONTAINER: "0",
+      PI_ORB_SUPERVISOR_ID: metadata.supervisorId,
       PI_ORB_WORK_DIR: join(this.hostDirectory(metadata.orbId), "workspace"),
       // Do not inherit the control-plane user's home: process-backed orbs must
       // have the same per-orb durable home contract as Docker and GCE.
@@ -500,6 +505,7 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
           runtimeToken: randomBytes(32).toString("hex"),
           port: port.value,
           processGroupId: null,
+          supervisorId: randomBytes(32).toString("hex"),
           desiredState: "running",
         };
         const written = this.writeMetadata("provision", metadata);
@@ -517,7 +523,11 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
       } else if (metadata.specFingerprint !== specFingerprint) {
         return err(hostError("provision", "conflict", "process specification mismatch", false));
       } else if (metadata.desiredState === "stopped") {
-        metadata = { ...metadata, desiredState: "running" };
+        metadata = {
+          ...metadata,
+          desiredState: "running",
+          supervisorId: randomBytes(32).toString("hex"),
+        };
         const written = this.writeMetadata("provision", metadata);
         if (written.isErr()) return err(written.error);
       }
@@ -569,7 +579,14 @@ export class ProcessOrbHostProvider implements OrbHostProvider {
         if (found.value.specFingerprint !== request.expectedSpecFingerprint) {
           return err(hostError("start", "conflict", "process specification mismatch", false));
         }
-        const metadata = { ...found.value, desiredState: "running" as const };
+        const metadata = {
+          ...found.value,
+          desiredState: "running" as const,
+          supervisorId:
+            found.value.desiredState === "stopped"
+              ? randomBytes(32).toString("hex")
+              : found.value.supervisorId,
+        };
         const written = this.writeMetadata("start", metadata);
         if (written.isErr()) return err(written.error);
         return this.launch("start", metadata);
