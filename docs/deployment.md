@@ -257,6 +257,14 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Action runtime update (2026-09-13):** CI, E2E and Deploy artifact-upload steps
+pin `actions/upload-artifact` v7.0.1 at
+`043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`, whose action manifest declares
+`runs.using: node24`. This removes the v4 action's Node 20 deprecation warning;
+it is separate from the Node version selected for application builds. Artifact
+paths, retention, hidden-file exclusion and default ZIP packaging remain unchanged.
+The shared Chromium/WebKit installation is already merged to `main` (`7fdbc9b`).
+
 **Mobile release validated through explicit recovery (2026-09-13):** full run
 [34730567562](https://github.com/schani/pi-orb/actions/runs/34730567562) deployed
 `7fdbc9b` after passing checks including both mobile browser engines, build,

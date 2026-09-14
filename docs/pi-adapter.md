@@ -2,6 +2,8 @@
 
 How Pi is embedded in the orb runtime and how its persisted session maps to the harness-agnostic history model (`docs/history-replication.md`).
 
+**Thinking policy (decided 2026-09-08).** On every session attachment, the runtime sets the agent thinking level to `high`, overriding SDK defaults and restored session levels. Pi clamps this to the model's supported levels and records actual changes as replicated `pi.thinking_level_change` events. This applies to fresh and resumed sessions; the separate Luna summary/naming calls retain their minimal-reasoning policy.
+
 ## Embedding decisions
 
 - Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`. Pi packages use [0.85.1](https://github.com/earendil-works/pi/releases/tag/v0.85.1) for GPT-6 Astra support (decided 2026-09-05).
