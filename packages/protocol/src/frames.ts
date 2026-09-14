@@ -141,6 +141,7 @@ export const HistoryRecordFrameSchema = Type.Object(
     type: Type.Literal("history.record"),
     at: Type.String(),
     record: HistoryRecordSchema,
+    retiredBlockIds: Type.Array(Type.String()),
     headId: Type.Union([Type.String(), Type.Null()]),
   },
   closed,
@@ -193,15 +194,6 @@ export const OutputPatchEventSchema = Type.Object(
 );
 export type OutputPatchEvent = Static<typeof OutputPatchEventSchema>;
 
-export const OutputRetiredEventSchema = Type.Object(
-  {
-    type: Type.Literal("output_retired"),
-    operationId: Type.String(),
-    blockIds: Type.Array(Type.String()),
-  },
-  closed,
-);
-
 export const ToolStateEventSchema = Type.Object(
   {
     type: Type.Literal("tool_state"),
@@ -247,7 +239,6 @@ export const RuntimeEventSchema = Type.Union([
   RuntimeStatusEventSchema,
   OperationStartedEventSchema,
   OutputPatchEventSchema,
-  OutputRetiredEventSchema,
   ToolStateEventSchema,
   OperationFinishedEventSchema,
   TurnNotificationEventSchema,

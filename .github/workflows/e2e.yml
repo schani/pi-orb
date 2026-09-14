@@ -34,6 +34,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install pinned browser engines and system dependencies
+        run: npm run test:e2e:install
+
       - name: Build orb runtime image
         run: docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
 

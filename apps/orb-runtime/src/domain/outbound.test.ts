@@ -21,6 +21,7 @@ const at = "2026-07-20T10:00:00.000Z";
 const historyFrame = (id: string): ServerFrame => ({
   v: 1,
   type: "history.record",
+  retiredBlockIds: [],
   at,
   record: {
     id,

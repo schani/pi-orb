@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { usePhoneLayout } from "../lib/use-phone-layout.ts";
 import { ComposerCaret } from "./ComposerCaret.tsx";
 import {
   type ComposerMode,
@@ -15,6 +16,7 @@ import {
   leaveShellMode,
   normalizeComposerChange,
 } from "./composer-mode.ts";
+import { Icon } from "./Icons.tsx";
 import { OrbLinkPicker } from "./OrbLinkPicker.tsx";
 import { isSendShortcut } from "./send-shortcut.ts";
 
@@ -42,6 +44,8 @@ interface ComposerProps {
   onAbort: () => void;
   /** Shell submission was attempted while an image remains attached. */
   onShellAttachmentBlocked: () => void;
+  /** Phone-only operation feedback, beside the initiating control. */
+  feedback?: string;
 }
 
 export function Composer({
@@ -56,11 +60,16 @@ export function Composer({
   canAbort,
   onAbort,
   onShellAttachmentBlocked,
+  feedback,
 }: ComposerProps) {
   const isShell = mode !== "message";
   const shellBlockedByAttachment = isShell && images.length > 0;
   const hasInput = isShell ? text.trim() !== "" : text.trim() !== "" || images.length > 0;
   const sendEnabled = canSend && hasInput && !shellBlockedByAttachment;
+  const phone = usePhoneLayout();
+  const [expanded, setExpanded] = useState(false);
+  const padRef = useRef<HTMLButtonElement>(null);
+  const awaitingClear = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [mentionOffset, setMentionOffset] = useState<number | null>(null);
   const restoreCaret = useRef<number | null>(null);
@@ -85,12 +94,33 @@ export function Composer({
   };
 
   useEffect(() => {
-    inputRef.current?.focus({ preventScroll: true });
-  }, []);
+    if (!phone) inputRef.current?.focus({ preventScroll: true });
+  }, [phone]);
+
+  useLayoutEffect(() => {
+    if (phone && expanded) inputRef.current?.focus({ preventScroll: true });
+  }, [phone, expanded]);
+
+  useEffect(() => {
+    if (!awaitingClear.current || hasInput) return;
+    awaitingClear.current = false;
+    if (phone) {
+      inputRef.current?.blur();
+      setExpanded(false);
+    }
+  }, [hasInput, phone]);
+
+  const fold = () => {
+    setMentionOffset(null);
+    inputRef.current?.blur();
+    setExpanded(false);
+    padRef.current?.focus({ preventScroll: true });
+  };
 
   const submit = () => {
+    awaitingClear.current = true;
     onSend();
-    inputRef.current?.focus();
+    if (!phone) inputRef.current?.focus();
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -112,7 +142,41 @@ export function Composer({
   };
 
   return (
-    <div className="composer">
+    <div className="composer" data-expanded={expanded}>
+      {(feedback || shellBlockedByAttachment) && (
+        <div className="composer-phone-feedback" role="status">
+          {feedback || "Remove image attachments before running a shell command."}
+        </div>
+      )}
+      <div className="composer-phone-pad">
+        <button
+          ref={padRef}
+          type="button"
+          className="composer-open"
+          aria-label="Write message"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(true)}
+        >
+          <span className="composer-prefix">{composerModeGlyph(mode)}</span>
+          <span className="composer-draft-preview">
+            {text ||
+              (images.length > 0
+                ? `${images.length} image attachment${images.length === 1 ? "" : "s"}`
+                : "Message the orb…")}
+          </span>
+        </button>
+        {canAbort && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="abort"
+            title="abort"
+            onClick={onAbort}
+          >
+            <Icon name="x" />
+          </button>
+        )}
+      </div>
       {mentionOffset !== null && (
         <OrbLinkPicker onSelect={closePicker} onClose={() => closePicker()} />
       )}
@@ -141,6 +205,7 @@ export function Composer({
             className="composer-input"
             value={text}
             onChange={(event) => {
+              awaitingClear.current = false;
               const normalized = normalizeComposerChange(mode, event.target.value);
               onValueChange(normalized.text, normalized.mode);
               const input = event.nativeEvent as InputEvent;
@@ -156,6 +221,11 @@ export function Composer({
             }}
             onPaste={handlePaste}
             onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              if (phone && event.key === "Escape") {
+                event.preventDefault();
+                fold();
+                return;
+              }
               const atStart = event.currentTarget.selectionStart === 0;
               const collapsed =
                 event.currentTarget.selectionStart === event.currentTarget.selectionEnd;
@@ -192,14 +262,48 @@ export function Composer({
                 }
               }
             }}
-            placeholder={isShell ? "Run a shell command… (⌘⏎ to run)" : "Message the orb…"}
+            aria-label="Message the orb"
+            placeholder={
+              isShell
+                ? phone
+                  ? "Run a shell command…"
+                  : "Run a shell command… (⌘⏎ to run)"
+                : "Message the orb…"
+            }
             rows={4}
           />
           <ComposerCaret inputRef={inputRef} text={text} />
         </div>
+        <div className="composer-phone-rail">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Fold editor"
+            title="fold"
+            onClick={fold}
+          >
+            <Icon name="fold" />
+          </button>
+          <button
+            type="button"
+            className="icon-button composer-send"
+            aria-label={isShell ? "Run command" : "Send message"}
+            title={isShell ? "run" : "send"}
+            disabled={!sendEnabled}
+            onClick={submit}
+          >
+            <Icon name="send" />
+          </button>
+        </div>
         {canAbort && (
-          <button type="button" className="text-action" onClick={onAbort}>
-            abort
+          <button
+            type="button"
+            className="icon-button composer-abort"
+            aria-label="abort"
+            title="abort"
+            onClick={onAbort}
+          >
+            <Icon name="x" />
           </button>
         )}
       </div>

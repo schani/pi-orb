@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type Browser, chromium, expect as expectPage } from "@playwright/test";
+import { type Browser, chromium, expect as expectPage, type Page } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
@@ -10,6 +10,16 @@ const ORB_HASH = "#/orbs/frontend-fixture-orb";
 let vite: ViteDevServer;
 let browser: Browser;
 let origin: string;
+
+async function removeFixtureOrb(page: Page, orbId: string) {
+  const response = await page.request.delete(`${origin}/api/v1/orbs/${orbId}`);
+  if (response.status() === 404) return;
+  expectPage(response.status()).toBe(202);
+  // Deletion is asynchronous. A 202 does not release this test's fixture ownership.
+  await expectPage
+    .poll(async () => (await page.request.get(`${origin}/api/v1/orbs/${orbId}`)).status())
+    .toBe(404);
+}
 
 /**
  * Browser E2E for the exact cross-boundary path that unit tests cannot prove:
@@ -195,7 +205,8 @@ describe("frontend-only browser behavior", () => {
         await expectPage(gear).toBeVisible();
         expectPage(
           await gear.evaluate((element) => {
-            const heading = element.parentElement
+            const heading = element
+              .closest(".project-head-line")
               ?.querySelector(".project-name, .trunc")
               ?.getBoundingClientRect();
             const button = element.getBoundingClientRect();
@@ -491,12 +502,12 @@ describe("frontend-only browser behavior", () => {
           await header
             .locator("use")
             .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("href"))),
-        ).toEqual(["#i-gear", "#i-bin"]);
+        ).toEqual(hash === ORB_HASH ? ["#i-plus", "#i-gear", "#i-bin"] : ["#i-gear", "#i-bin"]);
         expectPage(
           await header.evaluate((node) =>
             node.parentElement?.lastElementChild?.classList.contains("project-new-orb-row"),
           ),
-        ).toBe(true);
+        ).toBe(hash !== ORB_HASH);
         await header.getByRole("button", { name: /^Configure / }).click();
         const dialog = page.getByRole("dialog");
         const general = dialog.getByRole("tabpanel", { name: "General", exact: true });
@@ -814,6 +825,317 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("toggles a headerless terminal shade without moving history or replacing its session", async () => {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const controls: { type: string; cols: number; rows: number }[] = [];
+    const inputs: Buffer[] = [];
+    let connections = 0;
+    let closedConnections = 0;
+    page.on("websocket", (socket) => {
+      if (!socket.url().endsWith("/frontend-long-history/terminal")) return;
+      connections += 1;
+      socket.on("close", () => {
+        closedConnections += 1;
+      });
+      socket.on("framesent", ({ payload }) => {
+        if (typeof payload === "string") controls.push(JSON.parse(payload));
+        else inputs.push(payload);
+      });
+    });
+    // Keep unrelated initial live replay/inbox commits out of the geometry
+    // assertion. The terminal still uses the fixture's real socket adapter.
+    await page.routeWebSocket("**/orbs/frontend-long-history/live", (socket) => {
+      socket.connectToServer().onMessage(() => {});
+    });
+    await page.route("**/orbs/frontend-long-history/messages", (route) =>
+      route.fulfill({ json: { items: [] } }),
+    );
+    const geometry = () =>
+      page.locator("body").evaluate((body) => {
+        const document = body.ownerDocument;
+        const history = document.querySelector(".history")?.getBoundingClientRect();
+        const composer = document.querySelector(".composer")?.getBoundingClientRect();
+        return {
+          scroll: document.defaultView?.scrollY,
+          history: history && { top: history.top, width: history.width, height: history.height },
+          composer: composer && { top: composer.top, height: composer.height },
+        };
+      });
+    try {
+      await page.goto(`${origin}/#/orbs/frontend-long-history`);
+      await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("draft survives terminal toggles");
+      await page.locator("body").evaluate(async (body) => {
+        const window = body.ownerDocument.defaultView;
+        if (window === null) return;
+        await new Promise<void>((resolve) => {
+          window.addEventListener("scroll", () => window.requestAnimationFrame(() => resolve()), {
+            once: true,
+          });
+          window.scrollTo(0, 1200);
+        });
+      });
+      const before = await geometry();
+      const header = page.locator(".orb-header");
+      const actionBoxes = await header
+        .locator(".orb-header-actions > button")
+        .evaluateAll((buttons) =>
+          buttons.map((button) => {
+            const box = button.getBoundingClientRect();
+            return { x: box.x, width: box.width };
+          }),
+        );
+      expectPage(actionBoxes).toHaveLength(5);
+      actionBoxes.forEach((box, index) => {
+        expectPage(box.width).toBe(20);
+        if (index > 0) expectPage(box.x - (actionBoxes[index - 1]?.x ?? 0)).toBe(28);
+      });
+      await page.keyboard.press("Meta+j");
+      const panel = page.getByRole("complementary", { name: "Interactive terminal" });
+      await expectPage(panel).toContainText("frontend fixture terminal");
+      await expectPage(panel.locator("header")).toHaveCount(0);
+      await expectPage(panel.locator("button")).toHaveCount(0);
+      await expectPage(panel).toHaveCSS("animation-name", "none");
+      await expectPage(panel).toHaveCSS("transition-duration", "0s");
+      await expectPage(panel).toHaveCSS("border-top-width", "1px");
+      await expectPage(panel).toHaveCSS("border-left-width", "1px");
+      await expectPage(panel).toHaveCSS("border-right-width", "1px");
+      await expectPage(panel).toHaveCSS("border-bottom-width", "1px");
+      await expectPage(panel.locator(".wterm")).toHaveCSS("box-shadow", "none");
+      await expectPage(panel.locator(".orb-terminal-loading")).toHaveCount(0);
+      const headerBox = await header.boundingBox();
+      const panelBox = await panel.boundingBox();
+      // Overlay the existing header/index rules, rather than drawing an
+      // adjacent second pixel. The right edge still ends at the header edge.
+      expectPage(panelBox?.x).toBe((headerBox?.x ?? 0) - 1);
+      expectPage(panelBox?.width).toBe((headerBox?.width ?? 0) + 1);
+      expectPage(panelBox?.y).toBe((headerBox?.y ?? 0) + (headerBox?.height ?? 0) - 1);
+      expectPage(await geometry()).toEqual(before);
+      // StrictMode can legitimately mount, dispose, and mount again before
+      // the first greeting. The invariant is no replacement AFTER readiness.
+      const connectionsBeforeHide = connections;
+      const closedBeforeHide = closedConnections;
+      const opensBeforeHide = controls.filter((control) => control.type === "terminal.open").length;
+      expectPage(opensBeforeHide).toBeGreaterThan(0);
+      await page.keyboard.type("SESSION_KEPT");
+      await expectPage(panel).toContainText("SESSION_KEPT");
+      // Escape is terminal input, not a window-manager shortcut (vim needs it).
+      await page.keyboard.press("Escape");
+      await expectPage(panel).toBeVisible();
+      await expectPage.poll(() => inputs.some((input) => input.includes(27))).toBe(true);
+      const inputCount = inputs.length;
+      const emulator = await panel.locator(".wterm").elementHandle();
+      await page.keyboard.press("Meta+j");
+      await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+      expectPage(await geometry()).toEqual(before);
+      await expectPage(composer).toHaveValue("draft survives terminal toggles");
+      await expectPage(composer).toBeFocused();
+      await composer.dispatchEvent("keydown", { key: "j", metaKey: true, repeat: true });
+      await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+      await page.keyboard.press("Meta+j");
+      await expectPage(panel).toContainText("SESSION_KEPT");
+      expectPage(inputs).toHaveLength(inputCount);
+      expectPage(
+        await emulator?.evaluate((node) => node === node.ownerDocument.querySelector(".wterm")),
+      ).toBe(true);
+      expectPage(connections).toBe(connectionsBeforeHide);
+      expectPage(closedConnections).toBe(closedBeforeHide);
+      expectPage(controls.filter((control) => control.type === "terminal.open")).toHaveLength(
+        opensBeforeHide,
+      );
+      expectPage(await geometry()).toEqual(before);
+      // Fill scrollback: scrollTop being a multiple of 20 alone is not
+      // sufficient if padding scrolls with the grid (the old first row was -7px).
+      for (let line = 0; line < 30; line += 1) await page.keyboard.press("Enter");
+      await page.keyboard.type("SCROLLBACK_READY");
+      await expectPage(panel).toContainText("SCROLLBACK_READY");
+      const rowEdges = () =>
+        panel.locator(".wterm").evaluate((node) => {
+          const viewport = node.getBoundingClientRect();
+          const visible = [...node.querySelectorAll(".term-row")]
+            .map((row) => row.getBoundingClientRect())
+            .filter((row) => row.bottom > viewport.top && row.top < viewport.bottom);
+          return {
+            first: visible[0]?.top === viewport.top,
+            last: visible.at(-1)?.bottom === viewport.bottom,
+          };
+        });
+      await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
+      const scrollStart = await panel.locator(".wterm").evaluate((node) => {
+        node.setAttribute("data-scroll-ended", "false");
+        node.addEventListener("scrollend", () => node.setAttribute("data-scroll-ended", "true"), {
+          once: true,
+        });
+        return node.scrollTop;
+      });
+      await panel.locator(".wterm").hover();
+      await page.mouse.wheel(0, -53);
+      await expectPage(panel.locator(".wterm")).toHaveAttribute("data-scroll-ended", "true");
+      expectPage(await panel.locator(".wterm").evaluate((node) => node.scrollTop)).toBeLessThan(
+        scrollStart,
+      );
+      expectPage(await rowEdges()).toEqual({ first: true, last: true });
+      const focusBeforeDrag = await page.locator(":focus").elementHandle();
+      const edge = panel.getByRole("separator", { name: "Resize terminal" });
+      const startHeight = panelBox?.height ?? 0;
+      const startEmulatorHeight = await panel
+        .locator(".wterm")
+        .evaluate((node) => node.clientHeight);
+      const resizeCount = () =>
+        controls.filter((control) => control.type === "terminal.resize").length;
+      const beforeDrag = resizeCount();
+      const edgeBox = await edge.boundingBox();
+      const x = (edgeBox?.x ?? 0) + (edgeBox?.width ?? 0) / 2;
+      const y = (edgeBox?.y ?? 0) + 4;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      expectPage(
+        await focusBeforeDrag?.evaluate((node) => node === node.ownerDocument.activeElement),
+      ).toBe(true);
+      await expectPage(edge).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expectPage(panel).toHaveCSS("border-bottom-width", "1px");
+      await page.mouse.move(x, y + 8);
+      await expectPage(panel).toHaveCSS("height", `${startHeight}px`);
+      await page.mouse.move(x, y + 49);
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      await page.mouse.move(x, y + 51);
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 60}px`);
+      await edge.dispatchEvent("pointercancel", { pointerId: 2 });
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 60}px`);
+      await expectPage(panel.locator(".wterm")).toHaveCSS("height", `${startEmulatorHeight}px`);
+      expectPage(resizeCount()).toBe(beforeDrag);
+      expectPage((await panel.boundingBox())?.y).toBe(panelBox?.y);
+      expectPage((await panel.boundingBox())?.width).toBe(panelBox?.width);
+      expectPage(await geometry()).toEqual(before);
+      await page.mouse.up();
+      expectPage(
+        await focusBeforeDrag?.evaluate((node) => node === node.ownerDocument.activeElement),
+      ).toBe(true);
+      await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
+      await expectPage.poll(resizeCount).toBe(beforeDrag + 1);
+      await expectPage(panel.locator(".wterm")).toHaveCSS(
+        "height",
+        `${startEmulatorHeight + 60}px`,
+      );
+      await edge.press("ArrowUp");
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      await expectPage.poll(resizeCount).toBe(beforeDrag + 2);
+      await expectPage(edge).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+      await expectPage(edge).toHaveCSS("outline-width", "0px");
+      await composer.focus();
+      const cancelBox = await edge.boundingBox();
+      const cancelY = (cancelBox?.y ?? 0) + 4;
+      await page.mouse.move(x, cancelY);
+      await page.mouse.down();
+      await page.mouse.move(x, cancelY - 61);
+      await expectPage(panel).toHaveCSS("height", `${startHeight - 20}px`);
+      await edge.dispatchEvent("pointercancel", { pointerId: 1 });
+      await page.mouse.up();
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      expectPage(resizeCount()).toBe(beforeDrag + 2);
+      await expectPage(composer).toBeFocused();
+      await expectPage(panel).toHaveCSS("border-bottom-width", "1px");
+      await page.keyboard.press("Meta+j");
+      await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+      await page.keyboard.press("Meta+j");
+      await expectPage(panel).toHaveCSS("height", `${startHeight + 40}px`);
+      await expectPage(panel).toContainText("SESSION_KEPT");
+      expectPage(connections).toBe(connectionsBeforeHide);
+      const firstCols = controls[0]?.cols;
+      await page.setViewportSize({ width: 1000, height: 600 });
+      await expectPage
+        .poll(() =>
+          controls.some(
+            (control) => control.type === "terminal.resize" && control.cols !== firstCols,
+          ),
+        )
+        .toBe(true);
+      const resizedHeader = await header.boundingBox();
+      await expectPage
+        .poll(async () => (await panel.boundingBox())?.width)
+        .toBe((resizedHeader?.width ?? 0) + 1);
+      const resizedPanel = await panel.boundingBox();
+      const composerBox = await page.locator(".composer").boundingBox();
+      expectPage((resizedPanel?.y ?? 0) + (resizedPanel?.height ?? 0)).toBeLessThanOrEqual(
+        composerBox?.y ?? 0,
+      );
+      const emulatorHeight = await panel.locator(".wterm").evaluate((node) => node.clientHeight);
+      expectPage(emulatorHeight % 20).toBe(0);
+      await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
+      // Deliberately stop only this page's admission view; no shared fixture
+      // lifecycle mutation can interfere with later cases.
+      await page.route("**/api/v1/orbs/frontend-long-history", async (route) => {
+        const response = await route.fetch();
+        const orb = await response.json();
+        await route.fulfill({ response, json: { ...orb, state: "stopped" } });
+      });
+      await expectPage(header.getByRole("button", { name: "Start orb" })).toBeVisible();
+      await expectPage(page.locator(".orb-terminal-window")).toHaveCount(0);
+      await expectPage(header.getByRole("button", { name: /^(Open|Hide) terminal$/ })).toHaveCount(
+        0,
+      );
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("keeps delayed terminal readiness hidden and exposes an explicit retry after exit", async () => {
+    const page = await browser.newPage();
+    let accept = () => {};
+    let exit = () => {};
+    let opens = 0;
+    await page.routeWebSocket("**/orbs/frontend-fixture-orb/terminal", (socket) => {
+      socket.onMessage((data) => {
+        if (typeof data !== "string") return;
+        const control = JSON.parse(data);
+        if (control.type !== "terminal.open") return;
+        opens += 1;
+        accept = () => {
+          socket.send(
+            JSON.stringify({
+              v: 1,
+              type: "terminal.ready",
+              cols: control.cols,
+              rows: control.rows,
+            }),
+          );
+          socket.send(Buffer.from("READY_AFTER_HIDE\r\n# "));
+        };
+        exit = () =>
+          socket.send(JSON.stringify({ v: 1, type: "terminal.exit", exitCode: 7, signal: 0 }));
+      });
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const header = page.locator(".orb-header");
+      await header.getByRole("button", { name: "Open terminal", exact: true }).click();
+      await expectPage.poll(() => opens).toBe(1);
+      await header.getByRole("button", { name: "Hide terminal", exact: true }).click();
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("keep focus here");
+      accept();
+      await expectPage(page.locator(".orb-terminal-window")).toContainText("READY_AFTER_HIDE");
+      await expectPage(composer).toBeFocused();
+      await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+      await header.getByRole("button", { name: "Open terminal", exact: true }).click();
+      exit();
+      await expectPage(page.locator(".orb-terminal-window").getByRole("alert")).toContainText(
+        "Terminal exited with code 7.",
+      );
+      await page.getByRole("button", { name: "New terminal", exact: true }).click();
+      await expectPage.poll(() => opens).toBe(2);
+      accept();
+      await expectPage(page.locator(".orb-terminal-window")).toContainText("READY_AFTER_HIDE");
+      await expectPage(page.getByRole("button", { name: "New terminal", exact: true })).toHaveCount(
+        0,
+      );
+      await expectPage(composer).toHaveValue("keep focus here");
+    } finally {
+      await page.close();
+    }
+  });
+
   it("skips unchanged long history while typing and still renders sent/live messages", async () => {
     const page = await browser.newPage();
     try {
@@ -870,12 +1192,395 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("creates from + without unmounting the workspace or clearing the draft", async () => {
+    const page = await browser.newPage();
+    await page.clock.install();
+    let createdId: string | undefined;
+    let releaseCreate = () => {};
+    let releaseHistory = () => {};
+    let releaseList = () => {};
+    let createArrived = () => {};
+    let historyArrived = () => {};
+    let listArrived = () => {};
+    const createGate = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const listGate = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    const createRequested = new Promise<void>((resolve) => {
+      createArrived = resolve;
+    });
+    const historyRequested = new Promise<void>((resolve) => {
+      historyArrived = resolve;
+    });
+    const listRequested = new Promise<void>((resolve) => {
+      listArrived = resolve;
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("keep this draft while creating");
+      await expectPage(
+        index.getByRole("link", { name: "New orb in scratchpad", exact: true }),
+      ).toBeVisible();
+      const indexNode = await index.elementHandle();
+      const historyNode = await page.locator(".history").elementHandle();
+      const composerNode = await composer.elementHandle();
+      const transcript = await page.locator(".history").innerText();
+      await page.route("**/api/v1/projects/frontend-scratchpad-project/orbs", async (route) => {
+        if (route.request().method() === "POST") {
+          createdId = route.request().postDataJSON().id;
+          createArrived();
+          await createGate;
+          await route.continue();
+        } else {
+          const response = await route.fetch();
+          listArrived();
+          await listGate;
+          await route.fulfill({ response });
+        }
+      });
+      await page.route("**/api/v1/orbs/*/history", async (route) => {
+        if (createdId !== undefined && route.request().url().includes(`/orbs/${createdId}/`)) {
+          const response = await route.fetch();
+          historyArrived();
+          await historyGate;
+          await route.fulfill({ response });
+        } else await route.continue();
+      });
+      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await createRequested;
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      await expectPage(
+        index.getByRole("button", { name: "Creating orb in scratchpad", exact: true }),
+      ).toBeDisabled();
+      await expectPage(index.getByRole("status")).toContainText("creating orb…");
+      expectPage(await indexNode?.evaluate((node) => node.isConnected)).toBe(true);
+      expectPage(await historyNode?.evaluate((node) => node.isConnected)).toBe(true);
+      expectPage(await composerNode?.evaluate((node) => node.isConnected)).toBe(true);
+      await expectPage(composer).toHaveValue("keep this draft while creating");
+      expectPage(await page.locator(".history").innerText()).toBe(transcript);
+      // Snapshot an empty list before acceptance; it must not erase the accepted row later.
+      await page.clock.runFor(2000);
+      await listRequested;
+      releaseCreate();
+      await historyRequested;
+      const newRow = index.locator(`a[href="#/orbs/${createdId}"]`);
+      await expectPage(newRow).toHaveAttribute("aria-current", "page");
+      await expectPage(index).toHaveAttribute("aria-busy", "true");
+      await expectPage(page.locator(".orb-main")).toHaveAttribute("inert", "");
+      expectPage(await historyNode?.evaluate((node) => node.isConnected)).toBe(true);
+      await expectPage(composer).toHaveValue("keep this draft while creating");
+      const staleResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/projects/frontend-scratchpad-project/orbs") &&
+          response.request().method() === "GET",
+      );
+      releaseList();
+      await (await staleResponse).finished();
+      await page.clock.runFor(32);
+      await expectPage(newRow).toHaveAttribute("aria-current", "page");
+      releaseHistory();
+      await expectPage(index).toHaveAttribute("aria-busy", "false");
+      await expectPage(page.locator(".orb-name")).toHaveText("untitled orb");
+      expectPage(await indexNode?.evaluate((node) => node.isConnected)).toBe(true);
+      await expectPage(composer).toHaveValue("");
+      await page.goBack();
+      await expectPage(page.locator(".orb-name")).toHaveText("Frontend Playground");
+      await expectPage(composer).toHaveValue("keep this draft while creating");
+    } finally {
+      releaseCreate();
+      releaseHistory();
+      releaseList();
+      if (createdId !== undefined) await removeFixtureOrb(page, createdId);
+      await page.close();
+    }
+  });
+
+  it("retries creation with the same ID and never overrides a later orb selection", async () => {
+    const page = await browser.newPage();
+    const attempts: string[] = [];
+    let release = () => {};
+    let arrived = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const requested = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    await page.route("**/api/v1/projects/frontend-scratchpad-project/orbs", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      attempts.push(route.request().postDataJSON().id);
+      if (attempts.length === 1) {
+        await route.fulfill({
+          status: 503,
+          json: {
+            error: { code: "unavailable", message: "Creation unavailable", retryable: true },
+          },
+        });
+      } else {
+        arrived();
+        await gate;
+        await route.continue();
+      }
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("draft survives failure");
+      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await expectPage(index.getByRole("alert")).toContainText("Failed to create orb");
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      await expectPage(composer).toHaveValue("draft survives failure");
+      await index.getByRole("button", { name: "retry", exact: true }).click();
+      await requested;
+      expectPage(attempts).toHaveLength(2);
+      expectPage(attempts[1]).toBe(attempts[0]);
+      await index.locator('a[href="#/orbs/frontend-offline-sync"]').click();
+      await expectPage(page.locator(".orb-name")).toHaveText("Offline sync");
+      release();
+      await expectPage(index.locator(`a[href="#/orbs/${attempts[0]}"]`)).toBeVisible();
+      await expectPage(page).toHaveURL(`${origin}/#/orbs/frontend-offline-sync`);
+      await expectPage(index.getByRole("alert")).toHaveCount(0);
+      await expectPage(
+        index.getByRole("button", { name: "Creating orb in scratchpad", exact: true }),
+      ).toHaveCount(0);
+    } finally {
+      release();
+      if (attempts[0] !== undefined) await removeFixtureOrb(page, attempts[0]);
+      await page.close();
+    }
+  });
+
+  it("keeps modified + clicks native without navigating the source workspace", async () => {
+    const page = await browser.newPage();
+    let popup: typeof page | undefined;
+    let createdId: string | undefined;
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      const node = await index.elementHandle();
+      // Native modified-link tabs have no opener: observe the context, not window.open/popups.
+      const opened = page.context().waitForEvent("page");
+      await index
+        .getByRole("link", { name: "New orb in scratchpad", exact: true })
+        .click({ modifiers: [process.platform === "darwin" ? "Meta" : "Control"] });
+      popup = await opened;
+      await expectPage(popup).toHaveURL(/#\/orbs\/[0-9a-f-]+$/);
+      createdId = popup.url().split("/orbs/")[1];
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      expectPage(await node?.evaluate((element) => element.isConnected)).toBe(true);
+    } finally {
+      if (createdId !== undefined) await removeFixtureOrb(page, createdId);
+      await popup?.close();
+      await page.close();
+    }
+  });
+
+  it("keeps the fleet mounted across projects, opens archives, and creates from the title plus", async () => {
+    const page = await browser.newPage();
+    let release = () => {};
+    let createdId: string | undefined;
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      await expectPage(index.locator(".ix-project")).toHaveCount(4);
+      await expectPage(index.locator(".project-new-orb-row")).toHaveCount(0);
+      await expectPage(index.getByRole("link", { name: /^New orb in / })).toHaveCount(4);
+      const geometry = await index.locator(".project-head-name").evaluateAll((heads) =>
+        heads.map((head) => {
+          const actions = head.querySelector(".project-head-actions");
+          return actions === null
+            ? -1
+            : head.getBoundingClientRect().right - actions.getBoundingClientRect().right;
+        }),
+      );
+      expectPage(geometry).toEqual([0, 0, 0, 0]);
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("original project draft");
+      const indexNode = await index.elementHandle();
+      const destination = index.locator('a[href="#/orbs/frontend-offline-sync"]');
+      const destinationNode = await destination.elementHandle();
+      let arrived = () => {};
+      const requested = new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route("**/api/v1/orbs/frontend-offline-sync/history", async (route) => {
+        const response = await route.fetch();
+        arrived();
+        await gate;
+        await route.fulfill({ response });
+      });
+      await index.evaluate((node) => {
+        node.style.maxHeight = "240px";
+      });
+      await destination.click();
+      await requested;
+      const scrollTop = await index.evaluate((node) => node.scrollTop);
+      await expectPage(destination).toHaveAttribute("aria-current", "page");
+      await expectPage(page.locator(".orb-main")).toHaveAttribute("inert", "");
+      await expectPage(composer).toHaveValue("original project draft");
+      release();
+      await expectPage(index).toHaveAttribute("aria-busy", "false");
+      await expectPage(page.locator(".orb-name")).toHaveText("Offline sync");
+      await expectPage(page).toHaveTitle("fieldnotes · Offline sync");
+      expectPage(
+        await indexNode?.evaluate(
+          (node) => node === node.ownerDocument.querySelector(".orb-index"),
+        ),
+      ).toBe(true);
+      expectPage(await destinationNode?.evaluate((node) => node.isConnected)).toBe(true);
+      expectPage(await index.evaluate((node) => node.scrollTop)).toBe(scrollTop);
+      await composer.fill("fieldnotes draft");
+      await page.goBack();
+      await expectPage(composer).toHaveValue("original project draft");
+      await destination.click();
+      await expectPage(composer).toHaveValue("fieldnotes draft");
+      await index.getByRole("button", { name: "Configure homelab", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await expectPage(dialog).toHaveAccessibleName("Config for homelab");
+      await dialog.getByRole("button", { name: "Close project config" }).click();
+      await index
+        .getByRole("region", { name: "Frontend playground", exact: true })
+        .locator(".project-archive > summary")
+        .click();
+      await index.locator('a[href="#/orbs/frontend-archived-orb"]').click();
+      await expectPage(page.locator(".orb-name")).toHaveText("Finished design exploration");
+      await expectPage(page.locator(".composer")).toHaveCount(0);
+      await expectPage(index.locator('[aria-current="page"]')).toHaveAttribute(
+        "href",
+        "#/orbs/frontend-archived-orb",
+      );
+      await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
+      await expectPage(page).toHaveURL(/#\/orbs\/[0-9a-f-]+$/);
+      createdId = page.url().split("/orbs/")[1];
+      await expectPage(page.locator(".orb-name")).toHaveText("untitled orb");
+      const created = await page.request.get(`${origin}/api/v1/orbs/${createdId}`);
+      expectPage((await created.json()).projectId).toBe("frontend-scratchpad-project");
+    } finally {
+      release();
+      if (createdId !== undefined) await removeFixtureOrb(page, createdId);
+      await page.close();
+    }
+  });
+
+  it("retains stale fleet rows, recovers partial failures, and fences old polls after config saves", async () => {
+    const page = await browser.newPage();
+    await page.clock.install();
+    let failOrbs = false;
+    let failProjects = false;
+    let holdProjects = false;
+    let renamed = false;
+    let calls = 0;
+    let release = () => {};
+    let arrived = () => {};
+    const requested = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/projects/frontend-fieldnotes-project/orbs", async (route) => {
+      if (failOrbs) await route.fulfill({ status: 503, json: {} });
+      else await route.continue();
+    });
+    await page.route("**/api/v1/projects", async (route) => {
+      calls += 1;
+      if (failProjects) {
+        await route.fulfill({ status: 503, json: {} });
+        return;
+      }
+      const response = await route.fetch();
+      const body = await response.json();
+      if (renamed)
+        body.items.find((p: { id: string }) => p.id === "frontend-fieldnotes-project").name =
+          "Fieldnotes renamed";
+      if (holdProjects) {
+        arrived();
+        await gate;
+      }
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/v1/projects/frontend-fieldnotes-project", async (route) => {
+      if (route.request().method() !== "PATCH") {
+        await route.continue();
+        return;
+      }
+      const response = await page.request.get(
+        `${origin}/api/v1/projects/frontend-fieldnotes-project`,
+      );
+      renamed = true;
+      await route.fulfill({ json: { ...(await response.json()), name: "Fieldnotes renamed" } });
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const index = page.getByRole("navigation", { name: "All project orbs" });
+      const destination = index.locator('a[href="#/orbs/frontend-offline-sync"]');
+      await expectPage(destination).toBeVisible();
+      failOrbs = true;
+      await page.clock.runFor(2000);
+      await expectPage(index.getByRole("alert")).toContainText("Orb list is stale");
+      await expectPage(destination).toBeVisible();
+      failOrbs = false;
+      await page.clock.runFor(2000);
+      await expectPage(index.getByRole("alert")).toHaveCount(0);
+      failProjects = true;
+      await page.clock.runFor(2000);
+      await expectPage(index.getByRole("alert")).toContainText("Project list is stale");
+      await expectPage(destination).toBeVisible();
+      failProjects = false;
+      holdProjects = true;
+      await page.clock.runFor(2000);
+      await requested;
+      const heldCalls = calls;
+      await page.clock.runFor(6000);
+      expectPage(calls).toBe(heldCalls);
+      await index.getByRole("button", { name: "Configure fieldnotes", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      const general = dialog.getByRole("tabpanel", { name: "General", exact: true });
+      await general.getByLabel("Name", { exact: true }).fill("Fieldnotes renamed");
+      await general.getByRole("button", { name: "save", exact: true }).click();
+      await expectPage(
+        index.getByRole("heading", { name: "Fieldnotes renamed", exact: true }),
+      ).toBeVisible();
+      const oldResponse = page.waitForResponse("**/api/v1/projects");
+      holdProjects = false;
+      release();
+      await (await oldResponse).finished();
+      await page.clock.runFor(32);
+      await expectPage(
+        index.getByRole("heading", { name: "Fieldnotes renamed", exact: true }),
+      ).toBeVisible();
+      await page.clock.runFor(2000);
+      await expectPage(index.getByRole("alert")).toHaveCount(0);
+      await expectPage(
+        index.getByRole("heading", { name: "Fieldnotes renamed", exact: true }),
+      ).toBeVisible();
+      await dialog.getByRole("button", { name: "Close project config" }).click();
+    } finally {
+      release();
+      await page.close();
+    }
+  });
+
   it("keeps the index and conversation visible until an orb switch is ready", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
     const composer = page.getByPlaceholder(/Message the orb/);
     await composer.fill("draft for the first orb");
-    const index = page.getByRole("navigation", { name: "Project orbs" });
+    const index = page.getByRole("navigation", { name: "All project orbs" });
     const destination = index.locator('a[href="#/orbs/frontend-auth-copy-test"]');
     await expectPage(destination).toBeVisible();
     const indexNode = await index.elementHandle();
@@ -926,7 +1631,7 @@ describe("frontend-only browser behavior", () => {
   it("discards a superseded orb load and preserves missing-resource URLs", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
-    const index = page.getByRole("navigation", { name: "Project orbs" });
+    const index = page.getByRole("navigation", { name: "All project orbs" });
     const destination = index.locator('a[href="#/orbs/frontend-auth-copy-test"]');
     await expectPage(destination).toBeVisible();
     let release = () => {};
@@ -1073,7 +1778,7 @@ describe("frontend-only browser behavior", () => {
     expectPage(await working.evaluate((el) => el.getBoundingClientRect().width)).toBe(
       await caret.evaluate((el) => el.getBoundingClientRect().width),
     );
-    await page.getByRole("button", { name: "terminal", exact: true }).click();
+    await page.getByRole("button", { name: "Open terminal", exact: true }).click();
     await expectPage(caret).toBeHidden();
     const terminalCursor = page.locator(".term-cursor").first();
     await expectPage(terminalCursor).toBeAttached();

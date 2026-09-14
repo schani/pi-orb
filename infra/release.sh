@@ -171,6 +171,7 @@ if [ -z "$VALIDATE" ]; then
   python3 -m infra.release_retire inventory "$RECORD"
   stage checks
   release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm ci
+  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run test:e2e:install
   release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run typecheck
   release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run lint
   release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm test

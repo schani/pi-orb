@@ -1,0 +1,72 @@
+{
+  "body": {
+    "width": 1440,
+    "height": 1000,
+    "font": "",
+    "fontFamily": "ui-monospace, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+    "color": "rgb(0, 0, 0)",
+    "background": "rgb(255, 255, 255)",
+    "padding": "0px",
+    "columns": "none"
+  },
+  ".orb-index": {
+    "width": 236,
+    "height": 129,
+    "font": "",
+    "fontFamily": "ui-monospace, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+    "color": "rgb(0, 0, 0)",
+    "background": "rgba(0, 0, 0, 0)",
+    "padding": "0px",
+    "columns": "none"
+  },
+  ".ix-row": {
+    "width": 235,
+    "height": 20,
+    "font": "",
+    "fontFamily": "ui-monospace, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+    "color": "rgb(255, 255, 255)",
+    "background": "rgb(0, 0, 0)",
+    "padding": "0px 10px",
+    "columns": "16px 157.516px 23.4844px"
+  },
+  ".project-name": {
+    "width": 151,
+    "height": 24,
+    "font": "",
+    "fontFamily": "ui-monospace, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+    "color": "rgb(0, 0, 0)",
+    "background": "rgba(0, 0, 0, 0)",
+    "padding": "0px",
+    "columns": "none"
+  },
+  ".orb-header": {
+    "width": 1204,
+    "height": 24,
+    "font": "",
+    "fontFamily": "ui-monospace, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+    "color": "rgb(0, 0, 0)",
+    "background": "rgb(255, 255, 255)",
+    "padding": "0px 12px",
+    "columns": "none"
+  },
+  ".rec": {
+    "width": 1204,
+    "height": 110,
+    "font": "",
+    "fontFamily": "ui-monospace, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+    "color": "rgb(0, 0, 0)",
+    "background": "rgba(0, 0, 0, 0)",
+    "padding": "4px 12px",
+    "columns": "32px 1136px"
+  },
+  ".composer-input": {
+    "width": 1124,
+    "height": 80,
+    "font": "",
+    "fontFamily": "ui-monospace, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+    "color": "rgb(0, 0, 0)",
+    "background": "rgba(0, 0, 0, 0)",
+    "padding": "0px",
+    "columns": "none"
+  }
+}

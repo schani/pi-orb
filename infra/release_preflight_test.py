@@ -38,6 +38,17 @@ class PreflightTest(unittest.TestCase):
         failure = fail("http", "cloud request HTTP 403")
         self.assertEqual(check_exclusion_authority(FakeCloud(failure), "p"), failure)
 
+    def test_browser_install_precedes_e2e_in_release_and_workflow(self):
+        import json
+        package = json.loads(Path("package.json").read_text())
+        self.assertEqual(package["scripts"]["test:e2e:install"],
+                         "playwright install --with-deps chromium webkit")
+        for path in ["infra/release.sh", ".github/workflows/e2e.yml"]:
+            script = Path(path).read_text()
+            self.assertLess(script.index("npm ci"), script.index("npm run test:e2e:install"))
+            self.assertLess(script.index("npm run test:e2e:install"),
+                            script.index("npm run test:e2e\n"))
+
     def test_check_precedes_checks_build_schema_and_apply(self):
         script = Path("infra/release.sh").read_text()
         check = script.index('python3 -m infra.release_preflight "$PROJECT"')

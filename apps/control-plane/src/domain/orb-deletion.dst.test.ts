@@ -132,7 +132,7 @@ describe("orb deletion (DST)", () => {
     });
   });
 
-  it("permanent delete supersedes an in-progress failed-compute discard", async () => {
+  it("permanent deletion completes while racing failed-compute discard", async () => {
     await runDst({ name: "delete-supersedes-discard", iterations: 30 }, async (sim) => {
       const harness = makeHarness({ constants: { deletionQuarantineMs: 2_000 } });
       const stop = new AbortController();
@@ -154,10 +154,11 @@ describe("orb deletion (DST)", () => {
             });
             expect(failed.isOk()).toBe(true);
             const deleted = await requestOrbDeletion(task, harness.deps, ORB);
-            expect(deleted.isOk() && deleted.value).toMatchObject({
-              state: "deleting",
-              hostDiscardThroughIncarnation: 0,
-            });
+            expect(deleted.isOk()).toBe(true);
+            if (deleted.isErr()) return;
+            expect(deleted.value.state).toBe("deleting");
+            // The concurrent reconciler may have finalized discard already.
+            expect([0, null]).toContain(deleted.value.hostDiscardThroughIncarnation);
             await waitUntil(
               task,
               "deletion-grade cleanup supersedes discard",

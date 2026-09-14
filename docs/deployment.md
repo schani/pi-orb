@@ -257,6 +257,56 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Mobile release validated through explicit recovery (2026-09-13):** full run
+[34730567562](https://github.com/schani/pi-orb/actions/runs/34730567562) deployed
+`7fdbc9b` after passing checks including both mobile browser engines, build,
+schema, apply and IAP repair. Retirement observation stopped on a classified
+Cloud Monitoring transport failure (`http: cloud request unavailable`), not a
+failed application gate or retirement timeout. Read-only inspection then found
+explicit active/idle zeroes for `pi-orb-00053-rtt` at 02:40 UTC and no pending
+compute operations. Validation-only run
+[34733669858](https://github.com/schani/pi-orb/actions/runs/34733669858) verified
+the exact serving deployment, completed repair/retirement/activation/lifecycle/
+identity gates, and recorded `validated`. All four recorded fixtures were deleted.
+Generation `1789264785` serves container digest
+`sha256:0da5970772506a1f4c7f2bfc15ba038f55a5da40b75d3ed434ab8666e3b66f97`.
+The recovery record is
+`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789267344-ee20f4b1-31fb-404c-91d7-c5619fb6f4e2.json`,
+referencing `r-1789262891-21e10879-7a36-4586-89ff-4df9609e0d76`.
+The original full run remains failed; recovery neither rebuilt nor reapplied.
+Evidence: `docs/postmortems/2026-09-13-release-webkit-prerequisite.md`.
+
+**Browser prerequisite correction (2026-09-13):** run `34729281559` for `301c543`
+stopped before apply because the new mobile WebKit suite lacked its executable.
+The authoritative release now installs both managed engines and system libraries
+via `npm run test:e2e:install` after `npm ci`, as does the standalone E2E workflow.
+Both engines remain mandatory. Evidence:
+`docs/postmortems/2026-09-13-release-webkit-prerequisite.md`.
+
+**Validated release (2026-09-13):** GitHub run
+[34726749434](https://github.com/schani/pi-orb/actions/runs/34726749434) deployed
+`858301d24a3cc25b5e0dd99328363fd849654b1e`, including the atomic output handoff
+and deletion/discard DST invariant correction. The full transaction completed
+at 00:47:18 UTC with `validated`, exit code 0, and every gate passed. Generation
+`1789259399` serves container digest
+`sha256:76fc88af44f126ccccc5ca4ef4445247ce510717aa4fefc10b905670222af036`.
+The prior browser revision had explicit active/idle zeroes at 00:36 before
+activation; all four recorded release fixtures were deleted. Durable evidence:
+`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789257530-814003a4-972c-47b3-a777-08e6c827394e.json`.
+The previous failed run remains preserved; this was a fresh full deployment,
+not a validation-only relabeling. Older orb runtimes require restart for the
+direct protocol change (`docs/runtime-protocol.md`).
+
+**Release gate finding (2026-09-12):** run `34711432756` stopped in checks before
+build/migration/apply; production was unchanged. MCP E2E's strict completion
+selector exposed the transient history-before-output-retirement duplicate DOM.
+The initial overlap-tolerant assertion was insufficient and is superseded by an
+atomic history-frame handoff carrying explicit retired block IDs. Strict MCP
+assertions are restored with deterministic adapter/writer/reducer schedules and
+renderer/replica-repair regressions. This changes the runtime protocol directly;
+no new production deployment is implied. Evidence:
+`docs/postmortems/2026-09-12-mcp-completion-selector.md`.
+
 **Production finding (2026-09-11; corrected and deployed):** `72fb304` passed checks/E2E,
 image acceptance and migration, then partially applied because the shared deployer
 lacks `logging.exclusions.create` for the MCP OAuth callback exclusion. All four

@@ -54,7 +54,7 @@ describe("dashboard layout contract", () => {
 
   it("keeps every orb entry on its line grid behind its state hue", () => {
     expect(rule(".orb-entry")).toContain("border-left: 2px solid var(--g2)");
-    expect(rule(".orb-entry-del")).toContain("border-left-style: dotted");
+    expect(rule(".orb-entry-del,\n.ix-row-del")).toContain("border-left-style: dotted");
     expect(rule(".orb-entry-title")).toContain("height: 22px");
     expect(rule(".orb-entry-meta")).toContain("height: var(--row)");
     expect(rule(".orb-entry-error")).toContain("color: var(--bad)");
@@ -91,7 +91,7 @@ describe("orb workspace layout contract", () => {
     expect(rule(".app")).toContain("flex-direction: column");
     expect(rule(".orb-page")).toContain("flex: 1");
     expect(rule(".orb-page")).toContain("grid-template-columns: 236px minmax(0, 1fr)");
-    expect(rule(".orb-main > .history")).toContain("flex: 1 0 auto");
+    expect(rule(".orb-transcript-content > .history")).toContain("flex: 1 0 auto");
     expect(rule(".composer")).toContain("position: sticky");
     expect(rule(".composer")).toContain("z-index: 30");
     expect(rule(".composer")).toContain("bottom: 0");
@@ -106,6 +106,15 @@ describe("orb workspace layout contract", () => {
     expect(rule(".ix-row-current,\n.ix-row-current:hover")).toContain("background: var(--k)");
   });
 
+  it("keeps stacked project actions and headers on the existing grid", () => {
+    expect(rule(".orb-index .project-head-actions")).toContain("margin-left: auto");
+    expect(rule(".orb-index .project-head-actions")).toContain("gap: 4px");
+    expect(rule("a.project-new-orb-icon")).toContain("width: 24px");
+    expect(rule("a.project-new-orb-icon")).toContain("height: 24px");
+    expect(rule(".ix-project > .project-head")).toContain("top: 24px");
+    expect(rule(".ix-project + .ix-project")).toContain("border-top: 1px solid var(--k)");
+  });
+
   it("spans the user band across the record's prefix column", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
     expect(rule(".rec-you")).toContain("background: var(--g1)");
@@ -114,11 +123,32 @@ describe("orb workspace layout contract", () => {
     expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--g2)");
   });
 
-  it("stacks the terminal title bar above the emulator", () => {
-    expect(rule(".orb-terminal-window")).toContain("display: flex");
-    expect(rule(".orb-terminal-window")).toContain("flex-direction: column");
-    expect(rule(".orb-terminal-header")).toContain("flex: 0 0 20px");
-    expect(rule(".orb-terminal-header")).toContain("background: var(--k)");
+  it("overlays a full-width headerless terminal immediately below the orb header", () => {
+    const terminal = rule(".orb-terminal-window");
+    expect(terminal).toContain("position: absolute");
+    expect(terminal).toContain("top: 100%");
+    expect(terminal).toContain("left: -1px");
+    expect(terminal).toContain("width: calc(100% + 1px)");
+    expect(terminal).toContain("border: 1px solid var(--k)");
+    expect(rule(".orb-terminal-resize")).toContain("bottom: 0");
+    expect(rule(".orb-terminal-resize")).toContain("cursor: ns-resize");
+    expect(rule(".orb-terminal-body")).toContain("overflow: clip");
+    expect(terminal).toContain("padding: 13px 0");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("padding: 0 15px");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain(
+      "scroll-snap-type: y mandatory",
+    );
+    expect(rule(".orb-terminal-emulator .term-row")).toContain("scroll-snap-align: start");
+    expect(rule(".orb-terminal-resize:focus-visible")).toContain("background: transparent");
+    expect(rule(".orb-terminal-resize:focus-visible")).toContain("outline: 0");
+    expect(terminal).not.toMatch(/animation|transition/);
+    expect(rule(".orb-terminal-window.orb-terminal-hidden")).toContain("visibility: hidden");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("flex: none");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("border-radius: 0");
+    expect(rule(".orb-terminal-window .orb-terminal-emulator")).toContain("box-shadow: none");
+    expect(css).not.toMatch(/orb-terminal-(header|launcher|controls)/);
+    expect(rule(".orb-header-actions")).toContain("gap: 8px");
+    expect(rule("button.icon-button")).toContain("width: 20px");
   });
 
   it("uses one rail-row geometry for reasoning and every tool category", () => {

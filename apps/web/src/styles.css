@@ -470,6 +470,36 @@ h3 {
   height: 16px;
 }
 
+.project-head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.orb-index .project-head-actions {
+  margin-left: auto;
+  gap: 4px;
+}
+
+a.project-new-orb-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  color: var(--g3);
+}
+
+a.project-new-orb-icon:hover,
+a.project-new-orb-icon:focus-visible {
+  background: var(--k);
+  color: var(--w);
+}
+
 .project-name {
   overflow: hidden;
   font-size: 18px;
@@ -587,15 +617,18 @@ h3 {
   border-left-color: var(--st-fail);
 }
 
-.orb-entry-arch {
+.orb-entry-arch,
+.ix-row-arch {
   border-left-color: var(--st-arch);
 }
 
-.orb-entry-archng {
+.orb-entry-archng,
+.ix-row-archng {
   border-left-color: var(--st-archng);
 }
 
-.orb-entry-del {
+.orb-entry-del,
+.ix-row-del {
   border-left-color: var(--st-del);
   border-left-style: dotted;
 }
@@ -1053,6 +1086,7 @@ h3 {
   position: sticky;
   top: 0;
   align-self: start;
+  height: 100dvh;
   max-height: 100dvh;
   overflow-y: auto;
   border-right: 1px solid var(--k);
@@ -1092,8 +1126,17 @@ h3 {
   min-width: 0;
 }
 
-/* The brand row owns the top of the index, so the project name sits below it. */
-.orb-index > .project-head {
+.ix-project + .ix-project {
+  border-top: 1px solid var(--k);
+}
+
+.ix-load-error {
+  padding: 0 10px;
+  overflow-wrap: anywhere;
+}
+
+/* Each project header sticks below the home row, within its own section. */
+.ix-project > .project-head {
   position: sticky;
   z-index: 3;
   top: 24px;
@@ -1200,7 +1243,12 @@ h3 {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+}
+
+.orb-header-actions > .icon-button[aria-pressed="true"] {
+  color: var(--w);
+  background: var(--k);
 }
 
 .orb-rename-form {
@@ -1229,7 +1277,7 @@ h3 {
   flex-direction: column;
 }
 
-.orb-main > .history {
+.orb-transcript-content > .history {
   flex: 1 0 auto;
 }
 
@@ -1757,7 +1805,7 @@ h3 {
   background: transparent;
 }
 
-.composer-line > .text-action {
+.composer-line > .composer-abort {
   align-self: start;
 }
 
@@ -1790,94 +1838,80 @@ h3 {
   line-height: 18px;
 }
 
-/* ---------- floating orb terminal ---------- */
+/* ---------- header-owned terminal shade ---------- */
 
 .orb-terminal-window {
-  position: fixed;
-  right: 12px;
-  z-index: 32;
+  position: absolute;
+  top: 100%;
+  left: -1px;
+  width: calc(100% + 1px);
+  padding: 13px 0;
   display: flex;
-  min-width: 330px;
-  min-height: 220px;
   flex-direction: column;
+  white-space: normal;
+  color: var(--k);
   background: var(--w);
   border: 1px solid var(--k);
 }
 
-.orb-terminal-window.orb-terminal-hidden {
-  opacity: 0;
-  pointer-events: none;
+.orb-terminal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: clip;
 }
 
 .orb-terminal-resize {
+  margin: 0;
+  border: 0;
+  padding: 0;
   position: absolute;
-  top: -7px;
-  left: -7px;
-  z-index: 2;
-  width: 22px;
-  height: 22px;
-  cursor: nwse-resize;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 8px;
+  cursor: ns-resize;
   touch-action: none;
 }
 
-.orb-terminal-header {
-  display: flex;
-  flex: 0 0 20px;
-  height: 20px;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-  padding: 0 2px 0 8px;
-  color: var(--w);
-  background: var(--k);
-  user-select: none;
+.orb-terminal-resize:focus-visible {
+  outline: 0;
+  background: transparent;
+  color: inherit;
 }
 
-.orb-terminal-title {
-  flex: none;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-}
-
-.orb-terminal-status {
-  color: var(--g2);
-}
-
-.orb-terminal-controls {
-  margin-left: auto;
-  display: flex;
-  flex: none;
-}
-
-.orb-terminal-header .icon-button {
-  color: var(--w);
-}
-
-.orb-terminal-header .icon-button:hover:not(:disabled) {
-  color: var(--k);
-  background: var(--w);
+.orb-terminal-window.orb-terminal-hidden {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .orb-terminal-error {
-  padding: 0 8px;
+  flex: none;
+  padding: 4px 8px;
   color: var(--bad);
   background: var(--bad-bg);
   border-bottom: 1px solid var(--bad);
 }
 
+.orb-terminal-error button {
+  margin-left: 8px;
+}
+
 .orb-terminal-loading {
-  flex: 1;
+  flex: none;
   padding: 4px 8px;
   color: var(--g3);
 }
 
 .orb-terminal-window .orb-terminal-emulator {
   width: 100%;
-  flex: 1;
+  flex: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   min-height: 0;
-  padding: 13px 15px;
+  padding: 0 15px;
   overflow: auto;
+  scroll-snap-type: y mandatory;
   color: var(--k);
   background: var(--w);
   --term-fg: #000;
@@ -1891,30 +1925,249 @@ h3 {
   --term-color-3: var(--st-start);
 }
 
-.orb-terminal-launcher {
-  position: fixed;
-  right: 12px;
-  z-index: 31;
-  padding: 0 8px;
-  line-height: 18px;
+.orb-terminal-emulator .term-row {
+  scroll-snap-align: start;
 }
 
-.orb-terminal-window + .orb-terminal-launcher:not(.orb-terminal-launcher-visible) {
+/* Side rail is phone-only; desktop keeps its four-line prompt and index. */
+.composer-phone-pad,
+.composer-phone-rail,
+.composer-phone-feedback,
+.orb-phone-home,
+button.orb-phone-menu {
   display: none;
 }
 
-@media (max-width: 700px) {
-  .orb-terminal-window {
-    right: 8px;
-    max-width: calc(100% - 16px);
-    min-width: 280px;
+.orb-composer-feedback-original,
+.orb-transcript-scroll,
+.orb-transcript-content {
+  display: contents;
+}
+
+@media (max-width: 600px) {
+  html:has(.orb-page),
+  body:has(.orb-page) {
+    overflow: hidden;
+    overscroll-behavior: none;
   }
 
-  .orb-terminal-resize {
+  #root:has(.orb-page) {
+    min-height: 0;
+  }
+
+  .app:has(.orb-page) {
+    position: fixed;
+    top: var(--phone-viewport-top, 0px);
+    left: 0;
+    width: 100%;
+    height: var(--phone-viewport-height, 100dvh);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-page {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-main {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-transcript-content {
+    display: flow-root;
+  }
+
+  .orb-transcript-scroll {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: none;
+  }
+
+  .orb-index {
     display: none;
   }
 
-  .orb-terminal-launcher {
-    right: 8px;
+  .orb-header {
+    position: relative;
+    height: auto;
+    min-height: 44px;
+    flex-wrap: wrap;
+    gap: 0 8px;
+    padding: 0 12px;
+  }
+
+  .app:has(> .session-ribbon) .orb-header {
+    top: auto;
+  }
+
+  .orb-phone-home,
+  button.orb-phone-menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border: 0;
+  }
+
+  .orb-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .orb-header > .icon-button:not(.orb-phone-menu) {
+    width: 44px;
+    height: 44px;
+  }
+
+  .orb-life-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .orb-header-actions {
+    display: none;
+    width: 100%;
+    justify-content: flex-end;
+    border-top: 1px solid var(--g2);
+    gap: 8px;
+  }
+
+  .orb-header[data-phone-actions="true"] .orb-header-actions {
+    display: flex;
+  }
+
+  .orb-header-actions > button.icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .orb-rename-form {
+    flex-wrap: wrap;
+  }
+
+  .orb-rename-form input {
+    width: 80px;
+    font-size: 16px;
+  }
+
+  .orb-main:has(.composer) .orb-composer-feedback-original {
+    display: none;
+  }
+
+  .composer {
+    position: relative;
+    bottom: auto;
+    flex: none;
+    padding: 0 12px env(safe-area-inset-bottom);
+  }
+
+  .composer-phone-feedback {
+    max-height: 80px;
+    overflow-y: auto;
+    display: block;
+    padding: 4px 0;
+    color: var(--bad);
+    overflow-wrap: anywhere;
+  }
+
+  .composer-phone-pad {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 12px;
+    height: 44px;
+  }
+
+  .composer-open {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    background: var(--w);
+  }
+
+  .composer-draft-preview {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--g3);
+  }
+
+  .composer-phone-pad > button.icon-button,
+  .composer-phone-rail > button.icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .composer:not([data-expanded="true"]) .composer-line,
+  .composer:not([data-expanded="true"]) .composer-attachments,
+  .composer[data-expanded="true"] .composer-phone-pad,
+  .composer-line > .composer-abort {
+    display: none;
+  }
+
+  .composer-line {
+    grid-template-columns: 32px minmax(0, 1fr) 44px;
+  }
+
+  .composer-line > .composer-prefix {
+    padding-top: 12px;
+  }
+
+  .composer-input {
+    height: 88px;
+    min-height: 88px;
+    padding: 12px 0;
+    resize: none;
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  .composer-input[data-block-caret="true"] {
+    caret-color: auto;
+  }
+
+  .composer-caret {
+    display: none;
+  }
+
+  .composer-phone-rail {
+    display: flex;
+    flex-direction: column;
+  }
+
+  button.composer-send {
+    color: var(--w);
+    background: var(--k);
+  }
+
+  button.composer-send:disabled {
+    color: var(--g2);
+    background: var(--g1);
+  }
+
+  .composer-attachments {
+    max-height: 80px;
+    overflow-y: auto;
+    margin-top: 4px;
+  }
+
+  .composer-attachment-remove {
+    min-width: 44px;
+    min-height: 44px;
   }
 }

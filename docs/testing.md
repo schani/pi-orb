@@ -1,5 +1,34 @@
 # Testing strategy
 
+**Atomic output assertions (2026-09-12, corrected after initial misdiagnosis):**
+streamed output and its committed record must not coexist at any observable
+frame boundary. Sixteen explicit schedules drive the real Pi adapter, outbound
+writer and browser reducer across backpressure, next-message timing,
+snapshot/microtask publication and a mapping failpoint. Renderer tests enforce
+one paragraph through handoff while preserving a later identical response;
+HTTP repair tests prevent cross-channel reordering. The SDK contract pins native
+message object identity across append/mapping. The overlap-tolerant browser
+assertion and its obsolete regression are removed; strict MCP completion checks
+are restored. No text matching, sleep, larger timeout, or randomized hope of
+hitting the handoff substitutes for these checkpoints. Evidence:
+`docs/postmortems/2026-09-12-mcp-completion-selector.md`.
+
+**Deletion/discard invariant correction (2026-09-12):** the
+`delete-supersedes-discard` trace reproduced an assertion requiring pending discard
+after the reconciler had completed it. The user selected a single DST scenario
+that accepts either pending incarnation `0` or finalized `null`, retaining
+successful deletion and all eventual cleanup assertions. DST explores the
+orderings rather than forcing them. The recorded failing prefix now passes its
+assertion; the complete scenario and full suite passed. Evidence:
+`docs/postmortems/2026-09-12-delete-discard-dst-ordering.md`.
+
+**Browser prerequisites (2026-09-13):** the release transaction and standalone
+E2E workflow run `npm run test:e2e:install` after `npm ci`. This uses the
+lockfile-pinned CLI to install Chromium/WebKit and system dependencies before
+checks need them; relying on runner-preinstalled Chromium did not provision
+WebKit. Both engines remain mandatory. Evidence:
+`docs/postmortems/2026-09-13-release-webkit-prerequisite.md`.
+
 ## Decisions
 
 - Deterministic simulation testing is a first-class requirement from the beginning, not a later hardening phase.
@@ -167,6 +196,10 @@ For end-to-end tests, the one external dependency that cannot be exercised as-is
 A terminal-route unit-test flake found 2026-08-11 demonstrates the repository-wide rule. `apps/orb-runtime/src/http/terminal-route.test.ts` closed its client WebSocket, awaited the **client-side** `close` event, and immediately asserted that the fake PTY had been killed by the **server-side** socket's independent `close` callback. Neither WebSocket nor Node event ordering guarantees that the server callback has run when the peer's close event fires. The original test failed intermittently; temporarily waiting for the fake process's kill observation made 50/50 repeated runs pass, confirming an assertion-order race rather than evidence that production omits cleanup. Fixed 2026-08-11 without changing production cleanup: `FakeProcess.kill()` resolves a test-owned one-shot promise, and the test registers and awaits both the client close and server cleanup signals. This replaces the invalid ordering assumption rather than adding polling, retries, or a larger timeout.
 
 **Prompted spawning (2026-09-08).** `docs/orb-spawning.md` uses DST for atomic acceptance/retry, caller retirement and project-deletion races, and unattended recovery after caller loss. The same store semantics run against the in-memory store, PGlite, and real PostgreSQL, including concurrent requests; driver tests reject the final acceptance write to prove orb/inbox rollback. The full-slice success leg invokes the installed CLI through a sibling's terminal, waits for the child to finish before any browser connects, retries the same ID, and checks one inbox row and one completion. It builds the real frontend into a test-owned temporary directory and supplies `PI_ORB_WEB_DIST` before opening the returned URL in Playwright: the previous API-only harness returned 404 at the app root. Every additional orb ID is owned by suite teardown even if project deletion is not reached. The external mock consumes rules forward, so child task and child notification rules must precede archival, and an explicit recorded-child-notification predicate fences advancement to archival. Putting spawn after archive skipped the archive rules; the child notification then consumed the fallback, making archival requests return `no_matching_rule`. This is test-script ordering, not an intermittent product error; failure logs were retained and rule ordering/synchronization corrected rather than increasing timeouts.
+
+**In-place orb-creation browser checks.** Gate the POST acceptance, destination history, and an older fleet-list response independently; verify the existing index/history/composer nodes remain connected until the destination commits, the same draft survives Back, retries reuse their UUID, and later navigation wins over a delayed create. Native Ctrl/Cmd-click creates a browser-context page without an opener, so observe `context.waitForEvent("page")`, not the source page's `popup` event (the latter timed out despite successful tab creation). The frontend fixture's DELETE returns 202 before its removal timer finishes: teardown must wait for GET 404 before ending ownership. Returning at 202 allowed the next test to capture a still-deleting orb in its archive snapshot. Project-specific archive locators must also name their project, not assume the entire fleet has only one archive. These replace the event/cleanup assumptions exposed by the first new test runs; no timeout was increased and no product navigation behavior was weakened.
+
+**Phone scroll/paint checks (2026-09-13).** Install the managed engines/dependencies with `npm run test:e2e:install`, then run `npm run test:e2e:mobile`. The focused `e2e/frontend-mobile.e2e.test.ts` suite runs its seven cases against **both Chromium and WebKit** by default (14 tests), with an independently owned Vite fixture and browser per engine. Chromium still honors `PLAYWRIGHT_CHROMIUM_EXECUTABLE` and the system-browser fallback. The removed `PLAYWRIGHT_BROWSER` switch is no longer needed. `npm run test:e2e:frontend` includes this suite and the existing 27-case Chromium session/desktop suite (41 total). Seven focused phone cases cover side-rail geometry/drafts/admission, explicit abort, injected visual viewport resize/pan, zero scroll-position writes during unrelated polls, and a native wheel raster round trip with byte-identical transcript PNGs. Mobile WebKit automation rejects wheel input; that last case deliberately uses its desktop input backend at phone width. Do not equate Linux WebKit or synthetic viewport events with physical iPhone momentum, keyboard or Safari toolbar behavior. The polling regression instruments the native scrollTop setter rather than checking only final offsets—same-value writes were the defect and geometry alone missed them. Incident evidence and remaining physical validation: `docs/postmortems/2026-09-12-mobile-safari-scroll-ownership.md`, `TODO.md`.
 
 **Shared-preview acceptance (2026-09-09):** browser tests below launch their own fresh Vite process/server, not the preview already shared with the user. Validate the changed operation on the actual served preview and inspect its reload logs independently. In particular, shared-protocol export changes require a full frontend process restart; Node's cached external modules can make Vite config reload fail while stale middleware keeps returning HTTP 200. Fixture restart loses its in-memory data. See `docs/postmortems/2026-09-09-stale-frontend-preview.md`.
 

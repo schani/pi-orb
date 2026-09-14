@@ -1,3 +1,4 @@
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import { LiveHistoryPublisher } from "./live-history.ts";
@@ -15,6 +16,21 @@ const entry = (id: string, parentId: string | null, role: "user" | "assistant", 
 });
 
 describe("LiveHistoryPublisher", () => {
+  it("preserves SDK message identity across append and mapping, even for equal text", () => {
+    const manager = SessionManager.inMemory();
+    const messages: unknown[] = [];
+    const publisher = new LiveHistoryPublisher(manager, (_record, message) =>
+      messages.push(message),
+    );
+    const first = { role: "user" as const, content: "same", timestamp: 1 };
+    const second = { role: "user" as const, content: "same", timestamp: 1 };
+    manager.appendMessage(first);
+    manager.appendMessage(second);
+    expect(publisher.flushPersisted().isOk()).toBe(true);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toBe(first);
+    expect(messages[1]).toBe(second);
+  });
   it("publishes an ordinary message persisted after message_end without entry_appended", async () => {
     const entries: unknown[] = [entry("old", null, "user", "already synchronized")];
     const published: HistoryRecord[] = [];

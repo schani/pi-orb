@@ -1,0 +1,252 @@
+{
+  "name": "delete-supersedes-discard",
+  "iteration": 8,
+  "error": "expected { id: 'orb-delete', …(31) } to match object { state: 'deleting', …(1) }\n(30 matching properties omitted from actual): expected false to be true // Object.is equality",
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of reconciler, driver",
+      "value": 0.8582829909611837
+    },
+    {
+      "type": "entropy",
+      "name": "driver random number: store latency: fail orb and request compute discard",
+      "value": 0.6637901833848643
+    },
+    {
+      "type": "timer-create",
+      "id": 1,
+      "reason": "driver sleep: fail orb and request compute discard",
+      "deadline": 4.318950916924321
+    },
+    {
+      "type": "entropy",
+      "name": "reconciler random number: store latency: list orbs in states",
+      "value": 0.2553007840416871
+    },
+    {
+      "type": "timer-create",
+      "id": 2,
+      "reason": "reconciler sleep: list orbs in states",
+      "deadline": 2.2765039202084356
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.0666892498988757
+    },
+    {
+      "type": "timer-fire",
+      "id": 2,
+      "reason": "reconciler sleep: list orbs in states",
+      "virtualTime": 2.2765039202084356
+    },
+    {
+      "type": "entropy",
+      "name": "reconciler random number: store latency: get orb",
+      "value": 0.28057588245807774
+    },
+    {
+      "type": "timer-create",
+      "id": 3,
+      "reason": "reconciler sleep: get orb",
+      "deadline": 4.6793833324988245
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.00924364692167512
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.18890374425567313
+    },
+    {
+      "type": "timer-fire",
+      "id": 1,
+      "reason": "driver sleep: fail orb and request compute discard",
+      "virtualTime": 4.318950916924321
+    },
+    {
+      "type": "entropy",
+      "name": "driver random number: store latency: get orb",
+      "value": 0.6218336435091493
+    },
+    {
+      "type": "timer-create",
+      "id": 4,
+      "reason": "driver sleep: get orb",
+      "deadline": 8.428119134470068
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2888188243884139
+    },
+    {
+      "type": "timer-fire",
+      "id": 3,
+      "reason": "reconciler sleep: get orb",
+      "virtualTime": 4.6793833324988245
+    },
+    {
+      "type": "timer-create",
+      "id": 5,
+      "reason": "reconciler deadline: diagnose before compute discard",
+      "deadline": 5004.679383332499
+    },
+    {
+      "type": "entropy",
+      "name": "reconciler random number: provider latency: observe",
+      "value": 0.007544260090940336
+    },
+    {
+      "type": "timer-create",
+      "id": 6,
+      "reason": "reconciler sleep: provider observe",
+      "deadline": 6.056596337045841
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5651392753693462
+    },
+    {
+      "type": "timer-fire",
+      "id": 6,
+      "reason": "reconciler sleep: provider observe",
+      "virtualTime": 6.056596337045841
+    },
+    {
+      "type": "timer-cancel",
+      "id": 5,
+      "reason": "reconciler deadline: diagnose before compute discard"
+    },
+    {
+      "type": "entropy",
+      "name": "reconciler random number: store latency: record host discard status",
+      "value": 0.13828905771559608
+    },
+    {
+      "type": "timer-create",
+      "id": 7,
+      "reason": "reconciler sleep: record host discard status",
+      "deadline": 7.748041625623822
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6980222470516624
+    },
+    {
+      "type": "timer-fire",
+      "id": 7,
+      "reason": "reconciler sleep: record host discard status",
+      "virtualTime": 7.748041625623822
+    },
+    {
+      "type": "timer-create",
+      "id": 8,
+      "reason": "reconciler deadline: discard compute",
+      "deadline": 5007.748041625624
+    },
+    {
+      "type": "entropy",
+      "name": "reconciler random number: provider latency: discard",
+      "value": 0.4461938012081418
+    },
+    {
+      "type": "timer-create",
+      "id": 9,
+      "reason": "reconciler sleep: provider discard",
+      "deadline": 31.057731686030912
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.04660890037251897
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.8761789321910209
+    },
+    {
+      "type": "timer-fire",
+      "id": 9,
+      "reason": "reconciler sleep: provider discard",
+      "virtualTime": 31.057731686030912
+    },
+    {
+      "type": "timer-cancel",
+      "id": 8,
+      "reason": "reconciler deadline: discard compute"
+    },
+    {
+      "type": "entropy",
+      "name": "reconciler random number: store latency: finalize host discard",
+      "value": 0.22017357684480676
+    },
+    {
+      "type": "timer-create",
+      "id": 10,
+      "reason": "reconciler sleep: finalize host discard",
+      "deadline": 33.15859957025495
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7768083954225536
+    },
+    {
+      "type": "timer-fire",
+      "id": 4,
+      "reason": "driver sleep: get orb",
+      "virtualTime": 31.057731686030912
+    },
+    {
+      "type": "entropy",
+      "name": "driver random number: store latency: request orb deletion",
+      "value": 0.42601806836020584
+    },
+    {
+      "type": "timer-create",
+      "id": 11,
+      "reason": "driver sleep: request orb deletion",
+      "deadline": 34.18782202783194
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2158568634501976
+    },
+    {
+      "type": "timer-fire",
+      "id": 10,
+      "reason": "reconciler sleep: finalize host discard",
+      "virtualTime": 33.15859957025495
+    },
+    {
+      "type": "timer-create",
+      "id": 12,
+      "reason": "reconciler sleep: reconcile loop tick",
+      "deadline": 533.158599570255
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.23813300148235306
+    },
+    {
+      "type": "timer-fire",
+      "id": 11,
+      "reason": "driver sleep: request orb deletion",
+      "virtualTime": 34.18782202783194
+    }
+  ]
+}
