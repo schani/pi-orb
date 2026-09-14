@@ -296,9 +296,19 @@ function FileCall({ call, kind }: { call: ActivityCall; kind: "edit" | "read" })
   );
 }
 
-function OtherCall({ call }: { call: ActivityCall }) {
+function OtherCall({ call, single }: { call: ActivityCall; single: boolean }) {
   const input = call.arguments === null ? "" : JSON.stringify(call.arguments, null, 2);
   const output = resultText(call.result);
+  const detail = (
+    <pre
+      className={
+        call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
+      }
+    >
+      {[input, output].filter(Boolean).join("\n\n") || "(no details)"}
+    </pre>
+  );
+  if (single) return detail;
   return (
     <details className="tool-activity-call">
       <summary>
@@ -306,13 +316,7 @@ function OtherCall({ call }: { call: ActivityCall }) {
         <code className="trunc">{call.name}</code>
         <span className={`tool-call-status tool-call-${call.state}`}>{callStatus(call)}</span>
       </summary>
-      <pre
-        className={
-          call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
-        }
-      >
-        {[input, output].filter(Boolean).join("\n\n") || "(no details)"}
-      </pre>
+      {detail}
     </details>
   );
 }
@@ -325,7 +329,7 @@ function CategoryCalls({ category }: { category: ActivityCategory }) {
         if (category.kind === "edit" || category.kind === "read") {
           return <FileCall call={call} kind={category.kind} key={call.callId} />;
         }
-        return <OtherCall call={call} key={call.callId} />;
+        return <OtherCall call={call} single={category.calls.length === 1} key={call.callId} />;
       })}
     </div>
   );

@@ -73,6 +73,75 @@ describe("frontend-only browser behavior", () => {
     await vite?.close();
   });
 
+  it("reveals generic tool inputs and outputs with a single disclosure", async () => {
+    const page = await browser.newPage();
+    const id = "frontend-auth-copy-test";
+    const tools = [
+      {
+        name: "subagent",
+        input: { prompt: "Inspect project purpose" },
+        output: "Agent started in background",
+      },
+      {
+        name: "get_subagent_result",
+        input: { agent_id: "local-child-one" },
+        output: "Four services found",
+      },
+    ];
+    await page.route(`**/api/v1/orbs/${id}`, async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        json: { ...(await response.json()), state: "stopped", activity: "idle" },
+      });
+    });
+    await page.route(`**/api/v1/orbs/${id}/history`, async (route) => {
+      const response = await route.fetch();
+      const base = { timestamp: "2026-09-14T00:00:00Z", overflow: {} };
+      const records = tools.flatMap((tool, index) => [
+        {
+          ...base,
+          id: `call-${index}`,
+          parentId: index === 0 ? null : `result-${index - 1}`,
+          type: "message",
+          role: "assistant",
+          content: [
+            { type: "tool_call", callId: `tool-${index}`, name: tool.name, arguments: tool.input },
+          ],
+        },
+        {
+          ...base,
+          id: `result-${index}`,
+          parentId: `call-${index}`,
+          type: "message",
+          role: "tool",
+          content: [
+            {
+              type: "tool_result",
+              callId: `tool-${index}`,
+              content: [{ type: "text", text: tool.output }],
+            },
+          ],
+        },
+      ]);
+      await route.fulfill({ json: { ...(await response.json()), records, headId: "result-1" } });
+    });
+    try {
+      await page.goto(`${origin}/#/orbs/${id}`);
+      for (const tool of tools) {
+        const category = page.locator(".tool-activity-category").filter({
+          has: page.locator(".activity-rail-label", { hasText: new RegExp(`^${tool.name}$`) }),
+        });
+        await category.locator(":scope > summary").click();
+        const output = category.locator(".tool-call-output");
+        await expectPage(output).toBeVisible();
+        await expectPage(output).toContainText(Object.values(tool.input)[0] as string);
+        await expectPage(output).toContainText(tool.output);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   it("opens the OAuth return dialog over the loaded dashboard and preserves it on close", async () => {
     const page = await browser.newPage();
     try {

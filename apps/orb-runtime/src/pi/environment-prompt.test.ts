@@ -28,6 +28,15 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("briefly lag");
   });
 
+  it("distinguishes requested local subagents from explicitly requested independent orbs", () => {
+    expect(environmentPrompt).toContain("For requested delegation, use the local `subagent` tool");
+    expect(environmentPrompt).toContain("get_subagent_result");
+    expect(environmentPrompt).toContain(
+      "Do not substitute `pi-orb spawn` for a request to use subagents",
+    );
+    expect(environmentPrompt).toContain("Only when the user explicitly requests a separate orb");
+  });
+
   it("documents independent spawning and safe recovery rather than recursive delegation", () => {
     expect(environmentPrompt).toContain("pi-orb spawn --prompt");
     expect(environmentPrompt).toContain("fresh default-branch checkout");

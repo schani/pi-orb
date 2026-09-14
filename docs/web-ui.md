@@ -61,7 +61,7 @@ The first UI needs to display at least:
 
 - user and assistant text as Markdown, for both committed history and live streaming;
 - reasoning/thinking when available and permitted;
-- tool-call and tool-result status, with inputs and outputs available only through collapsed disclosures by default;
+- tool-call and tool-result status, with inputs and outputs available only through collapsed disclosures by default; a single generic call needs only its category disclosure, not a second repeated-name fold (corrected 2026-09-14; `docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md`);
 - compaction summaries;
 - persisted and live user-shell commands as preformatted command/output blocks, including exit, cancellation, truncation, and excluded-from-context status;
 - runtime state such as starting, working, idle, stopped, or failed;

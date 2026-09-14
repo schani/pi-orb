@@ -126,6 +126,8 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md](docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md) — stale delegation guidance created an independent orb; nested tool folds hid existing input/output
+
 - [docs/postmortems/2026-09-13-release-webkit-prerequisite.md](docs/postmortems/2026-09-13-release-webkit-prerequisite.md) — missing managed browser dependency in unattended release checks
 
 - [docs/postmortems/2026-09-12-delete-discard-dst-ordering.md](docs/postmortems/2026-09-12-delete-discard-dst-ordering.md) — preserved DST failure from an unforced discard/deletion intermediate-state assumption
