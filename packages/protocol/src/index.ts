@@ -1,3 +1,4 @@
+export * from "./agent-settings.ts";
 export * from "./broker.ts";
 export * from "./control-plane-api.ts";
 export * from "./frames.ts";

@@ -2,7 +2,9 @@
 
 How Pi is embedded in the orb runtime and how its persisted session maps to the harness-agnostic history model (`docs/history-replication.md`).
 
-**Thinking policy (decided 2026-09-08).** On every session attachment, the runtime sets the agent thinking level to `high`, overriding SDK defaults and restored session levels. Pi clamps this to the model's supported levels and records actual changes as replicated `pi.thinking_level_change` events. This applies to fresh and resumed sessions; the separate Luna summary/naming calls retain their minimal-reasoning policy.
+**Thinking policy (revised and implemented 2026-09-14).** Fresh sessions default to `high`, clamped by Pi. Resumed sessions restore native model/thinking settings explicitly, including sessions with no assistant messages. Browser changes are per-session, not global Pi defaults. The former unconditional `high` override (2026-09-08) is superseded because it erased user choices. Luna summary/naming calls retain their separate minimal-reasoning policy. Runtime authority, mutation admission and failure semantics: `docs/agent-settings.md`.
+
+**User-selectable settings (implemented locally 2026-09-14):** `pi/settings-persistence.ts` exclusively reserves the fresh session's path and invokes public SDK empty-file initialization, which owns eager serialization and flushed state. File/directory fsync precedes settings success. This avoids the originally proposed SDK patch while retaining SDK file ownership. `pi/restore-settings.ts` supplies explicit restoration inputs because the SDK's automatic restore skips settings-only sessions. Native setting entries retain history identity; `pi-orb.settings-fallback` custom entries map to visible, non-model-context `agent.settings_fallback` events. `docs/agent-settings.md` records the real-SDK contracts and async setter/guard details.
 
 ## Embedding decisions
 

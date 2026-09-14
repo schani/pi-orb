@@ -1,16 +1,19 @@
-export type ComposerMode = "message" | "shell" | "excluded_shell";
+export type ComposerMode = "message" | "shell" | "excluded_shell" | "command";
 
 export interface ComposerValue {
   mode: ComposerMode;
   text: string;
 }
 
-export function composerModeLabel(mode: ComposerMode): "message" | "shell" | "excluded shell" {
+export function composerModeLabel(
+  mode: ComposerMode,
+): "message" | "shell" | "excluded shell" | "command" {
   return mode === "excluded_shell" ? "excluded shell" : mode;
 }
 
 /** The composer prefix column carries the mode. */
-export function composerModeGlyph(mode: ComposerMode): ">" | "!" | "!!" {
+export function composerModeGlyph(mode: ComposerMode): ">" | "!" | "!!" | "/" {
+  if (mode === "command") return "/";
   if (mode === "shell") return "!";
   if (mode === "excluded_shell") return "!!";
   return ">";
@@ -25,6 +28,7 @@ export function enterShellMode(mode: ComposerMode): ComposerMode | null {
 
 /** Backspace at offset zero removes one hidden prefix without changing text. */
 export function leaveShellMode(mode: ComposerMode): ComposerMode | null {
+  if (mode === "command") return "message";
   if (mode === "excluded_shell") return "shell";
   if (mode === "shell") return "message";
   return null;
@@ -36,6 +40,7 @@ export function leaveShellMode(mode: ComposerMode): ComposerMode | null {
  * remain visible in the textarea.
  */
 export function normalizeComposerChange(mode: ComposerMode, text: string): ComposerValue {
+  if (mode === "message" && text.startsWith("/")) return { mode: "command", text: text.slice(1) };
   if (mode === "message" && text.startsWith("!!")) {
     return { mode: "excluded_shell", text: text.slice(2) };
   }

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import {
   type AgentSession,
   type AgentSessionEvent,
@@ -12,6 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
+  type AgentSettings,
   type DeliverOrbMessageResponse,
   type MessageInputBlock,
   ORB_NAME_MESSAGE_MAX_BYTES,
@@ -21,12 +23,14 @@ import {
   type RuntimeHooks,
   type RuntimeTurnResume,
   type ServerFrame,
+  type SettingsAction,
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, ok, Result, ResultAsync } from "neverthrow";
 import { type BrokerEnv, HttpBrokerEndpoint } from "../broker/endpoint.ts";
 import { brokerProviderConfig } from "../broker/provider.ts";
+import { AgentSettingsController } from "../domain/agent-settings.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
@@ -56,10 +60,11 @@ import { readExecutionIdentity } from "./execution-identity.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
-import { pickCodexModel } from "./model-select.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
+import { restoreSessionSettings, settingsFallbackMessage } from "./restore-settings.ts";
 import { reportRustToolchainEdge } from "./rust-toolchain-reporter.ts";
 import { sessionFlushed } from "./session-flush.ts";
+import { createPersistentSession, syncSessionFile } from "./settings-persistence.ts";
 
 export interface PiOrbAgentOptions {
   readonly orbId: string;
@@ -170,6 +175,8 @@ export class PiOrbAgent {
   private readonly options: PiOrbAgentOptions;
   private health: RuntimeHealth;
   private sessionManager: PiSessionManager | null = null;
+  private settingsController: AgentSettingsController | null = null;
+  private observeSettings: (() => void) | null = null;
   private session: PiSession | null = null;
   private shutdownExtensions: (() => Promise<void>) | null = null;
   private closingExtensions: Promise<void> | null = null;
@@ -407,7 +414,7 @@ export class PiOrbAgent {
         if (existing !== undefined) {
           return SessionManager.open(existing, sessionDir, repoDir);
         }
-        return SessionManager.create(repoDir, sessionDir);
+        return null;
       },
       (error) => (error instanceof Error ? error.message : String(error)),
     )();
@@ -416,7 +423,13 @@ export class PiOrbAgent {
       // grounds for creating a fresh session.
       return err(this.failed("session_load_failed", managerResult.error, false));
     }
-    const sessionManager = managerResult.value;
+    const created =
+      managerResult.value === null
+        ? createPersistentSession(repoDir, sessionDir)
+        : ok(managerResult.value);
+    if (created.isErr())
+      return err(this.failed("session_init_failed", created.error.message, false));
+    const sessionManager = created.value;
     this.sessionManager = sessionManager;
 
     // 3. Codex credential resolves through the control-plane broker
@@ -475,7 +488,7 @@ export class PiOrbAgent {
       }
     }
 
-    // 4. Create the embedded session, pinned to the Codex model.
+    // 4. Restore per-session choices inside the brokered Codex catalog.
     const refreshed = await ResultAsync.fromPromise(
       modelRuntime.refresh({ allowNetwork: false }),
       (error) => (error instanceof Error ? error.message : String(error)),
@@ -483,10 +496,20 @@ export class PiOrbAgent {
     if (refreshed.isErr()) {
       return err(this.failed("session_init_failed", refreshed.error, true));
     }
-    const model = pickCodexModel(modelRuntime.getModels("openai-codex"));
-    if (model === undefined) {
+    const eligibleModels = modelRuntime
+      .getModels("openai-codex")
+      .filter((item) => item.input.includes("image") && !item.id.includes("luna"));
+    const restored = sessionManager.buildSessionContext();
+    const restoredThinking = sessionManager
+      .getEntries()
+      .some((entry) => entry.type === "thinking_level_change")
+      ? restored.thinkingLevel
+      : null;
+    const selection = restoreSessionSettings(sessionManager, eligibleModels);
+    if (selection === undefined) {
       return err(this.failed("session_init_failed", "no openai-codex model available", true));
     }
+    const { model, thinkingLevel } = selection;
     // 3b. `.agents/resume` runs after setup and before the session exists, so
     // the agent's first turn already sees whatever it authenticated. Its
     // outcome is awaited only for the blocking window; a slower hook keeps
@@ -549,6 +572,7 @@ export class PiOrbAgent {
         modelRuntime,
         sessionManager,
         model,
+        thinkingLevel,
         ...(settingsManager !== undefined ? { settingsManager } : {}),
         resourceLoader: loaderResult.value,
       }),
@@ -558,7 +582,7 @@ export class PiOrbAgent {
       return err(this.failed("session_init_failed", sessionResult.error, true));
     }
     const sdkSession = sessionResult.value.session;
-    sdkSession.setThinkingLevel("high");
+
     let binding = true;
     let startupExtensionError = false;
     const bound = await ResultAsync.fromPromise(
@@ -621,6 +645,111 @@ export class PiOrbAgent {
       await this.closeExtensions();
       return err(this.failed("mcp_config_record_failed", adoption.error, false));
     }
+    const readSettings = (): AgentSettings => ({
+      model: {
+        provider: sdkSession.model?.provider ?? model.provider,
+        id: sdkSession.model?.id ?? model.id,
+      },
+      thinkingLevel: sdkSession.thinkingLevel,
+    });
+    const fallback = settingsFallbackMessage(restored.model, restoredThinking, readSettings());
+    if (fallback !== null) {
+      const recorded = Result.fromThrowable(
+        () =>
+          sessionManager.appendCustomEntry("pi-orb.settings-fallback", {
+            message: fallback,
+          }),
+        () => "Cannot record model fallback",
+      )();
+      if (recorded.isErr()) return err(this.failed("session_init_failed", recorded.error, false));
+    }
+    const file = sessionManager.getSessionFile();
+    if (!file) return err(this.failed("session_init_failed", "No persistent session file", false));
+    const durable = syncSessionFile(file);
+    if (durable.isErr())
+      return err(this.failed("session_init_failed", durable.error.message, false));
+    this.settingsController = new AgentSettingsController({
+      task: new NoSimulationTask(`settings-${this.options.orbId}`, false),
+      initial: readSettings(),
+      models: eligibleModels.map((item) => ({
+        provider: item.provider,
+        id: item.id,
+        name: item.name,
+        thinkingLevels: getSupportedThinkingLevels(item),
+      })),
+      isIdle: () =>
+        this.health.status === "ready" && this.activity === "idle" && this.turnStart === null,
+      publish: (view) => this.broadcastEvent(view),
+      onFailure: (error) => {
+        this.health = this.failed("settings_failed", error.message, false);
+      },
+      apply: async (action) => {
+        const authenticated = await ResultAsync.fromPromise(
+          modelRuntime.checkAuth(model.provider),
+          () => ({
+            type: "settings_error" as const,
+            message: "Model authentication is unavailable.",
+            unchanged: true,
+          }),
+        );
+        if (authenticated.isErr()) return err(authenticated.error);
+        if (!authenticated.value)
+          return err({
+            type: "settings_error" as const,
+            message: "Model authentication is unavailable.",
+            unchanged: true,
+          });
+        const previousThinking = sdkSession.thinkingLevel;
+        const changed = await ResultAsync.fromPromise(
+          (async () => {
+            if (action.type === "set_model") {
+              const target = eligibleModels.find(
+                (item) => item.provider === action.model.provider && item.id === action.model.id,
+              );
+              if (target) await sdkSession.setModel(target);
+              sdkSession.setThinkingLevel(previousThinking);
+            } else sdkSession.setThinkingLevel(action.thinkingLevel);
+          })(),
+          () => ({
+            type: "settings_error" as const,
+            message: "Cannot apply agent settings; runtime recovery is required.",
+          }),
+        );
+        if (changed.isErr()) {
+          this.health = this.failed("settings_failed", changed.error.message, false);
+          return err(changed.error);
+        }
+        const persisted = syncSessionFile(file);
+        if (persisted.isErr()) {
+          this.health = this.failed("settings_failed", persisted.error.message, false);
+          return err(persisted.error);
+        }
+        const published = this.liveHistory?.flushPersisted();
+        if (published?.isErr()) {
+          this.health = this.failed("settings_failed", published.error.message, false);
+          return err({ type: "settings_error" as const, message: published.error.message });
+        }
+        return ok(readSettings());
+      },
+    });
+    this.observeSettings = () => {
+      const controller = this.settingsController;
+      if (!controller || controller.blocksInput) return;
+      const current = readSettings();
+      if (JSON.stringify(current) === JSON.stringify(controller.view.settings)) return;
+      const persisted = syncSessionFile(file);
+      if (persisted.isErr()) {
+        controller.invalidate(persisted.error);
+        return;
+      }
+      const published = this.liveHistory?.flushPersisted();
+      if (published?.isErr()) {
+        controller.invalidate({ type: "settings_error", message: published.error.message });
+        return;
+      }
+      controller.observe(current);
+    };
+    sdkSession.subscribe(() => this.observeSettings?.());
     const summarizer = this.options.turnSummarizer ?? new LunaTurnSummarizer(modelRuntime, model);
     this.attachSession(sessionResult.value.session, sessionManager, summarizer);
     return ok(undefined);
@@ -662,7 +791,13 @@ export class PiOrbAgent {
    * interrupted-turn hook. Deterministic tests drive this directly with a
    * scheduled fake session instead of booting a model runtime.
    */
-  attachSession(session: PiSession, manager: PiSessionManager, summarizer: TurnSummarizer): void {
+  attachSession(
+    session: PiSession,
+    manager: PiSessionManager,
+    summarizer: TurnSummarizer,
+    settingsController: AgentSettingsController | null = this.settingsController,
+  ): void {
+    this.settingsController = settingsController;
     this.session = session;
     this.sessionManager = manager;
     this.summaryCoordinator = new TurnSummaryCoordinator({
@@ -1074,6 +1209,7 @@ export class PiOrbAgent {
 
   /** Immutable snapshot of the full in-memory session (docs/history-replication.md). */
   snapshot(): Result<HarnessSnapshot, SnapshotError> {
+    this.observeSettings?.();
     const manager = this.sessionManager;
     if (manager === null || this.health.status !== "ready") {
       return err({ type: "snapshot_error", message: "session is not ready" });
@@ -1102,6 +1238,7 @@ export class PiOrbAgent {
       session: header.value,
       records,
       headId: manager.getLeafId(),
+      settings: this.settingsController?.view ?? null,
     });
   }
 
@@ -1110,7 +1247,17 @@ export class PiOrbAgent {
       activity: this.activity,
       headId: this.sessionManager?.getLeafId() ?? null,
       activeOperationId: this.operationId,
+      configuring: this.settingsController?.blocksInput ?? false,
     };
+  }
+
+  changeSettings(action: SettingsAction) {
+    return (
+      this.settingsController?.change(action) ??
+      ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
+        err({ code: "unsupported" as const, message: "Agent settings are unavailable." }),
+      )
+    );
   }
 
   liveView(): LiveOperationView | null {
@@ -1236,6 +1383,10 @@ export class PiOrbAgent {
         err({ message: "a foreground shell command is running", retryable: true }),
       );
     }
+    if (this.settingsController?.blocksInput)
+      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
+        err({ message: "Agent settings are changing", retryable: true }),
+      );
     const delivery: "turn" | "steer" = this.activity === "busy" ? "steer" : "turn";
     const operationId = delivery === "steer" ? (this.operationId ?? randomUUID()) : randomUUID();
     this.pendingInboxMessages.set(messageId, { delivery, operationId });

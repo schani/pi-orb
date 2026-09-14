@@ -879,14 +879,17 @@ describe("frontend-only browser behavior", () => {
       const before = await geometry();
       const header = page.locator(".orb-header");
       const actionBoxes = await header
-        .locator(".orb-header-actions > button")
+        .locator(
+          '.orb-header-actions > button:not([aria-label="Stop orb"]):not([aria-label="Start orb"])',
+        )
         .evaluateAll((buttons) =>
           buttons.map((button) => {
             const box = button.getBoundingClientRect();
             return { x: box.x, width: box.width };
           }),
         );
-      expectPage(actionBoxes).toHaveLength(5);
+      // Lifecycle cluster moves Stop beside status; the four utility controls retain 20px hits / 28px pitch.
+      expectPage(actionBoxes).toHaveLength(4);
       actionBoxes.forEach((box, index) => {
         expectPage(box.width).toBe(20);
         if (index > 0) expectPage(box.x - (actionBoxes[index - 1]?.x ?? 0)).toBe(28);

@@ -24,6 +24,10 @@ Persistence is deliberately separate: the control plane never derives replica wr
 
 **MCP boot configuration (2026-09-08).** `GET /runtime/v1/mcp` is a control-plane route authenticated with the existing incarnation bearer. It returns that orb's project catalog `{revision, servers}` containing secret references, not resolved keys. The runtime resolves them against its project-secret boot snapshot and adopts changes on next process start. OAuth entries (2026-09-10) additionally carry `oauth: {id}`; `POST /runtime/v1/mcp/:id/token` accepts `{url, rejectedGeneration?}` and returns `{accessToken, expiresAt, generation}` after deriving project authority from the caller and validating current ID/URL ownership. Only access tokens enter runtime memory; request-time resolution refreshes an existing connection without changing the boot catalog. The MCP SDK is not given an OAuth provider in the guest and cannot automatically authorize or replay a rejected tool call. This adds no WebSocket frames or first-message gate. MCP tool output and configuration-adoption records use normal session history and replication (`docs/mcp.md`).
 
+## Agent settings (implemented locally 2026-09-14)
+
+`docs/agent-settings.md` defines `set_model` / `set_thinking`, a complete `agent_settings` synchronization/live event, an operation-free `settings_applied {duplicate}` receipt, and idle-only shared agent admission covering HTTP inbox delivery as well as WebSockets. Explicit assignments are last-applied-wins, without head/revision CAS. The existing request registry now holds in-flight async settings results as well as completed outcomes: identical retries join/replay, conflicts reject. A 15-second deadline fails readiness without releasing unsafe input admission; late SDK completion cannot restore it. Known pre-mutation auth failures release admission and report rejection. Native session settings remain persistent authority; no control-plane settings API, queue or table is added. The frontend clears availability on disconnect and obtains the complete pair/catalog in every hello batch, including a caught-up cursor. The synchronous WS gate alone is not an async serial executor; `AgentSettingsController` claims configuration before awaiting SDK work.
+
 ## Workspace-upload transport (implemented 2026-09-09)
 
 Arbitrary browser files use the separate streaming HTTP path in `docs/workspace-uploads.md`; they do not become image blocks, base64 frames, or live WebSocket commands. Runtime upload actions carry an incarnation header, persist immutable chunks on the workspace, and return only bounded progress metadata. After every file in a picker selection is stored or cancelled, the control plane submits one normal inbox message listing the successful paths, with wake suppressed. The selection's immutable batch identity deduplicates notification across retries and recovery; file completion does not enqueue per-file messages. This reuses ordinary turn/steer delivery and replication rather than introducing context-only harness mutations. Running-only admission and transfer-wide idle protection are lifecycle rules, not agent busy activity.
@@ -102,6 +106,8 @@ type MessageInputBlock =
     };
 
 type ClientAction =
+  | { type: "set_model"; model: { provider: string; id: string } }
+  | { type: "set_thinking"; thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" }
   | {
       type: "message";
       expectedHeadId: string | null;
@@ -146,6 +152,7 @@ interface RequestResultFrame {
   at: string;
   requestId: string;
   result:
+    | { type: "settings_applied"; duplicate: boolean }
     | { type: "accepted"; operationId: string; duplicate: boolean }
     | {
         type: "rejected";
@@ -165,7 +172,7 @@ interface RequestResultFrame {
 }
 ```
 
-Acceptance is not operation completion. State changes are broadcast to every connected browser as a single event envelope:
+Agent/shell acceptance is not operation completion. Settings success instead means application and persistence completed; it does not start an operation. Its ordered `agent_settings` event (full schema in `docs/agent-settings.md`) is authoritative, whereas a replayed receipt must not update settings. State changes are broadcast to every connected browser as a single event envelope:
 
 ```ts
 interface RuntimeEventFrame {
@@ -173,6 +180,7 @@ interface RuntimeEventFrame {
   type: "runtime.event";
   at: string;
   event:
+    | AgentSettingsEvent
     | RuntimeStatusEvent
     | OperationStartedEvent
     | OutputPatchEvent
@@ -235,7 +243,7 @@ WebSocket ordering is sufficient within one connection, so frames do not have an
 
 `client.hello` is non-mutating: it observes and synchronizes state. All request actions are mutating: `message` starts agent work, `shell` starts a foreground command, and `abort` changes a running operation. HTTP health and history pulls are also non-mutating from the runtime's perspective. Control-plane host start/stop operations are mutations in a different API.
 
-Request identity is in-memory and scoped to one runtime process. The runtime keeps a map from request ID to its action and outcome for the life of the process. Resending a known request ID with an identical action returns the original result with `duplicate: true`; reusing a known ID with a different action returns `request_id_conflict`; an abort naming a finished or unknown operation returns `stale_operation`.
+Request identity is in-memory and scoped to one runtime process. The runtime keeps a map from request ID to its action and outcome for the life of the process, plus in-flight entries for async settings mutations. Identical in-flight retries join the original result without another SDK call. Resending a known request ID with an identical action returns the original result with `duplicate: true`; reusing a known ID with a different action returns `request_id_conflict`; an abort naming a finished or unknown operation returns `stale_operation`.
 
 A runtime restart empties that map, and `server.welcome.runtimeInstanceId` tells the browser so. After reconnecting, the browser may automatically resend an unacknowledged request only when `runtimeInstanceId` matches the instance that received it. When the instance has changed, the browser relies on synchronization instead: the Pi adapter uses `AgentSession.sendUserMessage`, and Pi appends an accepted user message to the session on its awaited `message_end`, before model streaming begins, so a delivered message always appears in the replayed history. If it appears, the request was delivered; if it does not, it never reached the model, and the user decides whether to send it again as a new request.
 
