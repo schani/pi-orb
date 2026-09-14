@@ -1,10 +1,15 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type ApiError, createOrb, describeApiError, listOrbs, listProjects } from "../lib/api.ts";
+import {
+  buildDashboardSearchSource,
+  type DashboardOrbListSnapshot,
+} from "../lib/dashboard-search-source.ts";
 import { FAVICON_HREFS } from "../lib/favicon.ts";
 import { projectDeletionProgressText } from "../lib/project-deletion.ts";
 import { formatProjectOrbAge, projectOrbGlyph, splitProjectOrbs } from "../lib/project-orbs.ts";
 import { generateUuid } from "../lib/uuid.ts";
+import { useAppSearchSource } from "./AppSearch.tsx";
 import { ProjectHeader } from "./ProjectHeader.tsx";
 import { StateTile } from "./StateTile.tsx";
 
@@ -213,6 +218,29 @@ export function OrbIndex({
   const [error, setError] = useState<ApiError | null>(null);
   const [lists, setLists] = useState<Record<string, OrbList>>({});
   const [now, setNow] = useState(() => Date.now());
+  const searchSource = useMemo(
+    () => ({
+      ...buildDashboardSearchSource({
+        projects: projects ?? [],
+        projectsLoading: projects === null && error === null,
+        projectsFailed: error !== null,
+        orbLists: Object.fromEntries(
+          Object.entries(lists).map(([id, list]): [string, DashboardOrbListSnapshot] => [
+            id,
+            list.error !== null
+              ? { type: "failed" }
+              : list.items === null
+                ? { type: "loading" }
+                : { type: "loaded", items: list.items },
+          ]),
+        ),
+        now,
+      }),
+      id: `orb-index:${orbId}`,
+    }),
+    [error, lists, now, orbId, projects],
+  );
+  useAppSearchSource(searchSource);
   // Completed config/delete/create mutations fence reads that began before they committed.
   const revision = useRef(0);
   useEffect(() => {

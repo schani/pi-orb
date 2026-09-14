@@ -1683,6 +1683,93 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("opens fleet Find from the orb composer and navigates with native result links", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("keep this draft");
+      await composer.press("Meta+k");
+      const dialog = page.getByRole("dialog", { name: "Find projects and orbs" });
+      const query = dialog.getByRole("searchbox");
+      await expectPage(query).toBeFocused();
+      await query.fill("Finished design");
+      const archived = dialog.getByRole("link");
+      await expectPage(archived).toHaveCount(1);
+      await expectPage(archived).toHaveAttribute("href", "#/orbs/frontend-archived-orb");
+      await query.press("Escape");
+      await expectPage(dialog).toBeHidden();
+      await expectPage(composer).toBeFocused();
+      await expectPage(composer).toHaveValue("keep this draft");
+
+      await composer.press("Control+k");
+      await query.fill("Frontend Playground");
+      await expectPage(dialog.getByRole("link", { name: /^orb:/ })).toHaveAttribute(
+        "href",
+        ORB_HASH,
+      );
+      await query.fill("github.com/example/frontend-playground");
+      await expectPage(dialog.getByRole("link")).toHaveAttribute(
+        "href",
+        "#/projects/frontend-fixture-project",
+      );
+      await query.press("Enter");
+      await expectPage(page).toHaveURL(`${origin}/#/projects/frontend-fixture-project`);
+      await expectPage(dialog).toBeHidden();
+      await expectPage(page.locator(".dashboard")).toBeVisible();
+      await page.keyboard.press("Control+k");
+      await expectPage(query).toHaveValue("");
+      await query.fill("Frontend Playground");
+      await query.press("ArrowDown");
+      await query.press("Enter");
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      await expectPage(composer).toHaveValue("keep this draft");
+      await composer.press("Meta+k");
+      await expectPage(query).toHaveValue("");
+      await query.fill("Finished design");
+      await query.press("Enter");
+      await expectPage(page).toHaveURL(`${origin}/#/orbs/frontend-archived-orb`);
+      await expectPage(dialog).toBeHidden();
+      await expectPage(page.locator(".orb-index")).toHaveAttribute("aria-busy", "false");
+      await page.keyboard.press("Meta+k");
+      await expectPage(query).toHaveValue("");
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("reports incomplete orb-view Find results while lists load or fail", async () => {
+    const page = await browser.newPage();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/projects/frontend-fixture-project/orbs", async (route) => {
+      await gate;
+      await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      await page.getByPlaceholder(/Message the orb/).press("Control+k");
+      const dialog = page.getByRole("dialog", { name: "Find projects and orbs" });
+      await dialog.getByRole("searchbox").fill("Finished design");
+      await expectPage(
+        dialog.getByText("Searching loaded items · some orbs still loading"),
+      ).toBeVisible();
+      release();
+      await expectPage(dialog.getByText(/Some orbs could not be searched/)).toBeVisible();
+      await expectPage(dialog.getByRole("searchbox")).toHaveValue("Finished design");
+      await dialog.getByRole("searchbox").fill("github.com/example/frontend-playground");
+      await expectPage(dialog.getByRole("link")).toHaveAttribute(
+        "href",
+        "#/projects/frontend-fixture-project",
+      );
+    } finally {
+      release();
+      await page.close();
+    }
+  });
+
   it("inserts orb URLs at typed @ and preserves cancelled mentions and shell input", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);

@@ -111,7 +111,7 @@ Subsystem designs:
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/workspace-uploads.md](docs/workspace-uploads.md) — streaming browser uploads into orb-local files, inbox notifications, idle protection, and recovery
-- [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard Command-K Find architecture, selected Index card design, and presentation study
+- [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard and orb-view Command-K Find architecture, selected Index card design, and presentation study
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
 - [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
 - [docs/mcp.md](docs/mcp.md) — project-scoped remote MCP configuration, static secret-backed headers, connection-scoped OAuth broker, first-party Pi tools, DST-first direct transport, and provider qualification
