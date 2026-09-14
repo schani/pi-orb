@@ -69,6 +69,8 @@ The first UI needs to display at least:
 
 Remaining UI questions include rendering unknown content blocks, large/truncated tool output, and image storage. Transient token deltas are ephemeral presentation events and are reconstructed after reconnect through ordinary live events; they are not stored in PostgreSQL.
 
+**Subagent notification rendering finding (2026-09-14):** the generic displayed-custom-message path prints model-facing XML and local transcript pointers because the browser does not use the extension's terminal renderer. Root `native.details` already supplies structured notification data; rendering it does not require child transcript replication or changing parent delivery. Diagnosis: `docs/postmortems/2026-09-14-subagent-notification-transcript.md`; repair is tracked in `TODO.md`.
+
 **Streaming lifetime correction (2026-09-09).** Green thinking rows represent transient output, not independent active jobs. On `output_retired`, remove the named blocks after their complete history has arrived; do not infer retirement by comparing text with historical messages. A new response can legitimately repeat old text, and final normalized text can differ from its streamed form. This replaces the text-equality suppression that left stale green rows below newer commands. Protocol and scheduling invariants: `docs/runtime-protocol.md`; incident: `docs/postmortems/2026-09-09-stale-thinking.md`.
 
 ## Model-response failures (decided and implemented 2026-09-09)
