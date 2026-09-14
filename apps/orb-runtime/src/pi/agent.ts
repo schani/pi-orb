@@ -558,6 +558,7 @@ export class PiOrbAgent {
       return err(this.failed("session_init_failed", sessionResult.error, true));
     }
     const sdkSession = sessionResult.value.session;
+    sdkSession.setThinkingLevel("high");
     let binding = true;
     let startupExtensionError = false;
     const bound = await ResultAsync.fromPromise(
