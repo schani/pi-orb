@@ -1,2 +1,0 @@
-Sep 14 03:14:09 pi-orb-58efed98-b832-4025-a899-7f43fed7ed72-i1 kernel: eadedCompositor[89191]: segfault at 7f7bc07fe000 ip 00007f7c1c170d8a sp 00007f7ba4dfe728 error 6 in libc.so.6[7f7c1c044000+156000] likely on CPU 1 (core 1, socket 0)
-Sep 14 03:14:09 pi-orb-58efed98-b832-4025-a899-7f43fed7ed72-i1 kernel: Code: 00 01 00 00 00 74 99 83 f9 c0 0f 87 7b fe ff ff c5 fe 6f 4e 20 48 29 fe 48 83 c7 3f 49 8d 0c 10 48 83 e7 c0 48 01 fe 48 29 f9 <f3> a4 c4 c1 7e 7f 00 c4 c1 7e 7f 48 20 c5 f8 77 c3 0f 1f 44 00 00

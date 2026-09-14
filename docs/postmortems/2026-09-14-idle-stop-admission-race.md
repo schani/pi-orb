@@ -2,6 +2,8 @@
 
 **2026-09-14; deterministic validation finding, not a deployed incident.**
 
+The `scripts/subagent-liveness/evidence/*.json` paths below are archive-member paths, not tracked files. Download, checksums and replay instructions: `scripts/subagent-liveness/evidence/README.md`.
+
 A forced composed schedule admitted a real runtime child after the control plane entered `stopping` for idle. The final history pull saw that child as busy and retained its admission record, but `reconcileStopping()` stopped the host anyway: its drain barrier checked replica completeness, not authority to stop newly admitted work.
 
 The first trace is `scripts/subagent-liveness/evidence/final-idle-stop-first.json` (original `test-failures/subagent-final-idle-stop-admission-1789396123564-0.json`). It was replayed before modification and reproduced `expected stopped to be running`. The original trace remains retained. The regression now tests both sides of admission rather than requiring acceptance after a fence: work admitted before the fence survives; work arriving after it is rejected without execution. Preparation acknowledgement loss is forced too.

@@ -44,6 +44,6 @@ The Chromium core is retained privately with mode 0600 under `.context/pr-qualif
 
 ## Retained artifacts and rule
 
-Raw logs remain under `.context/subagents-continuation/`: `merged-e2e.log`, `webkit-kernel-first.log`, `webkit-diagnostic-matched.log`, `webkit-probe-*.log` and `webkit-probes.txt`. Sanitized full-suite/kernel/probe-result copies are in `scripts/subagent-liveness/evidence/`, indexed by `continuation-2026-09-14.md`.
+Raw logs remain under `.context/subagents-continuation/`: `merged-e2e.log`, `webkit-kernel-first.log`, `webkit-diagnostic-matched.log`, `webkit-probe-*.log` and `webkit-probes.txt`. Sanitized full-suite/kernel/probe-result copies are in the downloadable archive indexed by `scripts/subagent-liveness/evidence/README.md`; the historical ledger is `scripts/subagent-liveness/evidence/continuation-2026-09-14.md`.
 
 The passing subagent/Docker/PostgreSQL cases establish their own coverage, not a clean combined release gate. Native browser crashes must retain process/kernel evidence; an isolated passing rerun cannot substitute for a cause and deterministic repair or a justified platform remedy. The invariant remains the no-flake rule in `docs/testing.md`.

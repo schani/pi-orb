@@ -33,6 +33,8 @@ WebKit. Both engines remain mandatory. Evidence:
 
 ## Decisions
 
+- **Qualification artifact placement (2026-09-14):** keep executable regressions, concise ledgers and postmortems in Git; retain bulky generated logs and scheduler traces as downloadable, checksum-indexed artifacts with source revision and replay instructions. Preservation does not require including every trace in the source diff. The subagent corpus is indexed by `scripts/subagent-liveness/evidence/README.md`; its original failures remain intact, and moving artifacts does not clear a release blocker.
+
 - Deterministic simulation testing is a first-class requirement from the beginning, not a later hardening phase.
 - We will use the TypeScript [`determined`](https://www.npmjs.com/package/determined) package.
 - Concurrency-critical domain code should accept its simulation/task abstractions so the same code runs with controlled scheduling and entropy in tests and `noSimulation` in production.

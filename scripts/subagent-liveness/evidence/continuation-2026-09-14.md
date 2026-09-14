@@ -1,5 +1,7 @@
 # Continuation acceptance evidence — 2026-09-14
 
+Historical log/trace filenames below refer to the downloadable archive indexed in `scripts/subagent-liveness/evidence/README.md`.
+
 No deployment. Main integration checkpoint `dd90350` and merge `48718af` are on branch `subagent-integration`; the merge incorporates current `origin/main` at `c9ed87f`. The installed fork remains 21.7.0-orb.1, source HEAD `6ad3a28132124e36c228887aaf549fd1c69e76e1`, artifact SHA-256 `0dbdd1483b853c35915483709fbd2fa9956d42b4939778ba129ddd1a18b75ee4`; Pi remains 0.85.1. The changes below are host adapter/tests, not additional fork seams.
 
 ## Reproductions and repairs
@@ -39,4 +41,4 @@ No deployment. Main integration checkpoint `dd90350` and merge `48718af` are on 
 
 Later MCP/resource, admission-fence and destructive-boundary qualification is recorded in `scripts/subagent-liveness/evidence/final-qualification-2026-09-14.md`; it supersedes the corresponding coverage gaps below, not the unresolved native WebKit failure.
 
-Raw local command logs are under `.context/subagents-continuation/` (ignored). Selected sanitized reproductions are copied beside this index. Remaining acceptance obligations are only in `TODO.md`: in particular, ordinary discovered tools/root-hook exclusion do not establish approved child MCP access, and active-child archival DST does not establish all browser/provider destructive races. Native/cloud and everyday-use qualification are not claimed.
+Raw local command logs are under `.context/subagents-continuation/` (ignored). Selected sanitized reproductions are retained in that archive. Remaining acceptance obligations are only in `TODO.md`: in particular, ordinary discovered tools/root-hook exclusion do not establish approved child MCP access, and active-child archival DST does not establish all browser/provider destructive races. Native/cloud and everyday-use qualification are not claimed.

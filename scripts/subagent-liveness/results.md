@@ -2,7 +2,7 @@
 
 Environment: Linux, Node 24.20.0, published gotgenes 21.4.2, Pi SDK 0.85.1. The lockfile pins all dependencies. No installed package source was modified.
 
-Final run: **7 passed, 0 failed**, approximately 9.5 seconds. Complete output: [evidence/seven-scenarios.txt](evidence/seven-scenarios.txt).
+Final run: **7 passed, 0 failed**, approximately 9.5 seconds. The original `seven-scenarios.txt` was not recovered into the tracked evidence. The later recovered baseline output is archived as `recovered-baseline.txt`; download details are in `evidence/README.md`.
 
 ## Liveness: feasible without a fork for the tested scope
 
@@ -40,7 +40,7 @@ Stripping types is currently unsupported for files under node_modules
 .../@gotgenes/pi-subagents/src/service/service.ts
 ```
 
-Full first failure: [evidence/first-loader-failure.txt](evidence/first-loader-failure.txt).
+The original `first-loader-failure.txt` was not recovered into the tracked evidence; the diagnostic excerpt above is retained.
 
 Cause: the package's public export points at TypeScript source; native Node import is the wrong loading boundary. The corrected harness loads `bridge-extension.ts` through Pi's ordinary jiti-backed extension loader and imports the **same public export** there. No dependency patch, timeout increase, assertion relaxation or green-seeking rerun was used. A subsequent trace-label collision in the test logger was corrected before the full suite; it did not affect scheduling or assertions.
 

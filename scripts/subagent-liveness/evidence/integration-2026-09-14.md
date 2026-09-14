@@ -1,6 +1,8 @@
 # Integration validation, 2026-09-14
 
-Pi 0.85.1; upstream 21.7.0 at `b3b6159399f541fd0623f65818557dd3e707a34f`; fork commits `b8dbccdc` and `6ad3a28132124e36c228887aaf549fd1c69e76e1`. Immutable installed artifact: `vendor/gotgenes-pi-subagents-21.7.0-orb.1.tgz` (integrity in the root lockfile; SHA-256 `0dbdd1483b853c35915483709fbd2fa9956d42b4939778ba129ddd1a18b75ee4`). The fork's 80-file / 1,771-test suite passed; earlier red/fixed outputs are retained here.
+Historical log/trace filenames below refer to the downloadable archive indexed in `scripts/subagent-liveness/evidence/README.md`.
+
+Pi 0.85.1; upstream 21.7.0 at `b3b6159399f541fd0623f65818557dd3e707a34f`; fork commits `b8dbccdc` and `6ad3a28132124e36c228887aaf549fd1c69e76e1`. Immutable installed artifact: `vendor/gotgenes-pi-subagents-21.7.0-orb.1.tgz` (integrity in the root lockfile; SHA-256 `0dbdd1483b853c35915483709fbd2fa9956d42b4939778ba129ddd1a18b75ee4`). The fork's 80-file / 1,771-test suite passed; earlier red/fixed outputs are retained in that archive.
 
 ## Failures and causes (not dismissed by passing reruns)
 
@@ -13,7 +15,7 @@ Pi 0.85.1; upstream 21.7.0 at `b3b6159399f541fd0623f65818557dd3e707a34f`; fork c
 
 6. **Hook config could redirect child auth.** The new runtime-owned `PI_CODING_AGENT_DIR` also needs the existing hook env-file fence. A parser regression demonstrated that it was accepted as an ordinary hook variable. Add it to the denylist; all 47 env-file/runner tests pass. The credential and hook documentation now include this protected name. The full suite then correctly caught the baked boot-hooks skill's missing copy of that contract; adding the name to the skill makes all 25 skill contracts pass.
 
-No sleep or timeout increase was used to fix ordering. The browser fixture uses owned temporary FIFOs. The real-SDK fixture uses explicit promises and lifecycle checkpoints. Earlier recorded DST traces were replayed before their fixes; their replay outputs remain in this directory and original traces remain under `test-failures/`.
+No sleep or timeout increase was used to fix ordering. The browser fixture uses owned temporary FIFOs. The real-SDK fixture uses explicit promises and lifecycle checkpoints. Earlier recorded DST traces were replayed before their fixes; their replay outputs remain in the archive and original traces remain under `test-failures/`.
 
 ## Independent passing checks
 

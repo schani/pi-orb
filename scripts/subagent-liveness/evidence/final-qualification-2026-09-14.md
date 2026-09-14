@@ -1,6 +1,6 @@
 # Local follow-up qualification — 2026-09-14
 
-No production deployment was performed. This supplements the earlier integration/continuation ledgers; their artifact pins and test counts are historical.
+No production deployment was performed. This supplements the earlier integration/continuation ledgers; their artifact pins and test counts are historical. Log/trace filenames below refer to the downloadable archive indexed in `scripts/subagent-liveness/evidence/README.md`.
 
 ## Immutable fork
 
@@ -18,7 +18,7 @@ Two fixture mistakes were diagnosed rather than counted as product evidence: `.m
 
 ## Admission, recovery and destructive boundaries
 
-The final idle-stop and archive snapshot races were forced and explicitly replayed before repair. Checked-in copies, normalized only with a trailing newline:
+The final idle-stop and archive snapshot races were forced and explicitly replayed before repair. Archived copies, normalized only with a trailing newline:
 
 - `final-idle-stop-first.json`: a newly busy child was stopped after the final drain.
 - `final-archive-first.json`: admission after an empty/idle reply lost the active child's workspace.
