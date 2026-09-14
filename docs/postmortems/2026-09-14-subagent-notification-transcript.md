@@ -17,6 +17,12 @@ The extension's `NotificationManager` withholds completion announcements while t
 
 The extension registers `createNotificationRenderer()` for its terminal UI. The browser does not use that renderer: `HistoryView.tsx` renders displayed custom messages through `PlainChatText`. Consequently the model-facing XML, transcript-file pointers and collection instructions are printed literally. Structured `native.details` already contains the description, status, error and bounded result preview; child transcripts need not be read or replicated to render these notices.
 
+## Terminal renderer inspection (2026-09-14)
+
+Direct reuse is possible with an adapter, not a React import: the registered renderer returns a Pi TUI `Text` component whose `render(width)` produces terminal text lines with ANSI styling. The SDK exposes the callback through `session.extensionRunner.getMessageRenderer(customType)`. The browser currently receives data, not rendered component output; no such bridge is implemented.
+
+A local probe bundled the pinned `renderer.ts` with its source alias and invoked it on the recorded failure details with an unstyled theme. Collapsed output was `✗ Count runtime-api code lines error`, followed by `↻2 · 0.6s`, `⎿  No output.`, and the full local transcript path (which wraps over several lines). Expanded mode replaces the one-line/80-character result preview with up to 30 preview lines; it still prints the path. For this error there is no substantive expanded content: the renderer never reads `details.error`, so the actual unsupported-model reason is omitted even though it is persisted. This limits faithful reuse as a complete error presentation; it does not make reuse impossible. Rendering changes alone would not remove the separately triggered parent acknowledgements.
+
 ## Outcome
 
 Diagnosis only; no presentation or notification-delivery behavior changed. The web rendering gap is distinct from the extension's deferred/unconsumed completion semantics. A presentation repair must not silently discard failure evidence or change parent notification delivery. Follow-up is tracked in `TODO.md`.
