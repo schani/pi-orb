@@ -32,9 +32,15 @@ The probes were intended to capture a fault/core, not obtain a green release res
 
 At the user's request, updated the exact `@playwright/test` pin and lockfile from **1.62.1 to 1.63.0**, the current stable release. The managed WebKit changes from **26.5 / build 2336** to **26.6 / build 2359**; managed Chromium is now **153.0.8010.12 / build 1243**. `npm ci` and `playwright install --with-deps --no-remove chromium webkit` completed; the latter preserves older browser installations for diagnosis.
 
-With core dumps enabled and `DEBUG=pw:browser`, `npm run test:e2e:frontend` passes **41/41 tests** (27 session/desktop and 14 phone cases across Chromium/WebKit), including the original WebKit 320px case. Typecheck and lint pass. No test assertions, retries, renderer flags or timeouts changed. The full 106-case suite has not been rerun on this upgraded toolchain; its prior result belongs to Playwright 1.62.1.
+With core dumps enabled and `DEBUG=pw:browser`, `npm run test:e2e:frontend` passes **41/41 tests** (27 session/desktop and 14 phone cases across Chromium/WebKit), including the original WebKit 320px case. Typecheck and lint pass. No test assertions, retries, renderer flags or timeouts changed. The subsequent complete PR rerun also passes **10 files / 106 tests** on Playwright 1.63.0; provenance is in `scripts/subagent-liveness/evidence/final-qualification-2026-09-14.md`. Neither passing run establishes the original crash's cause.
 
 The [1.63.0 release notes](https://github.com/microsoft/playwright/releases/tag/v1.63.0) announce WebKit 26.6 but do not identify a fix matching this fault. Since the old build also passed subsequent probes, this result establishes compatibility with the newer stable build, **not a demonstrated crash fix**. Release-blocking status remains unchanged. Upgrade/install/browser logs are retained locally under `.context/webkit-upgrade/`.
+
+## Interrupted full PR rerun — separate Chromium shutdown evidence
+
+A later full-suite rerun was interrupted by a host reboot. At **19:36:07 UTC**, system Chromium PID 5765 logged `FATAL:dbus/bus.cc:1245 D-Bus connection was disconnected. Aborting.` and left a core at **19:36:08**. The resumed host's PID 1 started at **19:37:02**; neither test driver survived and neither suite had written its completion/exit record. This is not a reproduction of the original WebKit compositor fault. The host reboot's cause is not established by these artifacts.
+
+The Chromium core is retained privately with mode 0600 under `.context/pr-qualification/chromium-host-shutdown.core`, alongside incomplete test logs; it is not exported because process memory can contain credentials. Docker was inactive on the new boot. After confirming process absence, Docker/browser prerequisites were restored and only the interrupted qualification was restarted under `.context/pr-qualification-after-reboot/`. The interrupted run is not counted as a pass.
 
 ## Retained artifacts and rule
 

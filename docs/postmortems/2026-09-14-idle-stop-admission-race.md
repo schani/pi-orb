@@ -28,4 +28,6 @@ The active-child browser case then exposed missing process-provider lifetime wir
 
 ## Qualification
 
+The PR rerun found a test assumption in the compute-replacement scenario. Its single reconciliation assumed it would reach an empty pull. Recorded trace `scripts/subagent-liveness/evidence/archive-compute-timeout-first.json` instead fires the `observe host for pull` deadline before the observation response; the product safely returns retryable without sealing, but the test demanded that replacement had occurred. The trace was replayed before changing the test. Qualification now uses thirty timely-response schedules that must reach replacement and return conflict, plus thirty late-timer schedules that permit only cancellation-backed retries (with archival pending and the workspace retained) or the same replacement conflict. Every schedule requires unsealed history. The original failing timeout trace passes those corrected assertions; product fencing code is unchanged.
+
 Composed DST, real-file restart/persistence contracts, HTTP/client-schema tests and an installed-SDK schedule cover the new boundary. The protocol is documented in `docs/runtime-protocol.md`. Remaining release gates are tracked only in `TODO.md`; this finding does not clear the separate native WebKit crash or authorize deployment.

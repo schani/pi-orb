@@ -170,43 +170,62 @@ describe("orb archival (DST)", () => {
     });
   });
 
-  it("does not use an old compute's preparation to seal a replacement", async () => {
-    await runDst({ name: "archive-fence-compute-replacement", iterations: 1 }, async (sim) => {
-      const h = makeHarness();
-      let replaced = false;
-      const deps = h.deps;
-      const pull = deps.runtimeClient.pullHistory.bind(deps.runtimeClient);
-      deps.runtimeClient.pullHistory = (...args) =>
-        pull(...args).map((value) => {
-          if (!replaced && value.records.length === 0) {
-            replaced = true;
-            const orb = h.store.orbSnapshot(ORB);
-            if (orb !== null)
-              h.store.seedOrb({
-                ...orb,
-                hostRef: "replacement",
-                hostIncarnation: orb.hostIncarnation + 1,
-                stateVersion: orb.stateVersion + 1,
-              });
-          }
-          return value;
-        });
-      const result = await sim.runTasks([
+  it.each([false, true])(
+    "does not use an old compute's preparation to seal a replacement (late timers: %s)",
+    async (lateTimers) => {
+      await runDst(
         {
-          name: "archive",
-          f: async (task) => {
-            seedRunningOrb(task, h, ORB);
-            h.world.appendMessage(ORB, "retained session");
-            expect((await requestOrbArchive(task, deps, ORB)).isOk()).toBe(true);
-            await reconcileOrbOnce(task, deps, ORB);
-            expect(replaced).toBe(true);
-            expect(h.store.deletionSnapshot(ORB)?.historySealedAt).toBeNull();
-          },
+          name: "archive-fence-compute-replacement",
+          iterations: 30,
+          lateTimerProbability: lateTimers ? 0.05 : 0,
         },
-      ]);
-      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-    });
-  });
+        async (sim) => {
+          const h = makeHarness();
+          let replaced = false;
+          const deps = h.deps;
+          const pull = deps.runtimeClient.pullHistory.bind(deps.runtimeClient);
+          deps.runtimeClient.pullHistory = (...args) =>
+            pull(...args).map((value) => {
+              if (!replaced && value.records.length === 0) {
+                replaced = true;
+                const orb = h.store.orbSnapshot(ORB);
+                if (orb !== null)
+                  h.store.seedOrb({
+                    ...orb,
+                    hostRef: "replacement",
+                    hostIncarnation: orb.hostIncarnation + 1,
+                    stateVersion: orb.stateVersion + 1,
+                  });
+              }
+              return value;
+            });
+          const result = await sim.runTasks([
+            {
+              name: "archive",
+              f: async (task) => {
+                seedRunningOrb(task, h, ORB);
+                h.world.appendMessage(ORB, "retained session");
+                expect((await requestOrbArchive(task, deps, ORB)).isOk()).toBe(true);
+                const outcome = await reconcileOrbOnce(task, deps, ORB);
+                expect(h.store.deletionSnapshot(ORB)?.historySealedAt).toBeNull();
+                if (lateTimers && outcome.type === "retryable") {
+                  // A deadline can prevent this cycle from reaching the replacement window.
+                  expect(outcome.message).toMatch(/cancel/i);
+                  expect(h.store.orbSnapshot(ORB)?.state).toBe("archiving");
+                  expect(h.world.filesystemExists(ORB)).toBe(true);
+                } else {
+                  // Timely-response schedules must actually hit the race, not just remain unsealed.
+                  expect(replaced).toBe(true);
+                  expect(outcome).toEqual({ type: "conflict" });
+                }
+              },
+            },
+          ]);
+          expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        },
+      );
+    },
+  );
 
   it("seals and retains history while destroying every runtime resource", async () => {
     await runDst({ name: "archive-complete", iterations: 20 }, async (sim) => {

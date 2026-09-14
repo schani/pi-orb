@@ -41,3 +41,17 @@ Additional qualification includes sixty before/after idle-stop schedules, thirty
 Local raw command logs are under `.context/subagents-finish/`; they are not exported because some inference dumps contain mock authorization headers. Original failure directories and traces are retained.
 
 The original native WebKit compositor SIGSEGV remains unresolved; later passing browser runs do not clear it. An initial read-only cloud preflight could not refresh the configured federated identity because the issuer did not answer within the CLI's ten-second budget (exit 6). A later independent preflight succeeded with the existing federation; no fallback admin login was attempted. Native build/boot qualification was then attempted from clean commit `f51c407`: `us-central1-a` rejected the prescribed `n2d-highmem-4` builder with `STOCKOUT` and advertised other zones. A separate attempt in advertised `us-central1-c` was refused by the existing `compute.instances.create` grant. Both owned cleanup sequences completed; instance, disk and image inventories found no retained qualification resources. No IAM permission was widened, no image was produced, and native/cloud or everyday-use qualification is not claimed. Local logs are `native-qualification.log` and `native-qualification-c.log`. Outstanding gates are tracked only in `TODO.md`.
+
+## PR rerun with Playwright 1.63.0 — 2026-09-14
+
+Merged `origin/main` through `368e314` in `27fdd6a`, including high thinking-level policy and the Node 24 artifact action. After installing the pinned dependencies/browser prerequisites, qualification passes:
+
+- **219 files / 1,699 repository tests passed**, with 3 files / 5 tests skipped; infra checks pass, including 26 native guest tests.
+- **10 files / 106 combined E2E tests passed** on Playwright **1.63.0**, including managed WebKit **26.6 / build 2359**. Runtime Docker image: `sha256:9d942c1bd5cee1abd43d4cf3e275203b3efc6b5d16ddcddf957d7978344ecc84`.
+- Typecheck and lint pass.
+
+The first attempt was interrupted by a host reboot; its test drivers were gone and no suite exit records existed. A system Chromium D-Bus-disconnection core was retained privately, not confused with the earlier WebKit fault. Details are in `docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md`.
+
+The resumed unit run exposed a deterministic test assumption: a deadline could prevent the one-cycle compute-replacement fixture from reaching its intended window. `archive-compute-timeout-first.json` was replayed before repair and passes afterward. The fixture now requires replacement/conflict in thirty timely schedules and cancellation-backed safe retries or replacement/conflict in thirty late-timer schedules, always retaining unsealed history. The complete suite above includes this test-only correction; production fencing code is unchanged. Its rationale is recorded in `docs/postmortems/2026-09-14-idle-stop-admission-race.md`.
+
+Logs are retained locally under `.context/pr-qualification/` (interrupted) and `.context/pr-qualification-after-reboot/` (completed). No retries were added to tests or assertions weakened without identifying the incorrect scheduling assumption. These passing results do not establish the cause of the original WebKit crash or complete native/cloud or everyday-use qualification. No deployment occurred.
