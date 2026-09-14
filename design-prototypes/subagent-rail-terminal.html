@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N1 + C2 — subagent rail and terminal</title>
+<link rel="stylesheet" href="../apps/web/src/styles.css">
+<style>
+body { display: block; }
+.study { padding: 12px; border-bottom: 1px solid var(--k); }
+.study h1, .rationale h2 { font-size: 13px; line-height: 20px; margin: 0 0 8px; }
+.study p, .rationale p { margin: 4px 0; color: var(--g3); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 8px 0; }
+.controls label { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; }
+.controls select { border: 1px solid var(--k); min-width: 0; flex: 1; }
+button[aria-pressed="true"] { background: var(--k); color: var(--w); }
+.rationale { border-top: 1px solid var(--k); padding: 12px; }
+.preview { container-type: inline-size; margin: 16px 12px; border: 1px solid var(--k); max-width: calc(100% - 24px); }
+.preview[data-width="390"], .preview[data-width="320"] { margin-inline: auto; }
+.preview[data-width="390"] { width: 390px; }
+.preview[data-width="320"] { width: 320px; }
+.screen { height: 660px; display: grid; grid-template-columns: 236px minmax(0, 1fr); }
+.preview.short .screen { height: 360px; }
+.index { border-right: 1px solid var(--k); overflow: auto; }
+.index-home { height: 24px; padding: 0 12px; border-bottom: 1px solid var(--k); }
+.project { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; }
+.project strong { font-size: 18px; line-height: 24px; letter-spacing: .08em; }
+.project .icons { margin-left: auto; }
+.index-row { display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 8px 0 10px; border-left: 2px solid var(--ok); }
+.index-row.current { background: var(--k); color: var(--w); }
+.index-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.index-row small { font: inherit; color: var(--g2); }
+.icons { display: inline-flex; align-items: center; gap: 8px; color: var(--g3); }
+.instrument { width: 16px; height: 16px; color: var(--ok); flex: none; }
+.pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.preview .orb-header { position: relative; top: auto; z-index: 10; }
+.preview .orb-name { min-width: 0; flex: 1; }
+.preview .orb-life { color: var(--g3); }
+.preview #terminal-toggle { color: var(--g3); }
+.preview #terminal-toggle[aria-pressed="true"] { background: var(--k); color: var(--w); }
+.phone-only { display: none; }
+.connection { padding: 4px 12px; border-bottom: 1px solid var(--k); color: var(--bad); }
+.workbench { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; --rail-h: 20px; --roster-h: 96px; --term-h: 208px; }
+.live-rail { position: relative; flex: none; z-index: 5; background: var(--w); border-bottom: 1px solid var(--g2); }
+.rail-toggle { border: 0; padding: 0 12px; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 20px; color: var(--ok); text-align: left; }
+.rail-toggle[aria-expanded="true"] { color: var(--k); }
+.rail-toggle .metric { margin-left: auto; display: flex; justify-content: flex-end; gap: 0 8px; flex-wrap: wrap; max-width: 68%; color: var(--g3); }
+.rail-toggle .metric span { white-space: nowrap; }
+.rail-toggle .metric .running { color: var(--ok); }
+.rail-toggle:hover .metric, .rail-toggle:focus-visible .metric, .rail-toggle:hover .running, .rail-toggle:focus-visible .running { color: inherit; }
+.roster { flex: none; position: relative; z-index: 4; height: var(--roster-h); overflow: auto; background: var(--w); border-bottom: 1px solid var(--k); }
+.roster-inner { padding: 0 12px; }
+.roster details + details { border-top: 1px solid var(--g2); }
+.roster summary { display: grid; grid-template-columns: 2ch minmax(0,1fr) auto; gap: 8px; align-items: center; min-height: 24px; cursor: pointer; list-style: none; }
+.roster summary::-webkit-details-marker { display: none; }
+.roster summary:hover { background: var(--g1); }
+.roster .marker::before { content: "▸"; }
+.roster details[open] .marker::before { content: "▾"; }
+.roster .phase { color: var(--g3); }
+.roster .phase.running { color: var(--ok); }
+.worker-detail { padding: 4px 0 8px 3ch; color: var(--g3); }
+.terminal { position: absolute; top: calc(var(--rail-h) + var(--roster-h)); left: 0; right: 0; height: var(--term-h); z-index: 3; background: var(--w); border: 1px solid var(--k); padding: 13px 0; display: flex; flex-direction: column; }
+.term-console { min-height: 0; flex: 1; padding: 0 15px; overflow: auto; }
+.term-lines { margin: 0; font: inherit; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.term-prompt { display: flex; gap: 1ch; align-items: baseline; }
+.term-input { flex: 1; width: 0; min-width: 0; padding: 0; border: 0; height: 20px; line-height: 20px; background: var(--w); color: var(--k); outline: 0; }
+.term-input:focus { background: var(--w); color: var(--k); }
+.resize-grip { position: absolute; bottom: 0; left: 0; width: 100%; height: 8px; padding: 0; border: 0; cursor: ns-resize; touch-action: none; background: transparent; }
+.resize-grip:hover, .resize-grip:focus-visible { background: var(--g1); color: var(--k); }
+.transcript { flex: 1; min-height: 0; overflow: auto; }
+.preview .rec { padding-block: 6px; }
+.preview .rec.you { background: var(--g1); border-top: 1px solid var(--g2); border-bottom: 1px solid var(--g2); }
+.preview .rec p { margin: 0 0 8px; }
+.preview .rec p:last-child { margin: 0; }
+.preview .rec-bd { overflow-wrap: anywhere; }
+.preview .activity-rail-row { margin: 4px 0; }
+.preview .activity-rail-summary { color: var(--k); }
+.preview .activity-rail-row-failed .activity-rail-summary { color: var(--bad); }
+.detail { padding: 8px; background: var(--g1); border-top: 1px solid var(--g2); }
+.failure { color: var(--bad); }
+.meta { color: var(--g3); margin-top: 8px; }
+.preview .composer { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--k); position: relative; background: var(--w); }
+.composer-prefix { text-align: right; font-weight: bold; }
+.preview .composer textarea { width: 100%; height: 80px; min-height: 80px; padding: 0; border: 0; resize: none; }
+.preview .composer .compose-controls { display: none; flex-direction: column; }
+.preview .composer .phone-pad { display: none; }
+.preview .composer .desktop-abort { color: var(--g3); }
+.stream-cursor { display: inline-block; width: 1ch; height: 20px; vertical-align: text-bottom; background: var(--k); }
+[hidden] { display: none !important; }
+/* P2: the live rail follows the lower edge of the header-owned shade. */
+.preview[data-proposal="2"] .workbench[data-terminal="true"] .terminal { top: 0; }
+.preview[data-proposal="2"] .workbench[data-terminal="true"] .live-rail { position: absolute; top: var(--term-h); left: 0; right: 0; }
+.preview[data-proposal="2"] .workbench[data-terminal="true"] .roster { position: absolute; top: calc(var(--term-h) + var(--rail-h)); left: 0; right: 0; }
+/* P3: the two instruments share one overlay; neither DOM session is destroyed. */
+.preview[data-proposal="3"] .terminal { top: var(--rail-h); }
+.preview[data-proposal="3"] .roster { position: absolute; top: var(--rail-h); left: 0; right: 0; }
+/* P4: compare terminal and roster side by side; stack on narrow panes. */
+.preview[data-proposal="4"] .workbench[data-terminal="true"] .terminal { top: var(--rail-h); }
+.preview[data-proposal="4"] .workbench[data-terminal="true"][data-roster="true"]:not(.narrow) .terminal { right: 300px; }
+.preview[data-proposal="4"] .workbench[data-terminal="true"][data-roster="true"] .roster { position: absolute; top: var(--rail-h); right: 0; width: 300px; height: var(--term-h); border-left: 1px solid var(--k); }
+.preview[data-proposal="4"] .workbench.narrow[data-terminal="true"][data-roster="true"] .roster { top: calc(var(--rail-h) + var(--term-h)); width: 100%; height: var(--roster-h); border-left: 0; }
+/* P5: all instruments participate in flow; transcript owns the remainder. */
+.preview[data-proposal="5"] .terminal { position: relative; top: auto; left: auto; right: auto; flex: none; }
+@container(max-width:600px) {
+ .screen { display: block; }
+ .index, .desktop-only { display: none !important; }
+ .phone-only { display: inline-flex; }
+ .pane { height: 100%; }
+ .preview .orb-header { height: 44px; padding: 0 8px; gap: 6px; }
+ .preview .orb-life .life-text { display: none; }
+ .preview .orb-header .icon-button { width: 44px; height: 44px; }
+ .preview .orb-header > .phone-only { width: 44px; height: 44px; justify-content: center; flex: none; }
+ .preview .rec { padding-inline: 8px; gap: 8px; }
+ .preview .activity-rail-row > summary { min-height: 44px; }
+ .preview .activity-rail-summary { white-space: normal; }
+ .rail-toggle { min-height: 44px; padding-inline: 8px; }
+ .roster-inner { padding-inline: 8px; }
+ .roster summary { min-height: 44px; grid-template-columns: 1ch minmax(0,1fr) auto; }
+ .preview .composer { min-height: 44px; padding: 0 8px; gap: 8px; align-items: center; }
+ .preview .composer textarea { display: none; font-size: 16px; line-height: 20px; }
+ .preview .composer .phone-pad { display: block; min-width: 0; min-height: 44px; padding: 0; text-align: left; border: 0; color: var(--g3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .preview .composer .icon-button { width: 44px; height: 44px; }
+ .preview .composer .compose-controls { display: none; }
+ .preview .composer.editing textarea { display: block; height: 88px; min-height: 88px; padding-block: 4px; }
+ .preview .composer.editing .composer-prefix { align-self: start; padding-top: 4px; }
+ .preview .composer.editing .phone-pad, .preview .composer.editing .desktop-abort { display: none; }
+ .preview .composer.editing .compose-controls { display: flex; }
+}
+@media(max-width:650px) { .controls button { min-height: 36px; } }
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true"><defs>
+<symbol id="i-terminal" viewBox="0 0 16 16"><path d="M3 4l4 4-4 4 M9 12h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-fold" viewBox="0 0 16 16"><path d="m3 6 5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-send" viewBox="0 0 16 16"><path d="M8 13V3M3 8l5-5 5 5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-back" viewBox="0 0 16 16"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-upload" viewBox="0 0 16 16"><path d="M3 10v3h10v-3 M8 10V2 M5 5l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-stop" viewBox="0 0 16 16"><path d="M4 4h8v8H4z" fill="currentColor"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-more" viewBox="0 0 16 16"><path d="M3 8h1m3 0h1m3 0h1" stroke="currentColor" stroke-width="1.5"/></symbol>
+<symbol id="i-busy" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" fill="currentColor"/><g fill="white"><circle cx="5" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="11" cy="8" r="1"/></g></symbol>
+</defs></svg>
+<section class="study">
+<h1>N1 + C2 / RAIL × TERMINAL</h1>
+<p>Five refinements · simulated UI only · no runtime or shell requests</p>
+<nav class="controls" id="proposals" aria-label="Layout proposals"></nav>
+<div class="controls">
+<label>Viewport <select id="width"><option value="full">Full width</option><option value="390">390px phone</option><option value="320">320px phone</option></select></label>
+<label>Children <select id="children"><option value="running">3 running</option><option value="mixed">2 running · 1 queued · 1 finishing</option><option value="queued">2 queued</option><option value="finishing">1 finishing</option><option value="none">None · parent still busy</option><option value="unknown">Agent disconnected</option></select></label>
+<button id="advance">Finish one child</button><button id="reset">Reset children</button><button id="short" aria-pressed="false">Short viewport</button>
+</div>
+</section>
+<div class="preview" id="preview" data-proposal="1" data-width="full">
+<div class="screen">
+<aside class="index"><div class="index-home">PI-ORB</div><div class="project"><strong>ORBYU</strong><span class="icons" aria-hidden="true"><svg class="ic"><use href="#i-plus"/></svg></span></div><div class="index-row current"><svg class="instrument" aria-hidden="true"><use href="#i-busy"/></svg><span class="name">Project services</span><small>8m</small></div><div class="index-row"><svg class="instrument" aria-hidden="true"><use href="#i-busy"/></svg><span class="name">Review runtime protocol</span><small>2h</small></div></aside>
+<div class="pane">
+<header class="orb-header"><span class="phone-only icons" aria-hidden="true"><svg class="ic"><use href="#i-back"/></svg></span><strong class="orb-name">Project services</strong><span class="orb-life"><svg class="instrument" role="img" aria-label="Busy"><use href="#i-busy"/></svg><span class="life-text">running · busy</span></span><button class="icon-button" id="terminal-toggle" title="terminal · ⌘J" aria-label="Toggle terminal" aria-controls="terminal" aria-keyshortcuts="Meta+J" aria-pressed="true"><svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg></button><span class="icons desktop-only" aria-hidden="true"><svg class="ic"><use href="#i-upload"/></svg><svg class="ic"><use href="#i-stop"/></svg></span><span class="icons phone-only" aria-hidden="true"><svg class="ic"><use href="#i-more"/></svg></span></header>
+<div class="connection" id="connection" hidden>Agent connection lost.</div>
+<div class="workbench" id="workbench">
+<div class="live-rail" id="live-rail"><button class="rail-toggle" id="rail-toggle" aria-expanded="false" aria-controls="roster"><span id="rail-marker" aria-hidden="true">▸</span><span>subagents</span><span class="metric" id="metric"></span></button></div>
+<section class="roster" id="roster" aria-label="Active subagents" hidden><div class="roster-inner" id="roster-inner"></div></section>
+<section class="terminal" id="terminal" aria-label="Terminal preview"><div class="term-console" id="term-console"><pre class="term-lines" id="term-lines"># pwd
+/workspace/repo
+# ls
+apps  docs  packages
+</pre><label class="term-prompt"><span>#</span><input class="term-input" id="term-input" aria-label="Terminal input" autocomplete="off" spellcheck="false"></label></div><button class="resize-grip" id="resize" role="separator" aria-label="Resize terminal" aria-orientation="horizontal" aria-valuemin="2" aria-valuemax="24" aria-valuenow="9"></button></section>
+<main class="transcript" id="transcript">
+<div class="rec you"><div class="rec-px">you</div><div class="rec-bd">Count the source lines for each service in separate subagents.</div></div>
+<div class="rec"><div class="rec-px">orb</div><div class="rec-bd"><p>The service roles share one backend codebase.</p><p><strong>22,914</strong> backend lines · <strong>9,863</strong> frontend lines.</p></div></div>
+<div class="rec"><div class="rec-px">···</div><div class="rec-bd"><details class="activity-rail-row activity-rail-row-failed" id="failure-receipt"><summary><span class="activity-rail-marker"></span><span class="activity-rail-summary">Count runtime-api code lines</span><span class="activity-rail-metric">failed</span></summary><div class="detail"><p class="failure">Codex error: The 'gpt-5.4-mini' model is not supported when using Codex with a ChatGPT account.</p><div class="meta">156d2beb · 22:04:07 · 0.6s</div></div></details><details class="activity-rail-row" id="success-receipt"><summary><span class="activity-rail-marker"></span><span class="activity-rail-summary">Count web code lines</span><span class="activity-rail-metric">completed</span></summary><div class="detail"><p>9,863 nonblank source lines. Test files and fixtures excluded.</p><div class="meta">e1588e99 · 22:05:06 · 28s</div></div></details></div></div>
+<div class="rec"><div class="rec-px">orb</div><div class="rec-bd">That failure is from the initial model choice. The replacement agent completed successfully.</div></div>
+<div class="rec you"><div class="rec-px">you</div><div class="rec-bd">Now check how those services are deployed.</div></div>
+<div class="rec"><div class="rec-px">orb</div><div class="rec-bd">I’ll inspect the deployment entry points. <span class="stream-cursor" id="stream-cursor" aria-hidden="true"></span></div></div>
+</main>
+</div>
+<div class="composer" id="composer"><span class="composer-prefix">&gt;</span><button class="phone-pad" id="phone-pad">Message the orb…</button><textarea id="draft" aria-label="Message the orb" placeholder="Message the orb…"></textarea><span class="desktop-abort icons" aria-hidden="true"><svg class="ic"><use href="#i-x"/></svg></span><div class="compose-controls phone-only"><button class="icon-button" id="fold" aria-label="Fold draft"><svg class="ic" aria-hidden="true"><use href="#i-fold"/></svg></button><button class="icon-button" id="send" aria-label="Send simulated message"><svg class="ic" aria-hidden="true"><use href="#i-send"/></svg></button></div></div>
+</div>
+</div>
+</div>
+<section class="rationale" id="rationale"></section>
+<section class="study">
+<p>Toggle the header terminal (or ⌘J), expand the live rail, and drag the terminal’s bottom edge. The same mock terminal DOM, input and output survive hiding, switching layouts and the last child finishing. Try <code>pwd</code> or <code>ls</code>; no command is executed.</p>
+<p>The rail exists only while fresh state confirms running, queued or finishing children. Parent-only work and historical notices do not keep it alive. On disconnect, it withdraws rather than showing stale counts; the connection notice remains.</p>
+<p>Phone layouts keep the index hidden, the 44px collapsed composer and 44px controls. Tap the draft to open the existing side-rail editor; fold preserves it. Short viewport approximates keyboard space, not native keyboard behavior.</p>
+<p>All five retain N1 receipts and leave parent notification delivery unchanged. Terminal input is separate from the parent draft; no child-only Stop or child transcript viewer.</p>
+</section>
+<script type="module">
+const $=id=>document.getElementById(id);
+const variants=[
+ ['Rail above shade','The rail stays directly below the header. Expanding it places the roster above the terminal shade; the shade moves down, never over the rail.','Same ordering on phones. The roster scrolls within its allocation, the terminal shrinks only if needed, and the composer stays outside both.','Closest to the current terminal. Predictable rail location, but opening a roster moves the shell vertically.'],
+ ['Rail at shade edge','With the terminal closed, the rail sits below the header. Opening the shade moves the rail to its lower edge; the roster unfolds below that edge.','Terminal, then rail, then roster. The terminal height is capped so the rail and at least one roster row remain reachable, even in the short viewport.','The count is visually attached to the shared checkout’s terminal. Its position changes when opening or resizing the shade.'],
+ ['Shared top deck','The rail never moves. The roster and terminal share one overlay slot: expanding the roster temporarily parks the terminal; collapsing restores it. The terminal button brings the shell back directly.','The same exclusive surface avoids two cramped panes. Returning to the terminal preserves its input and output; no new terminal session is implied.','Most economical on phones, but you cannot inspect children and read terminal output at the same time.'],
+ ['Split instruments','An expanded roster shares the shade: terminal on the left, children on the right. Closing the roster restores full terminal width.','Narrow panes stack terminal above roster instead. Each scrolls separately within a bounded deck; the rail and composer stay visible.','Best side-by-side monitoring on wide screens. Opening the roster changes terminal columns; a real implementation must use the existing PTY resize path.'],
+ ['In-flow stack','Rail, roster and terminal consume layout space rather than overlaying the transcript. The remaining conversation scrolls below them.','The same stack reserves at least three transcript lines, even with the editor open in the short viewport. Instrument heights shrink to fit.','Nothing covers a notification or draft. Strongest departure from the existing shade; the conversation becomes shorter while instruments are open.']
+];
+const params=new URLSearchParams(location.hash.slice(1));
+const state={p:/^[1-5]$/.test(params.get('p')??'')?Number(params.get('p')):1, terminal:true, expanded:false, phases:['running','running','running'], unknown:false, rows:9};
+const tasks=['Check web deployment','Check runtime-api deployment','Check ops deployment','Check issuer deployment'];
+let workerContent='';
+let terminalTailPinned=true;
+let terminalOrigin=$('terminal-toggle');
+$('term-console').addEventListener('scroll',()=>{if(!$('terminal').hidden){const e=$('term-console');terminalTailPinned=e.scrollHeight-e.clientHeight-e.scrollTop<=1;}});
+function active(){return state.phases.map((phase,i)=>({phase,i})).filter(x=>x.phase!=='completed');}
+function terminalVisible(){return state.terminal&&!(state.p===3&&state.expanded&&active().length>0&&!state.unknown);}
+function rosterVisible(){return state.expanded&&active().length>0&&!state.unknown;}
+function sync(){
+ const hasWork=!state.unknown&&active().length>0;
+ if(!hasWork)state.expanded=false;
+ const focusWasHidden=(!hasWork&&($('live-rail').contains(document.activeElement)||$('roster').contains(document.activeElement)));
+ $('preview').dataset.proposal=state.p;
+ $('live-rail').hidden=!hasWork; $('roster').hidden=!rosterVisible(); $('terminal').hidden=!terminalVisible();
+ $('connection').hidden=!state.unknown; $('stream-cursor').hidden=state.unknown;
+ $('rail-toggle').setAttribute('aria-expanded',String(rosterVisible())); $('rail-marker').textContent=rosterVisible()?'▾':'▸';
+ $('metric').innerHTML=['running','queued','finishing'].map(phase=>{const n=state.phases.filter(p=>p===phase).length;return n?`<span class="${phase}">${n} ${phase}</span>`:'';}).join('');
+ const content=active().map(({phase,i})=>`<details data-child="${i}"><summary><span class="marker"></span><span>${tasks[i]}</span><span class="phase ${phase}">${phase}</span></summary><div class="worker-detail">Explore · child-${i+1}</div></details>`).join('');
+ if(content!==workerContent){const open=[...$('roster-inner').querySelectorAll('details[open]')].map(d=>d.dataset.child);$('roster-inner').innerHTML=content;workerContent=content;for(const id of open){const d=$('roster-inner').querySelector(`[data-child="${id}"]`);if(d)d.open=true;}}
+ $('terminal-toggle').setAttribute('aria-pressed',String(terminalVisible()));
+ $('workbench').dataset.terminal=terminalVisible(); $('workbench').dataset.roster=rosterVisible();
+ $('advance').disabled=state.unknown||active().length===0;
+ $('proposals').innerHTML=variants.map((v,i)=>`<button data-proposal="${i+1}" aria-pressed="${state.p===i+1}">P${i+1} ${v[0]}</button>`).join('');
+ const v=variants[state.p-1];$('rationale').innerHTML=`<h2>P${state.p} / ${v[0].toUpperCase()}</h2><p>${v[1]}</p><p>${v[2]}</p><p>${v[3]}</p>`;
+ if(focusWasHidden)$('terminal-toggle').focus({preventScroll:true});
+ window.history.replaceState(null,'',`#p=${state.p}`);
+ layout();
+}
+function layout(){
+ const b=$('workbench'), h=b.clientHeight, phone=$('preview').clientWidth<=600;
+ b.classList.toggle('narrow',b.clientWidth<700);
+ const r=$('live-rail').hidden?0:$('live-rail').offsetHeight;
+ let roster=rosterVisible()?Math.min($('roster-inner').scrollHeight,phone?176:160):0;
+ let t=Math.max(68,state.rows*20+28);
+ if(state.p===2&&terminalVisible()){t=Math.min(t,h-r-(roster?44:0));roster=Math.min(roster,h-r-t);}
+ else if(state.p===3){t=Math.min(t,h-r);roster=Math.min(roster,h-r);}
+ else if(state.p===4&&terminalVisible()&&b.clientWidth>=700){t=Math.min(t,h-r);}
+ else {const reserve=state.p===5?60:0;roster=Math.min(roster,Math.max(0,h-r-(terminalVisible()?68:0)-reserve));t=Math.min(t,h-r-roster-reserve);}
+ b.style.setProperty('--rail-h',`${r}px`);b.style.setProperty('--roster-h',`${Math.max(0,roster)}px`);b.style.setProperty('--term-h',`${Math.max(0,t)}px`);
+ $('resize').setAttribute('aria-valuenow',String(Math.max(2,Math.floor((t-28)/20))));
+ if(terminalVisible()&&terminalTailPinned){const e=$('term-console'), target=e.scrollHeight-e.clientHeight;if(e.scrollTop!==target)e.scrollTop=target;}
+}
+function toggleTerminal(){
+ if(!terminalVisible()&&document.activeElement instanceof HTMLElement)terminalOrigin=document.activeElement;
+ if(state.p===3&&state.expanded){state.terminal=true;state.expanded=false;}else state.terminal=!state.terminal;
+ sync(); if(terminalVisible())$('term-input').focus({preventScroll:true});else (terminalOrigin.isConnected&&terminalOrigin.getClientRects().length?terminalOrigin:$('terminal-toggle')).focus({preventScroll:true});
+}
+function resetChildren(){
+ state.unknown=$('children').value==='unknown';
+ state.phases=({running:['running','running','running'],mixed:['running','running','queued','finishing'],queued:['queued','queued'],finishing:['finishing'],none:[],unknown:[]})[$('children').value];sync();
+}
+$('proposals').addEventListener('click',e=>{const b=e.target.closest('[data-proposal]');if(!b)return;state.p=Number(b.dataset.proposal);sync();$('proposals').querySelector(`[data-proposal="${state.p}"]`).focus({preventScroll:true});});
+$('terminal-toggle').addEventListener('click',toggleTerminal);
+$('rail-toggle').addEventListener('click',()=>{state.expanded=!state.expanded;sync();});
+$('roster-inner').addEventListener('toggle',layout,true);
+$('children').addEventListener('change',resetChildren);
+$('reset').addEventListener('click',resetChildren);
+$('advance').addEventListener('click',()=>{const a=active()[0];if(a)state.phases[a.i]='completed';sync();});
+$('width').addEventListener('change',()=>{$('preview').dataset.width=$('width').value;layout();});
+$('short').addEventListener('click',()=>{$('preview').classList.toggle('short');$('short').setAttribute('aria-pressed',String($('preview').classList.contains('short')));layout();});
+$('term-input').addEventListener('keydown',e=>{if(e.key!=='Enter')return;e.preventDefault();const cmd=e.target.value;const answer=cmd.trim()==='pwd'?'/workspace/repo\n':cmd.trim()==='ls'?'apps  docs  packages\n':cmd.trim()?'preview: command not executed\n':'';$('term-lines').textContent+=`# ${cmd}\n${answer}`;e.target.value='';terminalTailPinned=true;$('term-console').scrollTop=$('term-console').scrollHeight;});
+$('phone-pad').addEventListener('click',()=>{$('composer').classList.add('editing');layout();$('draft').focus({preventScroll:true});});
+function fold(){const wasDraft=document.activeElement===$('draft');$('composer').classList.remove('editing');$('phone-pad').textContent=$('draft').value||'Message the orb…';layout();if(wasDraft)$('phone-pad').focus({preventScroll:true});}
+$('fold').addEventListener('click',()=>{fold();$('phone-pad').focus({preventScroll:true});});
+$('draft').addEventListener('input',()=>{$('phone-pad').textContent=$('draft').value||'Message the orb…';});
+function send(){const text=$('draft').value.trim();if(!text)return;const row=document.createElement('div');row.className='rec you';const prefix=document.createElement('div');prefix.className='rec-px';prefix.textContent='you';const body=document.createElement('div');body.className='rec-bd';body.textContent=text;row.append(prefix,body);$('transcript').append(row);$('draft').value='';fold();$('transcript').scrollTop=$('transcript').scrollHeight;}
+$('send').addEventListener('click',send);
+document.addEventListener('keydown',e=>{if(e.metaKey&&!e.ctrlKey&&!e.altKey&&!e.shiftKey&&!e.repeat&&!e.isComposing&&e.key.toLowerCase()==='j'){e.preventDefault();toggleTerminal();}else if((e.metaKey||e.ctrlKey)&&e.key==='Enter'&&e.target===$('draft')){e.preventDefault();send();}else if(e.key==='Escape'&&e.target===$('draft'))fold();});
+let drag=null;
+$('resize').addEventListener('pointerdown',e=>{drag={y:e.clientY,height:$('terminal').offsetHeight};e.target.setPointerCapture(e.pointerId);e.preventDefault();});
+$('resize').addEventListener('pointermove',e=>{if(!drag)return;state.rows=Math.min(24,Math.max(2,Math.round((drag.height+e.clientY-drag.y-28)/20)));layout();});
+$('resize').addEventListener('pointerup',()=>{drag=null;});
+$('resize').addEventListener('pointercancel',()=>{drag=null;});
+$('resize').addEventListener('keydown',e=>{if(!['ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();state.rows=Math.min(24,Math.max(2,state.rows+(e.key==='ArrowUp'?-1:1)));layout();});
+new ResizeObserver(layout).observe($('workbench'));
+sync();
+</script>
+</body>
+</html>
