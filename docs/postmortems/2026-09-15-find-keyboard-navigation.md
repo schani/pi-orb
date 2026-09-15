@@ -59,9 +59,21 @@ Local evidence in `.context/find-navigation/`:
 All 11 search core/dialog unit tests and E2E TypeScript checking passed. Biome
 passed with the pre-existing unrelated non-null-assertion warning at line 769.
 
+## GitHub verification
+
+For fix commit `3eec79a`, CI
+[35021851741](https://github.com/schani/pi-orb/actions/runs/35021851741) passed.
+E2E [35021851799](https://github.com/schani/pi-orb/actions/runs/35021851799)
+passed all 34 frontend-session cases, including this controlled Find schedule.
+The overall run failed independently in PostgreSQL setup because host port
+55434 was occupied: 62 tests passed and 55 store cases were unrun. That failure
+was not rerun and is preserved separately in
+`docs/postmortems/2026-09-15-postgres-e2e-port-collision.md`. This qualifies the
+Find correction, not the complete release.
+
 ## Outcome and rule
 
-The Find synchronization defect is corrected and locally validated; the original
+The Find synchronization defect is corrected and locally/GitHub validated; the original
 GitHub failure remains preserved, not relabelled green. No second production
 workflow was dispatched. The separately recorded WebKit issue remains open.
 Correctness requires deterministic result/selection synchronization, not a sleep,
