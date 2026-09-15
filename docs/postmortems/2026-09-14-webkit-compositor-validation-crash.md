@@ -36,6 +36,16 @@ With core dumps enabled and `DEBUG=pw:browser`, `npm run test:e2e:frontend` pass
 
 The [1.63.0 release notes](https://github.com/microsoft/playwright/releases/tag/v1.63.0) announce WebKit 26.6 but do not identify a fix matching this fault. Since the old build also passed subsequent probes, this result establishes compatibility with the newer stable build, **not a demonstrated crash fix**. Release-blocking status remains unchanged. Upgrade/install/browser logs are retained locally under `.context/webkit-upgrade/`.
 
+## Prior production versus the upgrade (verified 2026-09-15)
+
+The last successful production run at this investigation,
+[34896870065](https://github.com/schani/pi-orb/actions/runs/34896870065), deployed
+`d11099083cbcf9b11fd3e09f53165472be9f1c36` on 2026-09-14. Its `package.json`
+still pins Playwright 1.62.1. The later merged integration includes upgrade commit
+`3922155`; neither that upgrade's passing tests nor the older successful release
+records an established fix or waiver for this crash. Do not describe the prior
+deployment as proof that the compositor failure was resolved.
+
 ## Interrupted full PR rerun — separate Chromium shutdown evidence
 
 A later full-suite rerun was interrupted by a host reboot. At **19:36:07 UTC**, system Chromium PID 5765 logged `FATAL:dbus/bus.cc:1245 D-Bus connection was disconnected. Aborting.` and left a core at **19:36:08**. The resumed host's PID 1 started at **19:37:02**; neither test driver survived and neither suite had written its completion/exit record. This is not a reproduction of the original WebKit compositor fault. The host reboot's cause is not established by these artifacts.

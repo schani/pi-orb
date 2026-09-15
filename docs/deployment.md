@@ -274,8 +274,12 @@ acceptance (operation `32790f16ad424b5f`). Diagnostic resources were cleaned up.
 No new production apply was attempted: the separately recorded WebKit crash
 remains release-blocking under the no-flake rule; its work remains in `TODO.md`.
 The same corrected commit's automatic E2E run `35013933184` then finished
-116 passed / 1 failed on fleet Find keyboard navigation; that separate blocker
-is preserved in `docs/postmortems/2026-09-15-find-keyboard-navigation.md`.
+116 passed / 1 failed on fleet Find keyboard navigation. A controlled delayed
+orb-list response subsequently reproduced that test synchronization defect; the
+corrected scenario waits for the intended result/selection and passes all 34
+frontend-session cases. The original failure and correction are preserved in
+`docs/postmortems/2026-09-15-find-keyboard-navigation.md`. This does not clear the
+unrelated WebKit crash.
 
 **Action runtime update (2026-09-13):** CI, E2E and Deploy artifact-upload steps
 pin `actions/upload-artifact` v7.0.1 at

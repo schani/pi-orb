@@ -14,13 +14,15 @@ Find is navigation, not a general command palette. It does not search IDs, lifec
 
 **Scope expanded (decided and implemented 2026-09-14):** the dashboard and orb view both provide the same project-and-orb navigation search. The orb view registers its already-loaded all-project index, including archived orbs, without additional fetching or a search cache. That index remains available when the conversation target is missing; the missing orb URL and message remain unchanged. Other missing-resource and create-orb routes retain the browser's default Command-K / Control-K behavior. The shortcut opens Find even when focus is in the composer, a creation field, or a rename field. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists; a press outside the card closes it as well. There is no persistent Find hint or button, and (since 2026-09-04) no visible close control: a surface reached only by a shortcut is dismissed by that shortcut's own conventions.
 
-**Qualification failure (2026-09-15):** GitHub E2E run `35013933184` selected the
-project URL instead of the expected orb after query fill → ArrowDown → Enter.
-Cause is not established; a prior pass does not clear the failure. Keyboard
-navigation coverage must establish the result/selection state deterministically,
-not rely on sleeps or a longer navigation timeout. Evidence:
-`docs/postmortems/2026-09-15-find-keyboard-navigation.md`; investigation is in
-`TODO.md`.
+**Qualification synchronization corrected (2026-09-15):** GitHub E2E run
+`35013933184` pressed ArrowDown before the dashboard's orb list loaded, selecting
+the sole project result. A test-owned response gate reproduced the exact wrong-URL
+failure. The corrected test asserts the partial-loading result, releases the orb
+list, waits for the intended href and verifies active selection before Enter.
+Result arrival preserves the selected key; it does not replay earlier navigation
+keys. All 34 frontend-session browser cases pass. No product behavior, assertion
+timeout or retry policy changed. Evidence:
+`docs/postmortems/2026-09-15-find-keyboard-navigation.md`.
 
 ## Composer orb-link picker (decided 2026-09-08)
 

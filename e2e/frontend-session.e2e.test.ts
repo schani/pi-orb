@@ -2029,6 +2029,16 @@ describe("frontend-only browser behavior", () => {
 
   it("opens fleet Find from the orb composer and navigates with native result links", async () => {
     const page = await browser.newPage();
+    let holdDashboardOrbs = false;
+    let releaseDashboardOrbs = () => {};
+    const dashboardOrbsGate = new Promise<void>((resolve) => {
+      releaseDashboardOrbs = resolve;
+    });
+    await page.route("**/api/v1/projects/frontend-fixture-project/orbs", async (route) => {
+      const response = await route.fetch();
+      if (holdDashboardOrbs) await dashboardOrbsGate;
+      await route.fulfill({ response });
+    });
     try {
       await page.goto(`${origin}/${ORB_HASH}`);
       const composer = page.getByPlaceholder(/Message the orb/);
@@ -2057,6 +2067,7 @@ describe("frontend-only browser behavior", () => {
         "href",
         "#/projects/frontend-fixture-project",
       );
+      holdDashboardOrbs = true;
       await query.press("Enter");
       await expectPage(page).toHaveURL(`${origin}/#/projects/frontend-fixture-project`);
       await expectPage(dialog).toBeHidden();
@@ -2064,13 +2075,42 @@ describe("frontend-only browser behavior", () => {
       await page.keyboard.press("Control+k");
       await expectPage(query).toHaveValue("");
       await query.fill("Frontend Playground");
+      await expectPage(dialog.getByRole("link")).toHaveCount(1);
+      await expectPage(dialog.getByRole("link")).toHaveAttribute(
+        "href",
+        "#/projects/frontend-fixture-project",
+      );
+      await expectPage(
+        dialog.getByText("Searching loaded items · some orbs still loading"),
+      ).toBeVisible();
+      // With only a project loaded, ArrowDown wraps to that same project; it cannot select
+      // an orb that has not arrived. Preserve this schedule instead of relying on fast IO.
       await query.press("ArrowDown");
+      await expectPage(dialog.locator("a.active")).toHaveAttribute(
+        "href",
+        "#/projects/frontend-fixture-project",
+      );
+      releaseDashboardOrbs();
+      await expectPage(dialog.getByRole("link", { name: /^orb:/ })).toHaveAttribute(
+        "href",
+        ORB_HASH,
+      );
+      await expectPage(dialog.locator("a.active")).toHaveAttribute(
+        "href",
+        "#/projects/frontend-fixture-project",
+      );
+      await query.press("ArrowDown");
+      await expectPage(dialog.locator("a.active")).toHaveAttribute("href", ORB_HASH);
       await query.press("Enter");
       await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
       await expectPage(composer).toHaveValue("keep this draft");
       await composer.press("Meta+k");
       await expectPage(query).toHaveValue("");
       await query.fill("Finished design");
+      await expectPage(dialog.locator("a.active")).toHaveAttribute(
+        "href",
+        "#/orbs/frontend-archived-orb",
+      );
       await query.press("Enter");
       await expectPage(page).toHaveURL(`${origin}/#/orbs/frontend-archived-orb`);
       await expectPage(dialog).toBeHidden();
@@ -2078,6 +2118,7 @@ describe("frontend-only browser behavior", () => {
       await page.keyboard.press("Meta+k");
       await expectPage(query).toHaveValue("");
     } finally {
+      releaseDashboardOrbs();
       await page.close();
     }
   });
