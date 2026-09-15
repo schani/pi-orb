@@ -1,11 +1,14 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   MCP_RUNTIME_PATH,
   McpCatalogSchema,
+  PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
+  PersonalInstructionsSchema,
   ProjectSecretSnapshotSchema,
   TokenGrantSchema,
 } from "@pi-orb/protocol";
@@ -63,6 +66,12 @@ describe("validation broker", () => {
     const catalog = await mcp.json();
     expect(Check(McpCatalogSchema, catalog)).toBe(true);
     expect(catalog).toEqual({ revision: 0, servers: [] });
+    const personal = await request(PERSONAL_INSTRUCTIONS_RUNTIME_PATH);
+    expect(personal.status).toBe(200);
+    const instructions = await personal.json();
+    expect(Check(PersonalInstructionsSchema, instructions)).toBe(true);
+    expect(instructions).toEqual({ content: "", revision: 0 });
+    expect(await readdir(directory)).not.toContain("unrecognized");
 
     const grant = await request("/runtime/v1/tokens/model", {
       method: "POST",
@@ -76,6 +85,39 @@ describe("validation broker", () => {
     expect(unauthorized.status).toBe(401);
     const unauthorizedMcp = await fetch(`http://127.0.0.1:${port}${MCP_RUNTIME_PATH}`);
     expect(unauthorizedMcp.status).toBe(401);
+    for (const headers of [{}, { authorization: "Bearer wrong-token" }]) {
+      const denied = await fetch(`http://127.0.0.1:${port}${PERSONAL_INSTRUCTIONS_RUNTIME_PATH}`, {
+        headers,
+      });
+      expect(denied.status).toBe(401);
+    }
+    expect(await readdir(directory)).not.toContain("unrecognized");
+    for (const method of ["POST", "PUT", "HEAD"]) {
+      const denied = await request(PERSONAL_INSTRUCTIONS_RUNTIME_PATH, { method });
+      expect(denied.status).toBe(404);
+      expect(await readFile(marker, "utf8")).toBe(
+        `${method} ${PERSONAL_INSTRUCTIONS_RUNTIME_PATH}\n`,
+      );
+    }
+    // Node fetch refuses GET bodies locally; exercise the broker's own body guard over HTTP.
+    const bodyStatus = await new Promise<number | undefined>((resolve, reject) => {
+      const outgoing = httpRequest(
+        `http://127.0.0.1:${port}${PERSONAL_INSTRUCTIONS_RUNTIME_PATH}`,
+        {
+          method: "GET",
+          headers: { authorization: "Bearer runtime-token", "content-length": "2" },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode));
+          response.on("error", reject);
+        },
+      );
+      outgoing.on("error", reject);
+      outgoing.end("{}");
+    });
+    expect(bodyStatus).toBe(404);
+    expect(await readFile(marker, "utf8")).toBe(`GET ${PERSONAL_INSTRUCTIONS_RUNTIME_PATH}\n`);
     const unknown = await request("/runtime/v1/tokens/github", { method: "POST", body: "{}" });
     expect(unknown.status).toBe(404);
     expect(await readFile(marker, "utf8")).toBe("POST /runtime/v1/tokens/github\n");

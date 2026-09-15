@@ -257,6 +257,20 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Native acceptance blocked before apply (2026-09-15):** GitHub run
+[35004543252](https://github.com/schani/pi-orb/actions/runs/35004543252) for
+`ff0614c` passed checks and all 117 E2E tests, then failed native acceptance with
+`personal_instructions_unavailable`. The strict loopback validation broker lacks
+the runtime's new mandatory personal-instructions GET. Mandatory boot reads must
+update that broker and its contract coverage together; preserve unknown-route
+rejection and fail-closed readiness rather than retrying or weakening the gate.
+The durable outcome is `failed-before-apply`, production revisions are unchanged,
+and build cleanup and release-lock removal completed. Evidence and the
+runner-local diagnostic limitation are recorded in
+`docs/postmortems/2026-09-15-native-personal-instructions-fixture.md`. The exact
+fixture route is now corrected with a demonstrated failing regression and 65
+passing native-image tests; fresh cloud qualification remains in `TODO.md`.
+
 **Action runtime update (2026-09-13):** CI, E2E and Deploy artifact-upload steps
 pin `actions/upload-artifact` v7.0.1 at
 `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`, whose action manifest declares
