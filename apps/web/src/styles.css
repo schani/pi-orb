@@ -2296,7 +2296,7 @@ button.orb-phone-menu {
     width: 1px;
     background: var(--k);
   }
-  .orb-index .project-head-name {
+  .orb-index .project-head {
     padding-right: 0;
   }
   .orb-index .project-head-actions {

@@ -465,6 +465,34 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("ends every desktop index header at the trashcan cell without an extra gutter", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const headers = page.locator(".orb-index .project-head");
+      await expectPage(headers).toHaveCount(4);
+      for (const header of await headers.all()) {
+        const actions = header.locator(".project-head-actions");
+        await expectPage(actions.getByRole("button", { name: /^Delete / })).toBeVisible();
+        const geometry = await header.evaluate((node) => {
+          const cells = [
+            ...node.querySelectorAll(".project-head-actions > button, .project-head-actions > a"),
+          ];
+          return {
+            rightGutter:
+              node.getBoundingClientRect().right -
+              cells[cells.length - 1]!.getBoundingClientRect().right,
+            widths: cells.map((cell) => cell.getBoundingClientRect().width),
+          };
+        });
+        expectPage(geometry.rightGutter).toBe(0);
+        expectPage(geometry.widths).toEqual([28, 28, 28]);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each(["", ORB_HASH])(
     "shares project header and validates General settings at %s",
     async (hash) => {
