@@ -1340,6 +1340,15 @@ describe("full slice E2E", () => {
   async function runScenario(): Promise<void> {
     const base = controlPlane.baseUrl;
 
+    // Personal instructions are saved before boot, then changed while this orb runs.
+    expect(
+      (
+        await api(base, "PUT", "/api/v1/personal-instructions", {
+          content: "PERSONAL_E2E_FIRST_BOOT",
+        })
+      ).status,
+    ).toBe(200);
+
     // Project + orb through the real API (docs/testing.md steps 1-2).
     const projectId = randomUUID();
     const project = await api(base, "POST", "/api/v1/projects", {
@@ -1378,6 +1387,14 @@ describe("full slice E2E", () => {
       },
       { timeoutMs: 300_000, intervalMs: 2_000 },
     );
+
+    expect(
+      (
+        await api(base, "PUT", "/api/v1/personal-instructions", {
+          content: "PERSONAL_E2E_NEXT_BOOT",
+        })
+      ).status,
+    ).toBe(200);
 
     // A real PTY traverses browser route → control-plane binary proxy → runtime.
     const terminalSocket = new WebSocket(
@@ -1718,6 +1735,8 @@ describe("full slice E2E", () => {
         requests.some(
           (call) =>
             call.matchedRuleIndex === 0 &&
+            JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
+            !JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") &&
             call.body?.model === "gpt-5.6-sol" &&
             call.body?.reasoning?.effort === "low",
         ),
@@ -1771,6 +1790,9 @@ describe("full slice E2E", () => {
     // role (a Pi custom message), not mutate the system prompt.
     for (const [index, reply] of ["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].entries()) {
       if (index === 1) {
+        expect(
+          (await api(base, "PUT", "/api/v1/personal-instructions", { content: "" })).status,
+        ).toBe(200);
         if (PROCESS_BACKEND) {
           const before = controlPlane.logs.join("").split("E2E host specification advanced").length;
           controlPlane.process.kill("SIGHUP");
@@ -1803,6 +1825,8 @@ describe("full slice E2E", () => {
       const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
       const serialized = JSON.stringify(history.body["records"]);
       expect(serialized).toContain(warning);
+      expect(serialized).toContain("pi-orb:personal-instructions");
+      expect(serialized).not.toContain("PERSONAL_E2E_");
       const records = history.body["records"] as {
         overflow?: { native?: { customType?: string } };
       }[];
@@ -1816,6 +1840,8 @@ describe("full slice E2E", () => {
             (call) =>
               call.status === 200 &&
               call.matchedRuleIndex === index + 3 &&
+              !JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
+              JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") === (index === 0) &&
               call.body?.model === "gpt-5.6-sol" &&
               call.body?.reasoning?.effort === "low" &&
               call.body?.input?.some(

@@ -466,6 +466,7 @@ export async function main(
     control: new ControlState(),
     constants: lifecycleConstantsForHost(hostProvider.kind),
     projectSecrets: { pointers: database.projectSecrets, secrets },
+    personalInstructions: database.personalInstructions,
     hosting: {
       store: database.hosting,
       bytes: hostedBytes,
@@ -542,6 +543,7 @@ export async function main(
       nameGenerator: deps.nameGenerator,
       nameLeaseMs: deps.nameLeaseMs,
       projectSecrets: deps.projectSecrets,
+      personalInstructions: deps.personalInstructions,
       mcp: database.mcp,
       mcpOAuth,
       mint: {

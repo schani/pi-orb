@@ -14,12 +14,15 @@ import {
   type OrbHistoryView,
   type OrbMessageView,
   type OrbView,
+  PERSONAL_INSTRUCTIONS_PATH,
+  type PersonalInstructions,
   type ProjectView,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
   TERMINAL_SUBPROTOCOL,
   TerminalClientControlSchema,
   UploadBatchSchema,
+  validatePersonalInstructions,
   validateRepositoryUrl,
   type WorkspaceUpload,
 } from "@pi-orb/protocol";
@@ -46,6 +49,7 @@ interface MockState {
   projectSecretRevisions: Map<string, number>;
   projectMcp: Map<string, McpCatalog>;
   mcpGrants: Set<string>;
+  personalInstructions: PersonalInstructions;
 }
 
 function initialState(): MockState {
@@ -451,6 +455,7 @@ function initialState(): MockState {
         },
       ],
     ]),
+    personalInstructions: { content: "", revision: 0 },
     mcpGrants: new Set([
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000001`,
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000002`,
@@ -502,6 +507,25 @@ async function handleApi(
 
   if (method === "GET" && path === "/api/v1/session") {
     sendJson(response, 200, { status: "ok" });
+    return true;
+  }
+
+  if (path === PERSONAL_INSTRUCTIONS_PATH && (method === "GET" || method === "PUT")) {
+    response.setHeader("cache-control", "no-store");
+    if (method === "PUT") {
+      const content = validatePersonalInstructions(await readJson(request));
+      if (content.isErr()) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: content.error.message, retryable: false },
+        });
+        return true;
+      }
+      state.personalInstructions = {
+        content: content.value,
+        revision: state.personalInstructions.revision + 1,
+      };
+    }
+    sendJson(response, 200, state.personalInstructions);
     return true;
   }
 

@@ -110,6 +110,7 @@ Subsystem designs:
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
+- [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
 - [docs/workspace-uploads.md](docs/workspace-uploads.md) — streaming browser uploads into orb-local files, inbox notifications, idle protection, and recovery
 - [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard and orb-view Command-K Find architecture, selected Index card design, and presentation study
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
@@ -125,6 +126,8 @@ Subsystem designs:
 - [docs/stack.md](docs/stack.md) — language, repository layout, dependency, and error-handling choices
 
 Tracking:
+
+- [docs/postmortems/2026-09-14-terminal-retry-pre-ready.md](docs/postmortems/2026-09-14-terminal-retry-pre-ready.md) — terminal retry E2E counted transient StrictMode opens instead of current transport ownership
 
 - [docs/postmortems/2026-09-13-release-webkit-prerequisite.md](docs/postmortems/2026-09-13-release-webkit-prerequisite.md) — missing managed browser dependency in unattended release checks
 

@@ -7,6 +7,7 @@ import {
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
 import { Icon } from "../components/Icons.tsx";
+import { PersonalInstructionsButton } from "../components/PersonalInstructions.tsx";
 import { ProjectConfigModal } from "../components/ProjectConfigModal.tsx";
 import { ProjectHeader } from "../components/ProjectHeader.tsx";
 import { ProjectNewOrbLink } from "../components/ProjectNewOrbLink.tsx";
@@ -344,6 +345,7 @@ export function ProjectsPage({
           <b>{totals.failed}</b>
           <span>failed</span>
         </span>
+        <PersonalInstructionsButton />
       </div>
       {loadError !== null && (
         <div className="banner banner-error">

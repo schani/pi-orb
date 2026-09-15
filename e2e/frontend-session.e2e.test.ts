@@ -37,6 +37,19 @@ describe("frontend-only browser behavior", () => {
           name: "test-history-render-count",
           enforce: "pre",
           transform(code, id) {
+            if (id.endsWith("/components/OrbTerminal.tsx")) {
+              // Test-only checkpoint: identify StrictMode emulator ownership
+              // and hold its final connection until the scenario releases it.
+              return code
+                .replace(
+                  "(wt: WTerm) => {",
+                  'async (wt: WTerm) => { const gate = Reflect.get(globalThis, "__terminalReadyGate")?.(); if (gate?.pause) await gate.pause;',
+                )
+                .replace(
+                  "new WebSocket(terminalUrl(orbId), TERMINAL_SUBPROTOCOL)",
+                  'new WebSocket(terminalUrl(orbId) + (gate ? "?ready=" + gate.ordinal : ""), TERMINAL_SUBPROTOCOL)',
+                );
+            }
             if (!id.endsWith("/components/HistoryView.tsx")) return;
             // Count function executions, not DOM mutations: React can reparse the
             // entire transcript without changing a single DOM node.
@@ -1113,15 +1126,34 @@ describe("frontend-only browser behavior", () => {
 
   it("keeps delayed terminal readiness hidden and exposes an explicit retry after exit", async () => {
     const page = await browser.newPage();
+    await page.addInitScript(() => {
+      let readyCalls = 0;
+      Reflect.set(globalThis, "__terminalReadyGate", () => {
+        Reflect.set(globalThis, "__terminalReadyCalls", ++readyCalls);
+        return {
+          ordinal: readyCalls,
+          pause:
+            readyCalls % 2 === 0
+              ? new Promise<void>((resolve) =>
+                  Reflect.set(globalThis, "__releaseTerminalReady", resolve),
+                )
+              : undefined,
+        };
+      });
+    });
     let accept = () => {};
     let exit = () => {};
     let opens = 0;
-    await page.routeWebSocket("**/orbs/frontend-fixture-orb/terminal", (socket) => {
+    const active = new Set<number>();
+    await page.routeWebSocket("**/orbs/frontend-fixture-orb/terminal*", (socket) => {
+      const ordinal = Number(new URL(socket.url()).searchParams.get("ready"));
+      socket.onClose(() => active.delete(ordinal));
       socket.onMessage((data) => {
         if (typeof data !== "string") return;
         const control = JSON.parse(data);
         if (control.type !== "terminal.open") return;
         opens += 1;
+        active.add(ordinal);
         accept = () => {
           socket.send(
             JSON.stringify({
@@ -1141,7 +1173,13 @@ describe("frontend-only browser behavior", () => {
       await page.goto(`${origin}/${ORB_HASH}`);
       const header = page.locator(".orb-header");
       await header.getByRole("button", { name: "Open terminal", exact: true }).click();
-      await expectPage.poll(() => opens).toBe(1);
+      // StrictMode may retire its first emulator before OR after its socket
+      // opens. Synchronize on the final emulator's identity, not a cumulative
+      // count of pre-ready connections; all superseded peers must close.
+      await page.waitForFunction(() => Reflect.get(globalThis, "__terminalReadyCalls") === 2);
+      await page.evaluate(() => Reflect.get(globalThis, "__releaseTerminalReady")());
+      await expectPage.poll(() => [...active]).toEqual([2]);
+      const firstGenerationOpens = opens;
       await header.getByRole("button", { name: "Hide terminal", exact: true }).click();
       const composer = page.getByPlaceholder(/Message the orb/);
       await composer.fill("keep focus here");
@@ -1155,13 +1193,19 @@ describe("frontend-only browser behavior", () => {
         "Terminal exited with code 7.",
       );
       await page.getByRole("button", { name: "New terminal", exact: true }).click();
-      await expectPage.poll(() => opens).toBe(2);
+      await page.waitForFunction(() => Reflect.get(globalThis, "__terminalReadyCalls") === 4);
+      await page.evaluate(() => Reflect.get(globalThis, "__releaseTerminalReady")());
+      await expectPage.poll(() => [...active]).toEqual([4]);
+      expectPage(opens).toBeGreaterThan(firstGenerationOpens);
+      const recoveredOpens = opens;
       accept();
       await expectPage(page.locator(".orb-terminal-window")).toContainText("READY_AFTER_HIDE");
       await expectPage(page.getByRole("button", { name: "New terminal", exact: true })).toHaveCount(
         0,
       );
       await expectPage(composer).toHaveValue("keep focus here");
+      expectPage(opens).toBe(recoveredOpens);
+      expectPage([...active]).toEqual([4]);
     } finally {
       await page.close();
     }

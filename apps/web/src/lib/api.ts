@@ -13,6 +13,8 @@ import {
   OrbMessageViewSchema,
   type OrbView,
   OrbViewSchema,
+  PERSONAL_INSTRUCTIONS_PATH,
+  PersonalInstructionsSchema,
   type ProjectSecretList,
   ProjectSecretListSchema,
   type ProjectView,
@@ -98,6 +100,21 @@ export function disconnectMcpOAuth(projectId: string, id: string) {
     `/api/v1/projects/${encodeURIComponent(projectId)}/mcp/${encodeURIComponent(id)}/oauth/disconnect`,
     { method: "POST", headers: jsonHeaders, body: "{}" },
   );
+}
+
+export function getPersonalInstructions() {
+  return apiFetch(PersonalInstructionsSchema, PERSONAL_INSTRUCTIONS_PATH, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+}
+export function savePersonalInstructions(content: string) {
+  return apiFetch(PersonalInstructionsSchema, PERSONAL_INSTRUCTIONS_PATH, {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ content }),
+    signal: AbortSignal.timeout(15_000),
+  });
 }
 
 export function getProjectMcp(projectId: string) {

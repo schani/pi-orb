@@ -1,5 +1,11 @@
 # Projects and the control-plane API
 
+## Personal instructions (implemented locally, 2026-09-14)
+
+`GET /api/v1/personal-instructions` returns `{content: string, revision: number}` for the current single account, initially `{content: "", revision: 0}`. `PUT` to the same URL accepts only `{content}` and atomically returns the new persisted snapshot. Every explicit successful assignment increments revision; last-applied-wins, no automatic retries/CAS or per-project override. Empty content clears the managed instructions. Text preserves whitespace and is limited to 64 KiB UTF-8; NUL and unpaired surrogates are invalid. Both replies are `no-store`; invalid input returns 400, unavailable storage 503, inconsistent storage 500, all with the existing typed HTTP error envelope. Saving never changes lifecycle state or messages.
+
+`GET /runtime/v1/personal-instructions` serves the same snapshot only after the existing current active-incarnation bearer authorization; there is no runtime write route. This intentionally spans projects within the single account, like sibling-orb inspection. Adoption is next runtime start, not save-time fan-out. `019_personal_instructions.sql` owns the singleton and revision bounds. UI, loading and adoption observability: `docs/personal-instructions.md`.
+
 ## Workspace file uploads (implemented 2026-09-09)
 
 `/api/v1/orbs/:orbId/uploads` and its per-transfer `status`, `chunk`, `finish`, and `cancel` actions implement running-only, streaming browser uploads. The control plane persists metadata and forwards raw byte streams to the private runtime; it never buffers whole files or routes file bytes through the message inbox. The metadata POST atomically registers a selection's complete batch membership. Once every file is stored or cancelled, one message lists the successful paths with compute wake suppressed. The complete HTTP shapes, durable transfer states, activity/idle-stop rules, and validation are in `docs/workspace-uploads.md`.

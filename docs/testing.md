@@ -1,5 +1,11 @@
 # Testing strategy
 
+## Personal instructions qualification (2026-09-14)
+
+Home gear was implemented tests-first. Protocol, atomic singleton storage/DST, SDK context layering, HTTP boundaries and the browser editor had failing pre-implementation tests. The final result is `npm run typecheck`, `npm run lint` (existing warning/info only), `npm test` (**1,690 passed, five existing skips**, plus infrastructure suites), and `PI_ORB_E2E_BACKEND=process npm run test:e2e` (**53 passed, two platform skips**). Both Chromium and WebKit cover the new editor. The full runtime E2E asserts personal text in the actual model request, no live adoption after a save, next-start replacement, clearing through compute replacement and body-free replicated adoption metadata. Cross-project runtime access is covered by authenticated route tests, while real PGlite contracts pin the migration, atomic revision/content snapshots, clearing, missing-state failures and revision exhaustion. DST races writes and startup reads with pre/post-commit failpoints and immutable boot snapshots. Details: `docs/personal-instructions.md`.
+
+The first whole E2E run exposed the terminal retry test's pre-ready StrictMode transport-count assumption (52 passed, one failed, two skipped). A test-only readiness/peer-identity checkpoint now requires exactly one final owner and closure of superseded transports instead of a cumulative count. The whole suite then passed with source held unchanged; no production terminal code or timeout was changed. First-failure evidence, diagnostic trace and root cause: `docs/postmortems/2026-09-14-terminal-retry-pre-ready.md`. Docker's daemon is not active here; the two process-mode skips remain the Docker interrupted-turn scenario and the network PostgreSQL driver contract. No deployment was performed.
+
 **Atomic output assertions (2026-09-12, corrected after initial misdiagnosis):**
 streamed output and its committed record must not coexist at any observable
 frame boundary. Sixteen explicit schedules drive the real Pi adapter, outbound

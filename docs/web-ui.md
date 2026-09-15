@@ -1,5 +1,11 @@
 # Web UI
 
+## Personal AGENTS.md (Home gear selected and implemented, 2026-09-14)
+
+One per-user instructions document applies across projects, equivalent to home-directory `AGENTS.md`. The dashboard totals strip has a right-aligned, icon-only gear outside every project column. It opens a 560px raw-Markdown editor titled `~/AGENTS.md`, with explicit Save and the shared X close icon; no tabs, templates or duplicate help copy. Save success says `Saved · next orb start` once. Initial read errors offer Retry rather than an editable empty document; failed saves retain the draft. Closing/Escape restore gear focus and retain unsaved drafts in dashboard component memory, while reload/leaving the dashboard discard them. Backdrop clicks never discard drafts. A pending save disables editing/closing, retains focus inside the modal and shows no premature success. Late reads from a closed/unmounted editor cannot publish. Phone text is 16px with touch-sized actions; at ≤600px the fleet totals use two 24px rows with the gear spanning both at the right edge.
+
+Home gear was selected from [`design-prototypes/user-agents.html`](../design-prototypes/user-agents.html), which preserves Footer folio, Personal fold, Scope switch and Margin sheet as rejected alternatives. That study remains simulated; `PersonalInstructions.tsx` and the frontend fixture now implement the selected editor. Storage, runtime adoption, privacy, rationale and tests: `docs/personal-instructions.md`. The first slice deliberately adds no orb-index entry, composer command or live updates. No deployment is implied.
+
 ## Command-mode desktop exploration (proposed, 2026-09-13)
 
 **Required:** typing `/` enters composer command mode; its only commands are `model` and `thinking`. Show current model and thinking level in the desktop top line. The anchored menu is selected for refinement; no production implementation ships in this study.

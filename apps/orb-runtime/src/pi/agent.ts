@@ -53,6 +53,7 @@ import { McpTools } from "../mcp/tools.ts";
 import { HttpMcpTransport } from "../mcp/transport.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
+import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
 import { settleBootPrerequisites } from "./boot-prerequisites.ts";
@@ -60,6 +61,10 @@ import { readExecutionIdentity } from "./execution-identity.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
+import {
+  PERSONAL_INSTRUCTIONS_ADOPTION,
+  personalInstructionsAdoption,
+} from "./personal-instructions.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
 import { restoreSessionSettings, settingsFallbackMessage } from "./restore-settings.ts";
 import { reportRustToolchainEdge } from "./rust-toolchain-reporter.ts";
@@ -397,6 +402,16 @@ export class PiOrbAgent {
       process.env[name] = value;
     }
 
+    const personalInstructions = await fetchPersonalInstructions(broker);
+    if (personalInstructions.isErr())
+      return err(
+        this.failed(
+          "personal_instructions_unavailable",
+          personalInstructions.error.message,
+          personalInstructions.error.retryable,
+        ),
+      );
+
     // 2. Session: never replace an existing one (docs/host-provider.md).
     this.health = this.initializing("loading_session");
     const sessionDir = join(this.options.workDir, "pi-sessions");
@@ -561,6 +576,7 @@ export class PiOrbAgent {
       hookEnv,
       skillsDir: this.options.skillsDir,
       mcp: { configs: catalog.value.servers, tools: mcpTools },
+      personalInstructions: personalInstructions.value,
     });
     if (loaderResult.isErr()) {
       return err(this.failed("session_init_failed", loaderResult.error, true));
@@ -644,6 +660,26 @@ export class PiOrbAgent {
     if (adoption.isErr()) {
       await this.closeExtensions();
       return err(this.failed("mcp_config_record_failed", adoption.error, false));
+    }
+    const personalAdoption = Result.fromThrowable(
+      () => {
+        const previous = sessionManager
+          .getEntries()
+          .findLast(
+            (entry) =>
+              entry.type === "custom" && entry.customType === PERSONAL_INSTRUCTIONS_ADOPTION,
+          );
+        const edge = personalInstructionsAdoption(
+          personalInstructions.value,
+          previous?.type === "custom" ? previous.data : null,
+        );
+        if (edge !== null) sessionManager.appendCustomEntry(PERSONAL_INSTRUCTIONS_ADOPTION, edge);
+      },
+      () => "Cannot record personal instructions adoption",
+    )();
+    if (personalAdoption.isErr()) {
+      await this.closeExtensions();
+      return err(this.failed("personal_instructions_record_failed", personalAdoption.error, false));
     }
     const readSettings = (): AgentSettings => ({
       model: {
