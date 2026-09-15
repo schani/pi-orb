@@ -36,6 +36,24 @@ With core dumps enabled and `DEBUG=pw:browser`, `npm run test:e2e:frontend` pass
 
 The [1.63.0 release notes](https://github.com/microsoft/playwright/releases/tag/v1.63.0) announce WebKit 26.6 but do not identify a fix matching this fault. Since the old build also passed subsequent probes, this result establishes compatibility with the newer stable build, **not a demonstrated crash fix**. Release-blocking status remains unchanged. Upgrade/install/browser logs are retained locally under `.context/webkit-upgrade/`.
 
+## Post-upgrade recurrence audit — 2026-09-15
+
+**No recurrence is recorded in the inspected post-upgrade runs.** Six completed
+GitHub E2E logs (`34891462327`, `34895955247`, `34999422115`, `34999422305`,
+`35013933184`, `35021851799`) explicitly downloaded WebKit **26.6 / build 2359**
+and passed the original 320px phone case. Three runs completed successfully;
+two failed Find assertions and one failed PostgreSQL port setup, not a browser
+crash. Deploy run `35004543252` also installed build 2359 and passed that case
+before its unrelated native-image fixture failure. Full logs were inspected for
+`Page crashed`, compositor segfault and SIGSEGV evidence; none was found.
+Local copies of the six E2E logs are in `.context/port-investigation/` named by
+run ID; GitHub retains the originals.
+
+This complements the already recorded successful local post-upgrade suite. The
+only documented WebKit compositor crash remains the pre-upgrade 26.5 incident.
+The remaining uncertainty is whether the upgrade repaired its cause, not an
+observed continuing failure on 26.6.
+
 ## Prior production versus the upgrade (verified 2026-09-15)
 
 The last successful production run at this investigation,

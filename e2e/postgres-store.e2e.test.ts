@@ -7,6 +7,7 @@ import { PostgreSQLHostingStore } from "../apps/control-plane/src/adapters/pg/ho
 import { openThrowawayPostgres } from "../apps/control-plane/src/testkit/postgres.ts";
 import { storeContractTests } from "../apps/control-plane/src/testkit/store-contract.ts";
 import { docker, waitForPostgres } from "./harness.ts";
+import { capturePortDiagnostics } from "./port-diagnostics.ts";
 
 /**
  * The store contract against a real PostgreSQL server, over the same
@@ -40,6 +41,7 @@ if (providedUrl === "" && PROCESS_BACKEND) {
   if (providedUrl === "") {
     beforeAll(async () => {
       await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
+      console.info(JSON.stringify(await capturePortDiagnostics(PG_PORT, "before-bind")));
       await docker([
         "run",
         "--detach",
@@ -54,7 +56,11 @@ if (providedUrl === "" && PROCESS_BACKEND) {
         "-p",
         `127.0.0.1:${PG_PORT}:5432`,
         "postgres:16",
-      ]);
+      ]).catch(async (error: unknown) => {
+        console.error(JSON.stringify(await capturePortDiagnostics(PG_PORT, "run-failed")));
+        // Vitest must receive the original setup failure, not a diagnostic/tooling failure.
+        throw error;
+      });
       await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb", "store-contract postgres ready");
       connectionString = `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`;
     }, 120_000);
