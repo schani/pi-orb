@@ -12,6 +12,8 @@ Historical log/trace filenames in those ledgers refer to archive members below.
 
 - [N1/C2/P1 live rail, terminal and notification validation](live-rail-2026-09-14.md) — separate checksum-indexed download, including the Docker export failure that blocked four full-slice scenarios. This later UI/protocol slice is not covered by the earlier complete PR run.
 
+- [Independent upstream draft preparation](../upstream-prs/README.md) — four isolated branches, tests-first package qualification, and a separate checksum-indexed archive.
+
 ## Archive
 
 [Download the evidence archive](https://files---pi-orb-1077475695242.us-central1.run.app/s/58efed98-b832-4025-a899-7f43fed7ed72/qualification/pr-44/subagent-evidence.tar.gz) (pi-orb authentication required).
