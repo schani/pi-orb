@@ -1,6 +1,6 @@
 import type { HistoryRecord, OrbHistoryView } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
-import { mergeReplicatedHistory } from "./history-refresh.ts";
+import { canRepairFromReplica, mergeReplicatedHistory } from "./history-refresh.ts";
 
 function record(id: string, parentId: string | null): HistoryRecord {
   return {
@@ -19,6 +19,18 @@ function view(records: HistoryRecord[], cursor: string | null, headId = cursor):
 }
 
 describe("replicated history refresh", () => {
+  it.each(["closed", "connecting", "open"] as const)(
+    "running %s defers inbox gaps to initial live synchronization",
+    (connection) => {
+      expect(canRepairFromReplica("running", connection)).toBe(false);
+    },
+  );
+  it("permits repair after transport failure and while non-running, but not through an open socket", () => {
+    expect(canRepairFromReplica("running", "retrying")).toBe(true);
+    expect(canRepairFromReplica("stopped", "closed")).toBe(true);
+    expect(canRepairFromReplica("failed", "closed")).toBe(true);
+    expect(canRepairFromReplica("stopped", "open")).toBe(false);
+  });
   it("inserts the newly replicated prefix without discarding a newer live suffix", () => {
     const user = record("user", null);
     const assistant = record("assistant", "user");

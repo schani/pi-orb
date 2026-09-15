@@ -88,6 +88,8 @@ This exemption deliberately trades transient per-connection memory — up to one
 
 If `afterRecordId` is unknown, synchronization selects `mode: "full"` and replays all complete records. The UI upserts replayed records by ID.
 
+**Browser transcript caching (2026-09-15, local implementation):** the browser may obtain `afterRecordId` from its bounded in-memory cache rather than a new database read (`docs/transcript-cache.md`). A welcome naming a different session invalidates the cached namespace and reconnects from null, even if an old record ID happens to exist in that different session. A changed runtime instance with the same session does not invalidate complete records. Full-sync start clears the old cache entry; an interrupted replacement is not cache-admitted until `sync.completed` or a subsequent consistent full HTTP snapshot independently establishes a complete prefix while disconnected. Cached records grant no live readiness, settings or request-replay authority. These are client ownership rules, not additions to the frame schema or runtime replay contract.
+
 There is deliberately no separate snapshot payload. Synchronization expresses the current operation as the same events used for live updates, with `replace` patches where complete accumulated state is needed. This keeps one reducer and one event model. `sync.started` tells the browser to clear transient state before applying the reconstructing events.
 
 This provides reconnect without retaining a token-delta replay log. The resume cursor is a durable history record ID, while replayed ordinary events reconstruct transient work.

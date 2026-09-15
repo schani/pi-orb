@@ -4,7 +4,15 @@ import {
   type SystemView,
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
 import { Icon } from "../components/Icons.tsx";
 import { PersonalInstructionsButton } from "../components/PersonalInstructions.tsx";
@@ -32,6 +40,7 @@ import {
   projectOrbGlyph,
   splitProjectOrbs,
 } from "../lib/project-orbs.ts";
+import { TranscriptCacheContext } from "../lib/transcript-cache-context.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -142,6 +151,7 @@ export function ProjectsPage({
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deletingOrb, setDeletingOrb] = useState<string | null>(null);
+  const cache = useContext(TranscriptCacheContext);
   const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
   const [orbCreateError, setOrbCreateError] = useState<{
@@ -304,6 +314,7 @@ export function ProjectsPage({
       return;
     setDeletingOrb(orb.id);
     const result = await deleteOrb(orb.id);
+    if (result.isOk()) cache?.invalidate(orb.id);
     setDeletingOrb(null);
     if (result.isErr()) {
       setOrbCreateError({ projectId: orb.projectId, message: describeApiError(result.error) });

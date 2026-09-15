@@ -1,7 +1,8 @@
 import type { ProjectView } from "@pi-orb/protocol";
-import { type MouseEventHandler, useEffect, useRef, useState } from "react";
+import { type MouseEventHandler, useContext, useEffect, useRef, useState } from "react";
 import { deleteProject, describeApiError } from "../lib/api.ts";
 import { projectDeletionConfirmation } from "../lib/project-deletion.ts";
+import { TranscriptCacheContext } from "../lib/transcript-cache-context.ts";
 import { Icon } from "./Icons.tsx";
 import { ProjectConfigButton } from "./ProjectConfigButton.tsx";
 import { ProjectNewOrbLink } from "./ProjectNewOrbLink.tsx";
@@ -16,6 +17,10 @@ export function ProjectHeader({
   orbCreation?: { pending: boolean; onClick: MouseEventHandler<HTMLAnchorElement> };
   onChanged: (project: ProjectView) => void | Promise<void>;
 }) {
+  const cache = useContext(TranscriptCacheContext);
+  useEffect(() => {
+    if (project.state === "deleting") cache?.invalidateProject(project.id);
+  }, [cache, project.id, project.state]);
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -31,6 +36,7 @@ export function ProjectHeader({
     setBusy(true);
     setError(null);
     const result = await deleteProject(project.id);
+    if (result.isOk()) cache?.invalidateProject(project.id);
     if (!active.current) return;
     setBusy(false);
     if (result.isErr()) setError(describeApiError(result.error));

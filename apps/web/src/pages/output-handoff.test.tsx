@@ -9,6 +9,7 @@ it("does not let HTTP jump ahead of an open socket even before its first output 
   expect(
     reducer(state, {
       type: "history_refreshed",
+      epoch: state.historyEpoch,
       view: { orbId: "orb", session: null, cursor: "ahead", headId: "ahead", records: [] },
     }),
   ).toBe(state);
@@ -45,6 +46,7 @@ it("commits and retires output atomically without suppressing a later identical 
   // The HTTP repair channel must not race ahead of the live atomic handoff.
   state = reducer(state, {
     type: "history_refreshed",
+    epoch: state.historyEpoch,
     view: {
       orbId: "orb",
       session: null,
@@ -101,6 +103,7 @@ it("commits and retires output atomically without suppressing a later identical 
   state = reducer(state, { type: "connection_status", status: "closed" });
   state = reducer(state, {
     type: "history_refreshed",
+    epoch: state.historyEpoch,
     view: {
       orbId: "orb",
       session: null,

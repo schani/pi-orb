@@ -12,7 +12,15 @@ import {
   type ServerFrame,
   type SettingsAction,
 } from "@pi-orb/protocol";
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { Composer, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
@@ -42,8 +50,9 @@ import {
 import { loadComposerDraft, saveComposerDraft } from "../lib/composer-draft.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
-import { mergeReplicatedHistory } from "../lib/history-refresh.ts";
+import { canRepairFromReplica, mergeReplicatedHistory } from "../lib/history-refresh.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
+import { isMissing, type OrbLoad, startOrbLoad } from "../lib/orb-load.ts";
 import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
 import { formatTimeRemaining, projectOrbGlyph } from "../lib/project-orbs.ts";
 import {
@@ -53,6 +62,12 @@ import {
   withQueuedMessage,
 } from "../lib/queued-messages.ts";
 import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
+import {
+  type CachedTranscript,
+  snapshotFromHistory,
+  type TranscriptCache,
+  type TranscriptOwner,
+} from "../lib/transcript-cache.ts";
 import {
   type BrowserNotificationPermission,
   notificationPermission,
@@ -78,7 +93,10 @@ const FALLBACK_MAX_PROMPT_BYTES = 6 * 1024 * 1024;
 
 interface OrbPageState {
   /** Insertion-ordered records keyed by id for cross-boundary dedupe. */
-  records: Map<string, HistoryRecord>;
+  records: ReadonlyMap<string, HistoryRecord>;
+  sessionId: string | null;
+  cacheReady: boolean;
+  historyEpoch: number;
   /** Last complete record id applied; sent as `afterRecordId` in hello. */
   afterRecordId: string | null;
   /** Current conversation head used for `expectedHeadId`. */
@@ -110,7 +128,8 @@ interface OrbPageState {
 
 type OrbPageAction =
   | { type: "history_loaded"; view: OrbHistoryView }
-  | { type: "history_refreshed"; view: OrbHistoryView }
+  | { type: "history_restored"; snapshot: CachedTranscript }
+  | { type: "history_refreshed"; view: OrbHistoryView; epoch: number }
   | { type: "history_failed"; error: ApiError }
   | { type: "frame"; frame: ServerFrame }
   | { type: "connection_status"; status: LiveConnectionStatus }
@@ -130,6 +149,9 @@ export function initialState(orbId: string): OrbPageState {
   const draft = loadedDraft.isOk() ? loadedDraft.value : null;
   return {
     records: new Map(),
+    sessionId: null,
+    cacheReady: false,
+    historyEpoch: 0,
     afterRecordId: null,
     headId: null,
     historyLoaded: false,
@@ -154,7 +176,7 @@ export function initialState(orbId: string): OrbPageState {
   };
 }
 
-function lastKey(map: Map<string, HistoryRecord>): string | null {
+function lastKey(map: ReadonlyMap<string, HistoryRecord>): string | null {
   let last: string | null = null;
   for (const key of map.keys()) last = key;
   return last;
@@ -255,6 +277,16 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
       return {
         ...state,
         subagents: [],
+        ...(state.sessionId !== null && state.sessionId !== frame.sessionId
+          ? {
+              records: new Map(),
+              afterRecordId: null,
+              headId: null,
+              cacheReady: false,
+              historyEpoch: state.historyEpoch + 1,
+            }
+          : {}),
+        sessionId: frame.sessionId,
         welcome: {
           runtimeInstanceId: frame.runtimeInstanceId,
           sessionId: frame.sessionId,
@@ -266,6 +298,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
     case "sync.started": {
       const next: OrbPageState = {
         ...state,
+        historyEpoch: state.historyEpoch + 1,
         liveBlocks: new Map(),
         tools: new Map(),
         operationId: null,
@@ -275,7 +308,13 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         synced: false,
       };
       if (frame.mode === "full") {
-        return { ...next, records: new Map(), afterRecordId: null, headId: null };
+        return {
+          ...next,
+          records: new Map(),
+          afterRecordId: null,
+          headId: null,
+          cacheReady: false,
+        };
       }
       return next;
     }
@@ -293,7 +332,14 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
       };
     }
     case "sync.completed":
-      return { ...state, headId: frame.headId ?? lastKey(state.records), synced: true };
+      return {
+        ...state,
+        headId: frame.headId ?? lastKey(state.records),
+        synced: true,
+        cacheReady: true,
+        historyLoaded: true,
+        historyError: null,
+      };
     case "runtime.event":
       return applyRuntimeEvent(state, frame.event);
     case "request.result": {
@@ -354,22 +400,28 @@ export function isLiveBusy(
 
 export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
   switch (action.type) {
-    case "history_loaded": {
-      const records = new Map<string, HistoryRecord>();
-      for (const record of action.view.records) records.set(record.id, record);
+    case "history_loaded":
+      return reducer(state, {
+        type: "history_restored",
+        snapshot: snapshotFromHistory(action.view),
+      });
+    case "history_restored":
       return {
         ...state,
-        records,
-        afterRecordId: action.view.cursor,
-        headId: action.view.headId,
+        ...action.snapshot,
         historyLoaded: true,
         historyError: null,
+        cacheReady: true,
+        historyEpoch: state.historyEpoch + 1,
       };
-    }
     case "history_refreshed": {
       // Replica repair has no live-block identities. An open socket owns the
       // ordered handoff, including patches still in flight when HTTP arrives.
-      if (state.connection === "open") return state;
+      if (state.connection === "open" || action.epoch !== state.historyEpoch) return state;
+      const sessionId = action.view.session?.id ?? state.sessionId;
+      if (state.sessionId !== null && sessionId !== state.sessionId) {
+        return reducer(state, { type: "history_loaded", view: action.view });
+      }
       const merged = mergeReplicatedHistory(
         {
           records: [...state.records.values()],
@@ -380,6 +432,9 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       );
       return {
         ...state,
+        sessionId,
+        cacheReady: true,
+        historyLoaded: true,
         records: new Map(merged.records.map((record) => [record.id, record])),
         afterRecordId: merged.afterRecordId,
         headId: merged.headId,
@@ -395,6 +450,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       return {
         ...state,
         connection: action.status,
+        historyEpoch: state.historyEpoch + (action.status === "connecting" ? 1 : 0),
         ...(action.status === "open"
           ? {}
           : { activity: null, operationId: null, subagents: [], settings: null, synced: false }),
@@ -510,27 +566,28 @@ function CopyCodeButton({ code }: { code: string }) {
   );
 }
 
-interface OrbLoad {
-  orbId: string;
-  orb: Awaited<ReturnType<typeof getOrb>>;
-  history: Awaited<ReturnType<typeof getOrbHistory>>;
-}
-
-export function OrbPage({ orbId }: { orbId: string }) {
+export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCache }) {
   const pageRef = useRef<HTMLDivElement>(null);
   usePhoneViewport(pageRef);
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [loaded, setLoaded] = useState<OrbLoad | null>(null);
   useEffect(() => {
     if (loaded?.orbId === orbId) return;
-    let cancelled = false;
-    void Promise.all([getOrb(orbId), getOrbHistory(orbId)]).then(([orb, history]) => {
-      if (!cancelled) setLoaded({ orbId, orb, history });
+    const started = performance.now();
+    const load = startOrbLoad({
+      orbId,
+      cache,
+      getOrb,
+      getHistory: getOrbHistory,
+      diagnostic: (data) =>
+        console.debug("transcript navigation", { ...data, loadMs: performance.now() - started }),
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [orbId, loaded]);
+    void load.result.then((value) => {
+      const accepted = load.accept(value);
+      if (accepted !== null) setLoaded(accepted);
+    });
+    return load.cancel;
+  }, [orbId, loaded, cache]);
   const pending = loaded?.orbId !== orbId;
   return (
     <div className="orb-page" ref={pageRef}>
@@ -546,6 +603,7 @@ export function OrbPage({ orbId }: { orbId: string }) {
         <OrbConversation
           key={loaded.orbId}
           initial={loaded}
+          cache={cache}
           pending={pending}
           projectName={
             loaded.orb.isOk() && project?.id === loaded.orb.value.projectId ? project.name : null
@@ -558,10 +616,12 @@ export function OrbPage({ orbId }: { orbId: string }) {
 
 function OrbConversation({
   initial,
+  cache,
   pending,
   projectName,
 }: {
   initial: OrbLoad;
+  cache: TranscriptCache;
   pending: boolean;
   projectName: string | null;
 }) {
@@ -573,7 +633,7 @@ function OrbConversation({
     reducer(
       initialState(load.orbId),
       load.history.isOk()
-        ? { type: "history_loaded", view: load.history.value }
+        ? { type: "history_restored", snapshot: load.history.value }
         : { type: "history_failed", error: load.history.error },
     ),
   );
@@ -607,13 +667,115 @@ function OrbConversation({
   // Invalidates queued-message reads that were already in flight when a
   // message mutation committed (see lib/queued-messages.ts).
   const [messageEpoch] = useState(createMutationEpoch);
-  const transcriptRef = useRef({ records: state.records, historyLoaded: state.historyLoaded });
-  transcriptRef.current = { records: state.records, historyLoaded: state.historyLoaded };
-  const historyRefreshInFlightRef = useRef(false);
+  const transcriptRef = useRef(state);
+  transcriptRef.current = state;
   const [orbNotFound, setOrbNotFound] = useState(
     () =>
       initial.orb.isErr() && initial.orb.error.type === "http" && initial.orb.error.status === 404,
   );
+  const cacheOwner = useRef<TranscriptOwner | null>(null);
+  const lifecycle = orb?.state ?? null;
+  const resourceGone = orbNotFound || lifecycle === "deleting";
+  const resourceProjectId = !resourceGone ? (orb?.projectId ?? null) : null;
+  useLayoutEffect(() => {
+    if (resourceGone) cache.invalidate(orbId);
+    if (resourceProjectId === null) return;
+    const owner = cache.acquire(orbId, resourceProjectId);
+    cacheOwner.current = owner;
+    return () => {
+      owner.release();
+      cacheOwner.current = null;
+    };
+  }, [cache, orbId, resourceProjectId, resourceGone]);
+  const cacheAdmission = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const owner = cacheOwner.current;
+    if (!owner || resourceProjectId === null) return;
+    if (!state.cacheReady) {
+      owner.clear();
+      return;
+    }
+    const admission = owner.publish({
+      sessionId: state.sessionId,
+      records: state.records,
+      afterRecordId: state.afterRecordId,
+      headId: state.headId,
+    });
+    if (admission !== cacheAdmission.current) {
+      cacheAdmission.current = admission;
+      console.debug("transcript cache", { orbId, admission, ...cache.stats });
+    }
+  }, [
+    cache,
+    orbId,
+    resourceProjectId,
+    state.sessionId,
+    state.records,
+    state.afterRecordId,
+    state.headId,
+    state.cacheReady,
+  ]);
+
+  const refreshOwner = useRef<object | null>(null);
+  useEffect(
+    () => () => {
+      refreshOwner.current = null;
+    },
+    [],
+  );
+  const refreshHistory = useCallback(() => {
+    if (orbNotFound || refreshOwner.current !== null) return;
+    const owner = {};
+    const epoch = transcriptRef.current.historyEpoch;
+    refreshOwner.current = owner;
+    void getOrbHistory(orbId).then((history) => {
+      if (refreshOwner.current !== owner) return;
+      refreshOwner.current = null;
+      if (history.isErr() && isMissing(history.error)) {
+        cache.invalidate(orbId);
+        setOrb(null);
+        setOrbError(null);
+        setOrbNotFound(true);
+        return;
+      }
+      if (history.isOk() && history.value.orbId !== orbId) {
+        dispatch({
+          type: "history_failed",
+          error: { type: "invalid_response", message: "History identity mismatch" },
+        });
+        return;
+      }
+      if (
+        transcriptRef.current.historyEpoch !== epoch ||
+        transcriptRef.current.connection === "open"
+      )
+        return;
+      dispatch(
+        history.isOk()
+          ? { type: "history_refreshed", view: history.value, epoch }
+          : { type: "history_failed", error: history.error },
+      );
+    });
+  }, [orbId, cache, orbNotFound]);
+  const priorLifecycle = useRef(initial.orb.isOk() ? initial.orb.value.state : null);
+  useEffect(() => {
+    if (lifecycle === null || resourceGone) return;
+    const lifecycleChanged = priorLifecycle.current !== lifecycle;
+    priorLifecycle.current = lifecycle;
+    if (lifecycle !== "running" && (initial.cacheHit || lifecycleChanged)) {
+      if (lifecycleChanged) refreshOwner.current = null;
+      refreshHistory();
+    }
+  }, [lifecycle, resourceGone, refreshHistory, initial.cacheHit]);
+  const [mountedAt] = useState(() => performance.now());
+  useEffect(() => {
+    if (state.synced)
+      console.debug("transcript live ready", {
+        orbId,
+        mountToLiveMs: performance.now() - mountedAt,
+      });
+  }, [state.synced, orbId, mountedAt]);
+
   const orbNameRef = useRef<string | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [phoneActions, setPhoneActions] = useState(false);
@@ -707,6 +869,7 @@ function OrbConversation({
 
   useEffect(() => {
     let cancelled = false;
+    if (resourceGone) return;
     const poll = () => {
       const token = messageEpoch.begin();
       void listOrbMessages(orbId).then((result) => {
@@ -723,19 +886,9 @@ function OrbConversation({
         if (
           transcript.historyLoaded &&
           hasDeliveredMessageAwaitingHistory(result.value.items, records) &&
-          !historyRefreshInFlightRef.current
-        ) {
-          historyRefreshInFlightRef.current = true;
-          void getOrbHistory(orbId).then((history) => {
-            historyRefreshInFlightRef.current = false;
-            if (cancelled) return;
-            dispatch(
-              history.isOk()
-                ? { type: "history_refreshed", view: history.value }
-                : { type: "history_failed", error: history.error },
-            );
-          });
-        }
+          canRepairFromReplica(lifecycle, transcript.connection)
+        )
+          refreshHistory();
       });
     };
     poll();
@@ -744,7 +897,7 @@ function OrbConversation({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [orbId, messageEpoch]);
+  }, [orbId, messageEpoch, refreshHistory, lifecycle, resourceGone]);
 
   useEffect(() => {
     orbNameRef.current = orb?.name ?? null;
@@ -826,7 +979,7 @@ function OrbConversation({
   }, [state.afterRecordId]);
 
   const liveRef = useRef<LiveConnection | null>(null);
-  const shouldConnect = orb?.state === "running" && state.historyLoaded;
+  const shouldConnect = !orbNotFound && orb?.state === "running" && state.historyLoaded;
   useEffect(() => {
     if (!shouldConnect) return;
     let active = true;
@@ -834,7 +987,9 @@ function OrbConversation({
     const connection = openLiveConnection({
       orbId,
       getAfterRecordId: () => afterRecordIdRef.current,
+      sessionId: transcriptRef.current.sessionId,
       onFrame: (frame) => {
+        if (!active) return;
         if (frame.type === "runtime.event" && frame.event.type === "turn_notification") {
           const event = frame.event;
           // Auto-naming runs concurrently with the first turn. Refresh once at notification time
@@ -999,6 +1154,7 @@ function OrbConversation({
     )
       return;
     const result = await deleteOrb(orbId);
+    if (result.isOk()) cache.invalidate(orbId);
     if (result.isOk()) {
       setOrb(result.value);
       setOrbError(null);
@@ -1308,7 +1464,12 @@ function OrbConversation({
             {state.notice !== null && <OrbNotice>{state.notice}</OrbNotice>}
           </div>
           {state.historyError !== null && (
-            <OrbNotice error>history unavailable: {describeApiError(state.historyError)}</OrbNotice>
+            <OrbNotice error>
+              history unavailable: {describeApiError(state.historyError)}{" "}
+              <button type="button" onClick={refreshHistory}>
+                Retry
+              </button>
+            </OrbNotice>
           )}
 
           <HistoryView

@@ -1,7 +1,9 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { AppSearchProvider } from "./components/AppSearch.tsx";
 import { IconSprite } from "./components/Icons.tsx";
 import { SessionRibbon } from "./components/SessionRibbon.tsx";
+import { TranscriptCache } from "./lib/transcript-cache.ts";
+import { TranscriptCacheContext } from "./lib/transcript-cache-context.ts";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { OrbPage } from "./pages/OrbPage.tsx";
@@ -40,7 +42,7 @@ function readHash(): string {
   return window.location.hash;
 }
 
-function AppRoutes() {
+function AppRoutes({ cache }: { cache: TranscriptCache }) {
   const hash = useSyncExternalStore(subscribeToHash, readHash);
   const route = parseRoute(hash);
   return route.page === "mcp" || route.page === "projects" ? (
@@ -51,20 +53,23 @@ function AppRoutes() {
   ) : route.page === "create_orb" ? (
     <CreateOrbPage key={route.projectId} projectId={route.projectId} />
   ) : route.page === "orb" ? (
-    <OrbPage orbId={route.orbId} />
+    <OrbPage orbId={route.orbId} cache={cache} />
   ) : (
     <NotFoundPage />
   );
 }
 
 export function App() {
+  const [cache] = useState(() => new TranscriptCache());
   return (
-    <AppSearchProvider>
-      <div className="app">
-        <IconSprite />
-        <SessionRibbon />
-        <AppRoutes />
-      </div>
-    </AppSearchProvider>
+    <TranscriptCacheContext.Provider value={cache}>
+      <AppSearchProvider>
+        <div className="app">
+          <IconSprite />
+          <SessionRibbon />
+          <AppRoutes cache={cache} />
+        </div>
+      </AppSearchProvider>
+    </TranscriptCacheContext.Provider>
   );
 }

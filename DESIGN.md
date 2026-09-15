@@ -110,6 +110,7 @@ Subsystem designs:
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
+- [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules and deterministic/browser qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
 - [docs/workspace-uploads.md](docs/workspace-uploads.md) — streaming browser uploads into orb-local files, inbox notifications, idle protection, and recovery
@@ -130,6 +131,10 @@ Tracking:
 
 - [docs/postmortems/2026-09-14-subagent-notification-transcript.md](docs/postmortems/2026-09-14-subagent-notification-transcript.md) — raw model-facing XML shown in the browser; delayed uncollected child failures caused extra parent replies
 - [docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md](docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md) — stale delegation guidance created an independent orb; nested tool folds hid existing input/output
+- [docs/postmortems/2026-09-15-cache-catchup-fixture-ownership.md](docs/postmortems/2026-09-15-cache-catchup-fixture-ownership.md) — cache catch-up repair race; socket-owned fixture work and durable completion barriers
+
+- [docs/postmortems/2026-09-15-long-transcript-navigation.md](docs/postmortems/2026-09-15-long-transcript-navigation.md) — slow orb switching profile: large JSON response and 1Password-amplified composer mount
+
 - [docs/postmortems/2026-09-14-terminal-retry-pre-ready.md](docs/postmortems/2026-09-14-terminal-retry-pre-ready.md) — terminal retry E2E counted transient StrictMode opens instead of current transport ownership
 
 - [docs/postmortems/2026-09-13-release-webkit-prerequisite.md](docs/postmortems/2026-09-13-release-webkit-prerequisite.md) — missing managed browser dependency in unattended release checks

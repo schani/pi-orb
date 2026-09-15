@@ -1,0 +1,20 @@
+{
+  "name": "transcript-cache-navigation",
+  "iteration": 1,
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of navigate, leave-delete",
+      "value": 0.05610243923723235
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of navigate, leave-delete",
+      "value": 0.1328204948861611
+    }
+  ]
+}

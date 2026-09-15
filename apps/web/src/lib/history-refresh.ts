@@ -1,4 +1,13 @@
-import type { HistoryRecord, OrbHistoryView } from "@pi-orb/protocol";
+import type { HistoryRecord, OrbHistoryView, OrbView } from "@pi-orb/protocol";
+import type { LiveConnectionStatus } from "./live.ts";
+
+/** Initial hello owns ordinary running-orb catch-up; HTTP is the disconnected fallback. */
+export function canRepairFromReplica(
+  lifecycle: OrbView["state"] | null,
+  connection: LiveConnectionStatus,
+): boolean {
+  return connection !== "open" && (lifecycle !== "running" || connection === "retrying");
+}
 
 export interface LocalHistory {
   readonly records: readonly HistoryRecord[];

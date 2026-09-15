@@ -1,0 +1,25 @@
+{
+  "name": "transcript-cache-full-sync",
+  "iteration": 0,
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of full-sync, late-replica",
+      "value": 0.9431041317064839
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of full-sync, late-replica",
+      "value": 0.015805225536309808
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of full-sync, late-replica",
+      "value": 0.9756304084550801
+    }
+  ]
+}

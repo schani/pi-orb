@@ -1,5 +1,22 @@
 # Testing strategy
 
+## Transcript cache qualification (2026-09-15)
+
+`docs/transcript-cache.md` records the tests-first implementation, retained/replayed DST traces, browser gates and local performance evidence. Unit/DST exercise the actual cache, loader, browser reducer and transport adapter. Chromium/WebKit tests block repeat history reads, hold metadata and initial hello, observe exact catch-up cursors, and cover live suffixes, stopped refresh/Retry, definitive 404 socket cleanup, phone/dashboard return, reload and LRU eviction. Large fixture payloads include roughly 26 MB and 6 MB of native data; no wall-clock speed assertion is used. The full-slice runtime test now visits source/spawned orbs A→B→A, forbids redundant browser history reads, checks the real hello cursor, then completes the existing upload-triggered message/inference path. No extra unsynchronized fake-model script consumer is added.
+
+The held-hello regression required correcting the cheaper fixture's socket-owned agent pump and waiting for committed assistant history before closing its observer. An enabled Change thinking picker is **not** an idle/completion barrier. The same durable-record barrier now protects the large-history revisit test; duplicate-input assertions are scoped to user turns rather than also counting legitimate assistant quotations. First failure evidence and resulting rules: `docs/postmortems/2026-09-15-cache-catchup-fixture-ownership.md`. The final stop/archive edge regression also verifies that a tail replicated after stopping begins is picked up at the final stopped edge. Request ownership is replaced only when a new non-running refresh starts, so a still-owned definitive 404 remains authoritative across a running handshake.
+
+Qualification completed locally:
+
+- `npm test`: 229 files passed / 3 conditional skips; 1,717 tests passed / 5 conditional skips; infrastructure suites passed. The web subset also passed independently (48 files / 254 tests).
+- Both retained DST traces replay green against the implementation; normal composed scenarios explore 40 schedules each.
+- `PI_ORB_E2E_BACKEND=process npm run test:e2e`: 62 passed / 2 expected skips (native interruption and externally configured PostgreSQL). All four full-slice scenarios passed.
+- After the late inbox/lifecycle ownership fixes, `npm run test:e2e:frontend`: **54 passed**, including all ten new cache cases across Chromium/WebKit. This includes the two late-added catch-up cases and two final-stop cases not present when the earlier full run was collected.
+- Final-code real-runtime requalification: `PI_ORB_E2E_BACKEND=process npm run test:e2e -- e2e/full-slice.e2e.test.ts -t 'runs login, a scripted tool round trip'` passed the main login/tool/replication/drain scenario, including cached A→B→A and subsequent inbox/inference; the other three scenarios were intentionally filtered in this recheck.
+- Final typecheck, lint and diff whitespace checks passed. Lint retains two pre-existing warnings and one informational diagnostic.
+
+Failure evidence was retained and causes corrected before requalification, not dismissed by passing reruns. No deployment is included.
+
 ## Personal instructions qualification (2026-09-14)
 
 Home gear was implemented tests-first. Protocol, atomic singleton storage/DST, SDK context layering, HTTP boundaries and the browser editor had failing pre-implementation tests. The final result is `npm run typecheck`, `npm run lint` (existing warning/info only), `npm test` (**1,690 passed, five existing skips**, plus infrastructure suites), and `PI_ORB_E2E_BACKEND=process npm run test:e2e` (**53 passed, two platform skips**). Both Chromium and WebKit cover the new editor. The full runtime E2E asserts personal text in the actual model request, no live adoption after a save, next-start replacement, clearing through compute replacement and body-free replicated adoption metadata. Cross-project runtime access is covered by authenticated route tests, while real PGlite contracts pin the migration, atomic revision/content snapshots, clearing, missing-state failures and revision exhaustion. DST races writes and startup reads with pre/post-commit failpoints and immutable boot snapshots. Details: `docs/personal-instructions.md`.

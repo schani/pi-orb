@@ -238,7 +238,9 @@ In cloud deployment, at least one Cloud Run instance remains provisioned with CP
 
 **In-orb transcript inspection (decided and implemented 2026-08-27).** A running orb may read another orb's same consistent database snapshot through the bearer-authenticated `GET /runtime/v1/orbs/:orbId/transcript` route and `pi-orb transcript <orb-id>` (`docs/control-plane-api.md`). This is replica-only: it never starts or contacts the target runtime. The command therefore sees a sealed complete archive, but for an active target it may lag by the ordinary pull interval and omits partial streaming output. Default text rendering removes only the duplicated lossless native overflow; `--json` preserves the complete `OrbHistoryView`-equivalent snapshot. No second transcript representation or persistence path is introduced.
 
-Opening an active orb should behave as follows:
+**Browser cache exception (decided and implemented locally 2026-09-15):** `docs/transcript-cache.md` adds a bounded tab-local cache of complete parsed records plus session/cursor/head. A running-orb cache hit checks fresh orb metadata and resumes the existing live connection from the cached last-applied cursor, without repeating the full replica read. A miss still uses the database-first flow below. Non-running hits show cached history and revalidate through the unchanged full-snapshot endpoint; no delta API, replication change, persistent browser store or runtime wire change is introduced. A lagging replica cannot erase a newer cached live suffix, and a session change/full sync cannot merge unrelated cached records. The CLI's replica-only full snapshot is unchanged.
+
+Opening an active orb on a browser cache miss should behave as follows:
 
 1. The UI requests history from the control plane.
 2. In one consistent database read, the control plane returns all replicated records, `headId`, and cursor `C`.

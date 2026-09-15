@@ -17,6 +17,8 @@ export type LiveConnectionStatus = "connecting" | "open" | "retrying" | "closed"
 
 export interface LiveConnectionOptions {
   orbId: string;
+  /** Identity of the cached transcript, never runtime process identity. */
+  sessionId: string | null;
   /** Last complete record id applied by the UI; re-read on every (re)connect. */
   getAfterRecordId: () => string | null;
   onFrame: (frame: ServerFrame) => void;
@@ -68,6 +70,8 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
   let disposed = false;
   let retryTimer: number | null = null;
   let runtimeInstanceId: string | null = null;
+  let sessionId = options.sessionId;
+  let forceFullSync = false;
   const pending = new Map<string, PendingRequest>();
 
   function scheduleRetry(): void {
@@ -78,6 +82,20 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
 
   function handleFrame(ws: WebSocket, frame: ServerFrame): void {
     if (frame.type === "server.welcome") {
+      const changedSession = sessionId !== null && sessionId !== frame.sessionId;
+      sessionId = frame.sessionId;
+      if (changedSession) {
+        // A cursor can coincidentally exist in an unrelated session. Reconnect
+        // from null instead of accepting a delta against that old namespace.
+        for (const [id, entry] of pending) options.onRequestLost(id, entry.frame.action);
+        pending.clear();
+        forceFullSync = true;
+        options.onFrame(frame);
+        socket = null;
+        ws.close();
+        connect();
+        return;
+      }
       const newInstanceId = frame.runtimeInstanceId;
       for (const [requestId, entry] of [...pending.entries()]) {
         if (entry.runtimeInstanceId === newInstanceId) {
@@ -90,6 +108,8 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
         }
       }
       runtimeInstanceId = newInstanceId;
+    } else if (frame.type === "sync.completed") {
+      forceFullSync = false;
     } else if (frame.type === "request.result") {
       pending.delete(frame.requestId);
     }
@@ -116,7 +136,7 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
         v: 1,
         type: "client.hello",
         clientInstanceId: CLIENT_INSTANCE_ID,
-        afterRecordId: options.getAfterRecordId(),
+        afterRecordId: forceFullSync ? null : options.getAfterRecordId(),
       };
       ws.send(JSON.stringify(hello));
       ws.send(JSON.stringify(presenceFrame(options.getVisible())));

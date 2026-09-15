@@ -1958,8 +1958,52 @@ describe("full slice E2E", () => {
     });
     try {
       const page = await browser.newPage();
+      let blockCachedHistory = false;
+      let unnecessaryHistoryReads = 0;
+      let appliedCursor: string | null = null;
+      const cachedHellos: (string | null)[] = [];
+      await page.route(`**/api/v1/orbs/${spawnedOrbId}/history`, async (route) => {
+        if (blockCachedHistory) {
+          unnecessaryHistoryReads++;
+          return route.abort();
+        }
+        const response = await route.fetch();
+        appliedCursor = (await response.json()).cursor;
+        return route.fulfill({ response });
+      });
+      page.on("websocket", (transport) => {
+        if (!transport.url().endsWith(`/orbs/${spawnedOrbId}/live`)) return;
+        transport.on("framereceived", ({ payload }) => {
+          const frame = JSON.parse(String(payload));
+          if (frame.type === "history.record") appliedCursor = frame.record.id;
+        });
+        transport.on("framesent", ({ payload }) => {
+          const frame = JSON.parse(String(payload));
+          if (frame.type === "client.hello" && blockCachedHistory)
+            cachedHellos.push(frame.afterRecordId);
+        });
+      });
       await page.goto(`${base}/#/orbs/${spawnedOrbId}`);
       await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
+      await expectPage(
+        page.getByRole("button", { name: "Change thinking", exact: true }),
+      ).toBeEnabled();
+      await page.locator(`.orb-index a[href="#/orbs/${orbId}"]`).click();
+      await expectPage(
+        page.getByText("The check succeeded: E2E_TOOL_OK.", { exact: true }),
+      ).toBeVisible();
+      const resumeCursor = appliedCursor;
+      blockCachedHistory = true;
+      await page.locator(`.orb-index a[href="#/orbs/${spawnedOrbId}"]`).click();
+      await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
+      await expectPage(
+        page.getByRole("button", { name: "Change thinking", exact: true }),
+      ).toBeEnabled();
+      expect(cachedHellos.length).toBeGreaterThan(0);
+      expect(cachedHellos.every((cursor) => cursor === resumeCursor)).toBe(true);
+      expect(unnecessaryHistoryReads).toBe(0);
+      // The following upload submits a real inbox message and completes inference
+      // after cached browser→runtime handoff, without another model script rule.
       const choosing = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: "Upload files", exact: true }).click();
       await (await choosing).setFiles([
@@ -2006,6 +2050,7 @@ describe("full slice E2E", () => {
       expect(acceptedUploads).toHaveLength(1);
       expect(JSON.stringify(acceptedUploads[0]?.content)).toContain("e2e-upload.bin");
       expect(JSON.stringify(acceptedUploads[0]?.content)).toContain("e2e-sidecar.txt");
+      expect(unnecessaryHistoryReads).toBe(0);
     } finally {
       await browser.close();
     }

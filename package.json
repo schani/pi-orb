@@ -22,7 +22,7 @@
     "format": "biome check --write .",
     "test:e2e:install": "playwright install --with-deps chromium webkit",
     "test:e2e": "vitest run --config e2e/vitest.config.ts",
-    "test:e2e:frontend": "vitest run --config e2e/vitest.config.ts e2e/frontend-session.e2e.test.ts e2e/frontend-mobile.e2e.test.ts",
+    "test:e2e:frontend": "vitest run --config e2e/vitest.config.ts e2e/frontend-session.e2e.test.ts e2e/frontend-mobile.e2e.test.ts e2e/transcript-cache-frontend.e2e.test.ts e2e/transcript-cache-stopped.e2e.test.ts e2e/transcript-cache-missing.e2e.test.ts e2e/transcript-cache-catchup.e2e.test.ts e2e/transcript-cache-stop-edge.e2e.test.ts",
     "test:e2e:mobile": "vitest run --config e2e/vitest.config.ts e2e/frontend-mobile.e2e.test.ts",
     "native-image:build": "npm run build --workspace @pi-orb/native-image --"
   },

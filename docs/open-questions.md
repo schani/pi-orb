@@ -2,6 +2,8 @@
 
 Genuinely undecided design questions. Numbering is frozen and append-only — resolved questions are marked in place, never renumbered or deleted, because code and docs reference questions by number. Actionable work items (bugs, hardening, agreed follow-ups) live in `TODO.md`, not here; when a question is decided and the decision implies work, it is marked resolved here and the work moves there in the same edit.
 
+**Merged numbering note (2026-09-15):** parallel histories allocated 62–64 to different topics before integration. Preserve those published numbers rather than renumbering; qualify references by topic where ambiguous (for example, transcript navigation question 64). New questions append after the current maximum, 66.
+
 ## Immediate architecture
 
 1. Finalize the remaining HTTP/WebSocket payload details, capability negotiation, and versioning rules.
@@ -117,3 +119,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Personal instructions
 
 63. **Resolved (2026-09-14): Home gear selected; implementation authorized, DST/tests first.** One account-wide Markdown document, dashboard totals-strip gear and focused editor, atomic last-applied-wins saves, adoption on next runtime start (fresh and existing orbs), no live fan-out or compute wake. Pi's public context-file override prepends a virtual personal source while preserving all native agent-dir/ancestor/repository context; no guest or repository file is rewritten. The UI label `~/AGENTS.md` denotes home scope, not an on-disk file. Revision/hash adoption edges are durable non-model-context session records. The selected contract, alternatives and validation are in `docs/personal-instructions.md`. Deployment was not requested.
+
+## Transcript navigation performance
+
+64. **Resolved for the initial slice (2026-09-15): bare browser caching first.** The user selected caching and requested a simple, principled, well-tested implementation plan; `docs/transcript-cache.md` records the selected mechanics and qualification. Further pagination/virtualization/payload-reduction scope remains deferred, not part of this slice. Source inspection confirms full database history fetch/schema validation and full transcript remount on each switch, without a recent-orb cache or virtualization; the subsequent Zen profile measures a 25.2 MB JSON response taking 5.06 s and 1.20 s of 1Password DOM traversal nested in the post-load 1.60 s main-thread task (`docs/postmortems/2026-09-15-long-transcript-navigation.md`). URLs are sanitized and SQL time is not separately measured. Candidate scope and tradeoffs (recent-data cache with cursor catch-up, bounded recent-history paging, viewport rendering, and lean browser payloads) are recorded in `docs/web-ui.md`. The original brainstorming did not authorize implementation; the subsequent request selected bare caching first and asked for the plan. The user subsequently approved implementation with DST/tests first; the bounded frontend cache is now implemented and locally qualified (`docs/testing.md`). The completed implementation item has been removed from `TODO.md`. No deployment is included.
