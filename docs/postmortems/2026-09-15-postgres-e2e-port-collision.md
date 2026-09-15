@@ -124,5 +124,14 @@ an intentionally occupied old port/name, not just a clean rerun. The original
 GitHub occupant remains unidentified; the assumption that it must leave this
 specific port free has been removed rather than relabelled as explained.
 
-Production was not changed by this harness correction. The WebKit investigation
-remains separate.
+Commit `abe4184` then passed GitHub CI
+[35031818607](https://github.com/schani/pi-orb/actions/runs/35031818607) and full
+E2E [35031818654](https://github.com/schani/pi-orb/actions/runs/35031818654):
+**19 files / 138 tests**. The hosted fixture logged assigned port **32783** for
+container `e6182475e7dde51abe6d54e2bb238b8880b0e3b835c61e61685d351b784dd4ce`;
+all store cases and teardown passed. The original failure is retained alongside
+this occupied-port/concurrency regression and full-run validation.
+
+Production was not changed by this harness correction. No deployment workflow
+was dispatched while the separate WebKit investigation remains release-blocking
+under the current project instructions.
