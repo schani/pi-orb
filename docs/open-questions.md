@@ -2,7 +2,7 @@
 
 Genuinely undecided design questions. Numbering is frozen and append-only — resolved questions are marked in place, never renumbered or deleted, because code and docs reference questions by number. Actionable work items (bugs, hardening, agreed follow-ups) live in `TODO.md`, not here; when a question is decided and the decision implies work, it is marked resolved here and the work moves there in the same edit.
 
-**Merged numbering note (2026-09-15):** parallel histories allocated 62–64 to different topics before integration. Preserve those published numbers rather than renumbering; qualify references by topic where ambiguous (for example, transcript navigation question 64). New questions append after the current maximum, 66.
+**Merged numbering note (2026-09-15):** parallel histories allocated 62–64 to different topics before integration. Preserve those published numbers rather than renumbering; qualify references by topic where ambiguous (for example, transcript navigation question 64). New questions append after the highest existing number (66 at this integration).
 
 ## Immediate architecture
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { type Browser, chromium, expect as expectPage, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
+import { listenFrontend } from "./frontend-listen.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_HASH = "#/orbs/frontend-fixture-orb";
@@ -21,7 +22,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       mode: "frontend",
       server: { host: "127.0.0.1", port: 0 },
     });
-    await vite.listen();
+    await listenFrontend(vite);
     const address = vite.httpServer?.address();
     if (address === null || address === undefined || typeof address === "string") {
       throw new Error("phone E2E Vite server did not own a TCP port");

@@ -74,7 +74,7 @@ The final lifecycle-edge test additionally reproduced a missing post-drain suffi
 
 ## Main integration (2026-09-15)
 
-Rebased onto `3eec79a` after the local-subagent work landed. The welcome reducer preserves both contracts: clear the live child roster on every welcome, and independently invalidate cached records only for a changed session. Cache restoration has no live roster. Focused integration regressions cover same-session and replacement-session welcomes. The merged question-number collisions are retained and topic-qualified rather than renumbering published questions. The preview is restarted after integration because main also changed the shared runtime protocol and Playwright version.
+Rebased onto `3eec79a` after the local-subagent work landed. The welcome reducer preserves both contracts: clear the live child roster on every welcome, and independently invalidate cached records only for a changed session. Cache restoration has no live roster. Focused integration regressions cover same-session and replacement-session welcomes. The merged question-number collisions are retained and topic-qualified rather than renumbering published questions. The preview was restarted after integration because main also changed the shared runtime protocol and Playwright version. Integration qualification additionally corrected Vite's zero-port fallback so a preview browser cannot reconnect into an E2E fixture; the listener regression and full merged-tree suite pass (1,775 unit tests plus infrastructure, 73 process-backend E2E tests, typecheck/lint). Evidence and expected platform skips are recorded in `docs/testing.md`. The user subsequently authorized the main push.
 
 ## Implementation sequence (tests first; completed)
 

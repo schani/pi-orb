@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
+import { listenFrontend } from "./frontend-listen.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s: unseen delivered input waits for initial live catch-up instead of downloading full history",
@@ -27,7 +28,7 @@ it.each(["chromium", "webkit"] as const)(
         },
       ],
     });
-    await vite.listen();
+    await listenFrontend(vite);
     const address = vite.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("No fixture port");
     const browser = await (engine === "chromium" ? chromium : webkit).launch();

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
+import { listenFrontend } from "./frontend-listen.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s personal editor: explicit save, load/failure gates, retained drafts, scope and phone geometry",
@@ -13,7 +14,7 @@ it.each(["chromium", "webkit"] as const)(
       mode: "frontend",
       server: { host: "127.0.0.1", port: 0 },
     });
-    await vite.listen();
+    await listenFrontend(vite);
     const address = vite.httpServer?.address();
     if (!address || typeof address === "string") throw new Error("No owned fixture port");
     const browser = await (engine === "chromium" ? chromium : webkit).launch({ headless: true });

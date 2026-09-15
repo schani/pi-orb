@@ -50,7 +50,7 @@ Prioritize **bounded recent-history reads plus a small recent-orb cache**: the l
 
 Keep DOM work bounded too. Mounting a complete transcript costs more than first-party rendering: browser extensions can scan the newly mounted tree. Viewport rendering and lazy closed tool bodies can reduce that exposure, but their benefits require measurement. A credential-scanning opt-out on the non-credential composer is a small candidate mitigation; validate actual 1Password behavior rather than assuming a `data-1p-ignore` attribute eliminates all mutation scanning. A same-orb, comparable capture with 1Password disabled on this site would isolate the extension's contribution, but would not fix the five-second large response.
 
-Do not label the entire 1.6 s task “Markdown parsing,” assume the 1.54 s pre-response wait is SQL time, or treat caching alone as sufficient to remove remount cost. The revised proposals are in `docs/web-ui.md`; scope selection remains question 64 in `docs/open-questions.md`.
+Do not label the entire 1.6 s task “Markdown parsing,” assume the 1.54 s pre-response wait is SQL time, or treat caching alone as sufficient to remove remount cost. The revised proposals are in `docs/web-ui.md`; scope selection remains transcript navigation question 64 in `docs/open-questions.md`.
 
 ## Reproduction methodology
 
