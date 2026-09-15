@@ -8,9 +8,11 @@ export interface AgentGateView {
   readonly activity: "idle" | "busy";
   readonly headId: string | null;
   readonly activeOperationId: string | null;
+  readonly configuring?: boolean;
 }
 
 export type RequestDecision =
+  | { readonly type: "change_settings" }
   | { readonly type: "start_message" }
   | { readonly type: "start_shell" }
   | { readonly type: "abort_operation"; readonly operationId: string }
@@ -33,7 +35,24 @@ export function decideRequest(view: AgentGateView, action: ClientAction): Reques
       message: "runtime is preparing to stop",
       retryable: true,
     };
+  if (view.configuring && action.type !== "abort")
+    return {
+      type: "reject",
+      code: "busy",
+      message: "Agent settings are changing.",
+      retryable: true,
+    };
   switch (action.type) {
+    case "set_model":
+    case "set_thinking":
+      return view.activity === "idle"
+        ? { type: "change_settings" }
+        : {
+            type: "reject",
+            code: "busy",
+            message: "Wait for the current operation to finish.",
+            retryable: true,
+          };
     case "message": {
       if (view.activity === "busy") {
         return {
@@ -88,6 +107,7 @@ export function decideRequest(view: AgentGateView, action: ClientAction): Reques
 
 export type RegistryLookup =
   | { readonly type: "new" }
+  | { readonly type: "pending"; readonly result: Promise<RequestResult> }
   | { readonly type: "replay"; readonly result: RequestResult }
   | { readonly type: "conflict" };
 
@@ -104,13 +124,34 @@ function actionsEqual(a: ClientAction, b: ClientAction): boolean {
  */
 export class RequestRegistry {
   private readonly byId = new Map<string, { action: ClientAction; result: RequestResult }>();
+  private readonly pending = new Map<
+    string,
+    {
+      action: ClientAction;
+      result: Promise<RequestResult>;
+      resolve: (result: RequestResult) => void;
+    }
+  >();
+
+  reserve(requestId: string, action: ClientAction): void {
+    let resolve: (result: RequestResult) => void = () => {};
+    const result = new Promise<RequestResult>((done) => {
+      resolve = done;
+    });
+    this.pending.set(requestId, { action, result, resolve });
+  }
 
   lookup(requestId: string, action: ClientAction): RegistryLookup {
+    const pending = this.pending.get(requestId);
+    if (pending)
+      return actionsEqual(pending.action, action)
+        ? { type: "pending", result: pending.result }
+        : { type: "conflict" };
     const known = this.byId.get(requestId);
     if (known === undefined) return { type: "new" };
     if (!actionsEqual(known.action, action)) return { type: "conflict" };
     const result = known.result;
-    if (result.type === "accepted") {
+    if (result.type === "accepted" || result.type === "settings_applied") {
       return { type: "replay", result: { ...result, duplicate: true } };
     }
     return { type: "replay", result };
@@ -118,5 +159,9 @@ export class RequestRegistry {
 
   record(requestId: string, action: ClientAction, result: RequestResult): void {
     this.byId.set(requestId, { action, result });
+    this.pending
+      .get(requestId)
+      ?.resolve(result.type === "rejected" ? result : { ...result, duplicate: true });
+    this.pending.delete(requestId);
   }
 }

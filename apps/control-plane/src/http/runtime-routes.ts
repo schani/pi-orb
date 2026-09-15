@@ -20,6 +20,7 @@ import {
   OrbNameTriggerSchema,
   type OrbSpawnRequest,
   OrbSpawnRequestSchema,
+  PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_SECRETS_RUNTIME_PATH,
   RUNTIME_TOKENS_PREFIX,
   type TokenErrorBody,
@@ -43,6 +44,7 @@ import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuth } from "../domain/mcp-oauth.ts";
 import type { OrbRow } from "../domain/orb.ts";
 import { generateOrbName, normalizeOrbName } from "../domain/orb-naming.ts";
+import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
 import type {
   ArchiveCaller,
   BrokerDeps,
@@ -77,6 +79,7 @@ export interface RuntimeRouteDeps {
   /** Identity issuance (docs/workload-identity.md); its own store lookup. */
   readonly mint: MintDeps;
   readonly projectSecrets: ProjectSecretsDeps;
+  readonly personalInstructions: PersonalInstructionsStore;
   readonly mcp?: McpStore;
   readonly mcpOAuth?: McpOAuth;
 }
@@ -413,6 +416,30 @@ export function registerRuntimeRoutes(
       return result.isErr() ? sendMcpError(reply, result.error) : reply.send(result.value);
     });
   }
+
+  app.get(PERSONAL_INSTRUCTIONS_RUNTIME_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable")
+      return reply.status(503).send({
+        error: {
+          code: "unavailable",
+          message: "Personal instructions unavailable",
+          retryable: true,
+        },
+      });
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    const result = await deps.personalInstructions.read(task);
+    if (result.isErr())
+      return reply.status(result.error.code === "internal" ? 500 : 503).send({
+        error: {
+          code: result.error.code,
+          message: result.error.message,
+          retryable: result.error.code === "unavailable",
+        },
+      });
+    return reply.send(result.value);
+  });
 
   app.get(PROJECT_SECRETS_RUNTIME_PATH, async (request, reply) => {
     const auth = await authenticate(request.headers.authorization);

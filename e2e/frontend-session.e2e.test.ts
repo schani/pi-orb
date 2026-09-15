@@ -37,6 +37,19 @@ describe("frontend-only browser behavior", () => {
           name: "test-history-render-count",
           enforce: "pre",
           transform(code, id) {
+            if (id.endsWith("/components/OrbTerminal.tsx")) {
+              // Test-only checkpoint: identify StrictMode emulator ownership
+              // and hold its final connection until the scenario releases it.
+              return code
+                .replace(
+                  "(wt: WTerm) => {",
+                  'async (wt: WTerm) => { const gate = Reflect.get(globalThis, "__terminalReadyGate")?.(); if (gate?.pause) await gate.pause;',
+                )
+                .replace(
+                  "new WebSocket(terminalUrl(orbId), TERMINAL_SUBPROTOCOL)",
+                  'new WebSocket(terminalUrl(orbId) + (gate ? "?ready=" + gate.ordinal : ""), TERMINAL_SUBPROTOCOL)',
+                );
+            }
             if (!id.endsWith("/components/HistoryView.tsx")) return;
             // Count function executions, not DOM mutations: React can reparse the
             // entire transcript without changing a single DOM node.
@@ -737,6 +750,34 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("ends every desktop index header at the trashcan cell without an extra gutter", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const headers = page.locator(".orb-index .project-head");
+      await expectPage(headers).toHaveCount(4);
+      for (const header of await headers.all()) {
+        const actions = header.locator(".project-head-actions");
+        await expectPage(actions.getByRole("button", { name: /^Delete / })).toBeVisible();
+        const geometry = await header.evaluate((node) => {
+          const cells = [
+            ...node.querySelectorAll(".project-head-actions > button, .project-head-actions > a"),
+          ];
+          return {
+            rightGutter:
+              node.getBoundingClientRect().right -
+              cells[cells.length - 1]!.getBoundingClientRect().right,
+            widths: cells.map((cell) => cell.getBoundingClientRect().width),
+          };
+        });
+        expectPage(geometry.rightGutter).toBe(0);
+        expectPage(geometry.widths).toEqual([28, 28, 28]);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each(["", ORB_HASH])(
     "shares project header and validates General settings at %s",
     async (hash) => {
@@ -1151,14 +1192,17 @@ describe("frontend-only browser behavior", () => {
       const before = await geometry();
       const header = page.locator(".orb-header");
       const actionBoxes = await header
-        .locator(".orb-header-actions > button")
+        .locator(
+          '.orb-header-actions > button:not([aria-label="Stop orb"]):not([aria-label="Start orb"])',
+        )
         .evaluateAll((buttons) =>
           buttons.map((button) => {
             const box = button.getBoundingClientRect();
             return { x: box.x, width: box.width };
           }),
         );
-      expectPage(actionBoxes).toHaveLength(5);
+      // Lifecycle cluster moves Stop beside status; the four utility controls retain 20px hits / 28px pitch.
+      expectPage(actionBoxes).toHaveLength(4);
       actionBoxes.forEach((box, index) => {
         expectPage(box.width).toBe(20);
         if (index > 0) expectPage(box.x - (actionBoxes[index - 1]?.x ?? 0)).toBe(28);
@@ -1354,15 +1398,34 @@ describe("frontend-only browser behavior", () => {
 
   it("keeps delayed terminal readiness hidden and exposes an explicit retry after exit", async () => {
     const page = await browser.newPage();
+    await page.addInitScript(() => {
+      let readyCalls = 0;
+      Reflect.set(globalThis, "__terminalReadyGate", () => {
+        Reflect.set(globalThis, "__terminalReadyCalls", ++readyCalls);
+        return {
+          ordinal: readyCalls,
+          pause:
+            readyCalls % 2 === 0
+              ? new Promise<void>((resolve) =>
+                  Reflect.set(globalThis, "__releaseTerminalReady", resolve),
+                )
+              : undefined,
+        };
+      });
+    });
     let accept = () => {};
     let exit = () => {};
     let opens = 0;
-    await page.routeWebSocket("**/orbs/frontend-fixture-orb/terminal", (socket) => {
+    const active = new Set<number>();
+    await page.routeWebSocket("**/orbs/frontend-fixture-orb/terminal*", (socket) => {
+      const ordinal = Number(new URL(socket.url()).searchParams.get("ready"));
+      socket.onClose(() => active.delete(ordinal));
       socket.onMessage((data) => {
         if (typeof data !== "string") return;
         const control = JSON.parse(data);
         if (control.type !== "terminal.open") return;
         opens += 1;
+        active.add(ordinal);
         accept = () => {
           socket.send(
             JSON.stringify({
@@ -1382,7 +1445,13 @@ describe("frontend-only browser behavior", () => {
       await page.goto(`${origin}/${ORB_HASH}`);
       const header = page.locator(".orb-header");
       await header.getByRole("button", { name: "Open terminal", exact: true }).click();
-      await expectPage.poll(() => opens).toBe(1);
+      // StrictMode may retire its first emulator before OR after its socket
+      // opens. Synchronize on the final emulator's identity, not a cumulative
+      // count of pre-ready connections; all superseded peers must close.
+      await page.waitForFunction(() => Reflect.get(globalThis, "__terminalReadyCalls") === 2);
+      await page.evaluate(() => Reflect.get(globalThis, "__releaseTerminalReady")());
+      await expectPage.poll(() => [...active]).toEqual([2]);
+      const firstGenerationOpens = opens;
       await header.getByRole("button", { name: "Hide terminal", exact: true }).click();
       const composer = page.getByPlaceholder(/Message the orb/);
       await composer.fill("keep focus here");
@@ -1396,13 +1465,19 @@ describe("frontend-only browser behavior", () => {
         "Terminal exited with code 7.",
       );
       await page.getByRole("button", { name: "New terminal", exact: true }).click();
-      await expectPage.poll(() => opens).toBe(2);
+      await page.waitForFunction(() => Reflect.get(globalThis, "__terminalReadyCalls") === 4);
+      await page.evaluate(() => Reflect.get(globalThis, "__releaseTerminalReady")());
+      await expectPage.poll(() => [...active]).toEqual([4]);
+      expectPage(opens).toBeGreaterThan(firstGenerationOpens);
+      const recoveredOpens = opens;
       accept();
       await expectPage(page.locator(".orb-terminal-window")).toContainText("READY_AFTER_HIDE");
       await expectPage(page.getByRole("button", { name: "New terminal", exact: true })).toHaveCount(
         0,
       );
       await expectPage(composer).toHaveValue("keep focus here");
+      expectPage(opens).toBe(recoveredOpens);
+      expectPage([...active]).toEqual([4]);
     } finally {
       await page.close();
     }
@@ -1946,6 +2021,93 @@ describe("frontend-only browser behavior", () => {
       await expectPage(page.getByText("Orb doesn't exist")).toBeVisible();
       expectPage(page.url()).toBe(`${origin}/#/orbs/missing-switch-target`);
       await expectPage(page.getByRole("link", { name: "Back to dashboard" })).toBeVisible();
+    } finally {
+      release();
+      await page.close();
+    }
+  });
+
+  it("opens fleet Find from the orb composer and navigates with native result links", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const composer = page.getByPlaceholder(/Message the orb/);
+      await composer.fill("keep this draft");
+      await composer.press("Meta+k");
+      const dialog = page.getByRole("dialog", { name: "Find projects and orbs" });
+      const query = dialog.getByRole("searchbox");
+      await expectPage(query).toBeFocused();
+      await query.fill("Finished design");
+      const archived = dialog.getByRole("link");
+      await expectPage(archived).toHaveCount(1);
+      await expectPage(archived).toHaveAttribute("href", "#/orbs/frontend-archived-orb");
+      await query.press("Escape");
+      await expectPage(dialog).toBeHidden();
+      await expectPage(composer).toBeFocused();
+      await expectPage(composer).toHaveValue("keep this draft");
+
+      await composer.press("Control+k");
+      await query.fill("Frontend Playground");
+      await expectPage(dialog.getByRole("link", { name: /^orb:/ })).toHaveAttribute(
+        "href",
+        ORB_HASH,
+      );
+      await query.fill("github.com/example/frontend-playground");
+      await expectPage(dialog.getByRole("link")).toHaveAttribute(
+        "href",
+        "#/projects/frontend-fixture-project",
+      );
+      await query.press("Enter");
+      await expectPage(page).toHaveURL(`${origin}/#/projects/frontend-fixture-project`);
+      await expectPage(dialog).toBeHidden();
+      await expectPage(page.locator(".dashboard")).toBeVisible();
+      await page.keyboard.press("Control+k");
+      await expectPage(query).toHaveValue("");
+      await query.fill("Frontend Playground");
+      await query.press("ArrowDown");
+      await query.press("Enter");
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      await expectPage(composer).toHaveValue("keep this draft");
+      await composer.press("Meta+k");
+      await expectPage(query).toHaveValue("");
+      await query.fill("Finished design");
+      await query.press("Enter");
+      await expectPage(page).toHaveURL(`${origin}/#/orbs/frontend-archived-orb`);
+      await expectPage(dialog).toBeHidden();
+      await expectPage(page.locator(".orb-index")).toHaveAttribute("aria-busy", "false");
+      await page.keyboard.press("Meta+k");
+      await expectPage(query).toHaveValue("");
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("reports incomplete orb-view Find results while lists load or fail", async () => {
+    const page = await browser.newPage();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/projects/frontend-fixture-project/orbs", async (route) => {
+      await gate;
+      await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      await page.getByPlaceholder(/Message the orb/).press("Control+k");
+      const dialog = page.getByRole("dialog", { name: "Find projects and orbs" });
+      await dialog.getByRole("searchbox").fill("Finished design");
+      await expectPage(
+        dialog.getByText("Searching loaded items · some orbs still loading"),
+      ).toBeVisible();
+      release();
+      await expectPage(dialog.getByText(/Some orbs could not be searched/)).toBeVisible();
+      await expectPage(dialog.getByRole("searchbox")).toHaveValue("Finished design");
+      await dialog.getByRole("searchbox").fill("github.com/example/frontend-playground");
+      await expectPage(dialog.getByRole("link")).toHaveAttribute(
+        "href",
+        "#/projects/frontend-fixture-project",
+      );
     } finally {
       release();
       await page.close();

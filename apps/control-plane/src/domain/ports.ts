@@ -1014,4 +1014,5 @@ export interface ControlPlaneDeps {
   readonly constants: import("./constants.ts").LifecycleConstants;
   readonly projectSecrets: ProjectSecretsDeps;
   readonly hosting: import("./hosting-ports.ts").HostingDeps;
+  readonly personalInstructions: import("./personal-instructions.ts").PersonalInstructionsStore;
 }

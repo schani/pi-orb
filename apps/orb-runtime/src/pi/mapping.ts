@@ -245,8 +245,20 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
         eventType: "pi.branch_summary",
         content: [textBlock(typeof entry["summary"] === "string" ? entry["summary"] : "")],
       });
-    case "custom":
+    case "custom": {
+      const data = isRecordObject(entry["data"]) ? entry["data"] : null;
+      if (
+        entry["customType"] === "pi-orb.settings-fallback" &&
+        typeof data?.["message"] === "string"
+      )
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "agent.settings_fallback",
+          content: [textBlock(data["message"])],
+        });
       return ok({ ...identity, type: "event", eventType: "pi.custom" });
+    }
     case "custom_message":
       if (entry["customType"] === "pi-orb.user-message") {
         return ok({

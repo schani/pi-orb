@@ -1,5 +1,6 @@
 import {
   type ActiveSubagent,
+  type AgentSettingsEvent,
   CAPABILITY_ABORT,
   type HistoryRecord,
   type HostedFilesResponse,
@@ -9,6 +10,7 @@ import {
   type OrbView,
   type RuntimeEvent,
   type ServerFrame,
+  type SettingsAction,
 } from "@pi-orb/protocol";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Composer, type ComposerImage } from "../components/Composer.tsx";
@@ -93,7 +95,14 @@ interface OrbPageState {
   composerText: string;
   composerMode: ComposerMode;
   composerImages: ComposerImage[];
-  pendingRequest: { requestId: string; kind: "message" | "shell" | "abort" } | null;
+  settings: AgentSettingsEvent | null;
+  synced: boolean;
+  commandDraft: { text: string; mode: ComposerMode } | null;
+  pendingRequest: {
+    requestId: string;
+    kind: "message" | "shell" | "abort" | "settings";
+    submittedText?: string;
+  } | null;
   requestError: { code: string; message: string } | null;
   serverError: { code: string; message: string } | null;
   notice: string | null;
@@ -109,7 +118,8 @@ type OrbPageAction =
   | { type: "image_added"; image: ComposerImage }
   | { type: "image_removed"; id: string }
   | { type: "notice"; message: string }
-  | { type: "request_sent"; requestId: string; kind: "message" | "shell" | "abort" }
+  | { type: "open_settings"; command: "model" | "thinking" }
+  | { type: "request_sent"; requestId: string; kind: "message" | "shell" | "abort" | "settings" }
   | { type: "request_lost"; requestId: string }
   | { type: "message_enqueued"; requestId: string }
   | { type: "message_enqueue_failed"; requestId: string; error: ApiError }
@@ -134,6 +144,9 @@ export function initialState(orbId: string): OrbPageState {
     composerText: draft?.text ?? "",
     composerMode: draft?.mode ?? "message",
     composerImages: draft?.images ?? [],
+    settings: null,
+    synced: false,
+    commandDraft: null,
     pendingRequest: null,
     requestError: null,
     serverError: null,
@@ -149,6 +162,20 @@ function lastKey(map: Map<string, HistoryRecord>): string | null {
 
 function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageState {
   switch (event.type) {
+    case "agent_settings": {
+      const adjusted =
+        state.pendingRequest?.kind === "settings" &&
+        state.settings !== null &&
+        state.settings.settings.model.id !== event.settings.model.id &&
+        state.settings.settings.thinkingLevel !== event.settings.thinkingLevel;
+      return {
+        ...state,
+        settings: event,
+        ...(adjusted
+          ? { notice: `Thinking adjusted to ${event.settings.thinkingLevel} for this model.` }
+          : {}),
+      };
+    }
     case "status": {
       const operationId =
         event.operationId ?? (event.activity === "idle" ? null : state.operationId);
@@ -244,6 +271,8 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         operationId: null,
         activity: null,
         subagents: [],
+        settings: null,
+        synced: false,
       };
       if (frame.mode === "full") {
         return { ...next, records: new Map(), afterRecordId: null, headId: null };
@@ -264,12 +293,29 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
       };
     }
     case "sync.completed":
-      return { ...state, headId: frame.headId ?? lastKey(state.records) };
+      return { ...state, headId: frame.headId ?? lastKey(state.records), synced: true };
     case "runtime.event":
       return applyRuntimeEvent(state, frame.event);
     case "request.result": {
       if (state.pendingRequest === null || frame.requestId !== state.pendingRequest.requestId) {
         return state;
+      }
+      if (frame.result.type === "settings_applied") {
+        const unchangedDraft =
+          state.composerMode === "command" &&
+          state.composerText === state.pendingRequest.submittedText;
+        return {
+          ...state,
+          pendingRequest: null,
+          requestError: null,
+          ...(unchangedDraft
+            ? {
+                composerText: state.commandDraft?.text ?? "",
+                composerMode: state.commandDraft?.mode ?? "message",
+                commandDraft: null,
+              }
+            : {}),
+        };
       }
       if (frame.result.type === "accepted") {
         const clearComposer = state.pendingRequest.kind !== "abort";
@@ -349,9 +395,31 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       return {
         ...state,
         connection: action.status,
-        ...(action.status === "open" ? {} : { activity: null, operationId: null, subagents: [] }),
+        ...(action.status === "open"
+          ? {}
+          : { activity: null, operationId: null, subagents: [], settings: null, synced: false }),
+      };
+    case "open_settings":
+      return {
+        ...state,
+        commandDraft:
+          state.composerMode === "command"
+            ? state.commandDraft
+            : { text: state.composerText, mode: state.composerMode },
+        composerText: `${action.command} `,
+        composerMode: "command",
+        requestError: null,
+        notice: null,
       };
     case "composer_changed":
+      if (state.composerMode === "command" && action.mode === "message" && state.commandDraft)
+        return {
+          ...state,
+          composerText: state.commandDraft.text,
+          composerMode: state.commandDraft.mode,
+          commandDraft: null,
+          notice: null,
+        };
       return { ...state, composerText: action.text, composerMode: action.mode, notice: null };
     case "image_added":
       return { ...state, composerImages: [...state.composerImages, action.image], notice: null };
@@ -365,7 +433,11 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
     case "request_sent":
       return {
         ...state,
-        pendingRequest: { requestId: action.requestId, kind: action.kind },
+        pendingRequest: {
+          requestId: action.requestId,
+          kind: action.kind,
+          submittedText: state.composerText,
+        },
         requestError: null,
         notice: null,
       };
@@ -378,8 +450,10 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         ...state,
         pendingRequest,
         notice:
-          "The runtime restarted before acknowledging your request; it was not resent. " +
-          "If your message appears in the history it was delivered — otherwise send it again.",
+          state.pendingRequest?.kind === "settings"
+            ? "The runtime restarted before acknowledging the change. Check the synchronized settings before trying again."
+            : "The runtime restarted before acknowledging your request; it was not resent. " +
+              "If your message appears in the history it was delivered — otherwise send it again.",
       };
     }
     case "message_enqueued":
@@ -510,15 +584,15 @@ function OrbConversation({
 
   useEffect(() => {
     const saved = saveComposerDraft(orbId, {
-      text: state.composerText,
-      mode: state.composerMode,
+      text: state.commandDraft?.text ?? state.composerText,
+      mode: state.commandDraft?.mode ?? state.composerMode,
       images: state.composerImages,
     });
     if (saved.isErr() && !draftStorageErrorShown.current) {
       draftStorageErrorShown.current = true;
       dispatch({ type: "notice", message: saved.error.message });
     }
-  }, [orbId, state.composerImages, state.composerMode, state.composerText]);
+  }, [orbId, state.composerImages, state.composerMode, state.composerText, state.commandDraft]);
   const [orb, setOrb] = useState<OrbView | null>(() =>
     initial.orb.isOk() ? initial.orb.value : null,
   );
@@ -819,6 +893,7 @@ function OrbConversation({
     const text = state.composerText.trim();
     const images = state.composerImages;
 
+    if (state.composerMode === "command" || state.pendingRequest?.kind === "settings") return;
     if (state.composerMode !== "message") {
       if (connection === null) return;
       if (images.length > 0) {
@@ -865,6 +940,19 @@ function OrbConversation({
         dispatch({ type: "message_enqueue_failed", requestId, error: result.error });
       }
     });
+  };
+
+  const changeSettings = (action: SettingsAction) => {
+    if (
+      !state.synced ||
+      !state.settings?.writable ||
+      state.activity !== "idle" ||
+      state.pendingRequest
+    )
+      return;
+    const requestId = liveRef.current?.sendRequest(action);
+    if (!requestId) dispatch({ type: "send_unavailable" });
+    else dispatch({ type: "request_sent", requestId, kind: "settings" });
   };
 
   const sendAbort = () => {
@@ -940,8 +1028,19 @@ function OrbConversation({
     orb !== null &&
     !["deleting", "archiving", "archived"].includes(orb.state) &&
     state.historyLoaded;
+  const settingsAvailable =
+    orb?.state === "running" &&
+    state.connection === "open" &&
+    state.synced &&
+    state.settings !== null;
+  const settingsDisabled =
+    !settingsAvailable ||
+    !state.settings?.writable ||
+    state.activity !== "idle" ||
+    state.pendingRequest !== null;
   const canSend =
     state.pendingRequest === null &&
+    (state.settings?.writable ?? true) &&
     (state.composerMode === "message"
       ? messageAccepting
       : connected && state.activity === "idle" && state.historyLoaded);
@@ -974,44 +1073,46 @@ function OrbConversation({
           <a className="orb-phone-home" href="#/" aria-label="Dashboard" title="dashboard">
             <Icon name="back" />
           </a>
-          {renaming ? (
-            <form
-              className="orb-rename-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void saveName();
-              }}
-            >
-              <input
-                ref={renameInputRef}
-                aria-label="orb name"
-                value={renameText}
-                maxLength={80}
-                onChange={(event) => setRenameText(event.target.value)}
-              />
-              <button type="submit">save</button>
-              <button type="button" onClick={() => setRenaming(false)}>
-                cancel
-              </button>
-            </form>
-          ) : (
-            <>
-              <span className="orb-name">{orb?.name ?? "untitled orb"}</span>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Rename orb"
-                title="rename"
-                disabled={busyLocked}
-                onClick={() => {
-                  setRenameText(orb?.name ?? "");
-                  setRenaming(true);
+          <div className="orb-identity">
+            {renaming ? (
+              <form
+                className="orb-rename-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveName();
                 }}
               >
-                <Icon name="pen" />
-              </button>
-            </>
-          )}
+                <input
+                  ref={renameInputRef}
+                  aria-label="orb name"
+                  value={renameText}
+                  maxLength={80}
+                  onChange={(event) => setRenameText(event.target.value)}
+                />
+                <button type="submit">save</button>
+                <button type="button" onClick={() => setRenaming(false)}>
+                  cancel
+                </button>
+              </form>
+            ) : (
+              <>
+                <span className="orb-name">{orb?.name ?? "untitled orb"}</span>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Rename orb"
+                  title="rename"
+                  disabled={busyLocked}
+                  onClick={() => {
+                    setRenameText(orb?.name ?? "");
+                    setRenaming(true);
+                  }}
+                >
+                  <Icon name="pen" />
+                </button>
+              </>
+            )}
+          </div>
           {glyph !== null && lifecycleWord !== null && (
             <span className="orb-life">
               <StateTile glyph={glyph} decorative />
@@ -1029,6 +1130,26 @@ function OrbConversation({
           >
             <Icon name="more" />
           </button>
+          <div className="orb-settings">
+            <button
+              type="button"
+              title="Change model"
+              aria-label="Change model"
+              disabled={!settingsAvailable || state.pendingRequest !== null}
+              onClick={() => dispatch({ type: "open_settings", command: "model" })}
+            >
+              {settingsAvailable ? state.settings?.settings.model.id : "—"}
+            </button>
+            <button
+              type="button"
+              title="Change thinking"
+              aria-label="Change thinking"
+              disabled={!settingsAvailable || state.pendingRequest !== null}
+              onClick={() => dispatch({ type: "open_settings", command: "thinking" })}
+            >
+              {settingsAvailable ? state.settings?.settings.thinkingLevel : "—"}
+            </button>
+          </div>
           <div className="orb-header-actions">
             <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
             {uploads.button}
@@ -1201,7 +1322,12 @@ function OrbConversation({
       </div>
       {orb?.state !== "archived" && orb?.state !== "archiving" && (
         <Composer
+          settings={settingsAvailable ? state.settings : null}
+          settingsDisabled={settingsDisabled}
+          settingsPending={state.pendingRequest?.kind === "settings"}
+          onSettingsChange={changeSettings}
           feedback={[
+            state.pendingRequest?.kind === "settings" ? "Applying settings…" : null,
             state.serverError === null
               ? null
               : `runtime error ${state.serverError.code}: ${state.serverError.message}`,

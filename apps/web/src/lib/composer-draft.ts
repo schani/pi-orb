@@ -7,6 +7,7 @@ const ComposerDraftSchema = Type.Object(
     text: Type.String(),
     mode: Type.Union([
       Type.Literal("message"),
+      Type.Literal("command"),
       Type.Literal("shell"),
       Type.Literal("excluded_shell"),
     ]),

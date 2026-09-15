@@ -204,6 +204,10 @@ export function buildRuntimeServer(
 
       const handleRequest = (frame: ClientRequest): void => {
         const known = registry.lookup(frame.requestId, frame.action);
+        if (known.type === "pending") {
+          void known.result.then((result) => sendResult(frame.requestId, result));
+          return;
+        }
         if (known.type === "replay") {
           sendResult(frame.requestId, known.result);
           return;
@@ -268,6 +272,24 @@ export function buildRuntimeServer(
           registry.record(frame.requestId, frame.action, result);
           sendResult(frame.requestId, result);
           void agent.abortOperation();
+          return;
+        }
+        if (frame.action.type === "set_model" || frame.action.type === "set_thinking") {
+          registry.reserve(frame.requestId, frame.action);
+          void agent.changeSettings(frame.action).then((outcome) => {
+            const result: RequestResult = outcome.isOk()
+              ? { type: "settings_applied", duplicate: false }
+              : {
+                  type: "rejected",
+                  error: {
+                    code: outcome.error.code,
+                    message: outcome.error.message,
+                    retryable: false,
+                  },
+                };
+            registry.record(frame.requestId, frame.action, result);
+            sendResult(frame.requestId, result);
+          });
           return;
         }
         // Acceptance is not completion (docs/runtime-protocol.md).

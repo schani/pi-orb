@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
   DEFAULT_TTL_SECONDS,
+  type HistoryRecord,
   ID_TOKEN_PATH,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
@@ -749,7 +750,14 @@ describe("full slice E2E", () => {
           0o755,
         );
         const oldToken = await readRuntimeToken(replacementOrbId, 0);
-        const historyBefore = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
+        const historyBefore = await waitFor("initial settings replicated", async () => {
+          const view = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
+          return (view.body["records"] as HistoryRecord[]).some(
+            (record) => record.type === "event" && record.eventType === "pi.thinking_level_change",
+          )
+            ? view
+            : null;
+        });
         expect(historyBefore.status).toBe(200);
 
         // Workload identity end to end (docs/workload-identity.md): the orb
@@ -942,7 +950,34 @@ describe("full slice E2E", () => {
         }
         const historyAfter = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
         expect(historyAfter.status).toBe(200);
-        expect(historyAfter.body["records"]).toEqual(historyBefore.body["records"]);
+        const beforeRecords = historyBefore.body["records"] as HistoryRecord[];
+        const afterRecords = historyAfter.body["records"] as HistoryRecord[];
+        expect(afterRecords.slice(0, beforeRecords.length)).toEqual(beforeRecords);
+        // The SDK re-appends binding settings for message-free sessions (real-SDK contract).
+        // Preserve every old record; only unchanged settings and silent boot baselines may follow.
+        for (const record of afterRecords.slice(beforeRecords.length)) {
+          if (
+            record.type === "event" &&
+            (record.eventType === "pi.model_change" ||
+              record.eventType === "pi.thinking_level_change")
+          ) {
+            const previous = beforeRecords.findLast(
+              (item) => item.type === "event" && item.eventType === record.eventType,
+            );
+            const native = previous?.overflow["native"] as Record<string, unknown>;
+            expect(record.overflow["native"]).toMatchObject(
+              record.eventType === "pi.model_change"
+                ? { provider: native["provider"], modelId: native["modelId"] }
+                : { thinkingLevel: native["thinkingLevel"] },
+            );
+          } else {
+            expect(record).toMatchObject({
+              type: "event",
+              eventType: "pi.custom",
+              overflow: { native: { customType: "pi-orb.boot" } },
+            });
+          }
+        }
         expect(historyAfter.body["session"]).not.toBeNull();
 
         // -- boot hooks (docs/orb-setup-hook.md) ------------------------------
@@ -1305,6 +1340,15 @@ describe("full slice E2E", () => {
   async function runScenario(): Promise<void> {
     const base = controlPlane.baseUrl;
 
+    // Personal instructions are saved before boot, then changed while this orb runs.
+    expect(
+      (
+        await api(base, "PUT", "/api/v1/personal-instructions", {
+          content: "PERSONAL_E2E_FIRST_BOOT",
+        })
+      ).status,
+    ).toBe(200);
+
     // Project + orb through the real API (docs/testing.md steps 1-2).
     const projectId = randomUUID();
     const project = await api(base, "POST", "/api/v1/projects", {
@@ -1343,6 +1387,14 @@ describe("full slice E2E", () => {
       },
       { timeoutMs: 300_000, intervalMs: 2_000 },
     );
+
+    expect(
+      (
+        await api(base, "PUT", "/api/v1/personal-instructions", {
+          content: "PERSONAL_E2E_NEXT_BOOT",
+        })
+      ).status,
+    ).toBe(200);
 
     // A real PTY traverses browser route → control-plane binary proxy → runtime.
     const terminalSocket = new WebSocket(
@@ -1480,6 +1532,54 @@ describe("full slice E2E", () => {
     const syncCompleted = await untilFrame("sync.completed", () =>
       frames.find((frame) => frame.type === "sync.completed"),
     );
+
+    // Settings are real runtime mutations, persisted before the first assistant response.
+    const initialSettings = frames.find(
+      (frame) => frame.type === "runtime.event" && frame.event.type === "agent_settings",
+    );
+    expect(initialSettings).toBeDefined();
+    let earlierSettingsId = "";
+    for (const action of [
+      { type: "set_model", model: { provider: "openai-codex", id: "gpt-5.6-sol" } },
+      { type: "set_thinking", thinkingLevel: "high" },
+      { type: "set_thinking", thinkingLevel: "low" },
+    ]) {
+      const settingsId = randomUUID();
+      if (action.thinkingLevel === "high") earlierSettingsId = settingsId;
+      socket.send(JSON.stringify({ v: 1, type: "client.request", requestId: settingsId, action }));
+      const applied = await untilFrame("settings applied", () =>
+        frames.find((frame) => frame.type === "request.result" && frame.requestId === settingsId),
+      );
+      expect(applied.type === "request.result" && applied.result.type).toBe("settings_applied");
+    }
+    expect(
+      frames
+        .filter((frame) => frame.type === "runtime.event" && frame.event.type === "agent_settings")
+        .at(-1),
+    ).toMatchObject({
+      event: { settings: { model: { id: "gpt-5.6-sol" }, thinkingLevel: "low" }, writable: true },
+    });
+
+    const replayStart = frames.length;
+    socket.send(
+      JSON.stringify({
+        v: 1,
+        type: "client.request",
+        requestId: earlierSettingsId,
+        action: { type: "set_thinking", thinkingLevel: "high" },
+      }),
+    );
+    const replayed = await untilFrame("settings duplicate receipt", () =>
+      frames
+        .slice(replayStart)
+        .find((frame) => frame.type === "request.result" && frame.requestId === earlierSettingsId),
+    );
+    expect(replayed).toMatchObject({ result: { type: "settings_applied", duplicate: true } });
+    expect(
+      frames
+        .filter((frame) => frame.type === "runtime.event" && frame.event.type === "agent_settings")
+        .at(-1),
+    ).toMatchObject({ event: { settings: { thinkingLevel: "low" } } });
 
     // One scripted turn: reasoning + real bash tool + final text.
     let headId = syncCompleted.type === "sync.completed" ? syncCompleted.headId : null;
@@ -1630,6 +1730,17 @@ describe("full slice E2E", () => {
     const requests = await fakeControl(fake.sessionKey, "/requests");
     const inferenceCalls = JSON.stringify(requests);
     expect(inferenceCalls).toContain("E2E_TOOL_OK");
+    expect(
+      Array.isArray(requests) &&
+        requests.some(
+          (call) =>
+            call.matchedRuleIndex === 0 &&
+            JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
+            !JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") &&
+            call.body?.model === "gpt-5.6-sol" &&
+            call.body?.reasoning?.effort === "low",
+        ),
+    ).toBe(true);
     // Mock rules are consumed forwards. Account for the asynchronous turn
     // notification before another orb advances this same scenario to archive.
     await waitFor(
@@ -1679,6 +1790,9 @@ describe("full slice E2E", () => {
     // role (a Pi custom message), not mutate the system prompt.
     for (const [index, reply] of ["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].entries()) {
       if (index === 1) {
+        expect(
+          (await api(base, "PUT", "/api/v1/personal-instructions", { content: "" })).status,
+        ).toBe(200);
         if (PROCESS_BACKEND) {
           const before = controlPlane.logs.join("").split("E2E host specification advanced").length;
           controlPlane.process.kill("SIGHUP");
@@ -1711,6 +1825,8 @@ describe("full slice E2E", () => {
       const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
       const serialized = JSON.stringify(history.body["records"]);
       expect(serialized).toContain(warning);
+      expect(serialized).toContain("pi-orb:personal-instructions");
+      expect(serialized).not.toContain("PERSONAL_E2E_");
       const records = history.body["records"] as {
         overflow?: { native?: { customType?: string } };
       }[];
@@ -1724,6 +1840,10 @@ describe("full slice E2E", () => {
             (call) =>
               call.status === 200 &&
               call.matchedRuleIndex === index + 3 &&
+              !JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
+              JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") === (index === 0) &&
+              call.body?.model === "gpt-5.6-sol" &&
+              call.body?.reasoning?.effort === "low" &&
               call.body?.input?.some(
                 (message: { role?: string; content?: unknown }) =>
                   message.role === "user" && JSON.stringify(message.content).includes(warning),

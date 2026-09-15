@@ -1,3 +1,4 @@
+import type { AgentSettingsEvent, SettingsAction } from "@pi-orb/protocol";
 import {
   type ClipboardEvent,
   type KeyboardEvent,
@@ -8,6 +9,7 @@ import {
 } from "react";
 import { usePhoneLayout } from "../lib/use-phone-layout.ts";
 import { ComposerCaret } from "./ComposerCaret.tsx";
+import { type CommandOption, commandOptions } from "./command-options.ts";
 import {
   type ComposerMode,
   composerModeGlyph,
@@ -46,6 +48,10 @@ interface ComposerProps {
   onShellAttachmentBlocked: () => void;
   /** Phone-only operation feedback, beside the initiating control. */
   feedback?: string;
+  settings?: AgentSettingsEvent | null;
+  settingsDisabled?: boolean;
+  settingsPending?: boolean;
+  onSettingsChange?: (action: SettingsAction) => void;
 }
 
 export function Composer({
@@ -61,18 +67,68 @@ export function Composer({
   onAbort,
   onShellAttachmentBlocked,
   feedback,
+  settings = null,
+  settingsDisabled = true,
+  settingsPending = false,
+  onSettingsChange,
 }: ComposerProps) {
-  const isShell = mode !== "message";
+  const isCommand = mode === "command";
+  const isShell = mode === "shell" || mode === "excluded_shell";
+  const [commandIndex, setCommandIndex] = useState(0);
+  const choices = commandOptions(text, settings);
+  const selectedCommand = Math.min(commandIndex, Math.max(0, choices.length - 1));
+  const chooseCommand = (choice: CommandOption | undefined) => {
+    if (choice?.text !== undefined) {
+      onValueChange(choice.text, "command");
+      setCommandIndex(0);
+    } else if (choice?.action && !settingsDisabled) onSettingsChange?.(choice.action);
+  };
   const shellBlockedByAttachment = isShell && images.length > 0;
   const hasInput = isShell ? text.trim() !== "" : text.trim() !== "" || images.length > 0;
-  const sendEnabled = canSend && hasInput && !shellBlockedByAttachment;
+  const sendEnabled = !isCommand && canSend && hasInput && !shellBlockedByAttachment;
   const phone = usePhoneLayout();
   const [expanded, setExpanded] = useState(false);
   const padRef = useRef<HTMLButtonElement>(null);
   const awaitingClear = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const commandPickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isCommand || (phone && !expanded)) return;
+    const dismiss = () => {
+      setCommandIndex(0);
+      onValueChange("", "message");
+    };
+    const outside = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (
+        commandPickerRef.current?.contains(event.target) ||
+        inputRef.current?.contains(event.target)
+      )
+        return;
+      dismiss();
+    };
+    const onEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+      inputRef.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", onEscape, true);
+    return () => {
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("keydown", onEscape, true);
+    };
+  }, [isCommand, phone, expanded, onValueChange]);
   const [mentionOffset, setMentionOffset] = useState<number | null>(null);
   const restoreCaret = useRef<number | null>(null);
+  useEffect(() => {
+    if (mode === "command") {
+      if (phone) setExpanded(true);
+      inputRef.current?.focus({ preventScroll: true });
+    }
+  }, [mode, phone]);
 
   useLayoutEffect(() => {
     if (mentionOffset !== null || restoreCaret.current === null) return;
@@ -142,7 +198,7 @@ export function Composer({
   };
 
   return (
-    <div className="composer" data-expanded={expanded}>
+    <div className="composer" data-expanded={expanded} data-settings-pending={settingsPending}>
       {(feedback || shellBlockedByAttachment) && (
         <div className="composer-phone-feedback" role="status">
           {feedback || "Remove image attachments before running a shell command."}
@@ -177,6 +233,42 @@ export function Composer({
           </button>
         )}
       </div>
+      {isCommand && (!phone || expanded) && (
+        <div
+          ref={commandPickerRef}
+          className="command-picker"
+          role="listbox"
+          aria-label="Commands"
+          id="command-choices"
+        >
+          {choices.map((choice, index) => (
+            <button
+              type="button"
+              role="option"
+              id={`command-choice-${index}`}
+              aria-selected={index === selectedCommand}
+              key={choice.label}
+              className={index === selectedCommand ? "selected" : ""}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => chooseCommand(choice)}
+              disabled={choice.action !== undefined && settingsDisabled}
+            >
+              <span>{choice.label}</span>
+              <span aria-hidden="true">{choice.current ? "✓" : choice.text ? "→" : ""}</span>
+            </button>
+          ))}
+          {choices.length === 0 && (
+            <div className="command-empty">
+              {settings === null
+                ? "Settings unavailable — connect to a running orb."
+                : "No matching command or value."}
+            </div>
+          )}
+          {settings !== null && settingsDisabled && (
+            <div className="command-empty">Wait for the current operation to finish.</div>
+          )}
+        </div>
+      )}
       {mentionOffset !== null && (
         <OrbLinkPicker onSelect={closePicker} onClose={() => closePicker()} />
       )}
@@ -206,6 +298,7 @@ export function Composer({
             value={text}
             onChange={(event) => {
               awaitingClear.current = false;
+              setCommandIndex(0);
               const normalized = normalizeComposerChange(mode, event.target.value);
               onValueChange(normalized.text, normalized.mode);
               const input = event.nativeEvent as InputEvent;
@@ -221,6 +314,38 @@ export function Composer({
             }}
             onPaste={handlePaste}
             onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              if (event.nativeEvent.isComposing) return;
+              if (isCommand) {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setCommandIndex(
+                    choices.length
+                      ? (selectedCommand + (event.key === "ArrowDown" ? 1 : -1) + choices.length) %
+                          choices.length
+                      : 0,
+                  );
+                  return;
+                }
+                if (event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) {
+                  event.preventDefault();
+                  chooseCommand(choices[selectedCommand]);
+                  return;
+                }
+              }
+              if (
+                event.key === "/" &&
+                mode === "message" &&
+                event.currentTarget.selectionStart === 0 &&
+                event.currentTarget.selectionEnd === 0 &&
+                !event.metaKey &&
+                !event.ctrlKey &&
+                !event.altKey
+              ) {
+                event.preventDefault();
+                onValueChange(text, "command");
+                setCommandIndex(0);
+                return;
+              }
               if (phone && event.key === "Escape") {
                 event.preventDefault();
                 fold();
@@ -244,7 +369,12 @@ export function Composer({
                   return;
                 }
               }
-              if (event.key === "Backspace" && atStart && collapsed) {
+              if (
+                event.key === "Backspace" &&
+                atStart &&
+                collapsed &&
+                (!isCommand || text === "")
+              ) {
                 const nextMode = leaveShellMode(mode);
                 if (nextMode !== null) {
                   event.preventDefault();
@@ -263,12 +393,18 @@ export function Composer({
               }
             }}
             aria-label="Message the orb"
+            aria-controls={isCommand ? "command-choices" : undefined}
+            aria-activedescendant={
+              isCommand && choices.length ? `command-choice-${selectedCommand}` : undefined
+            }
             placeholder={
-              isShell
-                ? phone
-                  ? "Run a shell command…"
-                  : "Run a shell command… (⌘⏎ to run)"
-                : "Message the orb…"
+              isCommand
+                ? ""
+                : isShell
+                  ? phone
+                    ? "Run a shell command…"
+                    : "Run a shell command… (⌘⏎ to run)"
+                  : "Message the orb…"
             }
             rows={4}
           />

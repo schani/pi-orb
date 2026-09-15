@@ -14,6 +14,8 @@ Historical log/trace filenames in those ledgers refer to archive members below.
 
 - [Independent upstream draft preparation](../upstream-prs/README.md) — four isolated branches, tests-first package qualification, and a separate checksum-indexed archive.
 
+- [Main integration](main-merge-2026-09-15.md) — settings/fence and child-admission regressions, full process E2E, final focused qualification, and preserved failure/replay evidence.
+
 ## Archive
 
 [Download the evidence archive](https://files---pi-orb-1077475695242.us-central1.run.app/s/58efed98-b832-4025-a899-7f43fed7ed72/qualification/pr-44/subagent-evidence.tar.gz) (pi-orb authentication required).

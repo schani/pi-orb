@@ -3,6 +3,7 @@ import {
   CreateOrbRequestSchema,
   CreateProjectRequestSchema,
   EnqueueOrbMessageRequestSchema,
+  PERSONAL_INSTRUCTIONS_PATH,
   PROJECT_NAME_MAX_CHARS,
   ProjectSecretNameSchema,
   PutProjectSecretRequestSchema,
@@ -27,6 +28,10 @@ import {
 } from "../domain/lifecycle.ts";
 import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
+import {
+  readPersonalInstructions,
+  savePersonalInstructions,
+} from "../domain/personal-instructions.ts";
 import type { ControlPlaneDeps, SigningKeyDeps, SigningKeyRow } from "../domain/ports.ts";
 import { type ProjectCommandError, requestProjectDeletion } from "../domain/project-deletion.ts";
 import {
@@ -201,6 +206,39 @@ export function registerRoutes(
   // Which host provider, which database, which build. Resolved at boot and
   // constant for the process's lifetime, so it reads nothing per request.
   app.get("/api/v1/system", async (_request, reply) => reply.send(system));
+
+  app.get(PERSONAL_INSTRUCTIONS_PATH, async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+    const result = await readPersonalInstructions(task, deps.personalInstructions);
+    if (result.isErr())
+      return reply
+        .status(result.error.code === "internal" ? 500 : 503)
+        .send(
+          httpError(
+            result.error.code === "internal" ? "internal" : "unavailable",
+            result.error.message,
+            result.error.code === "unavailable",
+          ),
+        );
+    return reply.send(result.value);
+  });
+  app.put(PERSONAL_INSTRUCTIONS_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const result = await savePersonalInstructions(task, deps.personalInstructions, request.body);
+    if (result.isErr())
+      return reply
+        .status(
+          result.error.code === "invalid" ? 400 : result.error.code === "internal" ? 500 : 503,
+        )
+        .send(
+          httpError(
+            result.error.code === "invalid" ? "invalid_request" : result.error.code,
+            result.error.message,
+            result.error.code === "unavailable",
+          ),
+        );
+    return reply.send(result.value);
+  });
 
   if (signingKeys !== undefined) {
     app.post("/api/v1/issuer/signing-keys/publish", async (_request, reply) => {

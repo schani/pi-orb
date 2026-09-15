@@ -29,6 +29,22 @@ const busyView = (headId: string | null, operationId: string): AgentGateView => 
   activeOperationId: operationId,
 });
 
+it("joins an async settings request and replays its receipt without reapplying", async () => {
+  const registry = new RequestRegistry();
+  const action = { type: "set_thinking", thinkingLevel: "low" } as const;
+  registry.reserve("setting-1", action);
+  const waiting = registry.lookup("setting-1", action);
+  expect(waiting.type).toBe("pending");
+  expect(registry.lookup("setting-1", { ...action, thinkingLevel: "high" }).type).toBe("conflict");
+  registry.record("setting-1", action, { type: "settings_applied", duplicate: false });
+  if (waiting.type === "pending")
+    expect(await waiting.result).toEqual({ type: "settings_applied", duplicate: true });
+  expect(registry.lookup("setting-1", action)).toEqual({
+    type: "replay",
+    result: { type: "settings_applied", duplicate: true },
+  });
+});
+
 describe("decideRequest", () => {
   it("accepts a message when idle with a matching head", () => {
     const decision = decideRequest(idleView("rec-5"), messageAction("rec-5"));

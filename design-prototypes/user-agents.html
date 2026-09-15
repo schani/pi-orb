@@ -1,0 +1,2438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Personal AGENTS.md — five proposals</title>
+<style id="product-css">/* Signal / Boards — one monospace face, white paper, black rules, two signal
+   hues. Light only, by product decision. Prototype:
+   design-prototypes/signal-boards.html. */
+
+:root {
+  color-scheme: light;
+  --w: #fff;
+  --k: #000;
+  --g1: #f2f2f2; /* fills, insets */
+  --g2: #999; /* hairlines, disabled */
+  --g3: #555; /* secondary text */
+  --ok: #1a7e37;
+  --ok-bg: #e6f4ea;
+  --bad: #b42318;
+  --bad-bg: #fdecea;
+  --st-busy: var(--ok);
+  --st-idle: var(--ok);
+  --st-start: #966100;
+  --st-stop: #777;
+  --st-fail: var(--bad);
+  --st-arch: #666;
+  --st-archng: var(--st-start);
+  --st-del: var(--bad);
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --text-size: 13px;
+  --row: 20px;
+  --ribbon: 24px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--w);
+  color: var(--k);
+  font-family: var(--mono);
+  font-size: var(--text-size);
+  line-height: var(--row);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+
+/* App is the root's sole child. It must carry the viewport flex height down to
+   route content; otherwise an orb page shrink-wraps a sparse transcript and a
+   sticky composer has no space in which to reach the viewport bottom. */
+.app {
+  display: flex;
+  flex: 1;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid currentcolor;
+}
+
+a:hover {
+  background: var(--k);
+  color: var(--w);
+  border-color: var(--k);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  cursor: pointer;
+  padding: 0 8px;
+  line-height: 18px;
+  border: 1px solid var(--k);
+  background: var(--w);
+}
+
+button:hover:not(:disabled) {
+  background: var(--k);
+  color: var(--w);
+}
+
+button:disabled {
+  color: var(--g2);
+  border-color: var(--g2);
+  cursor: not-allowed;
+}
+
+button.danger {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--bad);
+  color: var(--w);
+}
+
+/* Text actions: a rule under the word, no box. */
+button.text-action {
+  border: 0;
+  border-bottom: 1px solid var(--g2);
+  padding: 0;
+  line-height: 16px;
+  color: var(--g3);
+  background: transparent;
+}
+
+button.text-action:disabled {
+  border-bottom-style: dotted;
+}
+
+button.text-action:disabled:hover {
+  background: transparent;
+  color: var(--g2);
+}
+
+/* Icon-only actions: a 20px hit area on the 20px line. */
+button.icon-button {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  color: var(--g3);
+  background: transparent;
+}
+
+.device-code-copy {
+  vertical-align: middle;
+}
+
+button.icon-button:hover:not(:disabled) {
+  background: var(--k);
+  color: var(--w);
+}
+
+button.icon-button:disabled {
+  color: var(--g2);
+  border: 0;
+}
+
+button.icon-button.danger {
+  color: var(--bad);
+  border: 0;
+}
+
+button.icon-button.danger:hover:not(:disabled) {
+  background: var(--bad);
+  color: var(--w);
+}
+
+button.icon-button.danger:disabled {
+  color: var(--g2);
+}
+
+.ic {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+input,
+textarea {
+  background: var(--w);
+  border: 1px solid var(--k);
+  padding: 0 6px;
+  line-height: 18px;
+}
+
+input:focus,
+textarea:focus {
+  outline: 0;
+  background: var(--k);
+  color: var(--w);
+}
+
+::placeholder {
+  color: var(--g2);
+}
+
+/* One neutral highlight stays visible on both paper and inverted surfaces. */
+::selection {
+  background: var(--g2);
+  color: var(--k);
+}
+
+:focus-visible {
+  outline: 0;
+  background: var(--k);
+  color: var(--w);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.up {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.muted {
+  color: var(--g3);
+}
+
+.error-text {
+  color: var(--bad);
+}
+
+.trunc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* reachable by assistive technology, absent from the layout */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Instrument tiles use the exact favicon assets, including on inverted rows. */
+.glyph {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  vertical-align: middle;
+}
+
+.s-busy {
+  font-weight: 700;
+  color: var(--st-busy);
+}
+
+.s-idle {
+  color: var(--st-idle);
+}
+
+.s-start {
+  color: var(--st-start);
+}
+
+.s-stop {
+  color: var(--st-stop);
+}
+
+.s-fail {
+  font-weight: 700;
+  color: var(--st-fail);
+}
+
+.s-arch {
+  color: var(--st-arch);
+}
+
+.s-archng {
+  color: var(--st-archng);
+}
+
+.s-del {
+  color: var(--st-del);
+}
+
+/* ---------- banners ---------- */
+
+.banner {
+  border: 1px solid var(--k);
+  padding: 0 8px;
+}
+
+.banner-error {
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-color: var(--bad);
+}
+
+/* ---------- session ribbon ---------- */
+
+.session-ribbon {
+  position: sticky;
+  z-index: 90;
+  top: 0;
+  height: var(--ribbon);
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-bottom: 1px solid var(--k);
+}
+
+.session-ribbon button {
+  border-color: var(--bad);
+  color: var(--bad);
+  background: transparent;
+}
+
+.session-ribbon button:hover:not(:disabled) {
+  background: var(--bad);
+  color: var(--w);
+}
+
+/* ---------- plain pages ---------- */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.simple-page {
+  padding: 20px 12px;
+  align-items: flex-start;
+}
+
+/* ---------- dashboard ---------- */
+
+.projects-page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* The dashboard's top line: what the fleet adds up to right now. */
+.dashboard-totals {
+  display: flex;
+  flex: none;
+  height: 24px;
+  align-items: center;
+  border-bottom: 1px solid var(--k);
+}
+
+.dashboard-total {
+  display: flex;
+  height: 24px;
+  min-width: 132px;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 12px;
+  line-height: 24px;
+  border-right: 1px solid var(--k);
+}
+
+.dashboard-total:last-child {
+  border-right: 0;
+}
+
+.dashboard-total span {
+  color: var(--g3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* The bottom line: what this deployment is made of, held against the viewport
+   bottom so the board's column rules always end on it. */
+.dashboard-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex: none;
+  height: 24px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--g3);
+  background: var(--w);
+  border-top: 1px solid var(--k);
+}
+
+.dashboard-footer-separator {
+  color: var(--g2);
+}
+
+/* Fixed 316px project columns, left-aligned, each row closed by a black rule;
+   the page itself scrolls. The board holds the viewport height the two 24px
+   lines leave it and its rows stretch into it, so a column with one orb still
+   rules from the totals strip down to the footer. */
+.dashboard {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 316px);
+  grid-auto-rows: minmax(min-content, 1fr);
+  align-content: stretch;
+  justify-content: start;
+  flex: 1;
+  min-height: calc(100dvh - 48px);
+}
+
+.app:has(> .session-ribbon) .dashboard {
+  min-height: calc(100dvh - 48px - var(--ribbon));
+}
+
+.project-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border-left: 1px solid var(--k);
+  border-bottom: 1px solid var(--k);
+}
+
+.project-head {
+  flex: none;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--k);
+}
+
+.project-head-line {
+  display: flex;
+  height: var(--row);
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/* Shared dashboard/index identity: 18px on a 24px line, with matching utility icons. */
+.project-head-name {
+  height: 24px;
+}
+
+.project-head-name .icon-button {
+  width: 24px;
+  height: 24px;
+}
+
+.project-head-name .ic {
+  width: 16px;
+  height: 16px;
+}
+
+.project-head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.orb-index .project-head-actions {
+  margin-left: auto;
+  gap: 4px;
+}
+
+a.project-new-orb-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  color: var(--g3);
+}
+
+a.project-new-orb-icon:hover,
+a.project-new-orb-icon:focus-visible {
+  background: var(--k);
+  color: var(--w);
+}
+
+.project-name {
+  overflow: hidden;
+  font-size: 18px;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.project-column-deleting .project-name {
+  color: var(--g3);
+}
+
+.project-new-orb {
+  text-transform: uppercase;
+  font-weight: 700;
+  border-bottom: 0;
+}
+
+.project-new-orb-row {
+  padding: 0 10px;
+  line-height: var(--row);
+}
+
+.project-progress {
+  flex: none;
+  padding: 0 10px;
+  color: var(--g3);
+}
+
+.project-column-error {
+  margin: 0 10px 2px;
+}
+
+/* orb entry: a 22px name line over a 20px meta line, behind a 2px state hue */
+.orb-entry {
+  flex: none;
+  padding: 4px 10px 4px 8px;
+  border-left: 2px solid var(--g2);
+  border-bottom: 1px solid var(--g1);
+}
+
+.orb-entry:hover {
+  background: var(--g1);
+}
+
+.orb-entry-title {
+  display: flex;
+  height: 22px;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.orb-entry-link {
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 0;
+}
+
+.orb-entry-meta {
+  display: flex;
+  height: var(--row);
+  align-items: center;
+  gap: 6px;
+  color: var(--g3);
+}
+
+.orb-entry-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.orb-entry-detail {
+  height: var(--row);
+  overflow: hidden;
+  color: var(--g3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orb-entry-error {
+  color: var(--bad);
+}
+
+.orb-entry-busy,
+.ix-row-busy {
+  border-left-color: var(--st-busy);
+}
+
+.orb-entry-idle,
+.ix-row-idle {
+  border-left-color: var(--st-idle);
+}
+
+.orb-entry-start,
+.ix-row-start {
+  border-left-color: var(--st-start);
+}
+
+.orb-entry-stop,
+.ix-row-stop {
+  border-left-color: var(--st-stop);
+}
+
+.orb-entry-fail,
+.ix-row-fail {
+  border-left-color: var(--st-fail);
+}
+
+.orb-entry-arch,
+.ix-row-arch {
+  border-left-color: var(--st-arch);
+}
+
+.orb-entry-archng,
+.ix-row-archng {
+  border-left-color: var(--st-archng);
+}
+
+.orb-entry-del,
+.ix-row-del {
+  border-left-color: var(--st-del);
+  border-left-style: dotted;
+}
+
+.orb-entry-busy .orb-entry-link,
+.orb-entry-fail .orb-entry-link {
+  font-weight: 700;
+}
+
+.orb-entry-stop .orb-entry-link,
+.orb-entry-arch .orb-entry-link,
+.orb-entry-archng .orb-entry-link,
+.orb-entry-del .orb-entry-link {
+  color: var(--g3);
+}
+
+/* archive shelf: the column's footer */
+.project-archive {
+  flex: none;
+  background: var(--g1);
+  border-top: 1px solid var(--g2);
+}
+
+.project-archive > summary {
+  display: flex;
+  height: var(--row);
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 10px;
+  color: var(--g3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.project-archive > summary::-webkit-details-marker {
+  display: none;
+}
+
+.project-archive > summary::before {
+  content: "▸";
+}
+
+.project-archive[open] > summary::before {
+  content: "▾";
+}
+
+.project-archive > summary:hover {
+  background: #e9e9e9;
+}
+
+.project-archive-body {
+  border-top: 1px solid var(--g2);
+}
+
+.project-archive .orb-entry {
+  border-bottom-color: #e6e6e6;
+}
+
+.project-archive .orb-entry:hover {
+  background: #e9e9e9;
+}
+
+/* new project: always the last cell */
+.new-project {
+  padding: 0 10px 10px;
+  border-left: 1px dashed var(--k);
+  border-bottom: 1px solid var(--k);
+}
+
+.new-project h2 {
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.new-project label {
+  display: block;
+  color: var(--g3);
+}
+
+.new-project input {
+  display: block;
+  width: 100%;
+}
+
+.new-project button {
+  margin-top: 10px;
+  background: var(--k);
+  color: var(--w);
+  padding: 0 10px;
+  line-height: 20px;
+}
+
+.new-project button:hover:not(:disabled) {
+  background: var(--w);
+  color: var(--k);
+}
+
+.new-project .banner {
+  margin-top: 6px;
+}
+
+.create-orb-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ---------- find ---------- */
+
+.app-search-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  background: rgb(0 0 0 / 35%);
+}
+
+.app-search-dialog {
+  position: relative;
+  width: 640px;
+  max-width: calc(100vw - 24px);
+  margin: 80px auto 0;
+  background: var(--w);
+  border: 1px solid var(--k);
+}
+
+.app-search-query-row {
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr);
+  gap: 10px;
+  height: var(--row);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--k);
+}
+
+.app-search-query-row::before {
+  content: ">";
+  font-weight: 700;
+}
+
+.app-search-input {
+  display: block;
+  width: 100%;
+  height: var(--row);
+  line-height: var(--row);
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.app-search-input:focus {
+  background: transparent;
+  color: var(--k);
+}
+
+.app-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.app-search-result-region {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.app-search-group {
+  padding: 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.app-search-result {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto 6ch;
+  gap: 8px;
+  align-items: center;
+  height: var(--row);
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--g1);
+}
+
+.app-search-group + .app-search-result {
+  border-top: 1px solid var(--g1);
+}
+
+.app-search-result:hover {
+  background: transparent;
+  color: inherit;
+}
+
+.app-search-result-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-search-result mark {
+  color: inherit;
+  background: transparent;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.app-search-chip {
+  grid-column: 3;
+  border: 1px solid var(--g2);
+  color: var(--g3);
+  padding: 0 5px;
+  line-height: 16px;
+}
+
+.app-search-age {
+  grid-column: 4;
+  color: var(--g3);
+  text-align: right;
+}
+
+.app-search-result.active {
+  background: var(--k);
+  color: var(--w);
+}
+
+.app-search-result.active .app-search-age,
+.app-search-result.active .glyph {
+  color: var(--w);
+}
+
+.app-search-result.active .app-search-chip {
+  border-color: var(--w);
+  color: var(--w);
+}
+
+.app-search-empty {
+  margin: 0;
+  padding: 0 12px;
+  height: var(--row);
+  color: var(--g2);
+}
+
+/* ---------- project config ---------- */
+
+.project-secrets-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
+  background: rgb(0 0 0 / 35%);
+}
+
+.project-secrets-dialog {
+  position: relative;
+  width: 560px;
+  max-width: calc(100vw - 24px);
+  margin: 80px auto 0;
+  background: var(--w);
+  border: 1px solid var(--k);
+}
+
+.project-secrets-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--k);
+}
+
+.project-secrets-header p {
+  margin: 0;
+  color: var(--g3);
+}
+
+.project-secrets-close {
+  margin-left: auto;
+  flex: none;
+  border: 0;
+  padding: 0 4px;
+}
+
+.project-secrets-lock {
+  display: inline-flex;
+  width: 13px;
+  height: 20px;
+  flex: none;
+  align-items: center;
+  color: var(--g3);
+}
+
+.project-secrets-lock svg {
+  width: 13px;
+  height: 13px;
+}
+
+.project-config-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--k);
+}
+
+.project-config-tabs [aria-selected="true"] {
+  background: var(--k);
+  color: var(--w);
+}
+
+.project-secrets-body {
+  padding: 8px 10px 10px;
+}
+
+.project-secrets-body > .project-secret-form:first-child {
+  margin-top: 0;
+}
+
+.project-secrets-body > .project-secret-form:last-child {
+  margin-bottom: 0;
+}
+
+.project-mcp-ledger {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+.project-mcp-ledger label {
+  display: block;
+  min-width: 0;
+  color: var(--g3);
+}
+.project-mcp-ledger input,
+.project-mcp-ledger select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+.project-mcp-ledger select {
+  height: var(--row);
+  color: var(--k);
+}
+.project-mcp-ledger .mcp-full {
+  grid-column: 1 / -1;
+}
+.mcp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--k);
+}
+.mcp-action-space {
+  flex: 1;
+}
+.mcp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.mcp-presets[hidden] {
+  display: none;
+}
+.mcp-add-area {
+  margin-top: 8px;
+}
+.mcp-add-area:first-child {
+  margin-top: 0;
+}
+.mcp-add-area > .project-mcp-ledger:last-child {
+  margin-bottom: 0;
+}
+.mcp-add-heading {
+  border-bottom: 1px solid var(--g2);
+}
+.project-mcp-connection > summary[aria-disabled="true"] {
+  cursor: wait;
+}
+@media (max-width: 560px) {
+  .project-mcp-ledger {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.project-secret-row {
+  display: flex;
+  height: var(--row);
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--g1);
+}
+
+.project-secret-name {
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-secret-updated {
+  margin-left: auto;
+  color: var(--g3);
+  white-space: nowrap;
+}
+
+.project-secret-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.project-secret-actions button {
+  line-height: 16px;
+}
+
+.project-secret-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.project-secret-form label {
+  display: block;
+  min-width: 0;
+  flex: 1;
+  color: var(--g3);
+}
+
+.project-secret-form input {
+  display: block;
+  width: 100%;
+}
+
+.project-secret-form button {
+  flex: none;
+}
+
+.project-general-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+/* ---------- orb page: two panes filling the viewport ---------- */
+
+.orb-page {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 236px minmax(0, 1fr);
+}
+
+/* The index scrolls itself while the transcript scrolls the document, so the
+   window-level bottom pinning in lib/scroll-pin.ts keeps working. */
+.orb-index {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  border-right: 1px solid var(--k);
+}
+
+/* The index's first row: the pi tile and app name link back to the dashboard. */
+.ix-brand {
+  gap: 8px;
+  position: sticky;
+  z-index: 4;
+  top: 0;
+  display: flex;
+  height: 24px;
+  align-items: center;
+  padding: 0 10px;
+  background: var(--w);
+  border-bottom: 1px solid var(--k);
+}
+
+.sect {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  display: flex;
+  height: var(--row);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--w);
+  border-bottom: 1px solid var(--k);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.sect > .trunc {
+  min-width: 0;
+}
+
+.ix-project + .ix-project {
+  border-top: 1px solid var(--k);
+}
+
+.ix-load-error {
+  padding: 0 10px;
+  overflow-wrap: anywhere;
+}
+
+/* Each project header sticks below the home row, within its own section. */
+.ix-project > .project-head {
+  position: sticky;
+  z-index: 3;
+  top: 24px;
+  background: var(--w);
+}
+
+.ix-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  height: var(--row);
+  padding: 0 10px;
+  border-left: 2px solid var(--g2);
+  border-bottom: 1px solid var(--g1);
+}
+
+.ix-row:hover {
+  color: inherit;
+  background: var(--g1);
+}
+
+.ix-row-current,
+.ix-row-current:hover {
+  color: var(--w);
+  background: var(--k);
+  font-weight: 700;
+}
+
+.ix-row-current .glyph,
+.ix-row-current .ix-age {
+  color: var(--w);
+}
+
+/* ---------- orb header ---------- */
+
+.orb-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.orb-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: flex;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: var(--w);
+  border-bottom: 1px solid var(--k);
+  white-space: nowrap;
+}
+
+.app:has(> .session-ribbon) .orb-header {
+  top: var(--ribbon);
+}
+
+.app:has(> .session-ribbon) .orb-index {
+  top: var(--ribbon);
+  max-height: calc(100dvh - var(--ribbon));
+}
+
+.orb-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+}
+
+.orb-life {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-uploads {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--k);
+  background: var(--g1);
+}
+.workspace-upload-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 4px 0;
+}
+.workspace-upload-row > span:first-child {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.workspace-upload-actions {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.orb-header-actions {
+  margin-left: auto;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.orb-header-actions > .icon-button[aria-pressed="true"] {
+  color: var(--w);
+  background: var(--k);
+}
+
+.orb-rename-form {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+}
+
+.orb-rename-form input {
+  min-width: 0;
+  flex: 1;
+}
+
+.orb-rename-form button {
+  flex: none;
+  line-height: 16px;
+}
+
+/* ---------- transcript ---------- */
+
+.history {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.orb-transcript-content > .history {
+  flex: 1 0 auto;
+}
+
+/* One record: a fixed prefix column naming the speaker, then the body. */
+.rec {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 4px 12px;
+}
+
+.rec-px {
+  color: var(--g3);
+  text-align: right;
+  user-select: none;
+}
+
+.rec-bd {
+  min-width: 0;
+}
+
+/* The user band spans the prefix column so a turn boundary is unmissable. */
+.rec-you {
+  padding: 9px 12px;
+  background: var(--g1);
+  border-top: 1px solid var(--g2);
+  border-bottom: 1px solid var(--g2);
+}
+
+.rec-you > .rec-px,
+.composer-prefix {
+  color: var(--k);
+  font-weight: 700;
+}
+
+.rec-q {
+  color: var(--g3);
+  border-left: 2px dotted var(--g2);
+}
+
+.rec-sys > .rec-px,
+.rec-q > .rec-px {
+  color: var(--g2);
+  font-weight: 400;
+}
+
+.rec-status {
+  margin-right: 6px;
+  padding: 0 5px;
+  color: var(--g3);
+  border: 1px solid var(--g2);
+  line-height: 16px;
+}
+
+.msg-text,
+.reasoning-body,
+.shblk-out,
+.tool-call-output,
+.tool-command-output {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-image {
+  display: block;
+  max-width: min(100%, 24rem);
+  max-height: 20rem;
+  margin: 4px 0 0;
+  border: 1px solid var(--k);
+}
+
+/* ---------- chat markdown ---------- */
+
+.chat-markdown {
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
+
+.markdown-table-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
+}
+
+.markdown-table-scroll :is(th, td) {
+  padding: 4px 12px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--g2);
+}
+
+.markdown-table-scroll th {
+  text-align: left;
+  border-bottom: 1px solid var(--k);
+}
+
+.chat-markdown p {
+  margin: 0 0 8px;
+}
+
+.chat-markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: var(--row);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0 0 8px;
+  padding-left: 3ch;
+}
+
+.chat-markdown blockquote {
+  margin: 0 0 8px;
+  padding-left: 8px;
+  color: var(--g3);
+  border-left: 2px solid var(--g2);
+}
+
+.notice code,
+.chat-markdown :not(pre) > code {
+  padding: 0 3px;
+  background: var(--g1);
+}
+
+.markdown-code-block {
+  position: relative;
+  margin: 0 0 8px;
+  background: var(--g1);
+  border: 1px solid var(--k);
+}
+
+.markdown-code-copy {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+
+.device-code-copy[data-state="copied"],
+.markdown-code-copy[data-state="copied"] {
+  color: var(--ok);
+}
+
+.device-code-copy[data-state="failed"],
+.markdown-code-copy[data-state="failed"] {
+  color: var(--bad);
+}
+
+.chat-markdown .markdown-code-block pre {
+  margin: 0;
+  margin-right: 26px;
+  padding: 2px 8px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.chat-markdown pre code {
+  display: block;
+  padding: 0;
+  background: none;
+}
+
+/* ---------- activity rail: one geometry for reasoning and every tool ---------- */
+
+.tool-activity {
+  display: contents;
+}
+
+.activity-rail-row {
+  margin-bottom: 4px;
+  background: var(--w);
+  border: 1px solid var(--g2);
+}
+
+.activity-rail-row > summary,
+.tool-activity-call:not(details),
+.tool-activity-call > summary {
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: var(--row);
+  cursor: pointer;
+  list-style: none;
+}
+
+.activity-rail-row > summary {
+  padding: 0 8px;
+  user-select: none;
+}
+
+.activity-rail-row > summary::-webkit-details-marker,
+.tool-activity-call > summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-rail-row > summary:hover {
+  background: var(--g1);
+}
+
+.activity-rail-marker {
+  color: var(--g3);
+}
+
+.activity-rail-marker::before {
+  content: "\25b8";
+}
+
+.activity-rail-row[open] > summary .activity-rail-marker::before {
+  content: "\25be";
+}
+
+.activity-rail-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-rail-headline,
+.activity-rail-metric,
+.tool-call-status {
+  color: var(--g3);
+  white-space: nowrap;
+}
+
+.activity-rail-row-running .activity-rail-marker,
+.activity-rail-row-running .activity-rail-label,
+.tool-activity-running,
+.tool-diff-added {
+  color: var(--ok);
+}
+
+.activity-rail-row-failed .activity-rail-marker,
+.activity-rail-row-failed .activity-rail-label,
+.tool-activity-failed,
+.tool-diff-removed {
+  color: var(--bad);
+}
+
+.reasoning-body,
+.tool-activity-calls {
+  padding: 2px 8px 4px;
+  color: var(--g3);
+  background: var(--g1);
+  border-top: 1px solid var(--g2);
+}
+
+/* MCP forms share the chat disclosure, with form gutters and an inverted focus row. */
+.project-mcp-connection .reasoning-body {
+  padding-top: 4px;
+  padding-bottom: 8px;
+}
+.project-mcp-connection > summary:focus-visible {
+  background: var(--k);
+  color: var(--w);
+}
+.project-mcp-connection > summary:focus-visible .activity-rail-marker,
+.project-mcp-connection > summary:focus-visible .activity-rail-headline {
+  color: inherit;
+}
+
+.tool-activity-call:not(details),
+.tool-activity-call > summary {
+  color: var(--g3);
+}
+
+.tool-call-marker {
+  color: var(--k);
+}
+
+.tool-details > summary {
+  color: var(--g3);
+  cursor: pointer;
+}
+
+.tool-input,
+.tool-output,
+.tool-call-output {
+  max-height: 20rem;
+  margin: 0 0 4px 2ch;
+  padding: 2px 8px;
+  overflow: auto;
+  color: var(--g3);
+  background: var(--w);
+  border: 1px solid var(--g2);
+}
+
+.tool-error,
+.tool-call-output-error {
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-color: var(--bad);
+}
+
+.tool-command {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid var(--g2);
+}
+
+.tool-command:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.tool-command-line {
+  display: grid;
+  grid-template-columns: 4ch minmax(0, 1fr);
+  gap: 8px;
+}
+
+.tool-command-text {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.tool-command-output,
+.tool-command-footer {
+  max-height: 20rem;
+  overflow: auto;
+  padding-left: calc(4ch + 8px);
+  color: var(--g3);
+}
+
+/* ---------- compaction, custom events, shell blocks ---------- */
+
+.record-compaction {
+  padding: 2px 12px;
+  color: var(--g3);
+}
+
+.record-compaction .compaction-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.record-compaction .compaction-line::before,
+.record-compaction .compaction-line::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--g2);
+}
+
+.record-compaction summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.record-custom {
+  padding: 0 8px;
+  border-left: 2px solid var(--st-start);
+}
+
+.shblk {
+  border: 1px solid var(--k);
+}
+
+.shblk-cmd {
+  padding: 0 8px;
+  border-bottom: 1px solid var(--g1);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.shblk-out {
+  max-height: 28rem;
+  padding: 0 8px;
+  overflow: auto;
+  color: var(--g3);
+}
+
+.shblk-ft {
+  padding: 0 8px;
+  color: var(--g3);
+  border-top: 1px solid var(--g1);
+}
+
+/* live output ends in a blinking block cursor */
+.cur,
+.composer-caret {
+  display: inline-block;
+  width: 1ch;
+  height: var(--row);
+  background: var(--k);
+  vertical-align: bottom;
+  animation: cursor-blink 1.06s steps(1, end) infinite;
+}
+
+@keyframes cursor-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  50.01%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cur,
+  .composer-caret {
+    animation: none;
+  }
+}
+
+.busy-indicator {
+  padding: 0 12px 0 44px;
+}
+
+/* ---------- lifecycle and auth diagnostics ---------- */
+
+.notice {
+  padding: 0 8px;
+  border: 1px solid var(--k);
+}
+
+.notice-error {
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-color: var(--bad);
+}
+
+.user-code {
+  margin: 0 2px;
+  padding: 0 8px;
+  color: var(--w);
+  background: var(--k);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  /* Any click selects the whole code, never bleeding into adjacent words. */
+  -webkit-user-select: all;
+  user-select: all;
+}
+
+/* ---------- composer ---------- */
+
+/* Pinned to the viewport bottom, above the transcript scrolling behind it. */
+.composer {
+  position: sticky;
+  z-index: 30;
+  bottom: 0;
+  padding: 4px 12px;
+  background: var(--w);
+  border-top: 1px solid var(--k);
+}
+
+.composer-line {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.composer-prefix {
+  text-align: right;
+}
+
+.composer-editor {
+  position: relative;
+  min-width: 0;
+  background: var(--w);
+  isolation: isolate;
+}
+
+.composer-caret-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  line-height: var(--row);
+}
+
+.composer-caret {
+  position: absolute;
+  pointer-events: none;
+  background: var(--w);
+  mix-blend-mode: difference;
+}
+
+.composer-caret[hidden] {
+  display: none;
+}
+
+.composer-input[data-block-caret="true"] {
+  caret-color: transparent;
+}
+
+.composer-input {
+  display: block;
+  width: 100%;
+  height: calc(4 * var(--row));
+  min-height: calc(4 * var(--row));
+  padding: 0;
+  resize: vertical;
+  border: 0;
+  line-height: var(--row);
+}
+
+.composer-input:focus {
+  color: var(--k);
+  background: transparent;
+}
+
+.composer-line > .composer-abort {
+  align-self: start;
+}
+
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 4px 44px;
+}
+
+.composer-attachment {
+  position: relative;
+  display: inline-flex;
+}
+
+.composer-attachment img {
+  max-width: 8rem;
+  max-height: 4.5rem;
+  background: var(--w);
+  border: 1px solid var(--k);
+}
+
+.composer-attachment-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 18px;
+}
+
+/* ---------- header-owned terminal shade ---------- */
+
+.orb-terminal-window {
+  position: absolute;
+  top: 100%;
+  left: -1px;
+  width: calc(100% + 1px);
+  padding: 13px 0;
+  display: flex;
+  flex-direction: column;
+  white-space: normal;
+  color: var(--k);
+  background: var(--w);
+  border: 1px solid var(--k);
+}
+
+.orb-terminal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: clip;
+}
+
+.orb-terminal-resize {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.orb-terminal-resize:focus-visible {
+  outline: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.orb-terminal-window.orb-terminal-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.orb-terminal-error {
+  flex: none;
+  padding: 4px 8px;
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-bottom: 1px solid var(--bad);
+}
+
+.orb-terminal-error button {
+  margin-left: 8px;
+}
+
+.orb-terminal-loading {
+  flex: none;
+  padding: 4px 8px;
+  color: var(--g3);
+}
+
+.orb-terminal-window .orb-terminal-emulator {
+  width: 100%;
+  flex: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 0;
+  padding: 0 15px;
+  overflow: auto;
+  scroll-snap-type: y mandatory;
+  color: var(--k);
+  background: var(--w);
+  --term-fg: #000;
+  --term-bg: #fff;
+  --term-cursor: #000;
+  --term-font-family: var(--mono);
+  --term-font-size: var(--text-size);
+  --term-line-height: calc(20 / 13);
+  --term-row-height: var(--row);
+  --term-color-2: var(--ok);
+  --term-color-3: var(--st-start);
+}
+
+.orb-terminal-emulator .term-row {
+  scroll-snap-align: start;
+}
+
+/* Side rail is phone-only; desktop keeps its four-line prompt and index. */
+.composer-phone-pad,
+.composer-phone-rail,
+.composer-phone-feedback,
+.orb-phone-home,
+button.orb-phone-menu {
+  display: none;
+}
+
+.orb-composer-feedback-original,
+.orb-transcript-scroll,
+.orb-transcript-content {
+  display: contents;
+}
+
+@media (max-width: 600px) {
+  html:has(.orb-page),
+  body:has(.orb-page) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  #root:has(.orb-page) {
+    min-height: 0;
+  }
+
+  .app:has(.orb-page) {
+    position: fixed;
+    top: var(--phone-viewport-top, 0px);
+    left: 0;
+    width: 100%;
+    height: var(--phone-viewport-height, 100dvh);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-page {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-main {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .orb-transcript-content {
+    display: flow-root;
+  }
+
+  .orb-transcript-scroll {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: none;
+  }
+
+  .orb-index {
+    display: none;
+  }
+
+  .orb-header {
+    position: relative;
+    height: auto;
+    min-height: 44px;
+    flex-wrap: wrap;
+    gap: 0 8px;
+    padding: 0 12px;
+  }
+
+  .app:has(> .session-ribbon) .orb-header {
+    top: auto;
+  }
+
+  .orb-phone-home,
+  button.orb-phone-menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border: 0;
+  }
+
+  .orb-name {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .orb-header > .icon-button:not(.orb-phone-menu),
+  .orb-identity > .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .orb-life-word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .orb-header-actions {
+    display: none;
+    width: 100%;
+    justify-content: flex-end;
+    border-top: 1px solid var(--g2);
+    gap: 8px;
+  }
+
+  .orb-header[data-phone-actions="true"] .orb-header-actions {
+    display: flex;
+  }
+
+  .orb-header-actions > button.icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .orb-rename-form {
+    flex-wrap: wrap;
+  }
+
+  .orb-rename-form input {
+    width: 80px;
+    font-size: 16px;
+  }
+
+  .orb-main:has(.composer) .orb-composer-feedback-original {
+    display: none;
+  }
+
+  .composer {
+    position: relative;
+    bottom: auto;
+    flex: none;
+    padding: 0 12px env(safe-area-inset-bottom);
+  }
+
+  .composer-phone-feedback {
+    max-height: 80px;
+    overflow-y: auto;
+    display: block;
+    padding: 4px 0;
+    color: var(--bad);
+    overflow-wrap: anywhere;
+  }
+
+  .composer-phone-pad {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 12px;
+    height: 44px;
+  }
+
+  .composer-open {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    background: var(--w);
+  }
+
+  .composer-draft-preview {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--g3);
+  }
+
+  .composer-phone-pad > button.icon-button,
+  .composer-phone-rail > button.icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .composer:not([data-expanded="true"]) .composer-line,
+  .composer:not([data-expanded="true"]) .composer-attachments,
+  .composer[data-expanded="true"] .composer-phone-pad,
+  .composer-line > .composer-abort {
+    display: none;
+  }
+
+  .composer-line {
+    grid-template-columns: 32px minmax(0, 1fr) 44px;
+  }
+
+  .composer-line > .composer-prefix {
+    padding-top: 12px;
+  }
+
+  .composer-input {
+    height: 88px;
+    min-height: 88px;
+    padding: 12px 0;
+    resize: none;
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  .composer-input[data-block-caret="true"] {
+    caret-color: auto;
+  }
+
+  .composer-caret {
+    display: none;
+  }
+
+  .composer-phone-rail {
+    display: flex;
+    flex-direction: column;
+  }
+
+  button.composer-send {
+    color: var(--w);
+    background: var(--k);
+  }
+
+  button.composer-send:disabled {
+    color: var(--g2);
+    background: var(--g1);
+  }
+
+  .composer-attachments {
+    max-height: 80px;
+    overflow-y: auto;
+    margin-top: 4px;
+  }
+
+  .composer-attachment-remove {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Lifecycle cluster: native controls, one consistent desktop cell rule. */
+.orb-identity {
+  display: contents;
+}
+.orb-settings {
+  display: none;
+}
+.command-picker {
+  position: absolute;
+  z-index: 25;
+  bottom: 100%;
+  left: 56px;
+  width: min(420px, calc(100% - 68px));
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--k);
+  background: var(--w);
+}
+.command-picker button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+}
+.command-picker button.selected {
+  background: var(--k);
+  color: var(--w);
+}
+.command-picker button:disabled {
+  color: var(--g2);
+}
+.command-empty {
+  padding: 5px 8px;
+  color: var(--g3);
+}
+.composer:has(.command-picker) .composer-phone-feedback,
+.composer[data-settings-pending="true"] .composer-phone-feedback {
+  display: block;
+}
+.orb-main:has(.command-picker) .orb-composer-feedback-original,
+.orb-main:has(.composer[data-settings-pending="true"]) .orb-composer-feedback-original {
+  display: none;
+}
+@media (min-width: 601px) {
+  .orb-header {
+    gap: 0;
+    padding: 0;
+  }
+  .orb-identity {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex: 1;
+    min-width: 50px;
+    height: 23px;
+    padding: 0 8px 0 12px;
+  }
+  .orb-header .orb-life {
+    order: 1;
+    height: 23px;
+    padding: 0 8px;
+    border-left: 1px solid var(--k);
+  }
+  .orb-header-actions {
+    display: contents;
+  }
+  .orb-header-actions > button[aria-label="Start orb"],
+  .orb-header-actions > button[aria-label="Stop orb"] {
+    order: 2;
+    margin-right: 4px;
+  }
+  .orb-settings {
+    display: flex;
+    order: 3;
+    height: 23px;
+    min-width: 70px;
+    max-width: 40%;
+    flex: 0 1 auto;
+  }
+  .orb-settings button:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .orb-settings button:last-child {
+    flex: none;
+  }
+  .orb-settings button {
+    border: 0;
+    border-left: 1px solid var(--k);
+    padding: 0 8px;
+    color: var(--g3);
+    background: transparent;
+    font: inherit;
+  }
+  .orb-settings button:hover:not(:disabled) {
+    background: var(--k);
+    color: var(--w);
+  }
+  .orb-header-actions > button:not([aria-label="Start orb"]):not([aria-label="Stop orb"]) {
+    order: 4;
+    position: relative;
+    width: 20px;
+    height: 20px;
+    margin: 0 4px;
+  }
+  .orb-header-actions > button[aria-label="Open terminal"]::before,
+  .orb-header-actions > button[aria-label="Hide terminal"]::before,
+  .orb-header-actions > button[aria-label="Archive orb"]::before,
+  .orb-header-actions > button[aria-label="Delete orb"]::before {
+    content: "";
+    position: absolute;
+    left: -4px;
+    top: -2px;
+    height: 23px;
+    width: 1px;
+    background: var(--k);
+  }
+  .orb-index .project-head-name {
+    padding-right: 0;
+  }
+  .orb-index .project-head-actions {
+    gap: 0;
+  }
+  .orb-index .project-head-actions > button,
+  .orb-index .project-head-actions > a {
+    width: 28px;
+    height: 23px;
+    border-left: 1px solid var(--k);
+  }
+}
+@media (max-width: 600px) {
+  .command-picker {
+    left: 8px;
+    width: calc(100% - 16px);
+    max-height: min(240px, 35dvh);
+  }
+  .command-picker button {
+    min-height: 44px;
+  }
+}
+</style>
+<style>
+/* Study chrome is outside the product frame. Product tokens/controls are the real stylesheet above. */
+.study{padding:16px 20px;border-bottom:1px solid var(--k)}
+.study h1{font-size:13px;line-height:20px;letter-spacing:.08em;margin:0 0 12px}
+.variants{display:flex;gap:8px;flex-wrap:wrap}.variants button[aria-pressed="true"]{background:var(--k);color:var(--w)}
+.study p{margin:10px 0;max-width:940px;color:var(--g3)}.study-tools{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+#frame{position:relative;isolation:isolate;min-height:640px;height:calc(100dvh - 192px);overflow:auto;border-bottom:1px solid var(--k)}
+.scene{height:100%;min-height:640px;display:flex;flex-direction:column}.totals{display:flex;height:24px;flex:none;border-bottom:1px solid var(--k)}
+.totals>span{padding:1px 10px;border-right:1px solid var(--k);white-space:nowrap}.totals small{font-size:13px;color:var(--g3)}
+.totals .global{margin-left:auto;width:28px;border-left:1px solid var(--k);display:flex;align-items:center;justify-content:center}
+.board{flex:1;display:grid;grid-template-columns:repeat(auto-fill,316px);grid-auto-rows:minmax(min-content,1fr);align-content:stretch;align-items:stretch}
+.column{border-right:1px solid var(--k);border-bottom:1px solid var(--k);min-width:0}.column-head{display:flex;align-items:center;height:25px;padding:0 10px;border-bottom:1px solid var(--k);gap:8px}
+.column-head .project-name{flex:1}.column-head .actions{display:flex;gap:8px}.new-project{border-left:1px dashed var(--g2);padding:0 10px}.new-project h2{font-size:18px;line-height:24px;margin:0 0 12px;letter-spacing:.08em}
+.new-project input{border-bottom:1px solid var(--g2);display:block;margin:0 0 10px;width:100%}.new-project button{background:var(--k);color:var(--w)}
+.tile{height:16px;width:16px;vertical-align:middle;flex:none}.orb-entry-title{align-items:center}.foot{height:24px;flex:none;display:flex;align-items:center;padding:0 10px;color:var(--g3);border-top:1px solid var(--k);gap:16px}.foot .entry{margin-left:auto}
+.sheet{background:var(--w);border:1px solid var(--k);min-width:0}.sheet-title{height:24px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--k)}.sheet-title .icon-button{margin-left:auto}
+.editor{display:flex;flex-direction:column;min-height:0;flex:1}.editor textarea{display:block;width:100%;flex:1;min-height:240px;resize:vertical;padding:10px;line-height:20px;outline:0;tab-size:2}.editor textarea:focus{box-shadow:inset 2px 0 var(--k)}
+.editor-foot{display:flex;align-items:center;gap:10px;min-height:32px;padding:5px 10px;border-top:1px solid var(--k)}.editor-foot .receipt{color:var(--g3);font-size:12px}.editor-foot .receipt.error{color:var(--bad)}.editor-foot button{margin-left:auto}.editor-foot .dirty{color:var(--g3)}
+.scrim{position:absolute;inset:0;z-index:5;background:rgb(0 0 0 / 35%);display:flex;align-items:flex-start;justify-content:center;padding:80px 12px 24px;min-height:640px}.scrim .sheet{width:560px;max-width:100%}
+.folio{position:absolute;inset:0;background:var(--w);z-index:4;display:flex;flex-direction:column;min-height:640px}.folio .sheet-title{border-bottom:1px solid var(--k);padding:0}.folio .sheet-title>button{border:0;border-right:1px solid var(--k);height:23px;margin:0}.folio .editor{max-width:960px;width:100%;align-self:center;border-left:1px solid var(--k);border-right:1px solid var(--k)}.folio .editor textarea{resize:none}
+.personal-strip{border-bottom:1px solid var(--k);flex:none}.personal-strip>button{width:100%;text-align:left;border:0;height:24px;padding:0 10px}.personal-strip.open{display:grid;grid-template-columns:236px minmax(0,1fr);height:304px}.personal-strip.open>button{border-right:1px solid var(--k);align-self:stretch;height:100%;display:flex;align-items:flex-start;padding-top:2px;background:var(--g1)}.personal-strip .editor textarea{min-height:240px;resize:none}.personal-strip.open>button:hover{background:var(--k);color:var(--w)}
+.scope-bar{display:flex;border-bottom:1px solid var(--k);padding:4px 10px;gap:8px}.scope-bar button[aria-pressed="true"]{background:var(--k);color:var(--w)}.scope-bar>.icon-button{margin-left:auto}.scope-project{padding:10px}.scope-project input{display:block;border-bottom:1px solid var(--g2);width:100%;margin:8px 0 16px}.scope-project p{margin:0;color:var(--g3)}
+.orb-scene{display:grid;grid-template-columns:236px minmax(0,1fr);height:100%;min-height:640px}.rail{border-right:1px solid var(--k)}.home-row{height:24px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--k);padding:0 10px}.home-row a{border:0}.home-row button{margin-left:auto}.ix-sample{display:flex;align-items:center;gap:6px;padding:0 10px;height:20px;border-left:2px solid var(--ok)}.ix-sample.selected{background:var(--k);color:var(--w)}.ix-sample span:last-child{margin-left:auto;color:var(--g2)}
+.conversation{min-width:0;display:flex;flex-direction:column}.orb-top{height:24px;border-bottom:1px solid var(--k);display:flex;align-items:center;flex:none;overflow:hidden}.orb-top>span{height:24px;border-right:1px solid var(--k);padding:2px 8px;display:flex;align-items:center;gap:8px;white-space:nowrap}.orb-top .identity{flex:1;min-width:0;font-weight:700;overflow:hidden}.orb-top>button{width:28px;height:23px;border-right:1px solid var(--k)}
+.transcript{flex:1}.record{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;padding:10px 12px}.record.user{background:var(--g1);border-bottom:1px solid var(--g2)}.record p{margin:0 0 10px}.record .prefix{color:var(--g3)}.tool-row{border:1px solid var(--k);padding:0 6px;margin:8px 0}.compose{display:flex;gap:12px;padding:10px 12px;border-top:1px solid var(--k);height:102px;flex:none}.compose span{width:32px;font-weight:700}.compose textarea{resize:none;flex:1;min-width:0;outline:0}
+.margin-sheet{position:absolute;right:0;top:24px;bottom:0;width:480px;max-width:100%;display:flex;flex-direction:column;border-top:0;z-index:4}.margin-sheet .editor textarea{resize:none}
+button:focus-visible,a:focus-visible{outline:2px solid var(--k);outline-offset:2px}.study-note{padding:8px 20px;color:var(--g3)}
+@media(max-width:600px){.study{padding:12px}.variants{gap:6px}.variants button{min-height:36px}.study-tools button{min-height:36px}#frame{height:740px}.scene,.orb-scene{min-height:740px}.board{grid-template-columns:minmax(0,1fr)}.column{min-height:190px}.new-project{min-height:160px}.totals{height:auto;min-height:24px;flex-wrap:wrap}.totals>span{padding:1px 5px}.totals small{font-size:11px}.scrim{padding:44px 12px 24px;min-height:100%}.sheet-title{height:44px}.sheet-title .icon-button,.home-row button{width:44px;height:44px}.editor textarea{font-size:16px;min-height:300px}.editor-foot{min-height:44px}.editor-foot button{min-height:32px}.personal-strip.open{display:flex;flex-direction:column;height:400px}.personal-strip.open>button{height:44px;flex:none;align-items:center;border-bottom:1px solid var(--k);border-right:0;padding:0 10px}.personal-strip>button{height:44px}.personal-strip .editor textarea{min-height:260px}.folio{min-height:740px}.folio .sheet-title>button{height:43px}.orb-scene{grid-template-columns:minmax(0,1fr)}.rail{display:none}.orb-top{height:44px}.orb-top .model,.orb-top .thinking{display:none}.orb-top>span{height:44px}.orb-top>button{height:44px;width:44px}.margin-sheet{top:44px;width:100%;border-left:0;border-right:0}.foot{height:auto;min-height:44px;flex-wrap:wrap}.foot .entry{min-height:32px}.scope-bar button{min-height:32px}.receipt{max-width:200px}.study-note{padding:8px 12px}}
+</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true"><symbol id="i-fold" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="m3 6 5 5 5-5"/></symbol><symbol id="i-send" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M8 13V3M3 8l5-5 5 5"/></symbol><symbol id="i-back" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M10 3 5 8l5 5"/></symbol><symbol id="i-more" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M3 8h1m3 0h1m3 0h1"/></symbol><symbol id="i-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M8 3v10M3 8h10"/></symbol><symbol id="i-gear" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M6.5 1.5h3l.5 2 1.5 1 2-.5 1.5 2.5-1.5 1.5v1l1.5 1.5-1.5 2.5-2-.5-1.5 1-.5 2h-3l-.5-2-1.5-1-2 .5L1 10.5 2.5 9V8L1 6.5 2.5 4l2 .5 1.5-1z M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0"/></symbol><symbol id="i-upload" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M3 10v3h10v-3 M8 10V2 M5 5l3-3 3 3"/></symbol><symbol id="i-start" viewBox="0 0 16 16" fill="currentColor" stroke="none" stroke-width="1.5" stroke-linecap="square"><path d="M5 3l7 5-7 5z"/></symbol><symbol id="i-stop" viewBox="0 0 16 16" fill="currentColor" stroke="none" stroke-width="1.5" stroke-linecap="square"><path d="M4 4h8v8H4z"/></symbol><symbol id="i-pen" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M3 10 10 3l3 3-7 7H3z M8 5l3 3"/></symbol><symbol id="i-archive" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M3 6v7h10V6 M2 3h12v3H2z M6 9h4"/></symbol><symbol id="i-bin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="square"><path d="M4 6h16M9 6V3h6v3M6 9v11h12V9M10 10v6M14 10v6"/></symbol><symbol id="i-x" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="m4 4 8 8m0-8-8 8"/></symbol><symbol id="i-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M6 6h7v8H6z M3 10H2V2h8v1"/></symbol><symbol id="i-terminal" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><path d="M3 4l4 4-4 4 M9 12h4"/></symbol></svg>
+<header class="study">
+<h1>PERSONAL AGENTS.MD / FIVE DIRECTIONS</h1>
+<nav class="variants" aria-label="Design proposals"></nav>
+<p id="rationale"></p>
+<div class="study-tools"><button id="toggle-entry">Show entry point</button><label><input type="checkbox" id="fail-save"> Simulate failed save</label><span>Interactive study · memory only · no real configuration changes</span></div>
+</header>
+<main id="frame" aria-label="Product preview"></main>
+<footer class="study-note">Shared proposal: one personal Markdown file across projects; save for the next orb start, without interrupting running agents. Raw Markdown, explicit Save, no templates or onboarding.</footer>
+<script>
+const tiles = {"busy": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48dGl0bGU+T3JiIGJ1c3k8L3RpdGxlPjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgcng9IjIiIGZpbGw9IiMxYTdlMzciIHN0cm9rZT0ibm9uZSIvPjxnIGNvbG9yPSJ3aGl0ZSI+PGNpcmNsZSBjeD0iNSIgY3k9IjgiIHI9IjEiIGZpbGw9ImN1cnJlbnRDb2xvciIgc3Ryb2tlPSJub25lIi8+PGNpcmNsZSBjeD0iOCIgY3k9IjgiIHI9IjEiIGZpbGw9ImN1cnJlbnRDb2xvciIgc3Ryb2tlPSJub25lIi8+PGNpcmNsZSBjeD0iMTEiIGN5PSI4IiByPSIxIiBmaWxsPSJjdXJyZW50Q29sb3IiIHN0cm9rZT0ibm9uZSIvPjwvZz48L3N2Zz4K", "running": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48dGl0bGU+T3JiIHJ1bm5pbmc8L3RpdGxlPjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgcng9IjIiIGZpbGw9IiMxYTdlMzciIHN0cm9rZT0ibm9uZSIvPjxnIGNvbG9yPSJ3aGl0ZSI+PGNpcmNsZSBjeD0iOCIgY3k9IjgiIHI9IjMiLz48L2c+PC9zdmc+Cg==", "stopped": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48dGl0bGU+T3JiIHN0b3BwZWQ8L3RpdGxlPjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgcng9IjIiIGZpbGw9IiM3Nzc3NzciIHN0cm9rZT0ibm9uZSIvPjxnIGNvbG9yPSJ3aGl0ZSI+PHBhdGggZD0iTTUgOGg2Ii8+PC9nPjwvc3ZnPgo=", "neutral": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48dGl0bGU+T3JiIG5ldXRyYWw8L3RpdGxlPjxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgcng9IjIiIGZpbGw9IiM1NTU1NTUiIHN0cm9rZT0ibm9uZSIvPjxnIGNvbG9yPSJ3aGl0ZSI+PHBhdGggZD0iTTQgNWg4TTYgNXYzLjVRNiAxMCA1IDExTTEwIDV2NXEwIDEgMSAxIi8+PC9nPjwvc3ZnPgo="};
+const proposals = [
+ ['Home gear', 'A gear in the dashboard totals strip opens a single-purpose 560px editor. Familiar Config geometry, unmistakably outside every project. Smallest addition; another gear has to carry a different scope.'],
+ ['Footer folio', 'A quiet ~/AGENTS.md link in the system footer opens a full-page document. Maximum writing room with no permanent settings hub. Best for a long personal file; the entry is intentionally low-key.'],
+ ['Personal fold', 'A ~/AGENTS.md disclosure sits between fleet totals and project columns. Opening it unfolds a full-width writing band above the fleet. Home-directory scope becomes spatial: your instructions sit above every project. Costs dashboard height while open.'],
+ ['Scope switch', 'The existing project gear gains a Me / project scope switch. Choose Me to edit the shared file; project General, MCPs and Secrets stay project-owned. No new entry icon, but entering through a project risks confusing ownership.'],
+ ['Margin sheet', 'A ~/ control in the orb index home row opens a personal writing sheet over the conversation’s right margin. Revise instructions when an agent reminds you of a preference, without replacing your message draft. Closest to the work; covers part of the transcript.']
+];
+const initial = '# How I work\n\nPrefer the smallest design that solves the problem.\nQuestion assumptions before adding machinery.\n\n# Code\n\nUse explicit types at system boundaries.\nKeep changes focused; remove obsolete code with them.\n\n# Working together\n\nBe direct. Show the tradeoffs.\nAsk before deploying or deleting resources.\n';
+const states = proposals.map(()=>({draft:initial,saved:initial,receipt:''}));
+let current = Math.max(0,Math.min(4,(Number(location.hash.slice(1))||1)-1));
+let opened = true, scope = 'me', currentProject = 'pi-orb';
+let messageDraft = 'Also consider how this feels across projects.';
+const frame = document.querySelector('#frame');
+const icon = name => `<svg class="ic" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
+const control = (name,label,action,extra='') => `<button class="icon-button ${extra}" aria-label="${label}" title="${label}" ${action?`data-action="${action}"`:'disabled'}>${icon(name)}</button>`;
+const tile = state => `<img class="tile" src="${tiles[state]}" alt="${state}">`;
+const escapeHtml = text => text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+function project(name,orbs){return `<section class="column"><div class="column-head"><span class="project-name">${name}</span><span class="actions">${control('gear',`Configure ${name}`,current===3?'open-project':null)}${control('bin',`Delete ${name}`,null,'danger')}</span></div>${orbs.map(([name,state,age])=>`<div class="orb-entry orb-entry-${state==='stopped'?'stop':state==='busy'?'busy':'idle'}"><div class="orb-entry-title">${tile(state)}<span class="orb-entry-link">${name}</span></div><div class="orb-entry-meta">${age}<span class="orb-entry-actions">${control('archive',`Archive ${name}`)}${control('bin',`Delete ${name}`,null,'danger')}</span></div></div>`).join('')}<div class="project-new-orb-row"><button class="text-action project-new-orb" disabled>NEW ORB</button></div></section>`}
+function editor(){const state=states[current];return `<div class="editor"><textarea aria-label="Personal AGENTS.md" spellcheck="false">${escapeHtml(state.draft)}</textarea><div class="editor-foot"><span class="dirty">${state.draft!==state.saved?'Unsaved':''}</span><span class="receipt ${state.receipt.startsWith('Save failed')?'error':''}" role="status">${state.receipt}</span><button data-action="save" ${state.draft===state.saved?'disabled':''}>Save</button></div></div>`}
+function title(text){return `<div class="sheet-title"><span>${text}</span>${control('x','Close personal instructions','close')}</div>`}
+function board(){return `<div class="scene"><div class="totals"><span><b>3</b> <small>PROJECTS</small></span><span><b>6</b> <small>ORBS</small></span><span><b>1</b> <small>BUSY</small></span><span><b>0</b> <small>FAILED</small></span>${current===0?`<div class="global">${control('gear','Personal instructions','open')}</div>`:''}</div>${current===2?`<section class="personal-strip ${opened?'open':''}"><button data-action="${opened?'close':'open'}" aria-expanded="${opened}">${opened?'▾':'▸'} ~/AGENTS.md</button>${opened?editor():''}</section>`:''}<div class="board">${project('pi-orb',[['Personal instructions','busy','12s'],['MCP OAuth','running','8m'],['Mobile composer','stopped','2h']])}${project('field-notes',[['Search indexing','running','4m'],['Export pipeline','stopped','1d']])}${project('dotfiles',[['Shell aliases','stopped','3d']])}<section class="new-project"><h2>NEW PROJECT</h2><input placeholder="project name" aria-label="Project name" disabled><input placeholder="repository URL" aria-label="Repository URL" disabled><button disabled>Create project</button></section></div><div class="foot"><span>gce host · postgres · v0.1.0</span>${current===1?'<button class="text-action entry" data-action="open">~/AGENTS.md</button>':''}</div></div>`}
+function orb(){return `<div class="orb-scene"><aside class="rail"><div class="home-row">${tile('neutral')}<a href="#1" data-action="dashboard">PI-ORB</a><button class="text-action" aria-label="Personal instructions" title="Personal instructions" data-action="open">~/</button></div>${['PI-ORB','FIELD-NOTES','DOTFILES'].map((name,i)=>`<div class="column-head"><span class="project-name">${name}</span>${control('plus','New orb')}${control('gear','Project config')}</div>${(i===0?['Personal instructions','MCP OAuth','Mobile composer']:i===1?['Search indexing','Export pipeline']:['Shell aliases']).map((n,j)=>`<div class="ix-sample ${i===0&&j===0?'selected':''}">${tile(i===0&&j===0?'busy':'stopped')}${n}<span>${j+1}h</span></div>`).join('')}`).join('')}</aside><section class="conversation"><div class="orb-top"><span class="identity">Personal instructions ${control('pen','Rename orb')}</span><span>${tile('busy')}${control('stop','Stop orb')}</span><span class="model">astra</span><span class="thinking">high</span>${control('terminal','Terminal')}${control('upload','Upload')}${control('archive','Archive')}${control('bin','Delete',null,'danger')}<button class="phone-entry text-action" data-action="open" aria-label="Personal instructions">~/</button></div><div class="transcript"><div class="record user"><span class="prefix">you</span><div>Keep it simple. I’d rather remove a problem than add another configuration layer.</div></div><div class="record"><span class="prefix">orb</span><div><p>I’ll compare the smallest options first, with the tradeoffs made explicit.</p><div class="tool-row">▸ read · docs/web-ui.md</div><p>There’s already a good place for occasional project configuration. Personal instructions need a clearly different scope.</p></div></div></div><div class="compose"><span>&gt;</span><textarea aria-label="Message draft" placeholder="Message the orb…">${escapeHtml(messageDraft)}</textarea></div></section></div>`}
+function render(){
+ document.querySelector('.variants').innerHTML=proposals.map(([name],i)=>`<button data-proposal="${i}" aria-pressed="${i===current}">${i+1}. ${name}</button>`).join('');
+ document.querySelector('#rationale').textContent=proposals[current][1];
+ document.querySelector('#toggle-entry').textContent=opened?'Show entry point':'Open editor';
+ frame.innerHTML=current===4?orb():board();
+ if(opened){
+  if(current===0) frame.insertAdjacentHTML('beforeend',`<div class="scrim"><section class="sheet" role="dialog" aria-modal="true" aria-label="Personal instructions">${title('~/AGENTS.md')}${editor()}</section></div>`);
+  if(current===1) frame.insertAdjacentHTML('beforeend',`<section class="folio"><div class="sheet-title"><button data-action="close">← dashboard</button><span>~/AGENTS.md</span></div>${editor()}</section>`);
+  if(current===3) frame.insertAdjacentHTML('beforeend',`<div class="scrim"><section class="sheet" role="dialog" aria-modal="true" aria-label="Configuration"><div class="scope-bar"><button data-scope="me" aria-pressed="${scope==='me'}">Me</button><button data-scope="project" aria-pressed="${scope==='project'}">${currentProject}</button>${control('x','Close configuration','close')}</div>${scope==='me'?`<div class="sheet-title">AGENTS.md</div>${editor()}`:`<div class="project-config-tabs"><button aria-selected="true">General</button><button disabled>MCPs</button><button disabled>Secrets</button></div><div class="scope-project"><p>Name</p><input value="${currentProject}" aria-label="Name" readonly><p>Repository URL</p><input value="https://github.com/example/${currentProject}" aria-label="Repository URL" readonly></div>`}</section></div>`);
+  if(current===4) frame.insertAdjacentHTML('beforeend',`<section class="sheet margin-sheet" aria-label="Personal instructions">${title('~/AGENTS.md')}${editor()}</section>`);
+ }
+ const mobile=matchMedia('(max-width:600px)').matches;
+ frame.querySelector('.phone-entry')?.toggleAttribute('hidden',!mobile);
+}
+function toggle(next){opened=next;render();if(next)frame.querySelector('[data-action="close"]')?.focus();else frame.querySelector('[data-action="open"], [data-action="open-project"]')?.focus()}
+document.addEventListener('click',event=>{
+ const button=event.target.closest('button, a');if(!button)return;
+ if(button.dataset.proposal!==undefined){current=Number(button.dataset.proposal);opened=true;scope='me';location.hash=String(current+1);render();return}
+ if(button.dataset.scope){scope=button.dataset.scope;render();frame.querySelector(`[data-scope="${scope}"]`)?.focus();return}
+ const action=button.dataset.action;
+ if(action==='open'||action==='open-project'){if(action==='open-project'){scope='project';currentProject=button.getAttribute('aria-label').replace('Configure ','');}toggle(true)}
+ if(action==='close')toggle(false);
+ if(action==='dashboard'){event.preventDefault();current=0;location.hash='1';opened=false;render()}
+ if(action==='save'){
+  const state=states[current];
+  if(document.querySelector('#fail-save').checked)state.receipt='Save failed. Draft retained.';
+  else {state.saved=state.draft;state.receipt='Saved · next orb start';}
+  const selection=frame.querySelector('.editor textarea');const caret=selection.selectionStart;
+  render();const restored=frame.querySelector('.editor textarea');restored.focus();restored.setSelectionRange(caret,caret);
+ }
+});
+document.addEventListener('input',event=>{if(event.target.matches('[aria-label="Message draft"]')){messageDraft=event.target.value;return}if(!event.target.matches('.editor textarea'))return;const state=states[current];state.draft=event.target.value;state.receipt='';frame.querySelector('.dirty').textContent=state.draft!==state.saved?'Unsaved':'';frame.querySelector('.receipt').textContent='';frame.querySelector('[data-action="save"]').disabled=state.draft===state.saved});
+document.querySelector('#toggle-entry').onclick=()=>toggle(!opened);
+document.addEventListener('keydown',event=>{
+ if(event.key==='Escape'&&opened){event.preventDefault();toggle(false);return}
+ const modal=frame.querySelector('[role="dialog"]');
+ if(event.key==='Tab'&&modal&&modal.contains(document.activeElement)){
+  const items=[...modal.querySelectorAll('button:not(:disabled), textarea, input')];const index=items.indexOf(document.activeElement);
+  if(event.shiftKey&&index===0){event.preventDefault();items.at(-1).focus()}else if(!event.shiftKey&&index===items.length-1){event.preventDefault();items[0].focus()}
+ }
+});
+window.addEventListener('hashchange',()=>{const index=(Number(location.hash.slice(1))||1)-1;if(index>=0&&index<5&&index!==current){current=index;opened=true;scope='me';render()}});
+matchMedia('(max-width:600px)').addEventListener('change',event=>frame.querySelector('.phone-entry')?.toggleAttribute('hidden',!event.matches));
+render();
+</script>
+</body>
+</html>

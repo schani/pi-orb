@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { AgentSettingsEventSchema, SettingsActionSchema } from "./agent-settings.ts";
 import { HistoryRecordSchema } from "./history.ts";
 import { JsonValueSchema } from "./json.ts";
 
@@ -40,6 +41,7 @@ export const MessageInputBlockSchema = Type.Union([
 export type MessageInputBlock = Static<typeof MessageInputBlockSchema>;
 
 export const ClientActionSchema = Type.Union([
+  SettingsActionSchema,
   Type.Object(
     {
       type: Type.Literal("message"),
@@ -255,6 +257,7 @@ export const TurnNotificationEventSchema = Type.Object(
 export type TurnNotificationEvent = Static<typeof TurnNotificationEventSchema>;
 
 export const RuntimeEventSchema = Type.Union([
+  AgentSettingsEventSchema,
   RuntimeStatusEventSchema,
   SubagentsEventSchema,
   OperationStartedEventSchema,
@@ -283,6 +286,7 @@ export const RequestResultFrameSchema = Type.Object(
     at: Type.String(),
     requestId: Type.String(),
     result: Type.Union([
+      Type.Object({ type: Type.Literal("settings_applied"), duplicate: Type.Boolean() }, closed),
       Type.Object(
         {
           type: Type.Literal("accepted"),

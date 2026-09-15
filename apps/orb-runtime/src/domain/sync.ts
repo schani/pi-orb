@@ -46,7 +46,7 @@ export function computeSyncFrames(
     representedHead = snapshot.headId;
   }
 
-  const events: RuntimeEvent[] = [];
+  const events: RuntimeEvent[] = snapshot.settings ? [snapshot.settings] : [];
   if (live !== null) {
     events.push({ type: "operation_started", operationId: live.operationId });
     for (const block of live.blocks) {

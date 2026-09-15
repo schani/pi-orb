@@ -1,3 +1,4 @@
+export * from "./agent-settings.ts";
 export * from "./broker.ts";
 export * from "./control-plane-api.ts";
 export * from "./frames.ts";
@@ -9,6 +10,7 @@ export * from "./orb-archive.ts";
 export * from "./orb-inspection.ts";
 export * from "./orb-naming.ts";
 export * from "./orb-spawn.ts";
+export * from "./personal-instructions.ts";
 export * from "./project-secrets.ts";
 export * from "./repository-url.ts";
 export * from "./runtime-http.ts";

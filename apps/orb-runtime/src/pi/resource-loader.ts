@@ -4,7 +4,7 @@ import {
   type ResourceLoader,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { RuntimeHooks } from "@pi-orb/protocol";
+import type { PersonalInstructions, RuntimeHooks } from "@pi-orb/protocol";
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
 import type { HookEnvReport } from "../hooks/env-file.ts";
 import { bootHookPrompt } from "../hooks/prompt.ts";
@@ -30,6 +30,7 @@ export interface OrbResourceLoaderInput {
   readonly skillsDir: string | null;
   readonly mcp?: McpExtensionDeps;
   readonly subagents?: SubagentHost;
+  readonly personalInstructions?: PersonalInstructions;
 }
 
 /**
@@ -46,6 +47,8 @@ export interface OrbResourceLoaderInput {
  */
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
   const previewHost = input.previewHost ?? null;
+  // Capture the boot value: an SDK reload must not adopt a later account edit.
+  const personalContent = input.personalInstructions?.content ?? "";
   const hookPrompt = bootHookPrompt(input.hooks ?? {}, input.hookEnv ?? null);
   const mcpPrompt = mcpInventoryPrompt(input.mcp?.configs ?? []);
   return {
@@ -56,6 +59,14 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
       cwd: input.cwd,
       ...(input.mcp ? { mcp: input.mcp } : {}),
       ...(input.subagents ? { subagents: input.subagents } : {}),
+    }),
+    agentsFilesOverride: (current) => ({
+      agentsFiles: [
+        ...(personalContent === ""
+          ? []
+          : [{ path: "pi-orb:personal/AGENTS.md", content: personalContent }]),
+        ...current.agentsFiles,
+      ],
     }),
     additionalSkillPaths: input.skillsDir === null ? [] : [input.skillsDir],
     appendSystemPromptOverride: (base: string[]): string[] => [

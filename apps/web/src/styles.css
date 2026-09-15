@@ -868,6 +868,100 @@ a.project-new-orb-icon:focus-visible {
   color: var(--g2);
 }
 
+/* ---------- personal instructions ---------- */
+button.personal-instructions-gear {
+  margin-left: auto;
+  width: 28px;
+  height: 24px;
+  border-left: 1px solid var(--k);
+}
+.personal-instructions-header {
+  display: flex;
+  height: 24px;
+  align-items: center;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--k);
+}
+.personal-instructions-header button {
+  margin-left: auto;
+}
+.personal-instructions-dialog form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.personal-instructions-dialog textarea {
+  width: 100%;
+  min-height: 240px;
+  height: min(440px, 55dvh);
+  resize: vertical;
+  padding: 8px 10px;
+  border: 0;
+  outline-offset: -2px;
+}
+.personal-instructions-feedback {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid var(--k);
+  padding: 5px 10px;
+  min-height: 32px;
+  color: var(--g3);
+}
+.personal-instructions-feedback > span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.personal-instructions-feedback button {
+  flex: none;
+}
+.personal-instructions-error {
+  color: var(--bad);
+}
+@media (max-width: 600px) {
+  .dashboard-totals {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) 44px;
+    height: 48px;
+  }
+  .dashboard-total {
+    min-width: 0;
+    padding: 0 8px;
+  }
+  .dashboard-total:nth-child(3) {
+    grid-row: 2;
+    grid-column: 1;
+  }
+  .dashboard-total:nth-child(4) {
+    grid-row: 2;
+    grid-column: 2;
+  }
+  button.personal-instructions-gear {
+    grid-row: 1 / 3;
+    grid-column: 3;
+    height: 48px;
+    width: 44px;
+  }
+  .project-secrets-dialog.personal-instructions-dialog {
+    margin-top: 24px;
+  }
+  .personal-instructions-header {
+    height: 44px;
+  }
+  .personal-instructions-header button {
+    height: 44px;
+    width: 44px;
+  }
+  .personal-instructions-dialog textarea {
+    font-size: 16px;
+    min-height: 120px;
+    height: min(440px, 50dvh);
+  }
+  .personal-instructions-feedback button {
+    min-height: 44px;
+  }
+}
+
 /* ---------- project config ---------- */
 
 .project-secrets-backdrop {
@@ -2101,7 +2195,8 @@ button.orb-phone-menu {
     min-width: 0;
   }
 
-  .orb-header > .icon-button:not(.orb-phone-menu) {
+  .orb-header > .icon-button:not(.orb-phone-menu),
+  .orb-identity > .icon-button {
     width: 44px;
     height: 44px;
   }
@@ -2248,6 +2343,153 @@ button.orb-phone-menu {
 
   .composer-attachment-remove {
     min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Lifecycle cluster: native controls, one consistent desktop cell rule. */
+.orb-identity {
+  display: contents;
+}
+.orb-settings {
+  display: none;
+}
+.command-picker {
+  position: absolute;
+  z-index: 25;
+  bottom: 100%;
+  left: 56px;
+  width: min(420px, calc(100% - 68px));
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--k);
+  background: var(--w);
+}
+.command-picker button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+}
+.command-picker button.selected {
+  background: var(--k);
+  color: var(--w);
+}
+.command-picker button:disabled {
+  color: var(--g2);
+}
+.command-empty {
+  padding: 5px 8px;
+  color: var(--g3);
+}
+.composer:has(.command-picker) .composer-phone-feedback,
+.composer[data-settings-pending="true"] .composer-phone-feedback {
+  display: block;
+}
+.orb-main:has(.command-picker) .orb-composer-feedback-original,
+.orb-main:has(.composer[data-settings-pending="true"]) .orb-composer-feedback-original {
+  display: none;
+}
+@media (min-width: 601px) {
+  .orb-header {
+    gap: 0;
+    padding: 0;
+  }
+  .orb-identity {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex: 1;
+    min-width: 50px;
+    height: 23px;
+    padding: 0 8px 0 12px;
+  }
+  .orb-header .orb-life {
+    order: 1;
+    height: 23px;
+    padding: 0 8px;
+    border-left: 1px solid var(--k);
+  }
+  .orb-header-actions {
+    display: contents;
+  }
+  .orb-header-actions > button[aria-label="Start orb"],
+  .orb-header-actions > button[aria-label="Stop orb"] {
+    order: 2;
+    margin-right: 4px;
+  }
+  .orb-settings {
+    display: flex;
+    order: 3;
+    height: 23px;
+    min-width: 70px;
+    max-width: 40%;
+    flex: 0 1 auto;
+  }
+  .orb-settings button:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .orb-settings button:last-child {
+    flex: none;
+  }
+  .orb-settings button {
+    border: 0;
+    border-left: 1px solid var(--k);
+    padding: 0 8px;
+    color: var(--g3);
+    background: transparent;
+    font: inherit;
+  }
+  .orb-settings button:hover:not(:disabled) {
+    background: var(--k);
+    color: var(--w);
+  }
+  .orb-header-actions > button:not([aria-label="Start orb"]):not([aria-label="Stop orb"]) {
+    order: 4;
+    position: relative;
+    width: 20px;
+    height: 20px;
+    margin: 0 4px;
+  }
+  .orb-header-actions > button[aria-label="Open terminal"]::before,
+  .orb-header-actions > button[aria-label="Hide terminal"]::before,
+  .orb-header-actions > button[aria-label="Archive orb"]::before,
+  .orb-header-actions > button[aria-label="Delete orb"]::before {
+    content: "";
+    position: absolute;
+    left: -4px;
+    top: -2px;
+    height: 23px;
+    width: 1px;
+    background: var(--k);
+  }
+  .orb-index .project-head {
+    padding-right: 0;
+  }
+  .orb-index .project-head-actions {
+    gap: 0;
+  }
+  .orb-index .project-head-actions > button,
+  .orb-index .project-head-actions > a {
+    width: 28px;
+    height: 23px;
+    border-left: 1px solid var(--k);
+  }
+}
+@media (max-width: 600px) {
+  .command-picker {
+    left: 8px;
+    width: calc(100% - 16px);
+    max-height: min(240px, 35dvh);
+  }
+  .command-picker button {
     min-height: 44px;
   }
 }

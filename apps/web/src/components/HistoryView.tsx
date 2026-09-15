@@ -185,6 +185,7 @@ function bashExecutionView(record: EventRecord): BashExecutionView {
 
 /** Per docs/pi-adapter.md, only `pi.custom_message` with native `display: true` is shown. */
 function isDisplayedCustomMessage(record: EventRecord): boolean {
+  if (record.eventType === "agent.settings_fallback") return true;
   if (record.eventType !== "pi.custom_message") return false;
   const native = record.overflow["native"];
   if (typeof native !== "object" || native === null || Array.isArray(native)) return false;

@@ -14,12 +14,15 @@ import {
   type OrbHistoryView,
   type OrbMessageView,
   type OrbView,
+  PERSONAL_INSTRUCTIONS_PATH,
+  type PersonalInstructions,
   type ProjectView,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
   TERMINAL_SUBPROTOCOL,
   TerminalClientControlSchema,
   UploadBatchSchema,
+  validatePersonalInstructions,
   validateRepositoryUrl,
   type WorkspaceUpload,
 } from "@pi-orb/protocol";
@@ -46,6 +49,7 @@ interface MockState {
   projectSecretRevisions: Map<string, number>;
   projectMcp: Map<string, McpCatalog>;
   mcpGrants: Set<string>;
+  personalInstructions: PersonalInstructions;
 }
 
 function initialState(): MockState {
@@ -451,6 +455,7 @@ function initialState(): MockState {
         },
       ],
     ]),
+    personalInstructions: { content: "", revision: 0 },
     mcpGrants: new Set([
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000001`,
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000002`,
@@ -502,6 +507,25 @@ async function handleApi(
 
   if (method === "GET" && path === "/api/v1/session") {
     sendJson(response, 200, { status: "ok" });
+    return true;
+  }
+
+  if (path === PERSONAL_INSTRUCTIONS_PATH && (method === "GET" || method === "PUT")) {
+    response.setHeader("cache-control", "no-store");
+    if (method === "PUT") {
+      const content = validatePersonalInstructions(await readJson(request));
+      if (content.isErr()) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: content.error.message, retryable: false },
+        });
+        return true;
+      }
+      state.personalInstructions = {
+        content: content.value,
+        revision: state.personalInstructions.revision + 1,
+      };
+    }
+    sendJson(response, 200, state.personalInstructions);
     return true;
   }
 
@@ -1341,6 +1365,37 @@ function completeShell(
   if (next !== undefined) setTimeout(() => deliverPendingMessage(state, session.orbId, next.id), 0);
 }
 
+const fixtureSettings = new WeakMap<
+  MockState,
+  Map<string, import("@pi-orb/protocol").AgentSettingsEvent>
+>();
+function settingsFor(
+  state: MockState,
+  orbId: string,
+): import("@pi-orb/protocol").AgentSettingsEvent {
+  let map = fixtureSettings.get(state);
+  if (!map) {
+    map = new Map();
+    fixtureSettings.set(state, map);
+  }
+  let view = map.get(orbId);
+  if (!view) {
+    view = {
+      type: "agent_settings",
+      settings: { model: { provider: "openai-codex", id: "gpt-6-astra" }, thinkingLevel: "high" },
+      models: ["gpt-6-astra", "gpt-5.6-sol"].map((id) => ({
+        provider: "openai-codex",
+        id,
+        name: id,
+        thinkingLevels: ["low", "medium", "high"],
+      })),
+      writable: true,
+    };
+    map.set(orbId, view);
+  }
+  return view;
+}
+
 function handleAction(
   state: MockState,
   session: LiveSession,
@@ -1406,6 +1461,21 @@ function handleAction(
     return;
   }
 
+  if (action.type === "set_model" || action.type === "set_thinking") {
+    const view = settingsFor(state, session.orbId);
+    if (action.type === "set_model") view.settings = { ...view.settings, model: action.model };
+    else view.settings = { ...view.settings, thinkingLevel: action.thinkingLevel };
+    for (const peer of state.liveSessions.get(session.orbId) ?? [])
+      send(peer.socket, { v: 1, type: "runtime.event", at: now(), event: view });
+    send(session.socket, {
+      v: 1,
+      type: "request.result",
+      at: now(),
+      requestId,
+      result: { type: "settings_applied", duplicate: false },
+    });
+    return;
+  }
   const records = state.histories.get(session.orbId) ?? [];
   const headId = records.at(-1)?.id ?? null;
   if (action.expectedHeadId !== headId) {
@@ -1685,6 +1755,7 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
       });
     }
     const headId = records.at(-1)?.id ?? null;
+    send(socket, { v: 1, type: "runtime.event", at: now(), event: settingsFor(state, orbId) });
     send(socket, { v: 1, type: "sync.completed", at: now(), headId });
     send(
       socket,

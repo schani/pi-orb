@@ -1,4 +1,9 @@
-import type { ActiveSubagent, HarnessSessionMetadata, HistoryRecord } from "@pi-orb/protocol";
+import type {
+  ActiveSubagent,
+  AgentSettingsEvent,
+  HarnessSessionMetadata,
+  HistoryRecord,
+} from "@pi-orb/protocol";
 
 /**
  * A synchronous, immutable snapshot of the harness's persisted session
@@ -13,6 +18,7 @@ export interface HarnessSnapshot {
   readonly session: HarnessSessionMetadata;
   readonly records: readonly HistoryRecord[];
   readonly headId: string | null;
+  readonly settings?: AgentSettingsEvent | null;
 }
 
 /** The accumulated state of one in-flight operation, for reconnect replay. */

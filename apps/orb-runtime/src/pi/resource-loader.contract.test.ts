@@ -109,6 +109,40 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
+  it("prepends the personal boot snapshot, preserves native files, and removes only personal context when empty", async () => {
+    writeFileSync(join(agentDir, "AGENTS.md"), "guest-local instructions");
+    const native = (await implicitLoader()).getAgentsFiles().agentsFiles;
+    const personalInstructions = { content: "# Personal\nKeep this exact.\n", revision: 7 };
+    const loaded = (
+      await createOrbResourceLoader({
+        cwd: repoDir,
+        agentDir,
+        skillsDir: null,
+        personalInstructions,
+      })
+    )._unsafeUnwrap();
+    expect(loaded.getAgentsFiles().agentsFiles).toEqual([
+      { path: "pi-orb:personal/AGENTS.md", content: personalInstructions.content },
+      ...native,
+    ]);
+    personalInstructions.content = "not until next start";
+    await loaded.reload();
+    expect(loaded.getAgentsFiles().agentsFiles).toEqual([
+      { path: "pi-orb:personal/AGENTS.md", content: "# Personal\nKeep this exact.\n" },
+      ...native,
+    ]);
+    const cleared = (
+      await createOrbResourceLoader({
+        cwd: repoDir,
+        agentDir,
+        skillsDir: null,
+        personalInstructions: { content: "", revision: 8 },
+      })
+    )._unsafeUnwrap();
+    expect(cleared.getAgentsFiles().agentsFiles).toEqual(native);
+    expect((await implicitLoader()).getAgentsFiles().agentsFiles).toEqual(native);
+  });
+
   it("loads first-party MCP alongside discovered extensions and rejects tool-name collisions", async () => {
     const mcp = {
       configs: [
