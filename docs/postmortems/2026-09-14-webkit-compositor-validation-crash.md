@@ -1,6 +1,6 @@
 # WebKit compositor crash during local validation — 2026-09-14
 
-**Status: cause not established; release qualification blocked. No deployment occurred.** The user requested removal of the dedicated investigation item from `TODO.md` on 2026-09-15. That backlog change does not establish a crash fix or change the repository's no-flake release rule; the evidence remains below.
+**Status: cause not established; deployment authorized by explicit user exception (2026-09-15).** The user first requested removal of the dedicated investigation item from `TODO.md`, which did not itself waive the release block. The user subsequently added an explicit-user-exception clause to `AGENTS.md` and explicitly overrode the no-flake rule for the requested production deployment through GitHub Actions. The historical WebKit failure therefore does not block this deployment; all automated release gates remain enabled. This is risk acceptance, not an established crash fix or a passing rerun clearing the failure. The evidence and historical qualification findings remain below.
 
 ## Evidence
 

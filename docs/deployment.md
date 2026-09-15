@@ -257,6 +257,8 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Explicit user release exception (2026-09-15):** after adding the explicit-user-exception clause to `AGENTS.md`, the user explicitly overrode the no-flake rule and requested a new production deployment through GitHub Actions. The unresolved historical WebKit compositor crash is accepted for this deployment, not claimed fixed. The normal release transaction, including checks/E2E and all native and live gates, remains unchanged. Evidence is preserved in `docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md`; earlier release-blocking statements below describe the status before this exception.
+
 **Native acceptance blocked before apply (2026-09-15):** GitHub run
 [35004543252](https://github.com/schani/pi-orb/actions/runs/35004543252) for
 `ff0614c` passed checks and all 117 E2E tests, then failed native acceptance with
