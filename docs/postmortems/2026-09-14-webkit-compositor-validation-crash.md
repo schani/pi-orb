@@ -38,15 +38,16 @@ The [1.63.0 release notes](https://github.com/microsoft/playwright/releases/tag/
 
 ## Post-upgrade recurrence audit — 2026-09-15
 
-**No recurrence is recorded in the inspected post-upgrade runs.** Six completed
+**No recurrence is recorded in the inspected post-upgrade runs.** Eight completed
 GitHub E2E logs (`34891462327`, `34895955247`, `34999422115`, `34999422305`,
-`35013933184`, `35021851799`) explicitly downloaded WebKit **26.6 / build 2359**
-and passed the original 320px phone case. Three runs completed successfully;
+`35013933184`, `35021851799`, `35025810795`, `35027406866`) explicitly downloaded
+WebKit **26.6 / build 2359** and passed the original 320px phone case.
+Five runs completed successfully;
 two failed Find assertions and one failed PostgreSQL port setup, not a browser
 crash. Deploy run `35004543252` also installed build 2359 and passed that case
 before its unrelated native-image fixture failure. Full logs were inspected for
 `Page crashed`, compositor segfault and SIGSEGV evidence; none was found.
-Local copies of the six E2E logs are in `.context/port-investigation/` named by
+Local copies of the eight E2E logs are in `.context/port-investigation/` named by
 run ID; GitHub retains the originals.
 
 This complements the already recorded successful local post-upgrade suite. The

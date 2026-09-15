@@ -74,6 +74,24 @@ real experiment validated ESTABLISHED → TIME_WAIT capture and missing-tool
 handling. Port, container name, existing cleanup and test retry policy remain
 unchanged while gathering evidence.
 
+## Instrumented hosted run
+
+Diagnostic commit `3e84345` passed CI `35027406844` and E2E
+[35027406866](https://github.com/schani/pi-orb/actions/runs/35027406866): 19 files,
+131 tests, including all PostgreSQL contracts and the two diagnostic contracts.
+At 22:12:04 UTC the before-bind snapshot reported no matching TCP sockets, no
+Docker containers, ephemeral range `32768 60999`, and no reserved ports. All
+four probes succeeded, including privileged socket inspection. PostgreSQL then
+bound successfully. This confirms the exposed ephemeral-port policy on a real
+hosted runner, not only the local experiment; it does not identify the original
+occupant. There was no run-failed snapshot because this diagnostic execution had
+no collision. Its full log is retained locally as
+`.context/port-investigation/35027406866.log` and durably in GitHub.
+
+The independently running uninstrumented `d170a4e` E2E run `35025810795` also
+passed all 129 tests. Neither successful execution retrospectively explains the
+first failure. The fixed allocation and original failure remain preserved.
+
 The test harness must own its allocations, not delete unidentified occupants.
 Further attribution is tracked in `TODO.md`. Production was not changed. This is
 separate from the repaired Find synchronization issue and the WebKit investigation.
