@@ -1666,32 +1666,23 @@ a.project-new-orb-icon:focus-visible {
 }
 .subagent-roster {
   overflow: auto;
+  margin: 0;
   padding: 0 12px;
+  list-style: none;
   border-top: 1px solid var(--g2);
 }
-.subagent-roster > details + details {
+.subagent-roster > li + li {
   border-top: 1px solid var(--g2);
 }
-.subagent-roster summary {
+.subagent-roster > li {
   display: grid;
-  grid-template-columns: 2ch minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   min-height: 24px;
-  cursor: pointer;
-  list-style: none;
 }
-.subagent-roster summary::-webkit-details-marker {
-  display: none;
-}
-.subagent-roster summary:hover {
-  background: var(--g1);
-}
-.subagent-roster > details[open] > summary .activity-rail-marker::before {
-  content: "\\25be";
-}
-.subagent-roster .subagent-identity {
-  padding-left: calc(2ch + 8px);
+.subagent-roster > li > :first-child {
+  overflow-wrap: anywhere;
 }
 
 /* ---------- compaction, custom events, shell blocks ---------- */
@@ -2083,7 +2074,7 @@ button.orb-phone-menu {
   }
 
   .subagent-live-rail > summary,
-  .subagent-roster summary,
+  .subagent-roster > li,
   .subagent-notice > summary {
     min-height: 44px;
   }

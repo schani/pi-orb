@@ -48,18 +48,14 @@ export function SubagentRail({ agents }: { agents: readonly ActiveSubagent[] }) 
           })}
         </span>
       </summary>
-      <div className="subagent-roster" style={{ maxHeight }}>
+      <ul className="subagent-roster" style={{ maxHeight }}>
         {agents.map((agent) => (
-          <details key={agent.id}>
-            <summary>
-              <span className="activity-rail-marker" aria-hidden="true" />
-              <span>{agent.description}</span>
-              <span className={`subagent-phase-${agent.phase}`}>{agent.phase}</span>
-            </summary>
-            <div className="subagent-identity">{agent.id}</div>
-          </details>
+          <li key={agent.id}>
+            <span>{agent.description}</span>
+            <span className={`subagent-phase-${agent.phase}`}>{agent.phase}</span>
+          </li>
         ))}
-      </div>
+      </ul>
     </details>
   );
 }

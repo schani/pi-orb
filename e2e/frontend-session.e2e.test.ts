@@ -206,6 +206,14 @@ describe("frontend-only browser behavior", () => {
         const topBefore = (await terminal.boundingBox())?.y ?? Number.NaN;
         await rail.locator(":scope > summary").click();
         await expectPage(rail.locator(".subagent-roster")).toBeVisible();
+        await expectPage(rail.locator(".subagent-roster > li")).toHaveCount(3);
+        await expectPage(
+          rail.locator(".subagent-roster details, .subagent-roster summary"),
+        ).toHaveCount(0);
+        await expectPage(rail.locator(".subagent-roster")).not.toContainText("child-a");
+        await expectPage(rail.locator(".subagent-roster > li").first()).toHaveText(
+          "Check deploymentrunning",
+        );
         await expectPage
           .poll(async () => (await terminal.boundingBox())?.y ?? Number.NaN)
           .toBeGreaterThan(topBefore);

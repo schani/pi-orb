@@ -10,6 +10,14 @@ function rule(selector: string): string {
   return match?.[1] ?? "";
 }
 
+describe("subagent roster", () => {
+  it("has no nested disclosure-marker or identity-only styles", () => {
+    expect(css).not.toMatch(/\.subagent-roster[^{}]*::before/);
+    expect(css).not.toContain(".subagent-roster .subagent-identity");
+    expect(rule(".subagent-roster > li")).toContain("grid-template-columns: minmax(0, 1fr) auto");
+  });
+});
+
 describe("shared text selection", () => {
   it("uses a contrasting neutral highlight on both paper and inverted controls", () => {
     expect(rule("::selection")).toContain("background: var(--g2)");
