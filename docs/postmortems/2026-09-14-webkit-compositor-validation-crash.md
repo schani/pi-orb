@@ -1,6 +1,6 @@
 # WebKit compositor crash during local validation — 2026-09-14
 
-**Status: cause not established; release qualification blocked. No deployment occurred.** Actionable investigation is tracked in `TODO.md`.
+**Status: cause not established; release qualification blocked. No deployment occurred.** The user requested removal of the dedicated investigation item from `TODO.md` on 2026-09-15. That backlog change does not establish a crash fix or change the repository's no-flake release rule; the evidence remains below.
 
 ## Evidence
 

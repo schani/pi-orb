@@ -272,7 +272,8 @@ fixture route is corrected in `995f7df` with a demonstrated failing regression,
 65 passing native-image tests, and successful fresh GCE guest/Cloud Logging
 acceptance (operation `32790f16ad424b5f`). Diagnostic resources were cleaned up.
 No new production apply was attempted: the separately recorded WebKit crash
-remains release-blocking under the no-flake rule; its work remains in `TODO.md`.
+remains release-blocking under the no-flake rule; the user subsequently requested
+removal of its dedicated `TODO.md` item on 2026-09-15, without establishing a fix.
 The same corrected commit's automatic E2E run `35013933184` then finished
 116 passed / 1 failed on fleet Find keyboard navigation. A controlled delayed
 orb-list response subsequently reproduced that test synchronization defect; the
