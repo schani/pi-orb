@@ -268,8 +268,14 @@ The durable outcome is `failed-before-apply`, production revisions are unchanged
 and build cleanup and release-lock removal completed. Evidence and the
 runner-local diagnostic limitation are recorded in
 `docs/postmortems/2026-09-15-native-personal-instructions-fixture.md`. The exact
-fixture route is now corrected with a demonstrated failing regression and 65
-passing native-image tests; fresh cloud qualification remains in `TODO.md`.
+fixture route is corrected in `995f7df` with a demonstrated failing regression,
+65 passing native-image tests, and successful fresh GCE guest/Cloud Logging
+acceptance (operation `32790f16ad424b5f`). Diagnostic resources were cleaned up.
+No new production apply was attempted: the separately recorded WebKit crash
+remains release-blocking under the no-flake rule; its work remains in `TODO.md`.
+The same corrected commit's automatic E2E run `35013933184` then finished
+116 passed / 1 failed on fleet Find keyboard navigation; that separate blocker
+is preserved in `docs/postmortems/2026-09-15-find-keyboard-navigation.md`.
 
 **Action runtime update (2026-09-13):** CI, E2E and Deploy artifact-upload steps
 pin `actions/upload-artifact` v7.0.1 at

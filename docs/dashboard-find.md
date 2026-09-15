@@ -14,6 +14,14 @@ Find is navigation, not a general command palette. It does not search IDs, lifec
 
 **Scope expanded (decided and implemented 2026-09-14):** the dashboard and orb view both provide the same project-and-orb navigation search. The orb view registers its already-loaded all-project index, including archived orbs, without additional fetching or a search cache. That index remains available when the conversation target is missing; the missing orb URL and message remain unchanged. Other missing-resource and create-orb routes retain the browser's default Command-K / Control-K behavior. The shortcut opens Find even when focus is in the composer, a creation field, or a rename field. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists; a press outside the card closes it as well. There is no persistent Find hint or button, and (since 2026-09-04) no visible close control: a surface reached only by a shortcut is dismissed by that shortcut's own conventions.
 
+**Qualification failure (2026-09-15):** GitHub E2E run `35013933184` selected the
+project URL instead of the expected orb after query fill → ArrowDown → Enter.
+Cause is not established; a prior pass does not clear the failure. Keyboard
+navigation coverage must establish the result/selection state deterministically,
+not rely on sleeps or a longer navigation timeout. Evidence:
+`docs/postmortems/2026-09-15-find-keyboard-navigation.md`; investigation is in
+`TODO.md`.
+
 ## Composer orb-link picker (decided 2026-09-08)
 
 Typing `@` in message mode opens the same search dialog, scoped to orb names across all projects, including archived orbs. The typed character first replaces the textarea selection normally. Picking a result replaces only that `@` with the absolute application URL (`https://<app>/#/orbs/:orbId`), without navigation, then restores composer focus and the caret immediately after the URL. Escape (including from a focused result) or outside dismissal leaves the `@` and restores the caret after it. Shell and excluded-shell input, paste, and IME composition do not trigger the picker.

@@ -43,7 +43,7 @@ failed SSH acceptance command; the durable boot event supplies the missing
 failure classification. No recovered marker contents or local reproduction are
 claimed here.
 
-## Correction (2026-09-15; live validation pending)
+## Correction (2026-09-15; fresh native acceptance passed)
 
 The validator now serves the exact authenticated, bodyless GET with
 `{ "content": "", "revision": 0 }`. No runtime fallback, production API change,
@@ -56,7 +56,32 @@ GET-with-body requests, and the existing unknown-route marker. Successful and
 unauthorized reads do not create that marker. Local red/green logs are in
 `.context/native-fixture-fix/`; the original cloud evidence above remains intact.
 The first lint pass identified import ordering and line wrapping; those formatting
-issues were corrected before release.
+issues were corrected before committing `995f7df0f984589645167c94f942f13da9db709d`.
+GitHub CI [35013933389](https://github.com/schani/pi-orb/actions/runs/35013933389)
+passed all 1,746 repository tests, infrastructure checks, typecheck and lint.
+
+A standalone clean-source GCE build of that exact commit passed native guest
+acceptance and the validator-specific runtime-ready Cloud Logging gate, exit 0.
+Operation `32790f16ad424b5f` accepted runtime image
+`pi-orb-image-v-995f7df-32790f16ad424b5f` (ID `3160345735233545007`) and workspace
+image `pi-orb-image-workspace-v-995f7df-32790f16ad424b5f` (ID `475404890722804589`).
+The source archive SHA-256 is
+`4199d9791da7154a42e55cf973a6a70f58669c76c6bd7c4879a163afbb34061f`.
+The manifest and command evidence remain under
+`.context/native-fixture-fix/candidate/`. Automatic cleanup removed the temporary
+VMs/disks and SSH key; the two accepted diagnostic images were subsequently
+deleted after verifying their exact IDs and operation labels. No production
+configuration, migration or image reference was changed.
+
+No second production workflow was dispatched: the separately documented WebKit
+crash still explicitly blocks release under the no-flake rule. The first dispatch
+should have caught that existing blocker; a successful native correction does
+not waive it. See `docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md`
+and `TODO.md`. The automatic E2E run
+[35013933184](https://github.com/schani/pi-orb/actions/runs/35013933184) subsequently
+finished 116 passed / 1 failed on fleet Find keyboard navigation, adding an
+independent release blocker. It was not rerun. Evidence:
+`docs/postmortems/2026-09-15-find-keyboard-navigation.md`.
 
 ## Cleanup and production verification
 
@@ -72,6 +97,6 @@ recorded previous revisions: `pi-orb-00056-b8n`, `pi-orb-ops-00053-kwz`,
 A new mandatory boot-time broker read must update the strict native validation
 broker and its contract coverage in the same change. Preserve unknown-route
 rejection and runtime fail-closed readiness; neither broader fake responses,
-longer timeouts nor a blind rerun repairs this mismatch. Corrective work is in
-`TODO.md`. Passing this run's hosted-runner checks does not resolve the separately
+longer timeouts nor a blind rerun repairs this mismatch. This fixture correction
+is locally and native-cloud validated. Passing hosted-runner checks does not resolve the separately
 recorded local Docker-store or WebKit-compositor incidents.

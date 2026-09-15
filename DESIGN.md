@@ -146,6 +146,7 @@ Tracking:
 - [docs/postmortems/2026-09-09-posthog-template-discovery.md](docs/postmortems/2026-09-09-posthog-template-discovery.md) — authenticated PostHog discovery blocked by an optional method's HTTP-404 error envelope
 - [docs/postmortems/2026-09-12-terminal-focus-and-scroll-padding.md](docs/postmortems/2026-09-12-terminal-focus-and-scroll-padding.md) — resize hit-target focus and scrolling padding caused a thick edge and partial terminal rows
 - [docs/postmortems/2026-09-12-mobile-safari-scroll-ownership.md](docs/postmortems/2026-09-12-mobile-safari-scroll-ownership.md) — phone momentum/keyboard drift; one visual viewport owner and an internal transcript scroller
+- [docs/postmortems/2026-09-15-find-keyboard-navigation.md](docs/postmortems/2026-09-15-find-keyboard-navigation.md) — fleet Find selected a project instead of the expected orb in keyboard-navigation E2E
 - [docs/postmortems/2026-09-15-native-personal-instructions-fixture.md](docs/postmortems/2026-09-15-native-personal-instructions-fixture.md) — mandatory boot read missing from the native validator's strict broker; release stopped before apply
 - [docs/postmortems/](docs/postmortems/) — incident forensics; design docs keep the resulting rules and link here
 - [docs/postmortems/2026-09-09-stale-thinking.md](docs/postmortems/2026-09-09-stale-thinking.md) — message-index reuse left stale green thinking below newer commands; explicit streaming retirement
