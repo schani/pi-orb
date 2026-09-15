@@ -9,6 +9,7 @@ import ghosttyWasmUrl from "@wterm/ghostty/ghostty-vt.wasm?url";
 import { Terminal, useTerminal } from "@wterm/react";
 import { Result, ResultAsync } from "neverthrow";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check } from "typebox/value";
 import { normalizeTerminalSelection } from "../lib/terminal-copy.ts";
 import { type TerminalGridMetrics, terminalShadeLayout } from "../lib/terminal-layout.ts";
@@ -61,6 +62,7 @@ function copySelection(event: React.ClipboardEvent<HTMLDivElement>): void {
 
 /** Render directly in the orb header's shared action row. */
 export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolean }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [started, setStarted] = useState(false);
   const [open, setOpen] = useState(false);
   const [bounds, setBounds] = useState({ width: 552, availableHeight: 400 });
@@ -96,9 +98,10 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
 
   useLayoutEffect(() => {
     if (!enabled) return;
-    const header = buttonRef.current?.closest<HTMLElement>(".orb-header");
+    const header = buttonRef.current?.closest<HTMLElement>(".orb-header-stack");
     const composer = header?.closest(".orb-main")?.querySelector<HTMLElement>(".composer");
     if (!header || !composer) return;
+    setAnchor(header);
     const update = () => {
       const headerBox = header.getBoundingClientRect();
       const next = {
@@ -119,6 +122,7 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
     observer.observe(header);
     observer.observe(composer);
     observer.observe(document.body);
+    if (header.parentElement) observer.observe(header.parentElement);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update);
     return () => {
@@ -324,123 +328,126 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
       >
         <Icon name="terminal" />
       </button>
-      {started && (
-        <aside
-          id={panelId}
-          className={`orb-terminal-window${open ? "" : " orb-terminal-hidden"}`}
-          style={{ height: preview.height }}
-          aria-label="Interactive terminal"
-          aria-hidden={!open}
-          inert={!open}
-        >
-          <div className="orb-terminal-body">
-            {error !== null && (
-              <div className="orb-terminal-error" role="alert">
-                {error}
-                {status === "ended" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      socketRef.current?.close();
-                      socketRef.current = null;
-                      readyRef.current = false;
-                      setError(null);
-                      setStatus("connecting");
-                      setCore(null);
-                      setGeneration((value) => value + 1);
-                    }}
-                  >
-                    New terminal
-                  </button>
-                )}
-              </div>
-            )}
-            {status === "connecting" && (
-              <div className="orb-terminal-loading" role="status">
-                {core === null ? "loading terminal…" : "connecting terminal…"}
-              </div>
-            )}
-            {core !== null && (
-              <Terminal
-                key={generation}
-                ref={ref}
-                core={core}
-                cols={layout.cols}
-                rows={layout.rows}
-                autoResize={false}
-                style={{ height: layout.rows * metrics.cellHeight }}
-                cursorBlink
-                onReady={onReady}
-                onData={sendInput}
-                onResize={sendResize}
-                onError={(cause) => {
-                  socketRef.current?.close();
-                  socketRef.current = null;
-                  readyRef.current = false;
-                  setStatus("ended");
-                  setError(`Terminal emulator failed: ${String(cause)}`);
-                }}
-                onCopy={copySelection}
-                className="orb-terminal-emulator"
-              />
-            )}
-          </div>
-          <hr
-            className="orb-terminal-resize"
-            tabIndex={0}
-            aria-label="Resize terminal"
-            aria-orientation="horizontal"
-            aria-valuemin={5}
-            aria-valuemax={layout.maxRows}
-            aria-valuenow={preview.rows}
-            aria-valuetext={`${preview.rows} rows`}
-            onPointerDown={(event) => {
-              if (event.button !== 0 || dragRef.current !== null) return;
-              event.preventDefault();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              dragRef.current = {
-                pointerId: event.pointerId,
-                startY: event.clientY,
-                startRows: layout.rows,
-                rows: layout.rows,
-                handle: event.currentTarget,
-              };
-            }}
-            onPointerMove={(event) => {
-              const drag = dragRef.current;
-              if (!drag || drag.pointerId !== event.pointerId) return;
-              const requested =
-                drag.startRows + Math.round((event.clientY - drag.startY) / metrics.cellHeight);
-              drag.rows = terminalShadeLayout(bounds, metrics, requested).rows;
-              setPreviewRows(drag.rows);
-            }}
-            onPointerUp={(event) => {
-              if (dragRef.current?.pointerId === event.pointerId) finishResize(true);
-            }}
-            onPointerCancel={(event) => {
-              if (dragRef.current?.pointerId === event.pointerId) finishResize(false);
-            }}
-            onLostPointerCapture={(event) => {
-              if (dragRef.current?.pointerId === event.pointerId) finishResize(false);
-            }}
-            onKeyDown={(event) => {
-              const rows =
-                event.key === "ArrowUp"
-                  ? layout.rows - 1
-                  : event.key === "ArrowDown"
-                    ? layout.rows + 1
-                    : event.key === "Home"
-                      ? 5
-                      : event.key === "End"
-                        ? layout.maxRows
-                        : null;
-              if (rows === null || dragRef.current) return;
-              event.preventDefault();
-              setPreferredRows(terminalShadeLayout(bounds, metrics, rows).rows);
-            }}
-          />
-        </aside>
-      )}
+      {started &&
+        anchor !== null &&
+        createPortal(
+          <aside
+            id={panelId}
+            className={`orb-terminal-window${open ? "" : " orb-terminal-hidden"}`}
+            style={{ height: preview.height }}
+            aria-label="Interactive terminal"
+            aria-hidden={!open}
+            inert={!open}
+          >
+            <div className="orb-terminal-body">
+              {error !== null && (
+                <div className="orb-terminal-error" role="alert">
+                  {error}
+                  {status === "ended" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        socketRef.current?.close();
+                        socketRef.current = null;
+                        readyRef.current = false;
+                        setError(null);
+                        setStatus("connecting");
+                        setCore(null);
+                        setGeneration((value) => value + 1);
+                      }}
+                    >
+                      New terminal
+                    </button>
+                  )}
+                </div>
+              )}
+              {status === "connecting" && (
+                <div className="orb-terminal-loading" role="status">
+                  {core === null ? "loading terminal…" : "connecting terminal…"}
+                </div>
+              )}
+              {core !== null && (
+                <Terminal
+                  key={generation}
+                  ref={ref}
+                  core={core}
+                  cols={layout.cols}
+                  rows={layout.rows}
+                  autoResize={false}
+                  style={{ height: layout.rows * metrics.cellHeight }}
+                  cursorBlink
+                  onReady={onReady}
+                  onData={sendInput}
+                  onResize={sendResize}
+                  onError={(cause) => {
+                    socketRef.current?.close();
+                    socketRef.current = null;
+                    readyRef.current = false;
+                    setStatus("ended");
+                    setError(`Terminal emulator failed: ${String(cause)}`);
+                  }}
+                  onCopy={copySelection}
+                  className="orb-terminal-emulator"
+                />
+              )}
+            </div>
+            <hr
+              className="orb-terminal-resize"
+              tabIndex={0}
+              aria-label="Resize terminal"
+              aria-orientation="horizontal"
+              aria-valuemin={5}
+              aria-valuemax={layout.maxRows}
+              aria-valuenow={preview.rows}
+              aria-valuetext={`${preview.rows} rows`}
+              onPointerDown={(event) => {
+                if (event.button !== 0 || dragRef.current !== null) return;
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                dragRef.current = {
+                  pointerId: event.pointerId,
+                  startY: event.clientY,
+                  startRows: layout.rows,
+                  rows: layout.rows,
+                  handle: event.currentTarget,
+                };
+              }}
+              onPointerMove={(event) => {
+                const drag = dragRef.current;
+                if (!drag || drag.pointerId !== event.pointerId) return;
+                const requested =
+                  drag.startRows + Math.round((event.clientY - drag.startY) / metrics.cellHeight);
+                drag.rows = terminalShadeLayout(bounds, metrics, requested).rows;
+                setPreviewRows(drag.rows);
+              }}
+              onPointerUp={(event) => {
+                if (dragRef.current?.pointerId === event.pointerId) finishResize(true);
+              }}
+              onPointerCancel={(event) => {
+                if (dragRef.current?.pointerId === event.pointerId) finishResize(false);
+              }}
+              onLostPointerCapture={(event) => {
+                if (dragRef.current?.pointerId === event.pointerId) finishResize(false);
+              }}
+              onKeyDown={(event) => {
+                const rows =
+                  event.key === "ArrowUp"
+                    ? layout.rows - 1
+                    : event.key === "ArrowDown"
+                      ? layout.rows + 1
+                      : event.key === "Home"
+                        ? 5
+                        : event.key === "End"
+                          ? layout.maxRows
+                          : null;
+                if (rows === null || dragRef.current) return;
+                event.preventDefault();
+                setPreferredRows(terminalShadeLayout(bounds, metrics, rows).rows);
+              }}
+            />
+          </aside>,
+          anchor,
+        )}
     </>
   );
 }

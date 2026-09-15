@@ -1060,7 +1060,7 @@ export class PiOrbAgent {
   }
 
   /** Public adapter seam: reserve before the extension can yield into child work. */
-  admitSubagent(childId: string): Result<SubagentRun, SubagentError> {
+  admitSubagent(childId: string, description = childId): Result<SubagentRun, SubagentError> {
     if (
       this.health.status !== "ready" ||
       this.idleStopPrepared ||
@@ -1079,16 +1079,35 @@ export class PiOrbAgent {
         type: "subagent_admission_rejected",
         message: "No agent operation owns this subagent",
       });
-    return this.subagentWork.admit(childId, operationId).mapErr(
-      (): SubagentError => ({
-        type: "subagent_admission_rejected",
-        message: "Subagent already belongs to another operation",
-      }),
-    );
+    return this.subagentWork
+      .admit(childId, operationId, description)
+      .map((run) => {
+        this.publishSubagents();
+        return run;
+      })
+      .mapErr(
+        (): SubagentError => ({
+          type: "subagent_admission_rejected",
+          message: "Subagent already belongs to another operation",
+        }),
+      );
+  }
+
+  startSubagent(run: SubagentRun): void {
+    if (this.subagentWork.start(run)) this.publishSubagents();
+  }
+
+  private publishSubagents(): void {
+    if (this.operationId !== null)
+      this.broadcastEvent({
+        type: "subagents",
+        operationId: this.operationId,
+        children: [...this.subagentWork.view],
+      });
   }
 
   releaseSubagent(run: SubagentRun): void {
-    this.subagentWork.release(run);
+    if (this.subagentWork.release(run)) this.publishSubagents();
     this.maybeFinishAgentOperation();
   }
 
@@ -1327,6 +1346,7 @@ export class PiOrbAgent {
     return {
       operationId: this.operationId,
       operationKind: this.operationKind ?? "agent",
+      subagents: this.subagentWork.view,
       blocks: [...this.liveBlocks.entries()].map(([blockId, block]) => ({
         blockId,
         blockType: block.blockType,
@@ -1674,7 +1694,10 @@ export class PiOrbAgent {
       this.liveHistory?.observe("entry_appended");
     }
     this.operationOutcome = "aborted";
-    if (this.operationId !== null) this.subagentWork.cancel(this.operationId);
+    if (this.operationId !== null) {
+      this.subagentWork.cancel(this.operationId);
+      if (this.subagentWork.busy) this.publishSubagents();
+    }
     const children = this.abortSubagents?.();
     // Abort acceptance must not hold the mutation executor while tools drain.
     // The operation remains busy until root readiness and child holds settle.

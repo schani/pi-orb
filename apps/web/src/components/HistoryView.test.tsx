@@ -16,6 +16,55 @@ function message(id: string, role: "user" | "assistant", text: string): HistoryR
 }
 
 describe("HistoryView turn structure", () => {
+  it.each([
+    [
+      "subagent-notification",
+      { status: "error", error: "Unsupported model", resultPreview: "No output." },
+      "Unsupported model",
+    ],
+    [
+      "subagent-notification",
+      { status: "completed", resultPreview: "Verified four services." },
+      "Verified four services.",
+    ],
+    ["subagent-update", { message: "Checking deployment paths." }, "Checking deployment paths."],
+    [
+      "subagent-workspace-notice",
+      { notice: "Changes retained in the checkout." },
+      "Changes retained in the checkout.",
+    ],
+  ])("renders %s through one readable receipt, not machine XML", (customType, details, text) => {
+    const record: HistoryRecord = {
+      id: "notice",
+      parentId: null,
+      timestamp: "2026-09-14T22:04:07Z",
+      type: "event",
+      eventType: "pi.custom_message",
+      content: [
+        { type: "text", text: "<task-notification>machine instructions</task-notification>" },
+      ],
+      overflow: {
+        native: {
+          customType,
+          display: true,
+          details: {
+            id: "child",
+            description: "Check deployment",
+            outputFile: "/private/tasks/session.jsonl",
+            ...details,
+          },
+        },
+      },
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html.match(/<details/g)).toHaveLength(1);
+    expect(html).toContain("Check deployment");
+    expect(html).toContain(text);
+    expect(html).not.toContain("machine instructions");
+    expect(html).not.toContain("/private/tasks");
+  });
   it.each([false, true])("shows durable provider failures with partial output: %s", (partial) => {
     const record: HistoryRecord = {
       ...message("failure", "assistant", ""),

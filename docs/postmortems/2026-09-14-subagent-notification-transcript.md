@@ -25,4 +25,4 @@ A local probe bundled the pinned `renderer.ts` with its source alias and invoked
 
 ## Outcome
 
-Diagnosis only; no presentation or notification-delivery behavior changed. The web rendering gap is distinct from the extension's deferred/unconsumed completion semantics. A presentation repair must not silently discard failure evidence or change parent notification delivery. Follow-up is tracked in `TODO.md`.
+The initial investigation changed neither presentation nor delivery. Subsequently, the user selected N1 receipts + C2 active-only rail and P1 above the terminal shade. The local implementation now renders these structured root details, including actual errors, with no machine XML or private transcript path in the receipt (`docs/web-ui.md`). Inspection of the same stopped preview orb confirms three readable failed receipts and no live rail. The web rendering gap remains distinct from deferred/unconsumed completion semantics: no failures, native records or parent acknowledgements were discarded, and notification delivery was not changed. Qualification: `scripts/subagent-liveness/evidence/live-rail-2026-09-14.md`.

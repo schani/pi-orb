@@ -1,3 +1,4 @@
+import type { ActiveSubagent } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 
 export interface SubagentError {
@@ -15,6 +16,8 @@ interface OwnedRun {
   readonly token: SubagentRun;
   active: boolean;
   cancelled: boolean;
+  description: string;
+  phase: ActiveSubagent["phase"];
 }
 
 /**
@@ -33,7 +36,25 @@ export class SubagentWork {
     return [...this.runs.values()].filter((run) => run.active).map((run) => run.token);
   }
 
-  admit(childId: string, operationId: string): Result<SubagentRun, { type: "ownership_conflict" }> {
+  get view(): readonly ActiveSubagent[] {
+    return [...this.runs.values()]
+      .filter((run) => run.active)
+      .map((run) => ({ id: run.token.childId, description: run.description, phase: run.phase }));
+  }
+
+  start(token: SubagentRun): boolean {
+    const run = this.runs.get(token.childId);
+    if (run?.token !== token || !run.active || run.cancelled || run.phase === "running")
+      return false;
+    run.phase = "running";
+    return true;
+  }
+
+  admit(
+    childId: string,
+    operationId: string,
+    description = childId,
+  ): Result<SubagentRun, { type: "ownership_conflict" }> {
     const existing = this.runs.get(childId);
     if (existing?.active) {
       return existing.token.operationId === operationId
@@ -41,7 +62,7 @@ export class SubagentWork {
         : err({ type: "ownership_conflict" });
     }
     const token = { childId, operationId };
-    this.runs.set(childId, { token, active: true, cancelled: false });
+    this.runs.set(childId, { token, active: true, cancelled: false, description, phase: "queued" });
     return ok(token);
   }
 
@@ -49,14 +70,19 @@ export class SubagentWork {
     return this.runs.get(childId)?.token;
   }
 
-  release(token: SubagentRun): void {
+  release(token: SubagentRun): boolean {
     const run = this.runs.get(token.childId);
-    if (run?.token === token) run.active = false;
+    if (run?.token !== token || !run.active) return false;
+    run.active = false;
+    return true;
   }
 
   cancel(operationId: string): void {
     for (const run of this.runs.values()) {
-      if (run.token.operationId === operationId) run.cancelled = true;
+      if (run.token.operationId === operationId) {
+        run.cancelled = true;
+        if (run.active) run.phase = "finishing";
+      }
     }
   }
 

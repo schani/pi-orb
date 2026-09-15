@@ -1,4 +1,4 @@
-import type { HarnessSessionMetadata, HistoryRecord } from "@pi-orb/protocol";
+import type { ActiveSubagent, HarnessSessionMetadata, HistoryRecord } from "@pi-orb/protocol";
 
 /**
  * A synchronous, immutable snapshot of the harness's persisted session
@@ -36,4 +36,5 @@ export interface LiveOperationView {
   readonly operationKind: "agent" | "shell";
   readonly blocks: readonly LiveBlockState[];
   readonly tools: readonly LiveToolState[];
+  readonly subagents: readonly ActiveSubagent[];
 }

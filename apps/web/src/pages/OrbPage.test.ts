@@ -18,6 +18,34 @@ function busyState() {
 }
 
 describe("OrbPage live activity", () => {
+  it("replaces the child roster and invalidates it across disconnect and operation changes", () => {
+    const children = [{ id: "child", description: "Check deployment", phase: "running" as const }];
+    const frame = {
+      v: 1 as const,
+      at: "now",
+      type: "runtime.event" as const,
+      event: { type: "subagents" as const, operationId: "op-1", children },
+    };
+    const before = reducer(busyState(), { type: "frame", frame });
+    expect(before.subagents).toEqual(children);
+    const empty = reducer(before, {
+      type: "frame",
+      frame: { ...frame, event: { ...frame.event, children: [] } },
+    });
+    expect(empty.subagents).toEqual([]);
+    expect(empty.activity).toBe("busy");
+    const disconnected = reducer(before, { type: "connection_status", status: "retrying" });
+    expect(disconnected.subagents).toEqual([]);
+    expect(reducer(disconnected, { type: "connection_status", status: "open" }).subagents).toEqual(
+      [],
+    );
+    const successor = reducer(before, {
+      type: "frame",
+      frame: { ...frame, event: { type: "operation_started", operationId: "op-2" } },
+    });
+    expect(successor.subagents).toEqual([]);
+    expect(reducer(successor, { type: "frame", frame }).subagents).toEqual([]);
+  });
   it.each(["closed", "retrying", "connecting"] as const)(
     "invalidates activity on %s without discarding output or the draft",
     (status) => {

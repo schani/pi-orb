@@ -74,6 +74,7 @@ describe("computeSyncFrames", () => {
       operationKind: "agent",
       blocks: [{ blockId: "b1", blockType: "text", revision: 7, text: "partial out" }],
       tools: [{ callId: "c1", name: "bash", revision: 3, state: "running" }],
+      subagents: [{ id: "child", description: "Check deployment", phase: "running" }],
     };
     const frames = computeSyncFrames(snapshot(2, "busy"), live, null, "now");
     const events = frames
@@ -97,6 +98,7 @@ describe("computeSyncFrames", () => {
         revision: 3,
         state: "running",
       },
+      { type: "subagents", operationId: "op-1", children: live.subagents },
       { type: "status", activity: "busy", operationId: "op-1" },
     ]);
   });
@@ -114,6 +116,7 @@ describe("computeSyncFrames", () => {
         },
       ],
       tools: [],
+      subagents: [],
     };
     const frames = computeSyncFrames(snapshot(1, "busy"), live, "rec-1", "now");
     expect(frames).toContainEqual({

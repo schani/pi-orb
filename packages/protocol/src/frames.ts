@@ -169,6 +169,25 @@ export const RuntimeStatusEventSchema = Type.Object(
 );
 export type RuntimeStatusEvent = Static<typeof RuntimeStatusEventSchema>;
 
+export const ActiveSubagentSchema = Type.Object(
+  {
+    id: Type.String(),
+    description: Type.String(),
+    phase: Type.Union([Type.Literal("queued"), Type.Literal("running"), Type.Literal("finishing")]),
+  },
+  closed,
+);
+export type ActiveSubagent = Static<typeof ActiveSubagentSchema>;
+
+export const SubagentsEventSchema = Type.Object(
+  {
+    type: Type.Literal("subagents"),
+    operationId: Type.String(),
+    children: Type.Array(ActiveSubagentSchema),
+  },
+  closed,
+);
+
 export const OperationStartedEventSchema = Type.Object(
   {
     type: Type.Literal("operation_started"),
@@ -237,6 +256,7 @@ export type TurnNotificationEvent = Static<typeof TurnNotificationEventSchema>;
 
 export const RuntimeEventSchema = Type.Union([
   RuntimeStatusEventSchema,
+  SubagentsEventSchema,
   OperationStartedEventSchema,
   OutputPatchEventSchema,
   ToolStateEventSchema,

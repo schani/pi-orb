@@ -170,6 +170,7 @@ Reference material:
 - [docs/postmortems/2026-09-09-native-cleanup-dst-io.md](docs/postmortems/2026-09-09-native-cleanup-dst-io.md) — real diagnostic IO and a busy observer escaped deterministic cleanup scheduling
 - [docs/postmortems/2026-09-09-credential-probe-role-reset.md](docs/postmortems/2026-09-09-credential-probe-role-reset.md) — ambient SQL role targeted the production password; restoration and explicit-target safeguards
 - [docs/postmortems/2026-09-14-idle-stop-admission-race.md](docs/postmortems/2026-09-14-idle-stop-admission-race.md) — forced late child admission exposed a missing runtime fence before idle-stop drain
+- [docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md](docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md) — missing Docker parent snapshot blocked four full-slice qualification scenarios; later builds do not clear the failure
 - [docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md](docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md) — native WebKit compositor fault during local qualification; passing isolated probes do not clear it
 - [docs/postmortems/2026-09-09-local-e2e-docker-startup.md](docs/postmortems/2026-09-09-local-e2e-docker-startup.md) — wrong containerd store and interrupted local validation; preserve evidence and owned fixtures
 - [docs/postmortems/2026-09-09-tracked-deployment-credentials.md](docs/postmortems/2026-09-09-tracked-deployment-credentials.md) — live credential confirmed in public plan archives; artifact containment and rotation status

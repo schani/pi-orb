@@ -123,10 +123,12 @@ describe("orb workspace layout contract", () => {
     expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--g2)");
   });
 
-  it("overlays a full-width headerless terminal immediately below the orb header", () => {
+  it("overlays a full-width headerless terminal below the header and active-child rail", () => {
+    expect(rule(".orb-header-stack")).toContain("position: sticky");
+    expect(rule(".orb-header")).toContain("position: relative");
     const terminal = rule(".orb-terminal-window");
     expect(terminal).toContain("position: absolute");
-    expect(terminal).toContain("top: 100%");
+    expect(terminal).toContain("top: calc(100% - 1px)");
     expect(terminal).toContain("left: -1px");
     expect(terminal).toContain("width: calc(100% + 1px)");
     expect(terminal).toContain("border: 1px solid var(--k)");

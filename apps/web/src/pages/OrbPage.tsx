@@ -1,4 +1,5 @@
 import {
+  type ActiveSubagent,
   CAPABILITY_ABORT,
   type HistoryRecord,
   type HostedFilesResponse,
@@ -20,6 +21,7 @@ import { OrbIndex } from "../components/OrbIndex.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
 import { StateTile } from "../components/StateTile.tsx";
+import { SubagentRail } from "../components/SubagentRail.tsx";
 import { useWorkspaceUploads } from "../components/useWorkspaceUploads.tsx";
 import {
   type ApiError,
@@ -85,6 +87,7 @@ interface OrbPageState {
   welcome: WelcomeInfo | null;
   activity: "idle" | "busy" | null;
   operationId: string | null;
+  subagents: readonly ActiveSubagent[];
   liveBlocks: Map<string, LiveBlock>;
   tools: Map<string, ToolChip>;
   composerText: string;
@@ -125,6 +128,7 @@ export function initialState(orbId: string): OrbPageState {
     welcome: null,
     activity: null,
     operationId: null,
+    subagents: [],
     liveBlocks: new Map(),
     tools: new Map(),
     composerText: draft?.text ?? "",
@@ -148,10 +152,25 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
     case "status": {
       const operationId =
         event.operationId ?? (event.activity === "idle" ? null : state.operationId);
-      return { ...state, activity: event.activity, operationId };
+      return {
+        ...state,
+        activity: event.activity,
+        operationId,
+        subagents:
+          event.activity === "idle" || operationId !== state.operationId ? [] : state.subagents,
+      };
     }
+    case "subagents":
+      return state.connection === "open" && state.operationId === event.operationId
+        ? { ...state, subagents: event.children }
+        : state;
     case "operation_started":
-      return { ...state, activity: "busy", operationId: event.operationId };
+      return {
+        ...state,
+        activity: "busy",
+        operationId: event.operationId,
+        subagents: state.operationId === event.operationId ? state.subagents : [],
+      };
     case "output_patch": {
       const existing = state.liveBlocks.get(event.blockId);
       const text =
@@ -191,6 +210,7 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
         tools: new Map(),
         operationId: null,
         activity: "idle",
+        subagents: [],
         serverError:
           event.outcome === "failed"
             ? {
@@ -207,6 +227,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
     case "server.welcome":
       return {
         ...state,
+        subagents: [],
         welcome: {
           runtimeInstanceId: frame.runtimeInstanceId,
           sessionId: frame.sessionId,
@@ -222,6 +243,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         tools: new Map(),
         operationId: null,
         activity: null,
+        subagents: [],
       };
       if (frame.mode === "full") {
         return { ...next, records: new Map(), afterRecordId: null, headId: null };
@@ -327,7 +349,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       return {
         ...state,
         connection: action.status,
-        ...(action.status === "open" ? {} : { activity: null, operationId: null }),
+        ...(action.status === "open" ? {} : { activity: null, operationId: null, subagents: [] }),
       };
     case "composer_changed":
       return { ...state, composerText: action.text, composerMode: action.mode, notice: null };
@@ -947,117 +969,122 @@ function OrbConversation({
 
   return (
     <main className="orb-main" inert={pending} aria-busy={pending}>
-      <header className="orb-header" data-phone-actions={phoneActions}>
-        <a className="orb-phone-home" href="#/" aria-label="Dashboard" title="dashboard">
-          <Icon name="back" />
-        </a>
-        {renaming ? (
-          <form
-            className="orb-rename-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveName();
-            }}
-          >
-            <input
-              ref={renameInputRef}
-              aria-label="orb name"
-              value={renameText}
-              maxLength={80}
-              onChange={(event) => setRenameText(event.target.value)}
-            />
-            <button type="submit">save</button>
-            <button type="button" onClick={() => setRenaming(false)}>
-              cancel
-            </button>
-          </form>
-        ) : (
-          <>
-            <span className="orb-name">{orb?.name ?? "untitled orb"}</span>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Rename orb"
-              title="rename"
-              disabled={busyLocked}
-              onClick={() => {
-                setRenameText(orb?.name ?? "");
-                setRenaming(true);
+      <div className="orb-header-stack">
+        <header className="orb-header" data-phone-actions={phoneActions}>
+          <a className="orb-phone-home" href="#/" aria-label="Dashboard" title="dashboard">
+            <Icon name="back" />
+          </a>
+          {renaming ? (
+            <form
+              className="orb-rename-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveName();
               }}
             >
-              <Icon name="pen" />
-            </button>
-          </>
-        )}
-        {glyph !== null && lifecycleWord !== null && (
-          <span className="orb-life">
-            <StateTile glyph={glyph} decorative />
-            <span className="orb-life-word">
-              {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
+              <input
+                ref={renameInputRef}
+                aria-label="orb name"
+                value={renameText}
+                maxLength={80}
+                onChange={(event) => setRenameText(event.target.value)}
+              />
+              <button type="submit">save</button>
+              <button type="button" onClick={() => setRenaming(false)}>
+                cancel
+              </button>
+            </form>
+          ) : (
+            <>
+              <span className="orb-name">{orb?.name ?? "untitled orb"}</span>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Rename orb"
+                title="rename"
+                disabled={busyLocked}
+                onClick={() => {
+                  setRenameText(orb?.name ?? "");
+                  setRenaming(true);
+                }}
+              >
+                <Icon name="pen" />
+              </button>
+            </>
+          )}
+          {glyph !== null && lifecycleWord !== null && (
+            <span className="orb-life">
+              <StateTile glyph={glyph} decorative />
+              <span className="orb-life-word">
+                {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
+              </span>
             </span>
-          </span>
+          )}
+          <button
+            type="button"
+            className="icon-button orb-phone-menu"
+            aria-label="Orb actions"
+            aria-expanded={phoneActions}
+            onClick={() => setPhoneActions((open) => !open)}
+          >
+            <Icon name="more" />
+          </button>
+          <div className="orb-header-actions">
+            <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
+            {uploads.button}
+            {canStart && (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Start orb"
+                title="start"
+                onClick={() => runLifecycle(startOrb)}
+              >
+                <Icon name="start" />
+              </button>
+            )}
+            {canStop && (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Stop orb"
+                title="stop"
+                onClick={() => runLifecycle(stopOrb)}
+              >
+                <Icon name="stop" />
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Archive orb"
+              title="archive"
+              disabled={
+                orb === null ||
+                orb.state === "deleting" ||
+                orb.state === "archiving" ||
+                orb.state === "archived"
+              }
+              onClick={() => void archive()}
+            >
+              <Icon name="archive" />
+            </button>
+            <button
+              type="button"
+              className="icon-button danger"
+              aria-label="Delete orb"
+              title="delete"
+              disabled={orb?.state === "deleting"}
+              onClick={() => void permanentlyDelete()}
+            >
+              <Icon name="bin" />
+            </button>
+          </div>
+        </header>
+        {orb?.state === "running" && connected && state.subagents.length > 0 && (
+          <SubagentRail agents={state.subagents} />
         )}
-        <button
-          type="button"
-          className="icon-button orb-phone-menu"
-          aria-label="Orb actions"
-          aria-expanded={phoneActions}
-          onClick={() => setPhoneActions((open) => !open)}
-        >
-          <Icon name="more" />
-        </button>
-        <div className="orb-header-actions">
-          <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
-          {uploads.button}
-          {canStart && (
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Start orb"
-              title="start"
-              onClick={() => runLifecycle(startOrb)}
-            >
-              <Icon name="start" />
-            </button>
-          )}
-          {canStop && (
-            <button
-              type="button"
-              className="icon-button"
-              aria-label="Stop orb"
-              title="stop"
-              onClick={() => runLifecycle(stopOrb)}
-            >
-              <Icon name="stop" />
-            </button>
-          )}
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Archive orb"
-            title="archive"
-            disabled={
-              orb === null ||
-              orb.state === "deleting" ||
-              orb.state === "archiving" ||
-              orb.state === "archived"
-            }
-            onClick={() => void archive()}
-          >
-            <Icon name="archive" />
-          </button>
-          <button
-            type="button"
-            className="icon-button danger"
-            aria-label="Delete orb"
-            title="delete"
-            disabled={orb?.state === "deleting"}
-            onClick={() => void permanentlyDelete()}
-          >
-            <Icon name="bin" />
-          </button>
-        </div>
-      </header>
+      </div>
       <div className="orb-transcript-scroll" ref={scrollRef}>
         <div className="orb-transcript-content" ref={scrollContentRef}>
           {uploads.progress}

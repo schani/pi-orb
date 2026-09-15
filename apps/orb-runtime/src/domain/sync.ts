@@ -70,6 +70,11 @@ export function computeSyncFrames(
         ...(tool.message !== undefined ? { message: tool.message } : {}),
       });
     }
+    events.push({
+      type: "subagents",
+      operationId: live.operationId,
+      children: [...live.subagents],
+    });
     events.push({ type: "status", activity: snapshot.activity, operationId: live.operationId });
   } else {
     events.push({ type: "status", activity: snapshot.activity });

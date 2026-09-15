@@ -5,7 +5,8 @@ import { Result } from "neverthrow";
 import type { SubagentError, SubagentRun } from "../../domain/subagent-work.ts";
 
 export interface SubagentHost {
-  admitSubagent(childId: string): Result<SubagentRun, SubagentError>;
+  admitSubagent(childId: string, description?: string): Result<SubagentRun, SubagentError>;
+  startSubagent(run: SubagentRun): void;
   abortOperation(): PromiseLike<Result<void, { message: string }>>;
   releaseSubagent(run: SubagentRun): void;
   mayWakeSubagent(childId: string): boolean;
@@ -29,9 +30,14 @@ export function createSubagentsExtension(
       type: "subagent_adapter_error",
       message: String(error),
     });
-    const record = (phase: string, run: SubagentRun): void => {
+    const record = (phase: string, run: SubagentRun, description?: string): void => {
       const saved = Result.fromThrowable(
-        () => pi.appendEntry("pi-orb.subagent-run", { ...run, phase }),
+        () =>
+          pi.appendEntry("pi-orb.subagent-run", {
+            ...run,
+            phase,
+            ...(description !== undefined ? { description } : {}),
+          }),
         toError,
       )();
       if (saved.isErr()) host.subagentAdapterFailed(saved.error.message);
@@ -57,15 +63,19 @@ export function createSubagentsExtension(
             const existing = runs.get(id);
             if (event === "started" && existing !== undefined) {
               record("started", existing);
+              host.startSubagent(existing);
               return;
             }
-            const admitted = host.admitSubagent(id);
+            const description =
+              "description" in data && typeof data.description === "string" ? data.description : id;
+            const admitted = host.admitSubagent(id, description);
             if (admitted.isErr()) {
               abort(id);
               return;
             }
             runs.set(id, admitted.value);
-            record("admitted", admitted.value);
+            record("admitted", admitted.value, description);
+            if (event !== "created") host.startSubagent(admitted.value);
             return;
           }
           const run = runs.get(id);

@@ -101,6 +101,53 @@ function fixture(promptResult?: Promise<void>) {
   };
 }
 
+it("publishes the same fenced roster on live edges and reconnect, through cancellation and resume", async () => {
+  await runDst({ name: "subagent-live-roster", iterations: 30 }, async (sim) => {
+    const h = fixture();
+    await h.agent.submitMessage([], "op");
+    const old = h.agent.admitSubagent("child", "Check deployment")._unsafeUnwrap();
+    expect(h.agent.liveView()?.subagents).toEqual([
+      { id: "child", description: "Check deployment", phase: "queued" },
+    ]);
+    h.agent.startSubagent(old);
+    expect(h.agent.liveView()?.subagents[0]?.phase).toBe("running");
+    await h.agent.abortOperation();
+    expect(h.agent.liveView()?.subagents[0]?.phase).toBe("finishing");
+    h.agent.releaseSubagent(old);
+    await h.agent.submitMessage([], "next");
+    const next = h.agent.admitSubagent("child", "Resume deployment")._unsafeUnwrap();
+    const result = await sim.runTasks([
+      {
+        name: "old callback",
+        f: async (task) => {
+          await task.checkpoint("stale execution");
+          h.agent.startSubagent(old);
+          h.agent.releaseSubagent(old);
+        },
+      },
+      {
+        name: "new callback",
+        f: async (task) => {
+          await task.checkpoint("resumed execution");
+          h.agent.startSubagent(next);
+        },
+      },
+    ]);
+    expect(result.isErr() ? result.error : null).toBeNull();
+    expect(h.agent.liveView()?.subagents).toEqual([
+      { id: "child", description: "Resume deployment", phase: "running" },
+    ]);
+    h.agent.releaseSubagent(next);
+    expect(h.agent.liveView()?.subagents).toEqual([]);
+    expect(h.agent.gateView().activity).toBe("busy");
+    expect(h.events.filter((e) => e.type === "subagents").at(-1)).toEqual({
+      type: "subagents",
+      operationId: "next",
+      children: [],
+    });
+  });
+});
+
 it("backpressure closes a slow peer without stranding child cleanup or changing the outcome", async () => {
   await runDst({ name: "subagent-outbound-backpressure", iterations: 50 }, async (sim) => {
     const h = fixture();

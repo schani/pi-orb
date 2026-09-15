@@ -234,6 +234,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       });
       await expectPage(page.getByRole("button", { name: "abort", exact: true })).toBeVisible();
       await expectPage(page.locator(".orb-life")).toContainText("busy", { timeout: 30_000 });
+      await expectPage(page.locator(".subagent-live-rail .subagent-counts")).toContainText(
+        "1 running",
+      );
       expect(
         readFileSync(
           i === 2 ? join(workspace, "repo", "child-edited.txt") : `${root}/edited-${i}`,
@@ -245,6 +248,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       await expectPage(page.getByRole("button", { name: "abort", exact: true })).toBeVisible({
         timeout: 30_000,
       });
+      await expectPage(page.locator(".subagent-live-rail .subagent-counts")).toContainText(
+        "1 running",
+      );
       if (i === 0) {
         await writeFile(`${root}/release-${i}`, "release\n");
         await expectPage(page.getByText("DELEGATION_COMPLETE", { exact: true })).toBeVisible({
@@ -304,6 +310,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       await expectPage(page.getByRole("button", { name: "abort", exact: true })).toHaveCount(0, {
         timeout: 60_000,
       });
+      await expectPage(page.locator(".subagent-live-rail")).toHaveCount(0);
       await waitFor(
         "replicated aggregate idle and child result",
         async () => {

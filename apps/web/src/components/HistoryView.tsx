@@ -11,6 +11,7 @@ import { representedInboxMessageIds } from "../lib/queued-messages.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
+import { isSubagentNotice, SubagentNotice } from "./SubagentNotice.tsx";
 import {
   type PersistedToolCall,
   ToolActivity,
@@ -220,6 +221,10 @@ function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): 
   for (const record of records) {
     if (record.type === "event") {
       flushTools();
+      if (isSubagentNotice(record)) {
+        nodes.push(<SubagentNotice key={record.id} record={record} />);
+        continue;
+      }
       nodes.push(
         <div className="record-custom" key={record.id}>
           <p className="msg-text">

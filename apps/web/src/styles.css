@@ -1179,10 +1179,17 @@ a.project-new-orb-icon:focus-visible {
   flex-direction: column;
 }
 
-.orb-header {
+.orb-header-stack {
   position: sticky;
   z-index: 20;
   top: 0;
+  flex: none;
+  min-width: 0;
+  background: var(--w);
+}
+
+.orb-header {
+  position: relative;
   display: flex;
   height: 24px;
   flex: none;
@@ -1194,7 +1201,7 @@ a.project-new-orb-icon:focus-visible {
   white-space: nowrap;
 }
 
-.app:has(> .session-ribbon) .orb-header {
+.app:has(> .session-ribbon) .orb-header-stack {
   top: var(--ribbon);
 }
 
@@ -1619,6 +1626,74 @@ a.project-new-orb-icon:focus-visible {
   color: var(--g3);
 }
 
+.subagent-notice-body {
+  padding: 4px 8px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  background: var(--g1);
+  border-top: 1px solid var(--g2);
+}
+.subagent-identity {
+  padding: 4px 0;
+  color: var(--g3);
+  overflow-wrap: anywhere;
+}
+.subagent-live-rail.activity-rail-row {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--g2);
+}
+.subagent-live-rail > summary {
+  min-height: 20px;
+  padding: 0 12px;
+}
+.subagent-counts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0 8px;
+  color: var(--g3);
+}
+.subagent-counts > span {
+  white-space: nowrap;
+}
+.subagent-phase-running {
+  color: var(--ok);
+}
+.subagent-phase-queued,
+.subagent-phase-finishing {
+  color: var(--g3);
+}
+.subagent-roster {
+  overflow: auto;
+  padding: 0 12px;
+  border-top: 1px solid var(--g2);
+}
+.subagent-roster > details + details {
+  border-top: 1px solid var(--g2);
+}
+.subagent-roster summary {
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 24px;
+  cursor: pointer;
+  list-style: none;
+}
+.subagent-roster summary::-webkit-details-marker {
+  display: none;
+}
+.subagent-roster summary:hover {
+  background: var(--g1);
+}
+.subagent-roster > details[open] > summary .activity-rail-marker::before {
+  content: "\\25be";
+}
+.subagent-roster .subagent-identity {
+  padding-left: calc(2ch + 8px);
+}
+
 /* ---------- compaction, custom events, shell blocks ---------- */
 
 .record-compaction {
@@ -1842,7 +1917,7 @@ a.project-new-orb-icon:focus-visible {
 
 .orb-terminal-window {
   position: absolute;
-  top: 100%;
+  top: calc(100% - 1px);
   left: -1px;
   width: calc(100% + 1px);
   padding: 13px 0;
@@ -2001,8 +2076,22 @@ button.orb-phone-menu {
     padding: 0 12px;
   }
 
-  .app:has(> .session-ribbon) .orb-header {
+  .orb-header-stack,
+  .app:has(> .session-ribbon) .orb-header-stack {
+    position: relative;
     top: auto;
+  }
+
+  .subagent-live-rail > summary,
+  .subagent-roster summary,
+  .subagent-notice > summary {
+    min-height: 44px;
+  }
+  .subagent-notice .activity-rail-summary {
+    white-space: normal;
+  }
+  .subagent-live-rail > summary {
+    grid-template-columns: 1ch auto minmax(0, 1fr);
   }
 
   .orb-phone-home,

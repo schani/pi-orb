@@ -180,6 +180,7 @@ interface RuntimeEventFrame {
     | OperationStartedEvent
     | OutputPatchEvent
     | ToolStateEvent
+    | SubagentsEvent
     | OperationFinishedEvent
     | TurnNotificationEvent;
 }
@@ -191,6 +192,16 @@ interface OutputPatchEvent {
   blockType: "text" | "reasoning" | "shell";
   revision: number;
   patch: { type: "append"; text: string } | { type: "replace"; text: string };
+}
+
+interface SubagentsEvent {
+  type: "subagents";
+  operationId: string;
+  children: Array<{
+    id: string;
+    description: string;
+    phase: "queued" | "running" | "finishing";
+  }>;
 }
 
 interface ToolStateEvent {
@@ -275,6 +286,8 @@ That status is a product outcome, not an operator detail, so it is surfaced end 
 ### Local-subagent activity (2026-09-14; under validation)
 
 `docs/subagents.md` requires one operation ID and busy status through root turns, leaf execution/cleanup and result-wake handoff. Aggregate busy must not be confused with root readiness: input during a child-only interval triggers a root turn within the existing operation, while input during whole-operation cancellation remains pending for the next operation. Completion history and child outcomes precede aggregate `operation_finished`; Luna remains detached and is scheduled only after aggregate settlement. The DST-first plan covers arbitration with existing inbox/turn-start barriers and consistent live/health/pull activity. The adapter now applies those same delivery rules to aggregate operation ownership; this is not a second protocol or a child-session replication endpoint.
+
+**Live child projection (implemented locally 2026-09-14).** `subagents` replaces the current operation's complete active-child roster. Synchronization sends it after operation/tool reconstruction and before status; subsequent admissions, starts, cancellation and terminal releases publish changes. An empty roster means no currently owned child work, not aggregate idle. Queued admissions and cancelling/finishing holds remain present until release. The browser ignores mismatched-operation rosters and clears them on disconnect, synchronization reset and operation retirement/change; old history cannot restore live claims. The existing connection notice distinguishes disconnection from confirmed inactivity. Task identities/descriptions/phases are display data, not lifecycle drain authority; no private transcripts or new persistence endpoint are introduced. Durable root lifecycle edges retain diagnostic provenance (`docs/subagents.md`).
 
 ### Atomic runtime delivery choice
 

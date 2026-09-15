@@ -73,6 +73,201 @@ describe("frontend-only browser behavior", () => {
     await vite?.close();
   });
 
+  it.each([1280, 390, 320])(
+    "keeps the active-only subagent rail above the terminal at %ipx",
+    async (width) => {
+      const page = await browser.newPage({ viewport: { width, height: 740 } });
+      const id = "frontend-fixture-orb";
+      const children = [
+        { id: "child-a", description: "Check deployment", phase: "running" },
+        { id: "child-b", description: "Check services", phase: "queued" },
+        { id: "child-c", description: "Clean up", phase: "finishing" },
+      ];
+      let emit: (event: object) => void = () => {};
+      let disconnect: () => void = () => {};
+      let snapshots = 0;
+      let holdReconnect = false;
+      let terminalSockets = 0;
+      let terminalStage = "initial mount";
+      const terminalEdges: string[] = [];
+      page.on("websocket", (socket) => {
+        if (socket.url().endsWith("/terminal")) {
+          terminalSockets++;
+          terminalEdges.push(`open: ${terminalStage}`);
+          socket.on("close", () => terminalEdges.push(`close: ${terminalStage}`));
+        }
+      });
+      await page.route(`**/api/v1/orbs/${id}`, async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          json: {
+            ...(await response.json()),
+            state: "running",
+            activity: "busy",
+            actionRequired: undefined,
+          },
+        });
+      });
+      await page.route(`**/api/v1/orbs/${id}/history`, async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          json: {
+            ...(await response.json()),
+            records: [
+              {
+                id: "notice",
+                parentId: null,
+                type: "event",
+                eventType: "pi.custom_message",
+                timestamp: "2026-09-14T22:04:07Z",
+                content: [
+                  {
+                    type: "text",
+                    text: "<task-notification>machine instructions /private/tasks/session.jsonl</task-notification>",
+                  },
+                ],
+                overflow: {
+                  native: {
+                    customType: "subagent-notification",
+                    display: true,
+                    details: {
+                      id: "old-child",
+                      description: "Count service lines",
+                      status: "error",
+                      error: "Unsupported model",
+                      resultPreview: "No output.",
+                    },
+                  },
+                },
+              },
+            ],
+            headId: "notice",
+          },
+        });
+      });
+      await page.routeWebSocket(`**/api/v1/orbs/${id}/live`, (socket) => {
+        const server = socket.connectToServer();
+        emit = (event) =>
+          socket.send(
+            JSON.stringify({ v: 1, type: "runtime.event", at: new Date().toISOString(), event }),
+          );
+        disconnect = () => socket.close();
+        server.onMessage((message) => {
+          const frame = JSON.parse(message.toString());
+          // Keep the test's history independent of the fixture's stored transcript.
+          if (frame.type === "history.record") return;
+          if (frame.type === "sync.started") {
+            socket.send(JSON.stringify({ ...frame, mode: "after", afterRecordId: "notice" }));
+            return;
+          }
+          if (frame.type === "runtime.event" && frame.event.type === "status") {
+            snapshots++;
+            if (!holdReconnect) {
+              emit({ type: "operation_started", operationId: "children-op" });
+              emit({ type: "subagents", operationId: "children-op", children });
+              emit({ type: "status", operationId: "children-op", activity: "busy" });
+            }
+            return;
+          }
+          socket.send(message);
+        });
+      });
+      try {
+        await page.goto(`${origin}/#/orbs/${id}`);
+        const rail = page.locator(".subagent-live-rail");
+        await expectPage(rail).toContainText("1 running");
+        await expectPage(rail).toContainText("1 queued");
+        await expectPage(rail).toContainText("1 finishing");
+        const receipt = page.locator(".subagent-notice");
+        await receipt.locator(":scope > summary").click();
+        await expectPage(receipt).toContainText("Unsupported model");
+        await expectPage(page.locator(".history")).not.toContainText("machine instructions");
+        if (width < 600) {
+          await expectPage(
+            page.getByRole("button", { name: "Open terminal", exact: true }),
+          ).toBeHidden();
+          await page.getByRole("button", { name: "Orb actions", exact: true }).click();
+        }
+        await page.getByRole("button", { name: "Open terminal", exact: true }).click();
+        const terminal = page.getByRole("complementary", { name: "Interactive terminal" });
+        await expectPage(terminal.locator(".term-grid")).toBeVisible();
+        if (width < 600)
+          await page.getByRole("button", { name: "Orb actions", exact: true }).click();
+        await expectPage(terminal).toBeVisible();
+        await expectPage(terminal).toContainText("frontend fixture terminal");
+        await expectPage(terminal.locator(".orb-terminal-loading")).toHaveCount(0);
+        // StrictMode's initial ref replay precedes readiness; from here on,
+        // changing child work or the agent socket must never replace the PTY.
+        const terminalConnectionsReady = terminalSockets;
+        terminalStage = "rail and reconnect changes";
+        await terminal.locator(".wterm").evaluate((e) => {
+          e.setAttribute("data-test-session", "retained");
+        });
+        const topBefore = (await terminal.boundingBox())?.y ?? Number.NaN;
+        await rail.locator(":scope > summary").click();
+        await expectPage(rail.locator(".subagent-roster")).toBeVisible();
+        await expectPage
+          .poll(async () => (await terminal.boundingBox())?.y ?? Number.NaN)
+          .toBeGreaterThan(topBefore);
+        await expectPage
+          .poll(async () => {
+            const t = await terminal.boundingBox(),
+              r = await rail.boundingBox(),
+              c = await page.locator(".composer").boundingBox();
+            return (
+              t !== null &&
+              r !== null &&
+              c !== null &&
+              t.y >= r.y + r.height - 1 &&
+              t.y + t.height <= c.y + 1
+            );
+          })
+          .toBe(true);
+        if (width < 600) await page.getByRole("button", { name: "Write message" }).click();
+        await page.getByRole("textbox", { name: "Message the orb" }).fill("keep my draft");
+        if (width < 600) {
+          await page.setViewportSize({ width, height: 360 });
+          await expectPage
+            .poll(async () => {
+              const t = await terminal.boundingBox(),
+                c = await page.locator(".composer").boundingBox();
+              return t !== null && c !== null && t.y + t.height <= c.y + 1;
+            })
+            .toBe(true);
+          await page.setViewportSize({ width, height: 740 });
+          await page.getByRole("button", { name: "Fold editor" }).click();
+        }
+        holdReconnect = true;
+        disconnect();
+        await expectPage(rail).toHaveCount(0);
+        await expectPage.poll(() => snapshots).toBe(2);
+        await expectPage(rail).toHaveCount(0);
+        emit({ type: "operation_started", operationId: "children-op" });
+        emit({ type: "subagents", operationId: "children-op", children });
+        await expectPage(rail).toBeVisible();
+        emit({ type: "subagents", operationId: "children-op", children: [] });
+        await expectPage(rail).toHaveCount(0);
+        await expectPage(terminal.locator('[data-test-session="retained"]')).toBeVisible();
+        expectPage(terminalSockets, terminalEdges.join("; ")).toBe(terminalConnectionsReady);
+        if (width < 600) await page.getByRole("button", { name: "Write message" }).click();
+        await expectPage(page.getByRole("textbox", { name: "Message the orb" })).toHaveValue(
+          "keep my draft",
+        );
+        expectPage(
+          await page
+            .locator("body")
+            .evaluate(
+              (body) =>
+                body.ownerDocument.documentElement.scrollWidth <=
+                (body.ownerDocument.defaultView?.innerWidth ?? 0),
+            ),
+        ).toBe(true);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
   it("reveals generic tool inputs and outputs with a single disclosure", async () => {
     const page = await browser.newPage();
     const id = "frontend-auth-copy-test";
