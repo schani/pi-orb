@@ -59,7 +59,8 @@ Experiment source, full socket/PID observations and Docker error are retained in
 explicitly bound to make the mechanism deterministic; no unrelated socket was
 closed, and no global port policy was changed.
 
-**Diagnostic instrumentation:** `e2e/port-diagnostics.ts` now captures bounded,
+**Diagnostic instrumentation (commit `3e84345`, retired by the allocation fix below):**
+`e2e/port-diagnostics.ts` captured bounded,
 read-only snapshots immediately before the fixture's bind and after Docker run
 failure, before cleanup. It records all matching TCP states (including TIME_WAIT),
 local/peer endpoints, inode/timer information, process names/PIDs where permitted,
@@ -92,6 +93,36 @@ The independently running uninstrumented `d170a4e` E2E run `35025810795` also
 passed all 129 tests. Neither successful execution retrospectively explains the
 first failure. The fixed allocation and original failure remain preserved.
 
-The test harness must own its allocations, not delete unidentified occupants.
-Further attribution is tracked in `TODO.md`. Production was not changed. This is
-separate from the repaired Find synchronization issue and the WebKit investigation.
+## Resolution selected and implemented — 2026-09-15
+
+After reviewing the evidence, the user selected Docker-assigned ports rather than
+continuing to depend on availability of 55434. The fixture now creates a uniquely
+named container with `-p 127.0.0.1::5432`, retains its returned ID, starts it, and
+reads `docker port ID 5432/tcp`. Docker owns the allocation continuously; there
+is no reserve/release/bind gap in the test harness. The port reader accepts only
+one `127.0.0.1:PORT` mapping with port 1–65535 and rejects wildcard, malformed or
+multiple mappings before constructing the database URL.
+
+`docker create` records ownership before `docker start` can fail. Teardown
+removes only that returned ID and reports cleanup failure instead of swallowing
+it. The fixed-name pre-cleanup is removed. Caller-supplied test database URLs
+remain unchanged and create no container. A token-free `postgres-fixture-bound`
+log records the exact container ID/name and assigned port. The one-off fixed-port
+snapshot module and its tests are removed with the fixed allocation; their
+source/evidence remains at `3e84345`, not as unused configuration or machinery.
+
+Validation held the old port with container
+`0384dbc2361e0eebf02ea9f206578b9e020974febd84efcbcbc70a1da49b36e9` and held the old
+name `pi-orb-e2e-store-pg` with a separate stopped sentinel. Two real store suites
+ran concurrently, each passing 55 PostgreSQL contracts plus nine port-reader
+cases. Docker assigned ports **32768** and **32769** to their distinct IDs. After
+both finished, both foreign-to-the-tests sentinels still existed unchanged and
+both test-owned containers were absent. The experiment then removed its own two
+sentinels. Logs and ownership checks are in `.context/pg-allocation/`.
+E2E typecheck and the changed files' lint pass. This establishes isolation under
+an intentionally occupied old port/name, not just a clean rerun. The original
+GitHub occupant remains unidentified; the assumption that it must leave this
+specific port free has been removed rather than relabelled as explained.
+
+Production was not changed by this harness correction. The WebKit investigation
+remains separate.

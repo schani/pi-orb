@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import {
   hostingStoreContractTests,
@@ -6,8 +7,8 @@ import {
 import { PostgreSQLHostingStore } from "../apps/control-plane/src/adapters/pg/hosting.ts";
 import { openThrowawayPostgres } from "../apps/control-plane/src/testkit/postgres.ts";
 import { storeContractTests } from "../apps/control-plane/src/testkit/store-contract.ts";
+import { parseDockerLoopbackPort } from "./docker-port.ts";
 import { docker, waitForPostgres } from "./harness.ts";
-import { capturePortDiagnostics } from "./port-diagnostics.ts";
 
 /**
  * The store contract against a real PostgreSQL server, over the same
@@ -25,11 +26,11 @@ import { capturePortDiagnostics } from "./port-diagnostics.ts";
  * `PI_ORB_E2E_BACKEND=process` gate skips this file unless that variable
  * supplies a server.
  */
-const PG_CONTAINER = "pi-orb-e2e-store-pg";
-const PG_PORT = 55_434;
+const PG_CONTAINER = `pi-orb-e2e-store-pg-${randomUUID()}`;
 const providedUrl = process.env["PI_ORB_TEST_DATABASE_URL"] ?? "";
 const PROCESS_BACKEND = process.env["PI_ORB_E2E_BACKEND"] === "process";
 let connectionString = providedUrl;
+let containerId: string | null = null;
 
 if (providedUrl === "" && PROCESS_BACKEND) {
   describe("node-postgres store contract", () => {
@@ -40,11 +41,8 @@ if (providedUrl === "" && PROCESS_BACKEND) {
 } else {
   if (providedUrl === "") {
     beforeAll(async () => {
-      await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
-      console.info(JSON.stringify(await capturePortDiagnostics(PG_PORT, "before-bind")));
-      await docker([
-        "run",
-        "--detach",
+      containerId = await docker([
+        "create",
         "--name",
         PG_CONTAINER,
         "-e",
@@ -54,19 +52,28 @@ if (providedUrl === "" && PROCESS_BACKEND) {
         "-e",
         "POSTGRES_DB=pi_orb",
         "-p",
-        `127.0.0.1:${PG_PORT}:5432`,
+        "127.0.0.1::5432",
         "postgres:16",
-      ]).catch(async (error: unknown) => {
-        console.error(JSON.stringify(await capturePortDiagnostics(PG_PORT, "run-failed")));
-        // Vitest must receive the original setup failure, not a diagnostic/tooling failure.
-        throw error;
-      });
-      await waitForPostgres(PG_CONTAINER, "pi-orb", "pi_orb", "store-contract postgres ready");
-      connectionString = `postgres://pi-orb:pi-orb@127.0.0.1:${PG_PORT}/pi_orb`;
+      ]);
+      await docker(["start", containerId]);
+      const port = parseDockerLoopbackPort(await docker(["port", containerId, "5432/tcp"]));
+      // Vitest setup failures are exceptions; never connect through an unvalidated mapping.
+      if (port.isErr())
+        throw new Error("Docker did not publish one valid loopback PostgreSQL port");
+      console.info(
+        JSON.stringify({
+          event: "postgres-fixture-bound",
+          container: containerId,
+          name: PG_CONTAINER,
+          port: port.value,
+        }),
+      );
+      await waitForPostgres(containerId, "pi-orb", "pi_orb", "store-contract postgres ready");
+      connectionString = `postgres://pi-orb:pi-orb@127.0.0.1:${port.value}/pi_orb`;
     }, 120_000);
 
     afterAll(async () => {
-      await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
+      if (containerId !== null) await docker(["rm", "-f", containerId]);
     });
   }
 
