@@ -91,7 +91,7 @@ interface WelcomeInfo {
 /** Defensive prompt cap until the welcome frame supplies the real limit. */
 const FALLBACK_MAX_PROMPT_BYTES = 6 * 1024 * 1024;
 
-interface OrbPageState {
+export interface OrbPageState {
   /** Insertion-ordered records keyed by id for cross-boundary dedupe. */
   records: ReadonlyMap<string, HistoryRecord>;
   sessionId: string | null;
@@ -126,7 +126,7 @@ interface OrbPageState {
   notice: string | null;
 }
 
-type OrbPageAction =
+export type OrbPageAction =
   | { type: "history_loaded"; view: OrbHistoryView }
   | { type: "history_restored"; snapshot: CachedTranscript }
   | { type: "history_refreshed"; view: OrbHistoryView; epoch: number }

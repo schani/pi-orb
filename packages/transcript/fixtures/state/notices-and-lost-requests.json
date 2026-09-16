@@ -1,0 +1,138 @@
+{
+  "name": "notices, attachments, and requests dropped across a runtime restart",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "notice",
+        "message": "hello"
+      },
+      "expect": {
+        "notice": "hello"
+      }
+    },
+    {
+      "action": {
+        "type": "send_unavailable"
+      },
+      "expect": {
+        "notice": "Not connected \u2014 the request was not sent."
+      }
+    },
+    {
+      "action": {
+        "type": "image_added",
+        "image": {
+          "id": "i1",
+          "mediaType": "image/png",
+          "data": "eA=="
+        }
+      },
+      "expect": {
+        "composerImages": [
+          {
+            "id": "i1",
+            "mediaType": "image/png",
+            "data": "eA=="
+          }
+        ],
+        "notice": null
+      }
+    },
+    {
+      "action": {
+        "type": "image_added",
+        "image": {
+          "id": "i2",
+          "mediaType": "image/png",
+          "data": "eQ=="
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "image_removed",
+        "id": "i1"
+      },
+      "expect": {
+        "composerImages": [
+          {
+            "id": "i2",
+            "mediaType": "image/png",
+            "data": "eQ=="
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req1",
+        "kind": "settings"
+      }
+    },
+    {
+      "action": {
+        "type": "request_lost",
+        "requestId": "other"
+      },
+      "expect": {
+        "pendingRequest": {
+          "requestId": "req1",
+          "kind": "settings",
+          "submittedText": ""
+        },
+        "notice": "The runtime restarted before acknowledging the change. Check the synchronized settings before trying again."
+      }
+    },
+    {
+      "action": {
+        "type": "request_lost",
+        "requestId": "req1"
+      },
+      "expect": {
+        "pendingRequest": null,
+        "notice": "The runtime restarted before acknowledging the change. Check the synchronized settings before trying again."
+      }
+    },
+    {
+      "action": {
+        "type": "request_lost",
+        "requestId": "req1"
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "closed",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [
+      {
+        "id": "i2",
+        "mediaType": "image/png",
+        "data": "eQ=="
+      }
+    ],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": "The runtime restarted before acknowledging your request; it was not resent. If your message appears in the history it was delivered \u2014 otherwise send it again."
+  }
+}

@@ -1,0 +1,161 @@
+{
+  "name": "roster frames are ignored unless the socket is open and owns the operation",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "status",
+            "activity": "busy",
+            "operationId": "op1"
+          }
+        }
+      },
+      "expect": {
+        "connection": "closed"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "subagents",
+            "operationId": "op1",
+            "children": [
+              {
+                "id": "child",
+                "description": "Check deployment",
+                "phase": "running"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "subagents": []
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      },
+      "expect": {
+        "activity": "busy",
+        "operationId": "op1"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "subagents",
+            "operationId": "op1",
+            "children": [
+              {
+                "id": "child",
+                "description": "Check deployment",
+                "phase": "running"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "subagents": [
+          {
+            "id": "child",
+            "description": "Check deployment",
+            "phase": "running"
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "subagents",
+            "operationId": "op2",
+            "children": [
+              {
+                "id": "child-2",
+                "description": "Run tests",
+                "phase": "queued"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "subagents": [
+          {
+            "id": "child",
+            "description": "Check deployment",
+            "phase": "running"
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "retrying"
+      },
+      "expect": {
+        "subagents": [],
+        "activity": null
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "name": "a settings receipt that changes both model and thinking level explains itself",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "agent_settings",
+            "settings": {
+              "model": {
+                "provider": "p",
+                "id": "a"
+              },
+              "thinkingLevel": "high"
+            },
+            "models": [],
+            "writable": true
+          }
+        }
+      },
+      "expect": {
+        "settings": {
+          "type": "agent_settings",
+          "settings": {
+            "model": {
+              "provider": "p",
+              "id": "a"
+            },
+            "thinkingLevel": "high"
+          },
+          "models": [],
+          "writable": true
+        },
+        "notice": null
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "s1",
+        "kind": "settings"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "agent_settings",
+            "settings": {
+              "model": {
+                "provider": "p",
+                "id": "b"
+              },
+              "thinkingLevel": "low"
+            },
+            "models": [],
+            "writable": true
+          }
+        }
+      },
+      "expect": {
+        "notice": "Thinking adjusted to low for this model."
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "agent_settings",
+            "settings": {
+              "model": {
+                "provider": "p",
+                "id": "b"
+              },
+              "thinkingLevel": "medium"
+            },
+            "models": [],
+            "writable": true
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": {
+      "type": "agent_settings",
+      "settings": {
+        "model": {
+          "provider": "p",
+          "id": "b"
+        },
+        "thinkingLevel": "medium"
+      },
+      "models": [],
+      "writable": true
+    },
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": {
+      "requestId": "s1",
+      "kind": "settings",
+      "submittedText": ""
+    },
+    "requestError": null,
+    "serverError": null,
+    "notice": "Thinking adjusted to low for this model."
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "name": "a welcome for a different session discards the cached transcript",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "history_loaded",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r1",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:01Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r1",
+          "headId": "r1"
+        }
+      },
+      "expect": {
+        "records": [
+          {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ],
+            "overflow": {}
+          }
+        ],
+        "historyEpoch": 1
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "connecting"
+      },
+      "expect": {
+        "historyEpoch": 2
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "server.welcome",
+          "connectionId": "c1",
+          "runtimeInstanceId": "ri2",
+          "orbId": "orb-1",
+          "sessionId": "s2",
+          "capabilities": [
+            "abort"
+          ],
+          "limits": {
+            "maxIncomingFrameBytes": 1000000,
+            "maxPromptBytes": 6000
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": "s2",
+    "cacheReady": false,
+    "historyEpoch": 3,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": true,
+    "historyError": null,
+    "connection": "open",
+    "welcome": {
+      "runtimeInstanceId": "ri2",
+      "sessionId": "s2",
+      "capabilities": [
+        "abort"
+      ],
+      "maxPromptBytes": 6000
+    },
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}

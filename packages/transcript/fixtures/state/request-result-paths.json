@@ -1,0 +1,165 @@
+{
+  "name": "accepted, aborted and rejected receipts",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "hello",
+        "mode": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req1",
+        "kind": "message"
+      },
+      "expect": {
+        "pendingRequest": {
+          "requestId": "req1",
+          "kind": "message",
+          "submittedText": "hello"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "other",
+          "result": {
+            "type": "accepted",
+            "operationId": "op1",
+            "duplicate": false
+          }
+        }
+      },
+      "expect": {
+        "pendingRequest": {
+          "requestId": "req1",
+          "kind": "message",
+          "submittedText": "hello"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "req1",
+          "result": {
+            "type": "accepted",
+            "operationId": "op1",
+            "duplicate": false
+          }
+        }
+      },
+      "expect": {
+        "pendingRequest": null,
+        "composerText": ""
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "abort me",
+        "mode": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req2",
+        "kind": "abort"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "req2",
+          "result": {
+            "type": "accepted",
+            "operationId": "op1",
+            "duplicate": true
+          }
+        }
+      },
+      "expect": {
+        "composerText": "abort me"
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req3",
+        "kind": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "req3",
+          "result": {
+            "type": "rejected",
+            "error": {
+              "code": "busy",
+              "message": "runtime busy",
+              "retryable": true
+            }
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "abort me",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": {
+      "code": "busy",
+      "message": "runtime busy"
+    },
+    "serverError": null,
+    "notice": null
+  }
+}

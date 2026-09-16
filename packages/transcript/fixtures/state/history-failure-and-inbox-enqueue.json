@@ -1,0 +1,163 @@
+{
+  "name": "history failures and inbox enqueue receipts",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "history_failed",
+        "error": {
+          "type": "network",
+          "message": "offline"
+        }
+      },
+      "expect": {
+        "historyError": {
+          "type": "network",
+          "message": "offline"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "history_loaded",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r1",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:01Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r1",
+          "headId": "r1"
+        }
+      },
+      "expect": {
+        "historyError": null
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "queued msg",
+        "mode": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req1",
+        "kind": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "message_enqueued",
+        "requestId": "other"
+      },
+      "expect": {
+        "pendingRequest": {
+          "requestId": "req1",
+          "kind": "message",
+          "submittedText": "queued msg"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "message_enqueued",
+        "requestId": "req1"
+      },
+      "expect": {
+        "pendingRequest": null,
+        "composerText": ""
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "again",
+        "mode": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req2",
+        "kind": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "message_enqueue_failed",
+        "requestId": "req2",
+        "error": {
+          "type": "http",
+          "status": 500,
+          "code": "internal",
+          "message": "boom",
+          "retryable": true
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [
+      {
+        "id": "r1",
+        "parentId": null,
+        "timestamp": "2026-09-16T00:00:01Z",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ],
+        "overflow": {}
+      }
+    ],
+    "sessionId": "s1",
+    "cacheReady": true,
+    "historyEpoch": 1,
+    "afterRecordId": "r1",
+    "headId": "r1",
+    "historyLoaded": true,
+    "historyError": null,
+    "connection": "closed",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "again",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": {
+      "code": "enqueue_failed",
+      "message": "internal: boom"
+    },
+    "serverError": null,
+    "notice": null
+  }
+}

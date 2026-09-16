@@ -1,0 +1,183 @@
+{
+  "name": "patches append, replace, and keep first-arrival block order",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b1",
+            "blockType": "text",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "one"
+            }
+          }
+        }
+      },
+      "expect": {
+        "liveBlocks": [
+          {
+            "blockId": "b1",
+            "blockType": "text",
+            "text": "one",
+            "revision": 1
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b1",
+            "blockType": "text",
+            "revision": 2,
+            "patch": {
+              "type": "append",
+              "text": " two"
+            }
+          }
+        }
+      },
+      "expect": {
+        "liveBlocks": [
+          {
+            "blockId": "b1",
+            "blockType": "text",
+            "text": "one two",
+            "revision": 2
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b2",
+            "blockType": "reasoning",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "x"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b1",
+            "blockType": "text",
+            "revision": 7,
+            "patch": {
+              "type": "replace",
+              "text": "final"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b3",
+            "blockType": "shell",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "sh"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [
+      {
+        "blockId": "b1",
+        "blockType": "text",
+        "text": "final",
+        "revision": 7
+      },
+      {
+        "blockId": "b2",
+        "blockType": "reasoning",
+        "text": "x",
+        "revision": 1
+      },
+      {
+        "blockId": "b3",
+        "blockType": "shell",
+        "text": "sh",
+        "revision": 1
+      }
+    ],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}

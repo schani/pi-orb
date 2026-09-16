@@ -1,0 +1,304 @@
+{
+  "name": "reconnects drop live authority but never the transcript or its output",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "history_loaded",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r1",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:01Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "overflow": {}
+            },
+            {
+              "id": "r2",
+              "parentId": "r1",
+              "timestamp": "2026-09-16T00:00:02Z",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hi"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r2",
+          "headId": "r2"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "server.welcome",
+          "connectionId": "c1",
+          "runtimeInstanceId": "ri1",
+          "orbId": "orb-1",
+          "sessionId": "s1",
+          "capabilities": [
+            "abort"
+          ],
+          "limits": {
+            "maxIncomingFrameBytes": 1000000,
+            "maxPromptBytes": 6000
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b1",
+            "blockType": "text",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "streaming"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "tool_state",
+            "operationId": "op1",
+            "callId": "c1",
+            "name": "bash",
+            "revision": 1,
+            "state": "running"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "agent_settings",
+            "settings": {
+              "model": {
+                "provider": "p",
+                "id": "a"
+              },
+              "thinkingLevel": "high"
+            },
+            "models": [],
+            "writable": true
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "status",
+            "activity": "busy",
+            "operationId": "op1"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "retrying"
+      },
+      "expect": {
+        "activity": null,
+        "operationId": null,
+        "settings": null,
+        "synced": false,
+        "liveBlocks": [
+          {
+            "blockId": "b1",
+            "blockType": "text",
+            "text": "streaming",
+            "revision": 1
+          }
+        ],
+        "tools": [
+          {
+            "callId": "c1",
+            "name": "bash",
+            "state": "running",
+            "message": null
+          }
+        ],
+        "records": [
+          {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ],
+            "overflow": {}
+          },
+          {
+            "id": "r2",
+            "parentId": "r1",
+            "timestamp": "2026-09-16T00:00:02Z",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ],
+            "overflow": {}
+          }
+        ],
+        "historyEpoch": 1
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "connecting"
+      },
+      "expect": {
+        "historyEpoch": 2
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    }
+  ],
+  "expect": {
+    "records": [
+      {
+        "id": "r1",
+        "parentId": null,
+        "timestamp": "2026-09-16T00:00:01Z",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ],
+        "overflow": {}
+      },
+      {
+        "id": "r2",
+        "parentId": "r1",
+        "timestamp": "2026-09-16T00:00:02Z",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "hi"
+          }
+        ],
+        "overflow": {}
+      }
+    ],
+    "sessionId": "s1",
+    "cacheReady": true,
+    "historyEpoch": 2,
+    "afterRecordId": "r2",
+    "headId": "r2",
+    "historyLoaded": true,
+    "historyError": null,
+    "connection": "open",
+    "welcome": {
+      "runtimeInstanceId": "ri1",
+      "sessionId": "s1",
+      "capabilities": [
+        "abort"
+      ],
+      "maxPromptBytes": 6000
+    },
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [
+      {
+        "blockId": "b1",
+        "blockType": "text",
+        "text": "streaming",
+        "revision": 1
+      }
+    ],
+    "tools": [
+      {
+        "callId": "c1",
+        "name": "bash",
+        "state": "running",
+        "message": null
+      }
+    ],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}

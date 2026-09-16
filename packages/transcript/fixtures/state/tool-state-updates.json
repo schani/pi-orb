@@ -1,0 +1,107 @@
+{
+  "name": "tool chips upsert by call id and carry the last message",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "tool_state",
+            "operationId": "op1",
+            "callId": "c1",
+            "name": "bash",
+            "revision": 1,
+            "state": "running"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "tool_state",
+            "operationId": "op1",
+            "callId": "c2",
+            "name": "read",
+            "revision": 1,
+            "state": "running"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "tool_state",
+            "operationId": "op1",
+            "callId": "c1",
+            "name": "bash",
+            "revision": 2,
+            "state": "completed",
+            "message": "done"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [
+      {
+        "callId": "c1",
+        "name": "bash",
+        "state": "completed",
+        "message": "done"
+      },
+      {
+        "callId": "c2",
+        "name": "read",
+        "state": "running",
+        "message": null
+      }
+    ],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}

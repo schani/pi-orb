@@ -1,0 +1,394 @@
+{
+  "name": "a lagging replica read keeps the live suffix and only a current epoch applies",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "history_loaded",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r1",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:01Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "overflow": {}
+            },
+            {
+              "id": "r2",
+              "parentId": "r1",
+              "timestamp": "2026-09-16T00:00:02Z",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hi"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r2",
+          "headId": "r2"
+        }
+      },
+      "expect": {
+        "historyEpoch": 1
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "history_refreshed",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r1",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:01Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r1",
+          "headId": "r1"
+        },
+        "epoch": 1
+      },
+      "expect": {
+        "records": [
+          {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ],
+            "overflow": {}
+          },
+          {
+            "id": "r2",
+            "parentId": "r1",
+            "timestamp": "2026-09-16T00:00:02Z",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ],
+            "overflow": {}
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "connecting"
+      },
+      "expect": {
+        "historyEpoch": 2
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "closed"
+      }
+    },
+    {
+      "action": {
+        "type": "history_refreshed",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r1",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:01Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r1",
+          "headId": "r1"
+        },
+        "epoch": 1
+      },
+      "expect": {
+        "records": [
+          {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ],
+            "overflow": {}
+          },
+          {
+            "id": "r2",
+            "parentId": "r1",
+            "timestamp": "2026-09-16T00:00:02Z",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ],
+            "overflow": {}
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "history_refreshed",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r1",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:01Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r1",
+          "headId": "r1"
+        },
+        "epoch": 2
+      },
+      "expect": {
+        "records": [
+          {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ],
+            "overflow": {}
+          },
+          {
+            "id": "r2",
+            "parentId": "r1",
+            "timestamp": "2026-09-16T00:00:02Z",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ],
+            "overflow": {}
+          }
+        ],
+        "afterRecordId": "r2",
+        "headId": "r2"
+      }
+    },
+    {
+      "action": {
+        "type": "history_refreshed",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r1",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:01Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hello"
+                }
+              ],
+              "overflow": {}
+            },
+            {
+              "id": "r2",
+              "parentId": "r1",
+              "timestamp": "2026-09-16T00:00:02Z",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "hi"
+                }
+              ],
+              "overflow": {}
+            },
+            {
+              "id": "r3",
+              "parentId": "r2",
+              "timestamp": "2026-09-16T00:00:03Z",
+              "type": "message",
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "more"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r3",
+          "headId": "r3"
+        },
+        "epoch": 2
+      }
+    }
+  ],
+  "expect": {
+    "records": [
+      {
+        "id": "r1",
+        "parentId": null,
+        "timestamp": "2026-09-16T00:00:01Z",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ],
+        "overflow": {}
+      },
+      {
+        "id": "r2",
+        "parentId": "r1",
+        "timestamp": "2026-09-16T00:00:02Z",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "hi"
+          }
+        ],
+        "overflow": {}
+      },
+      {
+        "id": "r3",
+        "parentId": "r2",
+        "timestamp": "2026-09-16T00:00:03Z",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "more"
+          }
+        ],
+        "overflow": {}
+      }
+    ],
+    "sessionId": "s1",
+    "cacheReady": true,
+    "historyEpoch": 2,
+    "afterRecordId": "r3",
+    "headId": "r3",
+    "historyLoaded": true,
+    "historyError": null,
+    "connection": "closed",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}

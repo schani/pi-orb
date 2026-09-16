@@ -1,0 +1,177 @@
+{
+  "name": "a failed operation drops live state and reports the failure",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op1"
+          }
+        }
+      },
+      "expect": {
+        "activity": "busy",
+        "operationId": "op1"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "subagents",
+            "operationId": "op1",
+            "children": [
+              {
+                "id": "child",
+                "description": "Check deployment",
+                "phase": "running"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "subagents": [
+          {
+            "id": "child",
+            "description": "Check deployment",
+            "phase": "running"
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b1",
+            "blockType": "text",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "x"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "tool_state",
+            "operationId": "op1",
+            "callId": "c1",
+            "name": "bash",
+            "revision": 1,
+            "state": "running"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "turn_notification",
+            "operationId": "op1",
+            "summary": "Deployed"
+          }
+        }
+      },
+      "expect": {
+        "liveBlocks": [
+          {
+            "blockId": "b1",
+            "blockType": "text",
+            "text": "x",
+            "revision": 1
+          }
+        ],
+        "subagents": [
+          {
+            "id": "child",
+            "description": "Check deployment",
+            "phase": "running"
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_finished",
+            "operationId": "op1",
+            "outcome": "failed",
+            "message": "boom"
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": "idle",
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": {
+      "code": "operation_failed",
+      "message": "boom"
+    },
+    "notice": null
+  }
+}

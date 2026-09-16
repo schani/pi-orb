@@ -1,0 +1,127 @@
+{
+  "name": "the command composer borrows and returns the message draft",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "keep me",
+        "mode": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "open_settings",
+        "command": "model"
+      },
+      "expect": {
+        "composerText": "model ",
+        "composerMode": "command",
+        "commandDraft": {
+          "text": "keep me",
+          "mode": "message"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req1",
+        "kind": "settings"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "req1",
+          "result": {
+            "type": "settings_applied",
+            "duplicate": false
+          }
+        }
+      },
+      "expect": {
+        "composerText": "keep me",
+        "composerMode": "message",
+        "commandDraft": null
+      }
+    },
+    {
+      "action": {
+        "type": "open_settings",
+        "command": "thinking"
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req2",
+        "kind": "settings"
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "thinking high",
+        "mode": "command"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "req2",
+          "result": {
+            "type": "settings_applied",
+            "duplicate": false
+          }
+        }
+      },
+      "expect": {
+        "composerText": "thinking high",
+        "composerMode": "command"
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "",
+        "mode": "message"
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "closed",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [],
+    "composerText": "keep me",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}

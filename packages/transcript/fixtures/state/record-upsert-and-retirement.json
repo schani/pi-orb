@@ -1,0 +1,226 @@
+{
+  "name": "a record re-sent by id keeps its arrival position and retires live blocks",
+  "orbId": "orb-1",
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "record": {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ],
+            "overflow": {}
+          },
+          "retiredBlockIds": [],
+          "headId": "r1"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "record": {
+            "id": "r2",
+            "parentId": "r1",
+            "timestamp": "2026-09-16T00:00:02Z",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ],
+            "overflow": {}
+          },
+          "retiredBlockIds": [],
+          "headId": "r2"
+        }
+      },
+      "expect": {
+        "records": [
+          {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello"
+              }
+            ],
+            "overflow": {}
+          },
+          {
+            "id": "r2",
+            "parentId": "r1",
+            "timestamp": "2026-09-16T00:00:02Z",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "hi"
+              }
+            ],
+            "overflow": {}
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b1",
+            "blockType": "text",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "partial"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "tool_state",
+            "operationId": "op1",
+            "callId": "c1",
+            "name": "read",
+            "revision": 1,
+            "state": "running"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "record": {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "hello (edited)"
+              }
+            ],
+            "overflow": {}
+          },
+          "retiredBlockIds": [
+            "b1"
+          ],
+          "headId": "r1"
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [
+      {
+        "id": "r1",
+        "parentId": null,
+        "timestamp": "2026-09-16T00:00:01Z",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello (edited)"
+          }
+        ],
+        "overflow": {}
+      },
+      {
+        "id": "r2",
+        "parentId": "r1",
+        "timestamp": "2026-09-16T00:00:02Z",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "hi"
+          }
+        ],
+        "overflow": {}
+      }
+    ],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": "r1",
+    "headId": "r1",
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [
+      {
+        "callId": "c1",
+        "name": "read",
+        "state": "running",
+        "message": null
+      }
+    ],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}
