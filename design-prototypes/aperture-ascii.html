@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apertures & ASCII — thinking markers</title>
+<style>
+:root{color-scheme:light;--mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;--pace:1}
+*{box-sizing:border-box}body{margin:0;background:white;color:black;font:13px/20px var(--mono);-webkit-font-smoothing:antialiased}button,select{font:inherit;color:inherit;border:1px solid black;background:white;border-radius:0;padding:2px 8px;cursor:pointer}button:hover,button[aria-pressed=true]{background:black;color:white}button:focus-visible,select:focus-visible{outline:2px solid black;outline-offset:3px}header{padding:24px 28px 20px;border-bottom:1px solid black}.eyebrow{color:#555;margin-bottom:12px}h1{margin:0 0 20px;font-size:26px;line-height:32px;font-weight:500;letter-spacing:-1px}.controls,.families{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.controls label{display:flex;align-items:center;gap:8px}.controls .families{margin-right:auto}.controls label+label{margin-left:8px}main{max-width:1440px;margin:auto;padding:28px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 24px}.candidate{min-width:0}.caption{display:flex;align-items:baseline;gap:12px;margin-bottom:10px}.number{color:#555}h2{font:700 13px/20px var(--mono);margin:0}.focus{margin-left:auto;color:#555;border:0;border-bottom:1px solid #999;padding:0}.specimen{border:1px solid black;display:grid;grid-template-columns:144px minmax(0,1fr);min-height:148px}.enlarged{display:grid;place-items:center;border-right:1px solid #999;background:#f2f2f2;position:relative}.enlarged small{position:absolute;bottom:6px;right:8px;font:11px/16px var(--mono);color:#555}.enlarged .instrument{transform:scale(3)}.thread{min-width:0}.rec{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;padding:4px 12px}.prefix{text-align:right;color:#555}.user{background:#f2f2f2;border-bottom:1px solid #999;padding-block:9px}.user .prefix{color:black;font-weight:700}.body{min-width:0;overflow-wrap:anywhere}.agent{padding-block:12px}.body p{margin:0 0 12px}.marker-line{min-height:20px;display:flex;align-items:center}.instrument{position:relative;display:block;width:16px;height:16px;flex:none;font:13px/16px var(--mono);color:black}.instrument svg{display:block;width:100%;height:100%}.pose{animation-duration:calc(var(--duration)*var(--pace));animation-iteration-count:infinite;animation-timing-function:steps(1,end)}.ascii .pose{position:absolute;inset:0;display:grid;place-items:center;white-space:pre}.reverse{color:white;background:black}.note{margin:8px 0 0;color:#555;max-width:66ch}.outcome{display:none;color:#555}.finished .live,.disconnected .live{visibility:hidden}.finished .marker-line .live,.disconnected .marker-line .live{display:none}.finished .done,.disconnected .lost{display:inline}.paused *{animation-play-state:paused!important}.candidate[hidden]{display:none}body.focused main{grid-template-columns:minmax(0,900px);justify-content:center}body.focused .specimen{min-height:240px;grid-template-columns:160px minmax(0,1fr)}footer{padding:16px 28px;border-top:1px solid black;color:#555}
+@media(max-width:760px){header{padding:20px 16px}h1{font-size:22px}main{padding:20px 12px;grid-template-columns:minmax(0,1fr);gap:24px}button,select{min-height:36px}.controls .families{flex-basis:100%;margin-bottom:4px}.controls label+label{margin-left:0}.specimen,body.focused .specimen{grid-template-columns:96px minmax(0,1fr)}.enlarged .instrument{transform:scale(2)}.enlarged small{display:none}.rec{grid-template-columns:28px minmax(0,1fr);gap:8px;padding-inline:8px}footer{padding:16px}}
+@media(prefers-reduced-motion:reduce){.pose{animation:none!important}}
+</style>
+<style id="motions"></style>
+</head>
+<body>
+<header>
+<div class="eyebrow">PI–ORB / THINKING MARKERS / ROUND 03</div>
+<h1>Apertures & ASCII.</h1>
+<div class="controls">
+<div class="families" aria-label="Design family"><button data-family="all" aria-pressed="true">Compare all</button><button data-family="aperture" aria-pressed="false">Apertures</button><button data-family="ascii" aria-pressed="false">ASCII</button></div>
+<button id="pause" aria-pressed="false">Pause motion</button>
+<label>Tempo <select id="tempo"><option value="1.5">Slow</option><option value="1" selected>Original</option><option value="0.7">Quick</option></select></label>
+<label>State <select id="state"><option value="working">Working</option><option value="finished">Finished</option><option value="disconnected">Disconnected</option></select></label>
+</div>
+</header>
+<main id="designs"></main>
+<footer>Five cut-paper instruments / five character instruments · Actual-size marks in the transcript · Prototype only</footer>
+<script>
+const rect=(x,y,width,height)=>`<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="white"/>`;
+const apertures=[
+ {id:'A1',name:'Inset orbit',duration:2.8,note:'Keep the black silhouette intact. A small white opening walks around the inside edge, never breaking the frame.',frames:[[2,2],[6,2],[11,2],[11,6],[11,11],[6,11],[2,11],[2,6]].map(([x,y])=>rect(x,y,3,3))},
+ {id:'A2',name:'Corner bite',duration:2.4,note:'The original aperture, made bolder. A square bite takes four deliberate steps around the corners.',frames:[[0,0],[10,0],[10,10],[0,10]].map(([x,y])=>rect(x,y,6,6))},
+ {id:'A3',name:'Letter slot',duration:3.2,note:'One narrow slit scans down and back. More like a piece of equipment than a loading spinner.',frames:[3,5,7,9,11,9,7,5].map(y=>rect(3,y,10,2))},
+ {id:'A4',name:'Square iris',duration:3.6,note:'The opening expands and contracts in measured steps. A slow breath, with a solid black frame throughout.',frames:[2,2,4,6,8,8,6,4].map(size=>rect((16-size)/2,(16-size)/2,size,size))},
+ {id:'A5',name:'Split shutter',duration:3.2,note:'Two white slots separate, then close into one seam. A paired mechanism rather than a traveling pixel.',frames:[0,1,2,3,3,2,1,0].map(gap=>rect(7-gap,3,1,10)+rect(8+gap,3,1,10))}
+].map(d=>({...d,family:'aperture'}));
+const ascii=[
+ {id:'T1',name:'Reverse rotor',duration:1.6,width:'16px',reverse:true,note:'The classic / - \\ | spinner, cut out of black. Closest bridge between the aperture and a terminal.',frames:['/','-','\\','|']},
+ {id:'T2',name:'Bracket pocket',duration:2.8,width:'5ch',note:'A period moves inside literal brackets. No tile, no fading; just a five-character pocket of activity.',frames:['[.  ]','[ . ]','[  .]','[ . ]']},
+ {id:'T3',name:'Hatch',duration:2.4,width:'3ch',note:'Three strokes turn together: ///, |||, \\\\\\, ---. A small patch of moving typeset texture.',frames:['///','|||','\\\\\\','---']},
+ {id:'T4',name:'Bit register',duration:3.2,width:'calc(3ch + 6px)',reverse:true,note:'A three-bit Gray-code loop: one character changes per step. Fixed choreography, not a task counter.',frames:['001','011','010','110','111','101','100','000']},
+ {id:'T5',name:'Overprint',duration:3.6,width:'16px',reverse:true,note:'White punctuation builds and releases density inside a black type block. A typographic version of the iris.',frames:['.',';',':','+','#','+',';',':']}
+].map(d=>({...d,family:'ascii'}));
+// Interleave the families for side-by-side comparison on wide screens.
+const designs=apertures.flatMap((design,i)=>[design,ascii[i]]);
+let css='';
+function prepare(d){
+ d.frames.forEach((_,frame)=>{
+  const stops=Array.from({length:d.frames.length+1},(_,i)=>`${i/d.frames.length*100}%{opacity:${i%d.frames.length===frame?1:0}}`).join('');
+  css+=`@keyframes pose-${d.id}-${frame}{${stops}}`;
+ });
+}
+const escapeHtml=text=>text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+function instrument(d,large){
+ const poses=d.frames.map((content,i)=>{
+  const style=`opacity:${i===0?1:0};animation-name:pose-${d.id}-${i};`;
+  return d.family==='aperture'?`<g class="pose" style="${style}">${content}</g>`:`<span class="pose" style="${style}">${escapeHtml(content)}</span>`;
+ }).join('');
+ const content=d.family==='aperture'?`<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="black" d="M0 0h16v16H0z"/>${poses}</svg>`:poses;
+ // Frame changes are decorative; assistive technology gets one stable busy label.
+ return `<span class="instrument live ${d.family==='ascii'?'ascii':''} ${d.reverse?'reverse':''}" style="--duration:${d.duration}s;width:${d.width||'16px'}" ${large?'aria-hidden="true"':'role="status" aria-label="Agent working"'}><span aria-hidden="true">${content}</span></span>`;
+}
+designs.forEach(prepare);
+document.querySelector('#motions').textContent=css;
+document.querySelector('#designs').innerHTML=designs.map(d=>`<section class="candidate" data-id="${d.id}" data-kind="${d.family}" aria-labelledby="name-${d.id}"><div class="caption"><span class="number">${d.id}</span><h2 id="name-${d.id}">${d.name}</h2><button class="focus" data-focus="${d.id}" aria-label="Focus ${d.name}">Focus ↗</button></div><div class="specimen"><div class="enlarged">${instrument(d,true)}<small>3×</small></div><div class="thread"><div class="rec user"><span class="prefix">you</span><div class="body">Check the live renderer.</div></div><div class="rec agent"><span class="prefix">orb</span><div class="body"><p>I’ll trace the output path.</p><div class="marker-line">${instrument(d,false)}<span class="outcome done">The renderer follows the busy state.</span><span class="outcome lost">Connection lost.</span></div></div></div></div></div><p class="note">${escapeHtml(d.note)}</p></section>`).join('');
+function show(family,id=null){
+ document.querySelectorAll('.candidate').forEach(card=>card.hidden=id!==null?card.dataset.id!==id:family!=='all'&&card.dataset.kind!==family);
+ document.body.classList.toggle('focused',id!==null);
+ document.querySelectorAll('[data-family]').forEach(button=>button.setAttribute('aria-pressed',String(id===null&&button.dataset.family===family)));
+}
+document.querySelectorAll('[data-family]').forEach(button=>button.addEventListener('click',()=>show(button.dataset.family)));
+document.querySelectorAll('[data-focus]').forEach(button=>button.addEventListener('click',()=>{show('all',button.dataset.focus);document.querySelector('[data-family="all"]').focus();}));
+document.querySelector('#pause').addEventListener('click',event=>{const paused=document.body.classList.toggle('paused');event.currentTarget.setAttribute('aria-pressed',String(paused));event.currentTarget.textContent=paused?'Resume motion':'Pause motion';});
+document.querySelector('#tempo').addEventListener('change',event=>document.documentElement.style.setProperty('--pace',event.target.value));
+document.querySelector('#state').addEventListener('change',event=>{document.body.classList.remove('finished','disconnected');if(event.target.value!=='working')document.body.classList.add(event.target.value);});
+</script>
+</body>
+</html>

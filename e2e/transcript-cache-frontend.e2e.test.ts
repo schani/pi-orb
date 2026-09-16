@@ -78,7 +78,7 @@ it.each(["chromium", "webkit"] as const)(
       await check
         .poll(() => committedReplies.some((text) => text.includes("cache a completed live record")))
         .toBe(true);
-      await check(page.locator(".history .cur")).toHaveCount(0);
+      await check(page.locator(".history .bit-register")).toHaveCount(0);
       await composer.fill("retain cache draft");
       await page.locator(`.orb-index a[href="#/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
@@ -122,7 +122,7 @@ it.each(["chromium", "webkit"] as const)(
       await check
         .poll(() => committedReplies.some((text) => text.includes("retain cache draft")))
         .toBe(true);
-      await check(page.locator(".history .cur")).toHaveCount(0);
+      await check(page.locator(".history .bit-register")).toHaveCount(0);
       check(unexpectedHistory).toBe(0);
       // The app-owned cache survives dashboard navigation, including the phone layout.
       await page.setViewportSize({ width: 390, height: 844 });

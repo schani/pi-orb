@@ -290,6 +290,177 @@ describe("frontend-only browser behavior", () => {
     },
   );
 
+  it.each([1280, 390, 320])(
+    "keeps one transcript bit register only while connected and busy at %ipx",
+    async (width) => {
+      const page = await browser.newPage({
+        viewport: { width, height: 740 },
+        reducedMotion: "no-preference",
+      });
+      const id = "frontend-fixture-orb";
+      let send: (frame: object) => void = () => {};
+      let disconnect = () => {};
+      let snapshots = 0;
+      const emit = (event: object) => send({ type: "runtime.event", event });
+      await page.route(`**/api/v1/orbs/${id}`, async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          json: { ...(await response.json()), state: "running", activity: "busy" },
+        });
+      });
+      await page.route(`**/api/v1/orbs/${id}/messages`, (route) =>
+        route.fulfill({ json: { items: [] } }),
+      );
+      await page.route(`**/api/v1/orbs/${id}/history`, async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          json: { ...(await response.json()), records: [], headId: null },
+        });
+      });
+      await page.routeWebSocket(`**/api/v1/orbs/${id}/live`, (socket) => {
+        const server = socket.connectToServer();
+        send = (frame) =>
+          socket.send(JSON.stringify({ v: 1, at: new Date().toISOString(), ...frame }));
+        disconnect = () => socket.close();
+        server.onMessage((message) => {
+          const frame = JSON.parse(message.toString());
+          if (frame.type === "history.record") return;
+          if (frame.type === "sync.started") {
+            socket.send(JSON.stringify({ ...frame, mode: "after", afterRecordId: null }));
+            return;
+          }
+          if (frame.type === "runtime.event") {
+            if (frame.event.type === "status") {
+              snapshots++;
+              // Reconnection deliberately receives no busy snapshot.
+              if (snapshots === 1) emit({ type: "operation_started", operationId: "bits-op" });
+            }
+            return;
+          }
+          socket.send(message);
+        });
+      });
+      try {
+        await page.goto(`${origin}/#/orbs/${id}`);
+        const history = page.locator(".history");
+        const marker = history.getByRole("status", { name: "Agent working", exact: true });
+        const singleMarker = async () => {
+          await expectPage(marker).toBeVisible();
+          await expectPage(page.locator(".bit-register")).toHaveCount(1);
+          await expectPage(history.locator(".cur")).toHaveCount(0);
+        };
+        await singleMarker();
+        await expectPage(history.locator(".rec-orb")).toHaveCount(0);
+        const strip = marker.locator(".bit-register-frames");
+        const frames = ["001", "011", "010", "110", "111", "101", "100", "000"];
+        await expectPage(strip).toHaveAttribute("aria-hidden", "true");
+        await expectPage(strip.locator(":scope > span")).toHaveText(frames);
+        await expectPage(marker).toHaveCSS("background-color", "rgb(0, 0, 0)");
+        await expectPage(marker).toHaveCSS("color", "rgb(255, 255, 255)");
+        await expectPage(marker).toHaveCSS("font-size", "13px");
+        await expectPage(marker).toHaveCSS("overflow", "hidden");
+        await expectPage(strip).toHaveCSS("animation-duration", "3.2s");
+        await expectPage(strip).toHaveCSS("animation-timing-function", "steps(8)");
+        // Seek into each step rather than racing the browser's animation clock.
+        for (const [index, text] of [...frames, frames[0]].entries()) {
+          const geometry = await strip.evaluate((element, index) => {
+            const animation = element.getAnimations()[0];
+            const marker = element.parentElement;
+            if (animation === undefined || marker === null) return null;
+            animation.pause();
+            animation.currentTime = index * 400 + 200;
+            const box = marker.getBoundingClientRect();
+            const spans = [...element.querySelectorAll("span")];
+            const visible = spans.filter((span) => {
+              const frame = span.getBoundingClientRect();
+              return frame.top < box.bottom - 0.5 && frame.bottom > box.top + 0.5;
+            });
+            const probe = marker.ownerDocument.createElement("span");
+            probe.style.cssText = "position:absolute;width:calc(3ch + 6px)";
+            marker.append(probe);
+            const expectedWidth = probe.getBoundingClientRect().width;
+            probe.remove();
+            return {
+              visible: visible.map((span) => span.textContent),
+              height: box.height,
+              width: box.width,
+              expectedWidth,
+              frameHeights: spans.map((span) => span.getBoundingClientRect().height),
+            };
+          }, index);
+          expectPage(geometry?.visible).toEqual([text]);
+          expectPage(geometry?.height).toBe(16);
+          expectPage(geometry?.width).toBeCloseTo(geometry?.expectedWidth ?? Number.NaN, 1);
+          expectPage(geometry?.frameHeights).toEqual(Array(8).fill(16));
+        }
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await expectPage(strip).toHaveCSS("animation-name", "none");
+        await expectPage(strip).toHaveCSS("transform", "none");
+        expectPage(await strip.evaluate((element) => element.getAnimations().length)).toBe(0);
+        expectPage(
+          await strip
+            .locator("span")
+            .first()
+            .evaluate(
+              (element) =>
+                element.getBoundingClientRect().top -
+                (element.parentElement?.parentElement?.getBoundingClientRect().top ?? Number.NaN),
+            ),
+        ).toBe(0);
+
+        emit({
+          type: "output_patch",
+          operationId: "bits-op",
+          blockId: "live-text",
+          blockType: "text",
+          revision: 1,
+          patch: { type: "append", text: "Live register output" },
+        });
+        await expectPage(history).toContainText("Live register output");
+        await singleMarker();
+        emit({
+          type: "tool_state",
+          operationId: "bits-op",
+          callId: "bits-tool",
+          name: "bash",
+          revision: 1,
+          state: "running",
+        });
+        await expectPage(history.locator(".tool-activity-category")).toContainText("bash");
+        await singleMarker();
+        send({
+          type: "history.record",
+          headId: "bits-record",
+          retiredBlockIds: [],
+          record: {
+            id: "bits-record",
+            parentId: null,
+            timestamp: "2026-09-14T00:00:00Z",
+            type: "message",
+            role: "assistant",
+            overflow: {},
+            content: [{ type: "text", text: "Persisted register output" }],
+          },
+        });
+        await expectPage(history).toContainText("Persisted register output");
+        await expectPage(history.locator(".rec-orb")).toHaveCount(1);
+        await expectPage(history.locator(".rec-orb")).toContainText("Live register output");
+        await singleMarker();
+        emit({ type: "status", operationId: "bits-op", activity: "idle" });
+        await expectPage(marker).toHaveCount(0);
+        await expectPage(history).toContainText("Live register output");
+        emit({ type: "operation_started", operationId: "bits-op" });
+        await singleMarker();
+        disconnect();
+        await expectPage(marker).toHaveCount(0);
+        await expectPage.poll(() => snapshots).toBe(2);
+        await expectPage(marker).toHaveCount(0);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
   it("reveals generic tool inputs and outputs with a single disclosure", async () => {
     const page = await browser.newPage();
     const id = "frontend-auth-copy-test";
@@ -2204,7 +2375,7 @@ describe("frontend-only browser behavior", () => {
     await page.close();
   });
 
-  it("uses full-cell block cursors and keeps the composer caret aligned during native editing", async () => {
+  it("keeps full-cell composer and terminal carets aligned during native editing", async () => {
     const page = await browser.newPage({ reducedMotion: "reduce" });
     await page.goto(`${origin}/${ORB_HASH}`);
     const composer = page.getByPlaceholder(/Message the orb/);
@@ -2249,18 +2420,6 @@ describe("frontend-only browser behavior", () => {
     await expectPage(caret).toBeVisible();
     expectPage((await position()).top).toBeLessThan(80);
 
-    // A stable presentation specimen avoids racing a transient streamed delta.
-    await page.locator(".composer-editor").evaluate((element) => {
-      const working = element.ownerDocument.createElement("span");
-      working.className = "cur";
-      working.dataset["testWorking"] = "true";
-      element.append(working);
-    });
-    const working = page.locator('[data-test-working="true"]');
-    await expectPage(working).toHaveCSS("height", "20px");
-    expectPage(await working.evaluate((el) => el.getBoundingClientRect().width)).toBe(
-      await caret.evaluate((el) => el.getBoundingClientRect().width),
-    );
     await page.getByRole("button", { name: "Open terminal", exact: true }).click();
     await expectPage(caret).toBeHidden();
     const terminalCursor = page.locator(".term-cursor").first();

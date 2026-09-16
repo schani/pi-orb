@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Thinking — five transcript markers</title>
+<style>
+:root{color-scheme:light;--k:#000;--w:#fff;--g1:#f2f2f2;--g2:#999;--g3:#555;--ok:#1a7e37;--mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--w);color:var(--k);font:13px/20px var(--mono);-webkit-font-smoothing:antialiased}button,select{font:inherit;color:inherit;background:#fff;border:1px solid #000;border-radius:0;padding:2px 8px;cursor:pointer}button:hover,button[aria-pressed=true]{background:#000;color:#fff}button:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--ok);outline-offset:3px}header{border-bottom:1px solid #000;padding:24px 28px 20px}.eyebrow{color:var(--g3);margin-bottom:12px}h1{font-size:26px;line-height:32px;letter-spacing:-1px;margin:0 0 16px;font-weight:500}.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.controls label{margin-left:auto;display:flex;align-items:center;gap:8px}main{max-width:1440px;margin:auto;padding:28px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 24px}.candidate{min-width:0}.caption{display:flex;gap:12px;align-items:baseline;margin-bottom:10px}.number{color:var(--g3)}h2{font:700 13px/20px var(--mono);margin:0}.focus{margin-left:auto;border:0;border-bottom:1px solid var(--g2);padding:0;color:var(--g3)}.frame{border:1px solid #000}.rec{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;align-items:start;padding:4px 12px}.prefix{text-align:right;color:var(--g3);position:relative}.body{min-width:0}.user{background:var(--g1);border-bottom:1px solid var(--g2);padding-block:9px}.user .prefix{color:#000;font-weight:700}.agent{min-height:174px;padding-top:12px}.body p{margin:0 0 8px;overflow-wrap:anywhere}details{border:1px solid var(--g2);color:var(--g3);margin-bottom:12px}summary{cursor:pointer;padding:0 6px}pre{font:inherit;white-space:pre-wrap;margin:0;padding:4px 8px;border-top:1px solid var(--g2);overflow-wrap:anywhere}.marker-line{height:24px;display:flex;align-items:center;position:relative}.marker{display:inline-flex;align-items:center;color:var(--ok)}.note{color:var(--g3);margin:10px 0 0;max-width:60ch}.composer{border-top:1px solid #000;padding:8px 12px;display:grid;grid-template-columns:32px 1fr;gap:12px;color:var(--g2)}.composer b{color:#000;text-align:right}.outcome{color:var(--g3);display:none}.finished .marker,.disconnected .marker{display:none}.finished .outcome.done,.disconnected .outcome.lost{display:inline}.finished .stream,.disconnected .stream{display:none}.stream{display:none}.streaming .stream{display:block}.streaming .lead{display:none}.paused *,.paused *:before,.paused *:after{animation-play-state:paused!important}
+/* 01: letterpress. No gradients, no moving layout; just ink weight by opacity. */
+.letters{color:var(--g3)}.letters span{animation:ink 2.4s ease-in-out infinite;animation-delay:calc(var(--i)*.12s)}@keyframes ink{0%,65%,100%{opacity:.4}25%{opacity:1;color:#000}}
+/* 02: a tiny 3×3 instrument, distinct from a caret. */
+.matrix{display:grid;grid-template-columns:repeat(3,4px);gap:2px;width:16px;height:16px}.matrix i{width:4px;height:4px;background:var(--ok);opacity:.18;animation:cell 1.8s steps(1,end) infinite;animation-delay:calc(var(--i)*-.2s)}@keyframes cell{0%,33%{opacity:1}34%,100%{opacity:.18}}
+/* 03: bounded movement that never implies completion. */
+.shuttle{width:64px;height:16px;border-left:1px solid #000;border-right:1px solid #000;position:relative;color:#000}.shuttle:before,.shuttle:after{content:"";position:absolute;width:4px;height:100%;border-top:1px solid #000;border-bottom:1px solid #000;top:0}.shuttle:before{left:0}.shuttle:after{right:0}.shuttle i{position:absolute;width:6px;height:6px;background:#000;top:5px;left:7px;animation:shuttle 1.8s ease-in-out infinite alternate}@keyframes shuttle{to{transform:translateX(42px)}}
+/* 04: activity belongs to the speaker, leaving the text column empty. */
+.margin-mark{position:absolute;right:9px;top:30px;width:14px;height:14px;border:1px solid var(--ok)}.margin-mark:before{content:"";position:absolute;inset:3px;background:var(--ok);animation:breathe 2.2s ease-in-out infinite}.margin-mark:after{content:"";position:absolute;inset:-4px;border:1px solid var(--ok);animation:echo 2.2s ease-out infinite}@keyframes breathe{50%{opacity:.3;transform:scale(.6)}}@keyframes echo{0%{opacity:.6;transform:scale(.65)}80%,100%{opacity:0;transform:scale(1.2)}}
+/* 05: a rule, not a filling progress bar. Constant-width segment returns forever. */
+.rule{width:100%;height:1px;background:#ddd;position:relative}.rule i{position:absolute;width:28px;height:2px;background:#000;top:-1px;left:0;animation:sweep 2.8s ease-in-out infinite alternate}@keyframes sweep{to{left:calc(100% - 28px)}}
+footer{border-top:1px solid #000;padding:16px 28px;color:var(--g3)}body[data-view]:not([data-view=all]) main{grid-template-columns:minmax(0,900px);justify-content:center}body[data-view]:not([data-view=all]) .candidate{display:none}body[data-view="1"] .candidate[data-id="1"],body[data-view="2"] .candidate[data-id="2"],body[data-view="3"] .candidate[data-id="3"],body[data-view="4"] .candidate[data-id="4"],body[data-view="5"] .candidate[data-id="5"]{display:block}body[data-view]:not([data-view=all]) .agent{min-height:260px}
+@media(max-width:760px){header{padding:20px 16px}main{grid-template-columns:minmax(0,1fr);padding:20px 12px;gap:24px}.controls label{margin-left:0;flex-basis:100%;margin-top:4px}button,select{min-height:36px}.focus{min-height:36px}h1{font-size:22px}footer{padding:16px}.rec{gap:12px}.agent{min-height:194px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important}.letters span{opacity:1}.matrix i:nth-child(odd){opacity:1}.margin-mark:after{display:none}}
+</style>
+</head>
+<body data-view="all">
+<header>
+<div class="eyebrow">PI–ORB / TRANSCRIPT STUDY</div>
+<h1>Thinking, without the cursor.</h1>
+<div class="controls" aria-label="Preview controls">
+<button id="compare" aria-pressed="true">Compare all</button>
+<button id="motion" aria-pressed="false">Pause motion</button>
+<label>Preview <select id="phase"><option value="thinking">Waiting for output</option><option value="streaming">Mid-response</option><option value="finished">Finished</option><option value="disconnected">Disconnected</option></select></label>
+</div>
+</header>
+<main id="designs"></main>
+<footer>Prototype only · 13px monospace / white paper / black rules / signal green</footer>
+<script>
+const designs = [
+ {name:'Letterpress',note:'Only type. A quiet wave of ink passes through the word; no extra symbol.',mark:'<span class="marker letters" role="status" aria-label="Agent working"><span aria-hidden="true" style="--i:0">t</span><span aria-hidden="true" style="--i:1">h</span><span aria-hidden="true" style="--i:2">i</span><span aria-hidden="true" style="--i:3">n</span><span aria-hidden="true" style="--i:4">k</span><span aria-hidden="true" style="--i:5">i</span><span aria-hidden="true" style="--i:6">n</span><span aria-hidden="true" style="--i:7">g</span></span>'},
+ {name:'Nine-cell instrument',note:'A miniature signal tile. Discrete cells cycle in place; compact enough for a single transcript line.',mark:'<span class="marker matrix" role="status" aria-label="Agent working">'+Array.from({length:9},(_,i)=>`<i style="--i:${i}" aria-hidden="true"></i>`).join('')+'</span>'},
+ {name:'Bracket shuttle',note:'Mechanical and monochrome. One piece moves between fixed brackets, with no progress claim.',mark:'<span class="marker shuttle" role="status" aria-label="Agent working"><i aria-hidden="true"></i></span>'},
+ {name:'Margin beacon',note:'Move activity off the text line. A slow square pulse sits beneath the orb speaker prefix.',mark:'<span class="marker margin-mark" role="status" aria-label="Agent working"></span>',gutter:true},
+ {name:'Scanning rule',note:'A typographic boundary instead of a glyph. A short black segment traverses a hairline below the response.',mark:'<span class="marker rule" role="status" aria-label="Agent working"><i aria-hidden="true"></i></span>'}
+];
+document.querySelector('#designs').innerHTML=designs.map((d,i)=>`<section class="candidate" data-id="${i+1}" aria-labelledby="title-${i+1}">
+<div class="caption"><span class="number">0${i+1}</span><h2 id="title-${i+1}">${d.name}</h2><button class="focus" data-focus="${i+1}" aria-label="Focus ${d.name}">Focus ↗</button></div>
+<div class="frame">
+<div class="rec user"><span class="prefix">you</span><div class="body">Find where the transcript renders live output.</div></div>
+<div class="rec agent"><span class="prefix">orb${d.gutter?d.mark:''}</span><div class="body">
+<p class="lead">I’ll check the renderer and its activity states.</p><p class="stream">The live response is rendered in HistoryView. The activity marker follows the current output.</p>
+<details><summary>read · HistoryView.tsx</summary><pre>Live output → assistant record\nBusy state → trailing activity marker</pre></details>
+<div class="marker-line">${d.gutter?'':d.mark}<span class="outcome done">The marker follows the busy state.</span><span class="outcome lost">Connection lost.</span></div>
+</div></div>
+<div class="composer"><b>&gt;</b><span>Message</span></div>
+</div><p class="note">${d.note}</p></section>`).join('');
+document.querySelectorAll('[data-focus]').forEach(button=>button.addEventListener('click',()=>{
+ document.body.dataset.view=button.dataset.focus;
+ document.querySelector('#compare').setAttribute('aria-pressed','false');
+ document.querySelector('#compare').focus();
+}));
+document.querySelector('#compare').addEventListener('click',()=>{document.body.dataset.view='all';document.querySelector('#compare').setAttribute('aria-pressed','true')});
+document.querySelector('#motion').addEventListener('click',event=>{const paused=document.body.classList.toggle('paused');event.currentTarget.setAttribute('aria-pressed',String(paused));event.currentTarget.textContent=paused?'Resume motion':'Pause motion'});
+document.querySelector('#phase').addEventListener('change',event=>{document.body.classList.remove('thinking','streaming','finished','disconnected');document.body.classList.add(event.target.value)});
+</script>
+</body>
+</html>

@@ -1852,8 +1852,36 @@ button.personal-instructions-gear {
   border-top: 1px solid var(--g1);
 }
 
-/* live output ends in a blinking block cursor */
-.cur,
+/* The transcript's bit register is independent of the composer's caret. */
+.bit-register {
+  display: inline-block;
+  width: calc(3ch + 6px);
+  height: 16px;
+  padding: 0 3px;
+  overflow: hidden;
+  color: var(--w);
+  background: var(--k);
+  font: 13px / 16px var(--mono);
+  vertical-align: middle;
+  user-select: none;
+}
+
+.bit-register-frames {
+  display: block;
+  animation: bit-register-step 3.2s steps(8, end) infinite;
+}
+
+.bit-register-frames > span {
+  display: block;
+  height: 16px;
+}
+
+@keyframes bit-register-step {
+  to {
+    transform: translateY(-100%);
+  }
+}
+
 .composer-caret {
   display: inline-block;
   width: 1ch;
@@ -1875,7 +1903,7 @@ button.personal-instructions-gear {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cur,
+  .bit-register-frames,
   .composer-caret {
     animation: none;
   }

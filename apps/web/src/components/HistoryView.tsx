@@ -9,6 +9,7 @@ import type {
 import { memo, type ReactNode } from "react";
 import { representedInboxMessageIds } from "../lib/queued-messages.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
+import { BitRegister } from "./BitRegister.tsx";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
 import { isSubagentNotice, SubagentNotice } from "./SubagentNotice.tsx";
@@ -326,8 +327,8 @@ function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNod
       ),
     );
   }
-  // The cursor is the only claim that the agent is still producing output.
-  if (busy) nodes.push(<span className="cur" key="cursor" />);
+  // Only authoritative busy state can keep the activity marker alive.
+  if (busy) nodes.push(<BitRegister key="busy" />);
   return nodes;
 }
 
@@ -481,7 +482,7 @@ export const HistoryView = memo(function HistoryView({
       )}
       {busy && !hasAgentLive && (
         <div className="busy-indicator">
-          <span className="cur" />
+          <BitRegister />
         </div>
       )}
     </div>

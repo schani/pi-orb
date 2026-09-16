@@ -333,7 +333,7 @@ describe("HistoryView turn structure", () => {
     expect(html).not.toContain("<strong>passing</strong>");
   });
 
-  it("renders live streaming output, tool chips, and the busy cursor as an agent record", () => {
+  it("renders live streaming output, tool chips, and the bit register as an agent record", () => {
     const html = renderToStaticMarkup(
       <HistoryView
         records={[message("u1", "user", "go")]}
@@ -348,8 +348,47 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain("streaming now");
     expect(html).toContain("activity-rail-row-running tool-activity-category");
     expect(html).toContain('class="activity-rail-label">commands</span>');
-    expect(html).toContain('class="cur"></span>');
+    expect(html).toContain('class="bit-register"');
+    expect(html).not.toContain('class="cur"');
   });
+
+  it.each(["waiting", "text", "reasoning", "shell", "tool", "merged"] as const)(
+    "renders exactly one accessible bit register only while busy: %s",
+    (scenario) => {
+      const records = scenario === "merged" ? [message("a1", "assistant", "committed output")] : [];
+      const liveBlocks =
+        scenario === "waiting" || scenario === "tool"
+          ? []
+          : [
+              {
+                blockId: "live",
+                blockType:
+                  scenario === "shell" || scenario === "reasoning" ? scenario : ("text" as const),
+                text: "retained output",
+                revision: 1,
+              },
+            ];
+      const tools =
+        scenario === "tool"
+          ? [{ callId: "call", name: "read", state: "running" as const, message: null }]
+          : [];
+      for (const busy of [true, false]) {
+        const html = renderToStaticMarkup(
+          <HistoryView records={records} liveBlocks={liveBlocks} tools={tools} busy={busy} />,
+        );
+        expect(html.match(/class="bit-register"/g) ?? []).toHaveLength(busy ? 1 : 0);
+        expect(html).not.toContain('class="cur"');
+        if (busy) {
+          expect(html).toContain('role="status" aria-label="Agent working"');
+          expect(html).toContain('class="bit-register-frames" aria-hidden="true"');
+          expect(html).toContain(
+            "<span>001</span><span>011</span><span>010</span><span>110</span><span>111</span><span>101</span><span>100</span><span>000</span>",
+          );
+        }
+        if (liveBlocks.length > 0) expect(html).toContain("retained output");
+      }
+    },
+  );
 });
 
 describe("HistoryView", () => {

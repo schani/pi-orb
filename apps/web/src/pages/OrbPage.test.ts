@@ -77,12 +77,12 @@ describe("OrbPage live activity", () => {
   });
 
   it.each(["stopping", "stopped", "starting", "failed", "archived", undefined] as const)(
-    "hides the cursor for %s even before socket cleanup",
+    "hides the activity marker for %s even before socket cleanup",
     (lifecycle) => expect(isLiveBusy(lifecycle, busyState())).toBe(false),
   );
 
   it.each(["closed", "retrying", "connecting"] as const)(
-    "hides the cursor for %s even with stale busy activity",
+    "hides the activity marker for %s even with stale busy activity",
     (connection) => expect(isLiveBusy("running", { ...busyState(), connection })).toBe(false),
   );
 
