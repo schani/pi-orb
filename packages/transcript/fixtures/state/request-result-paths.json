@@ -1,6 +1,5 @@
 {
   "name": "accepted, aborted and rejected receipts",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

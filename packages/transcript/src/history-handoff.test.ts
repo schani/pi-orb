@@ -1,11 +1,11 @@
 import { expect, it } from "vitest";
-import { snapshotFromHistory } from "../lib/transcript-cache.ts";
-import { history } from "../testkit/transcript.ts";
-import { initialState, reducer } from "./OrbPage.tsx";
+import { initialState, reducer } from "./state.ts";
+import { history } from "./testkit/transcript.ts";
+import { snapshotFromHistory } from "./transcript-cache.ts";
 
 it("restores only transcript state by reference into a disconnected conversation", () => {
   const snapshot = snapshotFromHistory(history());
-  const state = reducer(initialState("a"), { type: "history_restored", snapshot });
+  const state = reducer(initialState(), { type: "history_restored", snapshot });
   expect(state.records).toBe(snapshot.records);
   expect(state.sessionId).toBe("session");
   expect(state.cacheReady).toBe(true);
@@ -20,7 +20,7 @@ it("restores only transcript state by reference into a disconnected conversation
 it.each(["session", "replacement"])(
   "welcome for %s clears the live roster independently of cached session identity",
   (sessionId) => {
-    const restored = reducer(initialState("a"), { type: "history_loaded", view: history() });
+    const restored = reducer(initialState(), { type: "history_loaded", view: history() });
     const before = {
       ...restored,
       subagents: [{ id: "child", description: "Work", phase: "running" as const }],
@@ -51,7 +51,7 @@ it.each(["session", "replacement"])(
 );
 
 it("same-session lagging replica preserves newer live records; empty uninitialized replica pins nothing", () => {
-  const state = reducer(initialState("a"), {
+  const state = reducer(initialState(), {
     type: "history_loaded",
     view: history("a", ["one", "two"]),
   });
@@ -73,7 +73,7 @@ it("same-session lagging replica preserves newer live records; empty uninitializ
 });
 
 it("a confirmed new replica session replaces rather than concatenates histories", () => {
-  const state = reducer(initialState("a"), { type: "history_loaded", view: history() });
+  const state = reducer(initialState(), { type: "history_loaded", view: history() });
   const changed = reducer(state, {
     type: "history_refreshed",
     view: history("a", ["different"], "new-session"),
@@ -84,7 +84,7 @@ it("a confirmed new replica session replaces rather than concatenates histories"
 });
 
 it("starting a connection fences an already-issued HTTP refresh even after it disconnects", () => {
-  let state = reducer(initialState("a"), { type: "history_loaded", view: history() });
+  let state = reducer(initialState(), { type: "history_loaded", view: history() });
   const epoch = state.historyEpoch;
   state = reducer(state, { type: "connection_status", status: "connecting" });
   state = reducer(state, { type: "connection_status", status: "closed" });

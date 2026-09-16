@@ -1,11 +1,11 @@
 import type { ServerFrame } from "@pi-orb/protocol";
+import { initialState, reducer } from "@pi-orb/transcript";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { HistoryView } from "../components/HistoryView.tsx";
-import { initialState, reducer } from "./OrbPage.tsx";
 
 it("does not let HTTP jump ahead of an open socket even before its first output patch", () => {
-  const state = reducer(initialState("orb"), { type: "connection_status", status: "open" });
+  const state = reducer(initialState(), { type: "connection_status", status: "open" });
   expect(
     reducer(state, {
       type: "history_refreshed",
@@ -16,7 +16,7 @@ it("does not let HTTP jump ahead of an open socket even before its first output 
 });
 
 it("commits and retires output atomically without suppressing a later identical response", () => {
-  let state = reducer(initialState("orb"), { type: "connection_status", status: "open" });
+  let state = reducer(initialState(), { type: "connection_status", status: "open" });
   const base = { v: 1 as const, at: "2026-09-12T00:00:00Z" };
   const apply = (frame: ServerFrame) => {
     state = reducer(state, { type: "frame", frame });

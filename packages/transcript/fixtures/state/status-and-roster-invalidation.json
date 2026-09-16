@@ -1,6 +1,5 @@
 {
   "name": "status frames own activity and invalidate the roster on operation change",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

@@ -1,8 +1,8 @@
+import { TranscriptCache } from "@pi-orb/transcript";
 import { useState, useSyncExternalStore } from "react";
 import { AppSearchProvider } from "./components/AppSearch.tsx";
 import { IconSprite } from "./components/Icons.tsx";
 import { SessionRibbon } from "./components/SessionRibbon.tsx";
-import { TranscriptCache } from "./lib/transcript-cache.ts";
 import { TranscriptCacheContext } from "./lib/transcript-cache-context.ts";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";

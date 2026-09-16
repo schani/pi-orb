@@ -1,7 +1,5 @@
 import type { ActiveSubagent, AgentSettingsEvent, HistoryRecord } from "@pi-orb/protocol";
-import type { LiveBlock, ToolChip } from "../components/HistoryView.tsx";
-import type { OrbPageState } from "../pages/OrbPage.tsx";
-import type { ApiError } from "./api.ts";
+import type { LiveBlock, ToolChip, TranscriptState } from "./state.ts";
 
 /**
  * JSON-only projection of the client model: the comparison surface of the
@@ -17,7 +15,7 @@ export interface SerializedState {
   afterRecordId: string | null;
   headId: string | null;
   historyLoaded: boolean;
-  historyError: ApiError | null;
+  historyError: string | null;
   connection: string;
   welcome: {
     runtimeInstanceId: string;
@@ -42,7 +40,7 @@ export interface SerializedState {
   notice: string | null;
 }
 
-export function serializeState(state: OrbPageState): SerializedState {
+export function serializeState(state: TranscriptState): SerializedState {
   return {
     records: [...state.records.values()],
     sessionId: state.sessionId,

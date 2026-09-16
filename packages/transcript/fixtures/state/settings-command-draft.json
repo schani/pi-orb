@@ -1,6 +1,5 @@
 {
   "name": "the command composer borrows and returns the message draft",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

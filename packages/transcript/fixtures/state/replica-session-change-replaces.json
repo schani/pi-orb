@@ -1,6 +1,5 @@
 {
   "name": "a replica read from another session replaces rather than merges",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

@@ -1,6 +1,5 @@
 {
   "name": "roster frames are ignored unless the socket is open and owns the operation",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

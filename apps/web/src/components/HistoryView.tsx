@@ -6,8 +6,8 @@ import type {
   MessageRecord,
   OrbMessageView,
 } from "@pi-orb/protocol";
+import { type LiveBlock, representedInboxMessageIds, type ToolChip } from "@pi-orb/transcript";
 import { memo, type ReactNode } from "react";
-import { representedInboxMessageIds } from "../lib/queued-messages.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { BitRegister } from "./BitRegister.tsx";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
@@ -20,22 +20,6 @@ import {
   type ToolCallBlock,
   type ToolResultBlock,
 } from "./ToolActivity.tsx";
-
-/** Streaming output block accumulated from `output_patch` events. */
-export interface LiveBlock {
-  blockId: string;
-  blockType: "text" | "reasoning" | "shell";
-  text: string;
-  revision: number;
-}
-
-/** Latest per-call tool state from `tool_state` events. */
-export interface ToolChip {
-  callId: string;
-  name: string;
-  state: "running" | "completed" | "failed";
-  message: string | null;
-}
 
 interface HistoryViewProps {
   records: readonly HistoryRecord[];

@@ -1,6 +1,5 @@
 {
   "name": "welcome then a full sync loads the transcript",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

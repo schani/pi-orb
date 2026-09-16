@@ -7,13 +7,12 @@ import {
   type ServerFrame,
   ServerFrameSchema,
 } from "@pi-orb/protocol";
+import type { LiveConnectionStatus } from "@pi-orb/transcript";
 import { Check } from "typebox/value";
 import { generateUuid } from "./uuid.ts";
 
 /** Stable UUID for this browser tab (docs/runtime-protocol.md). */
 export const CLIENT_INSTANCE_ID: string = generateUuid();
-
-export type LiveConnectionStatus = "connecting" | "open" | "retrying" | "closed";
 
 export interface LiveConnectionOptions {
   orbId: string;

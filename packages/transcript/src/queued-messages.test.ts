@@ -6,7 +6,6 @@ import type {
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import { describe, expect, it } from "vitest";
-import type { ApiError } from "./api.ts";
 import {
   createMutationEpoch,
   hasDeliveredMessageAwaitingHistory,
@@ -32,8 +31,10 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
-type ListResult = Result<OrbMessageListView, ApiError>;
-type EnqueueResult = Result<OrbMessageView, ApiError>;
+/** Stands in for whatever typed transport failure a client reports. */
+type FetchError = { readonly message: string };
+type ListResult = Result<OrbMessageListView, FetchError>;
+type EnqueueResult = Result<OrbMessageView, FetchError>;
 
 /**
  * Mirrors the OrbPage wiring of the queued-message list: a 2s poll that
@@ -215,14 +216,12 @@ describe("queued message poll/enqueue race", () => {
     await seeded;
 
     const failedEnqueue = deferred<EnqueueResult>();
-    failedEnqueue.resolve(
-      err({ type: "http", status: 503, code: null, message: "unavailable", retryable: true }),
-    );
+    failedEnqueue.resolve(err({ message: "unavailable" }));
     await queue.send(failedEnqueue.promise);
 
     const failedPoll = deferred<ListResult>();
     const polled = queue.poll(failedPoll.promise);
-    failedPoll.resolve(err({ type: "network", message: "offline" }));
+    failedPoll.resolve(err({ message: "offline" }));
     await polled;
 
     expect(queue.messages.map((entry) => entry.id)).toEqual(["m1"]);

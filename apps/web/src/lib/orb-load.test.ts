@@ -1,10 +1,10 @@
 import type { OrbView } from "@pi-orb/protocol";
+import { snapshotFromHistory, TranscriptCache } from "@pi-orb/transcript";
+import { history } from "@pi-orb/transcript/testkit";
 import { err, ok } from "neverthrow";
 import { expect, it, vi } from "vitest";
-import { history } from "../testkit/transcript.ts";
 import type { ApiError } from "./api.ts";
 import { startOrbLoad } from "./orb-load.ts";
-import { snapshotFromHistory, TranscriptCache } from "./transcript-cache.ts";
 
 const orb = (id = "a", state: OrbView["state"] = "running") =>
   ({ id, projectId: "p", state }) as OrbView;

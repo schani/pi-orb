@@ -1,6 +1,5 @@
 {
   "name": "a lagging replica read keeps the live suffix and only a current epoch applies",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

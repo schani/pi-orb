@@ -1,11 +1,11 @@
 import type { OrbHistoryView, OrbView } from "@pi-orb/protocol";
-import { err, ok, type Result } from "neverthrow";
-import type { ApiError } from "./api.ts";
 import {
   type CachedTranscript,
   snapshotFromHistory,
   type TranscriptCache,
-} from "./transcript-cache.ts";
+} from "@pi-orb/transcript";
+import { err, ok, type Result } from "neverthrow";
+import type { ApiError } from "./api.ts";
 
 export interface OrbLoad {
   orbId: string;

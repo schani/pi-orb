@@ -1,5 +1,5 @@
 import type { HistoryRecord, OrbHistoryView, OrbView } from "@pi-orb/protocol";
-import type { LiveConnectionStatus } from "./live.ts";
+import type { LiveConnectionStatus } from "./state.ts";
 
 /** Initial hello owns ordinary running-orb catch-up; HTTP is the disconnected fallback. */
 export function canRepairFromReplica(

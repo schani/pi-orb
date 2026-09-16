@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { history } from "../testkit/transcript.ts";
+import { history } from "./testkit/transcript.ts";
 import { snapshotFromHistory, TranscriptCache } from "./transcript-cache.ts";
 
 describe("transcript cache", () => {

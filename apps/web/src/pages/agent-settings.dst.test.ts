@@ -1,4 +1,5 @@
 import type { AgentSettings, ServerFrame } from "@pi-orb/protocol";
+import { initialState, reducer } from "@pi-orb/transcript";
 import { ok, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { AgentSettingsController } from "../../../orb-runtime/src/domain/agent-settings.ts";
@@ -11,7 +12,6 @@ import {
   type PiSessionManager,
 } from "../../../orb-runtime/src/pi/agent.ts";
 import { runDst } from "../../../orb-runtime/src/testkit/sim.ts";
-import { initialState, reducer } from "./OrbPage.tsx";
 
 it.each([false, true])(
   "composed settings DST: real agent admission, registry, sync/writer and browser (backpressure=%s)",
@@ -28,7 +28,7 @@ it.each([false, true])(
               workDir: "/nonexistent",
               broker: null,
             });
-            let browser = initialState("test");
+            let browser = initialState();
             let buffered = queued ? 100 : 0;
             const writer = new OutboundWriter(
               {

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { initialState, reducer } from "./OrbPage.tsx";
+import { initialState, reducer } from "./state.ts";
 
 const event = {
   type: "agent_settings" as const,
@@ -8,7 +8,7 @@ const event = {
   writable: true,
 };
 it("settings events own the header; disconnect and old receipts cannot retain or regress it", () => {
-  let state = reducer(initialState("test"), {
+  let state = reducer(initialState(), {
     type: "frame",
     frame: { v: 1, type: "runtime.event", at: "now", event },
   });
@@ -28,7 +28,7 @@ it("settings events own the header; disconnect and old receipts cannot retain or
   expect(state.settings).toBeNull();
 });
 it("header command entry restores the draft and images on success but does not clear later edits", () => {
-  let state = reducer(initialState("test"), {
+  let state = reducer(initialState(), {
     type: "composer_changed",
     mode: "message",
     text: "keep me",

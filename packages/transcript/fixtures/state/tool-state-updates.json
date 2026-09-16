@@ -1,6 +1,5 @@
 {
   "name": "tool chips upsert by call id and carry the last message",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

@@ -2,23 +2,22 @@ import { readdirSync, readFileSync } from "node:fs";
 import { ServerFrameSchema } from "@pi-orb/protocol";
 import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
-import { serializeState } from "../lib/transcript-serialize.ts";
-import { initialState, type OrbPageAction, reducer } from "./OrbPage.tsx";
+import { serializeState } from "./serialize.ts";
+import { initialState, reducer, type TranscriptAction } from "./state.ts";
 
 interface Step {
-  action: OrbPageAction;
+  action: TranscriptAction;
   expect?: Record<string, unknown>;
 }
 
 interface StateFixture {
   name: string;
-  orbId: string;
   steps: Step[];
   expect: Record<string, unknown>;
 }
 
 function loadFixtures(directory: string): { file: string; fixture: StateFixture }[] {
-  const root = new URL(`../../../../packages/transcript/fixtures/${directory}/`, import.meta.url);
+  const root = new URL(`../fixtures/${directory}/`, import.meta.url);
   return readdirSync(root)
     .filter((file) => file.endsWith(".json"))
     .sort()
@@ -29,7 +28,7 @@ function loadFixtures(directory: string): { file: string; fixture: StateFixture 
 }
 
 function replay(fixture: StateFixture): void {
-  let state = initialState(fixture.orbId);
+  let state = initialState();
   fixture.steps.forEach((step, index) => {
     const where = `${fixture.name} step ${index} (${step.action.type})`;
     if (step.action.type === "frame") {

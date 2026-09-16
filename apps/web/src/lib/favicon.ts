@@ -1,5 +1,5 @@
 import type { OrbState } from "@pi-orb/protocol";
-import type { LiveConnectionStatus } from "./live.ts";
+import type { LiveConnectionStatus } from "@pi-orb/transcript";
 
 export type OrbFaviconStatus =
   | "neutral"

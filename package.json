@@ -4,6 +4,7 @@
   "type": "module",
   "workspaces": [
     "packages/protocol",
+    "packages/transcript",
     "packages/mock-openai",
     "packages/luna",
     "packages/native-image",

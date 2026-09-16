@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@pi-orb/protocol": "*",
+    "@pi-orb/transcript": "*",
     "@wterm/dom": "^0.3.2",
     "@wterm/ghostty": "^0.3.2",
     "@wterm/react": "^0.3.2",

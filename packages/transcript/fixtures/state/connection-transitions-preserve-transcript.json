@@ -1,6 +1,5 @@
 {
   "name": "reconnects drop live authority but never the transcript or its output",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

@@ -1,6 +1,5 @@
 {
   "name": "a record re-sent by id keeps its arrival position and retires live blocks",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

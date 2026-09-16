@@ -1,6 +1,5 @@
 {
   "name": "a failed operation drops live state and reports the failure",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

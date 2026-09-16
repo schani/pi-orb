@@ -1,6 +1,5 @@
 {
   "name": "a server error survives until the next welcome",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

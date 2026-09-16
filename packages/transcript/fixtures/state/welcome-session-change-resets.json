@@ -1,6 +1,5 @@
 {
   "name": "a welcome for a different session discards the cached transcript",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

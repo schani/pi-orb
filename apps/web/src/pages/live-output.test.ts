@@ -1,5 +1,6 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { ServerFrame } from "@pi-orb/protocol";
+import { initialState, reducer } from "@pi-orb/transcript";
 import { okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import { OutboundWriter } from "../../../orb-runtime/src/domain/outbound.ts";
@@ -8,7 +9,6 @@ import {
   type PiSession,
   type PiSessionManager,
 } from "../../../orb-runtime/src/pi/agent.ts";
-import { initialState, reducer } from "./OrbPage.tsx";
 
 // Exhaust the finite schedules: next response before/after publication,
 // immediate/backpressured delivery, snapshot/microtask flush, and a mapping
@@ -56,7 +56,7 @@ it.each(
       appendCustomEntry: () => "baseline",
     } as unknown as PiSessionManager;
     agent.attachSession(session, manager, summarizer);
-    let browser = initialState("test");
+    let browser = initialState();
     let firstIds: string[] = [];
     const committedSnapshots: { browser: string[]; reconnect: string[] }[] = [];
     const frames: ServerFrame[] = [];

@@ -1,6 +1,5 @@
 {
   "name": "an after-sync clears transient state and keeps the records",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

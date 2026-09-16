@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { initialState, isLiveBusy, reducer } from "./OrbPage.tsx";
+import { initialState, isLiveBusy, reducer } from "./state.ts";
 
 function busyState() {
-  const state = reducer(initialState("orb-1"), {
+  const state = reducer(initialState(), {
     type: "connection_status",
     status: "open",
   });

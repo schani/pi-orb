@@ -1,6 +1,5 @@
 {
   "name": "patches append, replace, and keep first-arrival block order",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

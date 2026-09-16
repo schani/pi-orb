@@ -1,4 +1,5 @@
 import type { AgentSettingsEvent, SettingsAction } from "@pi-orb/protocol";
+import type { ComposerImage, ComposerMode } from "@pi-orb/transcript";
 import {
   type ClipboardEvent,
   type KeyboardEvent,
@@ -11,7 +12,6 @@ import { usePhoneLayout } from "../lib/use-phone-layout.ts";
 import { ComposerCaret } from "./ComposerCaret.tsx";
 import { type CommandOption, commandOptions } from "./command-options.ts";
 import {
-  type ComposerMode,
   composerModeGlyph,
   composerModeLabel,
   enterShellMode,
@@ -21,14 +21,6 @@ import {
 import { Icon } from "./Icons.tsx";
 import { OrbLinkPicker } from "./OrbLinkPicker.tsx";
 import { isSendShortcut } from "./send-shortcut.ts";
-
-export interface ComposerImage {
-  id: string;
-  /** e.g. "image/png". */
-  mediaType: string;
-  /** Base64 payload without a data-URL prefix. */
-  data: string;
-}
 
 interface ComposerProps {
   text: string;

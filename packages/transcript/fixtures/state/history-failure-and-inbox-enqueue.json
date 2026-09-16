@@ -1,20 +1,13 @@
 {
   "name": "history failures and inbox enqueue receipts",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {
         "type": "history_failed",
-        "error": {
-          "type": "network",
-          "message": "offline"
-        }
+        "message": "network error: offline"
       },
       "expect": {
-        "historyError": {
-          "type": "network",
-          "message": "offline"
-        }
+        "historyError": "network error: offline"
       }
     },
     {
@@ -105,13 +98,7 @@
       "action": {
         "type": "message_enqueue_failed",
         "requestId": "req2",
-        "error": {
-          "type": "http",
-          "status": 500,
-          "code": "internal",
-          "message": "boom",
-          "retryable": true
-        }
+        "message": "internal: boom"
       }
     }
   ],

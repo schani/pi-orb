@@ -1,6 +1,5 @@
 {
   "name": "notices, attachments, and requests dropped across a runtime restart",
-  "orbId": "orb-1",
   "steps": [
     {
       "action": {

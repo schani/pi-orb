@@ -1,4 +1,4 @@
-export type ComposerMode = "message" | "shell" | "excluded_shell" | "command";
+import type { ComposerMode } from "@pi-orb/transcript";
 
 export interface ComposerValue {
   mode: ComposerMode;

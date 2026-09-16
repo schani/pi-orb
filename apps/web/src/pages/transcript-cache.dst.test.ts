@@ -1,11 +1,10 @@
 import type { OrbView } from "@pi-orb/protocol";
+import { initialState, reducer, snapshotFromHistory, TranscriptCache } from "@pi-orb/transcript";
+import { history } from "@pi-orb/transcript/testkit";
 import { ok } from "neverthrow";
 import { expect, it } from "vitest";
 import { runDst } from "../../../orb-runtime/src/testkit/sim.ts";
 import { startOrbLoad } from "../lib/orb-load.ts";
-import { snapshotFromHistory, TranscriptCache } from "../lib/transcript-cache.ts";
-import { history } from "../testkit/transcript.ts";
-import { initialState, reducer } from "./OrbPage.tsx";
 
 it("DST: cancelled navigation and invalidation fence actual loader/cache/reducer publication", async () => {
   await runDst({ name: "transcript-cache-navigation", iterations: 40 }, async (sim) => {
@@ -31,7 +30,7 @@ it("DST: cancelled navigation and invalidation fence actual loader/cache/reducer
           const loaded = await load.result;
           if (cancelled) expect(loaded).toBeNull();
           if (loaded?.history.isOk()) {
-            const state = reducer(initialState("a"), {
+            const state = reducer(initialState(), {
               type: "history_restored",
               snapshot: loaded.history.value,
             });
@@ -64,7 +63,7 @@ it("DST: replica refresh cannot cross full-sync/session boundaries or discard a 
   await runDst({ name: "transcript-cache-full-sync", iterations: 40 }, async (sim) => {
     const cache = new TranscriptCache();
     const owner = cache.acquire("a", "p");
-    let state = reducer(initialState("a"), { type: "history_loaded", view: history() });
+    let state = reducer(initialState(), { type: "history_loaded", view: history() });
     const refreshEpoch = state.historyEpoch;
     const publish = () => {
       if (state.cacheReady) owner.publish(state);

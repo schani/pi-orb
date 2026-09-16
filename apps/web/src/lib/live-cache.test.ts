@@ -1,7 +1,7 @@
 import type { ServerFrame } from "@pi-orb/protocol";
+import { initialState, reducer } from "@pi-orb/transcript";
+import { history } from "@pi-orb/transcript/testkit";
 import { afterEach, expect, it, vi } from "vitest";
-import { initialState, reducer } from "../pages/OrbPage.tsx";
-import { history } from "../testkit/transcript.ts";
 import { openLiveConnection } from "./live.ts";
 
 class Socket {
@@ -50,7 +50,7 @@ it.each([false, true])(
       setTimeout,
       clearTimeout,
     });
-    let state = reducer(initialState("a"), { type: "history_loaded", view: history() });
+    let state = reducer(initialState(), { type: "history_loaded", view: history() });
     const live = openLiveConnection({
       orbId: "a",
       sessionId: state.sessionId,
