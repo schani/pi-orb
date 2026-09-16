@@ -1916,13 +1916,46 @@ describe("frontend-only browser behavior", () => {
           };
         });
       await expectPage.poll(rowEdges).toEqual({ first: true, last: true });
-      const scrollStart = await panel.locator(".wterm").evaluate((node) => {
+      // Terminal writes and the mandatory re-snap after scrollback insertion
+      // leave scroll notifications queued. Sample the baseline only after two
+      // consecutive frames without one, then arm a gate that ignores any
+      // remaining stale settle: only a scroll that actually moves the offset
+      // away from the baseline lets `scrollend` mark the node.
+      const scrollStart = await panel.locator(".wterm").evaluate(
+        (node) =>
+          new Promise<number>((resolve) => {
+            const view = node.ownerDocument.defaultView;
+            if (view === null) {
+              resolve(node.scrollTop);
+              return;
+            }
+            let quiet = 0;
+            const onScroll = () => {
+              quiet = 0;
+            };
+            node.addEventListener("scroll", onScroll);
+            const step = () => {
+              quiet += 1;
+              if (quiet < 2) {
+                view.requestAnimationFrame(step);
+                return;
+              }
+              node.removeEventListener("scroll", onScroll);
+              resolve(node.scrollTop);
+            };
+            view.requestAnimationFrame(step);
+          }),
+      );
+      await panel.locator(".wterm").evaluate((node, start) => {
         node.setAttribute("data-scroll-ended", "false");
-        node.addEventListener("scrollend", () => node.setAttribute("data-scroll-ended", "true"), {
-          once: true,
+        let moved = false;
+        node.addEventListener("scroll", () => {
+          if (node.scrollTop !== start) moved = true;
         });
-        return node.scrollTop;
-      });
+        node.addEventListener("scrollend", () => {
+          if (moved) node.setAttribute("data-scroll-ended", "true");
+        });
+      }, scrollStart);
       await panel.locator(".wterm").hover();
       await page.mouse.wheel(0, -53);
       await expectPage(panel.locator(".wterm")).toHaveAttribute("data-scroll-ended", "true");
