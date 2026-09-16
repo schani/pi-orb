@@ -18,7 +18,16 @@ describe("subagent roster", () => {
   });
 });
 
-describe("shared text selection", () => {
+describe("shared text fields", () => {
+  it("inverts every focused input and textarea without local exceptions", () => {
+    const focused = rule("input:focus,\ntextarea:focus");
+    expect(focused).toContain("background: var(--k)");
+    expect(focused).toContain("color: var(--w)");
+    expect(focused).toContain("caret-color: var(--w)");
+    expect(css).not.toMatch(/\.(?:app-search-input|composer-input):focus\s*\{/);
+    expect(css).not.toMatch(/\.project-instructions-editor textarea\s*\{[^}]*background:/s);
+  });
+
   it("uses a contrasting neutral highlight on both paper and inverted controls", () => {
     expect(rule("::selection")).toContain("background: var(--g2)");
     expect(rule("::selection")).toContain("color: var(--k)");
@@ -64,6 +73,8 @@ describe("dashboard layout contract", () => {
     expect(rule(".orb-entry")).toContain("border-left: 2px solid var(--g2)");
     expect(rule(".orb-entry-del,\n.ix-row-del")).toContain("border-left-style: dotted");
     expect(rule(".orb-entry-title")).toContain("height: 22px");
+    expect(rule(".orb-entry-title")).toContain("align-items: center");
+    expect(rule(".orb-entry-link")).toContain("white-space: nowrap");
     expect(rule(".orb-entry-meta")).toContain("height: var(--row)");
     expect(rule(".orb-entry-error")).toContain("color: var(--bad)");
   });

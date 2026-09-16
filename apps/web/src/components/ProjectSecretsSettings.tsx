@@ -181,7 +181,6 @@ export function ProjectSecretsSettings({
             data-1p-ignore="true"
             value={name}
             autoComplete="off"
-            placeholder="NPM_TOKEN"
             onChange={(event) => setName(event.target.value)}
           />
         </label>
@@ -194,7 +193,6 @@ export function ProjectSecretsSettings({
             value={value}
             maxLength={PROJECT_SECRET_MAX_VALUE_BYTES}
             autoComplete="new-password"
-            placeholder="value is never shown again"
             onChange={(event) => setValue(event.target.value)}
           />
         </label>

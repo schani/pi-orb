@@ -186,10 +186,12 @@ button.icon-button.danger:disabled {
 
 input,
 textarea {
+  color: var(--k);
   background: var(--w);
   border: 1px solid var(--k);
   padding: 0 6px;
   line-height: 18px;
+  caret-color: var(--k);
 }
 
 input:focus,
@@ -197,10 +199,7 @@ textarea:focus {
   outline: 0;
   background: var(--k);
   color: var(--w);
-}
-
-::placeholder {
-  color: var(--g2);
+  caret-color: var(--w);
 }
 
 /* One neutral highlight stays visible on both paper and inverted surfaces. */
@@ -551,7 +550,7 @@ a.project-new-orb-icon:focus-visible {
   display: flex;
   height: 22px;
   min-width: 0;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
 }
 
@@ -775,12 +774,6 @@ a.project-new-orb-icon:focus-visible {
   line-height: var(--row);
   border: 0;
   padding: 0;
-  background: transparent;
-}
-
-.app-search-input:focus {
-  background: transparent;
-  color: var(--k);
 }
 
 .app-search-input::-webkit-search-cancel-button {
@@ -967,10 +960,6 @@ button.personal-instructions-gear {
 
 /* ---------- project config ---------- */
 
-.project-instructions-editor textarea {
-  background: var(--w);
-  color: var(--k);
-}
 .project-secrets-backdrop {
   position: fixed;
   z-index: 80;
@@ -2041,11 +2030,6 @@ button.personal-instructions-gear {
   line-height: var(--row);
 }
 
-.composer-input:focus {
-  color: var(--k);
-  background: transparent;
-}
-
 .composer-line > .composer-abort {
   align-self: start;
 }
@@ -2394,7 +2378,7 @@ button.orb-phone-menu {
   }
 
   .composer-input[data-block-caret="true"] {
-    caret-color: auto;
+    caret-color: var(--w);
   }
 
   .composer-caret {

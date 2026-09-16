@@ -28,8 +28,12 @@ function render(
 }
 
 describe("Composer shell presentation", () => {
-  it("starts with four lines", () => {
-    expect(render("message")).toMatch(/<textarea[^>]*rows="4"/);
+  it("starts with four lines without visible prompt text", () => {
+    const message = render("message");
+    expect(message).toMatch(/<textarea[^>]*aria-label="Message the orb"[^>]*rows="4"/);
+    expect(message).not.toContain("placeholder=");
+    expect(message).not.toContain("Message the orb…");
+    expect(render("shell")).toContain('aria-label="Run a shell command"');
   });
 
   it("carries the mode in the prefix column", () => {

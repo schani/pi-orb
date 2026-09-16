@@ -399,8 +399,10 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       "page",
     );
     await expectPage(index).toHaveAttribute("aria-busy", "false");
-    await page.getByPlaceholder("Message the orb…").fill("MCP check");
-    await page.getByPlaceholder("Message the orb…").press("Control+Enter");
+    await page.getByRole("textbox", { name: "Message the orb", exact: true }).fill("MCP check");
+    await page
+      .getByRole("textbox", { name: "Message the orb", exact: true })
+      .press("Control+Enter");
     await expectPage(page.getByText("MCP_CHECK_COMPLETE", { exact: true })).toBeVisible({
       timeout: 60_000,
     });
@@ -432,8 +434,10 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       "page",
     );
     await expectPage(index).toHaveAttribute("aria-busy", "false");
-    await page.getByPlaceholder("Message the orb…").fill("MCP isolation");
-    await page.getByPlaceholder("Message the orb…").press("Control+Enter");
+    await page.getByRole("textbox", { name: "Message the orb", exact: true }).fill("MCP isolation");
+    await page
+      .getByRole("textbox", { name: "Message the orb", exact: true })
+      .press("Control+Enter");
     await expectPage(page.getByText("MCP_ISOLATION_COMPLETE", { exact: true })).toBeVisible({
       timeout: 60_000,
     });

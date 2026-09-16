@@ -71,7 +71,6 @@ export function McpEditor({
           readOnly={!!previous}
           disabled={saving}
           value={draft.name}
-          placeholder="my-server"
           data-1p-ignore="true"
           onChange={(e) => change("name", e.target.value)}
         />
@@ -85,7 +84,6 @@ export function McpEditor({
           maxLength={2048}
           disabled={saving}
           value={draft.url}
-          placeholder="https://…/mcp"
           onChange={(e) => change("url", e.target.value)}
         />
       </label>

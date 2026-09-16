@@ -218,7 +218,7 @@ export function Composer({
             {text ||
               (images.length > 0
                 ? `${images.length} image attachment${images.length === 1 ? "" : "s"}`
-                : "Message the orb…")}
+                : "")}
           </span>
         </button>
         {canAbort && (
@@ -392,19 +392,10 @@ export function Composer({
                 }
               }
             }}
-            aria-label="Message the orb"
+            aria-label={isShell ? "Run a shell command" : "Message the orb"}
             aria-controls={isCommand ? "command-choices" : undefined}
             aria-activedescendant={
               isCommand && choices.length ? `command-choice-${selectedCommand}` : undefined
-            }
-            placeholder={
-              isCommand
-                ? ""
-                : isShell
-                  ? phone
-                    ? "Run a shell command…"
-                    : "Run a shell command… (⌘⏎ to run)"
-                  : "Message the orb…"
             }
             rows={4}
           />

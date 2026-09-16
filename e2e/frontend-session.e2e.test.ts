@@ -22,6 +22,45 @@ async function removeFixtureOrb(page: Page, orbId: string) {
     .toBe(404);
 }
 
+async function expectTextFieldContrast(page: Page, scope = page.locator("body")) {
+  const fields = scope.locator(
+    'input:not([type="file"]):not(:disabled):visible, textarea:not(:disabled):visible',
+  );
+  const count = await fields.count();
+  expectPage(count).toBeGreaterThan(0);
+  for (let index = 0; index < count; index++) {
+    const field = fields.nth(index);
+    await expectPage(field).not.toHaveAttribute("placeholder");
+    await field.evaluate((element) => element.blur());
+    expectPage(
+      await field.evaluate((element) => {
+        const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+        return {
+          background: style?.backgroundColor,
+          caret: style?.caretColor,
+          color: style?.color,
+        };
+      }),
+    ).toEqual({ background: "rgb(255, 255, 255)", caret: "rgb(0, 0, 0)", color: "rgb(0, 0, 0)" });
+    await field.focus();
+    const focused = await field.evaluate((element) => {
+      const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+      return {
+        background: style?.backgroundColor,
+        caret: style?.caretColor,
+        color: style?.color,
+        customCaret: element.classList.contains("composer-input"),
+      };
+    });
+    expectPage(focused).toEqual({
+      background: "rgb(0, 0, 0)",
+      caret: focused.customCaret ? "rgba(0, 0, 0, 0)" : "rgb(255, 255, 255)",
+      color: "rgb(255, 255, 255)",
+      customCaret: focused.customCaret,
+    });
+  }
+}
+
 /**
  * Browser E2E for the exact cross-boundary path that unit tests cannot prove:
  * Vite fixture control -> IAP-shaped HTML 401 -> shared API adapter -> React
@@ -1134,6 +1173,95 @@ describe("frontend-only browser behavior", () => {
     },
   );
 
+  it("centers dashboard status icons with single-line orb names at desktop, phone, and zoom", async () => {
+    const page = await browser.newPage();
+    try {
+      for (const scenario of [
+        { width: 1280, height: 900, zoom: 1 },
+        { width: 390, height: 844, zoom: 1 },
+        { width: 1280, height: 900, zoom: 1.5 },
+      ]) {
+        await page.setViewportSize({ width: scenario.width, height: scenario.height });
+        await page.goto(`${origin}/`);
+        await page.locator(".orb-entry-title").first().waitFor();
+        await page.locator("html").evaluate((element, zoom) => {
+          element.setAttribute("style", zoom === 1 ? "" : `zoom: ${zoom}`);
+        }, scenario.zoom);
+        const rows = await page.locator(".orb-entry-title").evaluateAll((titles) =>
+          titles.map((title) => {
+            const icon = title.querySelector(".glyph");
+            const link = title.querySelector(".orb-entry-link");
+            if (icon === null || link === null) return null;
+            const iconBox = icon.getBoundingClientRect();
+            const linkBox = link.getBoundingClientRect();
+            return {
+              centerDelta: Math.abs(
+                iconBox.top + iconBox.height / 2 - (linkBox.top + linkBox.height / 2),
+              ),
+              whiteSpace: title.ownerDocument.defaultView?.getComputedStyle(link).whiteSpace,
+            };
+          }),
+        );
+        expectPage(rows.length).toBeGreaterThan(0);
+        expectPage(rows.every((row) => row !== null && row.centerDelta <= 0.5)).toBe(true);
+        expectPage(rows.every((row) => row?.whiteSpace === "nowrap")).toBe(true);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("inverts every production text-field surface on focus and restores it on blur", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${origin}/`);
+      await expectPage(
+        page.getByRole("heading", { name: "New project", exact: true }),
+      ).toBeVisible();
+      await expectTextFieldContrast(page, page.locator(".new-project"));
+
+      await page.keyboard.press("Meta+k");
+      const search = page.getByRole("dialog", { name: "Find projects and orbs" });
+      await expectTextFieldContrast(page, search);
+      await page.keyboard.press("Escape");
+
+      await page.getByRole("button", { name: "Personal instructions" }).click();
+      const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
+      await expectTextFieldContrast(page, personal);
+      await personal.getByRole("button", { name: "Close personal instructions" }).click();
+
+      await page
+        .getByRole("button", { name: /^Configure / })
+        .first()
+        .click();
+      const config = page.getByRole("dialog");
+      await expectTextFieldContrast(page, config.getByRole("tabpanel", { name: "General" }));
+      await config.getByRole("tab", { name: "Instructions" }).click();
+      await expectTextFieldContrast(page, config.getByRole("tabpanel", { name: "Instructions" }));
+      await config.getByRole("tab", { name: "MCPs" }).click();
+      await config.getByRole("button", { name: "add server", exact: true }).click();
+      await expectTextFieldContrast(page, config.getByRole("tabpanel", { name: "MCPs" }));
+      await config.getByRole("tab", { name: "Secrets" }).click();
+      await expectTextFieldContrast(page, config.getByRole("tabpanel", { name: "Secrets" }));
+      await config.getByRole("button", { name: "Close project config" }).click();
+
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+      await expectPage(composer).toBeVisible();
+      await expectTextFieldContrast(page, page.locator(".composer"));
+      const blockCaret = page.locator(".composer-caret");
+      await composer.focus();
+      await expectPage(composer).toHaveAttribute("data-block-caret", "true");
+      await expectPage(blockCaret).toBeVisible();
+      await expectPage(blockCaret).toHaveCSS("background-color", "rgb(255, 255, 255)");
+      await expectPage(blockCaret).toHaveCSS("mix-blend-mode", "difference");
+      await page.getByRole("button", { name: "Rename orb" }).click();
+      await expectTextFieldContrast(page, page.locator(".orb-rename-form"));
+    } finally {
+      await page.close();
+    }
+  });
+
   it("keeps native selection visible on normal and inverted surfaces", async () => {
     const page = await browser.newPage();
     try {
@@ -1185,7 +1313,7 @@ describe("frontend-only browser behavior", () => {
   it("uploads arbitrary files in chunks without touching the draft and hides upload when stopped", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
-    const draft = page.getByPlaceholder(/Message the orb/);
+    const draft = page.getByRole("textbox", { name: "Message the orb", exact: true });
     await draft.fill("Keep this draft");
     const chunks: Promise<number>[] = [];
     page.on("response", (response) => {
@@ -1432,7 +1560,7 @@ describe("frontend-only browser behavior", () => {
     try {
       await page.goto(`${origin}/#/orbs/frontend-long-history`);
       await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
-      const composer = page.getByPlaceholder(/Message the orb/);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("draft survives terminal toggles");
       await page.locator("body").evaluate(async (body) => {
         const window = body.ownerDocument.defaultView;
@@ -1708,7 +1836,7 @@ describe("frontend-only browser behavior", () => {
       await expectPage.poll(() => [...active]).toEqual([2]);
       const firstGenerationOpens = opens;
       await header.getByRole("button", { name: "Hide terminal", exact: true }).click();
-      const composer = page.getByPlaceholder(/Message the orb/);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("keep focus here");
       accept();
       await expectPage(page.locator(".orb-terminal-window")).toContainText("READY_AFTER_HIDE");
@@ -1760,7 +1888,7 @@ describe("frontend-only browser behavior", () => {
       });
       await page.route("**/api/v1/orbs/frontend-long-history/messages", (route) => route.abort());
       await page.goto(`${origin}/#/orbs/frontend-long-history`);
-      const composer = page.getByPlaceholder(/Message the orb/);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
       await expectPage(page.locator(".history")).toContainText("Review 100");
       // The fixture is idle. Gate background history/inbox refreshes so this
@@ -1825,7 +1953,7 @@ describe("frontend-only browser behavior", () => {
     try {
       await page.goto(`${origin}/${ORB_HASH}`);
       const index = page.getByRole("navigation", { name: "All project orbs" });
-      const composer = page.getByPlaceholder(/Message the orb/);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("keep this draft while creating");
       await expectPage(
         index.getByRole("link", { name: "New orb in scratchpad", exact: true }),
@@ -1937,7 +2065,7 @@ describe("frontend-only browser behavior", () => {
     try {
       await page.goto(`${origin}/${ORB_HASH}`);
       const index = page.getByRole("navigation", { name: "All project orbs" });
-      const composer = page.getByPlaceholder(/Message the orb/);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("draft survives failure");
       await index.getByRole("link", { name: "New orb in scratchpad", exact: true }).click();
       await expectPage(index.getByRole("alert")).toContainText("Failed to create orb");
@@ -2007,7 +2135,7 @@ describe("frontend-only browser behavior", () => {
         }),
       );
       expectPage(geometry).toEqual([0, 0, 0, 0]);
-      const composer = page.getByPlaceholder(/Message the orb/);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("original project draft");
       const indexNode = await index.elementHandle();
       const destination = index.locator('a[href="#/orbs/frontend-offline-sync"]');
@@ -2180,7 +2308,7 @@ describe("frontend-only browser behavior", () => {
   it("keeps the index and conversation visible until an orb switch is ready", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
-    const composer = page.getByPlaceholder(/Message the orb/);
+    const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
     await composer.fill("draft for the first orb");
     const index = page.getByRole("navigation", { name: "All project orbs" });
     const destination = index.locator('a[href="#/orbs/frontend-auth-copy-test"]');
@@ -2296,7 +2424,7 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await page.goto(`${origin}/${ORB_HASH}`);
-      const composer = page.getByPlaceholder(/Message the orb/);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("keep this draft");
       await composer.press("Meta+k");
       const dialog = page.getByRole("dialog", { name: "Find projects and orbs" });
@@ -2404,7 +2532,7 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await page.goto(`${origin}/${ORB_HASH}`);
-      await page.getByPlaceholder(/Message the orb/).press("Meta+k");
+      await page.getByRole("textbox", { name: "Message the orb", exact: true }).press("Meta+k");
       const dialog = page.getByRole("dialog", { name: "Find projects and orbs" });
       await dialog.getByRole("searchbox").fill("Finished design");
       await expectPage(
@@ -2427,7 +2555,7 @@ describe("frontend-only browser behavior", () => {
   it("inserts orb URLs at typed @ and preserves cancelled mentions and shell input", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
-    const composer = page.getByPlaceholder(/Message the orb/);
+    const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
     await composer.fill("before replace after");
     await composer.evaluate((element) => element.setSelectionRange(7, 14));
     await composer.press("@");
@@ -2453,7 +2581,7 @@ describe("frontend-only browser behavior", () => {
 
     await composer.fill("");
     await composer.press("!");
-    const shell = page.getByPlaceholder(/Run a shell command/);
+    const shell = page.getByRole("textbox", { name: "Run a shell command", exact: true });
     await shell.press("@");
     await expectPage(shell).toHaveValue("@");
     await expectPage(dialog).toBeHidden();
@@ -2468,7 +2596,7 @@ describe("frontend-only browser behavior", () => {
   it("keeps full-cell composer and terminal carets aligned during native editing", async () => {
     const page = await browser.newPage({ reducedMotion: "reduce" });
     await page.goto(`${origin}/${ORB_HASH}`);
-    const composer = page.getByPlaceholder(/Message the orb/);
+    const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
     const caret = page.locator(".composer-caret");
     await composer.fill("abc\ndef");
     await expectPage(caret).toBeVisible();
@@ -2525,7 +2653,7 @@ describe("frontend-only browser behavior", () => {
     await page.goto(`${origin}/${ORB_HASH}`);
 
     const draft = "Keep this exact draft through IAP sign-in";
-    const composer = page.getByPlaceholder(/Message the orb/);
+    const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
     await composer.fill(draft);
 
     await page.getByRole("button", { name: "expire session" }).click();
@@ -2540,7 +2668,9 @@ describe("frontend-only browser behavior", () => {
     await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
     await expectPage(page.getByRole("alert")).toHaveCount(0);
     await expectPage(page.getByText("frontend fixture · session active")).toBeVisible();
-    await expectPage(page.getByPlaceholder(/Message the orb/)).toHaveValue(draft);
+    await expectPage(
+      page.getByRole("textbox", { name: "Message the orb", exact: true }),
+    ).toHaveValue(draft);
 
     await page.close();
   });
@@ -2555,7 +2685,9 @@ describe("frontend-only browser behavior", () => {
       "href",
       "http://files.localhost:7100/s/frontend-archived-orb/index.html",
     );
-    await expectPage(page.getByPlaceholder(/Message the orb/)).toHaveCount(0);
+    await expectPage(
+      page.getByRole("textbox", { name: "Message the orb", exact: true }),
+    ).toHaveCount(0);
 
     await page.goto(`${origin}/#/orbs/missing-hosted-files-orb`);
     await expectPage(page).toHaveURL(`${origin}/#/orbs/missing-hosted-files-orb`);
