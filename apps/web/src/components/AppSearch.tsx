@@ -320,7 +320,8 @@ export function AppSearchProvider({ children }: { children: ReactNode }) {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (
         registration !== null &&
-        (event.metaKey || event.ctrlKey) &&
+        event.metaKey &&
+        !event.ctrlKey &&
         !event.altKey &&
         event.key.toLowerCase() === "k"
       ) {

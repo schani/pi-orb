@@ -2206,7 +2206,7 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("opens fleet Find from the orb composer and navigates with native result links", async () => {
+  it("opens fleet Find with Cmd-K, leaves Ctrl-K native, and navigates with native links", async () => {
     const page = await browser.newPage();
     let holdDashboardOrbs = false;
     let releaseDashboardOrbs = () => {};
@@ -2235,7 +2235,21 @@ describe("frontend-only browser behavior", () => {
       await expectPage(composer).toBeFocused();
       await expectPage(composer).toHaveValue("keep this draft");
 
+      await composer.evaluate((element) => {
+        const target = element.ownerDocument.defaultView;
+        const onKeyDown = (event: { key: string; defaultPrevented: boolean }) => {
+          if (event.key.toLowerCase() !== "k") return;
+          element.setAttribute("data-ctrl-k-default-prevented", String(event.defaultPrevented));
+          target?.removeEventListener("keydown", onKeyDown);
+        };
+        target?.addEventListener("keydown", onKeyDown);
+      });
       await composer.press("Control+k");
+      await expectPage(dialog).toBeHidden();
+      await expectPage(composer).toBeFocused();
+      await expectPage(composer).toHaveAttribute("data-ctrl-k-default-prevented", "false");
+
+      await composer.press("Meta+k");
       await query.fill("Frontend Playground");
       await expectPage(dialog.getByRole("link", { name: /^orb:/ })).toHaveAttribute(
         "href",
@@ -2251,7 +2265,7 @@ describe("frontend-only browser behavior", () => {
       await expectPage(page).toHaveURL(`${origin}/#/projects/frontend-fixture-project`);
       await expectPage(dialog).toBeHidden();
       await expectPage(page.locator(".dashboard")).toBeVisible();
-      await page.keyboard.press("Control+k");
+      await page.keyboard.press("Meta+k");
       await expectPage(query).toHaveValue("");
       await query.fill("Frontend Playground");
       await expectPage(dialog.getByRole("link")).toHaveCount(1);
@@ -2314,7 +2328,7 @@ describe("frontend-only browser behavior", () => {
     });
     try {
       await page.goto(`${origin}/${ORB_HASH}`);
-      await page.getByPlaceholder(/Message the orb/).press("Control+k");
+      await page.getByPlaceholder(/Message the orb/).press("Meta+k");
       const dialog = page.getByRole("dialog", { name: "Find projects and orbs" });
       await dialog.getByRole("searchbox").fill("Finished design");
       await expectPage(

@@ -4,7 +4,7 @@
 
 ## Goal and scope
 
-On the dashboard and orb view, Command-K on macOS and Control-K elsewhere opens pi-orb Find. Find searches the fleet resources a person recognizes:
+On the dashboard and orb view, Command-K opens pi-orb Find. Control-K remains native. Find searches the fleet resources a person recognizes:
 
 - project display names;
 - project GitHub repository URLs; and
@@ -12,7 +12,7 @@ On the dashboard and orb view, Command-K on macOS and Control-K elsewhere opens 
 
 Find is navigation, not a general command palette. It does not search IDs, lifecycle state, transcript content, checkout files, or agent output. It does not make a network request per keystroke.
 
-**Scope expanded (decided and implemented 2026-09-14):** the dashboard and orb view both provide the same project-and-orb navigation search. The orb view registers its already-loaded all-project index, including archived orbs, without additional fetching or a search cache. That index remains available when the conversation target is missing; the missing orb URL and message remain unchanged. Other missing-resource and create-orb routes retain the browser's default Command-K / Control-K behavior. The shortcut opens Find even when focus is in the composer, a creation field, or a rename field. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists; a press outside the card closes it as well. There is no persistent Find hint or button, and (since 2026-09-04) no visible close control: a surface reached only by a shortcut is dismissed by that shortcut's own conventions.
+**Scope expanded (decided and implemented 2026-09-14):** the dashboard and orb view both provide the same project-and-orb navigation search. The orb view registers its already-loaded all-project index, including archived orbs, without additional fetching or a search cache. That index remains available when the conversation target is missing; the missing orb URL and message remain unchanged. Other missing-resource and create-orb routes retain the browser's default Command-K behavior. The shortcut opens Find even when focus is in the composer, a creation field, or a rename field. Repeating the shortcut focuses and selects the Find query. Escape closes Find and restores focus to the element that was focused before it opened when that element still exists; a press outside the card closes it as well. There is no persistent Find hint or button, and (since 2026-09-04) no visible close control: a surface reached only by a shortcut is dismissed by that shortcut's own conventions.
 
 **Qualification synchronization corrected (2026-09-15):** GitHub E2E run
 `35013933184` pressed ArrowDown before the dashboard's orb list loaded, selecting
@@ -100,7 +100,7 @@ Project rename, orb auto-naming observed by a dashboard refresh, archival, delet
 
 ## Keyboard and accessibility contract
 
-- Register one `keydown` listener in `AppSearchProvider` for the application lifetime. When and only when an active source exists, match `(event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k"`, call `preventDefault()`, then open/focus Find.
+- Register one `keydown` listener in `AppSearchProvider` for the application lifetime. When and only when an active source exists, match `event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "k"`, call `preventDefault()`, then open/focus Find. Never intercept Control-K.
 - Use a real `search` landmark. Overlay treatments use an accessible dialog with `aria-modal="true"`; in-place treatments use an expanded region and do not claim modal behavior.
 - The query is `<input type="search">` with an explicit `aria-label`. Announce partial-loading/failure status through one polite live region; the result count is not announced or displayed.
 - Up/Down changes the sole active result, actual pointer movement updates that same selection, Enter activates it, and Tab follows ordinary interactive-element order.
@@ -110,7 +110,7 @@ Project rename, orb auto-naming observed by a dashboard refresh, archival, delet
 
 ## Testing and observability
 
-Pure core unit tests cover normalization, explicit keyword matching, stable source order, and result limits without importing dashboard types. Dashboard-adapter tests separately cover URL aliases, field scope (IDs and states must not match), archived orbs, dashboard order, status mapping, and recomputation after mutation. Provider/dialog component tests cover source registration and cleanup, source-switch reset, no shortcut interception without a source, repeated shortcut focus, Escape focus restoration, keyboard selection, anchor hrefs for every item, native modified-link activation without closing the current card, zero matches, and partial loading/failure copy. Browser fixture tests cover opening from the orb composer with both shortcuts, draft/focus restoration on Escape, project/repository and working/archived-orb results, keyboard navigation across dashboard and orb routes, query reset on route changes, and explicit loading/failure diagnostics.
+Pure core unit tests cover normalization, explicit keyword matching, stable source order, and result limits without importing dashboard types. Dashboard-adapter tests separately cover URL aliases, field scope (IDs and states must not match), archived orbs, dashboard order, status mapping, and recomputation after mutation. Provider/dialog component tests cover source registration and cleanup, source-switch reset, no shortcut interception without a source, repeated shortcut focus, Escape focus restoration, keyboard selection, anchor hrefs for every item, native modified-link activation without closing the current card, zero matches, and partial loading/failure copy. Browser fixture tests cover Command-K opening from the orb composer, native Control-K, draft/focus restoration on Escape, project/repository and working/archived-orb results, keyboard navigation across dashboard and orb routes, query reset on route changes, and explicit loading/failure diagnostics.
 
 Find makes no autonomous server-side decision and creates no durable state, so lifecycle logging would be noise. User-facing diagnostics are the relevant observability: explicit partial loading/failure status is visible in the surface. Development-only component diagnostics may be inspected in React tooling, but product correctness must not depend on console logs.
 
