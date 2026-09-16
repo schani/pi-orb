@@ -34,6 +34,7 @@ apps/
 
 packages/
   protocol/             # TypeBox schemas and inferred wire/history types
+  transcript/           # Client-independent transcript model and its fixture corpus
   luna/                 # Shared Luna model/request/response adapter policy
 
 infra/
@@ -46,7 +47,9 @@ tsconfig.base.json
 
 `protocol` is shared because it has three real consumers. `luna` was extracted only after both the control plane's orb auto-naming and the runtime's turn notifications needed the same model selection, no-tool/minimal-reasoning options, response parsing, and typed provider-error mapping (decided 2026-08-07); prompts, credentials, scheduling, and product-specific output validation remain in their owning applications. Keep `OrbHostProvider`, repositories, broader Pi integration, fakes, and tests inside the application that owns them. Extract other domain, adapter, provider, or test-support packages only when another application genuinely needs them.
 
-The web app depends on `protocol`, not control-plane implementation code. Domain directories contain no Fastify, React, PostgreSQL, Docker, or Pi imports. Avoid generic `common` or `utils` packages.
+`transcript` was extracted on 2026-09-16 because a planned native macOS client needs the browser's transcript reduction, history handoff and turn-grouping rules unchanged; its JSON fixture corpus is the parity contract between implementations (`docs/transcript-model.md`).
+
+The web app depends on `protocol` and `transcript`, not control-plane implementation code. Domain directories contain no Fastify, React, PostgreSQL, Docker, or Pi imports. Avoid generic `common` or `utils` packages.
 
 ## Dependencies that earn their keep now
 

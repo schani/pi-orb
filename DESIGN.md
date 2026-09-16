@@ -113,6 +113,7 @@ Subsystem designs:
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company multi-user scope, per-user schema/credential proposal, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules and deterministic/browser qualification
+- [docs/transcript-model.md](docs/transcript-model.md) — the client-independent transcript model, its JSON fixture corpus as the parity contract for other clients, and the seeded generator
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
 - [docs/project-instructions.md](docs/project-instructions.md) — additional per-project instructions, Config tab, additive virtual context and next-start adoption

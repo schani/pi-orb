@@ -78,7 +78,7 @@ Rebased onto `3eec79a` after the local-subagent work landed. The welcome reducer
 
 ## Implementation sequence (tests first; completed)
 
-1. **Cache primitive:** add `apps/web/src/lib/transcript-cache.ts` and focused unit tests for coherent snapshots, reference reuse, fixed LRU/admission accounting, oversize bypass, invalidation and fresh instances. Keep cache errors/misses explicit rather than exception control flow.
+1. **Cache primitive:** add the cache primitive (now `packages/transcript/src/transcript-cache.ts`) and focused unit tests for coherent snapshots, reference reuse, fixed LRU/admission accounting, oversize bypass, invalidation and fresh instances. Keep cache errors/misses explicit rather than exception control flow.
 2. **Applied-history boundaries:** extend the actual `OrbPage` reducer/history-refresh helpers for session-aware snapshot restoration/publication and full-sync invalidation, preserving existing transcript/live-output/inbox rules. Write regressions before wiring navigation.
 3. **Navigation integration:** wire the app-owned cache through `App.tsx` and `OrbPage.tsx`; factor only the small load/refresh ownership logic necessary to exercise it independently of React. Existing API adapters remain typed `Result` boundaries. No new lifecycle or transport state machine.
 4. **Composed scheduling tests:** drive that production load/refresh logic, cache and reducer with `determined`, injected metadata/history completion and runtime-frame delivery. React lifecycle wiring is separately tested in the browser. Preserve/replay failure traces before fixes.
