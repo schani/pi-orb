@@ -155,6 +155,10 @@ resource "google_cloud_run_v2_service" "browser" {
         value = local.foundation.state_bucket
       }
       env {
+        name  = "PI_ORB_IAP_AUDIENCE"
+        value = "/projects/${local.foundation.project_number}/locations/${var.region}/services/${local.browser_service_name}"
+      }
+      env {
         name  = "PI_ORB_BROKER_URL"
         value = google_cloud_run_v2_service.runtime.uri
       }
@@ -256,6 +260,10 @@ resource "google_cloud_run_v2_service" "ops" {
       env {
         name  = "PI_ORB_ROLE"
         value = "ops"
+      }
+      env {
+        name  = "PI_ORB_OPS_PRINCIPAL"
+        value = "serviceAccount:pi-orb-debug@${var.project}.iam.gserviceaccount.com"
       }
       dynamic "env" {
         for_each = local.hosting_env

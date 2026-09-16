@@ -44,6 +44,7 @@ import {
   publishSigningKey,
   type RotationError,
 } from "../domain/signing-keys.ts";
+import { requirePrincipal } from "./browser-identity.ts";
 import { registerProjectInstructionsRoutes } from "./project-instructions.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
@@ -200,9 +201,13 @@ export function registerRoutes(
   system: SystemView,
   signingKeys?: SigningKeyDeps,
 ): void {
-  // Reaching this response proves that an external browser auth proxy (IAP in
-  // cloud deployment) admitted the request. It intentionally reads no state.
-  app.get("/api/v1/session", async (_request, reply) => reply.send({ status: "ok" }));
+  app.get("/api/v1/session", async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const principal = requirePrincipal(request);
+    return principal.isErr()
+      ? reply.status(500).send(httpError("internal", "request principal missing", false))
+      : reply.send({ status: "ok", principal: principal.value });
+  });
 
   // Which host provider, which database, which build. Resolved at boot and
   // constant for the process's lifetime, so it reads nothing per request.

@@ -33,7 +33,7 @@ Repository URL validation is strict allowlisting, decided as follows:
 - the hostname must be on a fixed allowlist, initially `github.com`, `gitlab.com`, `bitbucket.org`, and `codeberg.org`; extending the list is configuration, not a design change;
 - HTTPS userinfo (credential-bearing URLs), explicit ports, and IP-literal hosts are rejected; the only accepted scp-style user is the conventional literal `git`;
 - the path must match the host's repository shape (for example `/{owner}/{repo}` with an optional `.git`);
-- validation runs at project creation and General-settings updates, and is re-run by the runtime immediately before cloning, because the first slice's database is writable by anyone who can reach the control plane.
+- validation runs at project creation and General-settings updates, and is re-run by the runtime immediately before cloning, because stage 1 identifies callers but does not authorize database resources by owner.
 
 This forecloses local paths, `file://` URLs, credential leakage into the database and logs, and SSRF against internal networks or cloud metadata endpoints.
 
@@ -54,7 +54,7 @@ Still open:
 
 ## Minimal control-plane API
 
-The browser uses a small unauthenticated JSON API under `/api/v1`:
+The browser uses a small JSON API under `/api/v1`. Stage-1 application identity is implemented locally (2026-09-16) but not deployed; the deployed API remains unchanged until the single multi-user cutover:
 
 ```text
 GET  /api/v1/session
@@ -92,7 +92,20 @@ WS   /api/v1/orbs/:orbId/live
 WS   /api/v1/orbs/:orbId/terminal
 ```
 
-`GET /api/v1/session` returns `{ "status": "ok" }` without reading application state. In the cloud it is useful because merely reaching that response proves that IAP admitted the browser request; the browser probes it after regaining focus following reauthentication. It is not an application authentication or authorization implementation, and in unauthenticated local development it only confirms control-plane reachability.
+### Application principal (decided and implemented locally 2026-09-16; not deployed)
+
+Stage 1 resolves a role-appropriate principal before every browser API, hosted-file read, OAuth callback, live WebSocket and terminal WebSocket handler: user on `browser`/`all`, ops on `ops`. Static assets do not require a database lookup. Runtime bearer routes and the public issuer retain their separate authentication. This authenticates requests but does not yet add project scope or authorization.
+
+Cloud browser requests carry an IAP assertion verified as specified in `docs/deployment.md`. Its verified issuer/subject resolves a stable user UUID; email is mutable, nullable display data only. Domain unauthenticated failures return 401, verification-key or user-store availability failures return 503, and identity-store invariants return 500. Local `all` uses fixed `pi-orb:local/developer` identity without Google login, tests supply Alice/Bob, and `ops` uses only its configured machine principal without user-store access. Details: `docs/multi-user.md`.
+
+In the local implementation, `GET /api/v1/session` is a non-cacheable principal probe:
+
+```ts
+{ status: "ok", principal: { kind: "user", user: { id: string, email: string | null } } }
+{ status: "ok", principal: { kind: "ops", id: string } }
+```
+
+Issuer and subject are never browser response fields. No cookie, login endpoint or login UI is added; IAP remains the cloud login boundary. The current deployed `{ "status": "ok" }` response remains until the coordinated cutover.
 
 ### Hosted files (decided 2026-09-07)
 
@@ -289,7 +302,7 @@ All list responses use `{ items: [...] }`. Errors use one shape:
 ```ts
 interface ControlPlaneHttpError {
   error: {
-    code: "invalid_request" | "not_found" | "conflict" | "unavailable" | "internal";
+    code: "invalid_request" | "unauthorized" | "not_found" | "conflict" | "unavailable" | "internal";
     message: string;
     retryable: boolean;
   };

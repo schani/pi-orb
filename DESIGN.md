@@ -34,8 +34,8 @@ The first version is not intended to be a generic VM configurator or a generic r
 
 - The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
-- The first slice has no authentication or authorization: anybody who can reach the control plane can perform every operation.
-- The unauthenticated first slice must be treated as local/trusted-development software and must not be exposed publicly. Authentication is required before a public deployment.
+- The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
+- Stage 1 application identity is implemented locally (2026-09-16), without project authorization, and is not deployed. Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
 - After routing and runtime connection, the control plane proxies one live WebSocket between browser and runtime without interpreting agent content.
 - That WebSocket carries browser commands, transient streaming events, committed history-record notifications, runtime status, acknowledgements, and errors.
 - The control plane never uses WebSocket traffic for persistence. Replica persistence happens only through separate control-plane HTTP pulls from the runtime.
@@ -46,6 +46,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The composer supports foreground Pi user-shell commands through explicit `message`, `shell`, and `excluded shell` modes. `!` and `!!` at input offset zero enter the shell modes without leaving a visible prefix; both persist to history, while excluded shell alone is omitted from later model context. Shell submission requires an idle runtime and no image attachments (decided 2026-08-05).
 - Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes live mutations and broadcasts state. The send-anytime message inbox serializes messages durably at the control plane before runtime delivery.
 - Multiplayer product features such as presence, attribution, and per-user permissions are out of scope for the first slice.
+- Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): own projects/orbs and per-user Codex/GitHub credentials; cross-user file access is acceptable. No adversarial isolation, quotas or collaboration features are required. Stage 1 stable application identity is implemented locally; stages 2–3 and deployment are not authorized. They remain one production cutover before coworker onboarding. `docs/multi-user.md`.
 
 ## High-level architecture
 
@@ -74,7 +75,7 @@ Orb host
           `-- Pi history adapter
 ```
 
-The browser talks only to the control plane. In the unauthenticated first slice, the control plane resolves/starts the orb, loads replicated history, and performs the cursor-aware handoff. It proxies the live WebSocket content-agnostically between browser and runtime. History persistence is a separate control-plane-to-runtime HTTP pull, so the proxy does not need to understand agent messages. Cloud Run WebSocket behavior was validated operationally in 2026-07 (`docs/open-questions.md`, question 2).
+The browser talks only to the control plane. In the original first slice, the control plane resolves/starts the orb, loads replicated history, and performs the cursor-aware handoff. It proxies the live WebSocket content-agnostically between browser and runtime. History persistence is a separate control-plane-to-runtime HTTP pull, so the proxy does not need to understand agent messages. Cloud Run WebSocket behavior was validated operationally in 2026-07 (`docs/open-questions.md`, question 2).
 
 ## In-orb spawning and deferred suborbs
 
@@ -109,6 +110,7 @@ Subsystem designs:
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
+- [docs/multi-user.md](docs/multi-user.md) — trusted-company multi-user scope, per-user schema/credential proposal, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules and deterministic/browser qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification

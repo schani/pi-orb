@@ -44,9 +44,9 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 
 ## Product and security
 
-24. Define the future user/project/orb identity and authorization model before public deployment.
-25. Define future per-user/project model credentials and private-Git credentials/workload identity. (A proposal for brokered GitHub credentials exists in docs/credentials.md.)
-26. Define project trust and the security boundary for repository-controlled code.
+24. **Partially resolved (2026-09-16):** multi-user means trusted coworkers, not adversarial customers. Stage 1 stable UUID identity from verified IAP issuer/subject, first-verified-request user creation, explicit local/test identities and machine-only ops is implemented locally and not deployed. It adds no project authorization, login framework or first-user fallback. Stages 2–3 and deployment are not authorized. Existing ownership will be mapped explicitly during the controlled stage-2 cutover; its mechanics are not an open product question. Still decide whether cross-user browsing is explicit or URL/CLI-only and which cross-user mutations the UI exposes. `docs/multi-user.md`.
+25. **Partially resolved (2026-09-16):** Codex and GitHub credentials must be per-user, keyed by `(user, provider)` and selected from the orb's project owner rather than viewer or ops caller. Shared provider client configuration remains. Stage 3 is not authorized; any user-level workload-identity claims remain undecided. Existing global broker behavior is in `docs/credentials.md`.
+26. **Partially resolved (2026-09-16):** users are trusted coworkers; cross-user file access is acceptable, and the milestone does not expand the current personal-deployment network threat model. The earlier hostile-customer assessment is rejected (`docs/multi-user.md`). Shared company versus per-user tailnets remains undecided; a company tailnet is only the recommendation. Existing token, secret-handling and external-access safeguards remain.
 27. Partially resolved 2026-08-08: orb deletion removes the authoritative filesystem and replicated history rather than retaining a browsable transcript; the implemented resource inventory and cleanup protocol are in `docs/orb-deletion.md`. Export-before-delete remains undecided.
 28. Define whether stopped hosts have an expiration/garbage-collection policy.
 29. Define the eventual suborb orchestration and filesystem handoff model.

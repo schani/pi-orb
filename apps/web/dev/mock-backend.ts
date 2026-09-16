@@ -541,7 +541,13 @@ async function handleApi(
   const method = request.method ?? "GET";
 
   if (method === "GET" && path === "/api/v1/session") {
-    sendJson(response, 200, { status: "ok" });
+    sendJson(response, 200, {
+      status: "ok",
+      principal: {
+        kind: "user",
+        user: { id: "00000000-0000-4000-8000-000000000001", email: "developer@local" },
+      },
+    });
     return true;
   }
 

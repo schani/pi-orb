@@ -5,8 +5,26 @@ import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
 
 const closed = { additionalProperties: false } as const;
 
-/** Reachability response used to confirm that the browser passed its external auth proxy. */
-export const SessionProbeSchema = Type.Object({ status: Type.Literal("ok") }, closed);
+/** Authenticated application principal. */
+export const SessionProbeSchema = Type.Object(
+  {
+    status: Type.Literal("ok"),
+    principal: Type.Union([
+      Type.Object(
+        {
+          kind: Type.Literal("user"),
+          user: Type.Object(
+            { id: Type.String(), email: Type.Union([Type.String(), Type.Null()]) },
+            closed,
+          ),
+        },
+        closed,
+      ),
+      Type.Object({ kind: Type.Literal("ops"), id: Type.String() }, closed),
+    ]),
+  },
+  closed,
+);
 export type SessionProbe = Static<typeof SessionProbeSchema>;
 
 /** What this deployment is made of, for the dashboard footer. Facts only, never secrets. */
@@ -299,6 +317,7 @@ export const ControlPlaneHttpErrorSchema = Type.Object(
       {
         code: Type.Union([
           Type.Literal("invalid_request"),
+          Type.Literal("unauthorized"),
           Type.Literal("not_found"),
           Type.Literal("conflict"),
           Type.Literal("unavailable"),

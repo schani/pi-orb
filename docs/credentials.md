@@ -1,6 +1,12 @@
 # Security and credentials
 
-The first local vertical slice intentionally has no authentication or authorization. Anyone who can reach the control plane can list, create, inspect, control, and stop every project and orb. The control plane-to-runtime hop is also unauthenticated. This deployment is suitable only on a trusted development machine/network and must not be exposed publicly.
+The locally implemented, undeployed stage 1 identifies every browser/ops request but still adds no project authorization: any admitted principal can list, create, inspect, control, and stop every project and orb. Runtime bearer and issuer authentication remain separate. Local development is suitable only on a trusted machine/network.
+
+## Trusted-company multi-user requirement (2026-09-16)
+
+Stage 1 application identity is implemented locally and not deployed; stages 2–3 and deployment are not authorized. Stage 1 adds per-request user/ops principals but no project scope, so the global credential broker below remains current. It adds no cookie/login framework or roles.
+
+Stage 3 requires Codex and GitHub access/refresh credentials to be per-user; provider client configuration may remain deployment-wide. The proposal in `docs/multi-user.md` uses per-(user, provider) pointers, separate login/refresh state and Pi auth artifacts, and runtime/control-plane inference credentials derived from the orb's project owner, not its viewer. Existing orb actions eventually derive the credential user from project ownership; a new user-owned ops action must require an explicitly selected user, never infer a human behind the ops machine identity. Distinct immutable versions can share the existing provider Secret Manager parents; correctness depends on user-scoped pointers and version cleanup, not one parent secret per user. The GitHub App's private installation setting needs changing only for installations outside its owning account, not inherently for employee OAuth logins against repositories already covered.
 
 ## Conversation model selection (implemented locally 2026-09-14)
 
@@ -51,7 +57,7 @@ Decided for the cloud slice: replace the mounted file with a **control-plane cre
 - A runtime-facing control-plane endpoint returns a current short-lived access token. It is authenticated by a per-host-incarnation bearer token scoped to that orb only and valid only while the orb is meant to be running.
 - The orb runtime registers a provider config (the same `registerProvider` mechanism the E2E mock uses) whose `getApiKey`/`refreshToken` delegate to that endpoint; from Pi's perspective nothing is unusual.
 - Providers deliver two environment variables for the broker — the control-plane base URL and the orb token — via `--env` on Docker and via instance metadata forwarded into the container on GCE. Together with the Tailscale port-exposure variables (`docs/ports.md`), this env contract is the entire provider-specific surface.
-- Accepted limitation until the identity model exists (open question 24): repository code inside an orb can read the orb token and thus obtain short-lived access tokens. What it can no longer obtain is the refresh token.
+- Accepted limitation under the trusted-company model (open questions 24 and 26): repository code inside an orb can read the orb token and thus obtain short-lived access tokens. What it cannot obtain is the refresh token.
 - Token lifetime/renewal semantics, refresh coalescing, and the 401-retry path are settled in the detailed design below.
 
 **Local subagent auth (2026-09-14, under validation).** The runtime pins `PI_CODING_AGENT_DIR` to `<workDir>/pi-agent` and uses its standard `auth.json` for root and child ModelRuntimes. The hook env-file cannot override this runtime-owned directory. Children inherit the registered broker provider but own independent model pools. The process-provider browser subagent E2E demonstrated that copying provider registration alone is insufficient: a fresh runtime with a different auth path fails before inference with “No API key found”. Sharing this private broker-only store fixes that boundary without CLI login, real refresh-token distribution, or child-specific credentials. Approved child MCP tools borrow the root's configured `McpTools` and serialized connections: no child credential copy or separate connection owner. Root shutdown drains children before closing MCP; child disposal cannot close shared connections. Explicit tool allowlists remain authoritative. See `docs/subagents.md`.
@@ -186,7 +192,7 @@ Ordinary tests remain essential: shared PostgreSQL/PGlite store contracts pin lo
 
 ## Requirements before public deployment
 
-- Authenticate browser access and authorize every project/orb operation.
+- Deploy the locally implemented stage-1 browser authentication only with the not-yet-authorized ownership/authorization stages before coworker onboarding; do not deploy stage 1 as a standalone discovery step.
 - Authenticate runtime/control-plane communication.
 - Do not bake secrets into images.
 - Use short-lived, single-use registration credentials for runtime bootstrap.
@@ -200,13 +206,12 @@ Ordinary tests remain essential: shared PostgreSQL/PGlite store contracts pin lo
 
 Still open for that later security phase:
 
-- user authentication and authorization model;
+- project authorization and cross-user mutation/UI policy;
 - runtime identity after bootstrap registration;
 - GitHub repository authentication and token lifetime;
 - per-user/project model credentials, Secret Manager integration, and rotation;
 - Cloud SQL authentication and network topology;
 - secret/environment-variable scope and auditability;
-- whether project code is trusted, semi-trusted, or hostile;
 - portal/forwarded-port authorization.
 
 ## GitHub credentials for `gh` and git push (decided and implemented end to end 2026-08-03: user OAuth device flow)

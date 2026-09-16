@@ -611,6 +611,16 @@ describe("control-plane API schemas", () => {
         error: { code: "conflict", message: "orb is stopping", retryable: true },
       }),
     ).toBe(true);
+    expect(
+      Check(ControlPlaneHttpErrorSchema, {
+        error: { code: "unauthorized", message: "invalid identity", retryable: false },
+      }),
+    ).toBe(true);
+    expect(
+      Check(ControlPlaneHttpErrorSchema, {
+        error: { code: "unauthenticated", message: "invalid identity", retryable: false },
+      }),
+    ).toBe(false);
   });
 
   it("never allows OAuth credential fields to serialize (docs/credentials.md)", () => {

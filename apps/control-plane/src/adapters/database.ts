@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { err, ok, type Result, type ResultAsync } from "neverthrow";
 import type { StoreError } from "../domain/errors.ts";
 import type { HostingStore } from "../domain/hosting-ports.ts";
+import type { UserStore } from "../domain/identity.ts";
 import type { McpStore } from "../domain/mcp.ts";
 import type { McpOAuthStore } from "../domain/mcp-oauth.ts";
 import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
@@ -25,6 +26,7 @@ import { PostgreSQLProjectInstructionsStore } from "./pg/project-instructions.ts
 import { PostgreSQLProjectSecretPointerStore } from "./pg/project-secrets.ts";
 import { PostgreSQLSigningKeyStore } from "./pg/signing-keys.ts";
 import { PostgreSQLControlPlaneStore } from "./pg/store.ts";
+import { PostgreSQLUserStore } from "./pg/users.ts";
 
 export interface ControlPlaneDatabase {
   readonly store: ControlPlaneStore;
@@ -36,6 +38,7 @@ export interface ControlPlaneDatabase {
   readonly hosting: HostingStore;
   readonly mcp: McpStore;
   readonly mcpOAuth: McpOAuthStore & import("../domain/mcp-oauth-garbage.ts").McpOAuthGarbageStore;
+  readonly users: UserStore;
   migrate(observe?: MigrationObserver): ResultAsync<string[], StoreError>;
   close(): ResultAsync<void, StoreError>;
 }
@@ -56,6 +59,7 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     hosting: new PostgreSQLHostingStore(client),
     mcp: new PostgreSQLMcpStore(client),
     mcpOAuth: new PostgreSQLMcpOAuthStore(client),
+    users: new PostgreSQLUserStore(client),
     migrate: (observe) => runMigrations(client, observe),
     close: () => client.end(),
   };

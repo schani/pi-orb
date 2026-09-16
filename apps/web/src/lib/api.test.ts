@@ -33,10 +33,16 @@ describe("API session handling", () => {
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ status: "ok" }), {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify({
+              status: "ok",
+              principal: { kind: "user", user: { id: "user-1", email: null } },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
       ),
     );
     const result = await probeSession();

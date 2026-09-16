@@ -28,6 +28,7 @@ import {
 } from "./adapters/github-oauth/client.ts";
 import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
 import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
+import { IapIdentityVerifier } from "./adapters/iap-identity.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./adapters/mcp-oauth.ts";
 import { probeMcp } from "./adapters/mcp-probe.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
@@ -49,6 +50,7 @@ import {
   HttpTailscaleAuthKeyMinter,
   type TailscaleHostOptions,
 } from "./adapters/tailscale/client.ts";
+import { CryptoUserIdSource } from "./adapters/user-id.ts";
 import { uploadRequest } from "./adapters/workspace-upload-http.ts";
 import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
 import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
@@ -78,6 +80,7 @@ import {
   createConfiguredHostingAccessPolicy,
   readHostingConfiguration,
 } from "./hosting-config.ts";
+import { registerAuthenticatedBrowserRoutes } from "./http/browser-identity.ts";
 import { registerHostingAccessGuard } from "./http/hosting-access.ts";
 import {
   registerBrowserHostingRoutes,
@@ -91,6 +94,10 @@ import { registerRoutes } from "./http/routes.ts";
 import { registerRuntimeRoutes } from "./http/runtime-routes.ts";
 import { registerWebAssets } from "./http/web-assets.ts";
 import { registerWorkspaceUploadRoutes } from "./http/workspace-upload-routes.ts";
+import {
+  createRequestPrincipalResolver,
+  readRequestIdentityConfig,
+} from "./identity-composition.ts";
 import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
 
 const env = (name: string, fallback: string): string => {
@@ -177,6 +184,12 @@ export async function main(
   // "ops": the browser API surface for tooling, with no background loops,
   // no migrations, and no web assets — invoker-IAM keeps it private.
   const opsRole = role === "ops";
+  const requestIdentity = readRequestIdentityConfig(role, process.env);
+  if (requestIdentity.isErr()) {
+    bootTask.error(requestIdentity.error);
+    process.exitCode = 1;
+    return;
+  }
   const runtimeRole = role === "all" || role === "runtime";
   // "issuer": the deployment's only public unauthenticated surface, serving
   // OIDC discovery and JWKS and nothing else (docs/workload-identity.md).
@@ -501,32 +514,49 @@ export async function main(
     constants: DEFAULT_ISSUER_CONSTANTS,
   };
   if (browserRole || opsRole) {
-    registerBrowserHostingRoutes(app, httpTask, {
-      store: deps.store,
-      hosting: deps.hosting,
-      filesOrigin: hostingOrigin,
-      appOrigin,
-    });
-    await registerLiveProxy(app, httpTask, deps);
-    // Staged rotation lives only on the private roles: the public issuer
-    // publishes keys and must not be able to change them
-    // (docs/workload-identity.md).
-    registerRoutes(app, httpTask, deps, viewConfig, systemView, signingKeyDeps);
-    registerMcpOAuthRoutes(app, httpTask, database.mcp, mcpOAuth, appOrigin);
-    registerMcpRoutes(app, httpTask, database.mcp, async (projectId, config) => {
-      const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);
-      return snapshot.isErr()
-        ? err("Project secrets unavailable")
-        : probeMcp(config, snapshot.value.values);
-    });
-
-    registerWorkspaceUploadRoutes(app, httpTask, deps);
-    // Cloud deployment serves the built web UI from the same process; local
-    // development keeps the vite dev server + proxy instead.
-    const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";
-    if (webDist !== "") {
-      await registerWebAssets(app, webDist);
+    const identityConfig = requestIdentity.value;
+    if (identityConfig.kind === "none") {
+      bootTask.error("browser route identity configuration missing");
+      process.exitCode = 1;
+      return;
     }
+    const browserVerifier =
+      identityConfig.kind === "browser"
+        ? new IapIdentityVerifier(identityConfig.audience, () => Date.now())
+        : undefined;
+    const principalResolver = createRequestPrincipalResolver(
+      httpTask,
+      identityConfig,
+      database.users,
+      new CryptoUserIdSource(),
+      browserVerifier,
+    );
+    if (principalResolver.isErr()) {
+      bootTask.error(principalResolver.error);
+      process.exitCode = 1;
+      return;
+    }
+    registerAuthenticatedBrowserRoutes(app, principalResolver.value, async (browser) => {
+      registerBrowserHostingRoutes(browser, httpTask, {
+        store: deps.store,
+        hosting: deps.hosting,
+        filesOrigin: hostingOrigin,
+        appOrigin,
+      });
+      await registerLiveProxy(browser, httpTask, deps);
+      registerRoutes(browser, httpTask, deps, viewConfig, systemView, signingKeyDeps);
+      registerMcpOAuthRoutes(browser, httpTask, database.mcp, mcpOAuth, appOrigin);
+      registerMcpRoutes(browser, httpTask, database.mcp, async (projectId, config) => {
+        const snapshot = await getProjectSecretSnapshot(httpTask, deps.projectSecrets, projectId);
+        return snapshot.isErr()
+          ? err("Project secrets unavailable")
+          : probeMcp(config, snapshot.value.values);
+      });
+      registerWorkspaceUploadRoutes(browser, httpTask, deps);
+    });
+    // Static assets do not resolve an application user.
+    const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";
+    if (webDist !== "") await registerWebAssets(app, webDist);
   }
   if (runtimeRole) {
     await registerRuntimeHostingRoutes(app, httpTask, {
