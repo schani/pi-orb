@@ -56,18 +56,20 @@ import { HttpMcpTransport } from "../mcp/transport.ts";
 import { triggerOrbName } from "../naming/client.ts";
 import { readRootReadme } from "../naming/context.ts";
 import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
+import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
 import { settleBootPrerequisites } from "./boot-prerequisites.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
 import { FileIdleStopFence, type IdleStopFence } from "./idle-stop-fence.ts";
+import {
+  instructionsAdoption,
+  PERSONAL_INSTRUCTIONS_ADOPTION,
+  PROJECT_INSTRUCTIONS_ADOPTION,
+} from "./instructions-adoption.ts";
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
-import {
-  PERSONAL_INSTRUCTIONS_ADOPTION,
-  personalInstructionsAdoption,
-} from "./personal-instructions.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
 import { restoreSessionSettings, settingsFallbackMessage } from "./restore-settings.ts";
 import { reportRustToolchainEdge } from "./rust-toolchain-reporter.ts";
@@ -434,6 +436,16 @@ export class PiOrbAgent {
         ),
       );
 
+    const projectInstructions = await fetchProjectInstructions(broker);
+    if (projectInstructions.isErr())
+      return err(
+        this.failed(
+          "project_instructions_unavailable",
+          projectInstructions.error.message,
+          projectInstructions.error.retryable,
+        ),
+      );
+
     // 2. Session: never replace an existing one (docs/host-provider.md).
     this.health = this.initializing("loading_session");
     const sessionDir = join(this.options.workDir, "pi-sessions");
@@ -604,6 +616,7 @@ export class PiOrbAgent {
       mcp: { configs: catalog.value.servers, tools: mcpTools },
       subagents: this,
       personalInstructions: personalInstructions.value,
+      projectInstructions: projectInstructions.value,
     });
     if (loaderResult.isErr()) {
       return err(this.failed("session_init_failed", loaderResult.error, true));
@@ -688,25 +701,27 @@ export class PiOrbAgent {
       await this.closeExtensions();
       return err(this.failed("mcp_config_record_failed", adoption.error, false));
     }
-    const personalAdoption = Result.fromThrowable(
-      () => {
-        const previous = sessionManager
-          .getEntries()
-          .findLast(
-            (entry) =>
-              entry.type === "custom" && entry.customType === PERSONAL_INSTRUCTIONS_ADOPTION,
+    for (const [scope, customType, snapshot] of [
+      ["personal", PERSONAL_INSTRUCTIONS_ADOPTION, personalInstructions.value],
+      ["project", PROJECT_INSTRUCTIONS_ADOPTION, projectInstructions.value],
+    ] as const) {
+      const recorded = Result.fromThrowable(
+        () => {
+          const previous = sessionManager
+            .getEntries()
+            .findLast((entry) => entry.type === "custom" && entry.customType === customType);
+          const edge = instructionsAdoption(
+            snapshot,
+            previous?.type === "custom" ? previous.data : null,
           );
-        const edge = personalInstructionsAdoption(
-          personalInstructions.value,
-          previous?.type === "custom" ? previous.data : null,
-        );
-        if (edge !== null) sessionManager.appendCustomEntry(PERSONAL_INSTRUCTIONS_ADOPTION, edge);
-      },
-      () => "Cannot record personal instructions adoption",
-    )();
-    if (personalAdoption.isErr()) {
-      await this.closeExtensions();
-      return err(this.failed("personal_instructions_record_failed", personalAdoption.error, false));
+          if (edge !== null) sessionManager.appendCustomEntry(customType, edge);
+        },
+        () => `Cannot record ${scope} instructions adoption`,
+      )();
+      if (recorded.isErr()) {
+        await this.closeExtensions();
+        return err(this.failed(`${scope}_instructions_record_failed`, recorded.error, false));
+      }
     }
     const readSettings = (): AgentSettings => ({
       model: {

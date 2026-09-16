@@ -459,7 +459,7 @@ export function ProjectsPage({
         <ProjectConfigModal
           key={configProject.id}
           project={configProject}
-          initialTabIndex={1}
+          initialTabIndex={2}
           onChanged={(changed) => {
             setProjects(
               (current) =>

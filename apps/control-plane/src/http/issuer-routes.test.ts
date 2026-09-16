@@ -325,6 +325,7 @@ describe("minted tokens verify against the served JWKS", () => {
       nameLeaseMs: 30_000,
       projectSecrets: { pointers: new FakeProjectSecretPointerStore(PROJECT), secrets },
       personalInstructions: makeHarness().deps.personalInstructions,
+      projectInstructions: makeHarness().deps.projectInstructions,
       mint: {
         store,
         signer: new OidcTokenSigner({ keys, secrets, constants: DEFAULT_ISSUER_CONSTANTS }),

@@ -12,6 +12,7 @@ import type {
   ProjectSecretPointerStore,
   SigningKeyStore,
 } from "../domain/ports.ts";
+import type { ProjectInstructionsStore } from "../domain/project-instructions.ts";
 import { PgClient, type PostgreSQLClient } from "./pg/client.ts";
 import { PostgreSQLCredentialPointerStore } from "./pg/credential-pointers.ts";
 import { PostgreSQLHostingStore } from "./pg/hosting.ts";
@@ -20,6 +21,7 @@ import { PostgreSQLMcpOAuthStore } from "./pg/mcp-oauth.ts";
 import { type MigrationObserver, runMigrations } from "./pg/migrate.ts";
 import { PostgreSQLPersonalInstructionsStore } from "./pg/personal-instructions.ts";
 import { PGliteClient } from "./pg/pglite-client.ts";
+import { PostgreSQLProjectInstructionsStore } from "./pg/project-instructions.ts";
 import { PostgreSQLProjectSecretPointerStore } from "./pg/project-secrets.ts";
 import { PostgreSQLSigningKeyStore } from "./pg/signing-keys.ts";
 import { PostgreSQLControlPlaneStore } from "./pg/store.ts";
@@ -29,6 +31,7 @@ export interface ControlPlaneDatabase {
   readonly pointers: CredentialPointerStore;
   readonly projectSecrets: ProjectSecretPointerStore;
   readonly personalInstructions: PersonalInstructionsStore;
+  readonly projectInstructions: ProjectInstructionsStore;
   readonly signingKeys: SigningKeyStore;
   readonly hosting: HostingStore;
   readonly mcp: McpStore;
@@ -48,6 +51,7 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     pointers: new PostgreSQLCredentialPointerStore(client),
     projectSecrets: new PostgreSQLProjectSecretPointerStore(client),
     personalInstructions: new PostgreSQLPersonalInstructionsStore(client),
+    projectInstructions: new PostgreSQLProjectInstructionsStore(client),
     signingKeys: new PostgreSQLSigningKeyStore(client),
     hosting: new PostgreSQLHostingStore(client),
     mcp: new PostgreSQLMcpStore(client),

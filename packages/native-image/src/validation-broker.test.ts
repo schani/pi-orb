@@ -71,6 +71,12 @@ describe("validation broker", () => {
     const instructions = await personal.json();
     expect(Check(PersonalInstructionsSchema, instructions)).toBe(true);
     expect(instructions).toEqual({ content: "", revision: 0 });
+    const projectInstructions = await request("/runtime/v1/project-instructions");
+    expect(projectInstructions.status).toBe(200);
+    expect(await projectInstructions.json()).toEqual({ content: "", revision: 0 });
+    expect((await fetch(`http://127.0.0.1:${port}/runtime/v1/project-instructions`)).status).toBe(
+      401,
+    );
     expect(await readdir(directory)).not.toContain("unrecognized");
 
     const grant = await request("/runtime/v1/tokens/model", {

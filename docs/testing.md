@@ -1,5 +1,11 @@
 # Testing strategy
 
+## Additional project instructions qualification (2026-09-16)
+
+Config tab was implemented DST/tests first; `docs/project-instructions.md` records the red baselines, selected simple contract and final qualification. The project-scoped service/store is exercised under 200 determined schedules with concurrent saves, boot reads, deletion admission and pre/post-commit failures. Real SQL, HTTP/auth, SDK layering/reload and native-image broker contracts cover the remaining boundaries. Chromium/WebKit test explicit save acceptance, failures, retained drafts, per-project isolation and phone layout. Full runtime E2E proves next-start adoption, clearing through compute replacement, body-free adoption metadata and normal child inheritance of the parent's boot snapshot after a live edit.
+
+`npm test` passed **1,790 tests** (five existing conditional skips), plus infrastructure suites. Typecheck and lint pass (four pre-existing warnings and one info). The complete `PI_ORB_E2E_BACKEND=process npm run test:e2e` passed **84 tests**, with two explicit Docker-interruption/network-PostgreSQL skips. The first complete run found two deterministic MCP keyboard-test expectations for the old General → MCPs tab adjacency; tests now assert General → Instructions → MCPs explicitly, preserving existing focus/draft assertions and timeouts. This was not a flaky rerun or a production workaround. No deployment or push was performed.
+
 ## Transcript cache qualification (2026-09-15)
 
 `docs/transcript-cache.md` records the tests-first implementation, retained/replayed DST traces, browser gates and local performance evidence. Unit/DST exercise the actual cache, loader, browser reducer and transport adapter. Chromium/WebKit tests block repeat history reads, hold metadata and initial hello, observe exact catch-up cursors, and cover live suffixes, stopped refresh/Retry, definitive 404 socket cleanup, phone/dashboard return, reload and LRU eviction. Large fixture payloads include roughly 26 MB and 6 MB of native data; no wall-clock speed assertion is used. The full-slice runtime test now visits source/spawned orbs A→B→A, forbids redundant browser history reads, checks the real hello cursor, then completes the existing upload-triggered message/inference path. No extra unsynchronized fake-model script consumer is added.

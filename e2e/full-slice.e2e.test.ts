@@ -1357,6 +1357,13 @@ describe("full slice E2E", () => {
       repositoryUrl: REPOSITORY_URL,
     });
     expect(project.status, JSON.stringify(project.body)).toBe(201);
+    expect(
+      (
+        await api(base, "PUT", `/api/v1/projects/${projectId}/instructions`, {
+          content: "PROJECT_E2E_FIRST_BOOT",
+        })
+      ).status,
+    ).toBe(200);
     orbId = randomUUID();
     const orb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, { id: orbId });
     expect(orb.status, JSON.stringify(orb.body)).toBe(202);
@@ -1392,6 +1399,14 @@ describe("full slice E2E", () => {
       (
         await api(base, "PUT", "/api/v1/personal-instructions", {
           content: "PERSONAL_E2E_NEXT_BOOT",
+        })
+      ).status,
+    ).toBe(200);
+
+    expect(
+      (
+        await api(base, "PUT", `/api/v1/projects/${projectId}/instructions`, {
+          content: "PROJECT_E2E_NEXT_BOOT",
         })
       ).status,
     ).toBe(200);
@@ -1735,6 +1750,8 @@ describe("full slice E2E", () => {
         requests.some(
           (call) =>
             call.matchedRuleIndex === 0 &&
+            JSON.stringify(call.body).includes("PROJECT_E2E_FIRST_BOOT") &&
+            !JSON.stringify(call.body).includes("PROJECT_E2E_NEXT_BOOT") &&
             JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
             !JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") &&
             call.body?.model === "gpt-5.6-sol" &&
@@ -1793,6 +1810,10 @@ describe("full slice E2E", () => {
         expect(
           (await api(base, "PUT", "/api/v1/personal-instructions", { content: "" })).status,
         ).toBe(200);
+        expect(
+          (await api(base, "PUT", `/api/v1/projects/${projectId}/instructions`, { content: "" }))
+            .status,
+        ).toBe(200);
         if (PROCESS_BACKEND) {
           const before = controlPlane.logs.join("").split("E2E host specification advanced").length;
           controlPlane.process.kill("SIGHUP");
@@ -1826,7 +1847,9 @@ describe("full slice E2E", () => {
       const serialized = JSON.stringify(history.body["records"]);
       expect(serialized).toContain(warning);
       expect(serialized).toContain("pi-orb:personal-instructions");
+      expect(serialized).toContain("pi-orb:project-instructions");
       expect(serialized).not.toContain("PERSONAL_E2E_");
+      expect(serialized).not.toContain("PROJECT_E2E_");
       const records = history.body["records"] as {
         overflow?: { native?: { customType?: string } };
       }[];
@@ -1840,6 +1863,8 @@ describe("full slice E2E", () => {
             (call) =>
               call.status === 200 &&
               call.matchedRuleIndex === index + 3 &&
+              !JSON.stringify(call.body).includes("PROJECT_E2E_FIRST_BOOT") &&
+              JSON.stringify(call.body).includes("PROJECT_E2E_NEXT_BOOT") === (index === 0) &&
               !JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
               JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") === (index === 0) &&
               call.body?.model === "gpt-5.6-sol" &&

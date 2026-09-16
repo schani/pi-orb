@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./Icons.tsx";
 import { ProjectConfigModal } from "./ProjectConfigModal.tsx";
+import type { ProjectInstructionsDraft } from "./ProjectInstructions.tsx";
 
 export function ProjectConfigButton({
   project,
@@ -14,6 +15,7 @@ export function ProjectConfigButton({
   onChanged: (project: ProjectView) => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const instructionsDraft = useRef<ProjectInstructionsDraft | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   return (
     <>
@@ -33,6 +35,7 @@ export function ProjectConfigButton({
           <ProjectConfigModal
             key={project.id}
             project={project}
+            instructionsDraft={instructionsDraft}
             onChanged={onChanged}
             onClose={() => {
               setOpen(false);

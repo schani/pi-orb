@@ -21,6 +21,7 @@ import {
   type OrbSpawnRequest,
   OrbSpawnRequestSchema,
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
+  PROJECT_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_SECRETS_RUNTIME_PATH,
   RUNTIME_TOKENS_PREFIX,
   type TokenErrorBody,
@@ -54,10 +55,12 @@ import type {
   ProjectSecretsDeps,
   SpawnConflict,
 } from "../domain/ports.ts";
+import type { ProjectInstructionsStore } from "../domain/project-instructions.ts";
 import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
 import { oauthBinding, sendOAuthError } from "./mcp-oauth-routes.ts";
 import { sendMcpError } from "./mcp-routes.ts";
+import { sendProjectInstructionsError } from "./project-instructions.ts";
 
 export interface RuntimeRouteDeps {
   readonly appOrigin: string;
@@ -80,6 +83,7 @@ export interface RuntimeRouteDeps {
   readonly mint: MintDeps;
   readonly projectSecrets: ProjectSecretsDeps;
   readonly personalInstructions: PersonalInstructionsStore;
+  readonly projectInstructions: ProjectInstructionsStore;
   readonly mcp?: McpStore;
   readonly mcpOAuth?: McpOAuth;
 }
@@ -416,6 +420,22 @@ export function registerRuntimeRoutes(
       return result.isErr() ? sendMcpError(reply, result.error) : reply.send(result.value);
     });
   }
+
+  app.get(PROJECT_INSTRUCTIONS_RUNTIME_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable")
+      return sendProjectInstructionsError(reply, {
+        type: "project_instructions_error",
+        code: "unavailable",
+        message: "Project instructions unavailable",
+      });
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    const result = await deps.projectInstructions.read(task, auth.orb.projectId);
+    return result.isErr()
+      ? sendProjectInstructionsError(reply, result.error)
+      : reply.send(result.value);
+  });
 
   app.get(PERSONAL_INSTRUCTIONS_RUNTIME_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");

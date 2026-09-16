@@ -572,6 +572,13 @@ describe("frontend-only browser behavior", () => {
         await page.keyboard.press("Home");
         await expectPage(dialog.getByRole("tab", { name: "General", exact: true })).toBeFocused();
         await page.keyboard.press("ArrowRight");
+        await expectPage(
+          dialog.getByRole("tab", { name: "Instructions", exact: true }),
+        ).toBeFocused();
+        await expectPage(
+          dialog.getByRole("tabpanel", { name: "Instructions", exact: true }),
+        ).toBeVisible();
+        await page.keyboard.press("ArrowRight");
         await expectPage(mcpTab).toBeFocused();
         await expectPage(mcp.getByLabel("Name", { exact: true })).toHaveAttribute("readonly", "");
         await expectPage(mcp.getByLabel("Description", { exact: true })).toHaveValue(

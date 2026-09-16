@@ -175,6 +175,13 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       ).status,
     ).toBe(201);
     expect(
+      (
+        await api(cp.baseUrl, "PUT", `/api/v1/projects/${project}/instructions`, {
+          content: "PROJECT_CHILD_BOOT_SNAPSHOT",
+        })
+      ).status,
+    ).toBe(200);
+    expect(
       (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: orb })).status,
     ).toBe(202);
     const code = await waitFor(
@@ -195,6 +202,13 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       },
       { timeoutMs: 300_000 },
     );
+    expect(
+      (
+        await api(cp.baseUrl, "PUT", `/api/v1/projects/${project}/instructions`, {
+          content: "PROJECT_CHILD_NEXT_BOOT",
+        })
+      ).status,
+    ).toBe(200);
     const page = await browser.newPage();
     await page.goto(`${cp.baseUrl}/#/orbs/${orb}`);
     const workspace = join(root, "hosts", orb, "workspace");
@@ -334,7 +348,13 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
       surface: string;
       status: number;
+      matchedRuleIndex?: number;
+      body?: unknown;
     }[];
+    const firstChild = requests.find((r) => r.matchedRuleIndex === 1 && r.status === 200);
+    expect(firstChild).toBeDefined();
+    expect(JSON.stringify(firstChild?.body)).toContain("PROJECT_CHILD_BOOT_SNAPSHOT");
+    expect(JSON.stringify(firstChild?.body)).not.toContain("PROJECT_CHILD_NEXT_BOOT");
     // Device-code polling may legitimately be pending before approval. Only
     // model calls prove (or violate) cancellation's no-inference guarantee.
     const modelRequests = requests.filter((r) => r.surface === "model");

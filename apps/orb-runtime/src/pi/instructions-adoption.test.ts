@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { personalInstructionsAdoption } from "./personal-instructions.ts";
+import { instructionsAdoption as personalInstructionsAdoption } from "./instructions-adoption.ts";
 
-describe("personal instructions adoption edges", () => {
+describe("instruction adoption edges (shared by personal and project scopes)", () => {
   it("is silent for the initial empty default and unchanged restarts", () => {
     expect(personalInstructionsAdoption({ content: "", revision: 0 }, null)).toBeNull();
     const snapshot = { content: "private instructions", revision: 1 };

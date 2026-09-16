@@ -15,6 +15,7 @@ import {
   OrbViewSchema,
   PERSONAL_INSTRUCTIONS_PATH,
   PersonalInstructionsSchema,
+  ProjectInstructionsSchema,
   type ProjectSecretList,
   ProjectSecretListSchema,
   type ProjectView,
@@ -115,6 +116,26 @@ export function savePersonalInstructions(content: string) {
     body: JSON.stringify({ content }),
     signal: AbortSignal.timeout(15_000),
   });
+}
+
+export function getProjectInstructions(projectId: string) {
+  return apiFetch(
+    ProjectInstructionsSchema,
+    `/api/v1/projects/${encodeURIComponent(projectId)}/instructions`,
+    { cache: "no-store", signal: AbortSignal.timeout(15_000) },
+  );
+}
+export function saveProjectInstructions(projectId: string, content: string) {
+  return apiFetch(
+    ProjectInstructionsSchema,
+    `/api/v1/projects/${encodeURIComponent(projectId)}/instructions`,
+    {
+      method: "PUT",
+      headers: jsonHeaders,
+      body: JSON.stringify({ content }),
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
 }
 
 export function getProjectMcp(projectId: string) {

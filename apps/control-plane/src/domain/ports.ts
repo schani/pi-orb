@@ -1015,4 +1015,5 @@ export interface ControlPlaneDeps {
   readonly projectSecrets: ProjectSecretsDeps;
   readonly hosting: import("./hosting-ports.ts").HostingDeps;
   readonly personalInstructions: import("./personal-instructions.ts").PersonalInstructionsStore;
+  readonly projectInstructions: import("./project-instructions.ts").ProjectInstructionsStore;
 }

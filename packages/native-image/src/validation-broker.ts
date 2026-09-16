@@ -13,7 +13,7 @@ const server = createServer((request, response) => {
     if (request.headers.authorization !== "Bearer " + token) return json(response, 401, { error: "unauthorized" });
     if (request.method === "GET" && request.url === "/runtime/v1/project-secrets" && body === "") return json(response, 200, { revision: 0, values: {} });
     if (request.method === "GET" && request.url === "/runtime/v1/mcp" && body === "") return json(response, 200, { revision: 0, servers: [] });
-    if (request.method === "GET" && request.url === "/runtime/v1/personal-instructions" && body === "") return json(response, 200, { content: "", revision: 0 });
+    if (request.method === "GET" && (request.url === "/runtime/v1/personal-instructions" || request.url === "/runtime/v1/project-instructions") && body === "") return json(response, 200, { content: "", revision: 0 });
     if (request.method === "POST" && request.url === "/runtime/v1/tokens/model") {
       let parsed;
       try { parsed = JSON.parse(body); } catch { parsed = null; }

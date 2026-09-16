@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import type { PersonalInstructions } from "@pi-orb/protocol";
 
 export const PERSONAL_INSTRUCTIONS_ADOPTION = "pi-orb:personal-instructions";
+export const PROJECT_INSTRUCTIONS_ADOPTION = "pi-orb:project-instructions";
 
 /** Edge-only metadata. Content goes to model context, never into this history record. */
-export function personalInstructionsAdoption(snapshot: PersonalInstructions, previous: unknown) {
+export function instructionsAdoption(snapshot: PersonalInstructions, previous: unknown) {
   if (previous === null && snapshot.revision === 0 && snapshot.content === "") return null;
   const next = {
     revision: snapshot.revision,

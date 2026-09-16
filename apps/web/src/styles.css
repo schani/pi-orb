@@ -885,12 +885,14 @@ button.personal-instructions-gear {
 .personal-instructions-header button {
   margin-left: auto;
 }
-.personal-instructions-dialog form {
+.personal-instructions-dialog form,
+.project-instructions-editor {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-.personal-instructions-dialog textarea {
+.personal-instructions-dialog textarea,
+.project-instructions-editor textarea {
   width: 100%;
   min-height: 240px;
   height: min(440px, 55dvh);
@@ -952,7 +954,8 @@ button.personal-instructions-gear {
     height: 44px;
     width: 44px;
   }
-  .personal-instructions-dialog textarea {
+  .personal-instructions-dialog textarea,
+  .project-instructions-editor textarea {
     font-size: 16px;
     min-height: 120px;
     height: min(440px, 50dvh);
@@ -964,6 +967,10 @@ button.personal-instructions-gear {
 
 /* ---------- project config ---------- */
 
+.project-instructions-editor textarea {
+  background: var(--w);
+  color: var(--k);
+}
 .project-secrets-backdrop {
   position: fixed;
   z-index: 80;
@@ -1026,6 +1033,17 @@ button.personal-instructions-gear {
 .project-config-tabs [aria-selected="true"] {
   background: var(--k);
   color: var(--w);
+}
+
+@media (max-width: 600px) {
+  .project-config-tabs {
+    gap: 4px;
+    padding: 4px 6px;
+  }
+  .project-config-tabs button {
+    min-height: 44px;
+    padding: 0 3px;
+  }
 }
 
 .project-secrets-body {

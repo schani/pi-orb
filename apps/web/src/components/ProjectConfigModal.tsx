@@ -1,24 +1,31 @@
 import type { ProjectView } from "@pi-orb/protocol";
-import { useRef, useState } from "react";
+import { type RefObject, useRef, useState } from "react";
 import { useInitialFocus } from "../lib/use-initial-focus.ts";
 import { ProjectGeneralSettings } from "./ProjectGeneralSettings.tsx";
+import {
+  type ProjectInstructionsDraft,
+  ProjectInstructionsEditor,
+} from "./ProjectInstructions.tsx";
 import { ProjectMcpSettings } from "./ProjectMcpSettings.tsx";
 import { ProjectSecretsSettings } from "./ProjectSecretsSettings.tsx";
 
-const TABS = ["General", "MCPs", "Secrets"] as const;
+const TABS = ["General", "Instructions", "MCPs", "Secrets"] as const;
 
 export function ProjectConfigModal({
   project,
   onClose,
   onChanged,
   initialTabIndex = 0,
+  instructionsDraft,
 }: {
   project: ProjectView;
   initialTabIndex?: number;
+  instructionsDraft?: RefObject<ProjectInstructionsDraft | null>;
   onClose: () => void;
   onChanged: (project: ProjectView) => void | Promise<void>;
 }) {
   const [tab, setTab] = useState(initialTabIndex);
+  const localInstructionsDraft = useRef<ProjectInstructionsDraft | null>(null);
   const [saving, updateSaving] = useState(false);
   const dialog = useRef<HTMLElement>(null);
   const setSaving = (next: boolean) => {
@@ -75,7 +82,7 @@ export function ProjectConfigModal({
         <header className="project-secrets-header">
           <div>
             <h2 id="project-config-title">Config for {project.name}</h2>
-            {tab !== 1 && (
+            {(tab === 0 || tab === 3) && (
               <p>
                 {tab === 0 ? "Repository applies to new checkouts" : "Changes apply on next start"}
               </p>
@@ -145,13 +152,13 @@ export function ProjectConfigModal({
           aria-labelledby="project-config-tab-1"
           hidden={tab !== 1}
         >
-          <ProjectMcpSettings
+          <ProjectInstructionsEditor
             key={project.id}
             projectId={project.id}
-            projectName={project.name}
             active={tab === 1}
             saving={saving}
             setSaving={setSaving}
+            retained={instructionsDraft ?? localInstructionsDraft}
           />
         </div>
         <div
@@ -160,10 +167,25 @@ export function ProjectConfigModal({
           aria-labelledby="project-config-tab-2"
           hidden={tab !== 2}
         >
+          <ProjectMcpSettings
+            key={project.id}
+            projectId={project.id}
+            projectName={project.name}
+            active={tab === 2}
+            saving={saving}
+            setSaving={setSaving}
+          />
+        </div>
+        <div
+          role="tabpanel"
+          id="project-config-panel-3"
+          aria-labelledby="project-config-tab-3"
+          hidden={tab !== 3}
+        >
           <ProjectSecretsSettings
             key={project.id}
             project={project}
-            active={tab === 2}
+            active={tab === 3}
             saving={saving}
             setSaving={setSaving}
           />

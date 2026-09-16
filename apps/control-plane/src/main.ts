@@ -467,6 +467,7 @@ export async function main(
     constants: lifecycleConstantsForHost(hostProvider.kind),
     projectSecrets: { pointers: database.projectSecrets, secrets },
     personalInstructions: database.personalInstructions,
+    projectInstructions: database.projectInstructions,
     hosting: {
       store: database.hosting,
       bytes: hostedBytes,
@@ -544,6 +545,7 @@ export async function main(
       nameLeaseMs: deps.nameLeaseMs,
       projectSecrets: deps.projectSecrets,
       personalInstructions: deps.personalInstructions,
+      projectInstructions: deps.projectInstructions,
       mcp: database.mcp,
       mcpOAuth,
       mint: {

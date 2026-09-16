@@ -23,6 +23,7 @@ import { FakeSecretStore } from "./broker.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 import { makeHostingHarness } from "./hosting.ts";
 import { FakePersonalInstructionsStore } from "./personal-instructions.ts";
+import { FakeProjectInstructionsStore } from "./project-instructions.ts";
 import { InMemoryControlPlaneStore } from "./store.ts";
 import {
   FakeMintIdSource,
@@ -122,6 +123,9 @@ export function makeHarness(options?: {
     projectSecrets: { pointers: projectSecretPointers, secrets: new FakeSecretStore() },
     hosting: hosting.deps,
     personalInstructions: new FakePersonalInstructionsStore(),
+    projectInstructions: new FakeProjectInstructionsStore(
+      (id) => store.projectSnapshot(id)?.state ?? null,
+    ),
   };
   return { world, store, authGate, deps, hosting };
 }

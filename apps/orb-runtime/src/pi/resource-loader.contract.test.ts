@@ -143,6 +143,42 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect((await implicitLoader()).getAgentsFiles().agentsFiles).toEqual(native);
   });
 
+  it("adds project instructions after native context, preserving personal context and the immutable boot snapshot", async () => {
+    writeFileSync(join(agentDir, "AGENTS.md"), "guest-local instructions");
+    const native = (await implicitLoader()).getAgentsFiles().agentsFiles;
+    const personalInstructions = { content: "Personal marker", revision: 1 };
+    const projectInstructions = { content: "Project marker", revision: 2 };
+    const loaded = (
+      await createOrbResourceLoader({
+        cwd: repoDir,
+        agentDir,
+        skillsDir: null,
+        personalInstructions,
+        projectInstructions,
+      })
+    )._unsafeUnwrap();
+    const expected = [
+      { path: "pi-orb:personal/AGENTS.md", content: "Personal marker" },
+      ...native,
+      { path: "pi-orb:project/AGENTS.md", content: "Project marker" },
+    ];
+    expect(loaded.getAgentsFiles().agentsFiles).toEqual(expected);
+    projectInstructions.content = "Not until next start";
+    await loaded.reload();
+    expect(loaded.getAgentsFiles().agentsFiles).toEqual(expected);
+    const cleared = (
+      await createOrbResourceLoader({
+        cwd: repoDir,
+        agentDir,
+        skillsDir: null,
+        personalInstructions,
+        projectInstructions: { content: "", revision: 3 },
+      })
+    )._unsafeUnwrap();
+    expect(cleared.getAgentsFiles().agentsFiles).toEqual(expected.slice(0, -1));
+    expect((await implicitLoader()).getAgentsFiles().agentsFiles).toEqual(native);
+  });
+
   it("loads first-party MCP alongside discovered extensions and rejects tool-name collisions", async () => {
     const mcp = {
       configs: [

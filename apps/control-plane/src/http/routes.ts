@@ -44,6 +44,7 @@ import {
   publishSigningKey,
   type RotationError,
 } from "../domain/signing-keys.ts";
+import { registerProjectInstructionsRoutes } from "./project-instructions.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
 function httpError(
@@ -206,6 +207,8 @@ export function registerRoutes(
   // Which host provider, which database, which build. Resolved at boot and
   // constant for the process's lifetime, so it reads nothing per request.
   app.get("/api/v1/system", async (_request, reply) => reply.send(system));
+
+  registerProjectInstructionsRoutes(app, task, deps.projectInstructions);
 
   app.get(PERSONAL_INSTRUCTIONS_PATH, async (_request, reply) => {
     reply.header("cache-control", "no-store");

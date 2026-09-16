@@ -16,6 +16,7 @@ import {
   type OrbView,
   PERSONAL_INSTRUCTIONS_PATH,
   type PersonalInstructions,
+  type ProjectInstructions,
   type ProjectView,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
@@ -23,6 +24,7 @@ import {
   TerminalClientControlSchema,
   UploadBatchSchema,
   validatePersonalInstructions,
+  validateProjectInstructions,
   validateRepositoryUrl,
   type WorkspaceUpload,
 } from "@pi-orb/protocol";
@@ -50,6 +52,7 @@ interface MockState {
   projectMcp: Map<string, McpCatalog>;
   mcpGrants: Set<string>;
   personalInstructions: PersonalInstructions;
+  projectInstructions: Map<string, ProjectInstructions>;
 }
 
 function initialState(): MockState {
@@ -456,6 +459,7 @@ function initialState(): MockState {
       ],
     ]),
     personalInstructions: { content: "", revision: 0 },
+    projectInstructions: new Map(),
     mcpGrants: new Set([
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000001`,
       `${PROJECT_ID}/10000000-0000-4000-8000-000000000002`,
@@ -507,6 +511,37 @@ async function handleApi(
 
   if (method === "GET" && path === "/api/v1/session") {
     sendJson(response, 200, { status: "ok" });
+    return true;
+  }
+
+  const instructionsRoute = /^\/api\/v1\/projects\/([^/]+)\/instructions$/.exec(path);
+  if (instructionsRoute && (method === "GET" || method === "PUT")) {
+    response.setHeader("cache-control", "no-store");
+    const projectId = decodeURIComponent(instructionsRoute[1] ?? "");
+    const project = state.projects.get(projectId);
+    if (project?.state !== "active") {
+      sendJson(response, project ? 409 : 404, {
+        error: {
+          code: project ? "conflict" : "not_found",
+          message: project ? "Project is deleting" : "Project doesn't exist",
+          retryable: false,
+        },
+      });
+      return true;
+    }
+    let snapshot = state.projectInstructions.get(projectId) ?? { content: "", revision: 0 };
+    if (method === "PUT") {
+      const content = validateProjectInstructions(await readJson(request));
+      if (content.isErr()) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: content.error.message, retryable: false },
+        });
+        return true;
+      }
+      snapshot = { content: content.value, revision: snapshot.revision + 1 };
+      state.projectInstructions.set(projectId, snapshot);
+    }
+    sendJson(response, 200, snapshot);
     return true;
   }
 

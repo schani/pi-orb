@@ -113,6 +113,7 @@ Subsystem designs:
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules and deterministic/browser qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
+- [docs/project-instructions.md](docs/project-instructions.md) — additional per-project instructions, Config tab, additive virtual context and next-start adoption
 - [docs/workspace-uploads.md](docs/workspace-uploads.md) — streaming browser uploads into orb-local files, inbox notifications, idle protection, and recovery
 - [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard and orb-view Command-K Find architecture, selected Index card design, and presentation study
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal

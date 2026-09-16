@@ -1,5 +1,11 @@
 # Projects and the control-plane API
 
+## Additional project instructions (implemented locally, 2026-09-15)
+
+`GET /api/v1/projects/:projectId/instructions` returns `{content, revision}` for that project, initially empty/revision 0. `PUT` accepts only `{content}` and atomically assigns content/increments revision under the project-row lock; deletion conflicts, missing project returns 404, malformed text 400, storage outage 503 and inconsistent storage 500. Replies are no-store. Text shares the personal-instructions validation contract (64 KiB UTF-8, exact whitespace, no NUL/unpaired surrogates). Fleet responses never include instruction bodies. Migration `020_project_instructions.sql` adds the two project-owned columns.
+
+`GET /runtime/v1/project-instructions` derives the project from the current active-incarnation bearer; it ignores caller project selectors and exposes no runtime write. Boot captures that snapshot for fresh and resumed sessions. Save never wakes compute or sends a message. Config tab, shared implementation boundaries, adoption metadata and tests: `docs/project-instructions.md`.
+
 ## Personal instructions (implemented locally, 2026-09-14)
 
 `GET /api/v1/personal-instructions` returns `{content: string, revision: number}` for the current single account, initially `{content: "", revision: 0}`. `PUT` to the same URL accepts only `{content}` and atomically returns the new persisted snapshot. Every explicit successful assignment increments revision; last-applied-wins, no automatic retries/CAS or per-project override. Empty content clears the managed instructions. Text preserves whitespace and is limited to 64 KiB UTF-8; NUL and unpaired surrogates are invalid. Both replies are `no-store`; invalid input returns 400, unavailable storage 503, inconsistent storage 500, all with the existing typed HTTP error envelope. Saving never changes lifecycle state or messages.

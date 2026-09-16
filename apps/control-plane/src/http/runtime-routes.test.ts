@@ -41,6 +41,7 @@ import {
   TEST_ISSUER_URL,
 } from "../testkit/fixtures.ts";
 import { FakePersonalInstructionsStore } from "../testkit/personal-instructions.ts";
+import { FakeProjectInstructionsStore } from "../testkit/project-instructions.ts";
 import { FakeProjectSecretPointerStore } from "../testkit/project-secrets.ts";
 import { InMemoryControlPlaneStore } from "../testkit/store.ts";
 import {
@@ -67,6 +68,7 @@ describe("runtime broker routes", () => {
   let signer: FakeTokenSigner;
   let projectSecretPointers: FakeProjectSecretPointerStore;
   let personalInstructions: FakePersonalInstructionsStore;
+  let projectInstructions: FakeProjectInstructionsStore;
 
   const nameGenerator: OrbNameGenerator = {
     generate: () => okAsync("Repair Runtime Auth"),
@@ -94,6 +96,7 @@ describe("runtime broker routes", () => {
       nameLeaseMs: 30_000,
       projectSecrets: { pointers: projectSecretPointers, secrets },
       personalInstructions,
+      projectInstructions,
       mcp: {
         read: (_task, projectId) =>
           okAsync({
@@ -133,6 +136,9 @@ describe("runtime broker routes", () => {
     signer = new FakeTokenSigner("route-key-1");
     projectSecretPointers = new FakeProjectSecretPointerStore(PROJECT);
     personalInstructions = new FakePersonalInstructionsStore();
+    projectInstructions = new FakeProjectInstructionsStore(
+      (id) => store.projectSnapshot(id)?.state ?? null,
+    );
     broker = {
       pointers,
       secrets,
@@ -177,6 +183,41 @@ describe("runtime broker routes", () => {
         await app.inject({
           method: "PUT",
           url: "/runtime/v1/personal-instructions",
+          headers: { authorization: `Bearer ${TOKEN}` },
+          payload: { content: "no" },
+        })
+      ).statusCode,
+    ).toBe(404);
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped", { runtimeTokenHash: sha256(TOKEN) }));
+    expect((await request()).statusCode).toBe(401);
+  });
+
+  it("project instructions derive scope from the active bearer and expose no runtime write", async () => {
+    const request = (token = TOKEN) =>
+      app.inject({
+        method: "GET",
+        url: "/runtime/v1/project-instructions?projectId=other-project",
+        headers: { authorization: `Bearer ${token}` },
+      });
+    expect((await request()).statusCode).toBe(401);
+    store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+    projectInstructions.snapshots.set(PROJECT, { content: "This project only", revision: 5 });
+    const read = await request();
+    expect(read.json()).toEqual({ content: "This project only", revision: 5 });
+    expect(read.headers["cache-control"]).toBe("no-store");
+    store.seedProject(makeProjectRow("other-project"));
+    store.seedOrb(
+      makeOrbRow("other-orb", "other-project", "running", {
+        runtimeTokenHash: sha256("other-token"),
+      }),
+    );
+    expect((await request("other-token")).json()).toEqual({ content: "", revision: 0 });
+    expect((await request("stale-token")).statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/runtime/v1/project-instructions",
           headers: { authorization: `Bearer ${TOKEN}` },
           payload: { content: "no" },
         })

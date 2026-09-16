@@ -18,7 +18,9 @@ describe("ProjectConfigModal", () => {
       <ProjectConfigModal project={project} onClose={() => {}} onChanged={() => {}} />,
     );
     expect(html.match(/role="dialog"/g)).toHaveLength(1);
-    expect(html.match(/role="tabpanel"/g)).toHaveLength(3);
+    expect(html.match(/role="tabpanel"/g)).toHaveLength(4);
+    expect(html).toContain("Instructions");
+    expect(html).toContain('aria-label="Additional project instructions"');
     expect(html).toContain('hidden=""');
     expect(html).toContain("Config for Atlas");
     expect(html).toContain("Repository applies to new checkouts");
