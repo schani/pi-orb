@@ -132,6 +132,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-16-validator-cleanup-timeout.md](docs/postmortems/2026-09-16-validator-cleanup-timeout.md) — five-minute cleanup CLI timeout while the accepted GCE delete completed asynchronously
 - [docs/postmortems/2026-09-16-release-validation-blockers.md](docs/postmortems/2026-09-16-release-validation-blockers.md) — boot-hook DST, Find source-lifecycle and project-instructions activation-race corrections
 - [docs/postmortems/2026-09-16-codex-websocket-closures.md](docs/postmortems/2026-09-16-codex-websocket-closures.md) — persisted OpenAI Codex response-stream closures, automatic retry evidence, and limits of the production diagnosis
 - [docs/postmortems/2026-09-14-subagent-notification-transcript.md](docs/postmortems/2026-09-14-subagent-notification-transcript.md) — raw model-facing XML shown in the browser; delayed uncollected child failures caused extra parent replies

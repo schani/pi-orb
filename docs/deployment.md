@@ -250,8 +250,12 @@ checks deployment identity, and runs only post-apply IAP repair/revision pruning
 retirement/activation/validation—not build, migrations or infrastructure apply. The original failure is never rewritten into success.
 
 Successful smoke fixtures are deleted and verified absent; failed fixtures remain
-for diagnosis and cost accounting. Peer preview health is mandatory through the
-already-owned minting orb's Tailscale daemon, not conditional on runner networking.
+for diagnosis and cost accounting. An accepted cloud cleanup operation can outlive
+its CLI: a command timeout alone does not establish resource state. Reconciliation
+must use the exact operation and resource identities
+(`docs/postmortems/2026-09-16-validator-cleanup-timeout.md`).
+Peer preview health is mandatory through the already-owned minting orb's Tailscale
+daemon, not conditional on runner networking.
 The release's federation leg uses this repository's existing admitted project and
 shared deployer, exercising only read-only APIs. It creates/deletes its own two
 orbs, never that shared project. This does not bootstrap the separate experimental
@@ -277,6 +281,16 @@ An authenticated production GET additionally verified the project-instructions
 snapshot against the migrated database. Feature and local-service archival evidence:
 `docs/project-instructions.md`. This passing release does not establish a fix for
 the historical WebKit issue below.
+
+**Latest failed release attempt (2026-09-16):** GitHub
+[run 35137220634](https://github.com/schani/pi-orb/actions/runs/35137220634)
+for `56078c0` passed checks, 149 E2E tests and native acceptance, then the validator
+cleanup CLI hit its five-minute command deadline. GCE completed the already-admitted
+delete three minutes later. The durable outcome is `failed-before-apply`; no retry
+or apply occurred. Read-only reconciliation found every operation-owned build
+resource and the release lock absent. All four serving revision/image identities
+remain those of the validated `7d53024` release above. Evidence and the operation
+tracking gap: `docs/postmortems/2026-09-16-validator-cleanup-timeout.md`.
 
 **Previous validated production release (2026-09-16):** GitHub run
 [35035428234](https://github.com/schani/pi-orb/actions/runs/35035428234)
