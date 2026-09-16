@@ -895,21 +895,8 @@ export class PiOrbAgent {
       },
     });
     this.liveHistory = new LiveHistoryPublisher(manager, (record, sourceMessage) => {
-      const native = record.overflow["native"];
-      if (typeof native === "object" && native !== null && !Array.isArray(native)) {
-        const details = native["details"];
-        if (
-          native["type"] === "custom_message" &&
-          native["customType"] === "pi-orb.user-message" &&
-          typeof details === "object" &&
-          details !== null &&
-          !Array.isArray(details)
-        ) {
-          const messageIds = details["messageIds"];
-          const batchId = Array.isArray(messageIds) ? messageIds[0] : details["messageId"];
-          if (typeof batchId === "string") this.pendingInboxMessages.delete(batchId);
-        }
-      }
+      const batchId = record.type === "message" ? record.inboxMessageIds?.[0] : undefined;
+      if (batchId !== undefined) this.pendingInboxMessages.delete(batchId);
       const retiredBlockIds =
         sourceMessage === null ? [] : (this.messageBlocks.get(sourceMessage) ?? []);
       if (sourceMessage !== null) this.messageBlocks.delete(sourceMessage);

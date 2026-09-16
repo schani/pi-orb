@@ -89,6 +89,8 @@ type ContentBlock =
       callId: string;
       content: ContentBlock[];
       isError?: boolean;
+      /** Unified diff, when the tool reported one. */
+      patch?: string;
       overflow?: Record<string, JsonValue>;
     }
   | {
@@ -117,6 +119,12 @@ interface MessageRecord extends HistoryRecordBase {
   };
 
   finishReason?: string;
+
+  /** Durable client message IDs this user message delivered, in order. */
+  inboxMessageIds?: string[];
+
+  /** Present when `finishReason` is `"error"`; `diagnostics` are diagnostic types. */
+  failure?: { message: string; diagnostics: string[] };
 }
 
 interface CompactionRecord extends HistoryRecordBase {
@@ -128,6 +136,32 @@ interface EventRecord extends HistoryRecordBase {
   type: "event";
   eventType: string;
   content?: ContentBlock[];
+
+  /** Present iff `eventType` is `"pi.bash_execution"`. */
+  shell?: {
+    command: string;
+    output: string;
+    exitCode: number | null;
+    cancelled: boolean;
+    truncated: boolean;
+    excludeFromContext: boolean;
+  };
+
+  /** Present iff `eventType` is `"pi.custom_message"`. */
+  custom?: { customType: string; display: boolean };
+
+  /** Present iff the custom message is a subagent receipt. */
+  subagent?: {
+    kind: "notification" | "update" | "workspace_notice";
+    id?: string;
+    description?: string;
+    status?: string;
+    message?: string;
+    notice?: string;
+    error?: string;
+    resultPreview?: string;
+    durationMs?: number;
+  };
 }
 
 type HistoryRecord = MessageRecord | CompactionRecord | EventRecord;

@@ -168,19 +168,21 @@ Store its complete JSON in `orbs.harness_session_header` and its ID in `harness_
 
 For every entry, preserve `entry.id`, `entry.parentId`, and `entry.timestamp` exactly and put the complete JSON-safe original in `overflow.native`. Normalized fields intentionally duplicate native data.
 
+**Typed fields instead of native reads (decided and implemented 2026-09-16).** Every field a client needs is derived here, once, into normalized record fields; no code outside this adapter reads `overflow.native`. A second client (a native macOS app) would otherwise have to copy the web UI's coupling to undocumented Pi-native JSON shapes. `overflow` is unchanged and stays lossless — the typed fields duplicate it, as normalized fields always have. Transcripts persisted before the fields existed are backfilled from the native blob by `022_typed_history_fields.sql`; there is no dual read in TypeScript.
+
 | Pi persisted entry         | Normalized record                                                                                                               |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `message` / user           | `MessageRecord`, role `user`; text/image blocks.                                                                                |
-| `message` / assistant      | `MessageRecord`, role `assistant`; text, thinking→reasoning, and tool-call blocks; provider/model, usage, stop reason.          |
-| `message` / tool result    | `MessageRecord`, role `tool`; one typed `tool_result` block containing call ID, nested text/image content, and error flag.      |
-| `message` / bash execution | `EventRecord`, `eventType: "pi.bash_execution"`; normalized textual content where useful.                                       |
+| `message` / assistant      | `MessageRecord`, role `assistant`; text, thinking→reasoning, and tool-call blocks; provider/model, usage, stop reason; a failed stop reason with an error message also yields `failure` with that message and its diagnostic types. |
+| `message` / tool result    | `MessageRecord`, role `tool`; one typed `tool_result` block containing call ID, nested text/image content, error flag, and `details.patch` as `patch`. |
+| `message` / bash execution | `EventRecord`, `eventType: "pi.bash_execution"`; normalized textual content where useful, plus `shell` with command, output, exit code, cancellation, truncation, and context exclusion. |
 | `thinking_level_change`    | `EventRecord`, `eventType: "pi.thinking_level_change"`.                                                                         |
 | `model_change`             | `EventRecord`, `eventType: "pi.model_change"`.                                                                                  |
 | `compaction`               | `CompactionRecord`; summary as a text block, with first-kept ID/token/details retained natively.                                |
 | `branch_summary`           | `EventRecord`, `eventType: "pi.branch_summary"`, with summary text content.                                                     |
 | `custom`                   | `EventRecord`, `eventType: "pi.custom"`.                                                                                        |
-| `custom_message` / `pi-orb.user-message` (send-anytime envelope) | `MessageRecord`, role `user`; text/image blocks, with every durable client message ID in the squashed delivery batch retained natively. |
-| other `custom_message`     | `EventRecord`, `eventType: "pi.custom_message"`, with text/image content; retain `customType`, `display`, and details natively. |
+| `custom_message` / `pi-orb.user-message` (send-anytime envelope) | `MessageRecord`, role `user`; text/image blocks, plus `inboxMessageIds` with every durable client message ID in the squashed delivery batch, in order. |
+| other `custom_message`     | `EventRecord`, `eventType: "pi.custom_message"`, with text/image content and `custom` carrying `customType` and `display`; the subagent extension's three receipt types also yield `subagent`. |
 | `label`                    | `EventRecord`, `eventType: "pi.label"`.                                                                                         |
 | `session_info`             | `EventRecord`, `eventType: "pi.session_info"`.                                                                                  |
 | unknown future entry       | `EventRecord`, `eventType: "pi.<native-type>"`.                                                                                 |
@@ -192,7 +194,8 @@ Content conversions are direct and lossless through native overflow:
 - Pi thinking text → `ContentBlock { type: "reasoning" }`;
 - Pi tool call ID/name/arguments → typed `tool_call`;
 - Pi tool-result call ID/content/error → typed `tool_result`;
-- assistant provider/model/usage/cost/stop reason → normalized model, usage, and `finishReason` fields.
+- assistant provider/model/usage/cost/stop reason → normalized model, usage, and `finishReason` fields;
+- `subagent-notification` / `subagent-update` / `subagent-workspace-notice` details → `subagent` with kind `notification` / `update` / `workspace_notice` and the receipt's description, status, message, notice, error, result preview, duration, and child ID.
 
 An unknown message role maps to a generic event rather than inventing a shared role. A mapping/validation failure returns a typed history error and makes `pullHistory` fail; it must never silently omit an entry.
 
@@ -210,8 +213,8 @@ Visibility is presentation policy, not persistence filtering:
 
 - show user and assistant messages normally; show tool names and states while keeping tool inputs and outputs collapsed by default;
 - show compaction as a collapsed boundary;
-- show `pi.custom_message` only when native `display` is true;
-- show `pi.bash_execution` as a preformatted shell command/output block; show exit, cancellation, and truncation status, and mark excluded-shell entries as excluded from model context;
+- show `pi.custom_message` only when `custom.display` is true;
+- show a record's `shell` block as preformatted command/output; show exit, cancellation, and truncation status, and mark excluded-shell entries as excluded from model context;
 - hide model/thinking changes, branch summaries, labels, session-info entries, ordinary custom entries, and unknown events by default.
 
 The UI still traverses hidden records when reconstructing parent chains. Hidden records remain available for diagnostics and future richer renderers.

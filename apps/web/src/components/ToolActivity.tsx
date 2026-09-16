@@ -1,4 +1,4 @@
-import type { ContentBlock, JsonValue, MessageRecord } from "@pi-orb/protocol";
+import type { ContentBlock, JsonValue } from "@pi-orb/protocol";
 import type { ReactNode } from "react";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 
@@ -8,7 +8,6 @@ export type ToolResultBlock = ContentBlock & { type: "tool_result" };
 export interface PersistedToolCall {
   call: ToolCallBlock;
   result?: ToolResultBlock;
-  resultRecord?: MessageRecord;
 }
 
 export interface LiveToolCall {
@@ -27,7 +26,6 @@ type ActivityCall = {
   name: string;
   arguments: JsonValue | null;
   result?: ToolResultBlock;
-  resultRecord?: MessageRecord;
   state: "running" | "completed" | "failed";
 };
 
@@ -80,16 +78,6 @@ function resultText(result: ToolResultBlock | undefined): string {
     .join("\n");
 }
 
-function nativePatch(call: ActivityCall): string | null {
-  const native = call.resultRecord?.overflow["native"];
-  if (typeof native !== "object" || native === null || Array.isArray(native)) return null;
-  const message = native["message"];
-  if (typeof message !== "object" || message === null || Array.isArray(message)) return null;
-  const details = message["details"];
-  if (typeof details !== "object" || details === null || Array.isArray(details)) return null;
-  return typeof details["patch"] === "string" ? details["patch"] : null;
-}
-
 function patchStats(patch: string | null): DiffStats | null {
   if (patch === null) return null;
   let added = 0;
@@ -106,7 +94,7 @@ function statsForCalls(calls: readonly ActivityCall[]): DiffStats | null {
   let added = 0;
   let removed = 0;
   for (const call of calls) {
-    const stats = patchStats(nativePatch(call));
+    const stats = patchStats(call.result?.patch ?? null);
     if (stats === null) continue;
     found = true;
     added += stats.added;
@@ -253,7 +241,7 @@ function CommandCall({ call }: { call: ActivityCall }) {
 function FileCall({ call, kind }: { call: ActivityCall; kind: "edit" | "read" }) {
   const path = kind === "read" ? readCallLabel(call) : (callPath(call) ?? call.name);
   const output = resultText(call.result);
-  const stats = kind === "edit" ? patchStats(nativePatch(call)) : null;
+  const stats = kind === "edit" ? patchStats(call.result?.patch ?? null) : null;
   const input = call.arguments === null ? "" : JSON.stringify(call.arguments, null, 2);
   const detail = output !== "" ? output : input;
   const metric =
@@ -337,12 +325,11 @@ function CategoryCalls({ category }: { category: ActivityCategory }) {
 
 export function ToolActivity({ persisted = [], live = [] }: ToolActivityProps) {
   const calls: ActivityCall[] = [
-    ...persisted.map(({ call, result, resultRecord }) => ({
+    ...persisted.map(({ call, result }) => ({
       callId: call.callId,
       name: call.name,
       arguments: call.arguments,
       ...(result !== undefined ? { result } : {}),
-      ...(resultRecord !== undefined ? { resultRecord } : {}),
       state:
         result === undefined
           ? ("running" as const)

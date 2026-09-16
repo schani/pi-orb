@@ -299,7 +299,7 @@ const DEFAULT_PREEMPTION_SOFT_WINDOW_MS = 30_000;
 const DEFAULT_DESIRED_SPEC = "spec-a";
 
 /**
- * The native `customType` of the resume marker the runtime appends when it
+ * The `customType` of the resume marker the runtime appends when it
  * picks an interrupted turn back up (docs/lifecycle.md; one
  * `sendCustomMessage(..., { triggerTurn: true, display: true })`, which the Pi
  * adapter normalizes to an `event` record — docs/pi-adapter.md).
@@ -319,14 +319,7 @@ const RESUME_MARKER_TEXT = "turn interrupted by a host restart — resuming";
 const DECLINE_MARKER_TEXT = "turn interrupted again — not resuming; send a message to continue";
 
 function hasCustomType(record: HistoryRecord, customType: string): boolean {
-  if (record.type !== "event" || record.eventType !== "pi.custom_message") return false;
-  const native = record.overflow["native"];
-  return (
-    typeof native === "object" &&
-    native !== null &&
-    !Array.isArray(native) &&
-    native["customType"] === customType
-  );
+  return record.type === "event" && record.custom?.customType === customType;
 }
 
 /** Whether a record is the runtime's interrupted-turn resume marker. */
@@ -474,19 +467,9 @@ export class FakeWorld {
 
   /** The persisted inbox record of `batchId`, or undefined while none exists. */
   private findInboxRecord(fs: FakeFilesystem, batchId: string): HistoryRecord | undefined {
-    return fs.entries.find((record) => {
-      const native = record.overflow["native"];
-      if (typeof native !== "object" || native === null || Array.isArray(native)) return false;
-      const details = native["details"];
-      return (
-        native["customType"] === "pi-orb.user-message" &&
-        typeof details === "object" &&
-        details !== null &&
-        !Array.isArray(details) &&
-        Array.isArray(details["messageIds"]) &&
-        details["messageIds"][0] === batchId
-      );
-    });
+    return fs.entries.find(
+      (record) => record.type === "message" && record.inboxMessageIds?.[0] === batchId,
+    );
   }
 
   /**
@@ -513,6 +496,7 @@ export class FakeWorld {
       type: "message",
       role: "user",
       content: [{ type: "text", text }],
+      inboxMessageIds: [...messageIds],
       overflow: {
         native: {
           type: "custom_message",
@@ -1153,6 +1137,7 @@ export class FakeWorld {
       overflow: { native: { seq, customType, display: true, triggerTurn: resuming } },
       type: "event",
       eventType: "pi.custom_message",
+      custom: { customType, display: true },
       content: [{ type: "text", text }],
     }));
   }

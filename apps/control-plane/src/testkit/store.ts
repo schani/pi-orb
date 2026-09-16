@@ -1649,18 +1649,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         replica.order.push(record.id);
       }
       const deliveredIds = new Set(
-        staged.flatMap((record) => {
-          const native = record.overflow["native"];
-          if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
-          if (native["type"] !== "custom_message" || native["customType"] !== "pi-orb.user-message")
-            return [];
-          const details = native["details"];
-          if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
-          if (Array.isArray(details["messageIds"])) {
-            return details["messageIds"].filter((id): id is string => typeof id === "string");
-          }
-          return typeof details["messageId"] === "string" ? [details["messageId"]] : [];
-        }),
+        staged.flatMap((record) =>
+          record.type === "message" ? (record.inboxMessageIds ?? []) : [],
+        ),
       );
       if (deliveredIds.size > 0) {
         const rows = this.messages.get(params.orbId) ?? [];

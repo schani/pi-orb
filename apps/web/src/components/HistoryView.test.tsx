@@ -3,7 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { HistoryView } from "./HistoryView.tsx";
 
-function message(id: string, role: "user" | "assistant", text: string): HistoryRecord {
+type MessageRecord = Extract<HistoryRecord, { type: "message" }>;
+
+function message(id: string, role: "user" | "assistant", text: string): MessageRecord {
   return {
     id,
     parentId: null,
@@ -19,21 +21,34 @@ describe("HistoryView turn structure", () => {
   it.each([
     [
       "subagent-notification",
-      { status: "error", error: "Unsupported model", resultPreview: "No output." },
+      {
+        kind: "notification" as const,
+        status: "error",
+        error: "Unsupported model",
+        resultPreview: "No output.",
+      },
       "Unsupported model",
     ],
     [
       "subagent-notification",
-      { status: "completed", resultPreview: "Verified four services." },
+      {
+        kind: "notification" as const,
+        status: "completed",
+        resultPreview: "Verified four services.",
+      },
       "Verified four services.",
     ],
-    ["subagent-update", { message: "Checking deployment paths." }, "Checking deployment paths."],
+    [
+      "subagent-update",
+      { kind: "update" as const, message: "Checking deployment paths." },
+      "Checking deployment paths.",
+    ],
     [
       "subagent-workspace-notice",
-      { notice: "Changes retained in the checkout." },
+      { kind: "workspace_notice" as const, notice: "Changes retained in the checkout." },
       "Changes retained in the checkout.",
     ],
-  ])("renders %s through one readable receipt, not machine XML", (customType, details, text) => {
+  ])("renders %s through one readable receipt, not machine XML", (customType, subagent, text) => {
     const record: HistoryRecord = {
       id: "notice",
       parentId: null,
@@ -43,18 +58,9 @@ describe("HistoryView turn structure", () => {
       content: [
         { type: "text", text: "<task-notification>machine instructions</task-notification>" },
       ],
-      overflow: {
-        native: {
-          customType,
-          display: true,
-          details: {
-            id: "child",
-            description: "Check deployment",
-            outputFile: "/private/tasks/session.jsonl",
-            ...details,
-          },
-        },
-      },
+      custom: { customType, display: true },
+      subagent: { id: "child", description: "Check deployment", ...subagent },
+      overflow: {},
     };
     const html = renderToStaticMarkup(
       <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
@@ -63,13 +69,35 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain("Check deployment");
     expect(html).toContain(text);
     expect(html).not.toContain("machine instructions");
-    expect(html).not.toContain("/private/tasks");
+  });
+
+  it("ignores a subagent receipt that exists only in native overflow", () => {
+    const record: HistoryRecord = {
+      id: "notice",
+      parentId: null,
+      timestamp: "2026-09-14T22:04:07Z",
+      type: "event",
+      eventType: "pi.custom_message",
+      content: [{ type: "text", text: "<task-notification>machine</task-notification>" }],
+      overflow: {
+        native: {
+          customType: "subagent-notification",
+          display: true,
+          details: { id: "child", description: "Check deployment", status: "error" },
+        },
+      },
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).not.toContain("Check deployment");
+    expect(html).not.toContain("machine");
   });
   it.each([
-    [false, undefined],
-    [true, undefined],
-    [false, [{ type: "browser_transport_failure" }]],
-    [true, [{ type: "browser_transport_failure" }]],
+    [false, []],
+    [true, []],
+    [false, ["browser_transport_failure"]],
+    [true, ["browser_transport_failure"]],
   ])("shows plain assistant failures with partial output: %s", (partial, diagnostics) => {
     const record: HistoryRecord = {
       ...message("failure", "assistant", ""),
@@ -77,14 +105,8 @@ describe("HistoryView turn structure", () => {
       role: "assistant",
       content: partial ? [{ type: "text", text: "Partial answer" }] : [],
       finishReason: "error",
-      overflow: {
-        native: {
-          message: {
-            errorMessage: "Codex error: The usage limit has been reached",
-            ...(diagnostics === undefined ? {} : { diagnostics }),
-          },
-        },
-      },
+      failure: { message: "Codex error: The usage limit has been reached", diagnostics },
+      overflow: {},
     };
     const html = renderToStaticMarkup(
       <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
@@ -95,26 +117,29 @@ describe("HistoryView turn structure", () => {
     expect(html.includes("Partial answer")).toBe(partial);
   });
 
-  it.each([null, "not an array", [null, "not an object", []]])(
-    "ignores malformed diagnostics: %j",
-    (diagnostics) => {
-      const record: HistoryRecord = {
-        ...message("failure", "assistant", ""),
-        type: "message",
-        role: "assistant",
-        content: [],
-        finishReason: "error",
-        overflow: {
-          native: { message: { errorMessage: "Original error", diagnostics } },
+  it("does not read failure wording from native overflow", () => {
+    const record: HistoryRecord = {
+      ...message("failure", "assistant", ""),
+      type: "message",
+      role: "assistant",
+      content: [],
+      finishReason: "error",
+      overflow: {
+        native: {
+          message: {
+            errorMessage: "Original error",
+            diagnostics: [{ type: "provider_transport_failure" }],
+          },
         },
-      };
-      const html = renderToStaticMarkup(
-        <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
-      );
-      expect(html).toContain("Original error");
-      expect(html).not.toContain("agent’s connection");
-    },
-  );
+      },
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).toContain("Model response failed.");
+    expect(html).not.toContain("Original error");
+    expect(html).not.toContain("agent’s connection");
+  });
 
   it.each([
     ["OpenAI", "openai-codex", "OpenAI"],
@@ -128,14 +153,11 @@ describe("HistoryView turn structure", () => {
       model: { ...(provider === undefined ? {} : { provider }), id: "model-id" },
       content: [],
       finishReason: "error",
-      overflow: {
-        native: {
-          message: {
-            errorMessage: "WebSocket closed 1006",
-            diagnostics: [{ type: "provider_transport_failure" }],
-          },
-        },
+      failure: {
+        message: "WebSocket closed 1006",
+        diagnostics: ["provider_transport_failure"],
       },
+      overflow: {},
     };
     const html = renderToStaticMarkup(
       <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
@@ -147,7 +169,7 @@ describe("HistoryView turn structure", () => {
     expect(html).not.toContain("recovered");
   });
 
-  it.each([{}, { native: null }, { native: { message: { errorMessage: " " } } }])(
+  it.each([{}, { native: null }])(
     "shows a fallback when failure details are absent: %j",
     (overflow) => {
       const record: HistoryRecord = {
@@ -218,13 +240,9 @@ describe("HistoryView turn structure", () => {
     expect(queuedHtml).toContain('class="rec-status">queued</span>');
     expect(queuedHtml).toContain("queued while starting");
 
-    const committed = message("record-1", "user", "queued while starting");
-    committed.overflow = {
-      native: {
-        type: "custom_message",
-        customType: "pi-orb.user-message",
-        details: { messageIds: [queued.id] },
-      },
+    const committed: MessageRecord = {
+      ...message("record-1", "user", "queued while starting"),
+      inboxMessageIds: [queued.id],
     };
     const committedHtml = renderToStaticMarkup(
       <HistoryView
@@ -385,20 +403,15 @@ describe("HistoryView turn structure", () => {
       type: "event",
       eventType: "pi.bash_execution",
       content: [{ type: "text", text: "npm test\npassing" }],
-      overflow: {
-        native: {
-          type: "message",
-          message: {
-            role: "bashExecution",
-            command: "npm test",
-            output: "passing",
-            exitCode: 2,
-            cancelled: false,
-            truncated: true,
-            excludeFromContext: true,
-          },
-        },
+      shell: {
+        command: "npm test",
+        output: "passing",
+        exitCode: 2,
+        cancelled: false,
+        truncated: true,
+        excludeFromContext: true,
       },
+      overflow: {},
     };
     const html = renderToStaticMarkup(
       <HistoryView
@@ -422,6 +435,32 @@ describe("HistoryView turn structure", () => {
     expect(html).toContain("excluded from model context · exit 2 · output truncated");
     expect(html).toContain("$ git status\nclean");
     expect(html).not.toContain("<strong>passing</strong>");
+  });
+
+  it("does not read shell blocks from native overflow", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[
+          {
+            id: "shell-legacy",
+            parentId: null,
+            timestamp: "time-shell-legacy",
+            type: "event",
+            eventType: "pi.bash_execution",
+            content: [{ type: "text", text: "npm test\npassing" }],
+            overflow: {
+              native: {
+                message: { role: "bashExecution", command: "npm test", output: "passing" },
+              },
+            },
+          },
+        ]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+      />,
+    );
+    expect(html).not.toContain("shblk");
   });
 
   it("renders live streaming output, tool chips, and the bit register as an agent record", () => {
@@ -805,27 +844,33 @@ describe("HistoryView", () => {
       callId: string,
       text: string,
       isError = false,
-      overflow: HistoryRecord["overflow"] = {},
+      patch?: string,
     ): HistoryRecord => ({
       id,
       parentId: "calls",
       timestamp: `time-${id}`,
       type: "message",
       role: "tool",
-      content: [{ type: "tool_result", callId, content: [{ type: "text", text }], isError }],
-      overflow,
+      content: [
+        {
+          type: "tool_result",
+          callId,
+          content: [{ type: "text", text }],
+          isError,
+          ...(patch === undefined ? {} : { patch }),
+        },
+      ],
+      overflow: {},
     });
     const records = [
       callRecord,
-      toolResult("edit-result", "edit-1", "updated", false, {
-        native: {
-          message: {
-            details: {
-              patch: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@\n-old\n+new\n+extra",
-            },
-          },
-        },
-      }),
+      toolResult(
+        "edit-result",
+        "edit-1",
+        "updated",
+        false,
+        "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@\n-old\n+new\n+extra",
+      ),
       toolResult("bash-result-1", "bash-1", "one test failed", true),
       toolResult("bash-result-2", "bash-2", "typecheck passed"),
       toolResult("read-result-1", "read-1", "a source"),

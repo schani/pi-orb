@@ -39,13 +39,7 @@ const MAX_STOPS_PER_RECOVERY = 3;
  * `pi-orb.user-message` custom message), empty for every other record.
  */
 function inboxMessageIdsOf(record: HistoryRecord): readonly string[] {
-  const native = record.overflow["native"];
-  if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
-  const details = native["details"];
-  if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
-  const ids = details["messageIds"];
-  if (!Array.isArray(ids)) return [];
-  return ids.filter((id): id is string => typeof id === "string");
+  return record.type === "message" ? (record.inboxMessageIds ?? []) : [];
 }
 
 /** The replicated inbox records carrying `messageId`, in replica order. */
@@ -671,20 +665,9 @@ describe("orb lifecycle (DST)", () => {
               "queued message reaches the runtime session",
               () =>
                 harness.store.messageSnapshots(ORB)[0]?.status === "delivered" &&
-                harness.store.replicaRecords(ORB).some((record) => {
-                  const native = record.overflow["native"];
-                  if (typeof native !== "object" || native === null || Array.isArray(native)) {
-                    return false;
-                  }
-                  const details = native["details"];
-                  return (
-                    typeof details === "object" &&
-                    details !== null &&
-                    !Array.isArray(details) &&
-                    Array.isArray(details["messageIds"]) &&
-                    details["messageIds"].includes(messageId)
-                  );
-                }),
+                harness.store
+                  .replicaRecords(ORB)
+                  .some((record) => inboxMessageIdsOf(record).includes(messageId)),
               { timeoutMs: 300_000 },
             );
             stop.abort();
@@ -694,18 +677,7 @@ describe("orb lifecycle (DST)", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       const records = harness.store.replicaRecords(ORB);
       expect(
-        records.filter((record) => {
-          const native = record.overflow["native"];
-          if (typeof native !== "object" || native === null || Array.isArray(native)) return false;
-          const details = native["details"];
-          return (
-            typeof details === "object" &&
-            details !== null &&
-            !Array.isArray(details) &&
-            Array.isArray(details["messageIds"]) &&
-            details["messageIds"].includes(messageId)
-          );
-        }),
+        records.filter((record) => inboxMessageIdsOf(record).includes(messageId)),
       ).toHaveLength(1);
     });
   });

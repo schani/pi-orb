@@ -1,5 +1,6 @@
 import type {
   ContentBlock,
+  EventRecord,
   HarnessSessionMetadata,
   HistoryRecord,
   JsonObject,
@@ -62,6 +63,55 @@ function identityOf(entry: Record<string, unknown>): Result<EntryIdentity, Mappi
 
 function textBlock(text: string): ContentBlock {
   return { type: "text", text };
+}
+
+function stringOf(source: Record<string, unknown>, key: string): string | undefined {
+  const value = source[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+const SUBAGENT_KINDS: Record<string, "notification" | "update" | "workspace_notice"> = {
+  "subagent-notification": "notification",
+  "subagent-update": "update",
+  "subagent-workspace-notice": "workspace_notice",
+};
+
+/** The subagent extension's receipt details, typed for clients. */
+function subagentNotice(
+  customType: string,
+  rawDetails: unknown,
+): NonNullable<EventRecord["subagent"]> | null {
+  const kind = SUBAGENT_KINDS[customType];
+  if (kind === undefined) return null;
+  const details = isRecordObject(rawDetails) ? rawDetails : {};
+  const id = stringOf(details, "id");
+  const description = stringOf(details, "description");
+  const status = stringOf(details, "status");
+  const message = stringOf(details, "message");
+  const notice = stringOf(details, "notice");
+  const error = stringOf(details, "error");
+  const resultPreview = stringOf(details, "resultPreview");
+  const durationMs = details["durationMs"];
+  return {
+    kind,
+    ...(id !== undefined ? { id } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(message !== undefined ? { message } : {}),
+    ...(notice !== undefined ? { notice } : {}),
+    ...(error !== undefined ? { error } : {}),
+    ...(resultPreview !== undefined ? { resultPreview } : {}),
+    ...(typeof durationMs === "number" ? { durationMs } : {}),
+  };
+}
+
+/** Every durable client message ID the send-anytime envelope delivered, in order. */
+function inboxMessageIds(rawDetails: unknown): string[] {
+  if (!isRecordObject(rawDetails)) return [];
+  const ids = rawDetails["messageIds"];
+  if (Array.isArray(ids)) return ids.filter((id): id is string => typeof id === "string");
+  const single = rawDetails["messageId"];
+  return typeof single === "string" ? [single] : [];
 }
 
 function mapUserContent(content: unknown): ContentBlock[] {
@@ -140,6 +190,20 @@ function mapMessageEntry(
       const cacheWriteTokens = usageNumber(usage?.["cacheWrite"]);
       const totalTokens = usageNumber(usage?.["totalTokens"]);
       const costUsd = usageNumber(cost?.["total"]);
+      const errorMessage = stringOf(message, "errorMessage");
+      const diagnostics = message["diagnostics"];
+      const failure =
+        message["stopReason"] === "error" &&
+        errorMessage !== undefined &&
+        errorMessage.trim() !== ""
+          ? {
+              message: errorMessage,
+              diagnostics: (Array.isArray(diagnostics) ? diagnostics : [])
+                .filter(isRecordObject)
+                .map((diagnostic) => diagnostic["type"])
+                .filter((type): type is string => typeof type === "string"),
+            }
+          : null;
       const record: MessageRecord = {
         ...identity,
         type: "message",
@@ -170,10 +234,13 @@ function mapMessageEntry(
         ...(typeof message["stopReason"] === "string"
           ? { finishReason: message["stopReason"] }
           : {}),
+        ...(failure === null ? {} : { failure }),
       };
       return ok(record);
     }
-    case "toolResult":
+    case "toolResult": {
+      const details = message["details"];
+      const patch = isRecordObject(details) ? stringOf(details, "patch") : undefined;
       return ok({
         ...identity,
         type: "message",
@@ -186,10 +253,13 @@ function mapMessageEntry(
               (block) => block.type === "text" || block.type === "image" || block.type === "other",
             ),
             isError: message["isError"] === true,
+            ...(patch === undefined ? {} : { patch }),
           },
         ],
       });
-    case "bashExecution":
+    }
+    case "bashExecution": {
+      const exitCode = message["exitCode"];
       return ok({
         ...identity,
         type: "event",
@@ -201,7 +271,16 @@ function mapMessageEntry(
               .join("\n"),
           ),
         ],
+        shell: {
+          command: stringOf(message, "command") ?? "",
+          output: stringOf(message, "output") ?? "",
+          exitCode: typeof exitCode === "number" ? exitCode : null,
+          cancelled: message["cancelled"] === true,
+          truncated: message["truncated"] === true,
+          excludeFromContext: message["excludeFromContext"] === true,
+        },
       });
+    }
     default:
       // An unknown message role becomes a generic event rather than
       // inventing a shared role (docs/pi-adapter.md).
@@ -259,21 +338,28 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
         });
       return ok({ ...identity, type: "event", eventType: "pi.custom" });
     }
-    case "custom_message":
-      if (entry["customType"] === "pi-orb.user-message") {
+    case "custom_message": {
+      const customType = stringOf(entry, "customType") ?? "";
+      if (customType === "pi-orb.user-message") {
+        const ids = inboxMessageIds(entry["details"]);
         return ok({
           ...identity,
           type: "message",
           role: "user",
           content: mapUserContent(entry["content"]),
+          ...(ids.length === 0 ? {} : { inboxMessageIds: ids }),
         });
       }
+      const subagent = subagentNotice(customType, entry["details"]);
       return ok({
         ...identity,
         type: "event",
         eventType: "pi.custom_message",
         content: mapUserContent(entry["content"]),
+        custom: { customType, display: entry["display"] === true },
+        ...(subagent === null ? {} : { subagent }),
       });
+    }
     case "label":
       return ok({ ...identity, type: "event", eventType: "pi.label" });
     case "session_info":

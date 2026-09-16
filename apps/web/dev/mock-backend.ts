@@ -1653,6 +1653,7 @@ function handleAction(
     type: "message",
     role: "user",
     content: action.content,
+    ...(inboxMessageIds.length === 0 ? {} : { inboxMessageIds: [...inboxMessageIds] }),
     overflow:
       inboxMessageIds.length === 0
         ? {}

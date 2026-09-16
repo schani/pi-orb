@@ -327,19 +327,16 @@ describe("frontend-only browser behavior", () => {
                     text: "<task-notification>machine instructions /private/tasks/session.jsonl</task-notification>",
                   },
                 ],
-                overflow: {
-                  native: {
-                    customType: "subagent-notification",
-                    display: true,
-                    details: {
-                      id: "old-child",
-                      description: "Count service lines",
-                      status: "error",
-                      error: "Unsupported model",
-                      resultPreview: "No output.",
-                    },
-                  },
+                custom: { customType: "subagent-notification", display: true },
+                subagent: {
+                  kind: "notification",
+                  id: "old-child",
+                  description: "Count service lines",
+                  status: "error",
+                  error: "Unsupported model",
+                  resultPreview: "No output.",
                 },
+                overflow: {},
               },
             ],
             headId: "notice",
