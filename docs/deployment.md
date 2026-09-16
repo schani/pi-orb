@@ -257,6 +257,21 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
+**Validated production release (2026-09-16):** GitHub run
+[35035428234](https://github.com/schani/pi-orb/actions/runs/35035428234)
+deployed `f1a0f6e` and completed successfully at `2026-09-16T00:53:12Z`
+after the explicit user exception below. Every automated gate passed: checks/E2E,
+native build acceptance, plan, migrations, apply, IAP repair, retirement,
+activation, lifecycle and identity. Old browser revision `pi-orb-00056-b8n`
+had explicit active/idle zeroes at `00:42:00Z` before activation. All four smoke
+fixtures (one project and three orbs) were deleted. The four serving roles use
+container digest `sha256:6cc59af8b88b0232a1e8358e0709bd71e665250369d2ef9b82039907ddd47e03`;
+the three lifecycle roles use generation `1789516995` (issuer has none).
+The durable record is
+`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789514649-9b39aa25-687c-4183-91a2-9ff028b4b723.json`
+with outcome `validated`. This successful release does not establish the cause
+of the historically waived WebKit crash.
+
 **Explicit user release exception (2026-09-15):** after adding the explicit-user-exception clause to `AGENTS.md`, the user explicitly overrode the no-flake rule and requested a new production deployment through GitHub Actions. The unresolved historical WebKit compositor crash is accepted for this deployment, not claimed fixed. The normal release transaction, including checks/E2E and all native and live gates, remains unchanged. Evidence is preserved in `docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md`; earlier release-blocking statements below describe the status before this exception.
 
 **Native acceptance blocked before apply (2026-09-15):** GitHub run
