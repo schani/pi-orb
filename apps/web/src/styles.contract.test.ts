@@ -77,6 +77,19 @@ describe("dashboard layout contract", () => {
 });
 
 describe("orb workspace layout contract", () => {
+  it("uses gutter-free inverted user paper and plain white orb paper", () => {
+    expect(rule(".rec-you,\n.rec-orb")).toContain("display: block");
+    const user = rule(".rec-you");
+    expect(user).toContain("background: var(--k)");
+    expect(user).toContain("color: var(--w)");
+    expect(user).toContain("font-weight: 400");
+    expect(rule(".rec-you .chat-markdown :not(pre) > code")).toContain("color: var(--k)");
+    expect(rule(".rec-you .markdown-code-block")).toContain("background: var(--w)");
+    const error = rule(".rec-you .error-text");
+    expect(error).toContain("color: var(--bad)");
+    expect(error).toContain("background: var(--w)");
+  });
+
   it("scrolls wide tables instead of breaking words to squeeze columns", () => {
     expect(rule(".markdown-table-scroll")).toContain("overflow-x: auto");
     expect(rule(".markdown-table-scroll")).toContain("max-width: 100%");
@@ -123,12 +136,11 @@ describe("orb workspace layout contract", () => {
     expect(rule(".ix-project + .ix-project")).toContain("border-top: 1px solid var(--k)");
   });
 
-  it("spans the user band across the record's prefix column", () => {
+  it("retains the type gutter only for shell records and keeps queue state visible", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
-    expect(rule(".rec-you")).toContain("background: var(--g1)");
-    expect(rule(".rec-you")).toContain("border-top: 1px solid var(--g2)");
-    expect(rule(".rec-you")).toContain("border-bottom: 1px solid var(--g2)");
-    expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--g2)");
+    expect(rule(".rec-you,\n.rec-orb")).toContain("display: block");
+    expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--w)");
+    expect(rule(".rec-status")).toContain("border: 1px solid currentcolor");
   });
 
   it("overlays a full-width headerless terminal below the header and active-child rail", () => {

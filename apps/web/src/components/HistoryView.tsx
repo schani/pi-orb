@@ -354,14 +354,14 @@ function renderTurn(turn: Turn, live?: LiveAgentContent, busy = false): ReactNod
     case "user":
       return (
         <article className="rec rec-you" key={turn.record.id}>
-          <span className="rec-px">you</span>
+          <span className="visually-hidden">You:</span>
           <div className="rec-bd">{renderMessageBlocks(turn.record)}</div>
         </article>
       );
     case "agent":
       return (
         <article className="rec rec-orb" key={turn.key}>
-          <span className="rec-px">orb</span>
+          <span className="visually-hidden">Orb:</span>
           <div className="rec-bd">
             {renderAgentRecords(turn.records)}
             {live !== undefined && renderLiveAgentContent(live, busy)}
@@ -470,7 +470,7 @@ export const HistoryView = memo(function HistoryView({
         const failed = message.status === "failed";
         return (
           <article className="rec rec-you rec-q" key={message.id}>
-            <span className="rec-px">you</span>
+            <span className="visually-hidden">You:</span>
             <div className="rec-bd">
               <span className="rec-status">{status}</span>
               {renderMessageBlocks(record)}
@@ -493,7 +493,7 @@ export const HistoryView = memo(function HistoryView({
       ))}
       {hasAgentLive && !mergeLiveIntoFinalTurn && (
         <article className="rec rec-orb">
-          <span className="rec-px">orb</span>
+          <span className="visually-hidden">Orb:</span>
           <div className="rec-bd">{renderLiveAgentContent(liveAgentContent, busy)}</div>
         </article>
       )}

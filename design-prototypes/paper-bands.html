@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pi-orb · paper bands study</title>
+<style>
+:root{color-scheme:light;--w:#fff;--k:#000;--g1:#f2f2f2;--g2:#999;--g3:#555;--ok:#1a7e37;--bad:#b42318;--mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--w);color:var(--k);font:13px/20px var(--mono);font-variant-numeric:tabular-nums}button,textarea{font:inherit;color:inherit}button{padding:0 8px;line-height:18px;border:1px solid var(--k);background:var(--w);cursor:pointer}button:hover,button:focus-visible,button[aria-pressed=true]{color:var(--w);background:var(--k);outline:0}a{color:inherit;text-decoration:none;border-bottom:1px solid currentColor}code{font:inherit;background:var(--g1);padding:0 2px}::selection{color:var(--k);background:var(--g2)}.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* Study controls are not part of the product specimen. */
+.study{padding:12px;border-bottom:1px solid var(--k);background:var(--w)}.study-top{display:flex;align-items:baseline;gap:12px}.study h1{margin:0;font-size:13px;line-height:20px;letter-spacing:.08em;text-transform:uppercase}.study-note,.tradeoff{color:var(--g3)}.selectors{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}.selectors button{white-space:nowrap}.selectors b{margin-right:5px}.study-settings{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px}.tradeoff{flex:1;min-width:260px;margin:0}.preview{container-type:inline-size;width:min(1180px,calc(100% - 24px));height:800px;margin:16px auto;border:1px solid var(--k);overflow:hidden;background:var(--w)}.preview.phone{width:320px;max-width:calc(100% - 16px);height:700px}.screen{display:grid;grid-template-columns:236px minmax(0,1fr);height:100%}
+/* Signal / Boards frame. */
+.index{min-width:0;border-right:1px solid var(--k)}.home{height:24px;padding:1px 12px;border-bottom:1px solid var(--k)}.project{display:flex;align-items:center;height:24px;padding:0 10px;border-bottom:1px solid var(--k);font-size:18px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.project span{margin-left:auto;color:var(--g3);font-size:13px;letter-spacing:0}.ix{min-height:44px;padding:3px 10px 3px 8px;border-left:2px solid var(--g2);border-bottom:1px solid var(--g1)}.ix.current{border-left-color:var(--ok);background:var(--k);color:var(--w)}.ix small{display:block;color:var(--g2)}.pane{display:flex;min-width:0;min-height:0;flex-direction:column}.orb-header{display:flex;flex:none;align-items:center;gap:10px;height:24px;padding:0 12px;border-bottom:1px solid var(--k);white-space:nowrap}.orb-name{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:700}.life{display:inline-flex;align-items:center;gap:6px}.tile{width:16px;height:16px;display:inline-grid;place-items:center;color:var(--w);background:var(--ok);border-radius:2px;font-size:9px}.actions{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--g3)}.icon{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center}.icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:square}.transcript{min-height:0;flex:1;overflow:auto;background:var(--w)}
+/* Every proposal uses this exact turn geometry. */
+.turn{position:relative;min-width:0;padding:8px 12px;border-top:2px solid transparent;border-bottom:2px solid transparent;overflow-wrap:anywhere}.turn-body{position:relative;z-index:1;min-width:0}.turn p{margin:0 0 8px}.turn p:last-child{margin-bottom:0}.activity{margin:4px 0;border:1px solid var(--g2);background:var(--w)}.activity>summary{display:grid;grid-template-columns:2ch auto minmax(0,1fr) auto;gap:8px;align-items:center;min-height:20px;padding:0 8px;cursor:pointer;list-style:none;user-select:none}.activity>summary::-webkit-details-marker{display:none}.activity>summary::before{content:"▸";color:var(--g3)}.activity[open]>summary::before{content:"▾"}.activity>summary:hover{background:var(--g1)}.activity .metric{color:var(--g3);white-space:nowrap}.activity.active>summary::before,.activity.active .kind,.cursor{color:var(--ok)}.activity.failed>summary::before,.activity.failed .kind,.error-detail{color:var(--bad)}.detail{padding:3px 8px 5px;color:var(--g3);background:var(--g1);border-top:1px solid var(--g2);white-space:pre-wrap}.detail code{color:var(--k);padding:0}.codeblock{position:relative;margin:0 0 8px;border:1px solid var(--k);background:var(--g1)}.codeblock pre{max-width:100%;margin:0;padding:2px 8px;overflow:auto;white-space:pre}.copy{position:absolute;top:1px;right:3px;color:var(--g3)}.cursor{display:inline-block;width:8px;height:13px;margin-left:2px;background:var(--ok);vertical-align:-2px}.composer{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;flex:none;min-height:89px;padding:4px 12px;border-top:1px solid var(--k);background:var(--w)}.composer-prefix{text-align:right;font-weight:700}.composer textarea{width:100%;height:80px;min-width:0;padding:0;border:0;outline:0;resize:none;line-height:20px;background:transparent}
+/* 1 — Soft inversion: the prompt is the only dense black plane. */
+.preview.t1 .turn.user{color:var(--w);background:var(--k)}.preview.t1:not(.baseline) .user a{border-color:var(--w)}.preview.t1:not(.baseline) .user code{color:var(--k);background:var(--w)}.preview.t1:not(.baseline) .user ::selection{color:var(--k);background:var(--w)}
+/* 2 — Graphite edge: rules identify authored input without adding fill. */
+.preview.t2 .turn.user{background:var(--w);border-color:var(--k)}
+/* 3 — Dot stock: sparse stipple surrounds a calm reading plate. */
+.preview.t3 .turn.user{background-color:var(--g1);background-image:radial-gradient(circle,var(--g2) .65px,transparent .75px);background-size:8px 8px}.preview.t3 .user .turn-body{margin:-2px -4px;padding:2px 4px;background:rgba(255,255,255,.92)}
+/* 4 — Carbon copy: gray stock with a slightly misregistered lower rule. */
+.preview.t4 .turn.user{background:var(--g1);border-bottom-color:var(--k)}.preview.t4 .turn.user::after{content:"";position:absolute;z-index:2;right:0;bottom:3px;left:0;border-bottom:1px solid var(--g2);pointer-events:none}
+/* 5 — Reverse paper: orb output owns the gray field; tools remain white. */
+.preview.t5 .turn.user{background:var(--w);border-color:var(--g2)}.preview.t5 .turn.assistant{background:var(--g1)}.preview.t5 .assistant .activity{background:var(--w)}
+/* 6 — Woven boundary: hatch is confined to horizontal seams. */
+.preview.t6 .turn.user{background:var(--g1)}.preview.t6 .turn.user::before,.preview.t6 .turn.user::after{content:"";position:absolute;z-index:2;right:0;left:0;height:4px;background:repeating-linear-gradient(135deg,var(--k) 0 1px,transparent 1px 4px);pointer-events:none}.preview.t6 .turn.user::before{top:0}.preview.t6 .turn.user::after{bottom:0}
+/* Baseline overrides the selected proposal for direct comparison. */
+.preview.baseline .turn.user{color:var(--k);background:var(--g1);background-image:none;border-color:var(--g2)}.preview.baseline .turn.user::before,.preview.baseline .turn.user::after{content:none}.preview.baseline .user .turn-body{margin:0;padding:0;background:transparent}.preview.baseline .turn.assistant{color:var(--k);background:var(--w)}
+@media(max-width:600px){.study{padding:8px}.study-top{display:block}.study-note{display:none}.selectors{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.selectors button{min-width:0;min-height:36px;padding:2px 5px;white-space:normal;text-align:left;line-height:15px}.study-settings button{min-height:36px}.tradeoff{flex-basis:100%;min-width:0}.preview{margin-block:8px}}
+@container(max-width:600px){.screen{display:block}.index{display:none}.orb-header{height:44px;padding:0 8px;gap:7px}.orb-header .actions .icon:not(:last-child){display:none}.life{font-size:0}.pane{height:100%}.turn{padding-right:8px;padding-left:8px}.composer{grid-template-columns:28px minmax(0,1fr);gap:8px;padding-inline:8px}.composer textarea{font-size:16px}.activity>summary{grid-template-columns:1ch auto minmax(0,1fr)}.activity>summary::before{grid-column:1;grid-row:1}.activity>summary>.kind{grid-column:2;grid-row:1}.activity>summary>span:nth-of-type(2){grid-column:3;grid-row:1}.activity .metric{grid-column:2/-1;grid-row:2}}
+</style>
+</head>
+<body>
+<section class="study" aria-labelledby="study-title">
+  <div class="study-top"><h1 id="study-title">Paper bands</h1><span class="study-note">Same transcript · same geometry · simulated product</span></div>
+  <div class="selectors" role="group" aria-label="Paper band treatment">
+    <button type="button" data-choice="1"><b>1</b>Soft inversion</button>
+    <button type="button" data-choice="2"><b>2</b>Graphite edge</button>
+    <button type="button" data-choice="3"><b>3</b>Dot stock</button>
+    <button type="button" data-choice="4"><b>4</b>Carbon copy</button>
+    <button type="button" data-choice="5"><b>5</b>Reverse paper</button>
+    <button type="button" data-choice="6"><b>6</b>Woven boundary</button>
+  </div>
+  <div class="study-settings">
+    <button id="width" type="button" aria-pressed="false">Phone width</button>
+    <button id="baseline" type="button" aria-pressed="false">Show baseline</button>
+    <p class="tradeoff" id="tradeoff" aria-live="polite"></p>
+  </div>
+</section>
+<main class="preview t1" id="preview">
+  <div class="screen">
+    <aside class="index" aria-label="Orbs">
+      <div class="home">All projects</div><div class="project">pi-orb <span>＋ ⚙</span></div>
+      <div class="ix current">Paper bands<small>working now</small></div><div class="ix">Trace runtime latency<small>18m</small></div><div class="ix">Mobile composer<small>2h</small></div>
+    </aside>
+    <section class="pane" aria-label="Paper bands orb">
+      <header class="orb-header"><span class="orb-name">Paper bands</span><span class="life"><span class="tile" aria-hidden="true">●</span><span>running</span></span><span class="actions" aria-label="Orb actions"><span class="icon" title="Terminal"><svg viewBox="0 0 16 16"><path d="M3 4l4 4-4 4M9 12h4"/></svg></span><span class="icon" title="Upload"><svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3M8 10V2M5 5l3-3 3 3"/></svg></span><span class="icon" title="Stop"><svg viewBox="0 0 16 16"><path d="M4 4h8v8H4z" fill="currentColor" stroke="none"/></svg></span><span class="icon" title="More"><svg viewBox="0 0 16 16"><path d="M3 8h1m3 0h1m3 0h1"/></svg></span></span></header>
+      <div class="transcript" id="transcript">
+        <article class="turn user"><span class="visually-hidden">You:</span><div class="turn-body"><p>Please tighten the WebSocket reconnect path without changing the protocol. Keep the stale-head guard, add focused coverage for the first-message handshake, and preserve failure evidence if the schedule exposes anything surprising.</p><p>This must stay readable at 320px. Check the real <a href="#browser-path">browser path</a>, not only the unit fixture, and keep <code>snapshot.head</code> legible in every treatment.</p></div></article>
+        <article class="turn assistant" id="browser-path"><span class="visually-hidden">Orb:</span><div class="turn-body">
+          <details class="activity" open><summary><span class="kind">thinking</span><span>Locating snapshot and reconnect ownership</span><span class="metric">1.8s</span></summary><div class="detail">The first outbound message must wait for the authoritative head. I’m checking where that gate is released and whether reconnect creates a second owner.</div></details>
+          <p>I’ll trace the browser-to-runtime handshake first, then make the smallest scoped change.</p>
+          <details class="activity"><summary><span class="kind">read</span><span>runtime WebSocket path</span><span class="metric">3 files</span></summary><div class="detail"><code>apps/web/src/lib/runtime-socket.ts</code>
+<code>apps/runtime/src/server.ts</code>
+<code>e2e/runtime-handshake.e2e.test.ts</code></div></details>
+          <p>The stale-head check is correct; the client published its queued message before the replacement socket applied the snapshot.</p>
+          <div class="codeblock"><span class="copy" aria-hidden="true">⧉</span><pre><code>if (connection.head !== snapshot.head) {
+  return err({ type: "stale_head" });
+}</code></pre></div>
+        </div></article>
+        <article class="turn user"><span class="visually-hidden">You:</span><div class="turn-body"><p>Fantastic! Push it to main!</p></div></article>
+        <article class="turn assistant"><span class="visually-hidden">Orb:</span><div class="turn-body"><p>I’ll run the browser handshake test, inspect the diff, then push the verified commit.</p>
+          <details class="activity failed" open><summary><span class="kind">WebSocket</span><span>Preview connection failed</span><span class="metric">closed 1006</span></summary><div class="detail error-detail">Connection closed before snapshot acknowledgement. Retrying through the owned test fixture; no product retry was added.</div></details>
+          <details class="activity active"><summary><span class="kind">bash</span><span>npm run test:e2e -- runtime-handshake</span><span class="metric">running 00:18</span></summary><div class="detail">Chromium › waits for snapshot before first message <span class="cursor" aria-label="Running"></span></div></details>
+          <p>The regression holds the queued message until the replacement connection accepts the snapshot. The stale-head rejection remains unchanged.</p>
+        </div></article>
+      </div>
+      <div class="composer"><span class="composer-prefix">&gt;</span><textarea aria-label="Message the orb" placeholder="Message the orb…" readonly></textarea></div>
+    </section>
+  </div>
+</main>
+<script>
+const preview=document.getElementById('preview');
+const tradeoff=document.getElementById('tradeoff');
+const baseline=document.getElementById('baseline');
+const choices=[
+  ['Soft inversion','Strongest authorship split; the black prompt can outweigh a long orb response.'],
+  ['Graphite edge','Crisp input boundary with no fill; adjacent white papers are otherwise quiet.'],
+  ['Dot stock','Tactile user stock without a dark block; the pattern is the busiest option.'],
+  ['Carbon copy','Familiar gray prompt with a misregistered double rule; subtle at a glance.'],
+  ['Reverse paper','Orb output becomes the field and tools stay white; emphasis shifts toward the work.'],
+  ['Woven boundary','Patterned seams mark prompts without a side gutter; denser than plain rules.']
+];
+let selected=0;
+function select(index){
+  selected=index;
+  preview.classList.remove('t1','t2','t3','t4','t5','t6','baseline');
+  preview.classList.add(`t${index+1}`);
+  baseline.setAttribute('aria-pressed','false');
+  baseline.textContent='Show baseline';
+  document.querySelectorAll('[data-choice]').forEach((button,i)=>button.setAttribute('aria-pressed',String(i===index)));
+  tradeoff.textContent=choices[index][1];
+  history.replaceState(null,'',`#${index+1}`);
+}
+document.querySelectorAll('[data-choice]').forEach((button,i)=>button.addEventListener('click',()=>select(i)));
+document.getElementById('width').addEventListener('click',event=>{
+  const on=!preview.classList.contains('phone');
+  preview.classList.toggle('phone',on);
+  event.currentTarget.setAttribute('aria-pressed',String(on));
+  event.currentTarget.textContent=on?'Desktop width':'Phone width';
+});
+baseline.addEventListener('click',event=>{
+  const on=!preview.classList.contains('baseline');
+  preview.classList.toggle('baseline',on);
+  event.currentTarget.setAttribute('aria-pressed',String(on));
+  event.currentTarget.textContent=on?'Show proposal':'Show baseline';
+  tradeoff.textContent=on?'Baseline · gray user paper and white orb paper; economical, but speaker identity depends on one common fill.':choices[selected][1];
+});
+select(Math.max(0,Math.min(5,(Number(location.hash.slice(1))||1)-1)));
+</script>
+</body>
+</html>

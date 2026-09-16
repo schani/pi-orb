@@ -137,7 +137,17 @@ function initialState(): MockState {
       timestamp: createdAt,
       type: "message",
       role: "user",
-      content: [{ type: "text", text: "Show me the consolidated tool activity design." }],
+      content: [
+        {
+          type: "text",
+          text: "Keep the selected **soft inversion** compact. Check [the production renderer](https://example.com/history), `inline code`, and narrow tables.\n\n> Preserve non-author state such as shell and compaction records.\n\n| Width | Result |\n| --- | --- |\n| 320px | no overflow |\n| 390px | no overflow |\n\n```ts\nconst width = 320;\n```",
+        },
+        {
+          type: "image",
+          mediaType: "image/svg+xml",
+          data: "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCAxNjAgNjAiPjxyZWN0IHdpZHRoPSIxNjAiIGhlaWdodD0iNjAiIGZpbGw9IndoaXRlIi8+PHBhdGggZD0iTTEgMUgxNTlWNTlIMVoiIGZpbGw9Im5vbmUiIHN0cm9rZT0iYmxhY2siLz48dGV4dCB4PSI4IiB5PSIzNCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+YXR0YWNobWVudCBwcmV2aWV3PC90ZXh0Pjwvc3ZnPg==",
+        },
+      ],
       overflow: {},
     },
     {
@@ -343,6 +353,27 @@ function initialState(): MockState {
       overflow: {},
     });
   }
+  const seededMessages: OrbMessageView[] = [
+    {
+      id: "00000000-0000-4000-8000-000000000125",
+      orbId: ORB_ID,
+      content: [{ type: "text", text: "Also verify selection and link contrast." }],
+      status: "delivered",
+      delivery: "steer",
+      operationId: "00000000-0000-4000-8000-000000000225",
+      createdAt,
+      updatedAt: createdAt,
+    },
+    {
+      id: "00000000-0000-4000-8000-000000000126",
+      orbId: ORB_ID,
+      content: [{ type: "text", text: "This oversized follow-up was rejected." }],
+      status: "failed",
+      error: "400 invalid_request: message payload too large",
+      createdAt,
+      updatedAt: createdAt,
+    },
+  ];
   const fleetProjects: ProjectView[] = ["fieldnotes", "homelab", "scratchpad"].map((name) => ({
     ...project,
     id: `frontend-${name}-project`,
@@ -409,7 +440,7 @@ function initialState(): MockState {
     uploads: new Map(),
     messages: new Map([
       ...fleetOrbs.map((entry): [string, OrbMessageView[]] => [entry.id, []]),
-      [orb.id, []],
+      [orb.id, seededMessages],
       [longOrb.id, []],
       [authOrb.id, []],
       [archivedOrb.id, []],

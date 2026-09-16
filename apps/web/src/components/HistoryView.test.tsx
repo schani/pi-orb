@@ -189,8 +189,10 @@ describe("HistoryView turn structure", () => {
     expect(html.match(/rec rec-you/g)).toHaveLength(2);
     // a1 and t1 share one agent record; a2 (after u2) starts a new one.
     expect(html.match(/rec rec-orb/g)).toHaveLength(2);
-    expect(html.match(/rec-px">you</g)).toHaveLength(2);
-    expect(html.match(/rec-px">orb</g)).toHaveLength(2);
+    expect(html.match(/class="visually-hidden">You:<\/span>/g)).toHaveLength(2);
+    expect(html.match(/class="visually-hidden">Orb:<\/span>/g)).toHaveLength(2);
+    expect(html).not.toContain('class="rec-px">you');
+    expect(html).not.toContain('class="rec-px">orb');
     expect(html).not.toContain("turn-mark");
   });
 
@@ -199,7 +201,7 @@ describe("HistoryView turn structure", () => {
       id: "00000000-0000-4000-8000-000000000123",
       orbId: "orb-1",
       content: [{ type: "text" as const, text: "queued while starting" }],
-      status: "delivered" as const,
+      status: "queued" as const,
       createdAt: "2026-08-10T00:00:00.000Z",
       updatedAt: "2026-08-10T00:00:00.000Z",
     };
@@ -213,7 +215,7 @@ describe("HistoryView turn structure", () => {
       />,
     );
     expect(queuedHtml).toContain("rec rec-you rec-q");
-    expect(queuedHtml).toContain('class="rec-status">delivered</span>');
+    expect(queuedHtml).toContain('class="rec-status">queued</span>');
     expect(queuedHtml).toContain("queued while starting");
 
     const committed = message("record-1", "user", "queued while starting");
@@ -235,6 +237,32 @@ describe("HistoryView turn structure", () => {
     );
     expect(committedHtml).not.toContain("rec-q");
     expect(committedHtml.match(/queued while starting/g)).toHaveLength(1);
+  });
+
+  it("identifies steering messages without dropping their content", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[]}
+        liveBlocks={[]}
+        tools={[]}
+        busy
+        queuedMessages={[
+          {
+            id: "00000000-0000-4000-8000-000000000125",
+            orbId: "orb-1",
+            content: [{ type: "text", text: "Please check the phone layout too." }],
+            status: "delivered",
+            delivery: "steer",
+            operationId: "operation-1",
+            createdAt: "2026-08-10T00:00:00.000Z",
+            updatedAt: "2026-08-10T00:00:01.000Z",
+          },
+        ]}
+      />,
+    );
+    expect(html).toContain('class="rec-status">steering</span>');
+    expect(html).toContain("Please check the phone layout too.");
+    expect(html).toContain('class="visually-hidden">You:</span>');
   });
 
   it("shows a message the runtime rejected as failed, with its reason", () => {
@@ -288,7 +316,7 @@ describe("HistoryView turn structure", () => {
     );
 
     expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
-    expect(html.match(/class="rec-px">orb</g)).toHaveLength(1);
+    expect(html.match(/class="visually-hidden">Orb:<\/span>/g)).toHaveLength(1);
     expect(html.match(/class="activity-rail-row [^"]* reasoning"/g)).toHaveLength(2);
     expect(html.match(/activity-rail-label">thinking</g)).toHaveLength(2);
     expect(html).toContain("considering persisted evidence");
@@ -407,7 +435,7 @@ describe("HistoryView turn structure", () => {
     );
 
     expect(html.match(/rec rec-orb/g)).toHaveLength(1);
-    expect(html.match(/rec-px">orb</g)).toHaveLength(1);
+    expect(html.match(/class="visually-hidden">Orb:<\/span>/g)).toHaveLength(1);
     expect(html).toContain("streaming now");
     expect(html).toContain("activity-rail-row-running tool-activity-category");
     expect(html).toContain('class="activity-rail-label">commands</span>');

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pi-orb · speaker treatment study</title>
+<style>
+:root{color-scheme:light;--w:#fff;--k:#000;--g1:#f2f2f2;--g2:#999;--g3:#555;--ok:#1a7e37;--bad:#b42318;--mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;--row:20px}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--w);color:var(--k);font:13px/20px var(--mono);font-variant-numeric:tabular-nums}button,textarea{font:inherit;color:inherit}button{padding:0 8px;line-height:18px;border:1px solid var(--k);background:var(--w);cursor:pointer}button:hover,button:focus-visible,button[aria-pressed=true]{color:var(--w);background:var(--k);outline:0}.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+/* Study chrome stays outside the specimen. */
+.study{padding:12px;border-bottom:1px solid var(--k);background:var(--w)}.study-top{display:flex;align-items:baseline;gap:12px}.study h1{margin:0;font-size:13px;line-height:20px;letter-spacing:.08em;text-transform:uppercase}.study-note{color:var(--g3)}.selectors{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}.selectors button{min-width:38px}.selectors button span{margin-left:5px}.study-settings{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:8px}.study-settings label{display:inline-flex;align-items:center;gap:6px}.tradeoff{margin:0;color:var(--g3);flex:1;min-width:260px}.preview{container-type:inline-size;width:min(1180px,calc(100% - 24px));height:760px;margin:16px auto;border:1px solid var(--k);overflow:hidden;background:var(--w)}.preview.phone{width:320px;max-width:calc(100% - 16px);height:700px}.screen{display:grid;grid-template-columns:236px minmax(0,1fr);height:100%}
+/* Product-ish frame. */
+.index{min-width:0;border-right:1px solid var(--k)}.home{height:24px;padding:1px 12px;border-bottom:1px solid var(--k)}.project{display:flex;align-items:center;height:24px;padding:0 10px;border-bottom:1px solid var(--k);font-size:18px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.project span{margin-left:auto;color:var(--g3);font-size:13px;letter-spacing:0}.ix{min-height:44px;padding:3px 10px 3px 8px;border-left:2px solid var(--g2);border-bottom:1px solid var(--g1)}.ix.current{border-left-color:var(--ok);background:var(--k);color:var(--w)}.ix small{display:block;color:var(--g2)}.pane{display:flex;min-width:0;min-height:0;flex-direction:column}.orb-header{display:flex;flex:none;align-items:center;gap:10px;height:24px;padding:0 12px;border-bottom:1px solid var(--k);white-space:nowrap}.orb-name{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:700}.life{display:inline-flex;align-items:center;gap:6px}.tile{width:16px;height:16px;display:inline-grid;place-items:center;color:var(--w);background:var(--ok);border-radius:2px;font-size:9px}.actions{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--g3)}.icon{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center}.icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:square}.transcript{min-height:0;flex:1;overflow:auto;background:var(--w)}
+/* Shared transcript content. Speaker CSS changes geometry only. */
+.turn{position:relative;min-width:0;padding:8px 12px;overflow-wrap:anywhere}.turn.user{background:var(--g1);border-top:1px solid var(--g2);border-bottom:1px solid var(--g2)}.turn p{margin:0 0 8px}.turn p:last-child{margin-bottom:0}.turn.user .lead{font-weight:700}.speaker-mark{display:none}.turn-body{min-width:0}.activity{margin:4px 0;border:1px solid var(--g2);background:var(--w)}.activity>summary{display:grid;grid-template-columns:2ch auto minmax(0,1fr) auto;gap:8px;align-items:center;min-height:20px;padding:0 8px;cursor:pointer;list-style:none;user-select:none}.activity>summary::-webkit-details-marker{display:none}.activity>summary::before{content:"▸";color:var(--g3)}.activity[open]>summary::before{content:"▾"}.activity>summary:hover{background:var(--g1)}.activity .metric{color:var(--g3);white-space:nowrap}.activity.active>summary::before,.activity.active .kind,.cursor{color:var(--ok)}.activity.failed>summary::before,.activity.failed .kind,.error{color:var(--bad)}.detail{padding:3px 8px 5px;color:var(--g3);background:var(--g1);border-top:1px solid var(--g2);white-space:pre-wrap}.detail code{color:var(--k)}.error-detail{color:var(--bad)}.codeblock{position:relative;margin:0 0 8px;border:1px solid var(--k);background:var(--g1)}.codeblock pre{max-width:100%;margin:0;padding:2px 8px;overflow:auto;white-space:pre}.copy{position:absolute;top:1px;right:3px;color:var(--g3)}.cursor{display:inline-block;width:8px;height:13px;margin-left:2px;background:var(--ok);vertical-align:-2px}.composer{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;flex:none;min-height:109px;padding:8px 12px;border-top:1px solid var(--k);background:var(--w)}.composer-prefix{text-align:right;font-weight:700}.composer textarea{width:100%;height:80px;min-width:0;padding:0;border:0;outline:0;resize:none;line-height:20px;background:transparent}
+/* 1 — bands. */
+.preview.v1 .turn{padding:8px 12px}.preview.v1 .speaker-mark{display:none}.preview.v1 .turn.assistant{padding-top:7px;padding-bottom:11px}
+/* 2 — the stamp participates only in the first line. */
+.preview.v2 .speaker-mark,.preview.v5 .speaker-mark{display:inline}.preview.v2 .speaker-mark{margin-right:7px;padding:0 4px;line-height:16px;vertical-align:1px}.preview.v2 .user .speaker-mark{color:var(--w);background:var(--k);font-weight:700}.preview.v2 .assistant .speaker-mark{color:var(--g3);border-bottom:1px solid var(--g2)}
+/* 3 — caption cuts the boundary, then gets out of the text column. */
+.preview.v3 .turn{padding-top:0;margin-top:8px}.preview.v3 .turn.user{margin-top:0}.preview.v3 .speaker-mark{position:relative;display:table;margin:0 0 5px;padding:0 6px 0 0;color:var(--g3);background:var(--w);font-size:11px;letter-spacing:.08em;text-transform:uppercase}.preview.v3 .user .speaker-mark{background:var(--g1)}.preview.v3 .turn::before{content:"";position:absolute;top:9px;right:12px;left:12px;border-top:1px solid var(--g2)}.preview.v3 .speaker-mark{z-index:1}.preview.v3 .user .speaker-mark{color:var(--k);font-weight:700}.preview:is(.v2,.v5) .tool-speaker-anchor .speaker-mark{margin-left:0}
+/* 4 — shape, not hue, identifies speaker in an eight-pixel edge gutter. */
+.preview.v4 .turn{padding-left:20px}.preview.v4 .speaker-mark{display:none}.preview.v4 .turn::before{content:"";position:absolute;top:13px;left:6px;width:7px;height:7px}.preview.v4 .user::before{background:var(--k)}.preview.v4 .assistant::before{width:6px;height:6px;border:1px solid var(--k);background:var(--w);box-shadow:3px 3px 0 -2px var(--w),3px 3px 0 -1px var(--k)}
+/* 5 — prompt glyphs are first-line punctuation, never a track. */
+.preview.v5 .speaker-mark{margin-right:6px;font-weight:700}.preview.v5 .speaker-word{display:none}.preview.v5 .user .speaker-mark::after{content:">"}.preview.v5 .assistant .speaker-mark::after{content:"<"}.preview.v5 .assistant .speaker-mark{color:var(--g3)}
+/* Reference baseline: actual 32px speaker track. */
+.preview.baseline .turn{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px;margin-top:0;padding:4px 12px}.preview.baseline .turn::before{content:none}.preview.baseline .turn.user{padding-top:9px;padding-bottom:9px}.preview.baseline .speaker-mark{position:static;display:block;grid-column:1;margin:0;padding:0;color:var(--g3);background:transparent;border:0;font-size:13px;line-height:20px;letter-spacing:normal;text-align:right;text-transform:none;user-select:none}.preview.baseline .speaker-word{display:inline}.preview.baseline :is(.user,.assistant) .speaker-mark::after{content:none}.preview.baseline .user .speaker-mark{color:var(--k);background:transparent;font-weight:700}.preview.baseline .turn-body{grid-column:2}.preview.baseline .user .lead{font-weight:400}
+@media(max-width:600px){.study{padding:8px}.study-top{display:block}.selectors button{min-height:36px}.selectors button span{display:none}.tradeoff{flex-basis:100%;min-width:0}.preview{margin-block:8px}.study-note{display:none}}
+@container(max-width:600px){.screen{display:block}.index{display:none}.orb-header{height:44px;padding:0 8px;gap:7px}.orb-header .actions .icon:not(:last-child){display:none}.life{font-size:0}.pane{height:100%}.turn{padding-right:8px;padding-left:8px}.preview.v4 .turn{padding-left:18px}.preview.v4 .turn::before{left:5px}.preview.v3 .turn::before{right:8px;left:8px}.preview.baseline .turn{grid-template-columns:32px minmax(0,1fr);gap:12px;padding-right:12px;padding-left:12px}.composer{grid-template-columns:28px minmax(0,1fr);gap:8px;min-height:89px;padding:4px 8px}.composer textarea{height:80px;font-size:16px}.activity>summary{grid-template-columns:1ch auto minmax(0,1fr)}.activity>summary::before{grid-column:1;grid-row:1}.activity>summary>.kind{grid-column:2;grid-row:1}.activity>summary>span:nth-of-type(2){grid-column:3;grid-row:1}.activity .metric{grid-column:2 / -1;grid-row:2}}
+</style>
+</head>
+<body>
+<section class="study" aria-labelledby="study-title">
+  <div class="study-top"><h1 id="study-title">Speaker treatments</h1><span class="study-note">Same transcript · geometry only · simulated product</span></div>
+  <div class="selectors" role="group" aria-label="Speaker treatment">
+    <button type="button" data-choice="1"><b>1</b><span>Paper bands</span></button>
+    <button type="button" data-choice="2"><b>2</b><span>Inline stamps</span></button>
+    <button type="button" data-choice="3"><b>3</b><span>Rule captions</span></button>
+    <button type="button" data-choice="4"><b>4</b><span>Edge notches</span></button>
+    <button type="button" data-choice="5"><b>5</b><span>Terminal prefixes</span></button>
+  </div>
+  <div class="study-settings">
+    <button id="width" type="button" aria-pressed="false">Phone width</button>
+    <button id="baseline" type="button" aria-pressed="false">Current baseline</button>
+    <p class="tradeoff" id="tradeoff"></p>
+  </div>
+</section>
+<main class="preview v1" id="preview">
+  <div class="screen">
+    <aside class="index" aria-label="Orbs">
+      <div class="home">All projects</div><div class="project">pi-orb <span>＋ ⚙</span></div>
+      <div class="ix current">Speaker treatments<small>working now</small></div>
+      <div class="ix">Trace runtime latency<small>18m</small></div>
+      <div class="ix">Mobile composer<small>2h</small></div>
+    </aside>
+    <section class="pane" aria-label="Speaker treatments orb">
+      <header class="orb-header"><span class="orb-name">Speaker treatments</span><span class="life"><span class="tile" aria-hidden="true">●</span><span>running</span></span><span class="actions" aria-label="Orb actions"><span class="icon" title="Terminal"><svg viewBox="0 0 16 16"><path d="M3 4l4 4-4 4M9 12h4"/></svg></span><span class="icon" title="Upload"><svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3M8 10V2M5 5l3-3 3 3"/></svg></span><span class="icon" title="Stop"><svg viewBox="0 0 16 16"><path d="M4 4h8v8H4z" fill="currentColor" stroke="none"/></svg></span><span class="icon" title="More"><svg viewBox="0 0 16 16"><path d="M3 8h1m3 0h1m3 0h1"/></svg></span></span></header>
+      <div class="transcript" id="transcript">
+        <article class="turn user"><span class="visually-hidden">You:</span><div class="turn-body"><p class="lead"><span class="speaker-mark" aria-hidden="true"><span class="speaker-word">you</span></span>Please tighten the WebSocket reconnect path without changing the protocol. Keep the stale-head guard, add focused coverage for the first-message handshake, and preserve the failure evidence if the schedule exposes anything surprising.</p><p>This needs to stay readable at 320px too. Please check the real browser path rather than assuming the unit fixture covers it.</p></div></article>
+        <article class="turn assistant tool-first"><span class="visually-hidden">Orb:</span><div class="turn-body">
+          <details class="activity" open><summary><span class="kind"><span class="tool-speaker-anchor"></span>thinking</span><span>Locating snapshot and reconnect ownership</span><span class="metric">1.8s</span></summary><div class="detail">The first outbound message must wait for the authoritative head. I’m checking where that gate is released and whether reconnect creates a second owner.</div></details>
+          <p class="lead"><span class="speaker-mark" aria-hidden="true"><span class="speaker-word">orb</span></span>I’ll trace the browser-to-runtime handshake first, then make the smallest scoped change.</p>
+          <details class="activity"><summary><span class="kind">read</span><span>runtime WebSocket path</span><span class="metric">3 files</span></summary><div class="detail"><code>apps/web/src/lib/runtime-socket.ts</code>
+<code>apps/runtime/src/server.ts</code>
+<code>e2e/runtime-handshake.e2e.test.ts</code></div></details>
+          <p>The stale-head check is correct; the client was publishing its queued message before the replacement socket had applied the snapshot.</p>
+          <div class="codeblock"><span class="copy" aria-hidden="true">⧉</span><pre><code>if (connection.head !== snapshot.head) {
+  return err({ type: "stale_head" });
+}
+await connection.send(message);</code></pre></div>
+        </div></article>
+        <article class="turn user"><span class="visually-hidden">You:</span><div class="turn-body"><p class="lead"><span class="speaker-mark" aria-hidden="true"><span class="speaker-word">you</span></span>Fantastic! Push it to main!</p></div></article>
+        <article class="turn assistant"><span class="visually-hidden">Orb:</span><div class="turn-body"><p class="lead"><span class="speaker-mark" aria-hidden="true"><span class="speaker-word">orb</span></span>I’ll run the required browser handshake test, inspect the diff, then push the verified commit.</p>
+          <details class="activity"><summary><span class="kind">thinking</span><span>Checking branch and release prerequisites</span><span class="metric">0.9s</span></summary><div class="detail">The change touches the runtime protocol path, so the full end-to-end handshake is required before pushing.</div></details>
+          <details class="activity failed"><summary><span class="kind">WebSocket</span><span>Preview connection failed</span><span class="metric">closed 1006</span></summary><div class="detail error-detail">Connection closed before the snapshot acknowledgement. Retrying through the owned test fixture; no product retry was added.</div></details>
+          <details class="activity active"><summary><span class="kind">bash</span><span>npm run test:e2e -- runtime-handshake</span><span class="metric">running 00:18</span></summary><div class="detail">Chromium  › browser waits for snapshot before first message
+<span class="cursor" aria-label="Running"></span></div></details>
+          <p>The focused regression now holds the queued message until the replacement connection has accepted the snapshot. The existing stale-head rejection remains unchanged, and reconnect still has one transport owner.</p><p>Once the active browser check completes, I’ll commit only the runtime client and its regression test, then push the current branch.</p>
+        </div></article>
+      </div>
+      <div class="composer"><span class="composer-prefix">&gt;</span><textarea aria-label="Message the orb" placeholder="Message the orb…" readonly></textarea></div>
+    </section>
+  </div>
+</main>
+<script>
+const preview=document.getElementById('preview');
+const tradeoff=document.getElementById('tradeoff');
+const choices=[
+  ['Paper bands','Maximum reading width and the quietest orb prose; user turns rely on their full-width band.'],
+  ['Inline stamps','Names are immediately legible, while only the first line pays for them.'],
+  ['Rule captions','Strong turn starts and clean text measure; adds one compact line per turn.'],
+  ['Edge notches','Smallest signal and no labels; distinct solid/hollow geometry carries identity.'],
+  ['Terminal prefixes','Native to the product’s command language; terse glyphs require brief learning.']
+];
+let selected=0;
+function placeSpeakerMarks(mode){
+  document.querySelectorAll('.turn').forEach(turn=>{
+    const body=turn.querySelector('.turn-body');
+    const lead=turn.querySelector('.lead');
+    const mark=turn.querySelector('.speaker-mark');
+    if(!body||!lead||!mark)return;
+    if(mode==='baseline')turn.insertBefore(mark,body);
+    else if(mode==='caption')body.prepend(mark);
+    else if(mode==='inline'&&turn.classList.contains('tool-first'))turn.querySelector('.tool-speaker-anchor').prepend(mark);
+    else lead.prepend(mark);
+  });
+}
+function select(index){selected=index;preview.className=preview.className.replace(/\bv[1-5]\b/g,'').trim();preview.classList.add('v'+(index+1));document.querySelectorAll('[data-choice]').forEach((button,i)=>button.setAttribute('aria-pressed',String(i===index)));document.getElementById('baseline').setAttribute('aria-pressed','false');preview.classList.remove('baseline');placeSpeakerMarks(index===2?'caption':index===1||index===4?'inline':'lead');tradeoff.textContent=choices[index][1];history.replaceState(null,'','#'+(index+1));}
+document.querySelectorAll('[data-choice]').forEach((button,i)=>button.addEventListener('click',()=>select(i)));
+document.getElementById('width').addEventListener('click',event=>{const on=!preview.classList.contains('phone');preview.classList.toggle('phone',on);event.currentTarget.setAttribute('aria-pressed',String(on));event.currentTarget.textContent=on?'Desktop width':'Phone width';});
+document.getElementById('baseline').addEventListener('click',event=>{const on=!preview.classList.contains('baseline');preview.classList.toggle('baseline',on);placeSpeakerMarks(on?'baseline':selected===2?'caption':selected===1||selected===4?'inline':'lead');event.currentTarget.setAttribute('aria-pressed',String(on));tradeoff.textContent=on?'Current: explicit names, but every line loses a 32px column plus a 12px gap.':choices[selected][1];});
+select(Math.max(0,Math.min(4,(Number(location.hash.slice(1))||1)-1)));
+</script>
+</body>
+</html>

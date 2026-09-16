@@ -88,6 +88,82 @@ describe("frontend-only browser behavior", () => {
   });
 
   it.each([1280, 390, 320])(
+    "renders gutter-free soft-inversion turns without overflow at %ipx",
+    async (width) => {
+      const page = await browser.newPage({ viewport: { width, height: 740 } });
+      try {
+        await page.goto(`${origin}/${ORB_HASH}`);
+        const user = page.locator(".history .rec-you").first();
+        const orb = page.locator(".history .rec-orb").first();
+        await expectPage(user).toBeVisible();
+        await expectPage(orb).toBeVisible();
+        await expectPage(user.locator(".visually-hidden")).toHaveText("You:");
+        await expectPage(orb.locator(".visually-hidden")).toHaveText("Orb:");
+        expectPage(
+          await user.locator(".visually-hidden").evaluate((element) => {
+            const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+            const box = element.getBoundingClientRect();
+            return { width: box.width, height: box.height, clip: style?.clipPath };
+          }),
+        ).toEqual({ width: 1, height: 1, clip: "inset(50%)" });
+        expectPage(
+          await user.evaluate((element) => {
+            const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+            if (style === undefined) return null;
+            return {
+              display: style.display,
+              color: style.color,
+              background: style.backgroundColor,
+              weight: style.fontWeight,
+            };
+          }),
+        ).toEqual({
+          display: "block",
+          color: "rgb(255, 255, 255)",
+          background: "rgb(0, 0, 0)",
+          weight: "400",
+        });
+        expectPage(
+          await orb.evaluate(
+            (element) => element.ownerDocument.defaultView?.getComputedStyle(element).display,
+          ),
+        ).toBe("block");
+        const inlineCode = user.locator("code").first();
+        expectPage(
+          await inlineCode.evaluate((element) => {
+            const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+            return { color: style?.color, background: style?.backgroundColor };
+          }),
+        ).toEqual({ color: "rgb(0, 0, 0)", background: "rgb(255, 255, 255)" });
+        await expectPage(user.locator("blockquote")).toBeVisible();
+        await expectPage(user.locator(".markdown-code-block")).toBeVisible();
+        await expectPage(user.locator("table")).toBeVisible();
+        await expectPage(user.locator("img")).toBeVisible();
+        await expectPage(page.locator(".rec-status", { hasText: "steering" })).toBeVisible();
+        const failedTurn = page.locator(".rec-q", { hasText: "This oversized follow-up" });
+        await expectPage(failedTurn.locator(".rec-status", { hasText: "failed" })).toBeVisible();
+        expectPage(
+          await failedTurn.locator(".error-text").evaluate((element) => {
+            const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+            return { color: style?.color, background: style?.backgroundColor };
+          }),
+        ).toEqual({ color: "rgb(180, 35, 24)", background: "rgb(255, 255, 255)" });
+        expectPage(
+          await page
+            .locator("body")
+            .evaluate(
+              (body) =>
+                body.ownerDocument.documentElement.scrollWidth <=
+                (body.ownerDocument.defaultView?.innerWidth ?? 0),
+            ),
+        ).toBe(true);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  it.each([1280, 390, 320])(
     "keeps the active-only subagent rail above the terminal at %ipx",
     async (width) => {
       const page = await browser.newPage({ viewport: { width, height: 740 } });

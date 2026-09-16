@@ -1400,13 +1400,18 @@ button.personal-instructions-gear {
   flex: 1 0 auto;
 }
 
-/* One record: a fixed prefix column naming the speaker, then the body. */
+/* Shell records retain a compact type gutter; authored turns use the full width. */
 .rec {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
   padding: 4px 12px;
+}
+
+.rec-you,
+.rec-orb {
+  display: block;
 }
 
 .rec-px {
@@ -1419,27 +1424,26 @@ button.personal-instructions-gear {
   min-width: 0;
 }
 
-/* The user band spans the prefix column so a turn boundary is unmissable. */
 .rec-you {
   padding: 9px 12px;
-  background: var(--g1);
-  border-top: 1px solid var(--g2);
-  border-bottom: 1px solid var(--g2);
+  color: var(--w);
+  background: var(--k);
+  border-top: 1px solid var(--k);
+  border-bottom: 1px solid var(--k);
+  font-weight: 400;
 }
 
-.rec-you > .rec-px,
 .composer-prefix {
   color: var(--k);
   font-weight: 700;
 }
 
 .rec-q {
-  color: var(--g3);
-  border-left: 2px dotted var(--g2);
+  color: var(--w);
+  border-left: 2px dotted var(--w);
 }
 
-.rec-sys > .rec-px,
-.rec-q > .rec-px {
+.rec-sys > .rec-px {
   color: var(--g2);
   font-weight: 400;
 }
@@ -1447,8 +1451,8 @@ button.personal-instructions-gear {
 .rec-status {
   margin-right: 6px;
   padding: 0 5px;
-  color: var(--g3);
-  border: 1px solid var(--g2);
+  color: inherit;
+  border: 1px solid currentcolor;
   line-height: 16px;
 }
 
@@ -1572,6 +1576,37 @@ button.personal-instructions-gear {
   display: block;
   padding: 0;
   background: none;
+}
+
+.rec-you .chat-markdown :not(pre) > code {
+  color: var(--k);
+  background: var(--w);
+}
+
+.rec-you .markdown-code-block {
+  color: var(--k);
+  background: var(--w);
+  border-color: var(--w);
+}
+
+.rec-you .chat-markdown blockquote,
+.rec-you .muted {
+  color: var(--w);
+}
+
+.rec-you .chat-markdown blockquote,
+.rec-you .markdown-table-scroll :is(th, td) {
+  border-color: var(--w);
+}
+
+.rec-you .msg-image {
+  border-color: var(--w);
+}
+
+.rec-you .error-text {
+  padding: 0 5px;
+  color: var(--bad);
+  background: var(--w);
 }
 
 /* ---------- activity rail: one geometry for reasoning and every tool ---------- */
