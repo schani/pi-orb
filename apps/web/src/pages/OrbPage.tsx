@@ -1,19 +1,12 @@
 import {
-  type ActiveSubagent,
-  type AgentSettingsEvent,
   CAPABILITY_ABORT,
-  type HistoryRecord,
   type HostedFilesResponse,
   type MessageInputBlock,
-  type OrbHistoryView,
   type OrbMessageView,
   type OrbView,
-  type RuntimeEvent,
-  type ServerFrame,
   type SettingsAction,
 } from "@pi-orb/protocol";
 import {
-  type CachedTranscript,
   canRepairFromReplica,
   createMutationEpoch,
   hasDeliveredMessageAwaitingHistory,
@@ -21,7 +14,6 @@ import {
   isLiveBusy,
   messagesAwaitingHistory,
   reducer,
-  snapshotFromHistory,
   type TranscriptCache,
   type TranscriptOwner,
   withQueuedMessage,

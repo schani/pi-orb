@@ -1,0 +1,201 @@
+{
+  "name": "adjacent agent records share one turn; shell and compaction stand alone",
+  "records": [
+    {
+      "id": "u1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "hi"
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a2",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "more"
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "e1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.custom_message",
+      "overflow": {},
+      "content": [
+        {
+          "type": "text",
+          "text": "hidden"
+        }
+      ],
+      "custom": {
+        "customType": "",
+        "display": false
+      }
+    },
+    {
+      "id": "e2",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.custom_message",
+      "overflow": {},
+      "content": [
+        {
+          "type": "text",
+          "text": "notice body"
+        }
+      ],
+      "custom": {
+        "customType": "",
+        "display": true
+      }
+    },
+    {
+      "id": "sh1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.bash_execution",
+      "overflow": {},
+      "content": [],
+      "shell": {
+        "command": "ls",
+        "output": "file",
+        "exitCode": 0,
+        "cancelled": false,
+        "truncated": false,
+        "excludeFromContext": false
+      }
+    },
+    {
+      "id": "c1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "compaction",
+      "summary": [
+        {
+          "type": "text",
+          "text": "compacted"
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a3",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "after"
+        }
+      ],
+      "overflow": {}
+    }
+  ],
+  "expect": {
+    "turns": [
+      {
+        "kind": "user",
+        "id": "u1",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ]
+      },
+      {
+        "kind": "agent",
+        "key": "a1",
+        "parts": [
+          {
+            "kind": "block",
+            "key": "a1-0",
+            "block": {
+              "type": "text",
+              "text": "hi"
+            }
+          },
+          {
+            "kind": "block",
+            "key": "a2-0",
+            "block": {
+              "type": "text",
+              "text": "more"
+            }
+          },
+          {
+            "kind": "event_text",
+            "key": "e2",
+            "text": "notice body"
+          }
+        ]
+      },
+      {
+        "kind": "shell",
+        "id": "sh1",
+        "shell": {
+          "command": "ls",
+          "output": "file",
+          "exitCode": 0,
+          "cancelled": false,
+          "truncated": false,
+          "excludeFromContext": false
+        }
+      },
+      {
+        "kind": "compaction",
+        "id": "c1",
+        "summary": "compacted"
+      },
+      {
+        "kind": "agent",
+        "key": "a3",
+        "parts": [
+          {
+            "kind": "block",
+            "key": "a3-0",
+            "block": {
+              "type": "text",
+              "text": "after"
+            }
+          }
+        ]
+      }
+    ],
+    "representedMessageIds": [],
+    "persistedToolCallIds": []
+  }
+}

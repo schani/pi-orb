@@ -1,0 +1,186 @@
+{
+  "name": "shell status flags and the inbox messages a transcript already represents",
+  "records": [
+    {
+      "id": "sh1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.bash_execution",
+      "overflow": {},
+      "content": [],
+      "shell": {
+        "command": "npm test",
+        "output": "ok",
+        "exitCode": 1,
+        "cancelled": false,
+        "truncated": true,
+        "excludeFromContext": true
+      }
+    },
+    {
+      "id": "sh2",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.bash_execution",
+      "overflow": {},
+      "content": [
+        {
+          "type": "text",
+          "text": "from content"
+        }
+      ],
+      "shell": {
+        "command": "",
+        "output": "from content",
+        "exitCode": null,
+        "cancelled": false,
+        "truncated": false,
+        "excludeFromContext": false
+      }
+    },
+    {
+      "id": "sh3",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.bash_execution",
+      "overflow": {},
+      "content": [],
+      "shell": {
+        "command": "sleep",
+        "output": "",
+        "exitCode": null,
+        "cancelled": true,
+        "truncated": false,
+        "excludeFromContext": false
+      }
+    },
+    {
+      "id": "u1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "one"
+        }
+      ],
+      "overflow": {},
+      "inboxMessageIds": [
+        "m1",
+        "m2"
+      ]
+    },
+    {
+      "id": "u2",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "two"
+        }
+      ],
+      "overflow": {},
+      "inboxMessageIds": [
+        "m3"
+      ]
+    },
+    {
+      "id": "u3",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "three"
+        }
+      ],
+      "overflow": {}
+    }
+  ],
+  "expect": {
+    "turns": [
+      {
+        "kind": "shell",
+        "id": "sh1",
+        "shell": {
+          "command": "npm test",
+          "output": "ok",
+          "exitCode": 1,
+          "cancelled": false,
+          "truncated": true,
+          "excludeFromContext": true
+        }
+      },
+      {
+        "kind": "shell",
+        "id": "sh2",
+        "shell": {
+          "command": "",
+          "output": "from content",
+          "exitCode": null,
+          "cancelled": false,
+          "truncated": false,
+          "excludeFromContext": false
+        }
+      },
+      {
+        "kind": "shell",
+        "id": "sh3",
+        "shell": {
+          "command": "sleep",
+          "output": "",
+          "exitCode": null,
+          "cancelled": true,
+          "truncated": false,
+          "excludeFromContext": false
+        }
+      },
+      {
+        "kind": "user",
+        "id": "u1",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "one"
+          }
+        ]
+      },
+      {
+        "kind": "user",
+        "id": "u2",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "two"
+          }
+        ]
+      },
+      {
+        "kind": "user",
+        "id": "u3",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "three"
+          }
+        ]
+      }
+    ],
+    "representedMessageIds": [
+      "m1",
+      "m2",
+      "m3"
+    ],
+    "persistedToolCallIds": []
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "name": "failed assistant records explain themselves after their own content",
+  "records": [
+    {
+      "id": "a1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [],
+      "overflow": {},
+      "finishReason": "error",
+      "model": {
+        "provider": "openai-codex",
+        "id": "gpt"
+      },
+      "failure": {
+        "message": "stream closed",
+        "diagnostics": [
+          "provider_transport_failure"
+        ]
+      }
+    },
+    {
+      "id": "a2",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "partial"
+        }
+      ],
+      "overflow": {},
+      "finishReason": "error",
+      "failure": {
+        "message": "bad request",
+        "diagnostics": []
+      }
+    },
+    {
+      "id": "a3",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [],
+      "overflow": {},
+      "finishReason": "error"
+    },
+    {
+      "id": "a4",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "fine"
+        }
+      ],
+      "overflow": {},
+      "finishReason": "stop"
+    },
+    {
+      "id": "a5",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [],
+      "overflow": {},
+      "finishReason": "error"
+    },
+    {
+      "id": "a6",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [],
+      "overflow": {},
+      "finishReason": "error",
+      "model": {
+        "id": "m"
+      },
+      "failure": {
+        "message": "reset",
+        "diagnostics": [
+          "provider_transport_failure"
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "turns": [
+      {
+        "kind": "agent",
+        "key": "a1",
+        "parts": [
+          {
+            "kind": "failure",
+            "key": "a1-error",
+            "message": "The agent’s connection to OpenAI was interrupted. stream closed"
+          },
+          {
+            "kind": "block",
+            "key": "a2-0",
+            "block": {
+              "type": "text",
+              "text": "partial"
+            }
+          },
+          {
+            "kind": "failure",
+            "key": "a2-error",
+            "message": "bad request"
+          },
+          {
+            "kind": "failure",
+            "key": "a3-error",
+            "message": "Model response failed."
+          },
+          {
+            "kind": "block",
+            "key": "a4-0",
+            "block": {
+              "type": "text",
+              "text": "fine"
+            }
+          },
+          {
+            "kind": "failure",
+            "key": "a5-error",
+            "message": "Model response failed."
+          },
+          {
+            "kind": "failure",
+            "key": "a6-error",
+            "message": "The agent’s connection to the model provider was interrupted. reset"
+          }
+        ]
+      }
+    ],
+    "representedMessageIds": [],
+    "persistedToolCallIds": []
+  }
+}

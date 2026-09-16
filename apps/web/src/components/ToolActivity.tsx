@@ -1,195 +1,48 @@
-import type { ContentBlock, JsonValue } from "@pi-orb/protocol";
+import {
+  type ActivityCall,
+  type ActivityCategory,
+  activityCalls,
+  type CategoryCount,
+  callLabel,
+  callStatus,
+  categorize,
+  categoryCount,
+  categoryHeadline,
+  categoryProgress,
+  categoryState,
+  type LiveToolCall,
+  type PersistedToolCall,
+  patchStats,
+  resultText,
+} from "@pi-orb/transcript";
 import type { ReactNode } from "react";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
-
-export type ToolCallBlock = ContentBlock & { type: "tool_call" };
-export type ToolResultBlock = ContentBlock & { type: "tool_result" };
-
-export interface PersistedToolCall {
-  call: ToolCallBlock;
-  result?: ToolResultBlock;
-}
-
-export interface LiveToolCall {
-  callId: string;
-  name: string;
-  state: "running" | "completed" | "failed";
-}
 
 interface ToolActivityProps {
   persisted?: readonly PersistedToolCall[];
   live?: readonly LiveToolCall[];
 }
 
-type ActivityCall = {
-  callId: string;
-  name: string;
-  arguments: JsonValue | null;
-  result?: ToolResultBlock;
-  state: "running" | "completed" | "failed";
-};
-
-type CategoryKind = "edit" | "command" | "read" | "other";
-
-interface ActivityCategory {
-  key: string;
-  kind: CategoryKind;
-  label: string;
-  calls: ActivityCall[];
-}
-
-interface DiffStats {
-  added: number;
-  removed: number;
-}
-
-function objectValue(value: JsonValue | null): Record<string, JsonValue> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
-}
-
-function stringArgument(call: ActivityCall, key: string): string | null {
-  const value = objectValue(call.arguments)?.[key];
-  return typeof value === "string" ? value : null;
-}
-
-function numberArgument(call: ActivityCall, key: string): number | null {
-  const value = objectValue(call.arguments)?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function callPath(call: ActivityCall): string | null {
-  return stringArgument(call, "path");
-}
-
-function readCallLabel(call: ActivityCall): string {
-  const path = callPath(call) ?? call.name;
-  const offset = numberArgument(call, "offset");
-  const limit = numberArgument(call, "limit");
-  if (offset === null && limit === null) return path;
-  const start = offset ?? 1;
-  return limit === null ? `${path}:${start}+` : `${path}:${start}–${start + limit - 1}`;
-}
-
-function resultText(result: ToolResultBlock | undefined): string {
-  if (result === undefined) return "";
-  return result.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
-}
-
-function patchStats(patch: string | null): DiffStats | null {
-  if (patch === null) return null;
-  let added = 0;
-  let removed = 0;
-  for (const line of patch.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
-    if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
-  }
-  return { added, removed };
-}
-
-function statsForCalls(calls: readonly ActivityCall[]): DiffStats | null {
-  let found = false;
-  let added = 0;
-  let removed = 0;
-  for (const call of calls) {
-    const stats = patchStats(call.result?.patch ?? null);
-    if (stats === null) continue;
-    found = true;
-    added += stats.added;
-    removed += stats.removed;
-  }
-  return found ? { added, removed } : null;
-}
-
-function categoryFor(name: string): { key: string; kind: CategoryKind; label: string } {
-  switch (name) {
-    case "edit":
-    case "write":
-      return { key: "edit", kind: "edit", label: "edit" };
-    case "bash":
-      return { key: "command", kind: "command", label: "commands" };
-    case "read":
-      return { key: "read", kind: "read", label: "read" };
-    default:
-      return { key: `other:${name}`, kind: "other", label: name };
-  }
-}
-
-function categorize(calls: readonly ActivityCall[]): ActivityCategory[] {
-  const categories = new Map<string, ActivityCategory>();
-  for (const call of calls) {
-    const descriptor = categoryFor(call.name);
-    const existing = categories.get(descriptor.key);
-    if (existing !== undefined) {
-      existing.calls.push(call);
-    } else {
-      categories.set(descriptor.key, { ...descriptor, calls: [call] });
-    }
-  }
-  return [...categories.values()];
-}
-
-function uniquePathCount(calls: readonly ActivityCall[]): number {
-  const paths = new Set(calls.map(callPath).filter((path): path is string => path !== null));
-  return paths.size > 0 ? paths.size : calls.length;
-}
-
-function categoryState(category: ActivityCategory): "running" | "completed" | "failed" {
-  if (category.calls.some((call) => call.state === "failed")) return "failed";
-  if (category.calls.some((call) => call.state === "running")) return "running";
-  return "completed";
-}
-
-/** A category of one names its file or command; larger runs count in the metric. */
-function categoryHeadline(category: ActivityCategory): string | undefined {
-  const firstCall = category.calls[0];
-  if (firstCall === undefined) return undefined;
-  switch (category.kind) {
-    case "edit":
-      return category.calls.length === 1 ? (callPath(firstCall) ?? undefined) : undefined;
-    case "command":
-      return category.calls.length === 1
-        ? (stringArgument(firstCall, "command") ?? undefined)
-        : undefined;
-    case "read":
-      return uniquePathCount(category.calls) === 1 ? (callPath(firstCall) ?? undefined) : undefined;
-    case "other":
-      return undefined;
-  }
-}
-
-function countMetric(category: ActivityCategory): ReactNode | null {
-  if (category.kind === "edit") {
-    const stats = statsForCalls(category.calls);
-    if (stats !== null) {
-      return (
-        <>
-          <span className="tool-diff-added">+{stats.added}</span>{" "}
-          <span className="tool-diff-removed">−{stats.removed}</span>
-        </>
-      );
-    }
-  }
-  const count =
-    category.kind === "edit" || category.kind === "read"
-      ? uniquePathCount(category.calls)
-      : category.calls.length;
-  if (count < 2) return null;
-  if (category.kind === "command") return `${count} ran`;
-  return `${count} ${category.kind === "other" ? "calls" : "files"}`;
+function renderCount(count: CategoryCount): ReactNode | null {
+  if (count === null) return null;
+  if (count.kind === "count") return count.label;
+  return (
+    <>
+      <span className="tool-diff-added">+{count.added}</span>{" "}
+      <span className="tool-diff-removed">−{count.removed}</span>
+    </>
+  );
 }
 
 function categoryMetric(category: ActivityCategory): ReactNode | undefined {
-  const failures = category.calls.filter((call) => call.state === "failed").length;
-  const lead = countMetric(category);
+  const lead = renderCount(categoryCount(category));
+  const progress = categoryProgress(category);
   const trail =
-    failures > 0 ? (
-      <span className="tool-activity-failed">{failures} failed</span>
-    ) : category.calls.some((call) => call.state === "running") ? (
+    progress === null ? null : progress.kind === "failed" ? (
+      <span className="tool-activity-failed">{progress.count} failed</span>
+    ) : (
       <span className="tool-activity-running">running</span>
-    ) : null;
+    );
   if (lead === null) return trail ?? undefined;
   if (trail === null) return lead;
   return (
@@ -201,20 +54,13 @@ function categoryMetric(category: ActivityCategory): ReactNode | undefined {
   );
 }
 
-function callStatus(call: ActivityCall): string {
-  if (call.state === "failed") return "failed";
-  if (call.state === "running") return "running";
-  return "complete";
-}
-
 function CommandCall({ call }: { call: ActivityCall }) {
-  const command = stringArgument(call, "command") ?? call.name;
   const output = resultText(call.result);
   return (
     <div className="tool-command">
       <div className="tool-command-line">
         <span className="rec-px">run</span>
-        <span className="tool-command-text">{command}</span>
+        <span className="tool-command-text">{callLabel(call, "command")}</span>
       </div>
       {output !== "" && <pre className="tool-command-output">{output}</pre>}
       <div className="tool-command-footer">
@@ -239,7 +85,7 @@ function CommandCall({ call }: { call: ActivityCall }) {
 }
 
 function FileCall({ call, kind }: { call: ActivityCall; kind: "edit" | "read" }) {
-  const path = kind === "read" ? readCallLabel(call) : (callPath(call) ?? call.name);
+  const path = callLabel(call, kind);
   const output = resultText(call.result);
   const stats = kind === "edit" ? patchStats(call.result?.patch ?? null) : null;
   const input = call.arguments === null ? "" : JSON.stringify(call.arguments, null, 2);
@@ -301,7 +147,7 @@ function OtherCall({ call, single }: { call: ActivityCall; single: boolean }) {
     <details className="tool-activity-call">
       <summary>
         <span className="tool-call-marker">·</span>
-        <code className="trunc">{call.name}</code>
+        <code className="trunc">{callLabel(call, "other")}</code>
         <span className={`tool-call-status tool-call-${call.state}`}>{callStatus(call)}</span>
       </summary>
       {detail}
@@ -324,39 +170,22 @@ function CategoryCalls({ category }: { category: ActivityCategory }) {
 }
 
 export function ToolActivity({ persisted = [], live = [] }: ToolActivityProps) {
-  const calls: ActivityCall[] = [
-    ...persisted.map(({ call, result }) => ({
-      callId: call.callId,
-      name: call.name,
-      arguments: call.arguments,
-      ...(result !== undefined ? { result } : {}),
-      state:
-        result === undefined
-          ? ("running" as const)
-          : result.isError === true
-            ? ("failed" as const)
-            : ("completed" as const),
-    })),
-    ...live.map((call) => ({ ...call, arguments: null })),
-  ];
+  const calls = activityCalls(persisted, live);
   if (calls.length === 0) return null;
   return (
     <div className="tool-activity">
-      {categorize(calls).map((category) => {
-        const state = categoryState(category);
-        return (
-          <ActivityRailRow
-            className="tool-activity-category"
-            headline={categoryHeadline(category)}
-            key={category.key}
-            label={category.label}
-            metric={categoryMetric(category)}
-            state={state}
-          >
-            <CategoryCalls category={category} />
-          </ActivityRailRow>
-        );
-      })}
+      {categorize(calls).map((category) => (
+        <ActivityRailRow
+          className="tool-activity-category"
+          headline={categoryHeadline(category) ?? undefined}
+          key={category.key}
+          label={category.label}
+          metric={categoryMetric(category)}
+          state={categoryState(category)}
+        >
+          <CategoryCalls category={category} />
+        </ActivityRailRow>
+      ))}
     </div>
   );
 }

@@ -1,0 +1,327 @@
+{
+  "name": "calls group into edit, command, read and per-name other categories",
+  "records": [
+    {
+      "id": "a1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_call",
+          "callId": "e1",
+          "name": "edit",
+          "arguments": {
+            "path": "x.ts"
+          }
+        },
+        {
+          "type": "tool_call",
+          "callId": "e2",
+          "name": "write",
+          "arguments": {
+            "path": "y.ts"
+          }
+        },
+        {
+          "type": "tool_call",
+          "callId": "b1",
+          "name": "bash",
+          "arguments": {
+            "command": "npm test"
+          }
+        },
+        {
+          "type": "tool_call",
+          "callId": "b2",
+          "name": "bash",
+          "arguments": {
+            "command": "ls"
+          }
+        },
+        {
+          "type": "tool_call",
+          "callId": "r1",
+          "name": "read",
+          "arguments": {
+            "path": "z.ts",
+            "offset": 10,
+            "limit": 5
+          }
+        },
+        {
+          "type": "tool_call",
+          "callId": "m1",
+          "name": "mcp_call",
+          "arguments": {
+            "task": "inspect"
+          }
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a2",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_result",
+          "callId": "e1",
+          "content": [
+            {
+              "type": "text",
+              "text": "edited x"
+            }
+          ],
+          "patch": "+a\n-b\n+++c\n---d\n e"
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a3",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_result",
+          "callId": "e2",
+          "content": [
+            {
+              "type": "text",
+              "text": "wrote y"
+            }
+          ],
+          "patch": "+x"
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a4",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_result",
+          "callId": "b1",
+          "content": [
+            {
+              "type": "text",
+              "text": "failure output"
+            }
+          ],
+          "isError": true
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a5",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_result",
+          "callId": "b2",
+          "content": [
+            {
+              "type": "text",
+              "text": "listing"
+            }
+          ]
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a6",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_result",
+          "callId": "r1",
+          "content": [
+            {
+              "type": "text",
+              "text": "five lines"
+            }
+          ]
+        }
+      ],
+      "overflow": {}
+    },
+    {
+      "id": "a7",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_result",
+          "callId": "m1",
+          "content": [
+            {
+              "type": "text",
+              "text": "inspected"
+            }
+          ]
+        }
+      ],
+      "overflow": {}
+    }
+  ],
+  "expect": {
+    "turns": [
+      {
+        "kind": "agent",
+        "key": "a1",
+        "parts": [
+          {
+            "kind": "tool_run",
+            "key": "tools-0",
+            "categories": [
+              {
+                "key": "edit",
+                "kind": "edit",
+                "label": "edit",
+                "headline": null,
+                "state": "completed",
+                "count": {
+                  "kind": "diff",
+                  "added": 2,
+                  "removed": 1
+                },
+                "progress": null,
+                "calls": [
+                  {
+                    "callId": "e1",
+                    "name": "edit",
+                    "state": "completed",
+                    "label": "x.ts",
+                    "status": "complete",
+                    "output": "edited x",
+                    "stats": {
+                      "added": 1,
+                      "removed": 1
+                    }
+                  },
+                  {
+                    "callId": "e2",
+                    "name": "write",
+                    "state": "completed",
+                    "label": "y.ts",
+                    "status": "complete",
+                    "output": "wrote y",
+                    "stats": {
+                      "added": 1,
+                      "removed": 0
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "command",
+                "kind": "command",
+                "label": "commands",
+                "headline": null,
+                "state": "failed",
+                "count": {
+                  "kind": "count",
+                  "label": "2 ran"
+                },
+                "progress": {
+                  "kind": "failed",
+                  "count": 1
+                },
+                "calls": [
+                  {
+                    "callId": "b1",
+                    "name": "bash",
+                    "state": "failed",
+                    "label": "npm test",
+                    "status": "failed",
+                    "output": "failure output",
+                    "stats": null
+                  },
+                  {
+                    "callId": "b2",
+                    "name": "bash",
+                    "state": "completed",
+                    "label": "ls",
+                    "status": "complete",
+                    "output": "listing",
+                    "stats": null
+                  }
+                ]
+              },
+              {
+                "key": "read",
+                "kind": "read",
+                "label": "read",
+                "headline": "z.ts",
+                "state": "completed",
+                "count": null,
+                "progress": null,
+                "calls": [
+                  {
+                    "callId": "r1",
+                    "name": "read",
+                    "state": "completed",
+                    "label": "z.ts:10–14",
+                    "status": "complete",
+                    "output": "five lines",
+                    "stats": null
+                  }
+                ]
+              },
+              {
+                "key": "other:mcp_call",
+                "kind": "other",
+                "label": "mcp_call",
+                "headline": null,
+                "state": "completed",
+                "count": null,
+                "progress": null,
+                "calls": [
+                  {
+                    "callId": "m1",
+                    "name": "mcp_call",
+                    "state": "completed",
+                    "label": "mcp_call",
+                    "status": "complete",
+                    "output": "inspected",
+                    "stats": null
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "representedMessageIds": [],
+    "persistedToolCallIds": [
+      "e1",
+      "e2",
+      "b1",
+      "b2",
+      "r1",
+      "m1"
+    ]
+  }
+}

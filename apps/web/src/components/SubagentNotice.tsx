@@ -52,7 +52,3 @@ export function SubagentNotice({ record }: { record: EventRecord }) {
     </ActivityRailRow>
   );
 }
-
-export function isSubagentNotice(record: EventRecord): boolean {
-  return record.subagent !== undefined;
-}

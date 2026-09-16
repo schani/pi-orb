@@ -1,0 +1,119 @@
+{
+  "name": "only displayed custom messages reach a turn; subagent notices are their own part",
+  "records": [
+    {
+      "id": "e1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.custom_message",
+      "overflow": {},
+      "content": [
+        {
+          "type": "text",
+          "text": "<task-notification>raw</task-notification>"
+        }
+      ],
+      "custom": {
+        "customType": "subagent-notification",
+        "display": true
+      },
+      "subagent": {
+        "kind": "notification",
+        "id": "child",
+        "status": "completed"
+      }
+    },
+    {
+      "id": "e2",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.custom_message",
+      "overflow": {},
+      "content": [
+        {
+          "type": "text",
+          "text": "hidden"
+        }
+      ],
+      "custom": {
+        "customType": "",
+        "display": false
+      }
+    },
+    {
+      "id": "e3",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.custom_message",
+      "overflow": {},
+      "content": [
+        {
+          "type": "text",
+          "text": "shown"
+        }
+      ],
+      "custom": {
+        "customType": "",
+        "display": true
+      }
+    },
+    {
+      "id": "e4",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "agent.settings_fallback",
+      "overflow": {},
+      "content": [
+        {
+          "type": "text",
+          "text": "fell back to another model"
+        }
+      ]
+    },
+    {
+      "id": "e5",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "event",
+      "eventType": "pi.other",
+      "overflow": {},
+      "content": [
+        {
+          "type": "text",
+          "text": "ignored"
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "turns": [
+      {
+        "kind": "agent",
+        "key": "e1",
+        "parts": [
+          {
+            "kind": "subagent_notice",
+            "key": "e1",
+            "text": "<task-notification>raw</task-notification>"
+          },
+          {
+            "kind": "event_text",
+            "key": "e3",
+            "text": "shown"
+          },
+          {
+            "kind": "event_text",
+            "key": "e4",
+            "text": "fell back to another model"
+          }
+        ]
+      }
+    ],
+    "representedMessageIds": [],
+    "persistedToolCallIds": []
+  }
+}

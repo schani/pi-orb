@@ -1,25 +1,28 @@
 import type {
-  CompactionRecord,
   ContentBlock,
   EventRecord,
   HistoryRecord,
   MessageRecord,
   OrbMessageView,
 } from "@pi-orb/protocol";
-import { type LiveBlock, representedInboxMessageIds, type ToolChip } from "@pi-orb/transcript";
+import {
+  blockText,
+  groupTurns,
+  type LiveBlock,
+  persistedToolCallIds,
+  representedInboxMessageIds,
+  splitAgentRecords,
+  type ToolChip,
+  type Turn,
+} from "@pi-orb/transcript";
 import { memo, type ReactNode } from "react";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { BitRegister } from "./BitRegister.tsx";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
 import { ResponseMarkdown } from "./ResponseMarkdown.tsx";
-import { isSubagentNotice, SubagentNotice } from "./SubagentNotice.tsx";
-import {
-  type PersistedToolCall,
-  ToolActivity,
-  type ToolCallBlock,
-  type ToolResultBlock,
-} from "./ToolActivity.tsx";
+import { SubagentNotice } from "./SubagentNotice.tsx";
+import { ToolActivity } from "./ToolActivity.tsx";
 
 interface HistoryViewProps {
   records: readonly HistoryRecord[];
@@ -33,13 +36,6 @@ const TOOL_ARGS_LIMIT = 200;
 
 function truncate(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
-}
-
-function blockText(blocks: readonly ContentBlock[]): string {
-  return blocks
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
 }
 
 function renderToolCall(block: ContentBlock & { type: "tool_call" }): ReactNode {
@@ -127,31 +123,6 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
   return nodes;
 }
 
-/**
- * One transcript record: a user turn, a grouped agent turn (all adjacent
- * assistant/tool/event records share one prefix), a shell block, or a
- * full-width compaction divider.
- */
-type Turn =
-  | { kind: "user"; record: MessageRecord }
-  | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
-  | { kind: "shell"; record: EventRecord; shell: NonNullable<EventRecord["shell"]> }
-  | { kind: "compaction"; record: CompactionRecord };
-
-/** Per docs/pi-adapter.md, only a custom message the harness marked displayed is shown. */
-function isDisplayedCustomMessage(record: EventRecord): boolean {
-  return record.eventType === "agent.settings_fallback" || record.custom?.display === true;
-}
-
-function assistantFailure(record: MessageRecord): string | null {
-  if (record.role !== "assistant" || record.finishReason !== "error") return null;
-  const failure = record.failure;
-  if (failure === undefined) return "Model response failed.";
-  if (!failure.diagnostics.includes("provider_transport_failure")) return failure.message;
-  const provider = record.model?.provider === "openai-codex" ? "OpenAI" : "the model provider";
-  return `The agent’s connection to ${provider} was interrupted. ${failure.message}`;
-}
-
 export function assistantResponseMarkdown(record: MessageRecord): string | null {
   if (record.role !== "assistant") return null;
   const parts = record.content
@@ -161,121 +132,60 @@ export function assistantResponseMarkdown(record: MessageRecord): string | null 
   return parts.length === 0 ? null : parts.join("\n\n");
 }
 
-function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let runIndex = 0;
-  let currentCalls: PersistedToolCall[] = [];
-  let currentById = new Map<string, PersistedToolCall>();
-
-  const flushTools = () => {
-    if (currentCalls.length === 0) return;
-    nodes.push(<ToolActivity persisted={currentCalls} key={`tools-${runIndex}`} />);
-    runIndex += 1;
-    currentCalls = [];
-    currentById = new Map();
-  };
-
-  for (const record of records) {
-    if (record.type === "event") {
-      flushTools();
-      if (isSubagentNotice(record)) {
-        nodes.push(<SubagentNotice key={record.id} record={record} />);
-        continue;
-      }
-      nodes.push(
-        <div className="record-custom" key={record.id}>
-          <p className="msg-text">
-            <PlainChatText>{blockText(record.content ?? [])}</PlainChatText>
-          </p>
-        </div>,
-      );
-      continue;
-    }
-
-    const copySource = assistantResponseMarkdown(record);
-    const firstTextIndex = record.content.findIndex(
-      (block) => block.type === "text" && block.text.trim() !== "",
-    );
-    for (const [index, block] of record.content.entries()) {
-      if (block.type === "tool_call") {
-        const item: PersistedToolCall = { call: block as ToolCallBlock };
-        currentCalls.push(item);
-        currentById.set(block.callId, item);
-        continue;
-      }
-      if (block.type === "tool_result") {
-        const item = currentById.get(block.callId);
-        if (item !== undefined) {
-          item.result = block as ToolResultBlock;
-        } else {
-          flushTools();
-          nodes.push(renderToolResult(block, `${record.id}-${index}`));
-        }
-        continue;
-      }
-
-      // Visible prose/reasoning/media is a boundary between maximal tool runs.
-      flushTools();
-      if (block.type === "text" && index === firstTextIndex && copySource !== null) {
-        nodes.push(
-          <ResponseMarkdown
-            key={`${record.id}-${index}`}
-            markdown={block.text}
-            copySource={copySource}
-          />,
-        );
-        continue;
-      }
-      const singleBlockRecord: MessageRecord = { ...record, content: [block] };
-      const rendered = renderMessageBlocks(singleBlockRecord);
-      // Reasoning must be a direct child of the turn body so its rail row can
-      // collapse the body's prose gap against adjacent activity rows.
-      if (block.type === "reasoning") nodes.push(...rendered);
-      else nodes.push(<div key={`${record.id}-${index}`}>{rendered}</div>);
-    }
-    const failure = assistantFailure(record);
-    if (failure !== null) {
-      flushTools();
-      nodes.push(
-        <p className="error-text" role="alert" key={`${record.id}-error`}>
-          <PlainChatText>{failure}</PlainChatText>
-        </p>,
-      );
-    }
-  }
-  flushTools();
-  return nodes;
+/** One response owns one copy action, hosted by its first non-empty text block. */
+function responseCopySource(record: MessageRecord, block: ContentBlock): string | null {
+  if (block.type !== "text" || block.text.trim() === "") return null;
+  const first = record.content.find((other) => other.type === "text" && other.text.trim() !== "");
+  return block === first ? assistantResponseMarkdown(record) : null;
 }
 
-function groupTurns(records: readonly HistoryRecord[]): Turn[] {
-  const turns: Turn[] = [];
-  const appendAgentPart = (record: MessageRecord | EventRecord) => {
-    const last = turns[turns.length - 1];
-    if (last !== undefined && last.kind === "agent") {
-      last.records.push(record);
-    } else {
-      turns.push({ kind: "agent", key: record.id, records: [record] });
-    }
-  };
-  for (const record of records) {
-    switch (record.type) {
-      case "message":
-        if (record.role === "user") turns.push({ kind: "user", record });
-        else appendAgentPart(record);
+function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  for (const part of splitAgentRecords(records)) {
+    switch (part.kind) {
+      case "tool_run":
+        nodes.push(<ToolActivity persisted={part.calls} key={part.key} />);
         break;
-      case "compaction":
-        turns.push({ kind: "compaction", record });
+      case "subagent_notice":
+        nodes.push(<SubagentNotice key={part.key} record={part.record} />);
         break;
-      case "event":
-        if (record.shell !== undefined) {
-          turns.push({ kind: "shell", record, shell: record.shell });
-        } else if (isDisplayedCustomMessage(record)) {
-          appendAgentPart(record);
+      case "event_text":
+        nodes.push(
+          <div className="record-custom" key={part.key}>
+            <p className="msg-text">
+              <PlainChatText>{part.text}</PlainChatText>
+            </p>
+          </div>,
+        );
+        break;
+      case "tool_result":
+        nodes.push(renderToolResult(part.block, part.key));
+        break;
+      case "block": {
+        const copySource = responseCopySource(part.record, part.block);
+        if (part.block.type === "text" && copySource !== null) {
+          nodes.push(
+            <ResponseMarkdown key={part.key} markdown={part.block.text} copySource={copySource} />,
+          );
+          break;
         }
+        const rendered = renderMessageBlocks({ ...part.record, content: [part.block] });
+        // Reasoning must be a direct child of the turn body so its rail row can
+        // collapse the body's prose gap against adjacent activity rows.
+        if (part.block.type === "reasoning") nodes.push(...rendered);
+        else nodes.push(<div key={part.key}>{rendered}</div>);
+        break;
+      }
+      case "failure":
+        nodes.push(
+          <p className="error-text" role="alert" key={part.key}>
+            <PlainChatText>{part.message}</PlainChatText>
+          </p>,
+        );
         break;
     }
   }
-  return turns;
+  return nodes;
 }
 
 interface LiveAgentContent {
@@ -356,17 +266,6 @@ function renderTurn(turn: Turn, live?: LiveAgentContent, busy = false): ReactNod
         </div>
       );
   }
-}
-
-function persistedToolCallIds(records: readonly HistoryRecord[]): Set<string> {
-  const ids = new Set<string>();
-  for (const record of records) {
-    if (record.type !== "message") continue;
-    for (const block of record.content) {
-      if (block.type === "tool_call") ids.add(block.callId);
-    }
-  }
-  return ids;
 }
 
 export const HistoryView = memo(function HistoryView({
