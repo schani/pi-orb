@@ -175,6 +175,29 @@ const records: Record<string, unknown>[] = [
       },
     },
   }),
+  legacy("tool-empty-content", {
+    type: "message",
+    role: "tool",
+    content: [],
+    overflow: {
+      native: {
+        type: "message",
+        message: { role: "toolResult", details: { patch: "--- a\n+++ b\n+new" } },
+      },
+    },
+  }),
+  legacy("custom-entry", {
+    type: "event",
+    eventType: "pi.custom",
+    content: [],
+    overflow: {
+      native: {
+        type: "custom",
+        customType: "subagent-notification",
+        data: { id: "child-4", status: "completed" },
+      },
+    },
+  }),
   legacy("tool-plain", {
     type: "message",
     role: "tool",
@@ -320,6 +343,13 @@ describe(`${BACKFILL} history backfill`, () => {
       message: "usage limit reached",
       diagnostics: [],
     });
+  });
+
+  it("leaves a record the adapter would not have derived from untouched", () => {
+    // `jsonb_agg` over an empty array is NULL, which would null the column.
+    expect(messageRecord("tool-empty-content").content).toEqual([]);
+    expect(event("custom-entry").subagent).toBeUndefined();
+    expect(event("custom-entry").custom).toBeUndefined();
   });
 
   it("backfills tool-result patches", () => {

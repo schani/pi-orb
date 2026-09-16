@@ -61,6 +61,7 @@ UPDATE history_records SET record = record || jsonb_build_object(
   ))
 )
 WHERE record->>'type' = 'event'
+  AND record->>'eventType' = 'pi.custom_message'
   AND record->'subagent' IS NULL
   AND record->'overflow'->'native'->>'customType' IN (
     'subagent-notification', 'subagent-update', 'subagent-workspace-notice'
@@ -120,4 +121,5 @@ UPDATE history_records SET record = jsonb_set(record, '{content}', (
 ))
 WHERE record->>'type' = 'message'
   AND jsonb_typeof(record->'content') = 'array'
+  AND jsonb_array_length(record->'content') > 0
   AND jsonb_typeof(record->'overflow'->'native'->'message'->'details'->'patch') = 'string';
