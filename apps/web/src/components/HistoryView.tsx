@@ -12,6 +12,7 @@ import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { BitRegister } from "./BitRegister.tsx";
 import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
+import { ResponseMarkdown } from "./ResponseMarkdown.tsx";
 import { isSubagentNotice, SubagentNotice } from "./SubagentNotice.tsx";
 import {
   type PersistedToolCall,
@@ -223,6 +224,15 @@ function assistantFailure(record: MessageRecord): string | null {
   return "Model response failed.";
 }
 
+export function assistantResponseMarkdown(record: MessageRecord): string | null {
+  if (record.role !== "assistant") return null;
+  const parts = record.content
+    .filter((block): block is ContentBlock & { type: "text" } => block.type === "text")
+    .map((block) => block.text)
+    .filter((text) => text.trim() !== "");
+  return parts.length === 0 ? null : parts.join("\n\n");
+}
+
 function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): ReactNode[] {
   const nodes: ReactNode[] = [];
   let runIndex = 0;
@@ -254,6 +264,10 @@ function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): 
       continue;
     }
 
+    const copySource = assistantResponseMarkdown(record);
+    const firstTextIndex = record.content.findIndex(
+      (block) => block.type === "text" && block.text.trim() !== "",
+    );
     for (const [index, block] of record.content.entries()) {
       if (block.type === "tool_call") {
         const item: PersistedToolCall = { call: block as ToolCallBlock };
@@ -275,6 +289,16 @@ function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): 
 
       // Visible prose/reasoning/media is a boundary between maximal tool runs.
       flushTools();
+      if (block.type === "text" && index === firstTextIndex && copySource !== null) {
+        nodes.push(
+          <ResponseMarkdown
+            key={`${record.id}-${index}`}
+            markdown={block.text}
+            copySource={copySource}
+          />,
+        );
+        continue;
+      }
       const singleBlockRecord: MessageRecord = { ...record, content: [block] };
       const rendered = renderMessageBlocks(singleBlockRecord);
       // Reasoning must be a direct child of the turn body so its rail row can
@@ -339,8 +363,8 @@ function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNod
     nodes.push(
       block.blockType === "reasoning" ? (
         renderReasoningRail(block.text, block.blockId, true)
-      ) : (
-        <ChatMarkdown key={block.blockId}>{block.text}</ChatMarkdown>
+      ) : block.text.trim() === "" ? null : (
+        <ResponseMarkdown key={block.blockId} markdown={block.text} copySource={block.text} />
       ),
     );
   }

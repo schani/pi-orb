@@ -1,7 +1,7 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { HistoryView } from "./HistoryView.tsx";
+import { assistantResponseMarkdown, HistoryView } from "./HistoryView.tsx";
 
 function message(id: string, role: "user" | "assistant", text: string): HistoryRecord {
   return {
@@ -483,6 +483,76 @@ describe("HistoryView turn structure", () => {
 });
 
 describe("HistoryView", () => {
+  it("gives each persisted assistant message one raw-Markdown copy action", () => {
+    const mixed: HistoryRecord = {
+      id: "mixed",
+      parentId: null,
+      timestamp: "time-mixed",
+      type: "message",
+      role: "assistant",
+      content: [
+        { type: "text", text: "  " },
+        { type: "text", text: "First **source**." },
+        { type: "reasoning", text: "private reasoning" },
+        { type: "tool_call", callId: "call", name: "read", arguments: { path: "secret" } },
+        { type: "text", text: "Second [source](https://example.com)." },
+      ],
+      overflow: {},
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[mixed]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+
+    expect(assistantResponseMarkdown(mixed)).toBe(
+      "First **source**.\n\nSecond [source](https://example.com).",
+    );
+    expect(html.match(/class="icon-button response-copy"/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Copy response Markdown"');
+    expect(html).toContain("response-markdown");
+    expect(html.indexOf("First")).toBeLessThan(html.indexOf("response-copy"));
+    expect(html.indexOf("response-copy")).toBeLessThan(html.indexOf("Second"));
+  });
+
+  it("uses each live text block as its truthful pre-commit copy boundary", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[]}
+        liveBlocks={[
+          { blockId: "text-1", blockType: "text", text: "First live block", revision: 1 },
+          { blockId: "reasoning", blockType: "reasoning", text: "thinking", revision: 1 },
+          { blockId: "text-2", blockType: "text", text: "Second live block", revision: 1 },
+        ]}
+        tools={[]}
+        busy
+      />,
+    );
+
+    expect(html.match(/class="icon-button response-copy"/g)).toHaveLength(2);
+    expect(html.match(/class="response-markdown"/g)).toHaveLength(2);
+  });
+
+  it("omits response copy for thinking, tools, empty text, and user messages", () => {
+    const emptyAssistant = message("empty", "assistant", "") as Extract<
+      HistoryRecord,
+      { type: "message" }
+    >;
+    emptyAssistant.content = [
+      { type: "reasoning", text: "thinking only" },
+      { type: "text", text: "   " },
+    ];
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[message("user", "user", "user source"), emptyAssistant]}
+        liveBlocks={[{ blockId: "empty-live", blockType: "text", text: "", revision: 1 }]}
+        tools={[{ callId: "live-tool", name: "read", state: "running", message: null }]}
+        busy
+      />,
+    );
+
+    expect(assistantResponseMarkdown(emptyAssistant)).toBeNull();
+    expect(html).not.toContain("response-copy");
+  });
+
   it("renders user, committed assistant, and streaming assistant text as Markdown", () => {
     const html = renderToStaticMarkup(
       <HistoryView

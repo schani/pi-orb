@@ -1473,6 +1473,54 @@ button.personal-instructions-gear {
   margin-bottom: 0;
 }
 
+.response-markdown {
+  position: relative;
+  min-width: 0;
+  padding-right: 24px;
+  overflow-wrap: anywhere;
+}
+
+.response-copy {
+  position: absolute;
+  top: 0;
+  right: 0;
+  opacity: 0;
+}
+
+.response-markdown:hover > .response-copy,
+.response-markdown:focus-within > .response-copy,
+.response-copy[data-state="copied"],
+.response-copy[data-state="failed"] {
+  opacity: 1;
+}
+
+.response-copy-status {
+  display: block;
+  color: var(--g3);
+  font-size: 11px;
+  text-align: right;
+}
+
+.response-copy-status:empty {
+  display: none;
+}
+
+.response-copy[data-state="copied"],
+.response-copy-status:not(:empty) {
+  color: var(--ok);
+}
+
+.response-copy[data-state="failed"],
+.response-copy[data-state="failed"] + .response-copy-status {
+  color: var(--bad);
+}
+
+@media (hover: none) {
+  .response-copy {
+    opacity: 1;
+  }
+}
+
 .markdown-table-scroll {
   max-width: 100%;
   overflow-x: auto;
@@ -2351,6 +2399,17 @@ button.orb-phone-menu {
   .composer-phone-rail > button.icon-button {
     width: 44px;
     height: 44px;
+  }
+
+  .response-markdown {
+    min-height: 44px;
+    padding-right: 44px;
+  }
+
+  button.response-copy {
+    width: 44px;
+    height: 44px;
+    opacity: 1;
   }
 
   .composer:not([data-expanded="true"]) .composer-line,

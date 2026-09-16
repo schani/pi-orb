@@ -198,7 +198,7 @@ describe("frontend-only browser behavior", () => {
     await vite?.close();
   });
 
-  it.each([1280, 390, 320])(
+  it.each([1280, 600, 390, 320])(
     "renders gutter-free soft-inversion turns without overflow at %ipx",
     async (width) => {
       const page = await browser.newPage({ viewport: { width, height: 740 } });
@@ -250,6 +250,59 @@ describe("frontend-only browser behavior", () => {
         await expectPage(user.locator(".markdown-code-block")).toBeVisible();
         await expectPage(user.locator("table")).toBeVisible();
         await expectPage(user.locator("img")).toBeVisible();
+        const responseCopy = orb.getByRole("button", { name: "Copy response Markdown" }).first();
+        const responseBlock = responseCopy.locator("..");
+        await expectPage(responseCopy).toBeVisible();
+        if (width > 600) {
+          const opacity = () =>
+            responseCopy.evaluate(
+              (button) => button.ownerDocument.defaultView?.getComputedStyle(button).opacity,
+            );
+          expectPage(await opacity()).toBe("0");
+          await page.locator(".history .rec-orb").nth(1).hover();
+          expectPage(await opacity()).toBe("0");
+          await responseBlock.hover();
+          expectPage(await opacity()).toBe("1");
+          await page.mouse.move(0, 0);
+          await responseCopy.focus();
+          expectPage(await opacity()).toBe("1");
+        } else {
+          expectPage(
+            await responseCopy.evaluate((button) => ({
+              width: button.getBoundingClientRect().width,
+              height: button.getBoundingClientRect().height,
+              opacity: button.ownerDocument.defaultView?.getComputedStyle(button).opacity,
+            })),
+          ).toEqual({ width: 44, height: 44, opacity: "1" });
+          expectPage(
+            await page.locator(".response-markdown").evaluateAll((responses) =>
+              responses.every((response) => {
+                const wrapper = response.getBoundingClientRect();
+                const button = response.querySelector(".response-copy")?.getBoundingClientRect();
+                return (
+                  button !== undefined &&
+                  button.top >= wrapper.top &&
+                  button.bottom <= wrapper.bottom
+                );
+              }),
+            ),
+          ).toBe(true);
+          if (width === 320) {
+            expectPage(
+              await responseBlock.evaluate((response) => {
+                const content = response.querySelector(".chat-markdown")?.getBoundingClientRect();
+                const button = response.querySelector(".response-copy")?.getBoundingClientRect();
+                const box = response.getBoundingClientRect();
+                if (content === undefined || button === undefined) return null;
+                return {
+                  top: button.top - box.top,
+                  right: box.right - button.right,
+                  gap: button.left - content.right,
+                };
+              }),
+            ).toEqual({ top: 0, right: 0, gap: 0 });
+          }
+        }
         await expectPage(page.locator(".rec-status", { hasText: "steering" })).toBeVisible();
         const failedTurn = page.locator(".rec-q", { hasText: "This oversized follow-up" });
         await expectPage(failedTurn.locator(".rec-status", { hasText: "failed" })).toBeVisible();
@@ -273,6 +326,139 @@ describe("frontend-only browser behavior", () => {
       }
     },
   );
+
+  it("copies response Markdown independently from code and reports success", async () => {
+    const context = await browser.newContext({
+      permissions: ["clipboard-read", "clipboard-write"],
+      viewport: { width: 1280, height: 740 },
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const response = page.locator(".rec-orb").first();
+      const responseCopy = response.locator("button.response-copy");
+      const codeCopy = response.getByRole("button", { name: "Copy code to clipboard" });
+      await expectPage(responseCopy).toBeVisible();
+      await expectPage(responseCopy).toHaveAccessibleName("Copy response Markdown");
+      await expectPage(codeCopy).toBeVisible();
+
+      await codeCopy.click();
+      expectPage(
+        await page.evaluate(() =>
+          (
+            navigator as Navigator & { clipboard: { readText(): Promise<string> } }
+          ).clipboard.readText(),
+        ),
+      ).toBe('const orb = await connectOrb("frontend-playground");');
+
+      await page.clock.install();
+      await responseCopy.click();
+      await expectPage(responseCopy).toHaveAccessibleName("Copied response Markdown");
+      const copiedStatus = response.locator(".response-copy-status");
+      await expectPage(copiedStatus).toHaveText("copied");
+      await expectPage(copiedStatus).toHaveClass("response-copy-status visually-hidden");
+      expectPage(
+        await copiedStatus.evaluate((status) => {
+          const style = status.ownerDocument.defaultView?.getComputedStyle(status);
+          return { clipPath: style?.clipPath, position: style?.position };
+        }),
+      ).toEqual({ clipPath: "inset(50%)", position: "absolute" });
+      expectPage(
+        await page.evaluate(() =>
+          (
+            navigator as Navigator & { clipboard: { readText(): Promise<string> } }
+          ).clipboard.readText(),
+        ),
+      ).toBe(
+        '# Frontend playground\n\nThis conversation is supplied by the in-process fixture backend. Send a message and I will echo it with simulated streaming. Fenced code includes the top-right copy action:\n\n```ts\nconst orb = await connectOrb("frontend-playground");\n```',
+      );
+    } finally {
+      await context.close();
+    }
+  });
+
+  it("contains a short phone response action", async () => {
+    const context = await browser.newContext({
+      permissions: ["clipboard-read", "clipboard-write"],
+      viewport: { width: 600, height: 740 },
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const response = page
+        .locator(".response-markdown")
+        .filter({ hasText: "The activity rail is implemented and verified." });
+      expectPage(
+        await response.evaluate((wrapper) => {
+          const box = wrapper.getBoundingClientRect();
+          const paragraph = wrapper.querySelector("p")?.getBoundingClientRect();
+          const button = wrapper.querySelector(".response-copy")?.getBoundingClientRect();
+          if (paragraph === undefined || button === undefined) return null;
+          return {
+            paragraphHeight: paragraph.height,
+            wrapperHeight: box.height,
+            buttonContained: button.top >= box.top && button.bottom <= box.bottom,
+          };
+        }),
+      ).toEqual({ paragraphHeight: 20, wrapperHeight: 44, buttonContained: true });
+    } finally {
+      await context.close();
+    }
+  });
+
+  it("keeps corner response actions visible on touch-only desktops", async () => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      viewport: { width: 1280, height: 740 },
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const copy = page.getByRole("button", { name: "Copy response Markdown" }).first();
+      expectPage(
+        await copy.evaluate(
+          (button) => button.ownerDocument.defaultView?.getComputedStyle(button).opacity,
+        ),
+      ).toBe("1");
+    } finally {
+      await context.close();
+    }
+  });
+
+  it("keeps failed corner-copy feedback visible", async () => {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 740 } });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: async () => Promise.reject(new Error("blocked")) },
+      });
+      const documentConstructor = (globalThis as unknown as { Document: { prototype: object } })
+        .Document;
+      Object.defineProperty(documentConstructor.prototype, "execCommand", {
+        configurable: true,
+        value: () => false,
+      });
+    });
+    const page = await context.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const copy = page.getByRole("button", { name: "Copy response Markdown" }).first();
+      await copy.focus();
+      await page.keyboard.press("Enter");
+      await expectPage(copy).toHaveAccessibleName("Copy response Markdown failed");
+      await expectPage(page.getByText("copy failed", { exact: true }).first()).toBeVisible();
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(1700);
+      expectPage(
+        await copy.evaluate(
+          (button) => button.ownerDocument.defaultView?.getComputedStyle(button).opacity,
+        ),
+      ).toBe("1");
+      await expectPage(copy).toHaveAccessibleName("Copy response Markdown failed");
+    } finally {
+      await context.close();
+    }
+  });
 
   it.each([1280, 390, 320])(
     "keeps the active-only subagent rail above the terminal at %ipx",
