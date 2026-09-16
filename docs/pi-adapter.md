@@ -175,7 +175,7 @@ For every entry, preserve `entry.id`, `entry.parentId`, and `entry.timestamp` ex
 | Pi persisted entry         | Normalized record                                                                                                               |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `message` / user           | `MessageRecord`, role `user`; text/image blocks.                                                                                |
-| `message` / assistant      | `MessageRecord`, role `assistant`; text, thinking→reasoning, and tool-call blocks; provider/model, usage, stop reason; a failed stop reason with an error message also yields `failure` with that message and its diagnostic types. |
+| `message` / assistant      | `MessageRecord`, role `assistant`; text, thinking→reasoning, and tool-call blocks; provider/model, usage, stop reason; a failed stop reason with an error message nonempty under ECMAScript `trim()` also yields `failure` with the original message and its diagnostic types. |
 | `message` / tool result    | `MessageRecord`, role `tool`; one typed `tool_result` block containing call ID, nested text/image content, error flag, and `details.patch` as `patch`. |
 | `message` / bash execution | `EventRecord`, `eventType: "pi.bash_execution"`; normalized textual content where useful, plus `shell` with command, output, exit code, cancellation, truncation, and context exclusion. |
 | `thinking_level_change`    | `EventRecord`, `eventType: "pi.thinking_level_change"`.                                                                         |

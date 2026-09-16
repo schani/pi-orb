@@ -168,6 +168,39 @@ const entries: Record<string, unknown>[] = [
     type: "message",
     message: { role: "assistant", stopReason: "error", errorMessage: "   " },
   }),
+  entry("failure-ascii-whitespace-message", {
+    type: "message",
+    message: { role: "assistant", stopReason: "error", errorMessage: "\t\n\v\f\r " },
+  }),
+  entry("failure-unicode-whitespace-message", {
+    type: "message",
+    message: {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage:
+        "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff",
+    },
+  }),
+  entry("failure-surrounded-message", {
+    type: "message",
+    message: {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "\t\u00a0actual failure\u3000\n\ufeff",
+    },
+  }),
+  entry("failure-next-line-message", {
+    type: "message",
+    message: { role: "assistant", stopReason: "error", errorMessage: "\u0085" },
+  }),
+  entry("failure-mongolian-vowel-separator-message", {
+    type: "message",
+    message: { role: "assistant", stopReason: "error", errorMessage: "\u180e" },
+  }),
+  entry("failure-zero-width-space-message", {
+    type: "message",
+    message: { role: "assistant", stopReason: "error", errorMessage: "\u200b" },
+  }),
   entry("tool-patch", {
     type: "message",
     message: {
@@ -283,6 +316,23 @@ describe(`${BACKFILL} history backfill`, () => {
     expect(mapped.size).toBe(entries.length);
     for (const [id, record] of mapped) {
       expect(stored.get(id), `backfilled ${id}`).toEqual(record);
+    }
+  });
+
+  it("matches ECMAScript trim boundaries for assistant failures", () => {
+    for (const id of ["failure-ascii-whitespace-message", "failure-unicode-whitespace-message"]) {
+      expect(mapped.get(id)).not.toHaveProperty("failure");
+      expect(stored.get(id)).not.toHaveProperty("failure");
+    }
+
+    for (const id of [
+      "failure-surrounded-message",
+      "failure-next-line-message",
+      "failure-mongolian-vowel-separator-message",
+      "failure-zero-width-space-message",
+    ]) {
+      expect(mapped.get(id)).toHaveProperty("failure");
+      expect(stored.get(id)).toHaveProperty("failure");
     }
   });
 
