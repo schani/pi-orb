@@ -7,6 +7,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -45,12 +46,12 @@ export function useAppSearchSource(source: AppSearchSource | null): void {
   const removeSource = context?.removeSource ?? ignoreSourceRemoval;
   const owner = useRef(Symbol("app-search-source"));
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (source === null) removeSource(owner.current);
     else upsertSource(owner.current, source);
   }, [removeSource, source, upsertSource]);
 
-  useEffect(() => () => removeSource(owner.current), [removeSource]);
+  useLayoutEffect(() => () => removeSource(owner.current), [removeSource]);
 }
 
 function highlightedText(text: string, query: string): ReactNode {

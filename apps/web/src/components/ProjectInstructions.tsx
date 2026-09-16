@@ -30,6 +30,7 @@ export function ProjectInstructionsEditor({
   const requested = useRef(false);
   const writePending = useRef(false);
   const dirty = document.snapshot !== null && document.content !== document.snapshot.content;
+  const awaitingLoad = active && !requested.current && !dirty;
   const validation = validateProjectInstructions({ content: document.content });
   const remember = useCallback(
     (next: ProjectInstructionsDraft) => {
@@ -68,7 +69,8 @@ export function ProjectInstructionsEditor({
     void load();
   }, [active, load, retained]);
   const save = async () => {
-    if (writePending.current || saving || loading || !dirty || validation.isErr()) return;
+    if (writePending.current || saving || loading || awaitingLoad || !dirty || validation.isErr())
+      return;
     writePending.current = true;
     const request = ++epoch.current;
     setSaving(true);
@@ -98,7 +100,7 @@ export function ProjectInstructionsEditor({
         spellCheck={false}
         autoComplete="off"
         value={document.content}
-        disabled={loading || saving || document.snapshot === null}
+        disabled={loading || awaitingLoad || saving || document.snapshot === null}
         onChange={(event) => {
           remember({ ...document, content: event.target.value });
           setSaved(false);
@@ -116,7 +118,7 @@ export function ProjectInstructionsEditor({
           </span>
         ) : (
           <span role="status">
-            {loading
+            {loading || awaitingLoad
               ? "Loading…"
               : saving
                 ? "Saving…"
@@ -127,12 +129,15 @@ export function ProjectInstructionsEditor({
                     : ""}
           </span>
         )}
-        {document.snapshot === null && !loading && (
+        {document.snapshot === null && !loading && !awaitingLoad && (
           <button type="button" onClick={() => void load()}>
             Retry
           </button>
         )}
-        <button type="submit" disabled={loading || saving || !dirty || validation.isErr()}>
+        <button
+          type="submit"
+          disabled={loading || awaitingLoad || saving || !dirty || validation.isErr()}
+        >
           Save
         </button>
       </div>

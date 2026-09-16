@@ -658,10 +658,10 @@ describe("orb boot hook races (DST)", () => {
               expect(harness.world.setupRunsOf(ORB)).toEqual([0]);
               resumeRunsBefore = harness.world.resumeRunsOf(ORB);
 
-              // The runtime goes dark long enough for the reconciler's
-              // unreachable restart, and comes back well inside the boot that
-              // restart pays for: same compute, new runtime process.
-              harness.world.setRuntimeUnreachable(task, ORB, TEST_CONSTANTS.unreachableGraceMs * 3);
+              // The runtime stays dark until the reconciler restarts its host:
+              // same compute, new runtime process. A finite outage could
+              // legitimately recover after an attempted provider stop fails.
+              harness.world.killRuntimeProcess(ORB);
               await waitUntil(
                 task,
                 "orb left running for the restart",

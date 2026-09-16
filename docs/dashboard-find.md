@@ -30,7 +30,7 @@ Typing `@` in message mode opens the same search dialog, scoped to orb names acr
 
 `OrbLinkPicker` owns a fresh project/orb index for each opening, using the existing typed list APIs and dashboard source adapter with project results removed. Requests are not repeated per keystroke; late responses after dismissal are ignored. The dialog displays the existing loading and partial-failure diagnostics so an incomplete index is never silently presented as complete. Reopening retries loading; no persistent cache or lifecycle events are needed. `AppSearchDialog` accepts an optional selection callback for this insertion use case; dashboard navigation retains native anchor behavior. The picker remains insertion-only; Command-K separately opens fleet navigation from the orb view.
 
-Browser fixture tests cover replacing a selection in the middle of a draft, archived-orb lookup, keyboard activation without navigation, caret/focus restoration, Escape from a result, and both shell modes.
+Browser fixture tests cover replacing a selection in the middle of a draft, archived-orb lookup, keyboard activation without navigation, caret/focus restoration, Escape from a result, and both shell modes. Source registration, replacement and removal complete in layout effects, making the route's source current in the same DOM commit before browser interaction. A controlled route-switch test dispatches Command-K from a `MutationObserver` at that boundary; waiting for destination content alone is not the lifecycle guarantee. Evidence: `docs/postmortems/2026-09-16-release-validation-blockers.md`.
 
 ## Reusable client architecture
 

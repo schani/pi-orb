@@ -1,5 +1,9 @@
 # Testing strategy
 
+## Release-validation blocker corrections (2026-09-16)
+
+Five failures required causal fixes rather than green reruns: a boot-hook DST scenario now holds the runtime unavailable until the restart it asserts; Find source lifecycle uses layout effects so route and source become interactive in one commit, pinned by a controlled `MutationObserver` schedule; the project-instructions editor synchronously blocks clean-reopen edits until refresh ownership begins, pinned by an effect-free server render; the focused-field helper waits for the asynchronously enabled-and-visible predicate it counts; and session recovery waits for fixture history, scopes ribbon disappearance to `.session-ribbon`, and proves persisted history alerts remain. The corrected combined frontend run passed all 45 tests. Final `npm test` passed 1,809 tests with five conditional skips plus infrastructure suites; typecheck and lint passed. A prior combined Docker E2E passed 149 tests with no skips but predates the last two test-only corrections and does not qualify them. Evidence: `docs/postmortems/2026-09-16-release-validation-blockers.md`.
+
 ## Additional project instructions qualification (2026-09-16)
 
 Config tab was implemented DST/tests first; `docs/project-instructions.md` records the red baselines, selected simple contract and final qualification. The project-scoped service/store is exercised under 200 determined schedules with concurrent saves, boot reads, deletion admission and pre/post-commit failures. Real SQL, HTTP/auth, SDK layering/reload and native-image broker contracts cover the remaining boundaries. Chromium/WebKit test explicit save acceptance, failures, retained drafts, per-project isolation and phone layout. Full runtime E2E proves next-start adoption, clearing through compute replacement, body-free adoption metadata and normal child inheritance of the parent's boot snapshot after a live edit.

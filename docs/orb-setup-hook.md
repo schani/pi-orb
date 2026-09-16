@@ -402,6 +402,11 @@ Three defects the coverage found, all fixed on the same branch:
    exactly what the hold reseeds from after a process restart, so the reseed path was never really
    exercised. The model now derives both timestamps from the runtime's own start.
 
+A scenario asserting behavior after an unreachable restart must keep the runtime unavailable until
+that restart. A finite outage may recover after a retryable provider-stop failure, legitimately
+leaving the orb running. The retained failure and corrected fixture are recorded in
+`docs/postmortems/2026-09-16-release-validation-blockers.md`.
+
 ## Verification requirements
 
 - Runtime unit tests behind a process-spawner port and an injected clock: discovery

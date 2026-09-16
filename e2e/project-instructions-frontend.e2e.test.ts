@@ -109,8 +109,16 @@ it.each(["chromium", "webkit"] as const)(
       await check(input).toBeEnabled();
       await check(input).toHaveValue("");
       await close.click();
+      heldRead = new Promise((resolve) => {
+        releaseRead = resolve;
+      });
       await open();
+      await check(input).toBeDisabled();
+      releaseRead();
+      await check(input).toBeEnabled();
+      await check(input).toHaveValue(content);
       await input.fill("");
+      await check(save).toBeEnabled();
       await save.click();
       await check(panel).toContainText("Saved · next orb start");
       await page.reload();

@@ -26,6 +26,7 @@ async function expectTextFieldContrast(page: Page, scope = page.locator("body"))
   const fields = scope.locator(
     'input:not([type="file"]):not(:disabled):visible, textarea:not(:disabled):visible',
   );
+  await expectPage(fields.first()).toBeVisible();
   const count = await fields.count();
   expectPage(count).toBeGreaterThan(0);
   for (let index = 0; index < count; index++) {
@@ -73,6 +74,77 @@ describe("frontend-only browser behavior", () => {
       configFile: join(WEB_ROOT, "vite.config.ts"),
       mode: "frontend",
       plugins: [
+        {
+          name: "test-app-search-registration-order",
+          resolveId(id) {
+            return id === "virtual:app-search-registration-order" ? `\0${id}` : null;
+          },
+          configureServer(server) {
+            server.middlewares.use(async (request, response, next) => {
+              if (request.url !== "/__app-search-registration-order") {
+                next();
+                return;
+              }
+              const html = await server.transformIndexHtml(
+                request.url,
+                `<main id="root"></main><script type="module">import "virtual:app-search-registration-order";</script>`,
+              );
+              response.setHeader("Content-Type", "text/html");
+              response.end(html);
+            });
+          },
+          load(id) {
+            if (id !== "\0virtual:app-search-registration-order") return null;
+            return `
+              import React, { useEffect, useState } from "react";
+              import { createRoot } from "react-dom/client";
+              import {
+                AppSearchProvider,
+                useAppSearchSource,
+              } from "/src/components/AppSearch.tsx";
+
+              const source = (id) => ({
+                id,
+                label: \`Find \${id}\`,
+                status: { type: "complete" },
+                items: [],
+              });
+
+              function Route() {
+                const [id, setId] = useState("working");
+                useAppSearchSource(source(id));
+                useEffect(() => {
+                  const route = document.querySelector("[data-route-id]");
+                  const observer = new MutationObserver(() => {
+                    if (route?.getAttribute("data-route-id") !== "archived") return;
+                    observer.disconnect();
+                    window.dispatchEvent(
+                      new KeyboardEvent("keydown", { key: "k", metaKey: true }),
+                    );
+                  });
+                  if (route !== null) observer.observe(route, { attributes: true });
+                  return () => observer.disconnect();
+                }, []);
+                return React.createElement(
+                  "button",
+                  {
+                    "data-route-id": id,
+                    onClick: () => window.setTimeout(() => setId("archived"), 0),
+                  },
+                  "switch route",
+                );
+              }
+
+              createRoot(document.getElementById("root")).render(
+                React.createElement(
+                  AppSearchProvider,
+                  null,
+                  React.createElement(Route),
+                ),
+              );
+            `;
+          },
+        },
         {
           name: "test-history-render-count",
           enforce: "pre",
@@ -2410,6 +2482,17 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("registers a changed Find source before the changed route is interactive", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/__app-search-registration-order`);
+      await page.getByRole("button", { name: "switch route" }).click();
+      await expectPage(page.getByRole("dialog", { name: "Find archived" })).toBeVisible();
+    } finally {
+      await page.close();
+    }
+  });
+
   it("opens fleet Find with Cmd-K, leaves Ctrl-K native, and navigates with native links", async () => {
     const page = await browser.newPage();
     let holdDashboardOrbs = false;
@@ -2511,6 +2594,11 @@ describe("frontend-only browser behavior", () => {
       await query.press("Enter");
       await expectPage(page).toHaveURL(`${origin}/#/orbs/frontend-archived-orb`);
       await expectPage(dialog).toBeHidden();
+      const archivedMain = page.getByRole("main");
+      await expectPage(
+        archivedMain.getByText("Finished design exploration", { exact: true }),
+      ).toBeVisible();
+      await expectPage(archivedMain.getByText("archived", { exact: true })).toBeVisible();
       await expectPage(page.locator(".orb-index")).toHaveAttribute("aria-busy", "false");
       await page.keyboard.press("Meta+k");
       await expectPage(query).toHaveValue("");
@@ -2654,6 +2742,8 @@ describe("frontend-only browser behavior", () => {
 
     const draft = "Keep this exact draft through IAP sign-in";
     const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+    const historyAlerts = page.locator(".history").getByRole("alert");
+    await expectPage(historyAlerts).toHaveCount(3);
     await composer.fill(draft);
 
     await page.getByRole("button", { name: "expire session" }).click();
@@ -2666,7 +2756,8 @@ describe("frontend-only browser behavior", () => {
     await loaded;
 
     await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
-    await expectPage(page.getByRole("alert")).toHaveCount(0);
+    await expectPage(page.locator(".session-ribbon")).toHaveCount(0);
+    await expectPage(historyAlerts).toHaveCount(3);
     await expectPage(page.getByText("frontend fixture · session active")).toBeVisible();
     await expectPage(
       page.getByRole("textbox", { name: "Message the orb", exact: true }),
