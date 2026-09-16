@@ -25,6 +25,27 @@ The evidence separates the two outcomes: the workflow logged the command failure
 
 Increasing the generic command timeout would only move the ambiguity. Cleanup must capture and durably expose the exact asynchronous operation, then reconcile its terminal status independently of one CLI process.
 
+## Correction implemented locally — 2026-09-16
+
+The cleanup adapter persists target intent before predecessor inspection and preserves any exact blocking operation. It waits at most 60 seconds for a predecessor; a terminal predecessor error does not prevent rechecking ownership and deleting the owned partial resource. A dedicated, non-logging `gcloud auth print-access-token` process is bounded to 30 seconds with caller abort and `SIGKILL`; authentication failure never reaches deletion. The adapter then sends exactly one plain Compute REST `DELETE`, bounded by its own 30-second abort signal, with redirects rejected and no authentication replay or generic retry. It validates HTTP status and JSON, then persists the exact operation target and zonal/global scope before polling. The deletion-only poll budget is 12 minutes; `DONE` with an operation error is `failed`, while malformed responses, lost submission receipts, cancellation and poll interruption are `uncertain`. Token-free `submitted`, `failed`, and `uncertain` outcomes are allowlisted into the release record and GitHub artifact, including beside a primary build failure. There is no automatic recovery, blind resubmission, or indefinite global lock; pre-apply cleanup releases the lock.
+
+The initially proposed `gcloud ... delete --async --format=json` contract does not exist in pinned gcloud 583.0.0: all three relevant commands reject `--async`, and exact source tag `9b659d8b1efff08d32974041fd4b96d0988333e6` uses synchronous `MakeRequests`. The implemented REST boundary returns the Compute Operation directly. Its required fields are pinned by tests against the observed incident shape in `validator-operations-final.json`: `name`, `operationType=delete`, `status`, exact `targetLink`, and scope-matching `selfLink`. A read-only query of the old successful operation using the poller's exact format confirmed that `DONE` success returns the expected links and omits `error`; private evidence is retained at `.context/native-cleanup-fix/real-success-operation.json`.
+
+This is an implementation and focused-test result, not live REST or deployment validation.
+
+## Qualification and DST causal ledger
+
+Focused cleanup adapter, evidence, operation, release-state, and release-report regressions pass. Full typecheck and lint pass; `npm test` passed 1,886 tests with six conditional skips, plus infrastructure suites. Logs are retained under `.context/native-cleanup-fix/`. No new deployment was attempted; the separate application-identity gate remains pending user action.
+
+Every new DST failure was replayed before its test model was corrected, and every trace remains under `test-failures/`:
+
+- 20:02 UTC: `native-image-late-create-cleanup-log-{0,25}-1789588967*.json` exposed stale empty CLI delete receipts.
+- 20:12 UTC: `native-image-late-create-cleanup-log-{0,25}-1789589567*.json` omitted the injected REST submitter, leaving an unmanaged promise/deadlock; `native-image-slow-delete-1789589568151-0.json` retained the old mock flag and livelocked.
+- 20:14 UTC: `native-image-late-create-cleanup-log-{0,25}-1789589657*.json` retained a stale `deleted` flag and old CLI-log assertion.
+- 20:26 UTC: `native-cleanup-post-receipt-cancellation-1789590389468-0.json` omitted the injected command-log writer.
+
+These were test-model and assertion defects, not evidence of product defects. Their corrected focused scenarios are green. The production finding remains the original five-minute CLI deadline versus an eight-minute accepted GCE operation.
+
 ## Why no retry
 
 At workflow failure, the delete outcome was uncertain: the CLI had failed while GCE still owned a running operation. A blind cleanup retry could race that operation, and a full release retry would repeat an accepted build while obscuring the first failure. Validation-only recovery is inapplicable because no apply occurred. Read-only reconciliation established the actual terminal state instead.

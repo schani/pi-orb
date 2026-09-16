@@ -17,6 +17,22 @@ class ReportTest(unittest.TestCase):
         for text in ('applied-but-unvalidated', 'fixture-42', 'may incur costs', 'retained release lock', 'did not complete successfully'):
             self.assertIn(text, result.value)
 
+    def test_uncertain_native_cleanup_is_visible_without_raw_output(self):
+        value = record()
+        value['nativeCleanup'] = [{
+            'resourceKind': 'instances',
+            'target': 'projects/test-project/zones/us-central1-a/instances/native',
+            'scope': 'zones/us-central1-a',
+            'operation': None,
+            'status': 'uncertain',
+            'errorCode': 'SUBMIT_FAILED',
+        }]
+        result = report(value, 'b' * 40, 'failure')
+        self.assertIsNone(result.error)
+        self.assertIn('Native cleanup requires inspection', result.value)
+        self.assertIn('operation `unknown`', result.value)
+        self.assertNotIn('stderr', result.value)
+
     def test_recovery_keeps_source_and_runner_distinct(self):
         value = record()
         value['commit'] = 'a' * 40

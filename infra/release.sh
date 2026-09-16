@@ -140,6 +140,7 @@ mkdir -p "$RESULT_DIR"
 chmod 700 "$RESULT_DIR"
 RECORD="$RESULT_DIR/release.json"
 state init "$release_id" "$head_commit" "$PROJECT" "$REGION" "$ZONE" "$workflow_url"
+export PI_ORB_RELEASE_RECORD="$RECORD"
 if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; else state previous; fi
 state publish
 tofu -chdir="$INFRA" init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET" -backend-config=prefix=static-plane

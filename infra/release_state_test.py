@@ -32,7 +32,7 @@ def record():
         "previousServing": None,
         "serving": [{"service": name, "revision": name + "-new", "image": IMAGE, "generation": None if name == "pi-orb-issuer" else 42} for name in SERVICES],
         "retirement": {"after": STAMP, "operations": [], "revisions": ["pi-orb-old"], "zeroes": {"pi-orb-old": {"active": STAMP, "idle": STAMP}}},
-        "fixtures": [], "migrationJob": None,
+        "fixtures": [], "migrationJob": None, "nativeCleanup": [],
     }
 
 
@@ -71,10 +71,48 @@ class ReleaseStateTest(unittest.TestCase):
             {**value, "fixtures": [{"kind": "orb", "id": "x", "outcome": "retained", "token": "private-sentinel"}]},
             {**value, "artifacts": {**value["artifacts"], "password": "private-sentinel"}},
             {**value, "workflowUrl": "https://example.com/private-sentinel"},
+            {**value, "nativeCleanup": [{"resourceKind": "instances", "target": "projects/test-project/zones/us-central1-a/instances/native", "scope": "zones/us-central1-a", "operation": "operation-1", "status": "uncertain", "errorCode": "TOKEN", "stderr": "private-sentinel"}]},
         ]:
             cloud = FakeCloud()
             self.assertIsNotNone(publish(cloud, corrupt).error)
             self.assertEqual(cloud.writes, [])
+
+    def test_native_cleanup_is_strictly_allowlisted_and_scope_bound(self):
+        value = record()
+        valid = {"resourceKind": "instances", "target": "projects/test-project/zones/us-central1-a/instances/native", "scope": "zones/us-central1-a", "operation": "operation-1", "status": "uncertain", "errorCode": "POLL_FAILED"}
+        value["nativeCleanup"] = [valid]
+        self.assertTrue(validate_record(value))
+        for evidence in (
+            [{**valid, "target": []}],
+            [{**valid, "scope": "global"}],
+            [{**valid, "resourceKind": "images"}],
+            [{**valid, "target": valid["target"].replace("test-project", "other-project")}],
+            [{**valid, "status": "succeeded", "operation": None, "errorCode": None}],
+            [{**valid, "stderr": "private-sentinel"}],
+        ):
+            with self.subTest(evidence=evidence):
+                broken = copy.deepcopy(value)
+                broken["nativeCleanup"] = evidence
+                self.assertFalse(validate_record(broken))
+
+    def test_primary_build_failure_keeps_terminal_cleanup_evidence(self):
+        value = record()
+        value.update(phase="build", outcome="failed-before-apply", applyAttempted=False,
+                     gates={"build": "failed"}, artifacts=None, serving=None)
+        value["nativeCleanup"] = [{"resourceKind": "images", "target": "projects/test-project/global/images/native", "scope": "global", "operation": "operation-1", "status": "failed", "errorCode": "RESOURCE_IN_USE"}]
+        self.assertTrue(validate_record(value))
+
+    def test_native_cleanup_update_is_saved_before_one_publish(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, evidence_path = root / "release.json", root / "cleanup.json"
+            path.write_text(json.dumps(record()))
+            evidence = [{"resourceKind": "images", "target": "projects/test-project/global/images/native", "scope": "global", "operation": "operation-1", "status": "submitted", "errorCode": None}]
+            evidence_path.write_text(json.dumps(evidence))
+            with patch("infra.release_state.publish", return_value=Result()) as published:
+                self.assertEqual(main(["release_state", "native-cleanup", str(path), str(evidence_path)]), 0)
+            self.assertEqual(json.loads(path.read_text())["nativeCleanup"], evidence)
+            published.assert_called_once()
 
     def test_activation_requires_proof_and_matching_live_artifacts(self):
         for change in ("missing-proof", "changed-service", "mismatched-artifact", "missing-artifacts", "regression"):

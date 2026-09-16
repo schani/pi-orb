@@ -71,9 +71,15 @@ Token-free records live in `static-plane/releases/RELEASE_ID.json`, with a
 failed-before-apply, applied-but-unvalidated and validated; an interrupted apply
 is conservatively unvalidated. Schema changes may have committed even before an
 application apply—there is no automatic migration rollback. Failed smoke fixtures
-remain for diagnosis, with ownership/cleanup outcomes in the result. Local
-credential scratch is removed on handled exits. Never upload the workspace,
-state, saved plans or raw diagnostic directories.
+remain for diagnosis, with ownership/cleanup outcomes in the result. Native-build
+cleanup records token-free target intent before inspection and exact operation
+identity before polling. It reports `submitted`, `failed`, or `uncertain`; an
+uncertain submission is not retried automatically. Authentication and REST
+submission each have a 30-second bound, predecessor waiting has a 60-second
+bound, and exact-operation polling has a 12-minute bound. Cleanup does not hold
+the global pre-apply lock indefinitely. Local credential scratch is removed on
+handled exits. Never upload the workspace, state, saved plans or raw diagnostic
+directories.
 
 `build-push.sh`, `deploy.sh`, `smoke.sh`, and `smoke-workload-identity.sh` remain
 implementation stages for diagnostics; they are not separate operator steps. The native build boots a fresh VM and requires runtime readiness, correct ownership/storage, and disabled Docker services before accepting the image. Release validates its manifest against the exact source commit and project. Rebuild an image independently using `infra/native-vm/README.md`; the accepted manifest and logs remain under `.context/native-image-release/`.

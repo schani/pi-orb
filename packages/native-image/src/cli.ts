@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { fileCleanupEvidenceWriter } from "./cleanup-evidence.ts";
 import { GcloudImageBuildEffects } from "./gcloud.ts";
 import { buildNativeImage, type ImageBuildInput, validateImageBuildInput } from "./orchestrator.ts";
 import { installAbortSignalHandlers } from "./signals.ts";
@@ -88,7 +89,12 @@ async function main(): Promise<void> {
   };
   const result = await buildNativeImage(
     input,
-    new GcloudImageBuildEffects(),
+    new GcloudImageBuildEffects(
+      undefined,
+      undefined,
+      undefined,
+      fileCleanupEvidenceWriter(`${outputDir}/cleanup.json`, process.env["PI_ORB_RELEASE_RECORD"]),
+    ),
     controller.signal,
     ({ stage, action, status }) => process.stderr.write(`${stage}: ${action} ${status}\n`),
   );

@@ -85,7 +85,25 @@ describe("GCloud cleanup under deterministic scheduling", () => {
                   }
                   if (args[1] === "operations" && args[2] === "describe") {
                     describedOperations.push(String(args[3]));
-                    return { stdout: operationDone ? "DONE\n" : "RUNNING\n", stderr: "" };
+                    if (args[3] === "exact-create")
+                      return {
+                        stdout: JSON.stringify({
+                          name: args[3],
+                          status: operationDone ? "DONE" : "RUNNING",
+                          targetLink: `projects/target-project/global/images/${image}`,
+                          selfLink: `projects/target-project/global/operations/${args[3]}`,
+                        }),
+                        stderr: "",
+                      };
+                    return {
+                      stdout: JSON.stringify({
+                        name: args[3],
+                        status: "DONE",
+                        targetLink: `projects/target-project/global/images/${image}`,
+                        selfLink: `projects/target-project/global/operations/${args[3]}`,
+                      }),
+                      stderr: "",
+                    };
                   }
                   if (args[1] === "images" && args[2] === "describe") {
                     if (!materialized) throw new Error(`${image} was not found`);
@@ -101,7 +119,18 @@ describe("GCloud cleanup under deterministic scheduling", () => {
                     expect(operationDone).toBe(true);
                     expect(materialized).toBe(true);
                     deleted = true;
-                    return { stdout: "", stderr: "" };
+                    return {
+                      stdout: JSON.stringify([
+                        {
+                          name: "exact-delete",
+                          operationType: "delete",
+                          status: "RUNNING",
+                          targetLink: `projects/target-project/global/images/${image}`,
+                          selfLink: "projects/target-project/global/operations/exact-delete",
+                        },
+                      ]),
+                      stderr: "",
+                    };
                   }
                   throw new Error(`unexpected command: ${args.join(" ")}`);
                 };
@@ -109,6 +138,19 @@ describe("GCloud cleanup under deterministic scheduling", () => {
                   runner,
                   timing(task),
                   logWriter(task, logs, logDelay),
+                  undefined,
+                  () => {
+                    deleted = true;
+                    return ResultAsync.fromSafePromise(
+                      Promise.resolve({
+                        name: "exact-delete",
+                        operationType: "delete",
+                        status: "RUNNING",
+                        targetLink: `projects/target-project/global/images/${image}`,
+                        selfLink: "projects/target-project/global/operations/exact-delete",
+                      }),
+                    );
+                  },
                 ).run("cleanup", "delete-workspace-image", input, new AbortController().signal);
                 expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
               },
@@ -127,14 +169,112 @@ describe("GCloud cleanup under deterministic scheduling", () => {
             },
           ]);
           expect(schedule.isOk(), schedule.isErr() ? schedule.error.message : "").toBe(true);
-          expect(describedOperations.every((name) => name === "exact-create")).toBe(true);
-          expect(describedOperations.length).toBeGreaterThan(0);
+          expect(
+            describedOperations.every((name) => ["exact-create", "exact-delete"].includes(name)),
+          ).toBe(true);
+          expect(describedOperations).toContain("exact-create");
+          expect(describedOperations).toContain("exact-delete");
           expect(deleted).toBe(true);
-          expect(logs.some((entry) => entry.includes("images delete"))).toBe(true);
+          expect(logs.some((entry) => entry.includes("operations describe exact-delete"))).toBe(
+            true,
+          );
         },
       );
     });
   }
+
+  it("tracks an exact delete operation completing after eight minutes", async () => {
+    await runDst(
+      { name: "native-image-slow-delete", iterations: 10, lateTimerProbability: 0 },
+      async (sim) => {
+        let submitted = false;
+        let done = false;
+        const target = `projects/target-project/global/images/${image}`;
+        const operation = "slow-delete";
+        const evidence: string[] = [];
+        const schedule = await sim.runTasks([
+          {
+            name: "cleanup",
+            f: async (task) => {
+              const runner: CommandRunner = async (_command, args) => {
+                await task.checkpoint("slow delete command", ...args.slice(0, 4));
+                if (args[1] === "operations" && args[2] === "list")
+                  return { stdout: "[]", stderr: "" };
+                if (args[1] === "images" && args[2] === "describe")
+                  return {
+                    stdout: JSON.stringify({
+                      name: image,
+                      labels: { "pi-orb-native-build": input.operationId },
+                    }),
+                    stderr: "",
+                  };
+                if (args[1] === "images" && args[2] === "delete") {
+                  submitted = true;
+                  return {
+                    stdout: JSON.stringify([
+                      {
+                        name: operation,
+                        operationType: "delete",
+                        status: "RUNNING",
+                        targetLink: target,
+                        selfLink: `projects/target-project/global/operations/${operation}`,
+                      },
+                    ]),
+                    stderr: "",
+                  };
+                }
+                if (args[1] === "operations" && args[2] === "describe")
+                  return {
+                    stdout: JSON.stringify({
+                      name: operation,
+                      status: done ? "DONE" : "RUNNING",
+                      targetLink: target,
+                      selfLink: `projects/target-project/global/operations/${operation}`,
+                    }),
+                    stderr: "",
+                  };
+                throw new Error(`unexpected command: ${args.join(" ")}`);
+              };
+              const result = await new GcloudImageBuildEffects(
+                runner,
+                timing(task),
+                logWriter(task, [], 0),
+                (entry) => {
+                  evidence.push(`${task.monotonicNow()}:${entry.status}`);
+                  return ResultAsync.fromSafePromise(Promise.resolve());
+                },
+                () => {
+                  submitted = true;
+                  return ResultAsync.fromSafePromise(
+                    Promise.resolve({
+                      name: operation,
+                      operationType: "delete",
+                      status: "RUNNING",
+                      targetLink: target,
+                      selfLink: `projects/target-project/global/operations/${operation}`,
+                    }),
+                  );
+                },
+              ).run("cleanup", "delete-workspace-image", input, new AbortController().signal);
+              expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+            },
+          },
+          {
+            name: "cloud-delete",
+            f: async (task) => {
+              while (!submitted) await task.checkpoint("cloud waits for delete submission");
+              await task.sleep(488_000, "eight minute cloud deletion");
+              done = true;
+            },
+          },
+        ]);
+        expect(schedule.isOk(), schedule.isErr() ? schedule.error.message : "").toBe(true);
+        expect(evidence[0]).toMatch(/:uncertain$/);
+        expect(evidence.at(-1)).toMatch(/:succeeded$/);
+        expect(Number(evidence.at(-1)?.split(":")[0])).toBeGreaterThan(300_000);
+      },
+    );
+  });
 
   it("fails visibly when an exact operation never completes within the cleanup budget", async () => {
     await runDst(
@@ -161,7 +301,15 @@ describe("GCloud cleanup under deterministic scheduling", () => {
                 }
                 if (args[1] === "operations" && args[2] === "describe") {
                   await task.sleep(10_000, "slow operation status command");
-                  return { stdout: "RUNNING\n", stderr: "" };
+                  return {
+                    stdout: JSON.stringify({
+                      name: "stuck-create",
+                      status: "RUNNING",
+                      targetLink: `projects/target-project/global/images/${image}`,
+                      selfLink: "projects/target-project/global/operations/stuck-create",
+                    }),
+                    stderr: "",
+                  };
                 }
                 throw new Error(`unexpected command: ${args.join(" ")}`);
               };

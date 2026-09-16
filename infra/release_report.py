@@ -28,6 +28,11 @@ def report(record, commit, outcome):
         lines.append(f"Validation of `{record['validatesRelease']}`; the original record is unchanged.")
     if record["migrationJob"]:
         lines.append(f"Recorded migration job: `{record['migrationJob']}`. On uncertain execution, inspect it and the retained release lock before any new apply.")
+    cleanup_attention = [item for item in record["nativeCleanup"] if item["status"] in ("failed", "uncertain", "submitted")]
+    if cleanup_attention:
+        lines.append("Native cleanup requires inspection (pre-apply cleanup does not retain the global release lock):\n" + "\n".join(
+            f"- `{item['target']}`: {item['status']}; operation `{item['operation'] or 'unknown'}`; code `{item['errorCode'] or 'none'}`"
+            for item in cleanup_attention))
     retained = [item for item in record["fixtures"] if item["outcome"] in ("retained", "cleanup-failed")]
     if retained:
         lines.append("Retained fixtures may incur costs:\n" + "\n".join(

@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { promisify } from "node:util";
 import { err, errAsync, ok, okAsync, Result, ResultAsync } from "neverthrow";
+import type { CleanupEvidence, CleanupEvidenceWriter } from "./cleanup-evidence.ts";
 import type {
   CapturedImage,
   ImageBuildEffects,
@@ -20,7 +21,12 @@ type RunResult = { readonly stdout: string; readonly stderr: string };
 export type CommandRunner = (
   command: string,
   args: string[],
-  options: { signal: AbortSignal; maxBuffer: number; timeout: number; killSignal: NodeJS.Signals },
+  options: {
+    signal: AbortSignal;
+    maxBuffer: number;
+    timeout: number;
+    killSignal: NodeJS.Signals;
+  },
 ) => Promise<RunResult>;
 export interface CommandLogError {
   readonly type: "command_log_write_failed";
@@ -42,6 +48,106 @@ const writeCommandLog: CommandLogWriter = (path, contents) =>
     }),
   );
 
+export interface DeleteSubmitError {
+  readonly type: "delete_submit_failed";
+  readonly message: string;
+}
+export type DeleteSubmitter = (
+  target: string,
+  signal: AbortSignal,
+) => ResultAsync<unknown, DeleteSubmitError>;
+
+export type AccessTokenGetter = (signal: AbortSignal) => ResultAsync<string, DeleteSubmitError>;
+
+export const makeAccessTokenGetter =
+  (
+    runner: CommandRunner = execFileAsync,
+    deadline: () => AbortSignal = () => AbortSignal.timeout(30_000),
+  ): AccessTokenGetter =>
+  (signal) => {
+    if (signal.aborted)
+      return errAsync({
+        type: "delete_submit_failed",
+        message: "Compute delete authentication failed",
+      });
+    const commandSignal = AbortSignal.any([signal, deadline()]);
+    const failure = (): DeleteSubmitError => ({
+      type: "delete_submit_failed",
+      message: "Compute delete authentication failed",
+    });
+    return ResultAsync.fromPromise(
+      runner("gcloud", ["auth", "print-access-token"], {
+        signal: commandSignal,
+        maxBuffer: 1024 * 1024,
+        timeout: 30_000,
+        killSignal: "SIGKILL",
+      }),
+      failure,
+    ).andThen(({ stdout }) => {
+      const token = stdout.trim();
+      return !commandSignal.aborted && /^[A-Za-z0-9\-._~+/]+=*$/.test(token)
+        ? ok(token)
+        : err(failure());
+    });
+  };
+
+export interface ComputeDeleteResponse {
+  readonly status: number;
+  json(): Promise<unknown>;
+}
+export type ComputeDeleteRequester = (
+  url: string,
+  init: {
+    readonly method: "DELETE";
+    readonly headers: { readonly authorization: string };
+    readonly redirect: "error";
+    readonly signal: AbortSignal;
+  },
+) => Promise<ComputeDeleteResponse>;
+
+export const makeDeleteSubmitter =
+  (
+    getAccessToken: AccessTokenGetter,
+    request: ComputeDeleteRequester,
+    deadline: () => AbortSignal = () => AbortSignal.timeout(30_000),
+  ): DeleteSubmitter =>
+  (target, signal) =>
+    getAccessToken(signal).andThen((token) => {
+      if (signal.aborted)
+        return errAsync({
+          type: "delete_submit_failed" as const,
+          message: "Compute delete submission failed",
+        });
+      const requestSignal = AbortSignal.any([signal, deadline()]);
+      const failure = (): DeleteSubmitError => ({
+        type: "delete_submit_failed",
+        message: "Compute delete submission failed",
+      });
+      return ResultAsync.fromPromise(
+        request(`https://compute.googleapis.com/compute/v1/${target}`, {
+          method: "DELETE",
+          headers: { authorization: `Bearer ${token}` },
+          redirect: "error",
+          signal: requestSignal,
+        }),
+        failure,
+      ).andThen((response) => {
+        if (requestSignal.aborted || response.status < 200 || response.status >= 300)
+          return errAsync(failure());
+        return ResultAsync.fromPromise(response.json(), failure).andThen((body) =>
+          !requestSignal.aborted &&
+          typeof body === "object" &&
+          body !== null &&
+          !Array.isArray(body)
+            ? ok(body)
+            : err(failure()),
+        );
+      });
+    });
+
+const getAccessToken = makeAccessTokenGetter();
+const submitDelete = makeDeleteSubmitter(getAccessToken, (url, init) => fetch(url, init));
+
 export interface CleanupTiming {
   now(): number;
   wait(milliseconds: number, signal: AbortSignal): Promise<void>;
@@ -53,6 +159,8 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
   private readonly commandRunner: CommandRunner;
   private readonly cleanupTiming: CleanupTiming;
   private readonly commandLogWriter: CommandLogWriter;
+  private readonly cleanupEvidenceWriter: CleanupEvidenceWriter;
+  private readonly deleteSubmitter: DeleteSubmitter;
 
   constructor(
     commandRunner: CommandRunner = execFileAsync,
@@ -61,10 +169,14 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
       wait: (milliseconds, signal) => setTimeout(milliseconds, undefined, { signal }),
     },
     commandLogWriter: CommandLogWriter = writeCommandLog,
+    cleanupEvidenceWriter: CleanupEvidenceWriter = () => okAsync(undefined),
+    deleteSubmitter: DeleteSubmitter = submitDelete,
   ) {
     this.commandRunner = commandRunner;
     this.cleanupTiming = cleanupTiming;
     this.commandLogWriter = commandLogWriter;
+    this.cleanupEvidenceWriter = cleanupEvidenceWriter;
+    this.deleteSubmitter = deleteSubmitter;
   }
 
   now(): string {
@@ -122,7 +234,10 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           outcome = ok(output);
         } catch (cause) {
           const failure = cause as Error & { stdout?: string; stderr?: string };
-          output = { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "" };
+          output = {
+            stdout: failure.stdout ?? "",
+            stderr: failure.stderr ?? "",
+          };
           outcome = err({
             type: signal.aborted ? "cancelled" : "image_build_failed",
             stage,
@@ -203,7 +318,10 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
       case "cleanup:delete-ssh-key":
         return this.sshDirectoriesOwned.has(input.outputDir)
           ? ResultAsync.fromPromise(
-              rm(`${input.outputDir}/build-ssh`, { recursive: true, force: true }),
+              rm(`${input.outputDir}/build-ssh`, {
+                recursive: true,
+                force: true,
+              }),
               (cause): ImageBuildError => ({
                 type: "image_build_failed",
                 stage,
@@ -565,7 +683,11 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
       case "cleanup:delete-workspace-disk":
         return this.deleteOwned(input, "disks", workspaceDisk, signal);
       default:
-        return errAsync({ type: "image_build_failed", stage, message: `unknown action ${action}` });
+        return errAsync({
+          type: "image_build_failed",
+          stage,
+          message: `unknown action ${action}`,
+        });
     }
   }
 
@@ -625,18 +747,254 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
         .orElse((failure) =>
           notFound(failure) ? okAsync<"absent", ImageBuildError>("absent") : errAsync(failure),
         );
-    return this.waitForTargetOperations(input, kind, name, signal).andThen(() =>
-      describe().andThen((observation) =>
-        observation === "absent"
-          ? okAsync<void, ImageBuildError>(undefined)
-          : this.gcloud(
-              input,
-              stage,
-              ["compute", kind, "delete", name, ...scope, "--quiet"],
-              signal,
-            ).map(() => undefined),
-      ),
-    );
+    const target =
+      kind === "images"
+        ? `projects/${input.project}/global/images/${name}`
+        : `projects/${input.project}/zones/${input.zone}/${kind}/${name}`;
+    const operationScope = kind === "images" ? "global" : `zones/${input.zone}`;
+    const evidence = (
+      status: CleanupEvidence["status"],
+      operation: string | null,
+      errorCode: string | null = null,
+    ): CleanupEvidence => ({
+      resourceKind: kind,
+      target,
+      scope: operationScope,
+      operation,
+      status,
+      errorCode,
+    });
+    const record = (value: CleanupEvidence): ResultAsync<void, ImageBuildError> =>
+      this.cleanupEvidenceWriter(value).mapErr((failure) => ({
+        type: "image_build_failed" as const,
+        stage,
+        message: failure.message,
+      }));
+    return record(evidence("uncertain", null, "CLEANUP_PENDING"))
+      .andThen(() =>
+        this.waitForTargetOperations(input, kind, name, signal, (operation) =>
+          record(evidence("uncertain", operation, "PREDECESSOR_RUNNING")),
+        ),
+      )
+      .andThen(() =>
+        describe().andThen((observation) => {
+          if (observation === "absent") return record(evidence("absent", null));
+          return record(evidence("uncertain", null, "SUBMISSION_PENDING")).andThen(() =>
+            this.deleteSubmitter(target, signal)
+              .mapErr(
+                (failure): ImageBuildError => ({
+                  type: signal.aborted ? "cancelled" : "image_build_failed",
+                  stage,
+                  message: failure.message,
+                }),
+              )
+              .orElse((failure) =>
+                record(
+                  evidence("uncertain", null, signal.aborted ? "CANCELLED" : "SUBMIT_FAILED"),
+                ).andThen(() => errAsync<unknown, ImageBuildError>(failure)),
+              )
+              .andThen((submitted) => {
+                const receipt = this.parseDeleteOperationReceipt(submitted, target, operationScope);
+                if (receipt.isErr()) {
+                  return record(evidence("uncertain", null, "INVALID_RECEIPT")).andThen(() =>
+                    errAsync<void, ImageBuildError>(receipt.error),
+                  );
+                }
+                const operation = receipt.value;
+                return record(evidence("submitted", operation))
+                  .andThen(() =>
+                    this.waitForSubmittedDelete(
+                      input,
+                      kind,
+                      target,
+                      operation,
+                      signal,
+                      this.cleanupTiming.now() + 12 * 60_000,
+                      evidence,
+                      record,
+                    ),
+                  )
+                  .orElse((failure) =>
+                    record(
+                      evidence(
+                        "uncertain",
+                        operation,
+                        signal.aborted ? "CANCELLED" : "POLL_FAILED",
+                      ),
+                    )
+                      .orElse(() => okAsync(undefined))
+                      .andThen(() => errAsync<"succeeded" | "failed", ImageBuildError>(failure)),
+                  )
+                  .andThen((outcome) =>
+                    outcome === "succeeded"
+                      ? okAsync<void, ImageBuildError>(undefined)
+                      : errAsync<void, ImageBuildError>({
+                          type: "image_build_failed",
+                          stage,
+                          message: `cleanup operation ${operation} failed`,
+                        }),
+                  );
+              }),
+          );
+        }),
+      );
+  }
+
+  private parseDeleteOperationReceipt(
+    value: unknown,
+    target: string,
+    scope: string,
+  ): Result<string, ImageBuildError> {
+    const stage = "cleanup" as const;
+    const operation = value as Record<string, unknown> | null;
+    const operationPath =
+      scope === "global"
+        ? `projects/${target.split("/")[1]}/global/operations/`
+        : `projects/${target.split("/")[1]}/${scope}/operations/`;
+    if (
+      typeof operation !== "object" ||
+      operation === null ||
+      operation["operationType"] !== "delete" ||
+      String(operation["targetLink"] ?? "").replace(
+        /^https:\/\/www\.googleapis\.com\/compute\/v1\//,
+        "",
+      ) !== target ||
+      typeof operation["name"] !== "string" ||
+      !/^[a-z0-9-]+$/.test(operation["name"]) ||
+      String(operation["selfLink"] ?? "").replace(
+        /^https:\/\/www\.googleapis\.com\/compute\/v1\//,
+        "",
+      ) !== `${operationPath}${operation["name"]}` ||
+      !["PENDING", "RUNNING", "DONE"].includes(String(operation["status"] ?? ""))
+    )
+      return err<string, ImageBuildError>({
+        type: "image_build_failed",
+        stage,
+        message: "invalid cleanup submission receipt",
+      });
+    return ok<string, ImageBuildError>(operation["name"] as string);
+  }
+
+  private waitForSubmittedDelete(
+    input: ImageBuildInput,
+    kind: "instances" | "disks" | "images",
+    target: string,
+    operation: string,
+    signal: AbortSignal,
+    deadline: number,
+    evidence: (
+      status: CleanupEvidence["status"],
+      operation: string | null,
+      errorCode?: string | null,
+    ) => CleanupEvidence,
+    record: (value: CleanupEvidence) => ResultAsync<void, ImageBuildError>,
+  ): ResultAsync<"succeeded" | "failed", ImageBuildError> {
+    const stage = "cleanup" as const;
+    const remaining = deadline - this.cleanupTiming.now();
+    if (remaining <= 0)
+      return errAsync<"succeeded" | "failed", ImageBuildError>({
+        type: "image_build_failed",
+        stage,
+        message: `timed out waiting for cleanup operation ${operation}`,
+      });
+    return this.gcloud(
+      input,
+      stage,
+      [
+        "compute",
+        "operations",
+        "describe",
+        operation,
+        `--project=${input.project}`,
+        ...(kind === "images" ? ["--global"] : [`--zone=${input.zone}`]),
+        "--format=json(name,status,targetLink,selfLink,error)",
+      ],
+      signal,
+      Math.min(10_000, remaining),
+    ).andThen((described) => {
+      const parsed = Result.fromThrowable(
+        () => JSON.parse(described.stdout) as unknown,
+        (): ImageBuildError => ({
+          type: "image_build_failed",
+          stage,
+          message: `invalid cleanup operation ${operation}`,
+        }),
+      )();
+      if (parsed.isErr()) return errAsync<"succeeded" | "failed", ImageBuildError>(parsed.error);
+      const body = parsed.value as Record<string, unknown>;
+      const scope = kind === "images" ? "global" : `zones/${input.zone}`;
+      const operationPath = `projects/${input.project}/${scope}/operations/${operation}`;
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        body["name"] !== operation ||
+        String(body["targetLink"] ?? "").replace(
+          /^https:\/\/www\.googleapis\.com\/compute\/v1\//,
+          "",
+        ) !== target ||
+        String(body["selfLink"] ?? "").replace(
+          /^https:\/\/www\.googleapis\.com\/compute\/v1\//,
+          "",
+        ) !== operationPath
+      )
+        return errAsync<"succeeded" | "failed", ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: `invalid cleanup operation ${operation}`,
+        });
+      const status = body["status"];
+      if (status === "DONE") {
+        if (body["error"] === undefined)
+          return record(evidence("succeeded", operation)).map(() => "succeeded" as const);
+        const error = body["error"];
+        const errors =
+          typeof error === "object" && error !== null
+            ? (error as { errors?: unknown }).errors
+            : undefined;
+        if (!Array.isArray(errors) || errors.length === 0)
+          return errAsync<"succeeded" | "failed", ImageBuildError>({
+            type: "image_build_failed",
+            stage,
+            message: `invalid cleanup operation ${operation}`,
+          });
+        const rawCode = (errors[0] as { code?: unknown } | null)?.code;
+        const code =
+          typeof rawCode === "string" && /^[A-Z0-9_]+$/.test(rawCode) ? rawCode : "UNKNOWN";
+        return record(evidence("failed", operation, code)).map(() => "failed" as const);
+      }
+      if (status !== "PENDING" && status !== "RUNNING")
+        return errAsync<"succeeded" | "failed", ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: `invalid cleanup operation ${operation}`,
+        });
+      const wait = Math.min(5_000, deadline - this.cleanupTiming.now());
+      if (wait <= 0)
+        return errAsync<"succeeded" | "failed", ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: `timed out waiting for cleanup operation ${operation}`,
+        });
+      return ResultAsync.fromPromise(
+        this.cleanupTiming.wait(wait, signal),
+        (): ImageBuildError => ({
+          type: signal.aborted ? "cancelled" : "image_build_failed",
+          stage,
+          message: signal.aborted ? "cleanup cancelled" : "cleanup wait failed",
+        }),
+      ).andThen(() =>
+        this.waitForSubmittedDelete(
+          input,
+          kind,
+          target,
+          operation,
+          signal,
+          deadline,
+          evidence,
+          record,
+        ),
+      );
+    });
   }
 
   private waitForTargetOperations(
@@ -644,6 +1002,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
     kind: "instances" | "disks" | "images",
     name: string,
     signal: AbortSignal,
+    observe: (operation: string) => ResultAsync<void, ImageBuildError> = () => okAsync(undefined),
   ): ResultAsync<void, ImageBuildError> {
     const stage = "cleanup" as const;
     const target =
@@ -701,9 +1060,11 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
       }
       return names.reduce<ResultAsync<void, ImageBuildError>>(
         (waiting, operation) =>
-          waiting.andThen(() =>
-            this.waitForTargetOperation(input, kind, operation, signal, deadline),
-          ),
+          waiting
+            .andThen(() => observe(operation))
+            .andThen(() =>
+              this.waitForTargetOperation(input, kind, target, operation, signal, deadline),
+            ),
         okAsync<void, ImageBuildError>(undefined),
       );
     });
@@ -712,6 +1073,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
   private waitForTargetOperation(
     input: ImageBuildInput,
     kind: "instances" | "disks" | "images",
+    target: string,
     operation: string,
     signal: AbortSignal,
     deadline: number,
@@ -735,12 +1097,45 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
         operation,
         `--project=${input.project}`,
         ...(kind === "images" ? ["--global"] : [`--zone=${input.zone}`]),
-        "--format=value(status)",
+        "--format=json(name,status,targetLink,selfLink,error)",
       ],
       signal,
       Math.min(10_000, remaining),
     ).andThen((described) => {
-      const status = described.stdout.trim();
+      const parsed = Result.fromThrowable(
+        () => JSON.parse(described.stdout) as unknown,
+        (): ImageBuildError => ({
+          type: "image_build_failed",
+          stage,
+          message: `invalid cleanup operation ${operation}`,
+        }),
+      )();
+      if (parsed.isErr()) return errAsync(parsed.error);
+      if (typeof parsed.value !== "object" || parsed.value === null || Array.isArray(parsed.value))
+        return errAsync<void, ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: `invalid cleanup operation ${operation}`,
+        });
+      const body = parsed.value as Record<string, unknown>;
+      const scope = kind === "images" ? "global" : `zones/${input.zone}`;
+      if (
+        body["name"] !== operation ||
+        String(body["targetLink"] ?? "").replace(
+          /^https:\/\/www\.googleapis\.com\/compute\/v1\//,
+          "",
+        ) !== target ||
+        String(body["selfLink"] ?? "").replace(
+          /^https:\/\/www\.googleapis\.com\/compute\/v1\//,
+          "",
+        ) !== `projects/${input.project}/${scope}/operations/${operation}`
+      )
+        return errAsync<void, ImageBuildError>({
+          type: "image_build_failed",
+          stage,
+          message: `invalid cleanup operation ${operation}`,
+        });
+      const status = body["status"];
       if (status === "DONE") return okAsync<void, ImageBuildError>(undefined);
       if (status !== "PENDING" && status !== "RUNNING") {
         return errAsync<void, ImageBuildError>({
@@ -764,7 +1159,9 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           stage,
           message: String(cause),
         }),
-      ).andThen(() => this.waitForTargetOperation(input, kind, operation, signal, deadline));
+      ).andThen(() =>
+        this.waitForTargetOperation(input, kind, target, operation, signal, deadline),
+      );
     });
   }
 
@@ -940,7 +1337,11 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           { mode: 0o600 },
         ),
       ),
-      (cause) => ({ type: "image_build_failed", stage: "manifest", message: String(cause) }),
+      (cause) => ({
+        type: "image_build_failed",
+        stage: "manifest",
+        message: String(cause),
+      }),
     );
   }
 }

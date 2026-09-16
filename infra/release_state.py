@@ -149,9 +149,46 @@ PHASES = ("preflight", "checks", "build", "plan", "schema", "apply", "repair", "
 OUTCOMES = ("running", "failed-before-apply", "applied-but-unvalidated", "validated")
 FIELDS = {"schemaVersion", "releaseId", "commit", "runnerCommit", "project", "region", "zone", "workflowUrl", "validatesRelease",
           "startedAt", "finishedAt", "phase", "outcome", "exitCode", "applyAttempted", "gates", "artifacts",
-          "previousServing", "serving", "retirement", "fixtures", "migrationJob"}
+          "previousServing", "serving", "retirement", "fixtures", "migrationJob", "nativeCleanup"}
 SNAPSHOT_FIELDS = {"service", "revision", "image", "generation"}
 ARTIFACT_FIELDS = {"control_plane_image", "native_image_resource", "native_image_id", "workspace_image_resource", "workspace_image_id", "deploy_generation"}
+CLEANUP_FIELDS = {"resourceKind", "target", "scope", "operation", "status", "errorCode"}
+
+
+def valid_native_cleanup(value, project=None):
+    if not isinstance(value, list):
+        return False
+    targets = set()
+    for item in value:
+        if not isinstance(item, dict) or set(item) != CLEANUP_FIELDS:
+            return False
+        kind, target, scope = item["resourceKind"], item["target"], item["scope"]
+        operation, status, error_code = item["operation"], item["status"], item["errorCode"]
+        if not all(isinstance(field, str) for field in (kind, target, scope, status)):
+            return False
+        match = re.fullmatch(r"projects/([a-z0-9-]+)/(global/images|zones/([a-z0-9-]+)/(instances|disks))/([a-z0-9-]+)", target)
+        if (not match or target in targets or kind not in ("instances", "disks", "images")
+                or (project is not None and match.group(1) != project)):
+            return False
+        expected_scope = "global" if kind == "images" else f"zones/{match.group(3)}"
+        target_kind = "images" if match.group(2) == "global/images" else match.group(4)
+        if scope != expected_scope or kind != target_kind:
+            return False
+        if operation is not None and not valid_id(operation):
+            return False
+        if status not in ("absent", "submitted", "succeeded", "failed", "uncertain"):
+            return False
+        if status in ("submitted", "succeeded", "failed") and operation is None:
+            return False
+        if status == "absent" and (operation is not None or error_code is not None):
+            return False
+        if error_code is not None and (not isinstance(error_code, str) or not re.fullmatch(r"[A-Z0-9_]+", error_code)):
+            return False
+        if ((status == "failed" and error_code is None)
+                or (status in ("submitted", "succeeded") and error_code is not None)):
+            return False
+        targets.add(target)
+    return True
 
 
 def valid_id(value):
@@ -205,6 +242,8 @@ def validate_record(record):
     if record["migrationJob"] is not None and not valid_id(record["migrationJob"]):
         return False
     if not isinstance(record["fixtures"], list) or any(not isinstance(item, dict) or set(item) != {"kind", "id", "outcome"} or item["kind"] not in ("project", "orb") or not valid_id(item["id"]) or item["outcome"] not in ("requested", "created", "deleted", "retained", "cleanup-failed") for item in record["fixtures"]):
+        return False
+    if not valid_native_cleanup(record["nativeCleanup"], record["project"]):
         return False
     retirement = record["retirement"]
     if retirement is not None:
@@ -371,7 +410,7 @@ def main(argv):
                   "workflowUrl": workflow_url or None, "validatesRelease": None, "startedAt": now(), "finishedAt": None,
                   "phase": "preflight", "outcome": "running", "exitCode": None, "applyAttempted": False,
                   "gates": {"preflight": "running"}, "artifacts": None, "previousServing": None, "serving": None,
-                  "retirement": None, "fixtures": [], "migrationJob": None}
+                  "retirement": None, "fixtures": [], "migrationJob": None, "nativeCleanup": []}
         result = save(path, record) if validate_record(record) else fail("invalid", "invalid release identity")
     else:
         loaded = load(path)
@@ -422,6 +461,15 @@ def main(argv):
             elif action == "migration-job" and len(args) == 1 and valid_id(args[0]):
                 record["migrationJob"] = args[0]
                 result = save(path, record)
+            elif action == "native-cleanup" and len(args) == 1:
+                evidence = load(args[0])
+                if evidence.error or not valid_native_cleanup(evidence.value, record["project"]):
+                    result = fail("invalid", "invalid native cleanup evidence")
+                else:
+                    record["nativeCleanup"] = evidence.value
+                    result = save(path, record)
+                    if not result.error:
+                        result = publish(cloud, record)
             elif action == "preflight-vars" and len(args) == 1:
                 result = current_vars(cloud, record, args[0])
             elif action == "recover" and len(args) == 1:
