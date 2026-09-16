@@ -441,6 +441,21 @@ describe("Pi entry mapping", () => {
     });
   });
 
+  it("treats prototype-named custom types as ordinary custom messages", () => {
+    for (const customType of ["toString", "constructor"]) {
+      const record = expectMapped({
+        ...base,
+        type: "custom_message",
+        customType,
+        content: "note",
+        display: true,
+        details: { id: "child-9" },
+      });
+      if (record.type !== "event") throw new Error("expected event");
+      expect(record.subagent, customType).toBeUndefined();
+    }
+  });
+
   it("maps custom_message with text content", () => {
     const record = expectMapped({
       ...base,

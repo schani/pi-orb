@@ -70,19 +70,28 @@ function stringOf(source: Record<string, unknown>, key: string): string | undefi
   return typeof value === "string" ? value : undefined;
 }
 
-const SUBAGENT_KINDS: Record<string, "notification" | "update" | "workspace_notice"> = {
-  "subagent-notification": "notification",
-  "subagent-update": "update",
-  "subagent-workspace-notice": "workspace_notice",
-};
+type SubagentKind = NonNullable<EventRecord["subagent"]>["kind"];
+
+function subagentKind(customType: string): SubagentKind | null {
+  switch (customType) {
+    case "subagent-notification":
+      return "notification";
+    case "subagent-update":
+      return "update";
+    case "subagent-workspace-notice":
+      return "workspace_notice";
+    default:
+      return null;
+  }
+}
 
 /** The subagent extension's receipt details, typed for clients. */
 function subagentNotice(
   customType: string,
   rawDetails: unknown,
 ): NonNullable<EventRecord["subagent"]> | null {
-  const kind = SUBAGENT_KINDS[customType];
-  if (kind === undefined) return null;
+  const kind = subagentKind(customType);
+  if (kind === null) return null;
   const details = isRecordObject(rawDetails) ? rawDetails : {};
   const id = stringOf(details, "id");
   const description = stringOf(details, "description");

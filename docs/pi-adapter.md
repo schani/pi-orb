@@ -170,6 +170,8 @@ For every entry, preserve `entry.id`, `entry.parentId`, and `entry.timestamp` ex
 
 **Typed fields instead of native reads (decided and implemented 2026-09-16).** Every field a client needs is derived here, once, into normalized record fields; no code outside this adapter reads `overflow.native`. A second client (a native macOS app) would otherwise have to copy the web UI's coupling to undocumented Pi-native JSON shapes. `overflow` is unchanged and stays lossless — the typed fields duplicate it, as normalized fields always have. Transcripts persisted before the fields existed are backfilled from the native blob by `022_typed_history_fields.sql`; there is no dual read in TypeScript.
 
+**Deployment ordering (2026-09-16).** Stop running orbs, deploy and apply `022_typed_history_fields.sql`, then restart them: the backfill runs once, so a runtime still on the previous image would persist legacy-shaped records after it, and nothing reads them (`docs/deployment.md`).
+
 | Pi persisted entry         | Normalized record                                                                                                               |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `message` / user           | `MessageRecord`, role `user`; text/image blocks.                                                                                |

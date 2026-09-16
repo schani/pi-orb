@@ -240,6 +240,11 @@ and job identity for inspection. Successful jobs are removed. There is no
 automatic rollback of committed schema changes, nor a promise of compatibility
 for arbitrary breaking runtime/schema changes.
 
+A release whose migration backfills record shapes the runtime writes — such as
+`022_typed_history_fields.sql` (2026-09-16) — requires stopping running orbs
+before the deploy and restarting them after it, because a one-time backfill
+cannot see rows a previous runtime image writes afterwards.
+
 `release_state.py` constructs and validates token-free records, including nested
 allowlists, before publishing. It records source and runner commits, accepted
 artifacts, all four serving image/revision identities, lifecycle generations
