@@ -14,6 +14,7 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 
 - Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`. Pi packages use [0.85.1](https://github.com/earendil-works/pi/releases/tag/v0.85.1) for GPT-6 Astra support (decided 2026-09-05).
 - Pi SDK upgrades are routine and may be made whenever needed (user decision 2026-09-08). The pinned version makes validation reproducible; it is not a constraint on new integration designs.
+- **Production transport evidence (2026-09-16):** persisted `WebSocket closed 1006` errors sampled in two active orbs came from Pi's OpenAI Codex response-stream leg after streaming began, not the browser live socket; each first retry began about two seconds later and continued successfully. The UI preserves both failed and later successful assistant records. Measured rates, exact UTC evidence, transport-policy history, and limits are in `docs/postmortems/2026-09-16-codex-websocket-closures.md`.
 - The orb runtime is a Node.js service that owns the Pi SDK session and exposes a harness-agnostic HTTP/WebSocket protocol.
 - The Pi adapter translates Pi-native persisted session entries into the shared history schema.
 - A Pi extension may still be useful for Pi-specific instrumentation, but it is not the infrastructure supervisor.

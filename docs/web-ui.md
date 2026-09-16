@@ -1,5 +1,9 @@
 # Web UI
 
+## Provider transport failures (decided and implemented 2026-09-16)
+
+A failed assistant record with the typed native diagnostic `provider_transport_failure` identifies the interrupted leg as the agent’s model-provider connection. The transcript labels known `openai-codex` failures `The agent’s connection to OpenAI was interrupted.` and uses `the model provider` when the provider is unknown, followed by the original error diagnostic. Other assistant errors keep their original message. Browser connection notices remain separate, and the persisted failure does not claim that a retry recovered.
+
 ## Transcript thinking markers (Bit register selected and implemented, 2026-09-16)
 
 **Selected: T4 Bit register.** The transcript now uses `BitRegister.tsx` instead of the blinking `.cur`, both before output arrives and at the tail of live agent output. White 13px monospace digits occupy a black `calc(3ch + 6px)` × 16px tile. The fixed Gray-code sequence is `001 → 011 → 010 → 110 → 111 → 101 → 100 → 000`, one frame per 400ms (3.2-second loop). This is a visual activity mark, never a counter, progress estimate or inference metric. The selected design is implemented as one clipped, CSS-stepped strip: no JS timer, React frame updates, added configuration or runtime contract. Reduced motion keeps `001` static. One stable `Agent working` status label replaces the decorative digits for assistive technology; the frames are hidden from it and excluded from text selection.

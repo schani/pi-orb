@@ -65,7 +65,12 @@ describe("HistoryView turn structure", () => {
     expect(html).not.toContain("machine instructions");
     expect(html).not.toContain("/private/tasks");
   });
-  it.each([false, true])("shows durable provider failures with partial output: %s", (partial) => {
+  it.each([
+    [false, undefined],
+    [true, undefined],
+    [false, [{ type: "browser_transport_failure" }]],
+    [true, [{ type: "browser_transport_failure" }]],
+  ])("shows plain assistant failures with partial output: %s", (partial, diagnostics) => {
     const record: HistoryRecord = {
       ...message("failure", "assistant", ""),
       type: "message",
@@ -73,7 +78,12 @@ describe("HistoryView turn structure", () => {
       content: partial ? [{ type: "text", text: "Partial answer" }] : [],
       finishReason: "error",
       overflow: {
-        native: { message: { errorMessage: "Codex error: The usage limit has been reached" } },
+        native: {
+          message: {
+            errorMessage: "Codex error: The usage limit has been reached",
+            ...(diagnostics === undefined ? {} : { diagnostics }),
+          },
+        },
       },
     };
     const html = renderToStaticMarkup(
@@ -81,7 +91,60 @@ describe("HistoryView turn structure", () => {
     );
     expect(html).toContain('role="alert"');
     expect(html).toContain("Codex error: The usage limit has been reached");
+    expect(html).not.toContain("agent’s connection");
     expect(html.includes("Partial answer")).toBe(partial);
+  });
+
+  it.each([null, "not an array", [null, "not an object", []]])(
+    "ignores malformed diagnostics: %j",
+    (diagnostics) => {
+      const record: HistoryRecord = {
+        ...message("failure", "assistant", ""),
+        type: "message",
+        role: "assistant",
+        content: [],
+        finishReason: "error",
+        overflow: {
+          native: { message: { errorMessage: "Original error", diagnostics } },
+        },
+      };
+      const html = renderToStaticMarkup(
+        <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+      );
+      expect(html).toContain("Original error");
+      expect(html).not.toContain("agent’s connection");
+    },
+  );
+
+  it.each([
+    ["OpenAI", "openai-codex", "OpenAI"],
+    ["unknown", "unknown-provider", "the model provider"],
+    ["absent", undefined, "the model provider"],
+  ])("labels %s transport failures without claiming recovery", (_name, provider, providerLabel) => {
+    const record: HistoryRecord = {
+      ...message("failure", "assistant", ""),
+      type: "message",
+      role: "assistant",
+      model: { ...(provider === undefined ? {} : { provider }), id: "model-id" },
+      content: [],
+      finishReason: "error",
+      overflow: {
+        native: {
+          message: {
+            errorMessage: "WebSocket closed 1006",
+            diagnostics: [{ type: "provider_transport_failure" }],
+          },
+        },
+      },
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).toContain(
+      `The agent’s connection to ${providerLabel} was interrupted. WebSocket closed 1006`,
+    );
+    expect(html).not.toContain("retried");
+    expect(html).not.toContain("recovered");
   });
 
   it.each([{}, { native: null }, { native: { message: { errorMessage: " " } } }])(

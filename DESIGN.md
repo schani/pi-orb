@@ -130,6 +130,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-16-codex-websocket-closures.md](docs/postmortems/2026-09-16-codex-websocket-closures.md) — persisted OpenAI Codex response-stream closures, automatic retry evidence, and limits of the production diagnosis
 - [docs/postmortems/2026-09-14-subagent-notification-transcript.md](docs/postmortems/2026-09-14-subagent-notification-transcript.md) — raw model-facing XML shown in the browser; delayed uncollected child failures caused extra parent replies
 - [docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md](docs/postmortems/2026-09-14-local-subagent-routing-and-disclosure.md) — stale delegation guidance created an independent orb; nested tool folds hid existing input/output
 - [docs/postmortems/2026-09-15-cache-catchup-fixture-ownership.md](docs/postmortems/2026-09-15-cache-catchup-fixture-ownership.md) — cache catch-up repair race; socket-owned fixture work and durable completion barriers

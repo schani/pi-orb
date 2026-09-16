@@ -200,7 +200,24 @@ function assistantFailure(record: MessageRecord): string | null {
     const message = native["message"];
     if (typeof message === "object" && message !== null && !Array.isArray(message)) {
       const error = message["errorMessage"];
-      if (typeof error === "string" && error.trim() !== "") return error;
+      if (typeof error === "string" && error.trim() !== "") {
+        const diagnostics = message["diagnostics"];
+        const providerTransportFailure =
+          Array.isArray(diagnostics) &&
+          diagnostics.some(
+            (diagnostic) =>
+              typeof diagnostic === "object" &&
+              diagnostic !== null &&
+              !Array.isArray(diagnostic) &&
+              diagnostic["type"] === "provider_transport_failure",
+          );
+        if (providerTransportFailure) {
+          const provider =
+            record.model?.provider === "openai-codex" ? "OpenAI" : "the model provider";
+          return `The agent’s connection to ${provider} was interrupted. ${error}`;
+        }
+        return error;
+      }
     }
   }
   return "Model response failed.";
