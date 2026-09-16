@@ -12,14 +12,75 @@ export interface FakeSession {
   inferenceBaseUrl: string;
 }
 
-const controlUrl = (sessionKey: string, path = ""): string =>
-  `${FAKE_ORIGIN}/api/__mock__/sessions/${sessionKey}${path}`;
+const controlPath = (sessionKey: string, path = ""): string =>
+  `/api/__mock__/sessions/${sessionKey}${path}`;
+
+const FAKE_DEADLINE_MS = 15_000;
+const FAKE_BACKOFF_MS = [250, 500] as const;
+
+export interface FakeRequestOptions {
+  readonly body?: unknown;
+  /**
+   * Retry a *transport* failure — fetch rejecting, including the deadline
+   * abort. Only for requests whose replay after a lost response is harmless.
+   */
+  readonly retryTransport: boolean;
+  readonly deadlineMs?: number;
+  readonly backoffMs?: readonly number[];
+  readonly fetchImpl?: typeof fetch;
+}
+
+/**
+ * The single door to the hosted mock inference service. Every call is
+ * deadlined, so no test and no failure-diagnostic dump can wait on that host
+ * forever (2026-09-16: an ECONNRESET with no deadline consumed the whole job
+ * budget and the run lost its vitest summary; see
+ * docs/postmortems/2026-09-16-e2e-fake-inference-tls-reset.md). A returned
+ * response is never retried, however bad its status: only the request not
+ * arriving is transient.
+ * Rejects on transport failure, naming method, path and attempts; vitest's
+ * contract is exceptions, so this boundary throws instead of returning a Result.
+ */
+export async function fakeRequest(
+  method: "GET" | "POST" | "DELETE",
+  path: string,
+  options: FakeRequestOptions,
+): Promise<Response> {
+  const call = options.fetchImpl ?? fetch;
+  const deadlineMs = options.deadlineMs ?? FAKE_DEADLINE_MS;
+  const backoff = options.retryTransport ? (options.backoffMs ?? FAKE_BACKOFF_MS) : [];
+  let attempt = 0;
+  for (;;) {
+    attempt += 1;
+    try {
+      return await call(`${FAKE_ORIGIN}${path}`, {
+        method,
+        signal: AbortSignal.timeout(deadlineMs),
+        ...(options.body === undefined
+          ? {}
+          : {
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(options.body),
+            }),
+      });
+    } catch (cause) {
+      if (attempt > backoff.length) {
+        throw new Error(
+          `fake service ${method} ${path} failed after ${attempt} attempt${attempt === 1 ? "" : "s"}`,
+          { cause },
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, backoff[attempt - 1]));
+    }
+  }
+}
 
 export async function createFakeSession(name: string, scenario: unknown): Promise<FakeSession> {
-  const response = await fetch(`${FAKE_ORIGIN}/api/__mock__/sessions`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, scenario }),
+  // Retried: a lost response can leak one unreferenced mock session, which
+  // costs nothing a per-test session does not already cost.
+  const response = await fakeRequest("POST", "/api/__mock__/sessions", {
+    body: { name, scenario },
+    retryTransport: true,
   });
   if (!response.ok) throw new Error(`fake session creation failed: HTTP ${response.status}`);
   const body = (await response.json()) as Record<string, unknown>;
@@ -35,12 +96,18 @@ export async function fakeControl(
   path: string,
   body?: unknown,
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(controlUrl(sessionKey, path), {
-    method: body === undefined ? "GET" : "POST",
-    ...(body === undefined
-      ? {}
-      : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-  });
+  // Reads are replayable; a write is not. The mock service is deployed
+  // separately, so nothing here can establish that a second
+  // `/deviceauth/approve` succeeds rather than returning 4xx — writes get the
+  // deadline only.
+  const response = await fakeRequest(
+    body === undefined ? "GET" : "POST",
+    controlPath(sessionKey, path),
+    {
+      ...(body === undefined ? {} : { body }),
+      retryTransport: body === undefined,
+    },
+  );
   if (!response.ok) {
     throw new Error(`fake control ${path} failed: HTTP ${response.status}`);
   }
@@ -48,7 +115,9 @@ export async function fakeControl(
 }
 
 export async function deleteFakeSession(sessionKey: string): Promise<void> {
-  await fetch(controlUrl(sessionKey), { method: "DELETE" }).catch(() => undefined);
+  await fakeRequest("DELETE", controlPath(sessionKey), { retryTransport: false }).catch(
+    () => undefined,
+  );
 }
 
 export function docker(args: string[], timeoutMs = 120_000): Promise<string> {
