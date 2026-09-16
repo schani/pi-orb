@@ -35,7 +35,7 @@ This is an implementation and focused-test result, not live REST or deployment v
 
 ## Qualification and DST causal ledger
 
-Focused cleanup adapter, evidence, operation, release-state, and release-report regressions pass. Full typecheck and lint pass; `npm test` passed 1,886 tests with six conditional skips, plus infrastructure suites. Logs are retained under `.context/native-cleanup-fix/`. No new deployment was attempted; the separate application-identity gate remains pending user action.
+Focused cleanup adapter, evidence, operation, release-state, and release-report regressions pass. Full typecheck and lint pass; `npm test` passed 1,886 tests with six conditional skips, plus infrastructure suites. Logs are retained under `.context/native-cleanup-fix/`. No new deployment was attempted. On 2026-09-16 the user authorized the stage-1 identity release for existing single-user use after normal qualification.
 
 Every new DST failure was replayed before its test model was corrected, and every trace remains under `test-failures/`:
 

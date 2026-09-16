@@ -54,7 +54,7 @@ Still open:
 
 ## Minimal control-plane API
 
-The browser uses a small JSON API under `/api/v1`. Stage-1 application identity is implemented locally (2026-09-16) but not deployed; the deployed API remains unchanged until the single multi-user cutover:
+The browser uses a small JSON API under `/api/v1`. Stage-1 application identity is on `main` at `0746680` but not deployed; its authorized single-user release changes the session response before the later multi-user cutover:
 
 ```text
 GET  /api/v1/session
