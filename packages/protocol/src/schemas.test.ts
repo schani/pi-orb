@@ -82,9 +82,73 @@ describe("history schemas", () => {
     expect(Check(HistoryRecordSchema, record)).toBe(true);
   });
 
+  it("accepts the typed fields clients read instead of native overflow", () => {
+    expect(
+      Check(HistoryRecordSchema, {
+        ...eventRecord,
+        eventType: "pi.bash_execution",
+        shell: {
+          command: "npm test",
+          output: "passing",
+          exitCode: null,
+          cancelled: false,
+          truncated: true,
+          excludeFromContext: false,
+        },
+      }),
+    ).toBe(true);
+    expect(
+      Check(HistoryRecordSchema, {
+        ...eventRecord,
+        eventType: "pi.custom_message",
+        custom: { customType: "subagent-update", display: true },
+        subagent: { kind: "update", description: "Check services", message: "halfway" },
+      }),
+    ).toBe(true);
+    expect(
+      Check(HistoryRecordSchema, {
+        ...messageRecord,
+        role: "user",
+        inboxMessageIds: ["message-1", "message-2"],
+      }),
+    ).toBe(true);
+    expect(
+      Check(HistoryRecordSchema, {
+        ...messageRecord,
+        finishReason: "error",
+        failure: { message: "WebSocket closed 1006", diagnostics: ["provider_transport_failure"] },
+      }),
+    ).toBe(true);
+    expect(
+      Check(HistoryRecordSchema, {
+        ...messageRecord,
+        role: "tool",
+        content: [{ type: "tool_result", callId: "c1", content: [], patch: "--- a\n+++ b\n+line" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects typed fields that do not match their shape", () => {
+    expect(Check(HistoryRecordSchema, { ...messageRecord, inboxMessageIds: "message-1" })).toBe(
+      false,
+    );
+    expect(Check(HistoryRecordSchema, { ...eventRecord, subagent: { kind: "unknown-kind" } })).toBe(
+      false,
+    );
+    expect(Check(HistoryRecordSchema, { ...messageRecord, failure: { message: "boom" } })).toBe(
+      false,
+    );
+  });
+
   it("rejects records with unknown extra properties (closed schemas)", () => {
     expect(Check(HistoryRecordSchema, { ...messageRecord, extra: 1 })).toBe(false);
     expect(Check(HistoryRecordSchema, { ...eventRecord, sequence: 7 })).toBe(false);
+    expect(
+      Check(HistoryRecordSchema, {
+        ...eventRecord,
+        custom: { customType: "x", display: true, details: {} },
+      }),
+    ).toBe(false);
   });
 
   it("rejects records missing required fields", () => {

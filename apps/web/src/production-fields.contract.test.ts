@@ -10,11 +10,30 @@ function productionComponents(directory: string): string[] {
   });
 }
 
+function productionSources(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return productionSources(path);
+    const isSource = extname(path) === ".ts" || extname(path) === ".tsx";
+    return isSource && !/\.test\.tsx?$/.test(path) ? [path] : [];
+  });
+}
+
 describe("production text fields", () => {
   it("does not use visible placeholders", () => {
     const sourceRoot = import.meta.dirname;
     const offenders = productionComponents(sourceRoot).filter((path) =>
       /\bplaceholder\s*=/.test(readFileSync(path, "utf8")),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  /** Clients read typed record fields; only the Pi adapter knows native shapes. */
+  it("does not read the native overflow blob", () => {
+    const offenders = productionSources(import.meta.dirname).filter((path) =>
+      /overflow\s*(\?\.)?\s*\[\s*["']native["']\s*\]|overflow\s*\??\.\s*native/.test(
+        readFileSync(path, "utf8"),
+      ),
     );
     expect(offenders).toEqual([]);
   });

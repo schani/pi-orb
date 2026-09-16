@@ -35,20 +35,10 @@ export function createMutationEpoch(): MutationEpoch {
   };
 }
 
-export function inboxMessageIds(record: HistoryRecord): string[] {
-  const native = record.overflow["native"];
-  if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
-  if (native["customType"] !== "pi-orb.user-message") return [];
-  const details = native["details"];
-  if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
-  if (Array.isArray(details["messageIds"])) {
-    return details["messageIds"].filter((id): id is string => typeof id === "string");
-  }
-  return typeof details["messageId"] === "string" ? [details["messageId"]] : [];
-}
-
 export function representedInboxMessageIds(records: readonly HistoryRecord[]): Set<string> {
-  return new Set(records.flatMap(inboxMessageIds));
+  return new Set(
+    records.flatMap((record) => (record.type === "message" ? (record.inboxMessageIds ?? []) : [])),
+  );
 }
 
 /**

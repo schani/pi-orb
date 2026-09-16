@@ -1099,17 +1099,8 @@ export function storeSemanticsContractTests(
         type: "message",
         role: "user",
         content,
-        overflow: {
-          native: {
-            type: "custom_message",
-            customType: "pi-orb.user-message",
-            details: {
-              messageIds: [messageId, secondMessageId],
-              delivery: "turn",
-              operationId: "op-1",
-            },
-          },
-        },
+        inboxMessageIds: [messageId, secondMessageId],
+        overflow: {},
       };
       const committed = await store.commitPullBatch(task, {
         orbId: orb.id,
@@ -1323,13 +1314,8 @@ export function storeSemanticsContractTests(
         type: "message",
         role: "user",
         content,
-        overflow: {
-          native: {
-            type: "custom_message",
-            customType: "pi-orb.user-message",
-            details: { messageIds: [messageId] },
-          },
-        },
+        inboxMessageIds: [messageId],
+        overflow: {},
       };
       expect(
         (

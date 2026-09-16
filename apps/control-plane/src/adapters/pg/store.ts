@@ -134,18 +134,8 @@ function mapProjectRow(row: PgRow): ProjectRow {
   };
 }
 
-function inboxMessageIds(record: HistoryRecord): string[] {
-  const native = record.overflow["native"];
-  if (typeof native !== "object" || native === null || Array.isArray(native)) return [];
-  if (native["type"] !== "custom_message" || native["customType"] !== "pi-orb.user-message") {
-    return [];
-  }
-  const details = native["details"];
-  if (typeof details !== "object" || details === null || Array.isArray(details)) return [];
-  if (Array.isArray(details["messageIds"])) {
-    return details["messageIds"].filter((id): id is string => typeof id === "string");
-  }
-  return typeof details["messageId"] === "string" ? [details["messageId"]] : [];
+function inboxMessageIds(record: HistoryRecord): readonly string[] {
+  return record.type === "message" ? (record.inboxMessageIds ?? []) : [];
 }
 
 const stateConflict = (currentState?: OrbState): StateConflict => ({

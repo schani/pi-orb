@@ -114,18 +114,35 @@ describe("queued message list updates", () => {
       type: "message",
       role: "user",
       content: delivered.content,
-      overflow: {
-        native: {
-          customType: "pi-orb.user-message",
-          details: { messageIds: [delivered.id] },
-        },
-      },
+      inboxMessageIds: [delivered.id],
+      overflow: {},
     };
 
     expect(messagesAwaitingHistory([delivered], [])).toEqual([delivered]);
     expect(hasDeliveredMessageAwaitingHistory([delivered], [])).toBe(true);
     expect(messagesAwaitingHistory([delivered], [represented])).toEqual([]);
     expect(hasDeliveredMessageAwaitingHistory([delivered], [represented])).toBe(false);
+  });
+
+  it("does not read inbox identity from native overflow", () => {
+    const delivered = message("a", "delivered");
+    const legacy: HistoryRecord = {
+      id: "record-a",
+      parentId: null,
+      timestamp: "2026-08-10T00:00:01.000Z",
+      type: "message",
+      role: "user",
+      content: delivered.content,
+      overflow: {
+        native: {
+          type: "custom_message",
+          customType: "pi-orb.user-message",
+          details: { messageIds: [delivered.id] },
+        },
+      },
+    };
+
+    expect(messagesAwaitingHistory([delivered], [legacy])).toEqual([delivered]);
   });
 
   it("replaces an existing entry instead of duplicating it", () => {

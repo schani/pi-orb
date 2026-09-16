@@ -151,77 +151,21 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 type Turn =
   | { kind: "user"; record: MessageRecord }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
-  | { kind: "shell"; record: EventRecord }
+  | { kind: "shell"; record: EventRecord; shell: NonNullable<EventRecord["shell"]> }
   | { kind: "compaction"; record: CompactionRecord };
 
-interface BashExecutionView {
-  command: string;
-  output: string;
-  exitCode: number | null;
-  cancelled: boolean;
-  truncated: boolean;
-  excludeFromContext: boolean;
-}
-
-function bashExecutionView(record: EventRecord): BashExecutionView {
-  const native = record.overflow["native"];
-  const entry =
-    typeof native === "object" && native !== null && !Array.isArray(native)
-      ? (native as Record<string, unknown>)
-      : null;
-  const rawMessage = entry?.["message"];
-  const message =
-    typeof rawMessage === "object" && rawMessage !== null && !Array.isArray(rawMessage)
-      ? (rawMessage as Record<string, unknown>)
-      : null;
-  return {
-    command: typeof message?.["command"] === "string" ? message["command"] : "",
-    output:
-      typeof message?.["output"] === "string" ? message["output"] : blockText(record.content ?? []),
-    exitCode: typeof message?.["exitCode"] === "number" ? message["exitCode"] : null,
-    cancelled: message?.["cancelled"] === true,
-    truncated: message?.["truncated"] === true,
-    excludeFromContext: message?.["excludeFromContext"] === true,
-  };
-}
-
-/** Per docs/pi-adapter.md, only `pi.custom_message` with native `display: true` is shown. */
+/** Per docs/pi-adapter.md, only a custom message the harness marked displayed is shown. */
 function isDisplayedCustomMessage(record: EventRecord): boolean {
-  if (record.eventType === "agent.settings_fallback") return true;
-  if (record.eventType !== "pi.custom_message") return false;
-  const native = record.overflow["native"];
-  if (typeof native !== "object" || native === null || Array.isArray(native)) return false;
-  return native["display"] === true;
+  return record.eventType === "agent.settings_fallback" || record.custom?.display === true;
 }
 
 function assistantFailure(record: MessageRecord): string | null {
   if (record.role !== "assistant" || record.finishReason !== "error") return null;
-  const native = record.overflow["native"];
-  if (typeof native === "object" && native !== null && !Array.isArray(native)) {
-    const message = native["message"];
-    if (typeof message === "object" && message !== null && !Array.isArray(message)) {
-      const error = message["errorMessage"];
-      if (typeof error === "string" && error.trim() !== "") {
-        const diagnostics = message["diagnostics"];
-        const providerTransportFailure =
-          Array.isArray(diagnostics) &&
-          diagnostics.some(
-            (diagnostic) =>
-              typeof diagnostic === "object" &&
-              diagnostic !== null &&
-              !Array.isArray(diagnostic) &&
-              diagnostic["type"] === "provider_transport_failure",
-          );
-        if (providerTransportFailure) {
-          const provider =
-            record.model?.provider === "openai-codex" ? "OpenAI" : "the model provider";
-          return `The agent’s connection to ${provider} was interrupted. ${error}`;
-        }
-        return error;
-      }
-    }
-  }
-  return "Model response failed.";
+  const failure = record.failure;
+  if (failure === undefined) return "Model response failed.";
+  if (!failure.diagnostics.includes("provider_transport_failure")) return failure.message;
+  const provider = record.model?.provider === "openai-codex" ? "OpenAI" : "the model provider";
+  return `The agent’s connection to ${provider} was interrupted. ${failure.message}`;
 }
 
 export function assistantResponseMarkdown(record: MessageRecord): string | null {
@@ -279,7 +223,6 @@ function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): 
         const item = currentById.get(block.callId);
         if (item !== undefined) {
           item.result = block as ToolResultBlock;
-          item.resultRecord = record;
         } else {
           flushTools();
           nodes.push(renderToolResult(block, `${record.id}-${index}`));
@@ -340,8 +283,8 @@ function groupTurns(records: readonly HistoryRecord[]): Turn[] {
         turns.push({ kind: "compaction", record });
         break;
       case "event":
-        if (record.eventType === "pi.bash_execution") {
-          turns.push({ kind: "shell", record });
+        if (record.shell !== undefined) {
+          turns.push({ kind: "shell", record, shell: record.shell });
         } else if (isDisplayedCustomMessage(record)) {
           appendAgentPart(record);
         }
@@ -393,7 +336,7 @@ function renderTurn(turn: Turn, live?: LiveAgentContent, busy = false): ReactNod
         </article>
       );
     case "shell": {
-      const shell = bashExecutionView(turn.record);
+      const shell = turn.shell;
       const statuses = [
         ...(shell.excludeFromContext ? ["excluded from model context"] : []),
         ...(shell.cancelled

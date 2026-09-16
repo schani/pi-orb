@@ -92,6 +92,8 @@ const ToolResultBlockSchema = Type.Object(
     callId: Type.String(),
     content: Type.Array(LeafBlockSchema),
     isError: Type.Optional(Type.Boolean()),
+    /** Unified diff of an edit, when the tool reported one. */
+    patch: Type.Optional(Type.String()),
     overflow: Type.Optional(JsonObjectSchema),
   },
   closed,
@@ -117,6 +119,46 @@ const recordBase = {
    */
   overflow: JsonObjectSchema,
 };
+
+/**
+ * Normalized fields the harness adapter derives once so clients never parse
+ * harness-native JSON (docs/pi-adapter.md). `overflow` stays lossless.
+ */
+const ShellExecutionSchema = Type.Object(
+  {
+    command: Type.String(),
+    output: Type.String(),
+    exitCode: Type.Union([Type.Number(), Type.Null()]),
+    cancelled: Type.Boolean(),
+    truncated: Type.Boolean(),
+    excludeFromContext: Type.Boolean(),
+  },
+  closed,
+);
+
+const CustomMessageSchema = Type.Object(
+  { customType: Type.String(), display: Type.Boolean() },
+  closed,
+);
+
+const SubagentNoticeSchema = Type.Object(
+  {
+    kind: Type.Union([
+      Type.Literal("notification"),
+      Type.Literal("update"),
+      Type.Literal("workspace_notice"),
+    ]),
+    id: Type.Optional(Type.String()),
+    description: Type.Optional(Type.String()),
+    status: Type.Optional(Type.String()),
+    message: Type.Optional(Type.String()),
+    notice: Type.Optional(Type.String()),
+    error: Type.Optional(Type.String()),
+    resultPreview: Type.Optional(Type.String()),
+    durationMs: Type.Optional(Type.Number()),
+  },
+  closed,
+);
 
 export const MessageRecordSchema = Type.Object(
   {
@@ -147,6 +189,12 @@ export const MessageRecordSchema = Type.Object(
       ),
     ),
     finishReason: Type.Optional(Type.String()),
+    /** Durable client message IDs this user message delivered, in order. */
+    inboxMessageIds: Type.Optional(Type.Array(Type.String())),
+    /** Present on an assistant record whose `finishReason` is `error`. */
+    failure: Type.Optional(
+      Type.Object({ message: Type.String(), diagnostics: Type.Array(Type.String()) }, closed),
+    ),
   },
   closed,
 );
@@ -168,6 +216,12 @@ export const EventRecordSchema = Type.Object(
     type: Type.Literal("event"),
     eventType: Type.String(),
     content: Type.Optional(Type.Array(ContentBlockSchema)),
+    /** Present iff `eventType` is `pi.bash_execution`. */
+    shell: Type.Optional(ShellExecutionSchema),
+    /** Present iff `eventType` is `pi.custom_message`. */
+    custom: Type.Optional(CustomMessageSchema),
+    /** Present iff the custom message is a subagent receipt. */
+    subagent: Type.Optional(SubagentNoticeSchema),
   },
   closed,
 );
