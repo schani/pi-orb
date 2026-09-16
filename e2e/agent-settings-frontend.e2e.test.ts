@@ -24,6 +24,13 @@ it.each(["chromium", "webkit"] as const)(
       await page.goto(url);
       const thinking = page.getByRole("button", { name: "Change thinking", exact: true });
       await check(thinking).toBeEnabled();
+      const modelButton = page.getByRole("button", { name: "Change model", exact: true });
+      await modelButton.click();
+      const modelOptions = page.getByRole("option");
+      await check(modelOptions).toHaveCount(4);
+      for (const name of ["Astra", "Sol", "Terra", "Luna"])
+        await check(page.getByRole("option", { name, exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
       const input = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await input.fill("keep this draft");
       await thinking.click();
@@ -67,10 +74,10 @@ it.each(["chromium", "webkit"] as const)(
       await input.fill("model sol");
       await input.press("Enter");
       await check(page.getByRole("button", { name: "Change model", exact: true })).toHaveText(
-        "gpt-5.6-sol",
+        "Sol",
       );
       await check(second.getByRole("button", { name: "Change model", exact: true })).toHaveText(
-        "gpt-5.6-sol",
+        "Sol",
       );
       const bounds = await page.locator(".orb-header").evaluate((element) => ({
         height: element.getBoundingClientRect().height,
@@ -85,7 +92,7 @@ it.each(["chromium", "webkit"] as const)(
       check(status && stop && model && status.x < stop.x && stop.x < model.x).toBeTruthy();
       await page.reload();
       await check(page.getByRole("button", { name: "Change model", exact: true })).toHaveText(
-        "gpt-5.6-sol",
+        "Sol",
       );
       for (const width of [601, 768, 1024]) {
         await page.setViewportSize({ width, height: 900 });

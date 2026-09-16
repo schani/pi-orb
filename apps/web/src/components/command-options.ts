@@ -19,7 +19,7 @@ export function commandOptions(text: string, view: AgentSettingsEvent | null): C
         `${model.provider}/${model.id} ${model.name}`.toLowerCase().includes(query),
       )
       .map((model) => ({
-        label: model.id,
+        label: model.name,
         action: { type: "set_model", model: { provider: model.provider, id: model.id } },
         current:
           model.provider === view.settings.model.provider && model.id === view.settings.model.id,

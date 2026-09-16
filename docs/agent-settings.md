@@ -1,6 +1,6 @@
 # Agent settings and lifecycle-cluster header
 
-**Status: implemented and locally qualified, 2026-09-14.** The user approved the simplified design and required DST/tests first. Lifecycle cluster, the title-free anchored picker, live-only settings display, idle-only mutation and last-applied-wins are selected; `docs/open-questions.md`, agent-settings question 62 is resolved. Initial implementation was qualified without deployment. The user subsequently authorized pushing to `main` and dispatching the production GitHub Actions Deploy workflow (2026-09-14); its release transaction reruns checks and full Docker-backed E2E before applying. Typecheck, lint, unit/DST/infra and full process-backed E2E pass locally; exact coverage and platform skips are recorded in `docs/testing.md`.
+**Status: implemented and locally qualified, revised 2026-09-16.** The user approved the simplified design and required DST/tests first. Lifecycle cluster, the title-free anchored picker, live-only settings display, idle-only mutation and last-applied-wins are selected; `docs/open-questions.md`, agent-settings question 62 is resolved. Initial implementation was qualified without deployment. The user subsequently authorized pushing to `main` and dispatching the production GitHub Actions Deploy workflow (2026-09-14); its release transaction reruns checks and full Docker-backed E2E before applying. Typecheck, lint, unit/DST/infra and full process-backed E2E pass locally; exact coverage and platform skips are recorded in `docs/testing.md`.
 
 ## The smallest useful design
 
@@ -9,7 +9,7 @@
 ### Product behavior
 
 - Settings belong to the orb/session and survive restart. Fresh sessions use the existing Astra/high defaults; resumed sessions restore their recorded choices before boot notifications or interrupted-turn resume can issue inference.
-- Offer eligible image-capable conversation models from the existing brokered `openai-codex` catalog, excluding internal Luna. This preserves the existing image-input promise. The prototype's Anthropic names are not available providers.
+- Offer only the image-capable `openai-codex` catalog entries Astra (`gpt-6-astra`), Sol (`gpt-5.6-sol`), Terra (`gpt-5.6-terra`), and Luna (`gpt-5.6-luna`), in that order. These short names are user-facing. Missing or non-image-capable entries are omitted, preserving the existing image-input promise. The prototype's Anthropic names are not available providers.
 - The runtime supplies supported thinking levels from SDK metadata, including holes or `max`. Model changes retain the current level where supported and otherwise clamp using the SDK; explicit unsupported thinking choices reject. Show an adjustment only when one occurred. Same-value selections are no-ops.
 - Apply only when running, synchronized and idle. No queued-next-turn changes or automatic wake. Busy rejection is visible next to the picker.
 - Multiple tabs use **last-applied-wins for explicit requests**, not optimistic-concurrency revisions. Concurrent requests while a setter owns configuration reject busy; a later explicit request can overwrite an earlier selection, and every tab sees the result. Each command sets only its own field, so an old thinking picker does not resend an old model. Model-induced clamping remains runtime-owned.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickCodexModel } from "./model-select.ts";
+import { codexModelDisplayName, eligibleCodexModels, pickCodexModel } from "./model-select.ts";
 
 /**
  * The runtime advertises `input.image`, so the pinned Codex model must be
@@ -18,6 +18,32 @@ interface CatalogModel {
 const spark: CatalogModel = { id: "gpt-5.3-codex-spark", input: ["text"] };
 const multimodal: CatalogModel = { id: "gpt-5.4", input: ["text", "image"] };
 const astra: CatalogModel = { id: "gpt-6-astra", input: ["text", "image"] };
+
+describe("eligibleCodexModels", () => {
+  it("offers only Astra, Sol, Terra, and Luna in that order when image-capable", () => {
+    const catalog = [
+      { id: "gpt-5.6-luna", input: ["text", "image"] },
+      { id: "gpt-5.6-sol", input: ["text", "image"] },
+      { id: "gpt-5.6-terra", input: ["text", "image"] },
+      astra,
+      multimodal,
+    ];
+
+    expect(eligibleCodexModels(catalog).map((model) => model.id)).toEqual([
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+    ]);
+    expect(codexModelDisplayName("gpt-5.6-luna")).toBe("Luna");
+  });
+
+  it("omits configured models without image input", () => {
+    expect(
+      eligibleCodexModels([astra, { id: "gpt-5.6-sol", input: ["text"] }]).map((model) => model.id),
+    ).toEqual(["gpt-6-astra"]);
+  });
+});
 
 describe("pickCodexModel", () => {
   it("pins gpt-6-astra when the catalog has it (decided model)", () => {

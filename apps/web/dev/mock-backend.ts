@@ -1455,10 +1455,17 @@ function settingsFor(
     view = {
       type: "agent_settings",
       settings: { model: { provider: "openai-codex", id: "gpt-6-astra" }, thinkingLevel: "high" },
-      models: ["gpt-6-astra", "gpt-5.6-sol"].map((id) => ({
+      models: (
+        [
+          ["gpt-6-astra", "Astra"],
+          ["gpt-5.6-sol", "Sol"],
+          ["gpt-5.6-terra", "Terra"],
+          ["gpt-5.6-luna", "Luna"],
+        ] as const
+      ).map(([id, name]) => ({
         provider: "openai-codex",
         id,
-        name: id,
+        name,
         thinkingLevels: ["low", "medium", "high"],
       })),
       writable: true,

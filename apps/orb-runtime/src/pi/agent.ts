@@ -70,6 +70,7 @@ import {
 import { LiveHistoryPublisher } from "./live-history.ts";
 import { LunaTurnSummarizer } from "./luna-summarizer.ts";
 import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
+import { codexModelDisplayName, eligibleCodexModels } from "./model-select.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
 import { restoreSessionSettings, settingsFallbackMessage } from "./restore-settings.ts";
 import { reportRustToolchainEdge } from "./rust-toolchain-reporter.ts";
@@ -550,9 +551,7 @@ export class PiOrbAgent {
     if (refreshed.isErr()) {
       return err(this.failed("session_init_failed", refreshed.error, true));
     }
-    const eligibleModels = modelRuntime
-      .getModels("openai-codex")
-      .filter((item) => item.input.includes("image") && !item.id.includes("luna"));
+    const eligibleModels = eligibleCodexModels(modelRuntime.getModels("openai-codex"));
     const restored = sessionManager.buildSessionContext();
     const restoredThinking = sessionManager
       .getEntries()
@@ -752,7 +751,7 @@ export class PiOrbAgent {
       models: eligibleModels.map((item) => ({
         provider: item.provider,
         id: item.id,
-        name: item.name,
+        name: codexModelDisplayName(item.id),
         thinkingLevels: getSupportedThinkingLevels(item),
       })),
       isIdle: () =>

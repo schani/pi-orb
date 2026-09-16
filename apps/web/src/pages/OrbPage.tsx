@@ -1294,7 +1294,13 @@ function OrbConversation({
               disabled={!settingsAvailable || state.pendingRequest !== null}
               onClick={() => dispatch({ type: "open_settings", command: "model" })}
             >
-              {settingsAvailable ? state.settings?.settings.model.id : "—"}
+              {settingsAvailable
+                ? (state.settings?.models.find(
+                    (model) =>
+                      model.provider === state.settings?.settings.model.provider &&
+                      model.id === state.settings?.settings.model.id,
+                  )?.name ?? state.settings?.settings.model.id)
+                : "—"}
             </button>
             <button
               type="button"

@@ -26,9 +26,9 @@ it("offers only supported choices and never converts an unknown command to a pro
     type: "set_thinking",
     thinkingLevel: "low",
   });
-  expect(commandOptions("model A", view)[0]?.action).toEqual({
-    type: "set_model",
-    model: { provider: "test", id: "a" },
+  expect(commandOptions("model A", view)[0]).toMatchObject({
+    label: "A",
+    action: { type: "set_model", model: { provider: "test", id: "a" } },
   });
   expect(commandOptions("upload", view)).toEqual([]);
 });
