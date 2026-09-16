@@ -298,6 +298,68 @@
     "pendingRequest": null,
     "requestError": null,
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "user",
+        "key": "r1",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ]
+      },
+      {
+        "kind": "agent",
+        "key": "r2",
+        "parts": [
+          {
+            "kind": "block",
+            "key": "r2-0",
+            "block": {
+              "type": "text",
+              "text": "hi"
+            },
+            "copySource": "hi"
+          }
+        ],
+        "live": {
+          "categories": [
+            {
+              "key": "command",
+              "kind": "command",
+              "label": "commands",
+              "headline": null,
+              "state": "running",
+              "count": null,
+              "progress": {
+                "kind": "running"
+              },
+              "calls": [
+                {
+                  "callId": "c1",
+                  "name": "bash",
+                  "state": "running",
+                  "label": "bash",
+                  "status": "running",
+                  "output": "",
+                  "stats": null
+                }
+              ]
+            }
+          ],
+          "blocks": [
+            {
+              "blockId": "b1",
+              "blockType": "text",
+              "text": "streaming",
+              "revision": 1
+            }
+          ],
+          "busy": false
+        }
+      }
+    ]
   }
 }

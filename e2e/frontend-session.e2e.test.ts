@@ -166,8 +166,8 @@ describe("frontend-only browser behavior", () => {
             // Count function executions, not DOM mutations: React can reparse the
             // entire transcript without changing a single DOM node.
             return code.replace(
-              "const representedMessageIds =",
-              'Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1); const representedMessageIds =',
+              "const rows = presentTranscript(",
+              'Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1); const rows = presentTranscript(',
             );
           },
         },

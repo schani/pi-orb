@@ -1,0 +1,381 @@
+{
+  "name": "queued rows sit after the transcript, retire at their record, and end the live tail",
+  "queuedMessages": [
+    {
+      "id": "m1",
+      "orbId": "orb-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "first"
+        }
+      ],
+      "status": "queued",
+      "createdAt": "2026-09-16T00:00:00Z",
+      "updatedAt": "2026-09-16T00:00:00Z"
+    },
+    {
+      "id": "m2",
+      "orbId": "orb-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "second"
+        }
+      ],
+      "status": "failed",
+      "error": "prompt too large",
+      "createdAt": "2026-09-16T00:00:01Z",
+      "updatedAt": "2026-09-16T00:00:01Z"
+    }
+  ],
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "headId": "sh1",
+          "retiredBlockIds": [],
+          "record": {
+            "id": "sh1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:00Z",
+            "type": "event",
+            "eventType": "pi.bash_execution",
+            "content": [],
+            "overflow": {},
+            "shell": {
+              "command": "npm test",
+              "output": "ok",
+              "exitCode": null,
+              "cancelled": false,
+              "truncated": false,
+              "excludeFromContext": false
+            }
+          }
+        }
+      },
+      "expect": {
+        "presentation": [
+          {
+            "kind": "shell",
+            "key": "sh1",
+            "shell": {
+              "command": "npm test",
+              "output": "ok",
+              "exitCode": null,
+              "cancelled": false,
+              "truncated": false,
+              "excludeFromContext": false
+            }
+          },
+          {
+            "kind": "queued",
+            "key": "m1",
+            "status": "queued",
+            "error": null,
+            "blocks": [
+              {
+                "type": "text",
+                "text": "first"
+              }
+            ]
+          },
+          {
+            "kind": "queued",
+            "key": "m2",
+            "status": "failed",
+            "error": "prompt too large",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "second"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:01Z",
+          "type": "history.record",
+          "headId": "u1",
+          "retiredBlockIds": [],
+          "record": {
+            "id": "u1",
+            "parentId": "sh1",
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "first"
+              }
+            ],
+            "overflow": {},
+            "inboxMessageIds": [
+              "m1"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "presentation": [
+          {
+            "kind": "shell",
+            "key": "sh1"
+          },
+          {
+            "kind": "user",
+            "key": "u1",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "first"
+              }
+            ]
+          },
+          {
+            "kind": "queued",
+            "key": "m2",
+            "status": "failed",
+            "error": "prompt too large",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "second"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:02Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b1",
+            "blockType": "shell",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "running"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:03Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b2",
+            "blockType": "text",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "streaming"
+            }
+          }
+        }
+      },
+      "expect": {
+        "presentation": [
+          {
+            "kind": "shell",
+            "key": "sh1"
+          },
+          {
+            "kind": "user",
+            "key": "u1"
+          },
+          {
+            "kind": "queued",
+            "key": "m2"
+          },
+          {
+            "kind": "live_shell",
+            "key": "b1",
+            "text": "running"
+          },
+          {
+            "kind": "agent",
+            "key": "live",
+            "parts": [],
+            "live": {
+              "categories": [],
+              "blocks": [
+                {
+                  "blockId": "b2",
+                  "blockType": "text",
+                  "text": "streaming",
+                  "revision": 1
+                }
+              ],
+              "busy": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "records": [
+      {
+        "id": "sh1",
+        "parentId": null,
+        "timestamp": "2026-09-16T00:00:00Z",
+        "type": "event",
+        "eventType": "pi.bash_execution",
+        "content": [],
+        "overflow": {},
+        "shell": {
+          "command": "npm test",
+          "output": "ok",
+          "exitCode": null,
+          "cancelled": false,
+          "truncated": false,
+          "excludeFromContext": false
+        }
+      },
+      {
+        "id": "u1",
+        "parentId": "sh1",
+        "timestamp": "2026-09-16T00:00:01Z",
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "first"
+          }
+        ],
+        "overflow": {},
+        "inboxMessageIds": [
+          "m1"
+        ]
+      }
+    ],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": "u1",
+    "headId": "u1",
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [
+      {
+        "blockId": "b1",
+        "blockType": "shell",
+        "text": "running",
+        "revision": 1
+      },
+      {
+        "blockId": "b2",
+        "blockType": "text",
+        "text": "streaming",
+        "revision": 1
+      }
+    ],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "shell",
+        "key": "sh1",
+        "shell": {
+          "command": "npm test",
+          "output": "ok",
+          "exitCode": null,
+          "cancelled": false,
+          "truncated": false,
+          "excludeFromContext": false
+        }
+      },
+      {
+        "kind": "user",
+        "key": "u1",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "first"
+          }
+        ]
+      },
+      {
+        "kind": "queued",
+        "key": "m2",
+        "status": "failed",
+        "error": "prompt too large",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "second"
+          }
+        ]
+      },
+      {
+        "kind": "live_shell",
+        "key": "b1",
+        "text": "running"
+      },
+      {
+        "kind": "agent",
+        "key": "live",
+        "parts": [],
+        "live": {
+          "categories": [],
+          "blocks": [
+            {
+              "blockId": "b2",
+              "blockType": "text",
+              "text": "streaming",
+              "revision": 1
+            }
+          ],
+          "busy": false
+        }
+      }
+    ]
+  }
+}

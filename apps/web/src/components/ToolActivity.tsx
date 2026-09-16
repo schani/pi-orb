@@ -1,17 +1,13 @@
 import {
   type ActivityCall,
   type ActivityCategory,
-  activityCalls,
   type CategoryCount,
   callLabel,
   callStatus,
-  categorize,
   categoryCount,
   categoryHeadline,
   categoryProgress,
   categoryState,
-  type LiveToolCall,
-  type PersistedToolCall,
   patchStats,
   resultText,
 } from "@pi-orb/transcript";
@@ -19,8 +15,7 @@ import type { ReactNode } from "react";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 
 interface ToolActivityProps {
-  persisted?: readonly PersistedToolCall[];
-  live?: readonly LiveToolCall[];
+  categories: readonly ActivityCategory[];
 }
 
 function renderCount(count: CategoryCount): ReactNode | null {
@@ -169,12 +164,11 @@ function CategoryCalls({ category }: { category: ActivityCategory }) {
   );
 }
 
-export function ToolActivity({ persisted = [], live = [] }: ToolActivityProps) {
-  const calls = activityCalls(persisted, live);
-  if (calls.length === 0) return null;
+export function ToolActivity({ categories }: ToolActivityProps) {
+  if (categories.length === 0) return null;
   return (
     <div className="tool-activity">
-      {categorize(calls).map((category) => (
+      {categories.map((category) => (
         <ActivityRailRow
           className="tool-activity-category"
           headline={categoryHeadline(category) ?? undefined}

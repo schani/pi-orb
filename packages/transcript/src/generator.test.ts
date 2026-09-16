@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import type { HistoryRecord, OrbHistoryView, ServerFrame } from "@pi-orb/protocol";
 import { type EntropySource, sample } from "determined";
 import { expect, it } from "vitest";
+import { type PresentedRow, presentTranscript } from "./presentation.ts";
 import { serializeState } from "./serialize.ts";
 import {
   initialState,
@@ -37,16 +38,36 @@ interface Context {
   seq: number;
 }
 
+/** Every third record commits its own tool call, so live chips hand over. */
 function record(id: string, parentId: string | null): HistoryRecord {
+  const callId = `${id}-call`;
   return {
     id,
     parentId,
     timestamp: AT,
     type: "message",
     role: "assistant",
-    content: [{ type: "text", text: `text for ${id}` }],
+    content: id.endsWith("3")
+      ? [
+          { type: "tool_call", callId, name: "read", arguments: { path: `${id}.ts` } },
+          { type: "tool_result", callId, content: [{ type: "text", text: "ok" }] },
+        ]
+      : [{ type: "text", text: `text for ${id}` }],
     overflow: {},
   };
+}
+
+function presentedCallIds(rows: readonly PresentedRow[]): string[] {
+  const ids: string[] = [];
+  for (const row of rows) {
+    if (row.kind !== "agent") continue;
+    const categories = [
+      ...row.parts.flatMap((part) => (part.kind === "tool_run" ? part.categories : [])),
+      ...(row.live?.categories ?? []),
+    ];
+    for (const category of categories) for (const call of category.calls) ids.push(call.callId);
+  }
+  return ids;
 }
 
 function view(ids: readonly string[]): OrbHistoryView {
@@ -163,7 +184,7 @@ function nextAction(entropy: EntropySource, context: Context): TranscriptAction 
         event: {
           type: "tool_state",
           operationId: context.operationId,
-          callId: pick(entropy, "call id", ["call-1", "call-2"]),
+          callId: pick(entropy, "call id", ["call-1", `${lastRecord}-call`]),
           name: pick(entropy, "tool name", ["bash", "read", "edit"]),
           revision: context.seq,
           state: pick(entropy, "call state", ["running", "completed", "failed"]),
@@ -285,6 +306,16 @@ it.each(Array.from({ length: SEEDS }, (_, index) => index + 1))(
       expect([...state.records.keys()], `${where}: arrival order`).toEqual(
         arrivals.filter((id) => state.records.has(id)),
       );
+
+      // Every call is presented once: a committed call owns its chip.
+      const callIds = presentedCallIds(
+        presentTranscript({
+          records: [...state.records.values()],
+          liveBlocks: [...state.liveBlocks.values()],
+          tools: [...state.tools.values()],
+        }),
+      );
+      expect(new Set(callIds).size, `${where}: each call is presented once`).toBe(callIds.length);
 
       // A connection transition never drops the transcript.
       if (step.action.type === "connection_status") {

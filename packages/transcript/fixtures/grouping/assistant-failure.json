@@ -112,7 +112,8 @@
             "block": {
               "type": "text",
               "text": "partial"
-            }
+            },
+            "copySource": "partial"
           },
           {
             "kind": "failure",
@@ -130,7 +131,8 @@
             "block": {
               "type": "text",
               "text": "fine"
-            }
+            },
+            "copySource": "fine"
           },
           {
             "kind": "failure",
@@ -142,7 +144,8 @@
             "key": "a6-error",
             "message": "The agent’s connection to the model provider was interrupted. reset"
           }
-        ]
+        ],
+        "live": null
       }
     ],
     "representedMessageIds": [],

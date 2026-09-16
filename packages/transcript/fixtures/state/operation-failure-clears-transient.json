@@ -171,6 +171,7 @@
       "code": "operation_failed",
       "message": "boom"
     },
-    "notice": null
+    "notice": null,
+    "presentation": []
   }
 }

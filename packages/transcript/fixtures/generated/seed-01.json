@@ -72,7 +72,7 @@
           "event": {
             "type": "tool_state",
             "operationId": "op0",
-            "callId": "call-2",
+            "callId": "null-call",
             "name": "read",
             "revision": 5,
             "state": "completed"
@@ -642,6 +642,70 @@
     },
     "requestError": null,
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "agent",
+        "key": "r7",
+        "parts": [
+          {
+            "kind": "block",
+            "key": "r7-0",
+            "block": {
+              "type": "text",
+              "text": "text for r7"
+            },
+            "copySource": "text for r7"
+          },
+          {
+            "kind": "block",
+            "key": "r14-0",
+            "block": {
+              "type": "text",
+              "text": "text for r14"
+            },
+            "copySource": "text for r14"
+          },
+          {
+            "kind": "block",
+            "key": "r18-0",
+            "block": {
+              "type": "text",
+              "text": "text for r18"
+            },
+            "copySource": "text for r18"
+          }
+        ],
+        "live": {
+          "categories": [
+            {
+              "key": "edit",
+              "kind": "edit",
+              "label": "edit",
+              "headline": null,
+              "state": "failed",
+              "count": null,
+              "progress": {
+                "kind": "failed",
+                "count": 1
+              },
+              "calls": [
+                {
+                  "callId": "call-1",
+                  "name": "edit",
+                  "state": "failed",
+                  "label": "edit",
+                  "status": "failed",
+                  "output": "",
+                  "stats": null
+                }
+              ]
+            }
+          ],
+          "blocks": [],
+          "busy": false
+        }
+      }
+    ]
   }
 }

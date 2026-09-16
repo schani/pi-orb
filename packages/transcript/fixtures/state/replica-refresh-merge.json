@@ -388,6 +388,44 @@
     "pendingRequest": null,
     "requestError": null,
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "user",
+        "key": "r1",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ]
+      },
+      {
+        "kind": "agent",
+        "key": "r2",
+        "parts": [
+          {
+            "kind": "block",
+            "key": "r2-0",
+            "block": {
+              "type": "text",
+              "text": "hi"
+            },
+            "copySource": "hi"
+          }
+        ],
+        "live": null
+      },
+      {
+        "kind": "user",
+        "key": "r3",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "more"
+          }
+        ]
+      }
+    ]
   }
 }

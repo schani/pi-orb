@@ -3,26 +3,28 @@ import type {
   AgentSettingsEvent,
   ContentBlock,
   HistoryRecord,
+  OrbMessageView,
 } from "@pi-orb/protocol";
+import { blockText, persistedToolCallIds, type ShellExecution } from "./grouping.ts";
 import {
-  type AgentPart,
-  blockText,
-  groupTurns,
-  persistedToolCallIds,
-  type ShellExecution,
-  splitAgentRecords,
-  type Turn,
-} from "./grouping.ts";
-import { representedInboxMessageIds } from "./queued-messages.ts";
-import type { LiveBlock, ToolChip, TranscriptState } from "./state.ts";
+  type LiveTail,
+  type PresentedPart,
+  type PresentedRow,
+  presentTranscript,
+} from "./presentation.ts";
+import {
+  hasDeliveredMessageAwaitingHistory,
+  messagesAwaitingHistory,
+  representedInboxMessageIds,
+  withQueuedMessage,
+} from "./queued-messages.ts";
+import { isLiveBusy, type LiveBlock, type ToolChip, type TranscriptState } from "./state.ts";
 import {
   type ActivityCategory,
-  activityCalls,
   type CategoryCount,
   type CategoryProgress,
   callLabel,
   callStatus,
-  categorize,
   categoryCount,
   categoryHeadline,
   categoryProgress,
@@ -31,6 +33,7 @@ import {
   patchStats,
   resultText,
 } from "./tool-activity.ts";
+import type { TranscriptCache } from "./transcript-cache.ts";
 
 /**
  * JSON-only projection of the client model: the comparison surface of the
@@ -69,9 +72,14 @@ export interface SerializedState {
   requestError: { code: string; message: string } | null;
   serverError: { code: string; message: string } | null;
   notice: string | null;
+  /** What a client renders for this state, presenting a running orb. */
+  presentation: SerializedRow[];
 }
 
-export function serializeState(state: TranscriptState): SerializedState {
+export function serializeState(
+  state: TranscriptState,
+  queuedMessages: readonly OrbMessageView[] = [],
+): SerializedState {
   return {
     records: [...state.records.values()],
     sessionId: state.sessionId,
@@ -113,6 +121,15 @@ export function serializeState(state: TranscriptState): SerializedState {
     requestError: state.requestError,
     serverError: state.serverError,
     notice: state.notice,
+    presentation: serializePresentation(
+      presentTranscript({
+        records: [...state.records.values()],
+        liveBlocks: [...state.liveBlocks.values()],
+        tools: [...state.tools.values()],
+        queuedMessages,
+        busy: isLiveBusy("running", state),
+      }),
+    ),
   };
 }
 
@@ -169,18 +186,27 @@ type SerializedPart =
   | { kind: "tool_run"; key: string; categories: SerializedCategory[] }
   | { kind: "subagent_notice" | "event_text"; key: string; text: string }
   | { kind: "tool_result"; key: string; block: SerializedBlock }
-  | { kind: "block"; key: string; block: SerializedBlock }
+  | { kind: "block"; key: string; block: SerializedBlock; copySource: string | null }
   | { kind: "failure"; key: string; message: string };
 
-type SerializedTurn =
-  | { kind: "user"; id: string; blocks: SerializedBlock[] }
-  | { kind: "agent"; key: string; parts: SerializedPart[] }
-  | { kind: "shell"; id: string; shell: ShellExecution }
-  | { kind: "compaction"; id: string; summary: string };
+interface SerializedLive {
+  categories: SerializedCategory[];
+  blocks: { blockId: string; blockType: string; text: string; revision: number }[];
+  busy: boolean;
+}
 
-/** JSON-only projection of the turn/tool-run structure a client renders. */
+type SerializedRow =
+  | { kind: "user"; key: string; blocks: SerializedBlock[] }
+  | { kind: "agent"; key: string; parts: SerializedPart[]; live: SerializedLive | null }
+  | { kind: "shell"; key: string; shell: ShellExecution }
+  | { kind: "compaction"; key: string; summary: string }
+  | { kind: "queued"; key: string; status: string; error: string | null; blocks: SerializedBlock[] }
+  | { kind: "live_shell"; key: string; text: string }
+  | { kind: "busy"; key: string };
+
+/** JSON-only projection of the rows a client renders (`presentTranscript`). */
 export interface SerializedTurns {
-  turns: SerializedTurn[];
+  turns: SerializedRow[];
   representedMessageIds: string[];
   persistedToolCallIds: string[];
 }
@@ -206,13 +232,13 @@ function serializeCategory(category: ActivityCategory): SerializedCategory {
   };
 }
 
-function serializePart(part: AgentPart): SerializedPart {
+function serializePart(part: PresentedPart): SerializedPart {
   switch (part.kind) {
     case "tool_run":
       return {
         kind: "tool_run",
         key: part.key,
-        categories: categorize(activityCalls(part.calls, [])).map(serializeCategory),
+        categories: part.categories.map(serializeCategory),
       };
     case "subagent_notice":
       return { kind: "subagent_notice", key: part.key, text: blockText(part.record.content ?? []) };
@@ -221,33 +247,128 @@ function serializePart(part: AgentPart): SerializedPart {
     case "tool_result":
       return { kind: "tool_result", key: part.key, block: serializeBlock(part.block) };
     case "block":
-      return { kind: "block", key: part.key, block: serializeBlock(part.block) };
+      return {
+        kind: "block",
+        key: part.key,
+        block: serializeBlock(part.block),
+        copySource: part.copySource,
+      };
     case "failure":
       return { kind: "failure", key: part.key, message: part.message };
   }
 }
 
-function serializeTurn(turn: Turn): SerializedTurn {
-  switch (turn.kind) {
+function serializeLive(live: LiveTail): SerializedLive {
+  return {
+    categories: live.categories.map(serializeCategory),
+    blocks: live.blocks.map((block) => ({ ...block })),
+    busy: live.busy,
+  };
+}
+
+function serializeRow(row: PresentedRow): SerializedRow {
+  switch (row.kind) {
     case "user":
-      return { kind: "user", id: turn.record.id, blocks: turn.record.content.map(serializeBlock) };
+      return { kind: "user", key: row.key, blocks: row.record.content.map(serializeBlock) };
     case "agent":
       return {
         kind: "agent",
-        key: turn.key,
-        parts: splitAgentRecords(turn.records).map(serializePart),
+        key: row.key,
+        parts: row.parts.map(serializePart),
+        live: row.live === null ? null : serializeLive(row.live),
+      };
+    case "queued":
+      return {
+        kind: "queued",
+        key: row.key,
+        status: row.status,
+        error: row.error,
+        blocks: row.record.content.map(serializeBlock),
       };
     case "shell":
-      return { kind: "shell", id: turn.record.id, shell: turn.shell };
     case "compaction":
-      return { kind: "compaction", id: turn.record.id, summary: blockText(turn.record.summary) };
+    case "live_shell":
+    case "busy":
+      return row;
   }
+}
+
+export function serializePresentation(rows: readonly PresentedRow[]): SerializedRow[] {
+  return rows.map(serializeRow);
 }
 
 export function serializeTurns(records: readonly HistoryRecord[]): SerializedTurns {
   return {
-    turns: groupTurns(records).map(serializeTurn),
+    turns: serializePresentation(presentTranscript({ records })),
     representedMessageIds: [...representedInboxMessageIds(records)],
     persistedToolCallIds: [...persistedToolCallIds(records)],
+  };
+}
+
+export interface SerializedInboxMessage {
+  id: string;
+  status: string;
+  delivery: string | null;
+}
+
+/** JSON-only projection of inbox reconciliation (`fixtures/inbox/`). */
+export interface SerializedInbox {
+  represented: string[];
+  awaitingHistory: string[];
+  deliveredAwaitingHistory: boolean;
+  afterAppend: SerializedInboxMessage[];
+}
+
+function serializeInboxMessage(message: OrbMessageView): SerializedInboxMessage {
+  return { id: message.id, status: message.status, delivery: message.delivery ?? null };
+}
+
+export function serializeInbox(
+  items: readonly OrbMessageView[],
+  records: readonly HistoryRecord[],
+  append: readonly OrbMessageView[] = [],
+): SerializedInbox {
+  return {
+    represented: [...representedInboxMessageIds(records)],
+    awaitingHistory: messagesAwaitingHistory(items, records).map((message) => message.id),
+    deliveredAwaitingHistory: hasDeliveredMessageAwaitingHistory(items, records),
+    afterAppend: append
+      .reduce<readonly OrbMessageView[]>(withQueuedMessage, items)
+      .map(serializeInboxMessage),
+  };
+}
+
+export interface SerializedCacheEntry {
+  orbId: string;
+  projectId: string;
+  sessionId: string | null;
+  recordIds: string[];
+  afterRecordId: string | null;
+  headId: string | null;
+  bytes: number;
+}
+
+/** JSON-only projection of the transcript cache (`fixtures/cache/`). */
+export interface SerializedCache {
+  entries: SerializedCacheEntry[];
+  bytes: number;
+  owners: number;
+  invalidationEpoch: number;
+}
+
+export function serializeCache(cache: TranscriptCache): SerializedCache {
+  return {
+    entries: cache.contents.map((entry) => ({
+      orbId: entry.orbId,
+      projectId: entry.projectId,
+      sessionId: entry.snapshot.sessionId,
+      recordIds: [...entry.snapshot.records.keys()],
+      afterRecordId: entry.snapshot.afterRecordId,
+      headId: entry.snapshot.headId,
+      bytes: entry.bytes,
+    })),
+    bytes: cache.stats.bytes,
+    owners: cache.stats.owners,
+    invalidationEpoch: cache.invalidationEpoch,
   };
 }

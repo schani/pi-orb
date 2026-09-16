@@ -1,0 +1,81 @@
+{
+  "name": "reading an entry keeps it; the least recently used one is evicted",
+  "limits": { "maxEntries": 2 },
+  "steps": [
+    { "op": "acquire", "args": { "owner": "oa", "orbId": "a", "projectId": "p1" } },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "oa",
+        "snapshot": {
+          "sessionId": "s1",
+          "records": [{ "id": "r1", "text": "hello" }],
+          "afterRecordId": "r1",
+          "headId": "r1"
+        }
+      },
+      "expect": { "admission": "stored" }
+    },
+    { "op": "acquire", "args": { "owner": "ob", "orbId": "b", "projectId": "p1" } },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "ob",
+        "snapshot": {
+          "sessionId": "s2",
+          "records": [{ "id": "r2", "text": "hello" }],
+          "afterRecordId": "r2",
+          "headId": "r2"
+        }
+      },
+      "expect": { "admission": "stored" }
+    },
+    {
+      "op": "get",
+      "args": { "orbId": "a" },
+      "expect": {
+        "hit": { "sessionId": "s1", "recordIds": ["r1"], "afterRecordId": "r1", "headId": "r1" }
+      }
+    },
+    { "op": "acquire", "args": { "owner": "oc", "orbId": "c", "projectId": "p2" } },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "oc",
+        "snapshot": {
+          "sessionId": "s3",
+          "records": [{ "id": "r3", "text": "hello" }],
+          "afterRecordId": "r3",
+          "headId": "r3"
+        }
+      },
+      "expect": { "admission": "stored" }
+    },
+    { "op": "get", "args": { "orbId": "b" }, "expect": { "hit": null } }
+  ],
+  "expect": {
+    "entries": [
+      {
+        "orbId": "a",
+        "projectId": "p1",
+        "sessionId": "s1",
+        "recordIds": ["r1"],
+        "afterRecordId": "r1",
+        "headId": "r1",
+        "bytes": 870
+      },
+      {
+        "orbId": "c",
+        "projectId": "p2",
+        "sessionId": "s3",
+        "recordIds": ["r3"],
+        "afterRecordId": "r3",
+        "headId": "r3",
+        "bytes": 870
+      }
+    ],
+    "bytes": 1740,
+    "owners": 3,
+    "invalidationEpoch": 0
+  }
+}

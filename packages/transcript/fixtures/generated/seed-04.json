@@ -52,8 +52,22 @@
             "role": "assistant",
             "content": [
               {
-                "type": "text",
-                "text": "text for r3"
+                "type": "tool_call",
+                "callId": "r3-call",
+                "name": "read",
+                "arguments": {
+                  "path": "r3.ts"
+                }
+              },
+              {
+                "type": "tool_result",
+                "callId": "r3-call",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "ok"
+                  }
+                ]
               }
             ],
             "overflow": {}
@@ -340,8 +354,22 @@
               "role": "assistant",
               "content": [
                 {
-                  "type": "text",
-                  "text": "text for r3"
+                  "type": "tool_call",
+                  "callId": "r3-call",
+                  "name": "read",
+                  "arguments": {
+                    "path": "r3.ts"
+                  }
+                },
+                {
+                  "type": "tool_result",
+                  "callId": "r3-call",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "ok"
+                    }
+                  ]
                 }
               ],
               "overflow": {}
@@ -469,8 +497,22 @@
         "role": "assistant",
         "content": [
           {
-            "type": "text",
-            "text": "text for r3"
+            "type": "tool_call",
+            "callId": "r3-call",
+            "name": "read",
+            "arguments": {
+              "path": "r3.ts"
+            }
+          },
+          {
+            "type": "tool_result",
+            "callId": "r3-call",
+            "content": [
+              {
+                "type": "text",
+                "text": "ok"
+              }
+            ]
           }
         ],
         "overflow": {}
@@ -537,6 +579,67 @@
     },
     "requestError": null,
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "agent",
+        "key": "r3",
+        "parts": [
+          {
+            "kind": "tool_run",
+            "key": "tools-0",
+            "categories": [
+              {
+                "key": "read",
+                "kind": "read",
+                "label": "read",
+                "headline": "r3.ts",
+                "state": "completed",
+                "count": null,
+                "progress": null,
+                "calls": [
+                  {
+                    "callId": "r3-call",
+                    "name": "read",
+                    "state": "completed",
+                    "label": "r3.ts",
+                    "status": "complete",
+                    "output": "ok",
+                    "stats": null
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "block",
+            "key": "r29-0",
+            "block": {
+              "type": "text",
+              "text": "text for r29"
+            },
+            "copySource": "text for r29"
+          }
+        ],
+        "live": {
+          "categories": [],
+          "blocks": [
+            {
+              "blockId": "b11",
+              "blockType": "reasoning",
+              "text": "chunk 11chunk 20",
+              "revision": 20
+            },
+            {
+              "blockId": "b16",
+              "blockType": "text",
+              "text": "chunk 16",
+              "revision": 16
+            }
+          ],
+          "busy": false
+        }
+      }
+    ]
   }
 }

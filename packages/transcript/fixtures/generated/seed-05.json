@@ -629,6 +629,33 @@
       "message": "runtime busy"
     },
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "agent",
+        "key": "r2",
+        "parts": [
+          {
+            "kind": "block",
+            "key": "r2-0",
+            "block": {
+              "type": "text",
+              "text": "text for r2"
+            },
+            "copySource": "text for r2"
+          },
+          {
+            "kind": "block",
+            "key": "r6-0",
+            "block": {
+              "type": "text",
+              "text": "text for r6"
+            },
+            "copySource": "text for r6"
+          }
+        ],
+        "live": null
+      }
+    ]
   }
 }

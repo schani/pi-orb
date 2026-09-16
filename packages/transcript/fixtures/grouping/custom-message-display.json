@@ -110,7 +110,8 @@
             "key": "e4",
             "text": "fell back to another model"
           }
-        ]
+        ],
+        "live": null
       }
     ],
     "representedMessageIds": [],

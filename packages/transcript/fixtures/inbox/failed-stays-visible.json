@@ -1,0 +1,54 @@
+{
+  "name": "a failed message stays visible even once a record represents it",
+  "inboxMessages": [
+    {
+      "id": "m1",
+      "orbId": "orb-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "one"
+        }
+      ],
+      "status": "failed",
+      "error": "prompt too large",
+      "createdAt": "2026-09-16T00:00:00Z",
+      "updatedAt": "2026-09-16T00:00:00Z"
+    }
+  ],
+  "records": [
+    {
+      "id": "u1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "one"
+        }
+      ],
+      "overflow": {},
+      "inboxMessageIds": [
+        "m1"
+      ]
+    }
+  ],
+  "expect": {
+    "represented": [
+      "m1"
+    ],
+    "awaitingHistory": [
+      "m1"
+    ],
+    "deliveredAwaitingHistory": false,
+    "afterAppend": [
+      {
+        "id": "m1",
+        "status": "failed",
+        "delivery": null
+      }
+    ]
+  }
+}

@@ -1,19 +1,12 @@
-import type {
-  ContentBlock,
-  EventRecord,
-  HistoryRecord,
-  MessageRecord,
-  OrbMessageView,
-} from "@pi-orb/protocol";
+import type { ContentBlock, HistoryRecord, MessageRecord, OrbMessageView } from "@pi-orb/protocol";
 import {
   blockText,
-  groupTurns,
   type LiveBlock,
-  persistedToolCallIds,
-  representedInboxMessageIds,
-  splitAgentRecords,
+  type LiveTail,
+  type PresentedPart,
+  type PresentedRow,
+  presentTranscript,
   type ToolChip,
-  type Turn,
 } from "@pi-orb/transcript";
 import { memo, type ReactNode } from "react";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
@@ -123,28 +116,12 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
   return nodes;
 }
 
-export function assistantResponseMarkdown(record: MessageRecord): string | null {
-  if (record.role !== "assistant") return null;
-  const parts = record.content
-    .filter((block): block is ContentBlock & { type: "text" } => block.type === "text")
-    .map((block) => block.text)
-    .filter((text) => text.trim() !== "");
-  return parts.length === 0 ? null : parts.join("\n\n");
-}
-
-/** One response owns one copy action, hosted by its first non-empty text block. */
-function responseCopySource(record: MessageRecord, block: ContentBlock): string | null {
-  if (block.type !== "text" || block.text.trim() === "") return null;
-  const first = record.content.find((other) => other.type === "text" && other.text.trim() !== "");
-  return block === first ? assistantResponseMarkdown(record) : null;
-}
-
-function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): ReactNode[] {
+function renderParts(parts: readonly PresentedPart[]): ReactNode[] {
   const nodes: ReactNode[] = [];
-  for (const part of splitAgentRecords(records)) {
+  for (const part of parts) {
     switch (part.kind) {
       case "tool_run":
-        nodes.push(<ToolActivity persisted={part.calls} key={part.key} />);
+        nodes.push(<ToolActivity categories={part.categories} key={part.key} />);
         break;
       case "subagent_notice":
         nodes.push(<SubagentNotice key={part.key} record={part.record} />);
@@ -162,10 +139,13 @@ function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): 
         nodes.push(renderToolResult(part.block, part.key));
         break;
       case "block": {
-        const copySource = responseCopySource(part.record, part.block);
-        if (part.block.type === "text" && copySource !== null) {
+        if (part.block.type === "text" && part.copySource !== null) {
           nodes.push(
-            <ResponseMarkdown key={part.key} markdown={part.block.text} copySource={copySource} />,
+            <ResponseMarkdown
+              key={part.key}
+              markdown={part.block.text}
+              copySource={part.copySource}
+            />,
           );
           break;
         }
@@ -188,14 +168,11 @@ function renderAgentRecords(records: readonly (MessageRecord | EventRecord)[]): 
   return nodes;
 }
 
-interface LiveAgentContent {
-  blocks: readonly LiveBlock[];
-  tools: readonly ToolChip[];
-}
-
-function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNode[] {
+function renderLive(live: LiveTail): ReactNode[] {
   const nodes: ReactNode[] = [];
-  if (live.tools.length > 0) nodes.push(<ToolActivity live={live.tools} key="live-tools" />);
+  if (live.categories.length > 0) {
+    nodes.push(<ToolActivity categories={live.categories} key="live-tools" />);
+  }
   for (const block of live.blocks) {
     nodes.push(
       block.blockType === "reasoning" ? (
@@ -205,48 +182,46 @@ function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNod
       ),
     );
   }
-  // Only authoritative busy state can keep the activity marker alive.
-  if (busy) nodes.push(<BitRegister key="busy" />);
+  if (live.busy) nodes.push(<BitRegister key="busy" />);
   return nodes;
 }
 
-function renderTurn(turn: Turn, live?: LiveAgentContent, busy = false): ReactNode {
-  switch (turn.kind) {
+function renderRow(row: PresentedRow): ReactNode {
+  switch (row.kind) {
     case "user":
       return (
-        <article className="rec rec-you" key={turn.record.id}>
+        <article className="rec rec-you" key={row.key}>
           <span className="visually-hidden">You:</span>
-          <div className="rec-bd">{renderMessageBlocks(turn.record)}</div>
+          <div className="rec-bd">{renderMessageBlocks(row.record)}</div>
         </article>
       );
     case "agent":
       return (
-        <article className="rec rec-orb" key={turn.key}>
+        <article className="rec rec-orb" key={row.key}>
           <span className="visually-hidden">Orb:</span>
           <div className="rec-bd">
-            {renderAgentRecords(turn.records)}
-            {live !== undefined && renderLiveAgentContent(live, busy)}
+            {renderParts(row.parts)}
+            {row.live !== null && renderLive(row.live)}
           </div>
         </article>
       );
     case "shell": {
-      const shell = turn.shell;
       const statuses = [
-        ...(shell.excludeFromContext ? ["excluded from model context"] : []),
-        ...(shell.cancelled
+        ...(row.shell.excludeFromContext ? ["excluded from model context"] : []),
+        ...(row.shell.cancelled
           ? ["cancelled"]
-          : shell.exitCode !== null && shell.exitCode !== 0
-            ? [`exit ${shell.exitCode}`]
+          : row.shell.exitCode !== null && row.shell.exitCode !== 0
+            ? [`exit ${row.shell.exitCode}`]
             : []),
-        ...(shell.truncated ? ["output truncated"] : []),
+        ...(row.shell.truncated ? ["output truncated"] : []),
       ];
       return (
-        <article className="rec rec-sh" key={turn.record.id}>
+        <article className="rec rec-sh" key={row.key}>
           <span className="rec-px">sh</span>
           <div className="rec-bd">
             <div className="shblk">
-              <div className="shblk-cmd">! {shell.command}</div>
-              {shell.output !== "" && <pre className="shblk-out">{shell.output}</pre>}
+              <div className="shblk-cmd">! {row.shell.command}</div>
+              {row.shell.output !== "" && <pre className="shblk-out">{row.shell.output}</pre>}
               {statuses.length > 0 && <div className="shblk-ft">{statuses.join(" · ")}</div>}
             </div>
           </div>
@@ -255,14 +230,42 @@ function renderTurn(turn: Turn, live?: LiveAgentContent, busy = false): ReactNod
     }
     case "compaction":
       return (
-        <div className="record-compaction" key={turn.record.id}>
+        <div className="record-compaction" key={row.key}>
           <span className="compaction-line">context compacted</span>
           <details>
             <summary>summary</summary>
             <p className="msg-text">
-              <PlainChatText>{blockText(turn.record.summary)}</PlainChatText>
+              <PlainChatText>{row.summary}</PlainChatText>
             </p>
           </details>
+        </div>
+      );
+    case "queued":
+      return (
+        <article className="rec rec-you rec-q" key={row.key}>
+          <span className="visually-hidden">You:</span>
+          <div className="rec-bd">
+            <span className="rec-status">{row.status}</span>
+            {renderMessageBlocks(row.record)}
+            {row.error !== null && <div className="error-text">{row.error}</div>}
+          </div>
+        </article>
+      );
+    case "live_shell":
+      return (
+        <article className="rec rec-sh" key={row.key}>
+          <span className="rec-px">sh</span>
+          <div className="rec-bd">
+            <div className="shblk">
+              <pre className="shblk-out">{row.text}</pre>
+            </div>
+          </div>
+        </article>
+      );
+    case "busy":
+      return (
+        <div className="busy-indicator" key={row.key}>
+          <BitRegister />
         </div>
       );
   }
@@ -275,83 +278,6 @@ export const HistoryView = memo(function HistoryView({
   busy,
   queuedMessages = [],
 }: HistoryViewProps) {
-  const representedMessageIds = representedInboxMessageIds(records);
-  const pendingMessages = queuedMessages.filter(
-    (message) => !representedMessageIds.has(message.id),
-  );
-  const shellBlocks = liveBlocks.filter((block) => block.blockType === "shell");
-  const turns = groupTurns(records);
-  const finalTurn = turns[turns.length - 1];
-  const agentBlocks = liveBlocks.filter((block) => block.blockType !== "shell");
-  const committedToolCallIds = persistedToolCallIds(records);
-  const uncommittedTools = tools.filter((tool) => !committedToolCallIds.has(tool.callId));
-  const hasAgentLive = agentBlocks.length > 0 || uncommittedTools.length > 0;
-  const mergeLiveIntoFinalTurn =
-    hasAgentLive &&
-    finalTurn?.kind === "agent" &&
-    pendingMessages.length === 0 &&
-    shellBlocks.length === 0;
-  const mergedTurnIndex = mergeLiveIntoFinalTurn ? turns.length - 1 : -1;
-  const liveAgentContent: LiveAgentContent = { blocks: agentBlocks, tools: uncommittedTools };
-  return (
-    <div className="history">
-      {turns.map((turn, index) =>
-        index === mergedTurnIndex ? renderTurn(turn, liveAgentContent, busy) : renderTurn(turn),
-      )}
-      {pendingMessages.map((message) => {
-        const record: MessageRecord = {
-          id: `queued:${message.id}`,
-          parentId: null,
-          timestamp: message.createdAt,
-          type: "message",
-          role: "user",
-          content: message.content,
-          overflow: {},
-        };
-        const status =
-          message.status === "failed"
-            ? "failed"
-            : message.delivery === "steer"
-              ? "steering"
-              : message.status;
-        // A message the runtime refused for good is terminal: say so where the
-        // message is, with the reason, rather than leaving it looking pending
-        // forever (docs/runtime-protocol.md).
-        const failed = message.status === "failed";
-        return (
-          <article className="rec rec-you rec-q" key={message.id}>
-            <span className="visually-hidden">You:</span>
-            <div className="rec-bd">
-              <span className="rec-status">{status}</span>
-              {renderMessageBlocks(record)}
-              {failed && message.error !== undefined && (
-                <div className="error-text">{message.error}</div>
-              )}
-            </div>
-          </article>
-        );
-      })}
-      {shellBlocks.map((block) => (
-        <article className="rec rec-sh" key={block.blockId}>
-          <span className="rec-px">sh</span>
-          <div className="rec-bd">
-            <div className="shblk">
-              <pre className="shblk-out">{block.text}</pre>
-            </div>
-          </div>
-        </article>
-      ))}
-      {hasAgentLive && !mergeLiveIntoFinalTurn && (
-        <article className="rec rec-orb">
-          <span className="visually-hidden">Orb:</span>
-          <div className="rec-bd">{renderLiveAgentContent(liveAgentContent, busy)}</div>
-        </article>
-      )}
-      {busy && !hasAgentLive && (
-        <div className="busy-indicator">
-          <BitRegister />
-        </div>
-      )}
-    </div>
-  );
+  const rows = presentTranscript({ records, liveBlocks, tools, queuedMessages, busy });
+  return <div className="history">{rows.map(renderRow)}</div>;
 });

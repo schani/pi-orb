@@ -1,0 +1,43 @@
+{
+  "name": "nothing is retired without a representing record",
+  "inboxMessages": [
+    {
+      "id": "m1",
+      "orbId": "orb-1",
+      "content": [{ "type": "text", "text": "one" }],
+      "status": "queued",
+      "createdAt": "2026-09-16T00:00:00Z",
+      "updatedAt": "2026-09-16T00:00:00Z"
+    },
+    {
+      "id": "m2",
+      "orbId": "orb-1",
+      "content": [{ "type": "text", "text": "two" }],
+      "status": "delivering",
+      "delivery": "steer",
+      "operationId": "op1",
+      "createdAt": "2026-09-16T00:00:01Z",
+      "updatedAt": "2026-09-16T00:00:01Z"
+    },
+    {
+      "id": "m3",
+      "orbId": "orb-1",
+      "content": [{ "type": "text", "text": "three" }],
+      "status": "delivered",
+      "delivery": "turn",
+      "createdAt": "2026-09-16T00:00:02Z",
+      "updatedAt": "2026-09-16T00:00:02Z"
+    }
+  ],
+  "records": [],
+  "expect": {
+    "represented": [],
+    "awaitingHistory": ["m1", "m2", "m3"],
+    "deliveredAwaitingHistory": true,
+    "afterAppend": [
+      { "id": "m1", "status": "queued", "delivery": null },
+      { "id": "m2", "status": "delivering", "delivery": "steer" },
+      { "id": "m3", "status": "delivered", "delivery": "turn" }
+    ]
+  }
+}

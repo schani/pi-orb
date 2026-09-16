@@ -1,0 +1,234 @@
+{
+  "name": "a record for a live call replaces its chip instead of repeating it",
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op1"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "tool_state",
+            "operationId": "op1",
+            "callId": "c1",
+            "name": "read",
+            "revision": 1,
+            "state": "completed"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "headId": "r1",
+          "retiredBlockIds": [],
+          "record": {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:00Z",
+            "type": "message",
+            "role": "assistant",
+            "overflow": {},
+            "content": [
+              {
+                "type": "tool_call",
+                "callId": "c1",
+                "name": "read",
+                "arguments": {
+                  "path": "a.ts"
+                }
+              },
+              {
+                "type": "tool_result",
+                "callId": "c1",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "ok"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "tools": [
+          {
+            "callId": "c1",
+            "name": "read",
+            "state": "completed",
+            "message": null
+          }
+        ],
+        "presentation": [
+          {
+            "kind": "agent",
+            "key": "r1",
+            "live": null,
+            "parts": [
+              {
+                "kind": "tool_run",
+                "key": "tools-0",
+                "categories": [
+                  {
+                    "key": "read",
+                    "kind": "read",
+                    "label": "read",
+                    "headline": "a.ts",
+                    "state": "completed",
+                    "count": null,
+                    "progress": null,
+                    "calls": [
+                      {
+                        "callId": "c1",
+                        "name": "read",
+                        "state": "completed",
+                        "label": "a.ts",
+                        "status": "complete",
+                        "output": "ok",
+                        "stats": null
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "busy",
+            "key": "busy"
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "records": [
+      {
+        "id": "r1",
+        "parentId": null,
+        "timestamp": "2026-09-16T00:00:00Z",
+        "type": "message",
+        "role": "assistant",
+        "overflow": {},
+        "content": [
+          {
+            "type": "tool_call",
+            "callId": "c1",
+            "name": "read",
+            "arguments": {
+              "path": "a.ts"
+            }
+          },
+          {
+            "type": "tool_result",
+            "callId": "c1",
+            "content": [
+              {
+                "type": "text",
+                "text": "ok"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": "r1",
+    "headId": "r1",
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": "busy",
+    "operationId": "op1",
+    "subagents": [],
+    "liveBlocks": [],
+    "tools": [
+      {
+        "callId": "c1",
+        "name": "read",
+        "state": "completed",
+        "message": null
+      }
+    ],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "agent",
+        "key": "r1",
+        "parts": [
+          {
+            "kind": "tool_run",
+            "key": "tools-0",
+            "categories": [
+              {
+                "key": "read",
+                "kind": "read",
+                "label": "read",
+                "headline": "a.ts",
+                "state": "completed",
+                "count": null,
+                "progress": null,
+                "calls": [
+                  {
+                    "callId": "c1",
+                    "name": "read",
+                    "state": "completed",
+                    "label": "a.ts",
+                    "status": "complete",
+                    "output": "ok",
+                    "stats": null
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "live": null
+      },
+      {
+        "kind": "busy",
+        "key": "busy"
+      }
+    ]
+  }
+}

@@ -472,6 +472,13 @@
     },
     "requestError": null,
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "live_shell",
+        "key": "b29",
+        "text": "chunk 29"
+      }
+    ]
   }
 }

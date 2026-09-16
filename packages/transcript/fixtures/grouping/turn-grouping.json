@@ -128,7 +128,7 @@
     "turns": [
       {
         "kind": "user",
-        "id": "u1",
+        "key": "u1",
         "blocks": [
           {
             "type": "text",
@@ -146,7 +146,8 @@
             "block": {
               "type": "text",
               "text": "hi"
-            }
+            },
+            "copySource": "hi"
           },
           {
             "kind": "block",
@@ -154,18 +155,20 @@
             "block": {
               "type": "text",
               "text": "more"
-            }
+            },
+            "copySource": "more"
           },
           {
             "kind": "event_text",
             "key": "e2",
             "text": "notice body"
           }
-        ]
+        ],
+        "live": null
       },
       {
         "kind": "shell",
-        "id": "sh1",
+        "key": "sh1",
         "shell": {
           "command": "ls",
           "output": "file",
@@ -177,7 +180,7 @@
       },
       {
         "kind": "compaction",
-        "id": "c1",
+        "key": "c1",
         "summary": "compacted"
       },
       {
@@ -190,9 +193,11 @@
             "block": {
               "type": "text",
               "text": "after"
-            }
+            },
+            "copySource": "after"
           }
-        ]
+        ],
+        "live": null
       }
     ],
     "representedMessageIds": [],

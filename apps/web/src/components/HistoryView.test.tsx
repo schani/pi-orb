@@ -1,7 +1,8 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
+import { assistantResponseMarkdown } from "@pi-orb/transcript";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { assistantResponseMarkdown, HistoryView } from "./HistoryView.tsx";
+import { HistoryView } from "./HistoryView.tsx";
 
 type MessageRecord = Extract<HistoryRecord, { type: "message" }>;
 

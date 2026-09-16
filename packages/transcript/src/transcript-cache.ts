@@ -28,6 +28,10 @@ interface Entry {
   bytes: number;
 }
 
+export interface CacheEntryView extends Entry {
+  orbId: string;
+}
+
 /** Approximate retained JS data, not a heap/RSS guarantee. No serialization or deep clone. */
 function estimateBytes(value: unknown): number {
   if (typeof value === "string") return 24 + value.length * 2;
@@ -62,6 +66,16 @@ export class TranscriptCache {
 
   get stats() {
     return { entries: this.entries.size, bytes: this.bytes, owners: this.owners.size };
+  }
+
+  /** Least-recently-used first: the cache fixtures' comparison surface. */
+  get contents(): CacheEntryView[] {
+    return [...this.entries].map(([orbId, entry]) => ({
+      orbId,
+      projectId: entry.projectId,
+      snapshot: entry.snapshot,
+      bytes: entry.bytes,
+    }));
   }
 
   get(orbId: string): CachedTranscript | undefined {

@@ -103,6 +103,18 @@
     "pendingRequest": null,
     "requestError": null,
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "user",
+        "key": "r9",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "other session"
+          }
+        ]
+      }
+    ]
   }
 }

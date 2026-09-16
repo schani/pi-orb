@@ -1,0 +1,270 @@
+{
+  "name": "live output continues the final agent turn until a user record ends it",
+  "steps": [
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "headId": "r1",
+          "retiredBlockIds": [],
+          "record": {
+            "id": "r1",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:00Z",
+            "type": "message",
+            "role": "assistant",
+            "overflow": {},
+            "content": [
+              {
+                "type": "text",
+                "text": "committed"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op1",
+            "blockId": "b1",
+            "blockType": "text",
+            "revision": 1,
+            "patch": {
+              "type": "append",
+              "text": "streaming"
+            }
+          }
+        }
+      },
+      "expect": {
+        "presentation": [
+          {
+            "kind": "agent",
+            "key": "r1",
+            "parts": [
+              {
+                "kind": "block",
+                "key": "r1-0",
+                "block": {
+                  "type": "text",
+                  "text": "committed"
+                },
+                "copySource": "committed"
+              }
+            ],
+            "live": {
+              "categories": [],
+              "blocks": [
+                {
+                  "blockId": "b1",
+                  "blockType": "text",
+                  "text": "streaming",
+                  "revision": 1
+                }
+              ],
+              "busy": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "headId": "u1",
+          "retiredBlockIds": [],
+          "record": {
+            "id": "u1",
+            "parentId": "r1",
+            "timestamp": "2026-09-16T00:00:01Z",
+            "type": "message",
+            "role": "user",
+            "overflow": {},
+            "content": [
+              {
+                "type": "text",
+                "text": "next"
+              }
+            ]
+          }
+        }
+      },
+      "expect": {
+        "presentation": [
+          {
+            "kind": "agent",
+            "key": "r1",
+            "live": null,
+            "parts": [
+              {
+                "kind": "block",
+                "key": "r1-0",
+                "block": {
+                  "type": "text",
+                  "text": "committed"
+                },
+                "copySource": "committed"
+              }
+            ]
+          },
+          {
+            "kind": "user",
+            "key": "u1",
+            "blocks": [
+              {
+                "type": "text",
+                "text": "next"
+              }
+            ]
+          },
+          {
+            "kind": "agent",
+            "key": "live",
+            "parts": [],
+            "live": {
+              "categories": [],
+              "blocks": [
+                {
+                  "blockId": "b1",
+                  "blockType": "text",
+                  "text": "streaming",
+                  "revision": 1
+                }
+              ],
+              "busy": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "expect": {
+    "records": [
+      {
+        "id": "r1",
+        "parentId": null,
+        "timestamp": "2026-09-16T00:00:00Z",
+        "type": "message",
+        "role": "assistant",
+        "overflow": {},
+        "content": [
+          {
+            "type": "text",
+            "text": "committed"
+          }
+        ]
+      },
+      {
+        "id": "u1",
+        "parentId": "r1",
+        "timestamp": "2026-09-16T00:00:01Z",
+        "type": "message",
+        "role": "user",
+        "overflow": {},
+        "content": [
+          {
+            "type": "text",
+            "text": "next"
+          }
+        ]
+      }
+    ],
+    "sessionId": null,
+    "cacheReady": false,
+    "historyEpoch": 0,
+    "afterRecordId": "u1",
+    "headId": "u1",
+    "historyLoaded": false,
+    "historyError": null,
+    "connection": "open",
+    "welcome": null,
+    "activity": null,
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [
+      {
+        "blockId": "b1",
+        "blockType": "text",
+        "text": "streaming",
+        "revision": 1
+      }
+    ],
+    "tools": [],
+    "composerText": "",
+    "composerMode": "message",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": null,
+    "requestError": null,
+    "serverError": null,
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "agent",
+        "key": "r1",
+        "parts": [
+          {
+            "kind": "block",
+            "key": "r1-0",
+            "block": {
+              "type": "text",
+              "text": "committed"
+            },
+            "copySource": "committed"
+          }
+        ],
+        "live": null
+      },
+      {
+        "kind": "user",
+        "key": "u1",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "next"
+          }
+        ]
+      },
+      {
+        "kind": "agent",
+        "key": "live",
+        "parts": [],
+        "live": {
+          "categories": [],
+          "blocks": [
+            {
+              "blockId": "b1",
+              "blockType": "text",
+              "text": "streaming",
+              "revision": 1
+            }
+          ],
+          "busy": false
+        }
+      }
+    ]
+  }
+}

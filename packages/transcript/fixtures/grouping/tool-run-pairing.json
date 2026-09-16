@@ -132,7 +132,8 @@
             "block": {
               "type": "text",
               "text": "prose"
-            }
+            },
+            "copySource": "prose"
           },
           {
             "kind": "tool_run",
@@ -172,7 +173,8 @@
               "text": "orphan"
             }
           }
-        ]
+        ],
+        "live": null
       }
     ],
     "representedMessageIds": [],

@@ -111,7 +111,7 @@
     "turns": [
       {
         "kind": "shell",
-        "id": "sh1",
+        "key": "sh1",
         "shell": {
           "command": "npm test",
           "output": "ok",
@@ -123,7 +123,7 @@
       },
       {
         "kind": "shell",
-        "id": "sh2",
+        "key": "sh2",
         "shell": {
           "command": "",
           "output": "from content",
@@ -135,7 +135,7 @@
       },
       {
         "kind": "shell",
-        "id": "sh3",
+        "key": "sh3",
         "shell": {
           "command": "sleep",
           "output": "",
@@ -147,7 +147,7 @@
       },
       {
         "kind": "user",
-        "id": "u1",
+        "key": "u1",
         "blocks": [
           {
             "type": "text",
@@ -157,7 +157,7 @@
       },
       {
         "kind": "user",
-        "id": "u2",
+        "key": "u2",
         "blocks": [
           {
             "type": "text",
@@ -167,7 +167,7 @@
       },
       {
         "kind": "user",
-        "id": "u3",
+        "key": "u3",
         "blocks": [
           {
             "type": "text",

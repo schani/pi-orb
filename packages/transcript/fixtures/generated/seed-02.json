@@ -94,7 +94,7 @@
           "event": {
             "type": "tool_state",
             "operationId": "op4",
-            "callId": "call-2",
+            "callId": "null-call",
             "name": "read",
             "revision": 7,
             "state": "running"
@@ -564,6 +564,44 @@
     },
     "requestError": null,
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "agent",
+        "key": "r12",
+        "parts": [
+          {
+            "kind": "block",
+            "key": "r12-0",
+            "block": {
+              "type": "text",
+              "text": "text for r12"
+            },
+            "copySource": "text for r12"
+          },
+          {
+            "kind": "block",
+            "key": "r15-0",
+            "block": {
+              "type": "text",
+              "text": "text for r15"
+            },
+            "copySource": "text for r15"
+          }
+        ],
+        "live": {
+          "categories": [],
+          "blocks": [
+            {
+              "blockId": "b29",
+              "blockType": "text",
+              "text": "chunk 29chunk 30",
+              "revision": 30
+            }
+          ],
+          "busy": false
+        }
+      }
+    ]
   }
 }

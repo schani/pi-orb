@@ -139,6 +139,7 @@
     },
     "requestError": null,
     "serverError": null,
-    "notice": "Thinking adjusted to low for this model."
+    "notice": "Thinking adjusted to low for this model.",
+    "presentation": []
   }
 }

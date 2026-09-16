@@ -1,0 +1,59 @@
+{
+  "name": "only the current owner may publish, clear or release",
+  "steps": [
+    { "op": "acquire", "args": { "owner": "first", "orbId": "a", "projectId": "p1" } },
+    { "op": "acquire", "args": { "owner": "second", "orbId": "a", "projectId": "p1" } },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "first",
+        "snapshot": {
+          "sessionId": "s1",
+          "records": [{ "id": "r1", "text": "hello" }],
+          "afterRecordId": "r1",
+          "headId": "r1"
+        }
+      },
+      "expect": { "admission": "stale" }
+    },
+    { "op": "get", "args": { "orbId": "a" }, "expect": { "hit": null } },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "second",
+        "snapshot": {
+          "sessionId": "s1",
+          "records": [{ "id": "r1", "text": "hello" }],
+          "afterRecordId": "r1",
+          "headId": "r1"
+        }
+      },
+      "expect": { "admission": "stored" }
+    },
+    { "op": "clear", "args": { "owner": "first" } },
+    { "op": "release", "args": { "owner": "first" } },
+    {
+      "op": "get",
+      "args": { "orbId": "a" },
+      "expect": {
+        "hit": { "sessionId": "s1", "recordIds": ["r1"], "afterRecordId": "r1", "headId": "r1" }
+      }
+    }
+  ],
+  "expect": {
+    "entries": [
+      {
+        "orbId": "a",
+        "projectId": "p1",
+        "sessionId": "s1",
+        "recordIds": ["r1"],
+        "afterRecordId": "r1",
+        "headId": "r1",
+        "bytes": 870
+      }
+    ],
+    "bytes": 870,
+    "owners": 1,
+    "invalidationEpoch": 0
+  }
+}

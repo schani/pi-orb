@@ -145,6 +145,18 @@
       "message": "internal: boom"
     },
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "user",
+        "key": "r1",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "hello"
+          }
+        ]
+      }
+    ]
   }
 }

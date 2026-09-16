@@ -177,6 +177,36 @@
     "pendingRequest": null,
     "requestError": null,
     "serverError": null,
-    "notice": null
+    "notice": null,
+    "presentation": [
+      {
+        "kind": "live_shell",
+        "key": "b3",
+        "text": "sh"
+      },
+      {
+        "kind": "agent",
+        "key": "live",
+        "parts": [],
+        "live": {
+          "categories": [],
+          "blocks": [
+            {
+              "blockId": "b1",
+              "blockType": "text",
+              "text": "final",
+              "revision": 7
+            },
+            {
+              "blockId": "b2",
+              "blockType": "reasoning",
+              "text": "x",
+              "revision": 1
+            }
+          ],
+          "busy": false
+        }
+      }
+    ]
   }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "tool chips upsert by call id and carry the last message",
+  "name": "a tool chip with no record of its own stands in the live tail",
   "steps": [
     {
       "action": {
@@ -15,12 +15,8 @@
           "at": "2026-09-16T00:00:00Z",
           "type": "runtime.event",
           "event": {
-            "type": "tool_state",
-            "operationId": "op1",
-            "callId": "c1",
-            "name": "bash",
-            "revision": 1,
-            "state": "running"
+            "type": "operation_started",
+            "operationId": "op1"
           }
         }
       }
@@ -35,31 +31,49 @@
           "event": {
             "type": "tool_state",
             "operationId": "op1",
-            "callId": "c2",
+            "callId": "c1",
             "name": "read",
             "revision": 1,
             "state": "running"
           }
         }
-      }
-    },
-    {
-      "action": {
-        "type": "frame",
-        "frame": {
-          "v": 1,
-          "at": "2026-09-16T00:00:00Z",
-          "type": "runtime.event",
-          "event": {
-            "type": "tool_state",
-            "operationId": "op1",
-            "callId": "c1",
-            "name": "bash",
-            "revision": 2,
-            "state": "completed",
-            "message": "done"
+      },
+      "expect": {
+        "presentation": [
+          {
+            "kind": "agent",
+            "key": "live",
+            "parts": [],
+            "live": {
+              "categories": [
+                {
+                  "key": "read",
+                  "kind": "read",
+                  "label": "read",
+                  "headline": null,
+                  "state": "running",
+                  "count": null,
+                  "progress": {
+                    "kind": "running"
+                  },
+                  "calls": [
+                    {
+                      "callId": "c1",
+                      "name": "read",
+                      "state": "running",
+                      "label": "read",
+                      "status": "running",
+                      "output": "",
+                      "stats": null
+                    }
+                  ]
+                }
+              ],
+              "blocks": [],
+              "busy": true
+            }
           }
-        }
+        ]
       }
     }
   ],
@@ -74,19 +88,13 @@
     "historyError": null,
     "connection": "open",
     "welcome": null,
-    "activity": null,
-    "operationId": null,
+    "activity": "busy",
+    "operationId": "op1",
     "subagents": [],
     "liveBlocks": [],
     "tools": [
       {
         "callId": "c1",
-        "name": "bash",
-        "state": "completed",
-        "message": "done"
-      },
-      {
-        "callId": "c2",
         "name": "read",
         "state": "running",
         "message": null
@@ -110,26 +118,6 @@
         "live": {
           "categories": [
             {
-              "key": "command",
-              "kind": "command",
-              "label": "commands",
-              "headline": null,
-              "state": "completed",
-              "count": null,
-              "progress": null,
-              "calls": [
-                {
-                  "callId": "c1",
-                  "name": "bash",
-                  "state": "completed",
-                  "label": "bash",
-                  "status": "complete",
-                  "output": "",
-                  "stats": null
-                }
-              ]
-            },
-            {
               "key": "read",
               "kind": "read",
               "label": "read",
@@ -141,7 +129,7 @@
               },
               "calls": [
                 {
-                  "callId": "c2",
+                  "callId": "c1",
                   "name": "read",
                   "state": "running",
                   "label": "read",
@@ -153,7 +141,7 @@
             }
           ],
           "blocks": [],
-          "busy": false
+          "busy": true
         }
       }
     ]

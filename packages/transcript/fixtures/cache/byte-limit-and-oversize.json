@@ -1,0 +1,145 @@
+{
+  "name": "bytes evict least recently used, and an oversized snapshot removes its own entry",
+  "limits": {
+    "maxBytes": 1500
+  },
+  "steps": [
+    {
+      "op": "acquire",
+      "args": {
+        "owner": "oa",
+        "orbId": "a",
+        "projectId": "p1"
+      }
+    },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "oa",
+        "snapshot": {
+          "sessionId": "s1",
+          "records": [
+            {
+              "id": "r1",
+              "text": "hello"
+            }
+          ],
+          "afterRecordId": "r1",
+          "headId": "r1"
+        }
+      },
+      "expect": {
+        "admission": "stored"
+      }
+    },
+    {
+      "op": "acquire",
+      "args": {
+        "owner": "ob",
+        "orbId": "b",
+        "projectId": "p1"
+      }
+    },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "ob",
+        "snapshot": {
+          "sessionId": "s2",
+          "records": [
+            {
+              "id": "r2",
+              "text": "hello"
+            }
+          ],
+          "afterRecordId": "r2",
+          "headId": "r2"
+        }
+      },
+      "expect": {
+        "admission": "stored"
+      }
+    },
+    {
+      "op": "get",
+      "args": {
+        "orbId": "a"
+      },
+      "expect": {
+        "hit": null
+      }
+    },
+    {
+      "op": "acquire",
+      "args": {
+        "owner": "oc",
+        "orbId": "c",
+        "projectId": "p2"
+      }
+    },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "oc",
+        "snapshot": {
+          "sessionId": "s3",
+          "records": [
+            {
+              "id": "r3",
+              "text": "hello"
+            }
+          ],
+          "afterRecordId": "r3",
+          "headId": "r3"
+        }
+      },
+      "expect": {
+        "admission": "stored"
+      }
+    },
+    {
+      "op": "get",
+      "args": {
+        "orbId": "b"
+      },
+      "expect": {
+        "hit": null
+      }
+    },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "oc",
+        "snapshot": {
+          "sessionId": "s3",
+          "records": [
+            {
+              "id": "r3",
+              "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          ],
+          "afterRecordId": "r3",
+          "headId": "r3"
+        }
+      },
+      "expect": {
+        "admission": "oversized"
+      }
+    },
+    {
+      "op": "get",
+      "args": {
+        "orbId": "c"
+      },
+      "expect": {
+        "hit": null
+      }
+    }
+  ],
+  "expect": {
+    "entries": [],
+    "bytes": 0,
+    "owners": 3,
+    "invalidationEpoch": 0
+  }
+}

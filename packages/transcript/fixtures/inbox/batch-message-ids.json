@@ -1,0 +1,91 @@
+{
+  "name": "one record retires every message id it batched",
+  "inboxMessages": [
+    {
+      "id": "m1",
+      "orbId": "orb-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "one"
+        }
+      ],
+      "status": "delivered",
+      "createdAt": "2026-09-16T00:00:00Z",
+      "updatedAt": "2026-09-16T00:00:00Z"
+    },
+    {
+      "id": "m2",
+      "orbId": "orb-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "two"
+        }
+      ],
+      "status": "delivered",
+      "createdAt": "2026-09-16T00:00:01Z",
+      "updatedAt": "2026-09-16T00:00:01Z"
+    },
+    {
+      "id": "m3",
+      "orbId": "orb-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "three"
+        }
+      ],
+      "status": "queued",
+      "createdAt": "2026-09-16T00:00:02Z",
+      "updatedAt": "2026-09-16T00:00:02Z"
+    }
+  ],
+  "records": [
+    {
+      "id": "u1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "one\ntwo"
+        }
+      ],
+      "overflow": {},
+      "inboxMessageIds": [
+        "m1",
+        "m2"
+      ]
+    }
+  ],
+  "expect": {
+    "represented": [
+      "m1",
+      "m2"
+    ],
+    "awaitingHistory": [
+      "m3"
+    ],
+    "deliveredAwaitingHistory": false,
+    "afterAppend": [
+      {
+        "id": "m1",
+        "status": "delivered",
+        "delivery": null
+      },
+      {
+        "id": "m2",
+        "status": "delivered",
+        "delivery": null
+      },
+      {
+        "id": "m3",
+        "status": "queued",
+        "delivery": null
+      }
+    ]
+  }
+}

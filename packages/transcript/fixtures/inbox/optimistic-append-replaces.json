@@ -1,0 +1,50 @@
+{
+  "name": "an optimistic append replaces its own id and moves it to the tail",
+  "inboxMessages": [
+    {
+      "id": "m1",
+      "orbId": "orb-1",
+      "content": [{ "type": "text", "text": "one" }],
+      "status": "queued",
+      "createdAt": "2026-09-16T00:00:00Z",
+      "updatedAt": "2026-09-16T00:00:00Z"
+    }
+  ],
+  "records": [],
+  "append": [
+    {
+      "id": "m2",
+      "orbId": "orb-1",
+      "content": [{ "type": "text", "text": "two" }],
+      "status": "queued",
+      "createdAt": "2026-09-16T00:00:01Z",
+      "updatedAt": "2026-09-16T00:00:01Z"
+    },
+    {
+      "id": "m1",
+      "orbId": "orb-1",
+      "content": [{ "type": "text", "text": "one" }],
+      "status": "delivered",
+      "createdAt": "2026-09-16T00:00:00Z",
+      "updatedAt": "2026-09-16T00:00:02Z"
+    },
+    {
+      "id": "m2",
+      "orbId": "orb-1",
+      "content": [{ "type": "text", "text": "two" }],
+      "status": "delivering",
+      "delivery": "steer",
+      "createdAt": "2026-09-16T00:00:01Z",
+      "updatedAt": "2026-09-16T00:00:03Z"
+    }
+  ],
+  "expect": {
+    "represented": [],
+    "awaitingHistory": ["m1"],
+    "deliveredAwaitingHistory": false,
+    "afterAppend": [
+      { "id": "m1", "status": "delivered", "delivery": null },
+      { "id": "m2", "status": "delivering", "delivery": "steer" }
+    ]
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "name": "a snapshot whose cursor or head does not name retained records is rejected",
+  "steps": [
+    { "op": "acquire", "args": { "owner": "own", "orbId": "a", "projectId": "p1" } },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "own",
+        "snapshot": {
+          "sessionId": "s1",
+          "records": [
+            { "id": "r1", "text": "hello" },
+            { "id": "r2", "text": "world" }
+          ],
+          "afterRecordId": "r1",
+          "headId": "r1"
+        }
+      },
+      "expect": { "admission": "invalid" }
+    },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "own",
+        "snapshot": {
+          "sessionId": "s1",
+          "records": [{ "id": "r1", "text": "hello" }],
+          "afterRecordId": "r1",
+          "headId": "r9"
+        }
+      },
+      "expect": { "admission": "invalid" }
+    },
+    {
+      "op": "publish",
+      "args": {
+        "owner": "own",
+        "snapshot": {
+          "sessionId": "s1",
+          "records": [],
+          "afterRecordId": null,
+          "headId": null
+        }
+      },
+      "expect": { "admission": "stored" }
+    },
+    {
+      "op": "get",
+      "args": { "orbId": "a" },
+      "expect": {
+        "hit": { "sessionId": "s1", "recordIds": [], "afterRecordId": null, "headId": null }
+      }
+    }
+  ],
+  "expect": {
+    "entries": [
+      {
+        "orbId": "a",
+        "projectId": "p1",
+        "sessionId": "s1",
+        "recordIds": [],
+        "afterRecordId": null,
+        "headId": null,
+        "bytes": 128
+      }
+    ],
+    "bytes": 128,
+    "owners": 1,
+    "invalidationEpoch": 0
+  }
+}

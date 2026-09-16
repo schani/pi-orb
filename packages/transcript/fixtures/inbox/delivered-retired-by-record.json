@@ -1,0 +1,85 @@
+{
+  "name": "a delivered message retires at its own record, not at delivery",
+  "inboxMessages": [
+    {
+      "id": "m1",
+      "orbId": "orb-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "one"
+        }
+      ],
+      "status": "delivered",
+      "createdAt": "2026-09-16T00:00:00Z",
+      "updatedAt": "2026-09-16T00:00:00Z"
+    },
+    {
+      "id": "m2",
+      "orbId": "orb-1",
+      "content": [
+        {
+          "type": "text",
+          "text": "two"
+        }
+      ],
+      "status": "delivered",
+      "createdAt": "2026-09-16T00:00:01Z",
+      "updatedAt": "2026-09-16T00:00:01Z"
+    }
+  ],
+  "records": [
+    {
+      "id": "u1",
+      "parentId": null,
+      "timestamp": "2026-09-16T00:00:00Z",
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "one"
+        }
+      ],
+      "overflow": {},
+      "inboxMessageIds": [
+        "m1"
+      ]
+    },
+    {
+      "id": "u2",
+      "parentId": "u1",
+      "timestamp": "2026-09-16T00:00:01Z",
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "two"
+        }
+      ],
+      "overflow": {}
+    }
+  ],
+  "expect": {
+    "represented": [
+      "m1"
+    ],
+    "awaitingHistory": [
+      "m2"
+    ],
+    "deliveredAwaitingHistory": true,
+    "afterAppend": [
+      {
+        "id": "m1",
+        "status": "delivered",
+        "delivery": null
+      },
+      {
+        "id": "m2",
+        "status": "delivered",
+        "delivery": null
+      }
+    ]
+  }
+}
