@@ -121,6 +121,7 @@ function mapDeletionRow(row: PgRow): OrbDeletionRow {
 function mapProjectRow(row: PgRow): ProjectRow {
   return {
     id: String(row["id"]),
+    ownerUserId: String(row["owner_user_id"]),
     name: String(row["name"]),
     repositoryUrl: String(row["repository_url"]),
     state: String(row["state"]) as ProjectRow["state"],
@@ -138,6 +139,8 @@ function inboxMessageIds(record: HistoryRecord): readonly string[] {
   return record.type === "message" ? (record.inboxMessageIds ?? []) : [];
 }
 
+const projectIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const stateConflict = (currentState?: OrbState): StateConflict => ({
   type: "state_conflict",
   ...(currentState !== undefined ? { currentState } : {}),
@@ -154,6 +157,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   }
 
   getProject(_task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError> {
+    if (!projectIdPattern.test(projectId)) return okAsync(null);
     return this.db
       .query("SELECT * FROM projects WHERE id = $1", [projectId])
       .map((result) => (result.rows[0] !== undefined ? mapProjectRow(result.rows[0]) : null));
@@ -162,6 +166,15 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   listProjects(_task: SimulationTask): ResultAsync<ProjectRow[], StoreError> {
     return this.db
       .query("SELECT * FROM projects ORDER BY created_at")
+      .map((result) => result.rows.map(mapProjectRow));
+  }
+
+  listProjectsByOwner(
+    _task: SimulationTask,
+    ownerUserId: string,
+  ): ResultAsync<ProjectRow[], StoreError> {
+    return this.db
+      .query("SELECT * FROM projects WHERE owner_user_id = $1 ORDER BY created_at", [ownerUserId])
       .map((result) => result.rows.map(mapProjectRow));
   }
 
@@ -174,14 +187,37 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) => result.rows.map(mapProjectRow));
   }
 
-  insertProject(_task: SimulationTask, project: ProjectRow): ResultAsync<ProjectRow, StoreError> {
-    return this.db
-      .query(
-        `INSERT INTO projects (id, name, repository_url, state, state_version,
+  insertProject(_task: SimulationTask, project: ProjectRow) {
+    return this.db.transaction<ProjectRow, StoreError | ProjectConflict>(async (query) => {
+      const locked = await query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [
+        project.ownerUserId,
+      ]);
+      if (locked.isErr()) return err(locked.error);
+      const existing = await query("SELECT * FROM projects WHERE id = $1", [project.id]);
+      if (existing.isErr()) return err(existing.error);
+      const existingRow = existing.value.rows[0];
+      if (existingRow !== undefined)
+        return String(existingRow["owner_user_id"]) === project.ownerUserId &&
+          String(existingRow["name"]) === project.name &&
+          String(existingRow["repository_url"]) === project.repositoryUrl &&
+          String(existingRow["state"]) === project.state
+          ? ok(mapProjectRow(existingRow))
+          : err({ type: "project_conflict", reason: "concurrent_change" });
+      const duplicate = await query(
+        "SELECT 1 FROM projects WHERE owner_user_id = $1 AND name = $2",
+        [project.ownerUserId, project.name],
+      );
+      if (duplicate.isErr()) return err(duplicate.error);
+      if (duplicate.value.rows[0] !== undefined)
+        return err({ type: "project_conflict", reason: "name_conflict" });
+      const inserted = await query(
+        `INSERT INTO projects (id, owner_user_id, name, repository_url, state, state_version,
            deletion_requested_at, deletion_initial_orb_count, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           project.id,
+          project.ownerUserId,
           project.name,
           project.repositoryUrl,
           project.state,
@@ -191,21 +227,53 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           new Date(project.createdAt),
           new Date(project.updatedAt),
         ],
-      )
-      .map((result) => mapProjectRow(result.rows[0] ?? {}));
+      );
+      if (inserted.isErr()) return err(inserted.error);
+      const insertedRow = inserted.value.rows[0];
+      if (insertedRow !== undefined) return ok(mapProjectRow(insertedRow));
+      const raced = await query("SELECT * FROM projects WHERE id = $1", [project.id]);
+      if (raced.isErr()) return err(raced.error);
+      const racedRow = raced.value.rows[0];
+      return racedRow !== undefined &&
+        String(racedRow["owner_user_id"]) === project.ownerUserId &&
+        String(racedRow["name"]) === project.name &&
+        String(racedRow["repository_url"]) === project.repositoryUrl &&
+        String(racedRow["state"]) === project.state
+        ? ok(mapProjectRow(racedRow))
+        : err({ type: "project_conflict", reason: "concurrent_change" });
+    });
   }
 
   updateProject(
     _task: SimulationTask,
     params: { projectId: string; name: string; repositoryUrl: string; now: number },
-  ): ResultAsync<ProjectRow | null, StoreError> {
-    return this.db
-      .query(
+  ) {
+    return this.db.transaction<ProjectRow | null, StoreError | ProjectConflict>(async (query) => {
+      const project = await query("SELECT * FROM projects WHERE id = $1 AND state = 'active'", [
+        params.projectId,
+      ]);
+      if (project.isErr()) return err(project.error);
+      const row = project.value.rows[0];
+      if (row === undefined) return ok(null);
+      const ownerUserId = String(row["owner_user_id"]);
+      const locked = await query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [ownerUserId]);
+      if (locked.isErr()) return err(locked.error);
+      const duplicate = await query(
+        "SELECT 1 FROM projects WHERE owner_user_id = $1 AND name = $2 AND id <> $3",
+        [ownerUserId, params.name, params.projectId],
+      );
+      if (duplicate.isErr()) return err(duplicate.error);
+      if (duplicate.value.rows[0] !== undefined)
+        return err({ type: "project_conflict", reason: "name_conflict" });
+      const updated = await query(
         `UPDATE projects SET name = $2, repository_url = $3, updated_at = $4
          WHERE id = $1 AND state = 'active' RETURNING *`,
         [params.projectId, params.name, params.repositoryUrl, new Date(params.now)],
-      )
-      .map((result) => (result.rows[0] === undefined ? null : mapProjectRow(result.rows[0])));
+      );
+      return updated.isErr()
+        ? err(updated.error)
+        : ok(updated.value.rows[0] === undefined ? null : mapProjectRow(updated.value.rows[0]));
+    });
   }
 
   requestProjectDeletion(

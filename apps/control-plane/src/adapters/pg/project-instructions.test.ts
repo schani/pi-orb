@@ -1,6 +1,6 @@
 import { NoSimulationTask } from "determined";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { makeProjectRow } from "../../testkit/fixtures.ts";
+import { makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PGliteClient } from "./pglite-client.ts";
 import { PostgreSQLProjectInstructionsStore } from "./project-instructions.ts";
@@ -14,6 +14,7 @@ beforeEach(async () => {
   db = new PGliteClient();
   const database = composeControlPlaneDatabase(db);
   (await database.migrate())._unsafeUnwrap();
+  (await seedTestUser(task, database.users))._unsafeUnwrap();
   for (const id of [A, B])
     (await database.store.insertProject(task, makeProjectRow(id)))._unsafeUnwrap();
   store = new PostgreSQLProjectInstructionsStore(db);

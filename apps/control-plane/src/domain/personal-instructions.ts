@@ -8,18 +8,26 @@ export interface PersonalInstructionsError {
   readonly message: string;
 }
 export interface PersonalInstructionsStore {
-  read(task: SimulationTask): ResultAsync<PersonalInstructions, PersonalInstructionsError>;
+  read(
+    task: SimulationTask,
+    userId: string,
+  ): ResultAsync<PersonalInstructions, PersonalInstructionsError>;
   /** One atomic durable assignment; returned revision/content belong to that assignment. */
   replace(
     task: SimulationTask,
+    userId: string,
     content: string,
   ): ResultAsync<PersonalInstructions, PersonalInstructionsError>;
 }
-export const readPersonalInstructions = (task: SimulationTask, store: PersonalInstructionsStore) =>
-  store.read(task);
+export const readPersonalInstructions = (
+  task: SimulationTask,
+  store: PersonalInstructionsStore,
+  userId: string,
+) => store.read(task, userId);
 export function savePersonalInstructions(
   task: SimulationTask,
   store: PersonalInstructionsStore,
+  userId: string,
   body: unknown,
 ) {
   const content = validatePersonalInstructions(body);
@@ -29,5 +37,5 @@ export function savePersonalInstructions(
         code: "invalid",
         message: content.error.message,
       })
-    : store.replace(task, content.value);
+    : store.replace(task, userId, content.value);
 }

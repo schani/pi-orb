@@ -8,6 +8,7 @@ import {
   type LifecycleConstants,
 } from "../domain/constants.ts";
 import { ControlState } from "../domain/control-state.ts";
+import type { UserStore } from "../domain/identity.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
   ControlPlaneDeps,
@@ -17,6 +18,7 @@ import type {
   SigningKeyDeps,
 } from "../domain/ports.ts";
 import { createSigningKeyBootstrapState } from "../domain/signing-keys.ts";
+import { UserScope } from "../domain/user-scope.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
 import { FakeAuthGate, type FakeAuthMode } from "./auth.ts";
 import { FakeSecretStore } from "./broker.ts";
@@ -122,10 +124,15 @@ export function makeHarness(options?: {
     constants: { ...TEST_CONSTANTS, ...options?.constants },
     projectSecrets: { pointers: projectSecretPointers, secrets: new FakeSecretStore() },
     hosting: hosting.deps,
-    personalInstructions: new FakePersonalInstructionsStore(),
+    personalInstructions: new FakePersonalInstructionsStore([TEST_USER_ID]),
     projectInstructions: new FakeProjectInstructionsStore(
       (id) => store.projectSnapshot(id)?.state ?? null,
     ),
+    userScope: new UserScope({
+      getUser: (_task, id) =>
+        okAsync(id === TEST_USER_ID ? { id: TEST_USER_ID, email: "user@example.test" } : null),
+      resolveUser: (_task, _identity, input) => okAsync({ id: input.id, email: null }),
+    }),
   };
   return { world, store, authGate, deps, hosting };
 }
@@ -236,9 +243,20 @@ export function restartControlPlane(harness: TestHarness): TestHarness {
   };
 }
 
+export const TEST_USER_ID = "00000000-0000-4000-8000-000000000001";
+
+export function seedTestUser(task: SimulationTask, users: UserStore) {
+  return users.resolveUser(
+    task,
+    { issuer: "pi-orb:test", subject: "default", email: null },
+    { id: TEST_USER_ID, now: task.wallNow() },
+  );
+}
+
 export function makeProjectRow(id: string): ProjectRow {
   return {
     id,
+    ownerUserId: TEST_USER_ID,
     name: `project-${id}`,
     repositoryUrl: "https://github.com/owner/repo",
     state: "active",

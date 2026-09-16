@@ -364,6 +364,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     ]);
   }
 
+  listProjectsByOwner(
+    task: SimulationTask,
+    ownerUserId: string,
+  ): ResultAsync<ProjectRow[], StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "list projects by owner", () =>
+      [...this.projects.values()].filter((project) => project.ownerUserId === ownerUserId),
+    );
+  }
+
   listProjectsInState(
     task: SimulationTask,
     state: "deleting",
@@ -373,20 +382,52 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
-  insertProject(task: SimulationTask, project: ProjectRow): ResultAsync<ProjectRow, StoreError> {
+  insertProject(task: SimulationTask, project: ProjectRow) {
     return this.access(task, FAILPOINTS.storeWrite, "insert project", () => {
+      const existing = this.projects.get(project.id);
+      if (existing !== undefined)
+        return existing.ownerUserId === project.ownerUserId &&
+          existing.name === project.name &&
+          existing.repositoryUrl === project.repositoryUrl &&
+          existing.state === project.state
+          ? { kind: "saved" as const, value: existing }
+          : { kind: "id_conflict" as const };
+      if (
+        [...this.projects.values()].some(
+          (other) =>
+            other.ownerUserId === project.ownerUserId &&
+            other.name === project.name &&
+            other.id !== project.id,
+        )
+      )
+        return { kind: "name_conflict" as const };
       this.projects.set(project.id, project);
-      return project;
-    });
+      return { kind: "saved" as const, value: project };
+    }).andThen((saved) =>
+      saved.kind === "name_conflict"
+        ? errAsync({ type: "project_conflict" as const, reason: "name_conflict" as const })
+        : saved.kind === "id_conflict"
+          ? errAsync({ type: "project_conflict" as const, reason: "concurrent_change" as const })
+          : okAsync(saved.value),
+    );
   }
 
   updateProject(
     task: SimulationTask,
     params: { projectId: string; name: string; repositoryUrl: string; now: number },
-  ): ResultAsync<ProjectRow | null, StoreError> {
+  ) {
     return this.access(task, FAILPOINTS.storeWrite, "update project", () => {
       const project = this.projects.get(params.projectId);
-      if (project === undefined || project.state !== "active") return null;
+      if (project === undefined || project.state !== "active") return { kind: "missing" as const };
+      if (
+        [...this.projects.values()].some(
+          (other) =>
+            other.ownerUserId === project.ownerUserId &&
+            other.name === params.name &&
+            other.id !== project.id,
+        )
+      )
+        return { kind: "conflict" as const };
       const updated = {
         ...project,
         name: params.name,
@@ -394,8 +435,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         updatedAt: params.now,
       };
       this.projects.set(project.id, updated);
-      return updated;
-    });
+      return { kind: "saved" as const, value: updated };
+    }).andThen((result) =>
+      result.kind === "conflict"
+        ? errAsync({ type: "project_conflict" as const, reason: "name_conflict" as const })
+        : okAsync(result.kind === "missing" ? null : result.value),
+    );
   }
 
   requestProjectDeletion(

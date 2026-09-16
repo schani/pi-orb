@@ -13,10 +13,10 @@ import {
   validateRepositoryUrl,
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import type { ProjectSecretError, StoreError } from "../domain/errors.ts";
+import type { ProjectConflict, ProjectSecretError, StoreError } from "../domain/errors.ts";
 import {
   type CommandError,
   createOrb,
@@ -88,6 +88,48 @@ function sendStoreError(reply: FastifyReply, error: StoreError): FastifyReply {
   return error.code === "invariant"
     ? reply.status(500).send(httpError("internal", error.message, false))
     : reply.status(503).send(httpError("unavailable", error.message, true));
+}
+
+async function selectedUser(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+) {
+  const principal = requirePrincipal(request);
+  if (principal.isErr()) {
+    reply.status(500).send(httpError("internal", "request principal missing", false));
+    return null;
+  }
+  const selected = await deps.userScope.resolve(
+    task,
+    principal.value,
+    request.headers["x-pi-orb-user-id"],
+  );
+  if (selected.isOk()) return selected.value;
+  if (selected.error.type === "invalid_user_selection")
+    reply.status(400).send(httpError("invalid_request", selected.error.message, false));
+  else if (selected.error.type === "user_not_found")
+    reply.status(400).send(httpError("invalid_request", selected.error.message, false));
+  else sendStoreError(reply, selected.error);
+  return null;
+}
+
+function sendProjectWriteConflict(
+  reply: FastifyReply,
+  reason: ProjectConflict["reason"],
+): FastifyReply {
+  return reply
+    .status(409)
+    .send(
+      httpError(
+        "conflict",
+        reason === "name_conflict"
+          ? "project name already exists"
+          : "project id or state conflicts with this request",
+        false,
+      ),
+    );
 }
 
 function sendProjectSecretError(reply: FastifyReply, error: ProjectSecretError): FastifyReply {
@@ -215,9 +257,11 @@ export function registerRoutes(
 
   registerProjectInstructionsRoutes(app, task, deps.projectInstructions);
 
-  app.get(PERSONAL_INSTRUCTIONS_PATH, async (_request, reply) => {
+  app.get(PERSONAL_INSTRUCTIONS_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");
-    const result = await readPersonalInstructions(task, deps.personalInstructions);
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
+    const result = await readPersonalInstructions(task, deps.personalInstructions, user.id);
     if (result.isErr())
       return reply
         .status(result.error.code === "internal" ? 500 : 503)
@@ -232,7 +276,14 @@ export function registerRoutes(
   });
   app.put(PERSONAL_INSTRUCTIONS_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");
-    const result = await savePersonalInstructions(task, deps.personalInstructions, request.body);
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
+    const result = await savePersonalInstructions(
+      task,
+      deps.personalInstructions,
+      user.id,
+      request.body,
+    );
     if (result.isErr())
       return reply
         .status(
@@ -269,8 +320,10 @@ export function registerRoutes(
     });
   }
 
-  app.get("/api/v1/projects", async (_request, reply) => {
-    const projects = await deps.store.listProjects(task);
+  app.get("/api/v1/projects", async (request, reply) => {
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
+    const projects = await deps.store.listProjectsByOwner(task, user.id);
     if (projects.isErr()) {
       return sendStoreError(reply, projects.error);
     }
@@ -298,6 +351,8 @@ export function registerRoutes(
   });
 
   app.post("/api/v1/projects", async (request, reply) => {
+    const user = await selectedUser(request, reply, task, deps);
+    if (user === null) return;
     const body = request.body;
     if (!Check(CreateProjectRequestSchema, body)) {
       return reply.status(400).send(httpError("invalid_request", "invalid project body", false));
@@ -331,15 +386,20 @@ export function registerRoutes(
           .send(httpError("conflict", "project is being permanently deleted", false));
       }
       // Client-generated IDs make retried creates idempotent (docs/control-plane-api.md).
-      if (existing.value.name === name && existing.value.repositoryUrl === url.value.url) {
+      if (
+        existing.value.ownerUserId === user.id &&
+        existing.value.name === name &&
+        existing.value.repositoryUrl === url.value.url
+      ) {
         return reply.status(201).send(projectView(existing.value));
       }
       return reply
         .status(409)
-        .send(httpError("conflict", "project id exists with different content", false));
+        .send(httpError("conflict", "project id or state conflicts with this request", false));
     }
     const row: ProjectRow = {
       id: body.id,
+      ownerUserId: user.id,
       name,
       repositoryUrl: url.value.url,
       state: "active",
@@ -351,7 +411,9 @@ export function registerRoutes(
     };
     const inserted = await deps.store.insertProject(task, row);
     if (inserted.isErr()) {
-      return sendStoreError(reply, inserted.error);
+      return inserted.error.type === "project_conflict"
+        ? sendProjectWriteConflict(reply, inserted.error.reason)
+        : sendStoreError(reply, inserted.error);
     }
     return reply.status(201).send(projectView(inserted.value));
   });
@@ -464,7 +526,9 @@ export function registerRoutes(
         now: task.wallNow(),
       });
       if (updated.isErr()) {
-        return sendStoreError(reply, updated.error);
+        return updated.error.type === "project_conflict"
+          ? sendProjectWriteConflict(reply, updated.error.reason)
+          : sendStoreError(reply, updated.error);
       }
       if (updated.value !== null) return reply.send(projectView(updated.value));
 

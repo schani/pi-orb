@@ -28,6 +28,9 @@ it.each(["chromium", "webkit"] as const)(
     let lastRecord: string | null = null;
     const hellos: (string | null)[] = [];
     const committedReplies: string[] = [];
+    // Readiness assertions follow the frame that supplies settings, not large-history wall time.
+    const settingsWaiters: (() => void)[] = [];
+    const nextSettings = () => new Promise<void>((resolve) => settingsWaiters.push(resolve));
     try {
       await page.route(`**/orbs/${a}/history`, async (route) => {
         historyReads++;
@@ -57,6 +60,8 @@ it.each(["chromium", "webkit"] as const)(
         });
         server.onMessage((message) => {
           const frame = JSON.parse(String(message));
+          if (frame.type === "runtime.event" && frame.event.type === "agent_settings")
+            settingsWaiters.shift()?.();
           if (frame.type === "history.record") {
             lastRecord = frame.record.id;
             if (frame.record.role === "assistant")
@@ -65,8 +70,10 @@ it.each(["chromium", "webkit"] as const)(
           socket.send(message);
         });
       });
+      const initialSettings = nextSettings();
       await page.goto(`${origin}/#/orbs/${a}`);
       const ready = page.getByRole("button", { name: "Change thinking", exact: true });
+      await initialSettings;
       await check(ready).toBeEnabled();
       await check(page.locator(".history")).toContainText("Review 100");
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
@@ -100,6 +107,7 @@ it.each(["chromium", "webkit"] as const)(
         await metadataGate;
         return route.continue();
       });
+      const cachedSettings = nextSettings();
       await page.locator(`.orb-index a[href="#/orbs/${a}"]`).click();
       await metadataRequested;
       try {
@@ -109,6 +117,7 @@ it.each(["chromium", "webkit"] as const)(
         releaseMetadata();
       }
       await page.unroute(metadataPath);
+      await cachedSettings;
       await check(page.locator(".history")).toContainText("Review 100");
       await check(ready).toBeEnabled();
       await check(composer).toHaveValue("retain cache draft");
@@ -127,9 +136,11 @@ it.each(["chromium", "webkit"] as const)(
       // The app-owned cache survives dashboard navigation, including the phone layout.
       await page.setViewportSize({ width: 390, height: 844 });
       await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+      const dashboardSettings = nextSettings();
       await page
         .getByRole("link", { name: "Long history · typing performance", exact: true })
         .click();
+      await dashboardSettings;
       await check(page.locator(".history .rec-orb").last()).toContainText("retain cache draft");
       await check(
         page.getByRole("button", { name: "Change thinking", exact: true, includeHidden: true }),
@@ -139,7 +150,9 @@ it.each(["chromium", "webkit"] as const)(
       // Reload is explicitly a miss; no browser persistence is introduced.
       forbidHistory = false;
       const beforeReload = historyReads;
+      const reloadedSettings = nextSettings();
       await page.reload();
+      await reloadedSettings;
       await check(
         page.getByRole("button", { name: "Change thinking", exact: true, includeHidden: true }),
       ).toBeEnabled();
@@ -156,9 +169,11 @@ it.each(["chromium", "webkit"] as const)(
         await check(page.locator(".orb-name")).toHaveText(name ?? "");
       }
       const beforeEvictionReturn = historyReads;
+      const evictedSettings = nextSettings();
       await page.locator("body").evaluate((node, orbId) => {
         node.ownerDocument.location.hash = `/orbs/${orbId}`;
       }, a);
+      await evictedSettings;
       await check(
         page.getByRole("button", { name: "Change thinking", exact: true, includeHidden: true }),
       ).toBeEnabled();

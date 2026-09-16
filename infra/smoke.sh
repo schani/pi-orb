@@ -5,6 +5,7 @@ set -euo pipefail
 DIR=$(cd "$(dirname "$0")" && pwd)
 API="$DIR/api.sh"
 source "$DIR/smoke-fixtures.sh"
+: "${PI_ORB_USER_ID:?PI_ORB_USER_ID is required for smoke project creation}"
 OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-2700}
 RUNNING_TIMEOUT=${RUNNING_TIMEOUT:-900}
 STOPPED_TIMEOUT=${STOPPED_TIMEOUT:-300}

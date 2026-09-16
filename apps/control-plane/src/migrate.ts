@@ -1,13 +1,41 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { err, ok, type Result } from "neverthrow";
 import { type ControlPlaneDatabase, openControlPlaneDatabase } from "./adapters/database.ts";
+import type { OriginalOwnerMigrationInput } from "./adapters/pg/migrate.ts";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export function originalOwnerMigrationInput(
+  env: NodeJS.ProcessEnv,
+): Result<OriginalOwnerMigrationInput | undefined, string> {
+  const userId = env["PI_ORB_ORIGINAL_USER_ID"];
+  const identityIssuer = env["PI_ORB_ORIGINAL_IDENTITY_ISSUER"];
+  const identitySubject = env["PI_ORB_ORIGINAL_IDENTITY_SUBJECT"];
+  const values = [userId, identityIssuer, identitySubject];
+  if (values.every((value) => value === undefined || value === "")) return ok(undefined);
+  if (values.some((value) => value === undefined || value?.trim() === ""))
+    return err("original owner variables must be set together");
+  if (!UUID.test(userId ?? "")) return err("PI_ORB_ORIGINAL_USER_ID must be a UUID");
+  return ok({
+    userId: userId ?? "",
+    identityIssuer: identityIssuer ?? "",
+    identitySubject: identitySubject ?? "",
+  });
+}
 
 export async function migrateDatabase(
   database: Pick<ControlPlaneDatabase, "migrate" | "close">,
   log: (line: string) => void,
+  originalOwner?: OriginalOwnerMigrationInput,
 ): Promise<number> {
-  const migrated = await database.migrate((name, stage) => {
-    log(`lifecycle: migration-${stage} name=${JSON.stringify(name)}`);
+  const migrated = await database.migrate({
+    ...(originalOwner === undefined ? {} : { originalOwner }),
+    observe: (name, stage) => {
+      log(`lifecycle: migration-${stage} name=${JSON.stringify(name)}`);
+      if (name === "023_owned_projects_and_personal_instructions.sql" && stage === "applied")
+        log(`lifecycle: migration-owner-mapping configured=${originalOwner !== undefined}`);
+    },
   });
   // Error messages can contain database values. The last started filename and
   // typed error code identify the failure without disclosing those values.
@@ -25,13 +53,19 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const owner = originalOwnerMigrationInput(process.env);
+  if (owner.isErr()) {
+    console.error(`migration: ${owner.error}`);
+    process.exitCode = 1;
+    return;
+  }
   const opened = openControlPlaneDatabase({ kind: "postgresql", connectionString });
   if (opened.isErr()) {
     console.error("migration: cannot initialize database adapter");
     process.exitCode = 1;
     return;
   }
-  process.exitCode = await migrateDatabase(opened.value, console.log);
+  process.exitCode = await migrateDatabase(opened.value, console.log, owner.value);
 }
 
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) void main();

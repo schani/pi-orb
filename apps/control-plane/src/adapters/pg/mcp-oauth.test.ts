@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { makeProjectRow } from "../../testkit/fixtures.ts";
+import { makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PgClient, type PostgreSQLClient } from "./client.ts";
 import { PostgreSQLMcpStore } from "./mcp.ts";
@@ -46,6 +46,7 @@ beforeEach(async () => {
   } else db = new PGliteClient();
   const database = composeControlPlaneDatabase(db);
   (await database.migrate())._unsafeUnwrap();
+  (await seedTestUser(task, database.users))._unsafeUnwrap();
   (await database.store.insertProject(task, makeProjectRow(binding.projectId)))._unsafeUnwrap();
   store = new PostgreSQLMcpOAuthStore(db);
   catalog = new PostgreSQLMcpStore(db);

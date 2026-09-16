@@ -15,6 +15,12 @@ export class PostgreSQLUserStore implements UserStore {
     this.db = db;
   }
 
+  getUser(_task: SimulationTask, userId: string): ResultAsync<User | null, StoreError> {
+    return this.db
+      .query("SELECT id, email FROM users WHERE id = $1", [userId])
+      .map((result) => (result.rows[0] === undefined ? null : mapUser(result.rows[0])));
+  }
+
   resolveUser(
     _task: SimulationTask,
     identity: VerifiedUserIdentity,

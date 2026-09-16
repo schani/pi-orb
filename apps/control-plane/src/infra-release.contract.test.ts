@@ -202,6 +202,10 @@ esac
 beforeEach(() => {
   vi.stubEnv("PI_ORB_RELEASE_RESULT_DIR", undefined);
   vi.stubEnv("PI_ORB_RELEASE_RECORD", undefined);
+  vi.stubEnv("PI_ORB_USER_ID", "00000000-0000-4000-8000-000000000001");
+  vi.stubEnv("PI_ORB_ORIGINAL_USER_ID", undefined);
+  vi.stubEnv("PI_ORB_ORIGINAL_IDENTITY_ISSUER", undefined);
+  vi.stubEnv("PI_ORB_ORIGINAL_IDENTITY_SUBJECT", undefined);
 });
 
 afterEach(() => {

@@ -1,10 +1,10 @@
 # Security and credentials
 
-The stage 1 identity on `main` is not deployed and adds no project authorization: any admitted principal can list, create, inspect, control, and stop every project and orb. Runtime bearer and issuer authentication remain separate. Local development is suitable only on a trusted machine/network.
+Undeployed stages 1–2 identify every browser/ops request and scope default project lists, project creation, and personal instructions by owner. Existing direct resource access remains company-wide. Runtime bearer and issuer authentication remain separate. Local development is suitable only on a trusted machine/network.
 
 ## Trusted-company multi-user requirement (2026-09-16)
 
-Stage 1 application identity is on `main` at `0746680` and not deployed. Its release is authorized for existing single-user use after normal qualification; stages 2–3 are outside this release. Stage 1 adds per-request user/ops principals but no project scope, so the global credential broker below remains current. It adds no cookie/login framework or roles. Coworker onboarding still requires stages 1–3.
+Stage 1 identity is on `main`; stage 2 ownership/settings is implemented and qualified. Neither is deployed. Stage 3 credentials is authorized for implementation, but deployment remains unauthorized, so the global credential broker below remains current. Earlier stages can deploy for existing single-user use after normal qualification, but coworker onboarding requires stage 3. No cookie/login framework or roles are added.
 
 Stage 3 requires Codex and GitHub access/refresh credentials to be per-user; provider client configuration may remain deployment-wide. The proposal in `docs/multi-user.md` uses per-(user, provider) pointers, separate login/refresh state and Pi auth artifacts, and runtime/control-plane inference credentials derived from the orb's project owner, not its viewer. Existing orb actions eventually derive the credential user from project ownership; a new user-owned ops action must require an explicitly selected user, never infer a human behind the ops machine identity. Distinct immutable versions can share the existing provider Secret Manager parents; correctness depends on user-scoped pointers and version cleanup, not one parent secret per user. The GitHub App's private installation setting needs changing only for installations outside its owning account, not inherently for employee OAuth logins against repositories already covered.
 

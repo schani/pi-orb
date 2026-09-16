@@ -2,9 +2,11 @@ import { NoSimulationTask } from "determined";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { HostingStore } from "../../domain/hosting-ports.ts";
 import type { HostingUploadRequest } from "../../domain/hosting-types.ts";
+import { seedTestUser, TEST_USER_ID } from "../../testkit/fixtures.ts";
 import type { PostgreSQLClient } from "./client.ts";
 import { runMigrations } from "./migrate.ts";
 import { PostgreSQLControlPlaneStore } from "./store.ts";
+import { PostgreSQLUserStore } from "./users.ts";
 
 const task = new NoSimulationTask("hosting store contract", false);
 const PROJECT = "00000000-0000-4000-8000-000000000081";
@@ -30,11 +32,12 @@ export function postgreSQLHostingContractSubject(
     store,
     setup: async () => {
       expect((await runMigrations(client)).isOk()).toBe(true);
+      (await seedTestUser(task, new PostgreSQLUserStore(client)))._unsafeUnwrap();
       expect(
         (
           await client.query(
-            "INSERT INTO projects (id, name, repository_url) VALUES ($1, $2, $3)",
-            [PROJECT, "Hosting", "https://example.test/repository.git"],
+            "INSERT INTO projects (id, owner_user_id, name, repository_url) VALUES ($1, $2, $3, $4)",
+            [PROJECT, TEST_USER_ID, "Hosting", "https://example.test/repository.git"],
           )
         ).isOk(),
       ).toBe(true);

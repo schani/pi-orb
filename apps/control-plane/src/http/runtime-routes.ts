@@ -449,7 +449,13 @@ export function registerRuntimeRoutes(
         },
       });
     if (auth.kind !== "orb") return sendUnauthorized(reply);
-    const result = await deps.personalInstructions.read(task);
+    const project = await deps.store.getProject(task, auth.orb.projectId);
+    if (project.isErr()) return sendInspectionStoreError(reply, project.error);
+    if (project.value === null)
+      return reply.status(500).send({
+        error: { code: "internal", message: "orb project is missing", retryable: false },
+      });
+    const result = await deps.personalInstructions.read(task, project.value.ownerUserId);
     if (result.isErr())
       return reply.status(result.error.code === "internal" ? 500 : 503).send({
         error: {
@@ -494,7 +500,11 @@ export function registerRuntimeRoutes(
     }
     if (auth.kind !== "orb") return sendUnauthorized(reply);
 
-    const projects = await deps.store.listProjects(task);
+    const ownerProject = await deps.store.getProject(task, auth.orb.projectId);
+    if (ownerProject.isErr()) return sendInspectionStoreError(reply, ownerProject.error);
+    if (ownerProject.value === null)
+      return reply.status(500).send(inspectionError("internal", "orb project is missing", false));
+    const projects = await deps.store.listProjectsByOwner(task, ownerProject.value.ownerUserId);
     if (projects.isErr()) return sendInspectionStoreError(reply, projects.error);
     const items: OrbInspectionItem[] = [];
     for (const project of projects.value) {

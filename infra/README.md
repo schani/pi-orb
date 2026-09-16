@@ -32,6 +32,13 @@ application without rebuilding, migrating or applying infrastructure. `latest`
 selects the latest recorded attempt. It verifies all four serving image/revision
 identities and lifecycle generations, preserves the original failure record,
 and creates a separate validation result naming both deployed and runner commits.
+Both deployment and validation require repository/environment variable
+`PI_ORB_USER_ID`, the explicit owner for disposable smoke projects. The one-time
+stage-2 migration additionally accepts all three repository/environment variables
+`PI_ORB_ORIGINAL_USER_ID`, `PI_ORB_ORIGINAL_IDENTITY_ISSUER`, and
+`PI_ORB_ORIGINAL_IDENTITY_SUBJECT`; omit all three after migration. Validation
+runs no migration and ignores those three variables, but still creates and cleans
+up the existing disposable smoke fixtures.
 It completes IAP reconciliation and old-revision pruning in a separate `repair`
 phase before retirement, including failures after apply but before the initial
 serving snapshot. The original accepted image/generation must match all four roles.

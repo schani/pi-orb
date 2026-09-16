@@ -26,6 +26,7 @@ export interface UserIdentityVerifier<Request> {
 }
 
 export interface UserStore {
+  getUser(task: SimulationTask, userId: string): ResultAsync<User | null, StoreError>;
   resolveUser(
     task: SimulationTask,
     identity: VerifiedUserIdentity,

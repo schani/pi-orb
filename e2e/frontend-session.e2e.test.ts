@@ -932,6 +932,212 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it("loads and focuses an addressed project omitted from the default list", async () => {
+    const page = await browser.newPage();
+    await page.addInitScript(`
+      globalThis.__addressedScrolls = [];
+      Element.prototype.scrollIntoView = function () {
+        globalThis.__addressedScrolls.push(this.closest("section")?.id ?? null);
+      };
+    `);
+    let directReads = 0;
+    await page.route("**/api/v1/projects", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.items = body.items.filter(
+        (project: { id: string }) => project.id !== "frontend-fixture-project",
+      );
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/v1/projects/frontend-fixture-project", async (route) => {
+      if (route.request().method() === "GET") directReads += 1;
+      await route.continue();
+    });
+    try {
+      await page.goto(`${origin}/#/projects/frontend-fixture-project`);
+      const heading = page.getByRole("heading", { name: "Frontend playground", exact: true });
+      await expectPage(heading).toBeFocused();
+      await expectPage
+        .poll(() => page.evaluate("globalThis.__addressedScrolls"))
+        .toContain("project-frontend-fixture-project");
+      await page.evaluate((hash) => {
+        (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+      }, "#/projects/frontend-fixture-project/mcp");
+      await expectPage(page.getByRole("dialog")).toContainText("Config for Frontend playground");
+      await expectPage(
+        page.locator(".dashboard").getByRole("link", { name: "Frontend Playground", exact: true }),
+      ).toBeVisible();
+      expectPage(directReads).toBeGreaterThan(0);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("fences an addressed project poll completed after a settings mutation", async () => {
+    const page = await browser.newPage();
+    const response = await page.request.get(`${origin}/api/v1/projects/frontend-fixture-project`);
+    let project = await response.json();
+    let directReads = 0;
+    let staleReadArrived!: () => void;
+    let releaseStaleRead!: () => void;
+    const arrived = new Promise<void>((resolve) => {
+      staleReadArrived = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseStaleRead = resolve;
+    });
+    await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { items: [] } }));
+    await page.route("**/api/v1/projects/frontend-fixture-project", async (route) => {
+      if (route.request().method() === "PATCH") {
+        project = { ...project, ...route.request().postDataJSON() };
+        await route.fulfill({ json: project });
+        return;
+      }
+      directReads += 1;
+      const snapshot = { ...project };
+      if (directReads === 2) {
+        staleReadArrived();
+        await gate;
+      }
+      await route.fulfill({ json: snapshot });
+    });
+    try {
+      await page.goto(`${origin}/#/projects/frontend-fixture-project`);
+      await expectPage(
+        page.getByRole("heading", { name: "Frontend playground", exact: true }),
+      ).toBeVisible();
+      await arrived;
+      await page.getByRole("button", { name: "Configure Frontend playground" }).click();
+      const general = page
+        .getByRole("dialog")
+        .getByRole("tabpanel", { name: "General", exact: true });
+      await general.getByLabel("Name", { exact: true }).fill("Addressed rename");
+      await general.getByRole("button", { name: "save", exact: true }).click();
+      await expectPage(
+        page.getByRole("heading", { name: "Addressed rename", exact: true }),
+      ).toBeVisible();
+      const staleResponse = page.waitForResponse((candidate) =>
+        candidate.url().endsWith("/api/v1/projects/frontend-fixture-project"),
+      );
+      releaseStaleRead();
+      await staleResponse;
+      await page.evaluate(
+        "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+      );
+      expectPage(
+        await page.locator("#project-frontend-fixture-project .project-name").textContent(),
+      ).toBe("Addressed rename");
+    } finally {
+      releaseStaleRead();
+      await page.close();
+    }
+  });
+
+  it("does not mistake an addressed project lookup failure for a missing project", async () => {
+    const page = await browser.newPage();
+    await page.route("**/api/v1/projects", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.items = body.items.filter(
+        (project: { id: string }) => project.id !== "frontend-fixture-project",
+      );
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/v1/projects/frontend-fixture-project", (route) =>
+      route.fulfill({
+        status: 503,
+        json: { error: { code: "unavailable", message: "lookup unavailable", retryable: true } },
+      }),
+    );
+    try {
+      await page.goto(`${origin}/#/projects/frontend-fixture-project/mcp`);
+      await expectPage(
+        page.getByText("failed to load project: unavailable: lookup unavailable"),
+      ).toBeVisible();
+      await expectPage(page.getByText("Project doesn't exist", { exact: true })).toHaveCount(0);
+      await expectPage(page).toHaveURL(`${origin}/#/projects/frontend-fixture-project/mcp`);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("ignores a project lookup completed after navigation", async () => {
+    const page = await browser.newPage();
+    let lookupArrived!: () => void;
+    let releaseLookup!: () => void;
+    const arrived = new Promise<void>((resolve) => {
+      lookupArrived = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    await page.route("**/api/v1/projects", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.items = body.items.filter(
+        (project: { id: string }) => project.id !== "frontend-fixture-project",
+      );
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/v1/projects/missing-project", async (route) => {
+      lookupArrived();
+      await gate;
+      await route.fulfill({
+        status: 404,
+        json: { error: { code: "not_found", message: "project missing", retryable: false } },
+      });
+    });
+    try {
+      await page.goto(`${origin}/#/projects/missing-project/mcp`);
+      await arrived;
+      await page.evaluate((hash) => {
+        (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+      }, "#/projects/frontend-fixture-project/mcp");
+      await expectPage(page.getByRole("dialog")).toContainText("Config for Frontend playground");
+      const staleResponse = page.waitForResponse((response) =>
+        response.url().endsWith("/api/v1/projects/missing-project"),
+      );
+      releaseLookup();
+      await staleResponse;
+      await expectPage(page.getByRole("dialog")).toContainText("Config for Frontend playground");
+      await expectPage(page.getByText("Project doesn't exist", { exact: true })).toHaveCount(0);
+    } finally {
+      releaseLookup();
+      await page.close();
+    }
+  });
+
+  it("loads addressed orb project context omitted from the default list", async () => {
+    const page = await browser.newPage();
+    let directReads = 0;
+    await page.route("**/api/v1/projects", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.items = body.items.filter(
+        (project: { id: string }) => project.id !== "frontend-fixture-project",
+      );
+      await route.fulfill({ response, json: body });
+    });
+    await page.route("**/api/v1/projects/frontend-fixture-project", async (route) => {
+      if (route.request().method() === "GET") directReads += 1;
+      await route.continue();
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const project = page.locator(".orb-index .ix-project", {
+        has: page.getByRole("heading", { name: "Frontend playground", exact: true }),
+      });
+      await expectPage(project).toBeVisible();
+      await expectPage(
+        project.getByRole("button", { name: "Configure Frontend playground" }),
+      ).toBeVisible();
+      await expectPage(page).toHaveTitle("Frontend playground · Frontend Playground");
+      expectPage(directReads).toBeGreaterThan(0);
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each(["MCPs", "Secrets"])("keeps %s field focus across dashboard refreshes", async (modal) => {
     const page = await browser.newPage();
     await page.clock.install();

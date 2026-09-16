@@ -1,7 +1,30 @@
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import type { StoreError } from "./domain/errors.ts";
-import { migrateDatabase } from "./migrate.ts";
+import { migrateDatabase, originalOwnerMigrationInput } from "./migrate.ts";
+
+it("accepts original-owner migration input only when all fields are present", () => {
+  expect(originalOwnerMigrationInput({})._unsafeUnwrap()).toBeUndefined();
+  expect(originalOwnerMigrationInput({ PI_ORB_ORIGINAL_USER_ID: "bad" }).isErr()).toBe(true);
+  expect(
+    originalOwnerMigrationInput({
+      PI_ORB_ORIGINAL_USER_ID: "00000000-0000-4000-8000-000000000001",
+      PI_ORB_ORIGINAL_IDENTITY_ISSUER: "   ",
+      PI_ORB_ORIGINAL_IDENTITY_SUBJECT: "subject",
+    }).isErr(),
+  ).toBe(true);
+  expect(
+    originalOwnerMigrationInput({
+      PI_ORB_ORIGINAL_USER_ID: "00000000-0000-4000-8000-000000000001",
+      PI_ORB_ORIGINAL_IDENTITY_ISSUER: "issuer",
+      PI_ORB_ORIGINAL_IDENTITY_SUBJECT: "subject",
+    })._unsafeUnwrap(),
+  ).toEqual({
+    userId: "00000000-0000-4000-8000-000000000001",
+    identityIssuer: "issuer",
+    identitySubject: "subject",
+  });
+});
 
 it("closes after migration failure and logs only typed codes", async () => {
   const lines: string[] = [];
@@ -15,8 +38,8 @@ it("closes after migration failure and logs only typed codes", async () => {
   expect(
     await migrateDatabase(
       {
-        migrate: (observe) => {
-          observe?.("015_example.sql", "started");
+        migrate: (options) => {
+          options?.observe?.("015_example.sql", "started");
           return errAsync(error);
         },
         close: () => {

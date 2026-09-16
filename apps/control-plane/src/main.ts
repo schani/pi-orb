@@ -74,6 +74,7 @@ import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/port
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { waitForReleaseActivation } from "./domain/release-activation.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
+import { UserScope } from "./domain/user-scope.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
 import {
   type ControlPlaneRole,
@@ -99,6 +100,7 @@ import {
   readRequestIdentityConfig,
 } from "./identity-composition.ts";
 import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
+import { originalOwnerMigrationInput } from "./migrate.ts";
 
 const env = (name: string, fallback: string): string => {
   const value = process.env[name];
@@ -233,6 +235,12 @@ export async function main(
     return;
   }
   const issuerUrl = configuredIssuerUrl.isOk() ? configuredIssuerUrl.value : "";
+  const originalOwner = originalOwnerMigrationInput(process.env);
+  if (browserRole && activationBucket === "" && originalOwner.isErr()) {
+    bootTask.error("migration owner configuration invalid");
+    process.exitCode = 1;
+    return;
+  }
 
   mkdirSync(authDir, { recursive: true });
   const openedDatabase = openControlPlaneDatabase(
@@ -251,9 +259,12 @@ export async function main(
   // Production's release job migrates before any new service consumes schema.
   // Local development still initializes its own database.
   if (browserRole && activationBucket === "") {
-    const migrated = await database.migrate();
+    const owner = originalOwner._unsafeUnwrap();
+    const migrated = await database.migrate(owner === undefined ? {} : { originalOwner: owner });
     if (migrated.isErr()) {
-      bootTask.error("migration failed:", migrated.error.message);
+      bootTask.error(`migration failed code=${migrated.error.code}`);
+      const closed = await database.close();
+      if (closed.isErr()) bootTask.error(`database close failed code=${closed.error.code}`);
       process.exitCode = 1;
       return;
     }
@@ -481,6 +492,7 @@ export async function main(
     projectSecrets: { pointers: database.projectSecrets, secrets },
     personalInstructions: database.personalInstructions,
     projectInstructions: database.projectInstructions,
+    userScope: new UserScope(database.users),
     hosting: {
       store: database.hosting,
       bytes: hostedBytes,

@@ -39,6 +39,7 @@ import {
   makeProjectRow,
   TEST_ISSUER_CONSTANTS,
   TEST_ISSUER_URL,
+  TEST_USER_ID,
 } from "../testkit/fixtures.ts";
 import { FakePersonalInstructionsStore } from "../testkit/personal-instructions.ts";
 import { FakeProjectInstructionsStore } from "../testkit/project-instructions.ts";
@@ -135,7 +136,10 @@ describe("runtime broker routes", () => {
     secrets = new FakeSecretStore();
     signer = new FakeTokenSigner("route-key-1");
     projectSecretPointers = new FakeProjectSecretPointerStore(PROJECT);
-    personalInstructions = new FakePersonalInstructionsStore();
+    personalInstructions = new FakePersonalInstructionsStore([
+      TEST_USER_ID,
+      "00000000-0000-4000-8000-000000000002",
+    ]);
     projectInstructions = new FakeProjectInstructionsStore(
       (id) => store.projectSnapshot(id)?.state ?? null,
     );
@@ -169,13 +173,16 @@ describe("runtime broker routes", () => {
     personalInstructions.snapshot = { content: "Across all projects", revision: 3 };
     const read = await request();
     expect(read.json()).toEqual({ content: "Across all projects", revision: 3 });
-    store.seedProject(makeProjectRow("other-project"));
+    const otherOwner = "00000000-0000-4000-8000-000000000002";
+    store.seedProject({ ...makeProjectRow("other-project"), ownerUserId: otherOwner });
     store.seedOrb(
       makeOrbRow("other-orb", "other-project", "running", {
         runtimeTokenHash: sha256("other-token"),
       }),
     );
-    expect((await request("other-token")).json()).toEqual(read.json());
+    personalInstructions.snapshots.set(otherOwner, { content: "Other owner", revision: 1 });
+    expect((await request("other-token")).json()).toEqual({ content: "Other owner", revision: 1 });
+    expect(personalInstructions.snapshots.get(TEST_USER_ID)).toEqual(read.json());
     expect(read.headers["cache-control"]).toBe("no-store");
     expect((await request("stale-token")).statusCode).toBe(401);
     expect(
@@ -395,7 +402,7 @@ describe("runtime broker routes", () => {
   });
 
   function storeFailing(
-    operation: "listProjects" | "readHistorySnapshot",
+    operation: "listProjects" | "listProjectsByOwner" | "readHistorySnapshot",
     error: StoreError,
   ): ControlPlaneStore {
     return new Proxy(store, {
@@ -809,6 +816,19 @@ describe("runtime broker routes", () => {
       });
     });
 
+    it("omits other owners from default discovery but permits explicit transcript reads", async () => {
+      const crossProject = "project-cross-owner";
+      const crossOrb = "orb-cross-owner";
+      store.seedProject({
+        ...makeProjectRow(crossProject),
+        ownerUserId: "00000000-0000-4000-8000-000000000002",
+      });
+      store.seedOrb(makeOrbRow(crossOrb, crossProject, "archived"));
+      const listed = await inspect(ORB_INSPECTION_LIST_PATH);
+      expect(listed.json().items.some((item: { id: string }) => item.id === crossOrb)).toBe(false);
+      expect((await inspect(orbTranscriptPath(crossOrb))).statusCode).toBe(200);
+    });
+
     it("returns the same lossless replicated snapshot used by the browser", async () => {
       const session = { id: "session-b", overflow: { native: { id: "session-b" } } };
       const record = {
@@ -869,7 +889,7 @@ describe("runtime broker routes", () => {
       await app.close();
       await startApp(
         TEST_ISSUER_CONSTANTS,
-        storeFailing("listProjects", {
+        storeFailing("listProjectsByOwner", {
           type: "store_error",
           code: "unavailable",
           message: "raw database host and SQL must not escape",

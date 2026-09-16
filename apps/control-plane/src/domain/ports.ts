@@ -163,16 +163,23 @@ export interface ControlPlaneStore {
   readonly uploads: WorkspaceUploadStore;
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError>;
   listProjects(task: SimulationTask): ResultAsync<ProjectRow[], StoreError>;
+  listProjectsByOwner(
+    task: SimulationTask,
+    ownerUserId: string,
+  ): ResultAsync<ProjectRow[], StoreError>;
   listProjectsInState(
     task: SimulationTask,
     state: "deleting",
   ): ResultAsync<ProjectRow[], StoreError>;
-  insertProject(task: SimulationTask, project: ProjectRow): ResultAsync<ProjectRow, StoreError>;
+  insertProject(
+    task: SimulationTask,
+    project: ProjectRow,
+  ): ResultAsync<ProjectRow, StoreError | ProjectConflict>;
   /** Atomically updates active project metadata, fenced against deletion. */
   updateProject(
     task: SimulationTask,
     params: { projectId: string; name: string; repositoryUrl: string; now: number },
-  ): ResultAsync<ProjectRow | null, StoreError>;
+  ): ResultAsync<ProjectRow | null, StoreError | ProjectConflict>;
   /** Atomically fences child creation and moves every child to permanent deletion. */
   requestProjectDeletion(
     task: SimulationTask,
@@ -1016,4 +1023,5 @@ export interface ControlPlaneDeps {
   readonly hosting: import("./hosting-ports.ts").HostingDeps;
   readonly personalInstructions: import("./personal-instructions.ts").PersonalInstructionsStore;
   readonly projectInstructions: import("./project-instructions.ts").ProjectInstructionsStore;
+  readonly userScope: import("./user-scope.ts").UserScope;
 }

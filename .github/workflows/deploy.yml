@@ -76,6 +76,10 @@ jobs:
         env:
           VALIDATE_RELEASE: ${{ inputs.validate_release }}
           PI_ORB_RELEASE_RESULT_DIR: ${{ runner.temp }}/release-result
+          PI_ORB_USER_ID: ${{ vars.PI_ORB_USER_ID }}
+          PI_ORB_ORIGINAL_USER_ID: ${{ vars.PI_ORB_ORIGINAL_USER_ID }}
+          PI_ORB_ORIGINAL_IDENTITY_ISSUER: ${{ vars.PI_ORB_ORIGINAL_IDENTITY_ISSUER }}
+          PI_ORB_ORIGINAL_IDENTITY_SUBJECT: ${{ vars.PI_ORB_ORIGINAL_IDENTITY_SUBJECT }}
         run: |
           set -euo pipefail
           args=(--yes)

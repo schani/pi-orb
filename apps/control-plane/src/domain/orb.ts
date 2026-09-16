@@ -103,6 +103,7 @@ export interface OrbDeletionRow {
 
 export interface ProjectRow {
   readonly id: string;
+  readonly ownerUserId: string;
   readonly name: string;
   readonly repositoryUrl: string;
   readonly state: ProjectState;

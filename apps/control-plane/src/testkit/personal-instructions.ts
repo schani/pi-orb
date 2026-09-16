@@ -1,22 +1,61 @@
 import type { PersonalInstructions } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
-import { ResultAsync } from "neverthrow";
+import { errAsync, ResultAsync } from "neverthrow";
 import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
 
 export class FakePersonalInstructionsStore implements PersonalInstructionsStore {
-  snapshot: PersonalInstructions = { content: "", revision: 0 };
+  readonly snapshots = new Map<string, PersonalInstructions>();
   readonly commits: PersonalInstructions[] = [];
+  readonly commitsByUser = new Map<string, PersonalInstructions[]>();
+  private readonly users = new Set<string>();
 
-  read(task: SimulationTask) {
-    return this.operation(task, "read", () => ({ ...this.snapshot }));
+  constructor(userIds: Iterable<string> = []) {
+    for (const userId of userIds) this.seedUser(userId);
   }
-  replace(task: SimulationTask, content: string) {
+
+  seedUser(userId: string): void {
+    this.users.add(userId);
+  }
+
+  get snapshot(): PersonalInstructions {
+    return (
+      this.snapshots.get("00000000-0000-4000-8000-000000000001") ?? {
+        content: "",
+        revision: 0,
+      }
+    );
+  }
+  set snapshot(value: PersonalInstructions) {
+    this.snapshots.set("00000000-0000-4000-8000-000000000001", value);
+  }
+
+  read(task: SimulationTask, userId: string) {
+    if (!this.users.has(userId)) return errAsync(this.unknownUser());
+    return this.operation(task, "read", () => ({
+      ...(this.snapshots.get(userId) ?? { content: "", revision: 0 }),
+    }));
+  }
+  replace(task: SimulationTask, userId: string, content: string) {
+    if (!this.users.has(userId)) return errAsync(this.unknownUser());
     return this.operation(task, "write", () => {
-      this.snapshot = { content, revision: this.snapshot.revision + 1 };
-      this.commits.push(this.snapshot);
-      return { ...this.snapshot };
+      const previous = this.snapshots.get(userId) ?? { content: "", revision: 0 };
+      const snapshot = { content, revision: previous.revision + 1 };
+      this.snapshots.set(userId, snapshot);
+      this.commits.push(snapshot);
+      const commits = this.commitsByUser.get(userId) ?? [];
+      commits.push(snapshot);
+      this.commitsByUser.set(userId, commits);
+      return { ...snapshot };
     });
   }
+  private unknownUser() {
+    return {
+      type: "personal_instructions_error" as const,
+      code: "internal" as const,
+      message: "Personal instructions storage is inconsistent",
+    };
+  }
+
   private operation(task: SimulationTask, name: string, commit: () => PersonalInstructions) {
     return ResultAsync.fromPromise(
       (async () => {

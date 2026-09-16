@@ -4,13 +4,13 @@
 
 `GET /api/v1/projects/:projectId/instructions` returns `{content, revision}` for that project, initially empty/revision 0. `PUT` accepts only `{content}` and atomically assigns content/increments revision under the project-row lock; deletion conflicts, missing project returns 404, malformed text 400, storage outage 503 and inconsistent storage 500. Replies are no-store. Text shares the personal-instructions validation contract (64 KiB UTF-8, exact whitespace, no NUL/unpaired surrogates). Fleet responses never include instruction bodies. Migration `020_project_instructions.sql` adds the two project-owned columns.
 
-`GET /runtime/v1/project-instructions` derives the project from the current active-incarnation bearer; it ignores caller project selectors and exposes no runtime write. Boot captures that snapshot for fresh and resumed sessions. Save never wakes compute or sends a message. Config tab, shared implementation boundaries, adoption metadata and tests: `docs/project-instructions.md`.
+`GET /runtime/v1/project-instructions` derives the project from the current active-incarnation bearer; it ignores caller project selectors and exposes no runtime write. Project instructions remain project-scoped under stage 2; they are not copied into the owner's personal instructions. Boot captures that snapshot for fresh and resumed sessions. Save never wakes compute or sends a message. Config tab, shared implementation boundaries, adoption metadata and tests: `docs/project-instructions.md`.
 
-## Personal instructions (implemented locally, 2026-09-14)
+## Personal instructions (stage 2 implemented and qualified 2026-09-16)
 
-`GET /api/v1/personal-instructions` returns `{content: string, revision: number}` for the current single account, initially `{content: "", revision: 0}`. `PUT` to the same URL accepts only `{content}` and atomically returns the new persisted snapshot. Every explicit successful assignment increments revision; last-applied-wins, no automatic retries/CAS or per-project override. Empty content clears the managed instructions. Text preserves whitespace and is limited to 64 KiB UTF-8; NUL and unpaired surrogates are invalid. Both replies are `no-store`; invalid input returns 400, unavailable storage 503, inconsistent storage 500, all with the existing typed HTTP error envelope. Saving never changes lifecycle state or messages.
+`GET /api/v1/personal-instructions` returns `{content: string, revision: number}` for the signed-in user. A valid user with no row reads `{content: "", revision: 0}` until first write. `PUT` accepts only `{content}` and atomically updates that user's independent revision. Last-applied-wins, no automatic retries/CAS or per-project override. Empty content clears the managed instructions. Text preserves whitespace and is limited to 64 KiB UTF-8; NUL and unpaired surrogates are invalid. Both replies are `no-store`; invalid input returns 400, unavailable storage 503, inconsistent storage 500. Saving never changes lifecycle state or messages.
 
-`GET /runtime/v1/personal-instructions` serves the same snapshot only after the existing current active-incarnation bearer authorization; there is no runtime write route. This intentionally spans projects within the single account, like sibling-orb inspection. Adoption is next runtime start, not save-time fan-out. `019_personal_instructions.sql` owns the singleton and revision bounds. UI, loading and adoption observability: `docs/personal-instructions.md`.
+Ops GET/PUT requires `X-Pi-Orb-User-Id` containing a known UUID; user principals cannot override themselves with it. `GET /runtime/v1/personal-instructions` derives the owner through the active incarnation's orb and project, not a viewer or request selector. There is no runtime write. Adoption remains next runtime start. Migration 023 replaces the `019_personal_instructions.sql` singleton while preserving legacy content, revision and timestamp. UI, migration and observability: `docs/personal-instructions.md`, `docs/multi-user.md`.
 
 ## Workspace file uploads (implemented 2026-09-09)
 
@@ -20,10 +20,12 @@
 
 The first version requires no local checkout or user-operated CLI: lifecycle and conversation input are web-driven. A narrow CLI inside each running orb can read sibling-orb metadata and replicated transcripts so the agent can coordinate with prior work.
 
-A user registers a project in the web UI with:
+A signed-in user registers an owned project in the web UI with:
 
-- a project name;
+- a project name, unique within that owner;
 - a public Git repository URL.
+
+The project and all child resources have one owner; there is no independent orb owner or transfer operation.
 
 An orb's first checkout clones the project's repository into its filesystem; restarting an existing checkout preserves it. There is no local-checkout upload, dirty-state patch, sync-back workflow, clone cache, prepared snapshot, or other checkout optimization initially. The initial clone uses the repository's default branch; the resolved commit should be recorded for observability.
 
@@ -54,7 +56,7 @@ Still open:
 
 ## Minimal control-plane API
 
-The browser uses a small JSON API under `/api/v1`. Stage-1 application identity is on `main` at `0746680` but not deployed; its authorized single-user release changes the session response before the later multi-user cutover:
+The browser uses a small JSON API under `/api/v1`. Stage 1 application identity is on `main`; stage 2 ownership is implemented and qualified. Neither is deployed, and deployment is not authorized:
 
 ```text
 GET  /api/v1/session
@@ -94,7 +96,7 @@ WS   /api/v1/orbs/:orbId/terminal
 
 ### Application principal (decided and implemented locally 2026-09-16; not deployed)
 
-Stage 1 resolves a role-appropriate principal before every browser API, hosted-file read, OAuth callback, live WebSocket and terminal WebSocket handler: user on `browser`/`all`, ops on `ops`. Static assets do not require a database lookup. Runtime bearer routes and the public issuer retain their separate authentication. This authenticates requests but does not yet add project scope or authorization.
+Stage 1 resolves a role-appropriate principal before every browser API, hosted-file read, OAuth callback, live WebSocket and terminal WebSocket handler: user on `browser`/`all`, ops on `ops`. Static assets do not require a database lookup. Runtime bearer routes and the public issuer retain their separate authentication. Stage 1 authenticates requests. Stage 2 scopes default lists, browser project creation and personal settings to that user while deliberately retaining trusted-company direct-resource access.
 
 Cloud browser requests carry an IAP assertion verified as specified in `docs/deployment.md`. Its verified issuer/subject resolves a stable user UUID; email is mutable, nullable display data only. Domain unauthenticated failures return 401, verification-key or user-store availability failures return 503, and identity-store invariants return 500. Local `all` uses fixed `pi-orb:local/developer` identity without Google login, tests supply Alice/Bob, and `ops` uses only its configured machine principal without user-store access. Details: `docs/multi-user.md`.
 
@@ -105,7 +107,13 @@ In the local implementation, `GET /api/v1/session` is a non-cacheable principal 
 { status: "ok", principal: { kind: "ops", id: string } }
 ```
 
-Issuer and subject are never browser response fields. No cookie, login endpoint or login UI is added; IAP remains the cloud login boundary. The current deployed `{ "status": "ok" }` response remains until the coordinated cutover.
+Issuer and subject are never browser response fields. No cookie, login endpoint or login UI is added; IAP remains the cloud login boundary. The current deployed `{ "status": "ok" }` response remains until an authorized coordinated cutover.
+
+### Stage-2 ownership selection (decided 2026-09-16)
+
+Browser `GET /api/v1/projects`, `POST /api/v1/projects`, and personal-instructions GET/PUT use the signed-in user. Default project/orb lists therefore show only that user's resources. Existing direct project, orb, history, hosted-file, settings and lifecycle routes remain accessible to any authenticated coworker; resource-specific services derive the addressed project's owner when owner context is needed. There is no user selector in the browser.
+
+The ops role requires `X-Pi-Orb-User-Id` with a known UUID for exactly those four user-context operations: project list, project create, personal-instructions GET and PUT. Missing, malformed or unknown selection fails explicitly. User principals cannot override their identity with this header. Owner IDs and typed failures may be logged for correlation; identity assertions, instruction bodies and secrets may not.
 
 ### Hosted files (decided 2026-09-07)
 
@@ -122,7 +130,7 @@ wire protocol, storage, and lifecycle contract.
 
 `GET /api/v1/system` returns `{ hostProvider, databaseKind, version }` — the host provider this process constructs (`process` | `docker` | `gce`), the database it opened (`pglite` | `postgres`), and the control-plane package version. It exists so the dashboard footer can state which deployment the browser is looking at, which is the first question asked when a local window and a cloud window are open side by side. Every value is resolved once at boot and constant for the process's lifetime, so the route reads nothing — no store, no filesystem — per request. It carries deployment facts only: no connection strings, project or zone names, image references, secrets, or counts of anything the fleet is doing. It is registered with the rest of the browser API, so it exists on the `all`, `browser`, and `ops` roles and nowhere else.
 
-### In-orb inspection API (decided and implemented 2026-08-27)
+### In-orb inspection API (ownership scope updated 2026-09-16)
 
 The production URL injected into an orb points at the runtime-only Cloud Run role, not at the browser API. The `pi-orb` CLI therefore uses two dedicated runtime-facing reads:
 
@@ -131,9 +139,9 @@ GET /runtime/v1/orbs
 GET /runtime/v1/orbs/:orbId/transcript
 ```
 
-Both require the existing per-incarnation runtime bearer and are available only while the calling orb's lifecycle authorizes that bearer. In the current single-account product, a valid running orb may read every sibling orb in that account, including archived or stopped orbs; this deliberate cross-orb authority is what lets an agent find and reuse prior work. The list response is one non-cacheable aggregate snapshot containing `currentOrbId` plus each orb's ID, nullable name, state, update time, and parent project ID/name/repository URL. `pi-orb orbs [query]` performs NFKC case-insensitive substring filtering locally across those identity fields, so there is no server search index, request per keystroke, or transcript-content search.
+Both require the existing per-incarnation runtime bearer and are available only while the calling orb's lifecycle authorizes that bearer. The list derives the authenticated orb's project owner and returns only that owner's projects/orbs, including archived or stopped orbs. The list response is one non-cacheable aggregate snapshot containing `currentOrbId` plus each orb's ID, nullable name, state, update time, and parent project ID/name/repository URL. `pi-orb orbs [query]` performs NFKC case-insensitive substring filtering locally across those identity fields, so there is no server search index, request per keystroke, or transcript-content search.
 
-The transcript route returns the exact consistent replicated-history snapshot used by the browser, plus the same compact orb/project identity. It does not start the target orb or contact its runtime. Archived transcripts are sealed and complete; stopped/running transcripts have the completeness and lag semantics of `docs/history-replication.md`, so an active turn may briefly be newer than the returned replica. Missing targets return a typed `404`; deleting targets return a typed `409`, never another resource or a dashboard redirect. Both successful responses set `Cache-Control: no-store`. The default CLI renderer omits lossless `overflow.native` duplication while retaining normalized messages, reasoning, tool calls/results, compactions, and events; `--json` returns the lossless wire response.
+The explicit transcript route remains trusted-company cross-user access. It returns the exact consistent replicated-history snapshot used by the browser, plus the same compact orb/project identity. It does not start the target orb or contact its runtime. Archived transcripts are sealed and complete; stopped/running transcripts have the completeness and lag semantics of `docs/history-replication.md`, so an active turn may briefly be newer than the returned replica. Missing targets return a typed `404`; deleting targets return a typed `409`, never another resource or a dashboard redirect. Both successful responses set `Cache-Control: no-store`. The default CLI renderer omits lossless `overflow.native` duplication while retaining normalized messages, reasoning, tool calls/results, compactions, and events; `--json` returns the lossless wire response.
 
 This is intentionally not implemented by calling `/api/v1/*`: the cloud runtime role hard-registers only `/runtime/v1/*`. It adds no table, migration, search cache, pagination, or mutable operation. Because these reads make no autonomous decision and write no state, durable lifecycle events would be noise; typed CLI errors are the user-visible observability, and route logging must never include transcript content. Conventional boundary tests cover protocol validation, CLI stdout/stderr and exit classes, bearer authorization, sanitized retryable/non-retryable store failures, and missing/deleting targets; the full-slice E2E covers one real sibling reading another. DST was rejected for this read path: it has no retry loop, lease, CAS, durable mutation, or concurrent state machine whose interleavings define correctness. If a stronger cross-row snapshot contract is later required during concurrent project/orb deletion, define that transaction boundary first and test it at the store/route concurrency boundary rather than adding schedule permutations to the current sequential reads.
 
@@ -145,7 +153,7 @@ This is intentionally not implemented by calling `/api/v1/*`: the cloud runtime 
 
 `POST /runtime/v1/orb/archive` is the mutation behind plain `pi-orb archive`. It accepts `{}` (or no body), derives the target from the per-incarnation bearer, and returns non-cacheable `202 { "orbId": "<caller-id>", "state": "archiving" }` at durable acceptance, never after waiting for completion. Extra fields are `400`; invalid identity is `401`; incompatible lifecycle/changed caller authority is `409`; store failures use sanitized `503`/`500` responses. Errors have `{ "error": { "code": "...", "message": "...", "retryable": false } }`, with `retryable` reflecting the failure. New requests require `running`; an authorized `archiving` retry is idempotent. Caller hash/incarnation and absence of a discard fence are checked at the database mutation, not merely at HTTP authentication. It grants no sibling mutation authority and does not enable browser `/api/v1/*` routes on the runtime role. CLI failure after a lost response explicitly reports unknown acceptance. The agent prompt permits use only on user request. Irreversible file loss, turn completion, sealing, and observability: `docs/orb-archival.md`.
 
-`PATCH /api/v1/projects/:projectId` atomically updates an active project's `{ name, repositoryUrl }` (both required; decided 2026-09-09). Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters. Repository URLs use the creation allowlist/normalization rules above; invalid input returns 400 before either field changes. Updating a deleting project conflicts. The single SQL update fences both fields against deletion and persists `updatedAt`; DST and storage contracts cover that fence. The prior name-only update and immutable repository decision are superseded by General settings. Name changes appear immediately; the repository change affects future fresh checkouts, never rewriting an existing orb's Git remote or workspace. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
+`PATCH /api/v1/projects/:projectId` atomically updates an active project's `{ name, repositoryUrl }` (both required; decided 2026-09-09). Project names are NFKC-normalized, trimmed, whitespace-normalized strings of 1–80 characters and unique per owner. Create or rename conflicts within one owner return typed `409`; different owners may use the same normalized name. Repository URLs use the creation allowlist/normalization rules above; invalid input returns 400 before either field changes. Updating a deleting project conflicts. The single SQL update fences both fields against deletion and persists `updatedAt`; DST and storage contracts cover that fence. The prior name-only update and immutable repository decision are superseded by General settings. Name changes appear immediately; the repository change affects future fresh checkouts, never rewriting an existing orb's Git remote or workspace. Permanent project deletion is implemented as specified in `docs/project-deletion.md`: `DELETE /api/v1/projects/:projectId` atomically marks the project deleting and fans permanent deletion out to every child orb before removing the project row. The one orb update is the narrow naming endpoint described below. Permanent orb deletion is the asynchronous `DELETE` operation implemented in `docs/orb-deletion.md`: it removes both the authoritative filesystem and replica rather than retaining history. Read-only archival is implemented as specified in `docs/orb-archival.md`: it uses the same resource destruction but retains metadata and the sealed replica. OAuth is an internal prerequisite of orb creation/start, not a standalone frontend resource.
 
 The browser generates project, orb, and queued-message UUIDs with the shared `generateUuid()` helper and includes them in create requests. The helper uses `crypto.randomUUID()` when available and falls back to `crypto.getRandomValues()` because plain-HTTP tailnet origins are not secure contexts and may not expose `randomUUID`; browser code must not call `crypto.randomUUID()` directly (`docs/postmortems/2026-08-10-send-anytime-plain-http-randomuuid.md`).
 
@@ -170,7 +178,7 @@ interface UpdateOrbRequest {
 }
 ```
 
-This makes a retried create naturally idempotent without an idempotency table: the same ID and identical body returns the existing resource, while the same ID with different content returns `409 conflict`. Creating an orb also requests its initial start and returns it in `creating` state.
+This makes a retried create naturally idempotent without an idempotency table: the same ID, owner and identical body returns the existing resource, while a different owner or content returns `409 conflict`. Creating an orb inherits the project's owner, requests its initial start and returns it in `creating` state.
 
 ```ts
 interface ProjectView {

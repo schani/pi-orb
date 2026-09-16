@@ -36,20 +36,35 @@ export class PostgreSQLPersonalInstructionsStore implements PersonalInstructions
   constructor(db: PostgreSQLClient) {
     this.db = db;
   }
-  read(_task: SimulationTask): ResultAsync<PersonalInstructions, PersonalInstructionsError> {
+  read(
+    _task: SimulationTask,
+    userId: string,
+  ): ResultAsync<PersonalInstructions, PersonalInstructionsError> {
     return this.db
-      .query("SELECT content, revision FROM personal_instructions WHERE singleton = true")
+      .query(
+        `SELECT COALESCE(p.content, '') AS content, COALESCE(p.revision, 0) AS revision
+         FROM users u LEFT JOIN personal_instructions p ON p.user_id = u.id
+         WHERE u.id = $1`,
+        [userId],
+      )
       .mapErr(unavailable)
       .andThen(snapshot);
   }
   replace(
     _task: SimulationTask,
+    userId: string,
     content: string,
   ): ResultAsync<PersonalInstructions, PersonalInstructionsError> {
     return this.db
       .query(
-        "UPDATE personal_instructions SET content = $1, revision = revision + 1, updated_at = now() WHERE singleton = true RETURNING content, revision",
-        [content],
+        `INSERT INTO personal_instructions (user_id, content, revision, updated_at)
+         SELECT id, $2, 1, now() FROM users WHERE id = $1
+         ON CONFLICT (user_id) DO UPDATE
+         SET content = EXCLUDED.content,
+             revision = personal_instructions.revision + 1,
+             updated_at = now()
+         RETURNING content, revision`,
+        [userId, content],
       )
       .mapErr(unavailable)
       .andThen(snapshot);

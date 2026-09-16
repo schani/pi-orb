@@ -16,8 +16,10 @@ import type {
 } from "../domain/ports.ts";
 
 const task = new NoSimulationTask("store contract test", false);
+const OWNER = "00000000-0000-4000-8000-000000000099";
 const project: ProjectRow = {
   id: "00000000-0000-4000-8000-000000000001",
+  ownerUserId: OWNER,
   name: "project",
   repositoryUrl: "https://github.com/o/r",
   state: "active",
@@ -1443,6 +1445,12 @@ export function storeSemanticsContractTests(
           })
         ).isOk(),
       ).toBe(true);
+      const createRetry = await store.insertProject(task, saved._unsafeUnwrap() ?? project);
+      expect(
+        createRetry.isErr() &&
+          createRetry.error.type === "project_conflict" &&
+          createRetry.error.reason,
+      ).toBe("concurrent_change");
       const late = await store.updateProject(task, {
         ...params,
         name: "too late",
@@ -1962,6 +1970,15 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
     const subject = await open();
     const migrated = await subject.database.migrate();
     expect(migrated.isOk()).toBe(true);
+    expect(
+      (
+        await subject.database.users.resolveUser(
+          task,
+          { issuer: "store-contract", subject: name, email: null },
+          { id: OWNER, now: 0 },
+        )
+      ).isOk(),
+    ).toBe(true);
     return {
       store: subject.database.store,
       close: async () => {
@@ -1995,6 +2012,15 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       client = subject.client;
       const migrated = await database.migrate();
       expect(migrated.isOk()).toBe(true);
+      expect(
+        (
+          await database.users.resolveUser(
+            task,
+            { issuer: "driver-contract", subject: name, email: null },
+            { id: OWNER, now: 0 },
+          )
+        ).isOk(),
+      ).toBe(true);
       store = database.store;
       pointers = database.pointers;
       projectSecrets = database.projectSecrets;

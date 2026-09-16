@@ -22,10 +22,19 @@ const readMigrations = Result.fromThrowable(
 
 /** Numbered hand-written SQL migrations with a tiny runner (docs/stack.md). */
 export type MigrationObserver = (name: string, stage: "started" | "applied") => void;
+export interface OriginalOwnerMigrationInput {
+  readonly userId: string;
+  readonly identityIssuer: string;
+  readonly identitySubject: string;
+}
+export interface MigrationOptions {
+  readonly originalOwner?: OriginalOwnerMigrationInput;
+  readonly observe?: MigrationObserver;
+}
 
 export function runMigrations(
   db: PostgreSQLClient,
-  observe?: MigrationObserver,
+  options: MigrationOptions = {},
 ): ResultAsync<string[], StoreError> {
   const dir = join(dirname(fileURLToPath(import.meta.url)), "migrations");
   const run = async (): Promise<Result<string[], StoreError>> => {
@@ -41,8 +50,18 @@ export function runMigrations(
     const ran: string[] = [];
     for (const migration of migrations.value) {
       if (applied.has(migration.name)) continue;
-      observe?.(migration.name, "started");
+      options.observe?.(migration.name, "started");
       const outcome = await db.transaction<void, StoreError>(async (query, execute) => {
+        if (migration.name === "023_owned_projects_and_personal_instructions.sql") {
+          const owner = options.originalOwner;
+          const configured = await query(
+            `SELECT set_config('pi_orb.original_user_id', $1, true),
+                    set_config('pi_orb.original_identity_issuer', $2, true),
+                    set_config('pi_orb.original_identity_subject', $3, true)`,
+            [owner?.userId ?? "", owner?.identityIssuer ?? "", owner?.identitySubject ?? ""],
+          );
+          if (configured.isErr()) return err(configured.error);
+        }
         const executed = await execute(migration.sql);
         if (executed.isErr()) return err(executed.error);
         const recorded = await query("INSERT INTO schema_migrations (name) VALUES ($1)", [
@@ -53,7 +72,7 @@ export function runMigrations(
       });
       if (outcome.isErr()) return err(outcome.error);
       ran.push(migration.name);
-      observe?.(migration.name, "applied");
+      options.observe?.(migration.name, "applied");
     }
     return ok(ran);
   };

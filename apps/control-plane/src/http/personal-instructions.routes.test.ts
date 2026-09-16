@@ -2,12 +2,16 @@ import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { errAsync } from "neverthrow";
 import { expect, it } from "vitest";
-import { makeHarness, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
+import { makeHarness, TEST_SYSTEM_VIEW, TEST_USER_ID } from "../testkit/fixtures.ts";
 import { registerRoutes } from "./routes.ts";
 
 it("browser routes read/save one document without project scope, reject invalid bodies and expose failures", async () => {
   const h = makeHarness();
   const app = Fastify();
+  app.decorateRequest("principal", undefined);
+  app.addHook("onRequest", async (request) => {
+    request.principal = { kind: "user", user: { id: TEST_USER_ID, email: null } };
+  });
   registerRoutes(app, new NoSimulationTask("personal routes", false), h.deps, {}, TEST_SYSTEM_VIEW);
   try {
     const initial = await app.inject({ method: "GET", url: "/api/v1/personal-instructions" });

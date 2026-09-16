@@ -40,6 +40,7 @@ describe("request identity role composition", () => {
   it("uses the fixed local identity and ignores spoofed identity headers", async () => {
     const seen: unknown[] = [];
     const users: UserStore = {
+      getUser: () => okAsync(null),
       resolveUser: (_task, identity, input) => {
         seen.push(identity);
         return okAsync({ id: input.id, email: identity.email });
@@ -75,6 +76,7 @@ describe("request identity role composition", () => {
       task,
       config,
       {
+        getUser: () => okAsync(null),
         resolveUser: () => {
           storeReads += 1;
           return okAsync({ id: "wrong", email: null });

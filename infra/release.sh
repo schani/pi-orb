@@ -35,6 +35,40 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+[[ "${PI_ORB_USER_ID:-}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]] || {
+  echo 'release: PI_ORB_USER_ID must be an explicit UUID for smoke fixtures' >&2
+  exit 2
+}
+
+migration_owner_args=()
+if [ -z "$VALIDATE" ]; then
+  original_owner_values=(
+    "${PI_ORB_ORIGINAL_USER_ID:-}"
+    "${PI_ORB_ORIGINAL_IDENTITY_ISSUER:-}"
+    "${PI_ORB_ORIGINAL_IDENTITY_SUBJECT:-}"
+  )
+  original_owner_count=0
+  for value in "${original_owner_values[@]}"; do [ -n "$value" ] && original_owner_count=$((original_owner_count + 1)); done
+  if [ "$original_owner_count" -ne 0 ] && [ "$original_owner_count" -ne 3 ]; then
+    echo 'release: original owner variables must be set together' >&2
+    exit 2
+  fi
+  if [ "$original_owner_count" -eq 3 ]; then
+    [[ "${original_owner_values[0]}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$ ]] || {
+      echo 'release: PI_ORB_ORIGINAL_USER_ID must be a UUID' >&2
+      exit 2
+    }
+    for value in "${original_owner_values[1]}" "${original_owner_values[2]}"; do
+      [ -n "${value//[[:space:]]/}" ] || { echo 'release: original owner identity cannot be blank' >&2; exit 2; }
+    done
+    [[ "${original_owner_values[*]}" != *"@"* && "${original_owner_values[*]}" != *$'\n'* && "${original_owner_values[*]}" != *$'\r'* ]] || {
+      echo 'release: original owner values contain an unsupported separator' >&2
+      exit 2
+    }
+    migration_owner_args+=("--set-env-vars=^@^PI_ORB_ORIGINAL_USER_ID=${original_owner_values[0]}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=${original_owner_values[1]}@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=${original_owner_values[2]}")
+  fi
+fi
+
 state() { python3 -m infra.release_state "$1" "$RECORD" "${@:2}"; }
 stage() {
   echo "release: $1"
@@ -206,6 +240,7 @@ if [ -z "$VALIDATE" ]; then
     --network="$(jq -r '.pi_orb_network.value' <<<"$foundation")" \
     --subnet="$(jq -r '.run_egress_subnetwork.value' <<<"$foundation")" --vpc-egress=private-ranges-only \
     --set-secrets="DATABASE_URL=pi-orb-database-url:$database_version" \
+    "${migration_owner_args[@]}" \
     --command=node --args=apps/control-plane/src/migrate.ts --tasks=1 --parallelism=1 \
     --max-retries=0 --task-timeout=300s --cpu=1 --memory=512Mi --execute-now --wait --quiet
   KEEP_REMOTE_LOCK=false

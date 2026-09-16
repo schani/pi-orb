@@ -8,6 +8,7 @@ import {
 import { FAVICON_HREFS } from "../lib/favicon.ts";
 import { projectDeletionProgressText } from "../lib/project-deletion.ts";
 import { formatProjectOrbAge, projectOrbGlyph, splitProjectOrbs } from "../lib/project-orbs.ts";
+import { useAddressedProject } from "../lib/use-addressed-project.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { useAppSearchSource } from "./AppSearch.tsx";
 import { ProjectHeader } from "./ProjectHeader.tsx";
@@ -218,14 +219,46 @@ export function OrbIndex({
   const [error, setError] = useState<ApiError | null>(null);
   const [lists, setLists] = useState<Record<string, OrbList>>({});
   const [now, setNow] = useState(() => Date.now());
+  // Completed config/delete/create mutations fence reads that began before they committed.
+  const revision = useRef(0);
+  const projectInDefault =
+    projectId === null
+      ? true
+      : projects === null
+        ? null
+        : projects.some((project) => project.id === projectId);
+  const {
+    snapshot: addressed,
+    replaceProject: replaceAddressedProject,
+    upsertOrb: upsertAddressedOrb,
+  } = useAddressedProject(projectId, projectInDefault, revision);
+  const visibleProjects = useMemo(
+    () =>
+      projects === null
+        ? null
+        : addressed?.project !== null && addressed?.project !== undefined
+          ? mergeIndexProjects(projects, [...projects, addressed.project])
+          : projects,
+    [addressed?.project, projects],
+  );
+  const addressedId = addressed?.id;
+  const addressedOrbs = addressed?.orbs;
+  const addressedProject = addressed?.project;
+  const visibleLists = useMemo(
+    () =>
+      addressedProject == null || addressedId === undefined || addressedOrbs === undefined
+        ? lists
+        : { ...lists, [addressedId]: addressedOrbs },
+    [addressedId, addressedOrbs, addressedProject, lists],
+  );
   const searchSource = useMemo(
     () => ({
       ...buildDashboardSearchSource({
-        projects: projects ?? [],
+        projects: visibleProjects ?? [],
         projectsLoading: projects === null && error === null,
         projectsFailed: error !== null,
         orbLists: Object.fromEntries(
-          Object.entries(lists).map(([id, list]): [string, DashboardOrbListSnapshot] => [
+          Object.entries(visibleLists).map(([id, list]): [string, DashboardOrbListSnapshot] => [
             id,
             list.error !== null
               ? { type: "failed" }
@@ -238,11 +271,9 @@ export function OrbIndex({
       }),
       id: `orb-index:${orbId}`,
     }),
-    [error, lists, now, orbId, projects],
+    [error, now, orbId, projects, visibleLists, visibleProjects],
   );
   useAppSearchSource(searchSource);
-  // Completed config/delete/create mutations fence reads that began before they committed.
-  const revision = useRef(0);
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
@@ -292,7 +323,7 @@ export function OrbIndex({
       window.clearInterval(timer);
     };
   }, []);
-  const currentName = projects?.find((project) => project.id === projectId)?.name ?? null;
+  const currentName = visibleProjects?.find((project) => project.id === projectId)?.name ?? null;
   useEffect(() => {
     onProjectChange(
       projectId !== null && currentName !== null ? { id: projectId, name: currentName } : null,
@@ -319,11 +350,16 @@ export function OrbIndex({
           {describeApiError(error)}
         </div>
       )}
-      {projects?.map((project) => (
+      {addressed?.error !== null && addressed !== null && (
+        <div className="banner banner-error ix-load-error" role="alert">
+          Failed to load project: {describeApiError(addressed.error)}
+        </div>
+      )}
+      {visibleProjects?.map((project) => (
         <IndexProject
           key={project.id}
           project={project}
-          list={lists[project.id]}
+          list={visibleLists[project.id]}
           orbId={orbId}
           pending={pending}
           now={now}
@@ -341,6 +377,7 @@ export function OrbIndex({
                 error: previous[created.projectId]?.error ?? null,
               },
             }));
+            upsertAddressedOrb(created);
           }}
           onChanged={(changed) => {
             revision.current += 1;
@@ -348,6 +385,7 @@ export function OrbIndex({
               (previous) =>
                 previous?.map((entry) => (entry.id === changed.id ? changed : entry)) ?? null,
             );
+            replaceAddressedProject(changed);
             if (changed.state === "deleting" && changed.id === projectId)
               window.location.hash = "#/";
           }}

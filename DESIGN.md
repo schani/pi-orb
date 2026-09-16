@@ -26,7 +26,7 @@ The first target is deliberately narrow:
 - Make stopped-orb history viewable immediately from the database without starting the orb.
 - Put Docker behind an infrastructure abstraction that can later gain a GCE implementation.
 - Build deterministic simulation testing into concurrency-critical code from the start using [`determined`](https://www.npmjs.com/package/determined).
-- Do not focus on multiplayer yet.
+- Support trusted-company ownership without collaboration features: own-user defaults, company-wide direct resource access, and no presence, transfer, coworker-switcher or permissions framework.
 
 The first version is not intended to be a generic VM configurator or a generic remote development platform.
 
@@ -35,7 +35,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
-- Stage 1 application identity is on `main` at `0746680`, without project authorization, and is not deployed. Its 2026-09-16 release is authorized for existing single-user use after normal qualification. Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
+- Stage 1 application identity is on `main` (2026-09-16) and is not deployed. Stage 2 owned projects and per-user personal instructions is implemented and qualified, but not deployed. Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
 - After routing and runtime connection, the control plane proxies one live WebSocket between browser and runtime without interpreting agent content.
 - That WebSocket carries browser commands, transient streaming events, committed history-record notifications, runtime status, acknowledgements, and errors.
 - The control plane never uses WebSocket traffic for persistence. Replica persistence happens only through separate control-plane HTTP pulls from the runtime.
@@ -46,7 +46,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The composer supports foreground Pi user-shell commands through explicit `message`, `shell`, and `excluded shell` modes. `!` and `!!` at input offset zero enter the shell modes without leaving a visible prefix; both persist to history, while excluded shell alone is omitted from later model context. Shell submission requires an idle runtime and no image attachments (decided 2026-08-05).
 - Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes live mutations and broadcasts state. The send-anytime message inbox serializes messages durably at the control plane before runtime delivery.
 - Multiplayer product features such as presence, attribution, and per-user permissions are out of scope for the first slice.
-- Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): own projects/orbs and per-user Codex/GitHub credentials; cross-user file access is acceptable. No adversarial isolation, quotas or collaboration features are required. Earlier stages may deploy for existing single-user use, but stages 1–3 must all be complete before coworker onboarding; stages 2–3 are outside this release. `docs/multi-user.md`.
+- Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): default lists are own-user, while existing direct project/orb/file/transcript/settings/lifecycle access stays company-wide. A project and its children have one owner; no coworker switcher, transfers or new permissions framework. Stage 2 is implemented and qualified; stage 3 per-user credentials is authorized for implementation, but deployment is not. `docs/multi-user.md`.
 
 ## High-level architecture
 
@@ -110,7 +110,7 @@ Subsystem designs:
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
-- [docs/multi-user.md](docs/multi-user.md) — trusted-company multi-user scope, per-user schema/credential proposal, and tailnet options
+- [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned-project/personal-settings decisions, stage-3 credential proposal, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules and deterministic/browser qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
@@ -188,6 +188,7 @@ Reference material:
 - [docs/postmortems/2026-09-09-native-cleanup-dst-io.md](docs/postmortems/2026-09-09-native-cleanup-dst-io.md) — real diagnostic IO and a busy observer escaped deterministic cleanup scheduling
 - [docs/postmortems/2026-09-09-credential-probe-role-reset.md](docs/postmortems/2026-09-09-credential-probe-role-reset.md) — ambient SQL role targeted the production password; restoration and explicit-target safeguards
 - [docs/postmortems/2026-09-14-idle-stop-admission-race.md](docs/postmortems/2026-09-14-idle-stop-admission-race.md) — forced late child admission exposed a missing runtime fence before idle-stop drain
+- [docs/postmortems/2026-09-16-webkit-cache-readiness.md](docs/postmortems/2026-09-16-webkit-cache-readiness.md) — cold-history readiness assertions require protocol synchronization, not navigation timing
 - [docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md](docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md) — missing Docker parent snapshot blocked four full-slice qualification scenarios; later builds do not clear the failure
 - [docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md](docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md) — native WebKit compositor fault during local qualification; passing isolated probes do not clear it
 - [docs/postmortems/2026-09-09-local-e2e-docker-startup.md](docs/postmortems/2026-09-09-local-e2e-docker-startup.md) — wrong containerd store and interrupted local validation; preserve evidence and owned fixtures

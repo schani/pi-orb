@@ -41,6 +41,7 @@ import {
   splitProjectOrbs,
 } from "../lib/project-orbs.ts";
 import { TranscriptCacheContext } from "../lib/transcript-cache-context.ts";
+import { useAddressedProject } from "../lib/use-addressed-project.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -160,21 +161,61 @@ export function ProjectsPage({
   } | null>(null);
   const focusedProjectRef = useRef<HTMLElement>(null);
   const lastFocusedProjectIdRef = useRef<string | null>(null);
+  const addressedRevision = useRef(0);
 
+  const focusedProjectInDefault =
+    focusedProjectId === null
+      ? true
+      : projects === null
+        ? null
+        : projects.some((project) => project.id === focusedProjectId);
+  const {
+    snapshot: addressed,
+    replaceProject: replaceAddressedProject,
+    upsertOrb: upsertAddressedOrb,
+  } = useAddressedProject(focusedProjectId, focusedProjectInDefault, addressedRevision);
   const focusedProjectMissing =
-    focusedProjectId !== null &&
-    projects !== null &&
-    !projects.some((project) => project.id === focusedProjectId);
+    focusedProjectInDefault === false &&
+    addressed?.project === null &&
+    addressed.error?.type === "http" &&
+    addressed.error.status === 404;
+  const visibleProjects = useMemo(
+    () =>
+      projects === null
+        ? null
+        : addressed?.project !== null &&
+            addressed?.project !== undefined &&
+            !projects.some((project) => project.id === addressed.project?.id)
+          ? [...projects, addressed.project]
+          : projects,
+    [addressed?.project, projects],
+  );
+  const addressedId = addressed?.id;
+  const addressedOrbs = addressed?.orbs;
+  const addressedOrbList = useMemo<OrbListState | null>(() => {
+    if (addressed?.project == null || addressedOrbs === undefined) return null;
+    if (addressedOrbs.error !== null) return { type: "failed", error: addressedOrbs.error };
+    return addressedOrbs.items === null
+      ? { type: "loading" }
+      : { type: "loaded", items: addressedOrbs.items };
+  }, [addressed?.project, addressedOrbs]);
+  const visibleOrbLists = useMemo(
+    () =>
+      addressedOrbList === null || addressedId === undefined
+        ? orbLists
+        : { ...orbLists, [addressedId]: addressedOrbList },
+    [addressedId, addressedOrbList, orbLists],
+  );
   const searchSource = useMemo(
     () =>
       buildDashboardSearchSource({
-        projects: projects ?? [],
+        projects: visibleProjects ?? [],
         projectsLoading: projects === null && loadError === null,
         projectsFailed: projects === null && loadError !== null,
-        orbLists,
+        orbLists: visibleOrbLists,
         now: ageNow,
       }),
-    [ageNow, loadError, orbLists, projects],
+    [ageNow, loadError, projects, visibleOrbLists, visibleProjects],
   );
   useAppSearchSource(focusedProjectMissing ? null : searchSource);
 
@@ -239,8 +280,8 @@ export function ProjectsPage({
       return;
     }
     if (
-      projects === null ||
-      !projects.some((project) => project.id === focusedProjectId) ||
+      visibleProjects === null ||
+      !visibleProjects.some((project) => project.id === focusedProjectId) ||
       lastFocusedProjectIdRef.current === focusedProjectId
     ) {
       return;
@@ -249,7 +290,7 @@ export function ProjectsPage({
     focusedProjectRef.current?.scrollIntoView({ block: "center" });
     if (!mcpConfigOpen)
       focusedProjectRef.current?.querySelector<HTMLElement>("[data-project-heading]")?.focus();
-  }, [focusedProjectId, projects, mcpConfigOpen]);
+  }, [focusedProjectId, visibleProjects, mcpConfigOpen]);
 
   // Keep names and activity current, including when no lifecycle work is pending.
   useEffect(() => {
@@ -302,6 +343,8 @@ export function ProjectsPage({
       setOrbCreateError({ projectId: orb.projectId, message: describeApiError(result.error) });
       return;
     }
+    addressedRevision.current += 1;
+    upsertAddressedOrb(result.value);
     await refresh();
   };
 
@@ -314,7 +357,11 @@ export function ProjectsPage({
       return;
     setDeletingOrb(orb.id);
     const result = await deleteOrb(orb.id);
-    if (result.isOk()) cache?.invalidate(orb.id);
+    if (result.isOk()) {
+      cache?.invalidate(orb.id);
+      addressedRevision.current += 1;
+      upsertAddressedOrb(result.value);
+    }
     setDeletingOrb(null);
     if (result.isErr()) {
       setOrbCreateError({ projectId: orb.projectId, message: describeApiError(result.error) });
@@ -326,15 +373,15 @@ export function ProjectsPage({
   if (focusedProjectMissing) return <NotFoundPage resourceName="Project" />;
 
   const loadedOrbs = Object.fromEntries(
-    Object.entries(orbLists).map(([projectId, list]) => [
+    Object.entries(visibleOrbLists).map(([projectId, list]) => [
       projectId,
       list?.type === "loaded" ? list.items : [],
     ]),
   );
-  const ordered = projects === null ? [] : orderProjects(projects, loadedOrbs);
-  const totals = dashboardTotals(projects ?? [], loadedOrbs);
+  const ordered = visibleProjects === null ? [] : orderProjects(visibleProjects, loadedOrbs);
+  const totals = dashboardTotals(visibleProjects ?? [], loadedOrbs);
   const configProject = mcpConfigOpen
-    ? projects?.find((project) => project.id === focusedProjectId)
+    ? visibleProjects?.find((project) => project.id === focusedProjectId)
     : undefined;
 
   return (
@@ -363,9 +410,14 @@ export function ProjectsPage({
           failed to load projects: {describeApiError(loadError)}
         </div>
       )}
+      {addressed?.error !== null && addressed !== null && !focusedProjectMissing && (
+        <div className="banner banner-error">
+          failed to load project: {describeApiError(addressed.error)}
+        </div>
+      )}
       <div className="dashboard">
         {ordered.map((project) => {
-          const orbList = orbLists[project.id] ?? { type: "loading" as const };
+          const orbList = visibleOrbLists[project.id] ?? { type: "loading" as const };
           const deleting = project.state === "deleting";
           const shelves = splitProjectOrbs(orbList.type === "loaded" ? orbList.items : []);
           const entryProps = {
@@ -389,6 +441,8 @@ export function ProjectsPage({
                     (current) =>
                       current?.map((item) => (item.id === changed.id ? changed : item)) ?? null,
                   );
+                  addressedRevision.current += 1;
+                  replaceAddressedProject(changed);
                   await refresh();
                 }}
               />
@@ -465,6 +519,8 @@ export function ProjectsPage({
               (current) =>
                 current?.map((project) => (project.id === changed.id ? changed : project)) ?? null,
             );
+            addressedRevision.current += 1;
+            replaceAddressedProject(changed);
           }}
           onClose={() => {
             window.location.hash = `/projects/${configProject.id}`;

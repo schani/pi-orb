@@ -19,7 +19,7 @@ import { PostgreSQLCredentialPointerStore } from "./pg/credential-pointers.ts";
 import { PostgreSQLHostingStore } from "./pg/hosting.ts";
 import { PostgreSQLMcpStore } from "./pg/mcp.ts";
 import { PostgreSQLMcpOAuthStore } from "./pg/mcp-oauth.ts";
-import { type MigrationObserver, runMigrations } from "./pg/migrate.ts";
+import { type MigrationOptions, runMigrations } from "./pg/migrate.ts";
 import { PostgreSQLPersonalInstructionsStore } from "./pg/personal-instructions.ts";
 import { PGliteClient } from "./pg/pglite-client.ts";
 import { PostgreSQLProjectInstructionsStore } from "./pg/project-instructions.ts";
@@ -39,7 +39,7 @@ export interface ControlPlaneDatabase {
   readonly mcp: McpStore;
   readonly mcpOAuth: McpOAuthStore & import("../domain/mcp-oauth-garbage.ts").McpOAuthGarbageStore;
   readonly users: UserStore;
-  migrate(observe?: MigrationObserver): ResultAsync<string[], StoreError>;
+  migrate(options?: MigrationOptions): ResultAsync<string[], StoreError>;
   close(): ResultAsync<void, StoreError>;
 }
 
@@ -60,7 +60,7 @@ export function composeControlPlaneDatabase(client: PostgreSQLClient): ControlPl
     mcp: new PostgreSQLMcpStore(client),
     mcpOAuth: new PostgreSQLMcpOAuthStore(client),
     users: new PostgreSQLUserStore(client),
-    migrate: (observe) => runMigrations(client, observe),
+    migrate: (options) => runMigrations(client, options),
     close: () => client.end(),
   };
 }

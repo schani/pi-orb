@@ -104,7 +104,12 @@ export interface StateConflict {
 /** The parent project disappeared or no longer accepts child creation. */
 export interface ProjectConflict {
   readonly type: "project_conflict";
-  readonly reason: "not_found" | "deleting" | "children_remain" | "concurrent_change";
+  readonly reason:
+    | "not_found"
+    | "deleting"
+    | "children_remain"
+    | "concurrent_change"
+    | "name_conflict";
 }
 
 // ---------------------------------------------------------------------------

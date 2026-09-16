@@ -7,7 +7,7 @@ import {
   putProjectSecret,
 } from "../../domain/project-secrets.ts";
 import { FakeSecretStore } from "../../testkit/broker.ts";
-import { makeProjectRow } from "../../testkit/fixtures.ts";
+import { makeProjectRow, seedTestUser } from "../../testkit/fixtures.ts";
 import { composeControlPlaneDatabase } from "../database.ts";
 import { PostgreSQLMcpStore } from "./mcp.ts";
 import { PGliteClient } from "./pglite-client.ts";
@@ -22,6 +22,7 @@ beforeEach(async () => {
   db = new PGliteClient();
   const database = composeControlPlaneDatabase(db);
   (await database.migrate())._unsafeUnwrap();
+  (await seedTestUser(task, database.users))._unsafeUnwrap();
   (await database.store.insertProject(task, makeProjectRow(P)))._unsafeUnwrap();
   (await database.store.insertProject(task, makeProjectRow(Q)))._unsafeUnwrap();
   store = new PostgreSQLMcpStore(db);

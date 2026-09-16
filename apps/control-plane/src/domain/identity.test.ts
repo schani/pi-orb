@@ -13,6 +13,7 @@ describe("principal resolution", () => {
       task,
       { verify: () => okAsync(identity) },
       {
+        getUser: () => okAsync(null),
         resolveUser: (_task, actual, input) => {
           seen.push(actual, input);
           return okAsync({ id: input.id, email: actual.email });
@@ -34,6 +35,7 @@ describe("principal resolution", () => {
       task,
       { verify: () => errAsync({ type: "unauthenticated" as const, message: "invalid identity" }) },
       {
+        getUser: () => okAsync(null),
         resolveUser: () => {
           touched = true;
           return okAsync({ id: "x", email: null });
@@ -52,6 +54,7 @@ describe("principal resolution", () => {
       task,
       { verify: () => okAsync({ issuer: "i", subject: "s", email: null }) },
       {
+        getUser: () => okAsync(null),
         resolveUser: () => {
           touched = true;
           return okAsync({ id: "x", email: null });

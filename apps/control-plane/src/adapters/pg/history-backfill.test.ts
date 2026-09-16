@@ -14,6 +14,7 @@ import { PGliteClient } from "./pglite-client.ts";
  */
 const BACKFILL = "022_typed_history_fields.sql";
 
+const USER = "00000000-0000-4000-8000-000000000001";
 const PROJECT = "11111111-1111-4111-8111-111111111111";
 const ORB = "22222222-2222-4222-8222-222222222222";
 
@@ -266,8 +267,16 @@ describe(`${BACKFILL} history backfill`, () => {
     expect(
       (
         await client.query(
-          "INSERT INTO projects (id, name, repository_url) VALUES ($1, 'p', 'https://example.com/r.git')",
-          [PROJECT],
+          "INSERT INTO users (id, identity_issuer, identity_subject, created_at, updated_at) VALUES ($1, 'test', 'history-backfill', now(), now())",
+          [USER],
+        )
+      ).isOk(),
+    ).toBe(true);
+    expect(
+      (
+        await client.query(
+          "INSERT INTO projects (id, name, repository_url, owner_user_id) VALUES ($1, 'p', 'https://example.com/r.git', $2)",
+          [PROJECT, USER],
         )
       ).isOk(),
     ).toBe(true);

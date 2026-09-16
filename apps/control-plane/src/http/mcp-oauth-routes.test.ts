@@ -6,7 +6,7 @@ import { composeControlPlaneDatabase } from "../adapters/database.ts";
 import { PGliteClient } from "../adapters/pg/pglite-client.ts";
 import { McpOAuth, type McpOAuthProtocol } from "../domain/mcp-oauth.ts";
 import { FakeSecretStore } from "../testkit/broker.ts";
-import { makeProjectRow } from "../testkit/fixtures.ts";
+import { makeProjectRow, seedTestUser } from "../testkit/fixtures.ts";
 import { MCP_OAUTH_CALLBACK, registerMcpOAuthRoutes } from "./mcp-oauth-routes.ts";
 
 const task = new NoSimulationTask("oauth-routes", false);
@@ -23,6 +23,7 @@ beforeEach(async () => {
   exchanges = 0;
   const database = composeControlPlaneDatabase(db);
   (await database.migrate())._unsafeUnwrap();
+  (await seedTestUser(task, database.users))._unsafeUnwrap();
   (await database.store.insertProject(task, makeProjectRow(projectId)))._unsafeUnwrap();
   (
     await database.mcp.replace(task, projectId, {

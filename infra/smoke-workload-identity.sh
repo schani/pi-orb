@@ -40,6 +40,7 @@ umask 077
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 API="$DIR/api.sh"
+: "${PI_ORB_USER_ID:?PI_ORB_USER_ID is required for smoke project creation}"
 source "$DIR/smoke-fixtures.sh"
 
 OVERALL_TIMEOUT=${OVERALL_TIMEOUT:-3600} # two lifecycle boots, stops, SSH and federation
