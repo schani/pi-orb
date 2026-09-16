@@ -25,17 +25,17 @@ The evidence separates the two outcomes: the workflow logged the command failure
 
 Increasing the generic command timeout would only move the ambiguity. Cleanup must capture and durably expose the exact asynchronous operation, then reconcile its terminal status independently of one CLI process.
 
-## Correction implemented locally — 2026-09-16
+## Correction implemented and live-validated — 2026-09-16
 
 The cleanup adapter persists target intent before predecessor inspection and preserves any exact blocking operation. It waits at most 60 seconds for a predecessor; a terminal predecessor error does not prevent rechecking ownership and deleting the owned partial resource. A dedicated, non-logging `gcloud auth print-access-token` process is bounded to 30 seconds with caller abort and `SIGKILL`; authentication failure never reaches deletion. The adapter then sends exactly one plain Compute REST `DELETE`, bounded by its own 30-second abort signal, with redirects rejected and no authentication replay or generic retry. It validates HTTP status and JSON, then persists the exact operation target and zonal/global scope before polling. The deletion-only poll budget is 12 minutes; `DONE` with an operation error is `failed`, while malformed responses, lost submission receipts, cancellation and poll interruption are `uncertain`. Token-free `submitted`, `failed`, and `uncertain` outcomes are allowlisted into the release record and GitHub artifact, including beside a primary build failure. There is no automatic recovery, blind resubmission, or indefinite global lock; pre-apply cleanup releases the lock.
 
 The initially proposed `gcloud ... delete --async --format=json` contract does not exist in pinned gcloud 583.0.0: all three relevant commands reject `--async`, and exact source tag `9b659d8b1efff08d32974041fd4b96d0988333e6` uses synchronous `MakeRequests`. The implemented REST boundary returns the Compute Operation directly. Its required fields are pinned by tests against the observed incident shape in `validator-operations-final.json`: `name`, `operationType=delete`, `status`, exact `targetLink`, and scope-matching `selfLink`. A read-only query of the old successful operation using the poller's exact format confirmed that `DONE` success returns the expected links and omits `error`; private evidence is retained at `.context/native-cleanup-fix/real-success-operation.json`.
 
-This is an implementation and focused-test result, not live REST or deployment validation.
+A later fresh release, GitHub [run 35148741056](https://github.com/schani/pi-orb/actions/runs/35148741056), exercised four exact REST deletions successfully and reached validated without altering this incident's failed record. Its durable record is `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789591757-ba6c7400-95d4-471e-8a2f-351306869718.json`; private final record, artifact, image and serving snapshots are under `.context/native-cleanup-fix/deploy-35148741056/`.
 
 ## Qualification and DST causal ledger
 
-Focused cleanup adapter, evidence, operation, release-state, and release-report regressions pass. Full typecheck and lint pass; `npm test` passed 1,886 tests with six conditional skips, plus infrastructure suites. Logs are retained under `.context/native-cleanup-fix/`. No new deployment was attempted. On 2026-09-16 the user authorized the stage-1 identity release for existing single-user use after normal qualification.
+Focused cleanup adapter, evidence, operation, release-state, and release-report regressions pass. Full typecheck and lint pass; `npm test` passed 1,886 tests with six conditional skips, plus infrastructure suites. The later release above passed all gates and 149 E2E tests; its four cleanup records are `succeeded`. Logs are retained under `.context/native-cleanup-fix/`.
 
 Every new DST failure was replayed before its test model was corrected, and every trace remains under `test-failures/`:
 
@@ -62,4 +62,4 @@ All four latest-ready revisions and images still equal `previousServing` in the 
 - `pi-orb-issuer-00020-gjx`
 - image digest for all four: `sha256:a1bc1e20f7e7473f3e1d4a16d97b4950e465d0149e0035454c79532e4829bcb6`
 
-Production therefore remains the last validated release, `7d53024a1f3d52932bb2bd192dea06166f10946a`.
+At the end of this incident, production therefore remained the last validated release, `7d53024a1f3d52932bb2bd192dea06166f10946a`. The later fresh `1fcc261` release validated the correction without changing this original failure outcome.
