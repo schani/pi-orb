@@ -9,7 +9,7 @@ does share the one read/write database credential, `docs/deployment.md`).
 
 ## Deploy workflow
 
-First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Status (2026-09-09):** GitHub keyless authentication is live-verified. The manual workflow is operational. Normal build/migration/apply completed in run `34407362332`; its IAP-tooling failure is preserved. Corrected validation-only recovery `34411745647` passed all remaining gates at 23:10:45 UTC, with verified fixture cleanup and no remaining release lock. Application source `32d82e5` serves at generation `1788991246`; workflow/recovery fixes are in `95118b4`. No rebuild, migration or apply was repeated to obtain green. The user deferred database password rotation; release plans must preserve the existing credential.
+First apply the separately authorized foundation (`infra/foundation/README.md`). The release refuses an unapplied or mismatched foundation. **Status (2026-09-16):** GitHub keyless authentication and the manual workflow are operational. [Release 35104816962](https://github.com/schani/pi-orb/actions/runs/35104816962) deployed project instructions from `7d53024` at generation `1789569278`; all gates passed on the first attempt and the release was validated at 14:52:20 UTC. Smoke fixtures were deleted and the release lock is absent. Exact image identities, the durable record and earlier release/recovery evidence are in `docs/deployment.md`. The user deferred database password rotation; release plans must preserve the existing credential.
 
 In GitHub Actions, select **Deploy → Run workflow → main**, leaving
 `validate_release` empty for a new deployment. Supply a recorded release ID or

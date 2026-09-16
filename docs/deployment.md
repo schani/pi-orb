@@ -257,7 +257,26 @@ STS tier or add identity authority.
 
 ## Manual GitHub Actions deployment
 
-**Validated production release (2026-09-16):** GitHub run
+**Latest validated production release (2026-09-16, project instructions):**
+GitHub [run 35104816962](https://github.com/schani/pi-orb/actions/runs/35104816962)
+deployed `7d53024a1f3d52932bb2bd192dea06166f10946a` and completed at
+`2026-09-16T14:52:20Z`. Every release gate passed on the first attempt: checks/E2E,
+native acceptance/build, plan, schema, apply, IAP repair, retirement, activation,
+lifecycle and identity. Independent CI and Docker E2E passed as well (140 E2Es,
+no skips). All four smoke fixtures were deleted and the release lock was verified
+absent. The four roles serve digest
+`sha256:a1bc1e20f7e7473f3e1d4a16d97b4950e465d0149e0035454c79532e4829bcb6`;
+the three lifecycle roles use generation `1789569278`. Native image
+`pi-orb-image-v-7d53024-298c9b01d6b54a91` has ID `916365974662748416`; its
+workspace image `pi-orb-image-workspace-v-7d53024-298c9b01d6b54a91` has ID
+`957467935512140103`. Durable validated record:
+`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789566852-c25aeedd-dbe1-4076-89c6-88c589d90072.json`.
+An authenticated production GET additionally verified the project-instructions
+snapshot against the migrated database. Feature and local-service archival evidence:
+`docs/project-instructions.md`. This passing release does not establish a fix for
+the historical WebKit issue below.
+
+**Previous validated production release (2026-09-16):** GitHub run
 [35035428234](https://github.com/schani/pi-orb/actions/runs/35035428234)
 deployed `f1a0f6e` and completed successfully at `2026-09-16T00:53:12Z`
 after the explicit user exception below. Every automated gate passed: checks/E2E,
