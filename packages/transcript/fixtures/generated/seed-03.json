@@ -1,0 +1,477 @@
+{
+  "name": "generated seed 3",
+  "steps": [
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req1",
+        "kind": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op2"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "server.welcome",
+          "connectionId": "c3",
+          "runtimeInstanceId": "ri3",
+          "orbId": "orb-1",
+          "sessionId": "s2",
+          "capabilities": [
+            "abort"
+          ],
+          "limits": {
+            "maxIncomingFrameBytes": 1000000,
+            "maxPromptBytes": 6000
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op4"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op5"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "sync.started",
+          "mode": "full",
+          "afterRecordId": null
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "status",
+            "activity": "busy",
+            "operationId": "op5"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req8",
+        "kind": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "req8",
+          "result": {
+            "type": "rejected",
+            "error": {
+              "code": "busy",
+              "message": "runtime busy",
+              "retryable": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op5",
+            "blockId": "b10",
+            "blockType": "shell",
+            "revision": 10,
+            "patch": {
+              "type": "append",
+              "text": "chunk 10"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_finished",
+            "operationId": "op5",
+            "outcome": "aborted"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "draft 12",
+        "mode": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "closed"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "sync.completed",
+          "headId": null
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "history_loaded",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [],
+          "cursor": null,
+          "headId": null
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "req8",
+          "result": {
+            "type": "settings_applied",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req17",
+        "kind": "message"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op5",
+            "blockId": "b18",
+            "blockType": "text",
+            "revision": 18,
+            "patch": {
+              "type": "append",
+              "text": "chunk 18"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op19"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "draft 20",
+        "mode": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_finished",
+            "operationId": "op19",
+            "outcome": "failed"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "subagents",
+            "operationId": "op-stale",
+            "children": [
+              {
+                "id": "child",
+                "description": "Work",
+                "phase": "running"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "server.welcome",
+          "connectionId": "c23",
+          "runtimeInstanceId": "ri23",
+          "orbId": "orb-1",
+          "sessionId": "s1",
+          "capabilities": [
+            "abort"
+          ],
+          "limits": {
+            "maxIncomingFrameBytes": 1000000,
+            "maxPromptBytes": 6000
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "status",
+            "activity": "idle",
+            "operationId": "op19"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op25"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op26"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "subagents",
+            "operationId": "op-stale",
+            "children": [
+              {
+                "id": "child",
+                "description": "Work",
+                "phase": "running"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "draft 28",
+        "mode": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op26",
+            "blockId": "b29",
+            "blockType": "shell",
+            "revision": 29,
+            "patch": {
+              "type": "append",
+              "text": "chunk 29"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "history_refreshed",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [],
+          "cursor": null,
+          "headId": null
+        },
+        "epoch": 3
+      }
+    }
+  ],
+  "expect": {
+    "records": [],
+    "sessionId": "s1",
+    "cacheReady": true,
+    "historyEpoch": 2,
+    "afterRecordId": null,
+    "headId": null,
+    "historyLoaded": true,
+    "historyError": null,
+    "connection": "closed",
+    "welcome": {
+      "runtimeInstanceId": "ri23",
+      "sessionId": "s1",
+      "capabilities": [
+        "abort"
+      ],
+      "maxPromptBytes": 6000
+    },
+    "activity": "busy",
+    "operationId": "op26",
+    "subagents": [],
+    "liveBlocks": [
+      {
+        "blockId": "b29",
+        "blockType": "shell",
+        "text": "chunk 29",
+        "revision": 29
+      }
+    ],
+    "tools": [],
+    "composerText": "draft 28",
+    "composerMode": "shell",
+    "composerImages": [],
+    "settings": null,
+    "synced": true,
+    "commandDraft": null,
+    "pendingRequest": {
+      "requestId": "req17",
+      "kind": "message",
+      "submittedText": "draft 12"
+    },
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}

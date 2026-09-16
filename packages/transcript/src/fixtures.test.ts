@@ -51,7 +51,7 @@ function replay(fixture: StateFixture): void {
   expect(serializeState(state), fixture.name).toEqual(fixture.expect);
 }
 
-for (const directory of ["state"]) {
+for (const directory of ["state", "generated"]) {
   describe(`transcript fixtures: ${directory}`, () => {
     const fixtures = loadFixtures<StateFixture>(directory);
     it("has fixtures", () => expect(fixtures.length).toBeGreaterThan(0));

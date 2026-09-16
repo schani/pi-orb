@@ -1,0 +1,569 @@
+{
+  "name": "generated seed 2",
+  "steps": [
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req1",
+        "kind": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "sync.completed",
+          "headId": null
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "status",
+            "activity": "idle"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op4"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op4",
+            "blockId": "b5",
+            "blockType": "shell",
+            "revision": 5,
+            "patch": {
+              "type": "append",
+              "text": "chunk 5"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "request.result",
+          "requestId": "req1",
+          "result": {
+            "type": "accepted",
+            "operationId": "op4",
+            "duplicate": false
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "tool_state",
+            "operationId": "op4",
+            "callId": "call-2",
+            "name": "read",
+            "revision": 7,
+            "state": "running"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_finished",
+            "operationId": "op4",
+            "outcome": "aborted"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "history_refreshed",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [],
+          "cursor": null,
+          "headId": null
+        },
+        "epoch": 0
+      }
+    },
+    {
+      "action": {
+        "type": "history_loaded",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [],
+          "cursor": null,
+          "headId": null
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "open"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "record": {
+            "id": "r12",
+            "parentId": null,
+            "timestamp": "2026-09-16T00:00:00Z",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "text for r12"
+              }
+            ],
+            "overflow": {}
+          },
+          "retiredBlockIds": [
+            "b5"
+          ],
+          "headId": null
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_started",
+            "operationId": "op13"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "operation_finished",
+            "operationId": "op13",
+            "outcome": "failed"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "history.record",
+          "record": {
+            "id": "r15",
+            "parentId": "r12",
+            "timestamp": "2026-09-16T00:00:00Z",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "text for r15"
+              }
+            ],
+            "overflow": {}
+          },
+          "retiredBlockIds": [
+            "b5"
+          ],
+          "headId": "r15"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "status",
+            "activity": "busy",
+            "operationId": "op13"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "history_refreshed",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r12",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:00Z",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "text for r12"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r12",
+          "headId": "r12"
+        },
+        "epoch": 3
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "closed"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "server.welcome",
+          "connectionId": "c19",
+          "runtimeInstanceId": "ri19",
+          "orbId": "orb-1",
+          "sessionId": "s2",
+          "capabilities": [
+            "abort"
+          ],
+          "limits": {
+            "maxIncomingFrameBytes": 1000000,
+            "maxPromptBytes": 6000
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "status",
+            "activity": "busy"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "connection_status",
+        "status": "closed"
+      }
+    },
+    {
+      "action": {
+        "type": "history_loaded",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r12",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:00Z",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "text for r12"
+                }
+              ],
+              "overflow": {}
+            },
+            {
+              "id": "r15",
+              "parentId": "r12",
+              "timestamp": "2026-09-16T00:00:00Z",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "text for r15"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r15",
+          "headId": "r15"
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "draft 23",
+        "mode": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "history_refreshed",
+        "view": {
+          "orbId": "orb-1",
+          "session": {
+            "id": "s1",
+            "overflow": {}
+          },
+          "records": [
+            {
+              "id": "r12",
+              "parentId": null,
+              "timestamp": "2026-09-16T00:00:00Z",
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "text for r12"
+                }
+              ],
+              "overflow": {}
+            }
+          ],
+          "cursor": "r12",
+          "headId": "r12"
+        },
+        "epoch": 0
+      }
+    },
+    {
+      "action": {
+        "type": "request_sent",
+        "requestId": "req25",
+        "kind": "settings"
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "draft 26",
+        "mode": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "status",
+            "activity": "busy"
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "composer_changed",
+        "text": "draft 28",
+        "mode": "shell"
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op13",
+            "blockId": "b29",
+            "blockType": "shell",
+            "revision": 29,
+            "patch": {
+              "type": "append",
+              "text": "chunk 29"
+            }
+          }
+        }
+      }
+    },
+    {
+      "action": {
+        "type": "frame",
+        "frame": {
+          "v": 1,
+          "at": "2026-09-16T00:00:00Z",
+          "type": "runtime.event",
+          "event": {
+            "type": "output_patch",
+            "operationId": "op13",
+            "blockId": "b29",
+            "blockType": "text",
+            "revision": 30,
+            "patch": {
+              "type": "append",
+              "text": "chunk 30"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "expect": {
+    "records": [
+      {
+        "id": "r12",
+        "parentId": null,
+        "timestamp": "2026-09-16T00:00:00Z",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "text for r12"
+          }
+        ],
+        "overflow": {}
+      },
+      {
+        "id": "r15",
+        "parentId": "r12",
+        "timestamp": "2026-09-16T00:00:00Z",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "text for r15"
+          }
+        ],
+        "overflow": {}
+      }
+    ],
+    "sessionId": "s1",
+    "cacheReady": true,
+    "historyEpoch": 3,
+    "afterRecordId": "r15",
+    "headId": "r15",
+    "historyLoaded": true,
+    "historyError": null,
+    "connection": "closed",
+    "welcome": {
+      "runtimeInstanceId": "ri19",
+      "sessionId": "s2",
+      "capabilities": [
+        "abort"
+      ],
+      "maxPromptBytes": 6000
+    },
+    "activity": "busy",
+    "operationId": null,
+    "subagents": [],
+    "liveBlocks": [
+      {
+        "blockId": "b29",
+        "blockType": "text",
+        "text": "chunk 29chunk 30",
+        "revision": 30
+      }
+    ],
+    "tools": [],
+    "composerText": "draft 28",
+    "composerMode": "shell",
+    "composerImages": [],
+    "settings": null,
+    "synced": false,
+    "commandDraft": null,
+    "pendingRequest": {
+      "requestId": "req25",
+      "kind": "settings",
+      "submittedText": "draft 23"
+    },
+    "requestError": null,
+    "serverError": null,
+    "notice": null
+  }
+}
