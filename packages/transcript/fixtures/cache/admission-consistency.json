@@ -60,11 +60,9 @@
         "sessionId": "s1",
         "recordIds": [],
         "afterRecordId": null,
-        "headId": null,
-        "bytes": 128
+        "headId": null
       }
     ],
-    "bytes": 128,
     "owners": 1,
     "invalidationEpoch": 0
   }

@@ -61,8 +61,7 @@
         "sessionId": "s1",
         "recordIds": ["r1"],
         "afterRecordId": "r1",
-        "headId": "r1",
-        "bytes": 870
+        "headId": "r1"
       },
       {
         "orbId": "c",
@@ -70,11 +69,9 @@
         "sessionId": "s3",
         "recordIds": ["r3"],
         "afterRecordId": "r3",
-        "headId": "r3",
-        "bytes": 870
+        "headId": "r3"
       }
     ],
-    "bytes": 1740,
     "owners": 3,
     "invalidationEpoch": 0
   }

@@ -46,11 +46,9 @@
         "sessionId": "s2",
         "recordIds": ["r9"],
         "afterRecordId": "r9",
-        "headId": "r9",
-        "bytes": 870
+        "headId": "r9"
       }
     ],
-    "bytes": 870,
     "owners": 1,
     "invalidationEpoch": 0
   }

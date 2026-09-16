@@ -66,6 +66,27 @@ describe("transcript cache", () => {
     expect(cache.stats.owners).toBe(0);
   });
 
+  it("evicts the least recently used entry when the byte budget fills first", () => {
+    const snapshot = snapshotFromHistory(history());
+    const sample = new TranscriptCache({ maxEntries: 10 });
+    sample.acquire("a", "p").publish(snapshot);
+    sample.acquire("b", "p").publish(snapshot);
+    const budget = sample.stats.bytes;
+
+    const cache = new TranscriptCache({ maxEntries: 10, maxBytes: budget });
+    for (const id of ["a", "b"]) {
+      expect(cache.acquire(id, "p").publish(snapshot)).toBe("stored");
+    }
+    cache.get("a");
+    expect(cache.acquire("c", "p").publish(snapshot)).toBe("stored");
+
+    expect(cache.get("b")).toBeUndefined();
+    expect(cache.get("a")).toEqual(snapshot);
+    expect(cache.get("c")).toEqual(snapshot);
+    expect(cache.stats.entries).toBe(2);
+    expect(cache.stats.bytes).toBe(budget);
+  });
+
   it("bounds accounted bytes including native payloads; oversized replacement removes old entry", () => {
     const sample = new TranscriptCache();
     sample.acquire("a", "p").publish(snapshotFromHistory(history()));

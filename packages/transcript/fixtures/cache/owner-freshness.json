@@ -48,11 +48,9 @@
         "sessionId": "s1",
         "recordIds": ["r1"],
         "afterRecordId": "r1",
-        "headId": "r1",
-        "bytes": 870
+        "headId": "r1"
       }
     ],
-    "bytes": 870,
     "owners": 1,
     "invalidationEpoch": 0
   }

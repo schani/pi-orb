@@ -28,8 +28,10 @@ interface Entry {
   bytes: number;
 }
 
-export interface CacheEntryView extends Entry {
+export interface CacheEntryView {
   orbId: string;
+  projectId: string;
+  snapshot: CachedTranscript;
 }
 
 /** Approximate retained JS data, not a heap/RSS guarantee. No serialization or deep clone. */
@@ -74,7 +76,6 @@ export class TranscriptCache {
       orbId,
       projectId: entry.projectId,
       snapshot: entry.snapshot,
-      bytes: entry.bytes,
     }));
   }
 

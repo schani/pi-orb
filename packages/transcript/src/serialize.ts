@@ -36,10 +36,10 @@ import {
 import type { TranscriptCache } from "./transcript-cache.ts";
 
 /**
- * JSON-only projection of the client model: the comparison surface of the
- * fixture corpus (docs/transcript-model.md). Maps become insertion-ordered
- * arrays and absent optional fields become `null`, so two implementations of
- * the model emit byte-identical documents for the same input.
+ * JSON-only fixture projection of represented model behavior. Maps become
+ * insertion-ordered arrays, and only explicitly projected optionals become
+ * `null`; included protocol objects retain their shapes. Fixtures compare JSON
+ * structure, not serialized bytes or complete rendering fidelity.
  */
 export interface SerializedState {
   records: HistoryRecord[];
@@ -72,7 +72,7 @@ export interface SerializedState {
   requestError: { code: string; message: string } | null;
   serverError: { code: string; message: string } | null;
   notice: string | null;
-  /** What a client renders for this state, presenting a running orb. */
+  /** Presentation structure for this state, projected for fixture comparison. */
   presentation: SerializedRow[];
 }
 
@@ -204,7 +204,7 @@ type SerializedRow =
   | { kind: "live_shell"; key: string; text: string }
   | { kind: "busy"; key: string };
 
-/** JSON-only projection of the rows a client renders (`presentTranscript`). */
+/** Fixture projection of `presentTranscript` row structure and derived behavior. */
 export interface SerializedTurns {
   turns: SerializedRow[];
   representedMessageIds: string[];
@@ -345,13 +345,11 @@ export interface SerializedCacheEntry {
   recordIds: string[];
   afterRecordId: string | null;
   headId: string | null;
-  bytes: number;
 }
 
 /** JSON-only projection of the transcript cache (`fixtures/cache/`). */
 export interface SerializedCache {
   entries: SerializedCacheEntry[];
-  bytes: number;
   owners: number;
   invalidationEpoch: number;
 }
@@ -365,9 +363,7 @@ export function serializeCache(cache: TranscriptCache): SerializedCache {
       recordIds: [...entry.snapshot.records.keys()],
       afterRecordId: entry.snapshot.afterRecordId,
       headId: entry.snapshot.headId,
-      bytes: entry.bytes,
     })),
-    bytes: cache.stats.bytes,
     owners: cache.stats.owners,
     invalidationEpoch: cache.invalidationEpoch,
   };

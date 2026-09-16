@@ -148,7 +148,7 @@ interface CacheStep {
 
 interface CacheFixture {
   name: string;
-  limits?: { maxEntries?: number; maxBytes?: number };
+  limits?: { maxEntries?: number };
   steps: CacheStep[];
   expect: Record<string, unknown>;
 }

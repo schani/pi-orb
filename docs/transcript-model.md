@@ -3,8 +3,8 @@
 `@pi-orb/transcript` (`packages/transcript`) holds the client-side model of one
 orb conversation: pure TypeScript over `@pi-orb/protocol` types, with no React,
 no DOM and no browser globals. Extracted 2026-09-16 so a planned native macOS
-client can be ported from the same rules and proved equivalent against the same
-fixtures, instead of re-deriving them from a React page.
+client can be ported from the same rules and checked against shared fixture
+scenarios, instead of re-deriving them from a React page.
 
 ## What lives there
 
@@ -45,16 +45,22 @@ message, so no client's transport error type leaks into the shared state.
 
 ## Fixture corpus
 
-`packages/transcript/fixtures/` is the parity contract. Any other
-implementation of this model must replay the corpus and produce the same
-serialized output; `packages/transcript/src/fixtures.test.ts` does so for the
-TypeScript one. The files are plain JSON and deliberately language-neutral.
+`packages/transcript/fixtures/` pins represented reducer/model behavior and
+selected presentation structure for its scenarios. Another implementation can
+replay the corpus and compare those projections exactly;
+`packages/transcript/src/fixtures.test.ts` does so for TypeScript. A match does
+not establish complete model equivalence or rendering fidelity. The files are
+plain JSON and deliberately language-neutral.
 
 `serializeState(state, queuedMessages)`, `serializeTurns(records)`,
 `serializeInbox(...)` and `serializeCache(cache)` define the comparison
-surface: JSON only, maps as insertion-ordered arrays, absent optional fields as
-`null`, no functions. Five kinds of fixture share it: `state/`, `generated/`,
-`grouping/`, `inbox/` and `cache/`.
+surface. Equality is structural JSON equality, not byte identity. Maps become
+insertion-ordered arrays, and only explicitly projected optional fields become
+`null`; nested protocol objects included directly preserve their shapes. The
+presentation projection omits image data and URLs, tool arguments, and
+interpreted subagent details. Raw records and state fields still carry that
+information where applicable. Five kinds of fixture share the surface:
+`state/`, `generated/`, `grouping/`, `inbox/` and `cache/`.
 
 **State fixtures** (`fixtures/state/`, `fixtures/generated/`):
 
@@ -75,14 +81,14 @@ Actions are exactly the reducer's action union and frames are exactly
 and fails on protocol drift. A step's `expect` is a partial match on the
 serialized state — objects match a subset of keys, arrays must have the same
 length and match element-wise. The fixture's own `expect` is the exact final
-state.
+state projection, compared structurally.
 
-The serialized state's `presentation` key is `presentTranscript`'s real output
-for that state, so the corpus pins live rendering: which live tools survive
-deduplication, whether live output continues the final turn, and which queued
-rows remain. An optional top-level `queuedMessages` array supplies the inbox
-rows the client holds while replaying; the corpus presents a running orb, so
-`busy` follows the connection and activity the frames establish.
+The serialized state's `presentation` key projects `presentTranscript` for that
+state. It pins structural decisions in the covered scenarios: which live tools
+survive deduplication, whether live output continues the final turn, and which
+queued rows remain. An optional top-level `queuedMessages` array supplies the
+inbox rows the client holds while replaying; the corpus presents a running orb,
+so `busy` follows the connection and activity the frames establish.
 
 **Grouping fixtures** (`fixtures/grouping/`):
 
@@ -94,8 +100,9 @@ rows the client holds while replaying; the corpus presents a running orb, so
 }
 ```
 
-Records are validated against `HistoryRecordSchema` and compared exactly.
-`turns` is `presentTranscript`'s output for records alone, with no live input.
+Records are validated against `HistoryRecordSchema`; their fixture projection
+is compared structurally. `turns` is the presentation projection for records
+alone, with no live input.
 
 **Inbox fixtures** (`fixtures/inbox/`):
 
@@ -131,18 +138,18 @@ arrives. `append` applies `withQueuedMessage` in order.
       "args": { "owner": "first", "snapshot": { "sessionId": "s1", "records": [{ "id": "r1", "text": "hello" }], "afterRecordId": "r1", "headId": "r1" } },
       "expect": { "admission": "stale" } }
   ],
-  "expect": { "entries": [], "bytes": 0, "owners": 1, "invalidationEpoch": 0 }
+  "expect": { "entries": [], "owners": 1, "invalidationEpoch": 0 }
 }
 ```
 
 Owners are named rather than held, so no fixture carries a closure. A snapshot
 names its records by id and text; the runner builds one assistant message
 record per entry with timestamp `2026-09-16T00:00:00Z`, no parent and empty
-overflow, so the accounted byte sizes in `expect` are reproducible from the
-estimator in `transcript-cache.ts`. The fixtures cover owner freshness,
-admission consistency, full-sync clearing and session replacement, LRU
-eviction by entries and by bytes, oversize rejection, and the invalidation
-fence.
+overflow. The fixtures cover portable behavior: owner freshness, admission
+consistency, full-sync clearing and session replacement, entry-count LRU
+and the invalidation fence. Cache fixtures do not compare byte estimation,
+byte-budget eviction or oversize rejection; those remain TypeScript
+implementation tests because they use a JavaScript heap heuristic.
 
 ## Generated fixtures
 

@@ -47,5 +47,5 @@
     { "op": "invalidate_project", "args": { "projectId": "p2" } },
     { "op": "get", "args": { "orbId": "b" }, "expect": { "hit": null } }
   ],
-  "expect": { "entries": [], "bytes": 0, "owners": 0, "invalidationEpoch": 3 }
+  "expect": { "entries": [], "owners": 0, "invalidationEpoch": 3 }
 }
