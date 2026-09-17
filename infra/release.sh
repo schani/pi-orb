@@ -42,6 +42,7 @@ done
 
 migration_owner_args=()
 if [ -z "$VALIDATE" ]; then
+  migration_owner_env="^@^PI_ORB_USER_ID=${PI_ORB_USER_ID}"
   original_owner_values=(
     "${PI_ORB_ORIGINAL_USER_ID:-}"
     "${PI_ORB_ORIGINAL_IDENTITY_ISSUER:-}"
@@ -61,12 +62,17 @@ if [ -z "$VALIDATE" ]; then
     for value in "${original_owner_values[1]}" "${original_owner_values[2]}"; do
       [ -n "${value//[[:space:]]/}" ] || { echo 'release: original owner identity cannot be blank' >&2; exit 2; }
     done
+    [ "${original_owner_values[0]}" = "$PI_ORB_USER_ID" ] || {
+      echo 'release: PI_ORB_USER_ID conflicts with PI_ORB_ORIGINAL_USER_ID' >&2
+      exit 2
+    }
     [[ "${original_owner_values[*]}" != *"@"* && "${original_owner_values[*]}" != *$'\n'* && "${original_owner_values[*]}" != *$'\r'* ]] || {
       echo 'release: original owner values contain an unsupported separator' >&2
       exit 2
     }
-    migration_owner_args+=("--set-env-vars=^@^PI_ORB_ORIGINAL_USER_ID=${original_owner_values[0]}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=${original_owner_values[1]}@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=${original_owner_values[2]}")
+    migration_owner_env+="@PI_ORB_ORIGINAL_USER_ID=${original_owner_values[0]}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=${original_owner_values[1]}@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=${original_owner_values[2]}"
   fi
+  migration_owner_args+=("--set-env-vars=${migration_owner_env}")
 fi
 
 state() { python3 -m infra.release_state "$1" "$RECORD" "${@:2}"; }

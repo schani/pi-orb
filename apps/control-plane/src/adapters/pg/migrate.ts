@@ -22,6 +22,10 @@ const readMigrations = Result.fromThrowable(
 
 /** Numbered hand-written SQL migrations with a tiny runner (docs/stack.md). */
 export type MigrationObserver = (name: string, stage: "started" | "applied") => void;
+export type MigrationOwnerResolutionObserver = (
+  source: "users",
+  outcome: "resolved" | "unknown" | "not_provided",
+) => void;
 export interface OriginalOwnerMigrationInput {
   readonly userId: string;
   readonly identityIssuer: string;
@@ -29,7 +33,9 @@ export interface OriginalOwnerMigrationInput {
 }
 export interface MigrationOptions {
   readonly originalOwner?: OriginalOwnerMigrationInput;
+  readonly credentialOwnerUserId?: string;
   readonly observe?: MigrationObserver;
+  readonly observeOwnerResolution?: MigrationOwnerResolutionObserver;
 }
 
 export function runMigrations(
@@ -52,11 +58,40 @@ export function runMigrations(
       if (applied.has(migration.name)) continue;
       options.observe?.(migration.name, "started");
       const outcome = await db.transaction<void, StoreError>(async (query, execute) => {
+        let owner = options.originalOwner;
+        if (migration.name === "024_user_credential_pointers.sql") {
+          const selectedUserId = options.credentialOwnerUserId;
+          if (selectedUserId === undefined) {
+            options.observeOwnerResolution?.("users", "not_provided");
+            owner = undefined;
+          } else {
+            const selected = await query(
+              "SELECT id, identity_issuer, identity_subject FROM users WHERE id = $1",
+              [selectedUserId],
+            );
+            if (selected.isErr()) return err(selected.error);
+            const row = selected.value.rows[0];
+            if (row === undefined) {
+              options.observeOwnerResolution?.("users", "unknown");
+              return err({
+                type: "store_error",
+                code: "invariant",
+                message: "selected credential owner is not a known user",
+                retryable: false,
+              });
+            }
+            owner = {
+              userId: String(row["id"]),
+              identityIssuer: String(row["identity_issuer"]),
+              identitySubject: String(row["identity_subject"]),
+            };
+            options.observeOwnerResolution?.("users", "resolved");
+          }
+        }
         if (
           migration.name === "023_owned_projects_and_personal_instructions.sql" ||
           migration.name === "024_user_credential_pointers.sql"
         ) {
-          const owner = options.originalOwner;
           const configured = await query(
             `SELECT set_config('pi_orb.original_user_id', $1, true),
                     set_config('pi_orb.original_identity_issuer', $2, true),

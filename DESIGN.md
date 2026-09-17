@@ -133,6 +133,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-17-e2e-job-budget.md](docs/postmortems/2026-09-17-e2e-job-budget.md) — serial E2E growth exceeded the GitHub job's whole-path timeout
 - [docs/postmortems/2026-09-17-typed-history-runtime-fence.md](docs/postmortems/2026-09-17-typed-history-runtime-fence.md) — typed-history backfill ran while a legacy runtime writer remained active
 - [docs/postmortems/2026-09-17-delivered-message-order.md](docs/postmortems/2026-09-17-delivered-message-order.md) — delivered inbox prompt rendered after its assistant turn when the browser lacked the matching user history record
 - [docs/postmortems/2026-09-16-validator-cleanup-timeout.md](docs/postmortems/2026-09-16-validator-cleanup-timeout.md) — five-minute cleanup CLI timeout while the accepted GCE delete completed asynchronously

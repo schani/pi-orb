@@ -24,17 +24,50 @@ export function originalOwnerMigrationInput(
   });
 }
 
+export interface MigrationOwnerInput {
+  readonly originalOwner?: OriginalOwnerMigrationInput;
+  readonly credentialOwnerUserId?: string;
+}
+
+export function migrationOwnerInput(env: NodeJS.ProcessEnv): Result<MigrationOwnerInput, string> {
+  const originalOwner = originalOwnerMigrationInput(env);
+  if (originalOwner.isErr()) return err(originalOwner.error);
+  const credentialOwnerUserId = env["PI_ORB_USER_ID"];
+  if (
+    credentialOwnerUserId !== undefined &&
+    credentialOwnerUserId !== "" &&
+    !UUID.test(credentialOwnerUserId)
+  )
+    return err("PI_ORB_USER_ID must be a UUID");
+  if (
+    originalOwner.value !== undefined &&
+    credentialOwnerUserId !== undefined &&
+    credentialOwnerUserId !== "" &&
+    originalOwner.value.userId !== credentialOwnerUserId
+  )
+    return err("PI_ORB_USER_ID conflicts with PI_ORB_ORIGINAL_USER_ID");
+  return ok({
+    ...(originalOwner.value === undefined ? {} : { originalOwner: originalOwner.value }),
+    ...(credentialOwnerUserId === undefined || credentialOwnerUserId === ""
+      ? {}
+      : { credentialOwnerUserId }),
+  });
+}
+
 export async function migrateDatabase(
   database: Pick<ControlPlaneDatabase, "migrate" | "close">,
   log: (line: string) => void,
-  originalOwner?: OriginalOwnerMigrationInput,
+  owner: MigrationOwnerInput = {},
 ): Promise<number> {
   const migrated = await database.migrate({
-    ...(originalOwner === undefined ? {} : { originalOwner }),
+    ...owner,
     observe: (name, stage) => {
       log(`lifecycle: migration-${stage} name=${JSON.stringify(name)}`);
       if (name === "023_owned_projects_and_personal_instructions.sql" && stage === "applied")
-        log(`lifecycle: migration-owner-mapping configured=${originalOwner !== undefined}`);
+        log(`lifecycle: migration-owner-mapping configured=${owner.originalOwner !== undefined}`);
+    },
+    observeOwnerResolution: (source, outcome) => {
+      log(`lifecycle: migration-owner-resolution source=${source} outcome=${outcome}`);
     },
   });
   // Error messages can contain database values. The last started filename and
@@ -53,7 +86,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const owner = originalOwnerMigrationInput(process.env);
+  const owner = migrationOwnerInput(process.env);
   if (owner.isErr()) {
     console.error(`migration: ${owner.error}`);
     process.exitCode = 1;

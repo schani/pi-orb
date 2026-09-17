@@ -1,7 +1,8 @@
+import { readFileSync } from "node:fs";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it } from "vitest";
 import type { StoreError } from "./domain/errors.ts";
-import { migrateDatabase, originalOwnerMigrationInput } from "./migrate.ts";
+import { migrateDatabase, migrationOwnerInput, originalOwnerMigrationInput } from "./migrate.ts";
 
 it("accepts original-owner migration input only when all fields are present", () => {
   expect(originalOwnerMigrationInput({})._unsafeUnwrap()).toBeUndefined();
@@ -24,6 +25,34 @@ it("accepts original-owner migration input only when all fields are present", ()
     identityIssuer: "issuer",
     identitySubject: "subject",
   });
+});
+
+it("selects the credential owner independently while rejecting partial or conflicting inputs", () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  expect(migrationOwnerInput({ PI_ORB_USER_ID: userId })._unsafeUnwrap()).toEqual({
+    credentialOwnerUserId: userId,
+  });
+  expect(
+    migrationOwnerInput({
+      PI_ORB_USER_ID: userId,
+      PI_ORB_ORIGINAL_USER_ID: userId,
+    }).isErr(),
+  ).toBe(true);
+  expect(
+    migrationOwnerInput({
+      PI_ORB_USER_ID: userId,
+      PI_ORB_ORIGINAL_USER_ID: "00000000-0000-4000-8000-000000000002",
+      PI_ORB_ORIGINAL_IDENTITY_ISSUER: "issuer",
+      PI_ORB_ORIGINAL_IDENTITY_SUBJECT: "subject",
+    }).isErr(),
+  ).toBe(true);
+});
+
+it("uses the shared owner input for local startup migrations", () => {
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  expect(main).toContain("const migrationOwner = migrationOwnerInput(process.env)");
+  expect(main).toContain("database.migrate(migrationOwner._unsafeUnwrap())");
+  expect(main).not.toContain("originalOwnerMigrationInput(process.env)");
 });
 
 it("closes after migration failure and logs only typed codes", async () => {
@@ -53,6 +82,25 @@ it("closes after migration failure and logs only typed codes", async () => {
   expect(closed).toBe(true);
   expect(lines.join("\n")).toContain("015_example.sql");
   expect(lines.join("\n")).not.toContain("private-sentinel");
+});
+
+it("logs credential owner resolution without identity values", async () => {
+  const lines: string[] = [];
+  expect(
+    await migrateDatabase(
+      {
+        migrate: (options) => {
+          options?.observeOwnerResolution?.("users", "resolved");
+          return okAsync([]);
+        },
+        close: () => okAsync(undefined),
+      },
+      (line) => lines.push(line),
+      { credentialOwnerUserId: "00000000-0000-4000-8000-000000000001" },
+    ),
+  ).toBe(0);
+  expect(lines).toContain("lifecycle: migration-owner-resolution source=users outcome=resolved");
+  expect(lines.join("\n")).not.toContain("00000000");
 });
 
 it("reports successful migration and treats close failure as a failed job", async () => {

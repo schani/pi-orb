@@ -380,6 +380,10 @@ describe("infra/release.sh", () => {
     // The workload-identity smoke runs inside the lock, after the lifecycle
     // smoke, and is handed the project and zone its GCE legs need.
     expect(calls).toContain("wif-smoke:test-project:us-central1-a");
+    expect(calls).toContain(
+      "--set-env-vars=^@^PI_ORB_USER_ID=00000000-0000-4000-8000-000000000001",
+    );
+    expect(calls).not.toContain("PI_ORB_ORIGINAL_");
     expect(calls).toContain("plan-mode:600");
     expect(calls).not.toContain("--iap-only");
     const planPath = calls.match(/tofu:.* plan .* -out=([^ ]*\/release\.tfplan)/)?.[1];

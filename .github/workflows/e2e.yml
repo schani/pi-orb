@@ -1,6 +1,6 @@
 # Full-slice end-to-end test against the fake OpenAI service
 # (fake-openai.flingit.run). The dependency on the deployed fake is an
-# accepted trade-off; a good run takes about 24 minutes below the timeout.
+# accepted trade-off; the serial suite plus setup takes about 32 minutes.
 name: E2E
 
 on:
@@ -16,7 +16,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Check out repository

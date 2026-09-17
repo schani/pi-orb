@@ -1,5 +1,9 @@
 # Testing strategy
 
+## Hosted E2E job budget (2026-09-17)
+
+GitHub runs every E2E file serially after dependency, browser, and runtime-image setup. The job deadline must cover that whole path with material headroom; individual test deadlines remain deadlock watchdogs, not suite-capacity controls. Runs [35264000440](https://github.com/schani/pi-orb/actions/runs/35264000440) and [35270543609](https://github.com/schani/pi-orb/actions/runs/35270543609) passed every reported file before the 30-minute job cap killed Vitest. The last successful predecessor already used 28:02; the next serial two-user case added about two minutes, then sleep added about 72 seconds. The workflow job budget is therefore 40 minutes without changing test deadlines or assertions. Evidence and rejected sharding: `docs/postmortems/2026-09-17-e2e-job-budget.md`.
+
 ## Scheduled sleep qualification (2026-09-17)
 
 Implemented DST/tests first; contract and scenario matrix: `docs/orb-sleep.md`. Tests exercise production lifecycle/store and Pi boot paths: admission timing under row contention, graceful work/upload/history drain, deadline races and wall-clock jumps, cancellation and stale workers, concurrent reconcilers, transaction/crash boundaries, FIFO boot selection, combined notification persistence/deduplication, and crash-resume authority. Failing DST traces were replayed before fixes and retained in `test-failures/`.

@@ -12,6 +12,11 @@ const OWNER = {
   identityIssuer: "issuer",
   identitySubject: "subject",
 };
+const OTHER_OWNER = {
+  userId: "00000000-0000-4000-8000-000000000002",
+  identityIssuer: "other-issuer",
+  identitySubject: "other-subject",
+};
 
 async function prepareLegacy(
   client: PostgreSQLClient,
@@ -75,43 +80,24 @@ export function credentialPointerMigrationContractTests(
       ).toMatchObject({ generation: 8, secret_version: "42" });
     });
 
-    it("inserts the exact configured owner when migration 023 left no users", async () => {
+    it("supports an empty credential migration without an owner", async () => {
       const client = await prepareLegacy(await open(), false);
       clients.push(client);
-      (
-        await client.query(
-          `INSERT INTO credential_pointers
-           (provider, row_version, generation, secret_version, refresh_lease_until, last_refresh_at)
-           VALUES ('openai-codex', 1, 1, '7', 0, 0)`,
-        )
-      )._unsafeUnwrap();
 
-      expect((await runMigrations(client, { originalOwner: OWNER })).isOk()).toBe(true);
+      expect((await runMigrations(client)).isOk()).toBe(true);
       expect(
-        (
-          await client.query(
-            "SELECT id, identity_issuer, identity_subject FROM users WHERE id = $1",
-            [OWNER.userId],
-          )
-        )._unsafeUnwrap().rows[0],
-      ).toEqual({
-        id: OWNER.userId,
-        identity_issuer: OWNER.identityIssuer,
-        identity_subject: OWNER.identitySubject,
-      });
-      expect(
-        (await client.query("SELECT user_id FROM credential_pointers"))._unsafeUnwrap().rows[0],
-      ).toEqual({ user_id: OWNER.userId });
+        (await client.query("SELECT * FROM credential_pointers"))._unsafeUnwrap().rows,
+      ).toEqual([]);
     });
 
-    it("rolls back when the configured owner conflicts with an existing identity", async () => {
-      const client = await prepareLegacy(await open(), false);
+    it("selects the exact known user among multiple users", async () => {
+      const client = await prepareLegacy(await open());
       clients.push(client);
       (
         await client.query(
           `INSERT INTO users (id, identity_issuer, identity_subject, created_at, updated_at)
-           VALUES ($1, 'other-issuer', 'other-subject', now(), now())`,
-          [OWNER.userId],
+           VALUES ($1, $2, $3, now(), now())`,
+          [OTHER_OWNER.userId, OTHER_OWNER.identityIssuer, OTHER_OWNER.identitySubject],
         )
       )._unsafeUnwrap();
       (
@@ -122,11 +108,42 @@ export function credentialPointerMigrationContractTests(
         )
       )._unsafeUnwrap();
 
-      expect((await runMigrations(client, { originalOwner: OWNER })).isErr()).toBe(true);
-      expect((await client.query("SELECT user_id FROM credential_pointers")).isErr()).toBe(true);
+      const resolutions: string[] = [];
       expect(
-        (await client.query("SELECT identity_issuer FROM users"))._unsafeUnwrap().rows[0],
-      ).toEqual({ identity_issuer: "other-issuer" });
+        (
+          await runMigrations(client, {
+            credentialOwnerUserId: OTHER_OWNER.userId,
+            observeOwnerResolution: (source, outcome) => resolutions.push(`${source}:${outcome}`),
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect(resolutions).toEqual(["users:resolved"]);
+      expect(
+        (await client.query("SELECT user_id FROM credential_pointers"))._unsafeUnwrap().rows[0],
+      ).toEqual({ user_id: OTHER_OWNER.userId });
+    });
+
+    it("rolls back for an unknown selected user", async () => {
+      const client = await prepareLegacy(await open(), false);
+      clients.push(client);
+      (
+        await client.query(
+          `INSERT INTO credential_pointers
+           (provider, row_version, generation, secret_version, refresh_lease_until, last_refresh_at)
+           VALUES ('openai-codex', 1, 1, '7', 0, 0)`,
+        )
+      )._unsafeUnwrap();
+
+      expect((await runMigrations(client, { credentialOwnerUserId: OWNER.userId })).isErr()).toBe(
+        true,
+      );
+      expect((await client.query("SELECT user_id FROM credential_pointers")).isErr()).toBe(true);
+      expect((await client.query("SELECT * FROM users"))._unsafeUnwrap().rows).toEqual([]);
+      expect(
+        (
+          await client.query("SELECT name FROM schema_migrations WHERE name LIKE '024_%'")
+        )._unsafeUnwrap().rows,
+      ).toEqual([]);
     });
 
     it("preserves exact pointer state and permits the same provider for two users", async () => {
@@ -137,7 +154,9 @@ export function credentialPointerMigrationContractTests(
        (provider, row_version, generation, secret_version, refresh_lease_until, last_refresh_at)
        VALUES ('openai-codex', 7, 8, '42', 123, 456)`,
       );
-      expect((await runMigrations(client, { originalOwner: OWNER })).isOk()).toBe(true);
+      expect((await runMigrations(client, { credentialOwnerUserId: OWNER.userId })).isOk()).toBe(
+        true,
+      );
       const migrated = (await client.query("SELECT * FROM credential_pointers"))._unsafeUnwrap()
         .rows[0];
       expect(migrated).toMatchObject({

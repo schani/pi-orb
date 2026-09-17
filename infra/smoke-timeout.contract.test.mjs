@@ -55,9 +55,10 @@ test("release validates explicit user and one-shot owner configuration before ex
       release.indexOf("python3 -m infra.release_preflight"),
   );
   assert.equal((release.match(/--set-env-vars=/g) ?? []).length, 1);
+  assert.match(release, /migration_owner_env="\^@\^PI_ORB_USER_ID=/);
   assert.match(
     release,
-    /--set-env-vars=\^@\^PI_ORB_ORIGINAL_USER_ID=.*@PI_ORB_ORIGINAL_IDENTITY_ISSUER=.*@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=/,
+    /migration_owner_env\+="@PI_ORB_ORIGINAL_USER_ID=.*@PI_ORB_ORIGINAL_IDENTITY_ISSUER=.*@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=/,
   );
 
   const run = (env) =>
@@ -83,20 +84,23 @@ test("release validates explicit user and one-shot owner configuration before ex
   });
   assert.equal(whitespace.status, 2);
   assert.match(whitespace.stderr, /cannot be blank/);
+  const conflicting = run({
+    PI_ORB_USER_ID: "00000000-0000-4000-8000-000000000001",
+    PI_ORB_ORIGINAL_USER_ID: "00000000-0000-4000-8000-000000000002",
+    PI_ORB_ORIGINAL_IDENTITY_ISSUER: "issuer",
+    PI_ORB_ORIGINAL_IDENTITY_SUBJECT: "subject",
+  });
+  assert.equal(conflicting.status, 2);
+  assert.match(conflicting.stderr, /conflicts/);
 });
 
-test("workflow forwards explicit user and one-shot migration settings", () => {
+test("workflow forwards only the selected migration user", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/deploy.yml", import.meta.url),
     "utf8",
   );
-  for (const name of [
-    "PI_ORB_USER_ID",
-    "PI_ORB_ORIGINAL_USER_ID",
-    "PI_ORB_ORIGINAL_IDENTITY_ISSUER",
-    "PI_ORB_ORIGINAL_IDENTITY_SUBJECT",
-  ])
-    assert.match(workflow, new RegExp(`${name}: \\$\\{\\{ vars\\.${name} \\}\\}`));
+  assert.match(workflow, /PI_ORB_USER_ID: \$\{\{ vars\.PI_ORB_USER_ID \}\}/);
+  assert.doesNotMatch(workflow, /PI_ORB_ORIGINAL_/);
 });
 
 test("ops user header requires the domain UUID shape", () => {

@@ -33,12 +33,16 @@ selects the latest recorded attempt. It verifies all four serving image/revision
 identities and lifecycle generations, preserves the original failure record,
 and creates a separate validation result naming both deployed and runner commits.
 Both deployment and validation require repository/environment variable
-`PI_ORB_USER_ID`, the explicit owner for disposable smoke projects. The one-time
-stage-2 migration additionally accepts all three repository/environment variables
+`PI_ORB_USER_ID`. It selects disposable smoke ownership and, for pending migration
+024, the exact existing `users` row whose verified identity owns legacy credential
+pointers; an unknown UUID fails the migration. The production value is
+`53da7ad4-6c53-4223-868e-0641bb4bcdd9`. GitHub needs no `PI_ORB_ORIGINAL_*`
+variables. For a database where migration 023 still has existing ownership data,
+a local release may supply the all-or-none bootstrap tuple
 `PI_ORB_ORIGINAL_USER_ID`, `PI_ORB_ORIGINAL_IDENTITY_ISSUER`, and
-`PI_ORB_ORIGINAL_IDENTITY_SUBJECT`; omit all three after migration. Validation
-runs no migration and ignores those three variables, but still creates and cleans
-up the existing disposable smoke fixtures.
+`PI_ORB_ORIGINAL_IDENTITY_SUBJECT`; its UUID must match `PI_ORB_USER_ID`. Validation
+runs no migration but still creates and cleans up the existing disposable smoke
+fixtures.
 It completes IAP reconciliation and old-revision pruning in a separate `repair`
 phase before retirement, including failures after apply but before the initial
 serving snapshot. The original accepted image/generation must match all four roles.

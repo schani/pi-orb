@@ -94,7 +94,19 @@ export function ownedMigrationContractTests(
         "UPDATE projects SET instructions_content = 'project', instructions_revision = 4 WHERE id = $1",
         [projectId],
       );
-      expect((await runMigrations(client, { originalOwner: OWNER })).isOk()).toBe(true);
+      await client.query(
+        `INSERT INTO credential_pointers
+         (provider, row_version, generation, secret_version, refresh_lease_until, last_refresh_at)
+         VALUES ('openai-codex', 3, 4, '5', 6, 7)`,
+      );
+      expect(
+        (
+          await runMigrations(client, {
+            originalOwner: OWNER,
+            credentialOwnerUserId: OWNER.userId,
+          })
+        ).isOk(),
+      ).toBe(true);
       expect(
         (await client.query("SELECT owner_user_id FROM projects"))._unsafeUnwrap().rows[0]?.[
           "owner_user_id"
@@ -116,6 +128,9 @@ export function ownedMigrationContractTests(
           )
         )._unsafeUnwrap().rows[0],
       ).toMatchObject({ instructions_content: "project", instructions_revision: "4" });
+      expect(
+        (await client.query("SELECT user_id FROM credential_pointers"))._unsafeUnwrap().rows[0],
+      ).toEqual({ user_id: OWNER.userId });
       expect(
         (
           await runMigrations(client, {

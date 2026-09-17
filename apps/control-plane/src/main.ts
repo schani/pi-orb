@@ -109,7 +109,7 @@ import {
   readRequestIdentityConfig,
 } from "./identity-composition.ts";
 import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
-import { originalOwnerMigrationInput } from "./migrate.ts";
+import { migrationOwnerInput } from "./migrate.ts";
 
 const env = (name: string, fallback: string): string => {
   const value = process.env[name];
@@ -251,8 +251,8 @@ export async function main(
     return;
   }
   const issuerUrl = configuredIssuerUrl.isOk() ? configuredIssuerUrl.value : "";
-  const originalOwner = originalOwnerMigrationInput(process.env);
-  if (browserRole && activationBucket === "" && originalOwner.isErr()) {
+  const migrationOwner = migrationOwnerInput(process.env);
+  if (browserRole && activationBucket === "" && migrationOwner.isErr()) {
     bootTask.error("migration owner configuration invalid");
     process.exitCode = 1;
     return;
@@ -275,8 +275,7 @@ export async function main(
   // Production's release job migrates before any new service consumes schema.
   // Local development still initializes its own database.
   if (browserRole && activationBucket === "") {
-    const owner = originalOwner._unsafeUnwrap();
-    const migrated = await database.migrate(owner === undefined ? {} : { originalOwner: owner });
+    const migrated = await database.migrate(migrationOwner._unsafeUnwrap());
     if (migrated.isErr()) {
       bootTask.error(`migration failed code=${migrated.error.code}`);
       const closed = await database.close();
