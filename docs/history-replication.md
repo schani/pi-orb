@@ -169,6 +169,8 @@ type HistoryRecord = MessageRecord | CompactionRecord | EventRecord;
 
 This is a proposal, not a frozen schema. In particular, configuration/model-change records, attachments, patches, and command execution may deserve additional typed variants after comparing real Pi, Claude Code, and Codex histories.
 
+**Schema evolution (decided 2026-09-17).** Migrations must support a temporary overlap with old runtimes. New fields may be optional/defaulted only when absence preserves the required behavior; otherwise incompatible writes must be rejected at the write boundary with a typed, durable, user-visible outcome before commit. The protection must become effective atomically with the migration/backfill. `ToolResultBlock.patch` is optional presentation metadata: when absent, the UI omits `+`/`-` counts and shows call status. By contrast, `inboxMessageIds` participates in delivery correctness, so compatibility or rejection must preserve that behavior rather than merely make the schema parse. This supersedes manual fleet stopping as the standing migration rule. No dual-write policy, generic framework, or boundary implementation has been chosen.
+
 ### Tree state
 
 `id` and `parentId` describe graph ancestry. They do not identify which leaf is currently active once branching exists. The replica therefore also needs an independently replicated `headId`.

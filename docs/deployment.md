@@ -245,13 +245,25 @@ and job identity for inspection. Successful jobs are removed. There is no
 automatic rollback of committed schema changes, nor a promise of compatibility
 for arbitrary breaking runtime/schema changes.
 
-A release whose migration backfills record shapes the runtime writes — such as
-`022_typed_history_fields.sql` — must fail closed unless it proves incompatible
-runtime processes are stopped before mutation and remain fenced through predicate
-verification. State labels alone are insufficient. Restart only onto the new image.
-Deploy `35168145109` violated this invariant. The initial bounded check found no
-affected rows, but a later cutoff found five repairable missing patch projections
-written by the unfenced runtime. Incident and recovery:
+**Runtime/migration compatibility (decided 2026-09-17):** migrations must let
+supported old runtimes continue temporarily. Every changed write contract must
+either accept their writes through optional/defaulted fields with behavior-preserving
+handling, or reject incompatible writes at the boundary with a typed, durable, and
+user-visible outcome before incomplete state is stored. This applies to behavior,
+not only decoding: promoted fields such as `inboxMessageIds` affect delivery
+correctness, while an absent optional edit `patch` only removes UI diff counts.
+The selected protection must take effect atomically with its migration/backfill so
+there is no unsafe write window. This supersedes the manual stop-before-022 rule;
+a global runtime stop is not a standing deployment requirement. No generic
+migration framework, dual-write scheme, or specific guard is selected or implemented.
+
+Deploy `35168145109` missed the former manual rule. A later cutoff found five
+repairable missing edit-patch projections written by the old runtime. The raw diffs
+remain in `overflow.native.message.details.patch`; the missing optional field affects
+only `+`/`-` display statistics, with the UI falling back to call status. It did not
+break conversations, lose native data, or corrupt SQL schema. The incident also
+exposed the behavior-sensitive inbox case that future compatibility or rejection
+must cover. Incident and follow-up:
 `docs/postmortems/2026-09-17-typed-history-runtime-fence.md`.
 
 `release_state.py` constructs and validates token-free records, including nested
@@ -289,7 +301,7 @@ owner tuple was supplied; it must not be guessed from row order or email. Retry 
 `PI_ORB_ORIGINAL_IDENTITY_ISSUER`, and `PI_ORB_ORIGINAL_IDENTITY_SUBJECT`.
 Stage 3 is not part of this release.
 
-**Latest deployed release (2026-09-17, automated gates validated; runtime fence incomplete):**
+**Latest deployed release (2026-09-17, automated gates validated; migration compatibility enforcement remains a follow-up):**
 GitHub [run 35168145109](https://github.com/schani/pi-orb/actions/runs/35168145109)
 deployed `ec81e80d76541305c1c05578b89348ffca763a68`. GitHub completed successfully at
 `01:53:59Z`; durable record `r-1789606261-438efafc-cfc6-4137-81bd-881e5d3a2a03`
@@ -307,15 +319,22 @@ workspace image `pi-orb-image-workspace-v-ec81e80-0d871be33fdc4dba` has ID
 
 Migrations 022 and 023 applied at `01:38:06.336Z` and `01:38:25.184Z`.
 Stage-2 ownership and personal-instructions preservation checks passed. However,
-the required stop-before-022 step was omitted: one running `1fcc261` runtime and
-three archiving `d110990` VMs remained. The `01:57Z` bounded predicates found zero
-missing typed projections. After five parent-orb edit-tool calls, a fresh read-only
-cutoff at `02:19:49.331Z` found five missing patch projections among that orb's 117
-post-022 rows; all other projection counts, all three archiving-orb post-022 row
-counts, and normalized-history-proven non-delivered message counts were zero.
-Native patch data remains present, so no native-data loss was observed. No legacy
-runtime was stopped or repaired. Therefore this is the latest deployed release
-with automated validation, not a fully qualified rollout.
+the then-required stop-before-022 step was omitted. The `01:57Z` inventory found
+one running `1fcc261` runtime and three `d110990` VMs in `archiving`; its bounded
+predicates found zero missing typed projections. After five parent-orb edit-tool
+calls, a fresh read-only cutoff at `02:19:49.331Z` found five missing patch
+projections among that orb's 117 post-022 rows; all other projection counts, all
+three archiving-orb post-022 row counts, and normalized-history-proven non-delivered
+message counts were zero. Their raw diffs remain in native overflow. The observable
+impact is five missing UI `+`/`-` statistics, not broken conversation, native-data
+loss, or SQL schema corruption. No legacy runtime was stopped or row repaired by
+that cutoff. A bounded read-only recheck at `13:48:32Z` verified this orb's new
+image/incarnation, the same five missing patch projections, and zero other missing
+projections or proven-undelivered messages; the three other inspected orbs remained
+archiving. No repair was performed. This is the latest deployed release with automated
+validation; migration compatibility enforcement remains a follow-up. The manual-stop
+requirement has since been superseded by the compatibility or typed-rejection decision
+above.
 See `docs/postmortems/2026-09-17-typed-history-runtime-fence.md`.
 
 **Previous validated production release (2026-09-16, stage-1 identity and native cleanup):**
