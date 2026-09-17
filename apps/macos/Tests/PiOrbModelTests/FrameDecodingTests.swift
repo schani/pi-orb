@@ -248,7 +248,11 @@ struct HistoryRecordDecodingTests {
     }
     #expect(message.role == .assistant)
     #expect(
-      message.content == [.reasoning("thinking"), .toolCall(callId: "call-1", name: "read_file")])
+      message.content == [
+        .reasoning("thinking"),
+        .toolCall(
+          callId: "call-1", name: "read_file", arguments: .object(["path": .string("a")])),
+      ])
     #expect(message.failure == "provider closed the stream")
   }
 
@@ -264,7 +268,11 @@ struct HistoryRecordDecodingTests {
       Issue.record("expected message")
       return
     }
-    #expect(message.content == [.toolResult(callId: "call-1", isError: true)])
+    #expect(
+      message.content == [
+        .toolResult(
+          callId: "call-1", isError: true, output: "missing", patch: "--- a\n+++ b\n")
+      ])
   }
 
   @Test func shellEventRecord() throws {

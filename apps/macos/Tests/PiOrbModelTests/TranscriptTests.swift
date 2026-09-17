@@ -203,14 +203,10 @@ struct TranscriptPresentationTests {
           """
           {"id":"rec-1","parentId":null,"timestamp":"2026-09-17T10:00:00.000Z",
            "type":"message","role":"assistant","overflow":{},
-           "content":[{"type":"tool_call","callId":"call-1","name":"read_file","arguments":{}},
-            {"type":"tool_call","callId":"call-2","name":"edit_file","arguments":{}}]}
+           "content":[{"type":"tool_call","callId":"call-1","name":"read","arguments":{}},
+            {"type":"tool_call","callId":"call-2","name":"edit","arguments":{}}]}
           """)))
-    #expect(
-      present(reducer.state, pending: []).map(\.kind) == [
-        .tool(name: "read_file", status: .running),
-        .tool(name: "edit_file", status: .running),
-      ])
+    #expect(groups(reducer.state).map(\.status) == [.running, .running])
 
     reducer.apply(
       try decode(
@@ -221,11 +217,8 @@ struct TranscriptPresentationTests {
            "content":[{"type":"tool_result","callId":"call-1","content":[]},
             {"type":"tool_result","callId":"call-2","isError":true,"content":[]}]}
           """)))
-    #expect(
-      present(reducer.state, pending: []).map(\.kind) == [
-        .tool(name: "read_file", status: .completed),
-        .tool(name: "edit_file", status: .failed),
-      ])
+    #expect(groups(reducer.state).map(\.status) == [.completed, .failed])
+    #expect(groups(reducer.state).map(\.category) == [.read, .edit])
   }
 
   @Test func rendersShellAndDisplayedCustomMessagesOnly() throws {
@@ -291,7 +284,8 @@ struct TranscriptPresentationTests {
         """))
     #expect(
       present(reducer.state, pending: []).map(\.kind) == [
-        .assistantText("visible"), .live("streaming"),
+        .assistantText([.paragraph([.text("visible")])]),
+        .live([.paragraph([.text("streaming")])]),
       ])
   }
 }

@@ -19,14 +19,20 @@ public enum MessageRole: Sendable, Equatable {
 public enum ContentBlock: Sendable, Equatable {
   case text(String)
   case reasoning(String)
-  case toolCall(callId: String, name: String)
-  case toolResult(callId: String, isError: Bool)
+  case toolCall(callId: String, name: String, arguments: JSONValue?)
+  case toolResult(callId: String, isError: Bool, output: String, patch: String?)
   case other
 }
 
 extension ContentBlock: Decodable {
   private enum Key: String, CodingKey {
-    case type, text, callId, name, isError
+    case type, text, callId, name, arguments, isError, content, patch
+  }
+
+  /// `tool_result` nests one level of blocks; only their text is rendered.
+  private struct Nested: Decodable {
+    let type: String?
+    let text: String?
   }
 
   public init(from decoder: any Decoder) throws {
@@ -39,11 +45,15 @@ extension ContentBlock: Decodable {
     case "tool_call":
       self = .toolCall(
         callId: try container.decode(String.self, forKey: .callId),
-        name: try container.decode(String.self, forKey: .name))
+        name: try container.decode(String.self, forKey: .name),
+        arguments: try container.decodeIfPresent(JSONValue.self, forKey: .arguments))
     case "tool_result":
+      let nested = try container.decodeIfPresent([Nested].self, forKey: .content) ?? []
       self = .toolResult(
         callId: try container.decode(String.self, forKey: .callId),
-        isError: try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false)
+        isError: try container.decodeIfPresent(Bool.self, forKey: .isError) ?? false,
+        output: nested.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n"),
+        patch: try container.decodeIfPresent(String.self, forKey: .patch))
     default:
       self = .other
     }
@@ -62,6 +72,7 @@ public struct CustomMessage: Decodable, Sendable, Equatable {
 
 public struct HistoryRecord: Sendable, Equatable {
   public let id: String
+  public let timestamp: Date?
   public let body: Body
 
   public enum Body: Sendable, Equatable {
@@ -88,7 +99,7 @@ public struct HistoryRecord: Sendable, Equatable {
 
 extension HistoryRecord: Decodable {
   private enum Key: String, CodingKey {
-    case id, type, role, content, inboxMessageIds, failure, eventType, shell, custom
+    case id, timestamp, type, role, content, inboxMessageIds, failure, eventType, shell, custom
   }
 
   private struct Failure: Decodable {
@@ -98,6 +109,8 @@ extension HistoryRecord: Decodable {
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: Key.self)
     id = try container.decode(String.self, forKey: .id)
+    timestamp = try container.decodeIfPresent(String.self, forKey: .timestamp)
+      .flatMap(isoTimestamp(_:))
     let content = try container.decodeIfPresent([ContentBlock].self, forKey: .content) ?? []
     switch try container.decodeIfPresent(String.self, forKey: .type) ?? "" {
     case "message":
@@ -122,4 +135,12 @@ extension HistoryRecord: Decodable {
       body = .other
     }
   }
+}
+
+/// Record timestamps are ISO-8601 with fractional seconds; an unparsable one is
+/// simply absent rather than fatal.
+private func isoTimestamp(_ raw: String) -> Date? {
+  let formatter = ISO8601DateFormatter()
+  formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+  return formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
 }
