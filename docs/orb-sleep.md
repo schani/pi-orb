@@ -19,7 +19,7 @@ The orb row gains only two nullable fields:
 - `sleep_id`, a generated UUID and notice identity;
 - `sleep_until`, the accepted absolute UTC deadline.
 
-A database check requires both fields to be null or both set. `OrbView` exposes only optional `sleepUntil`. There is no appointment table, outcome table, generalized idempotency ledger, per-orb timer, or scheduler. Every sleep mutation bumps `state_version`; later work compares the sleep ID and version. Lifecycle edges durably record acceptance, waiting, stop initiation, cancellation, expiry, wake, failure, and delivery outcome without logging message content.
+Migration `025_orb_sleep.sql` follows the credential-owner migration `024`. Its new fields are nullable, the widened stop-reason check still accepts every old value, and absent message provenance remains `NULL`, so supported old runtime writes remain valid under the migration rule in `docs/deployment.md`. A database check requires both sleep fields to be null or both set. `OrbView` exposes only optional `sleepUntil`. There is no appointment table, outcome table, generalized idempotency ledger, per-orb timer, or scheduler. Every sleep mutation bumps `state_version`; later work compares the sleep ID and version. Lifecycle edges durably record acceptance, waiting, stop initiation, cancellation, expiry, wake, failure, and delivery outcome without logging message content.
 
 ## Lifecycle
 

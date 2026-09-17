@@ -59,7 +59,7 @@ it("retains a real sleep CLI turn, stops, and wakes with one combined system not
               {
                 type: "toolCall",
                 name: "bash",
-                arguments: { command: "pi-orb sleep 1d" },
+                arguments: { command: "pi-orb sleep 30m" },
               },
               stop,
             ],
@@ -137,7 +137,9 @@ it("retains a real sleep CLI turn, stops, and wakes with one combined system not
     const code = await waitFor("sleep fixture login", async () => {
       const view = await api(activeCp.baseUrl, "GET", `/api/v1/orbs/${orbId}`);
       const action = view.body["actionRequired"] as { userCode?: unknown } | undefined;
-      return typeof action?.userCode === "string" ? action.userCode : null;
+      return typeof action?.userCode === "string" && action.userCode !== ""
+        ? action.userCode
+        : null;
     });
     await fakeControl(fake.sessionKey, "/deviceauth/approve", {
       user_code: code,
