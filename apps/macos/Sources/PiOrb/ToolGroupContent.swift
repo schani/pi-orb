@@ -6,23 +6,6 @@ enum ToolPresentation {
   /// The web caps a call's raw input at 200 characters.
   static let argumentsLimit = 200
 
-  static func symbol(_ category: ToolCategory) -> String {
-    switch category {
-    case .edit: "pencil"
-    case .command: "terminal"
-    case .read: "doc.text"
-    case .other: "wrench.and.screwdriver"
-    }
-  }
-
-  static func mark(_ status: ToolStatus) -> String {
-    switch status {
-    case .running: "circle.dotted"
-    case .completed: "checkmark"
-    case .failed: "xmark"
-    }
-  }
-
   static func glyph(_ status: ToolStatus) -> String {
     switch status {
     case .running: "◐"
@@ -78,8 +61,6 @@ extension String {
 /// its result text.
 struct ToolCallsView: View {
   let group: ToolGroup
-  let mono: Font
-  let secondary: Color
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -94,12 +75,12 @@ struct ToolCallsView: View {
               Text("+\(diff.added) −\(diff.removed)")
             }
           }
-          .font(mono)
+          .font(Signal.mono)
           let detail = ToolPresentation.detail(call, in: group.category)
           if !detail.isEmpty {
             Text(detail)
-              .font(mono)
-              .foregroundStyle(secondary)
+              .font(Signal.mono)
+              .foregroundStyle(Signal.g3)
               .lineLimit(12)
               .textSelection(.enabled)
           }

@@ -5,24 +5,17 @@ import SwiftUI
 @main
 struct PiOrbApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-  @AppStorage(TranscriptDesign.storageKey) private var design = TranscriptDesign.bands
   @State private var fleet = FleetStore(client: ControlPlaneClient.fromEnvironment())
 
   var body: some Scene {
     WindowGroup {
       RootView(fleet: fleet, client: ControlPlaneClient.fromEnvironment())
+        .ignoresSafeArea(.container, edges: .top)
+        .preferredColorScheme(.light)
     }
     .defaultSize(width: 1000, height: 700)
-    .commands {
-      CommandGroup(after: .toolbar) {
-        Menu("Design") {
-          Picker("Design", selection: $design) {
-            ForEach(TranscriptDesign.allCases) { Text($0.title).tag($0) }
-          }
-          .pickerStyle(.inline)
-        }
-      }
-    }
+    .windowStyle(.hiddenTitleBar)
+    .commands { SidebarCommands() }
   }
 }
 

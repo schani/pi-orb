@@ -61,20 +61,39 @@ There is no authentication. In the `dev:local` composition the control plane min
 
 Against `dev:local` on 2026-09-17: the sidebar listed the project and orb and tracked `stopped → starting` within the poll interval; Start, Stop, `GET /history`, and inbox enqueue on a stopped orb all succeeded from the client's own code path. The live WebSocket was not exercised end to end — no orb could reach `running` on that machine because its Codex OAuth refresh token is invalid — so the frame handling is covered by unit tests only.
 
-## Design study (2026-09-17)
+## Look (Inverted bands decided 2026-09-17)
 
-The first look was bland. Five transcript designs now render the same presented
-rows and are switched from `View › Design`, remembered in the `transcriptDesign`
-`UserDefaults` key. Each is one file under `Sources/PiOrb/Designs/`; they differ
-in typography, colour, spacing, turn treatment, tool-group presentation,
-composer and busy marker, not in a palette.
+The first look was bland, so five transcript designs were built and compared
+side by side against the live control plane. **Inverted bands** was selected:
+the web UI's own look — full-width monochrome bands, inverted user turns, the
+bit-register busy marker, a text field that inverts on focus. Rejected by user
+preference after that comparison: Paper (warm stock, serif prose, ledger tool
+lines), Terminal (near-black ground, phosphor accent, `❯` prompt), Native
+(`.regularMaterial`, system fonts, accent bubbles, SF Symbols), Ledger (dense
+dark rows behind a timestamp gutter). The switcher that carried them is gone.
 
-- **Paper** (`pi-orb-design-paper.png`): warm stock, serif prose, hairline rules between turns, user turns as an indented quotation, tool runs as small-caps ledger lines, a breathing ink dot while busy.
-- **Terminal** (`pi-orb-design-terminal.png`): near-black ground and phosphor accent, monospace throughout, user turns behind a `❯` prompt, tool runs as log lines with a status glyph, a blinking block cursor, composer as the last prompt.
-- **Native** (`pi-orb-design-native.png`): `.regularMaterial`, system fonts, user turns as trailing accent bubbles, tool runs as `DisclosureGroup` rows with SF Symbols, a standard spinner.
-- **Inverted bands** (`pi-orb-design-bands.png`): the web UI's decided look — full-width monochrome bands, softly inverted user turns, the bit-register busy marker, a text field that inverts on focus.
-- **Ledger** (`pi-orb-design-ledger.png`): dense dark rows with a timestamp gutter, compact line height, tool runs as tabular columns of category, headline, count and state, for scanning a long transcript.
+The choice applies to the whole window, not only the transcript, and mirrors
+`docs/web-ui.md` rather than inventing: one 13px monospace face on a 20px row,
+white ground, black ink, the three greys and two signal hues of
+`apps/web/src/styles.css`, 1px black rules, `#f2f2f2` hairlines, zero radius,
+and inversion instead of tint for focus and the current row. Light only, as on
+the web — `styles.css` declares `color-scheme: light` and has no
+`prefers-color-scheme` mapping, so the window forces the light appearance.
 
-All five drop the composer placeholder and leave the sidebar alone. The
-screenshots are of the live local control plane. **Awaiting the user's
-selection**; nothing here is decided.
+- **Sidebar** is the web's orb index at 236px behind a black right rule: each
+  project name an uppercase, letter-spaced label over a black rule, each orb one
+  20px row of the 16px instrument tile (the exact geometry of
+  `apps/web/public/favicons/*.svg`, redrawn as paths) and the name truncated to
+  one line, behind a 2px border in the state's hue, with a `#f2f2f2` hairline
+  below. The selected row is inverted and bold, as `.ix-row-current` is. The top
+  band holds the traffic lights where the web puts its `PI-ORB` row.
+- **Header** is the web's orb header: the name in bold, then Start and Stop as
+  boxed text buttons where the web's lifecycle cluster sits, inverting on hover
+  and press and dimmed to `--g2` when the state refuses them.
+- **Window chrome** is a full-size content view with a transparent title bar and
+  no title text, so the bands run edge to edge; the toolbar and its sidebar
+  toggle are removed and `SidebarCommands` keeps ⌃⌘S. The top band is the
+  macOS title bar's 28px rather than the web's 24px, so the traffic lights fit.
+- **Composer** is the web's: a 32px `>` prefix column, a borderless four-line
+  field that inverts on focus, and the send mark from `Icons.tsx` as an
+  icon-only action. ⌘⏎ and ⏎ both send.
