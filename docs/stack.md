@@ -31,6 +31,7 @@ apps/
       http/             # history pull and live WebSocket endpoints
       inspection/       # in-orb sibling listing and replicated-transcript CLI
   web/                  # React browser UI
+  macos/                # SwiftPM SwiftUI prototype client (docs/native-macos.md)
 
 packages/
   protocol/             # TypeBox schemas and inferred wire/history types

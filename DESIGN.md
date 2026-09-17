@@ -32,7 +32,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 
 ## Product and interaction decisions
 
-- The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
+- The user-facing interface is web-based. A local SwiftUI prototype (`docs/native-macos.md`) exists alongside it to test the backend's contracts from outside a browser; it is not a shipping surface. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
 - Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
@@ -112,6 +112,7 @@ Subsystem designs:
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned-project/personal-settings decisions, stage-3 credential proposal, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
+- [docs/native-macos.md](docs/native-macos.md) — local SwiftUI prototype client and what it exposed about the backend's browser assumptions
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules and deterministic/browser qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
