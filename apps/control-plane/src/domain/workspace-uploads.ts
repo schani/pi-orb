@@ -54,6 +54,7 @@ export async function notifyUpload(task: SimulationTask, store: ControlPlaneStor
     messageId: row.batchId,
     now: task.wallNow(),
     wake: false,
+    cancelSleep: false,
     content: [
       {
         type: "text",

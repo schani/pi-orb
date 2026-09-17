@@ -7,6 +7,8 @@ import { join } from "node:path";
 import {
   MCP_RUNTIME_PATH,
   McpCatalogSchema,
+  ORB_BOOT_CONTEXT_PATH,
+  OrbBootContextResponseSchema,
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
   PersonalInstructionsSchema,
   ProjectSecretSnapshotSchema,
@@ -77,6 +79,15 @@ describe("validation broker", () => {
     expect((await fetch(`http://127.0.0.1:${port}/runtime/v1/project-instructions`)).status).toBe(
       401,
     );
+    const bootContext = await request(ORB_BOOT_CONTEXT_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ v: 1 }),
+    });
+    expect(bootContext.status).toBe(200);
+    const context = await bootContext.json();
+    expect(Check(OrbBootContextResponseSchema, context)).toBe(true);
+    expect(context).toEqual({ v: 1, context: null });
     expect(await readdir(directory)).not.toContain("unrecognized");
 
     const grant = await request("/runtime/v1/tokens/model", {
@@ -91,6 +102,11 @@ describe("validation broker", () => {
     expect(unauthorized.status).toBe(401);
     const unauthorizedMcp = await fetch(`http://127.0.0.1:${port}${MCP_RUNTIME_PATH}`);
     expect(unauthorizedMcp.status).toBe(401);
+    const unauthorizedBootContext = await fetch(
+      `http://127.0.0.1:${port}${ORB_BOOT_CONTEXT_PATH}`,
+      { method: "POST", body: JSON.stringify({ v: 1 }) },
+    );
+    expect(unauthorizedBootContext.status).toBe(401);
     for (const headers of [{}, { authorization: "Bearer wrong-token" }]) {
       const denied = await fetch(`http://127.0.0.1:${port}${PERSONAL_INSTRUCTIONS_RUNTIME_PATH}`, {
         headers,
@@ -124,6 +140,9 @@ describe("validation broker", () => {
     });
     expect(bodyStatus).toBe(404);
     expect(await readFile(marker, "utf8")).toBe(`GET ${PERSONAL_INSTRUCTIONS_RUNTIME_PATH}\n`);
+    const wrongBootContextMethod = await request(ORB_BOOT_CONTEXT_PATH);
+    expect(wrongBootContextMethod.status).toBe(404);
+    expect(await readFile(marker, "utf8")).toBe(`GET ${ORB_BOOT_CONTEXT_PATH}\n`);
     const unknown = await request("/runtime/v1/tokens/github", { method: "POST", body: "{}" });
     expect(unknown.status).toBe(404);
     expect(await readFile(marker, "utf8")).toBe("POST /runtime/v1/tokens/github\n");

@@ -31,19 +31,35 @@ describe("Instrument tiles", () => {
     }
   }
 
-  it("keeps all nine states static, distinct, and font-independent on the same tile", () => {
+  it("keeps all ten states static, distinct, and font-independent on the same tile", () => {
     const assets = Object.values(FAVICON_HREFS).map((href) =>
       readFileSync(new URL(`../../public${href}`, import.meta.url), "utf8"),
     );
-    expect(new Set(assets).size).toBe(9);
-    const geometry = assets.map((svg) => svg.replace(/#[0-9a-f]{6}/g, "#777777"));
-    expect(new Set(geometry).size).toBe(9);
+    expect(new Set(assets).size).toBe(10);
+    const geometry = assets.map((svg) => svg.replace(/#[0-9a-f]{3,6}/g, "#777777"));
+    expect(new Set(geometry).size).toBe(10);
     for (const svg of assets) {
       expect(svg).toContain('viewBox="0 0 16 16"');
       expect(svg).toContain('width="14" height="14" rx="2"');
       expect(svg).not.toMatch(/<text|<animate|<script/);
     }
     expect(assets[0]).toContain('d="M4 5h8M6 5v3.5Q6 10 5 11M10 5v5q0 1 1 1"');
+  });
+
+  it("uses the selected slender crescent for sleeping", () => {
+    const sleeping = readFileSync(
+      new URL("../../public/favicons/sleeping.svg", import.meta.url),
+      "utf8",
+    );
+    expect(sleeping).toContain("<title>Orb sleeping</title>");
+    expect(sleeping).toContain('<rect x="1" y="1" width="14" height="14" rx="2" fill="#777"');
+    expect(sleeping).toContain('d="M10.15 3.35a4.9 4.9 0 1 0 1.65 7.2 3.35 3.35 0 0 1-1.65-7.2Z"');
+    expect(sleeping).not.toMatch(/\sstroke(?:=|-)/);
+    const glyph = projectOrbGlyph("stopped", undefined, "2026-09-18T00:00:00.000Z");
+    expect(glyph.iconHref).toBe(FAVICON_HREFS.sleeping);
+    expect(renderToStaticMarkup(<StateTile glyph={glyph} />)).toContain(
+      'src="/favicons/sleeping.svg"',
+    );
   });
 
   it("uses the selected hourglass for transitions and bin for deletion", () => {

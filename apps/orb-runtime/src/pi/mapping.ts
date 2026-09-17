@@ -359,7 +359,9 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
           ...(ids.length === 0 ? {} : { inboxMessageIds: ids }),
         });
       }
-      const subagent = subagentNotice(customType, entry["details"]);
+      const details = entry["details"];
+      const subagent = subagentNotice(customType, details);
+      const ids = inboxMessageIds(details);
       return ok({
         ...identity,
         type: "event",
@@ -367,6 +369,7 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
         content: mapUserContent(entry["content"]),
         custom: { customType, display: entry["display"] === true },
         ...(subagent === null ? {} : { subagent }),
+        ...(ids.length === 0 ? {} : { inboxMessageIds: ids }),
       });
     }
     case "label":

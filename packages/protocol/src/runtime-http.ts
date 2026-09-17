@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import { MessageInputBlockSchema } from "./frames.ts";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
+import { OrbMessageSystemSchema } from "./orb-sleep.ts";
 
 const closed = { additionalProperties: false } as const;
 
@@ -160,6 +161,7 @@ export const DeliverOrbMessageRequestSchema = Type.Object(
     messageId: Type.String(),
     messageIds: Type.Array(Type.String(), { minItems: 1 }),
     content: Type.Array(MessageInputBlockSchema, { minItems: 1 }),
+    system: Type.Optional(OrbMessageSystemSchema),
   },
   closed,
 );

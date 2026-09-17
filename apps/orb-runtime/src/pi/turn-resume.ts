@@ -178,6 +178,7 @@ function classify(entry: unknown): TailEntry | null {
         case "pi-orb.user-message":
           return { kind: "user", id };
         case "pi-orb.host-restarted":
+        case "pi-orb.sleep-wake":
           return { kind: "boot_marker", id };
         case TURN_RESUME_CUSTOM_TYPE:
           return { kind: "resume_marker", id };

@@ -32,6 +32,14 @@ import type {
 } from "../domain/ports.ts";
 import { FAILPOINTS } from "./failpoints.ts";
 
+const BOOT_CONTEXT_STATES: readonly OrbState[] = [
+  "creating",
+  "starting",
+  "running",
+  "stopping",
+  "archiving",
+];
+
 /** Store operations that can be scripted to fail deterministically. */
 export type InvariantOperation = "getOrb" | "getOrbByRuntimeTokenHash" | "enqueueOrbMessage";
 
@@ -213,8 +221,10 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     { callerOrbId: string; projectId: string; requestHash: string }
   >();
   private nextMessageOrdinal = 1;
-  /** Remaining scripted failures of `clearOrbMessageAutoStart`. */
+  /** Remaining scripted failures while Stop cancels wake authority. */
   private clearAutoStartFailures = 0;
+  /** Remaining lost acknowledgements after an atomic Stop commit. */
+  private stopAfterCommitFailures = 0;
   /** Crash window after provider absence verification but before fence finalization. */
   private hostDiscardFinalizeFailures = 0;
   /** External replacement provision landed, but committing its ref/token fails. */
@@ -263,12 +273,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     this.hostReplacementCommitFailures = count;
   }
 
-  /**
-   * Fail the next `count` calls to `clearOrbMessageAutoStart` with a retryable
-   * store error — the store blip that can strand a message's wake intent.
-   */
+  /** Fail the next `count` Stop requests while cancelling wake authority. */
   failNextClearOrbMessageAutoStart(count: number): void {
     this.clearAutoStartFailures = count;
+  }
+
+  failNextOrbStopAfterCommit(count: number): void {
+    this.stopAfterCommitFailures = count;
   }
 
   /**
@@ -474,7 +485,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       for (const orb of children) {
         const updated: OrbRow =
           orb.state === "deleting"
-            ? orb
+            ? orb.sleepId === null
+              ? orb
+              : {
+                  ...orb,
+                  sleepId: null,
+                  sleepUntil: null,
+                  stateVersion: orb.stateVersion + 1,
+                  updatedAt: params.now,
+                }
             : {
                 ...orb,
                 state: "deleting",
@@ -483,6 +502,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
                 updatedAt: params.now,
                 lastError: null,
                 stopReason: null,
+                sleepId: null,
+                sleepUntil: null,
                 autoNameLeaseUntil: null,
                 autoNameNextAttemptAt: null,
               };
@@ -656,6 +677,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           messageId: params.orb.id,
           ordinal: this.nextMessageOrdinal++,
           content: [{ type: "text", text: params.prompt }],
+          system: null,
           status: "queued",
           delivery: null,
           operationId: null,
@@ -764,6 +786,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       content: OrbMessageRow["content"];
       now: number;
       wake?: boolean;
+      cancelSleep?: boolean;
     },
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
@@ -786,20 +809,27 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       // Admission is durable content plus, for an orb that cannot take
       // delivery now, a wake intent — never a lifecycle transition; the
       // reconciler's backstop owns that (docs/lifecycle.md, 2026-08-11).
+      const cancelledSleep = params.cancelSleep !== false && orb.sleepId !== null;
+      const admittedOrb: OrbRow = cancelledSleep
+        ? { ...orb, sleepId: null, sleepUntil: null, stateVersion: orb.stateVersion + 1 }
+        : orb;
       const autoStart =
         params.wake !== false &&
-        (orb.state === "stopping" || orb.state === "stopped" || orb.state === "failed");
+        (admittedOrb.state === "stopping" ||
+          admittedOrb.state === "stopped" ||
+          admittedOrb.state === "failed");
       const message: OrbMessageRow = {
         orbId: params.orbId,
         messageId: params.messageId,
         ordinal: this.nextMessageOrdinal++,
         content: params.content,
+        system: null,
         status: "queued",
         delivery: null,
         operationId: null,
         deliveryBatchId: null,
         autoStart,
-        wakeStateVersion: autoStart ? orb.stateVersion : null,
+        wakeStateVersion: autoStart ? admittedOrb.stateVersion : null,
         lastError: null,
         createdAt: params.now,
         updatedAt: params.now,
@@ -807,8 +837,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       rows.push(message);
       this.messages.set(params.orbId, rows);
       const updated: OrbRow = {
-        ...orb,
-        lastBusyAt: Math.max(orb.lastBusyAt ?? 0, params.now),
+        ...admittedOrb,
+        lastBusyAt: Math.max(admittedOrb.lastBusyAt ?? 0, params.now),
         updatedAt: params.now,
       };
       this.orbs.set(orb.id, updated);
@@ -826,6 +856,192 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     ]);
   }
 
+  seedSystemMessage(
+    orbId: string,
+    messageId: string,
+    system: NonNullable<OrbMessageRow["system"]>,
+    now: number,
+  ): void {
+    const rows = this.messages.get(orbId) ?? [];
+    rows.push({
+      orbId,
+      messageId,
+      ordinal: this.nextMessageOrdinal++,
+      content: [
+        {
+          type: "text",
+          text:
+            system.kind === "sleep_wake"
+              ? "Scheduled sleep finished."
+              : "Scheduled sleep expired before compute stopped.",
+        },
+      ],
+      system,
+      status: "queued",
+      delivery: null,
+      operationId: null,
+      deliveryBatchId: null,
+      autoStart: false,
+      wakeStateVersion: null,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    this.messages.set(orbId, rows);
+  }
+
+  scheduleOrbSleep(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      caller: import("../domain/ports.ts").ArchiveCaller;
+      sleepId: string;
+      durationSeconds: number;
+    },
+  ) {
+    return this.access(task, FAILPOINTS.storeWrite, "schedule orb sleep", () => {
+      const now = task.wallNow();
+      const sleepUntil = now + params.durationSeconds * 1_000;
+      const orb = this.orbs.get(params.orbId);
+      if (
+        orb === undefined ||
+        orb.state !== "running" ||
+        orb.sleepId !== null ||
+        orb.runtimeTokenHash !== params.caller.runtimeTokenHash ||
+        orb.hostIncarnation !== params.caller.hostIncarnation ||
+        orb.hostDiscardThroughIncarnation !== null ||
+        !Number.isFinite(sleepUntil) ||
+        sleepUntil > 8_640_000_000_000_000
+      )
+        return null;
+      const updated = {
+        ...orb,
+        sleepId: params.sleepId,
+        sleepUntil,
+        stateVersion: orb.stateVersion + 1,
+        updatedAt: now,
+      };
+      this.orbs.set(orb.id, updated);
+      return updated;
+    }).andThen((row) =>
+      row === null ? errAsync({ type: "state_conflict" as const }) : okAsync(row),
+    );
+  }
+
+  cancelOrbSleep(
+    task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ) {
+    return this.access(task, FAILPOINTS.storeWrite, "cancel orb sleep", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) return null;
+      if (orb.sleepId === null) return orb;
+      const updated = {
+        ...orb,
+        sleepId: null,
+        sleepUntil: null,
+        stateVersion: orb.stateVersion + 1,
+        updatedAt: params.now,
+      };
+      this.orbs.set(orb.id, updated);
+      return updated;
+    }).andThen((row) =>
+      row === null ? errAsync({ type: "state_conflict" as const }) : okAsync(row),
+    );
+  }
+
+  processDueOrbSleep(
+    task: SimulationTask,
+    params: { orbId: string; sleepId: string; expectedStateVersion: number; now: number },
+  ) {
+    return this.access(task, FAILPOINTS.storeWrite, "process due orb sleep", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (
+        orb === undefined ||
+        orb.sleepId !== params.sleepId ||
+        orb.stateVersion !== params.expectedStateVersion
+      )
+        return "stale" as const;
+      if (orb.sleepUntil === null || params.now < orb.sleepUntil || orb.state === "stopping")
+        return "waiting" as const;
+      if (!["running", "stopped", "failed"].includes(orb.state)) return "stale" as const;
+      const kind = orb.state === "running" ? ("sleep_expired" as const) : ("sleep_wake" as const);
+      const nextVersion = orb.stateVersion + 1;
+      const updated = {
+        ...orb,
+        sleepId: null,
+        sleepUntil: null,
+        stateVersion: nextVersion,
+        updatedAt: params.now,
+      };
+      this.orbs.set(orb.id, updated);
+      const rows = this.messages.get(orb.id) ?? [];
+      if (!rows.some((row) => row.messageId === params.sleepId)) {
+        rows.push({
+          orbId: orb.id,
+          messageId: params.sleepId,
+          ordinal: this.nextMessageOrdinal++,
+          content: [
+            {
+              type: "text",
+              text:
+                kind === "sleep_wake"
+                  ? "Scheduled sleep finished."
+                  : "Scheduled sleep expired before compute stopped.",
+            },
+          ],
+          system: { kind, sleepUntil: new Date(orb.sleepUntil).toISOString() },
+          status: "queued",
+          delivery: null,
+          operationId: null,
+          deliveryBatchId: null,
+          autoStart: kind === "sleep_wake",
+          wakeStateVersion: kind === "sleep_wake" ? nextVersion : null,
+          lastError: null,
+          createdAt: params.now,
+          updatedAt: params.now,
+        });
+        this.messages.set(orb.id, rows);
+      }
+      return kind === "sleep_wake" ? ("wake" as const) : ("expired" as const);
+    });
+  }
+
+  readOrbBootContext(
+    task: SimulationTask,
+    params: { orbId: string; caller: { runtimeTokenHash: string; hostIncarnation: number } },
+  ) {
+    return this.access(task, FAILPOINTS.storeWrite, "read orb boot context", () => {
+      const orb = this.orbs.get(params.orbId);
+      if (
+        orb === undefined ||
+        orb.runtimeTokenHash !== params.caller.runtimeTokenHash ||
+        orb.hostIncarnation !== params.caller.hostIncarnation ||
+        orb.hostDiscardThroughIncarnation !== null ||
+        !BOOT_CONTEXT_STATES.includes(orb.state)
+      )
+        return { authorized: false as const, context: null };
+      const rows = this.messages.get(params.orbId) ?? [];
+      const head = rows.find((row) => row.status === "queued" || row.status === "delivering");
+      if (head?.system?.kind !== "sleep_wake") return { authorized: true as const, context: null };
+      if (head.deliveryBatchId === null) {
+        const index = rows.indexOf(head);
+        rows[index] = { ...head, status: "delivering", deliveryBatchId: head.messageId };
+      }
+      return {
+        authorized: true as const,
+        context: {
+          messageId: head.messageId,
+          messageIds: [head.messageId],
+          content: [...head.content],
+          system: { kind: "sleep_wake" as const, sleepUntil: head.system.sleepUntil },
+        },
+      };
+    }).andThen((result) =>
+      result.authorized ? okAsync(result.context) : errAsync({ type: "state_conflict" as const }),
+    );
+  }
+
   claimNextOrbMessageBatch(
     task: SimulationTask,
     params: { orbId: string; now: number },
@@ -841,8 +1057,13 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         return outstanding.filter((row) => row.deliveryBatchId === first.deliveryBatchId);
       }
       const batchId = first.messageId;
+      const systemIndex = outstanding.findIndex((row) => row.system !== null);
+      const batch =
+        first.system !== null
+          ? [first]
+          : outstanding.slice(0, systemIndex < 0 ? undefined : systemIndex);
       const claimedIds = new Set(
-        outstanding.filter((row) => row.status === "queued").map((row) => row.messageId),
+        batch.filter((row) => row.status === "queued").map((row) => row.messageId),
       );
       const updated = rows.map((row) =>
         claimedIds.has(row.messageId)
@@ -924,35 +1145,58 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  clearOrbMessageAutoStart(
+  requestOrbStop(
     task: SimulationTask,
-    params: { orbId: string; now: number },
-  ): ResultAsync<void, StoreError> {
-    return this.access(
-      task,
-      FAILPOINTS.storeClearMessageAutoStart,
-      "clear orb message auto start",
-      () => {
-        // A scripted blip is a *specific* call failing, which is what scenarios
-        // about a stranded wake intent need; the failpoint above is the
-        // probabilistic form of the same outage.
-        if (this.clearAutoStartFailures > 0) {
-          this.clearAutoStartFailures -= 1;
-          return { failed: true as const };
-        }
-        const rows = this.messages.get(params.orbId) ?? [];
-        this.messages.set(
-          params.orbId,
-          rows.map((row) =>
-            row.autoStart ? { ...row, autoStart: false, updatedAt: params.now } : row,
-          ),
-        );
-        return { failed: false as const };
-      },
-    ).andThen((outcome) =>
-      outcome.failed
-        ? errAsync(unavailable("clear orb message auto start: scripted store failure"))
-        : okAsync(undefined),
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ) {
+    return this.access(task, FAILPOINTS.storeClearMessageAutoStart, "request orb stop", () => {
+      if (this.clearAutoStartFailures > 0) {
+        this.clearAutoStartFailures -= 1;
+        return { failed: true as const };
+      }
+      const orb = this.orbs.get(params.orbId);
+      if (orb === undefined || orb.stateVersion !== params.expectedStateVersion) return null;
+      const rows = this.messages.get(params.orbId) ?? [];
+      const wake = rows.find(
+        (row) =>
+          row.autoStart &&
+          row.system?.kind === "sleep_wake" &&
+          (row.status === "queued" || row.status === "delivering"),
+      );
+      const cancelledSleepId = orb.sleepId ?? wake?.messageId ?? null;
+      const transitions = orb.state !== "stopping" && orb.state !== "stopped";
+      const overridesSleepStop = orb.state === "stopping" && orb.stopReason === "sleep";
+      const startsStopEpisode = transitions || overridesSleepStop;
+      const clearsSleep = orb.sleepId !== null;
+      const updated: OrbRow = {
+        ...orb,
+        state: transitions ? "stopping" : orb.state,
+        stopReason: startsStopEpisode ? null : orb.stopReason,
+        sleepId: null,
+        sleepUntil: null,
+        stateVersion: orb.stateVersion + (startsStopEpisode || clearsSleep ? 1 : 0),
+        stateChangedAt: startsStopEpisode ? params.now : orb.stateChangedAt,
+        updatedAt: params.now,
+      };
+      this.orbs.set(orb.id, updated);
+      this.messages.set(
+        params.orbId,
+        rows.map((row) =>
+          row.autoStart ? { ...row, autoStart: false, updatedAt: params.now } : row,
+        ),
+      );
+      return { failed: false as const, orb: updated, cancelledSleepId };
+    }).andThen((result) =>
+      result === null
+        ? errAsync({ type: "state_conflict" as const })
+        : result.failed
+          ? errAsync(unavailable("request orb stop: scripted store failure"))
+          : this.stopAfterCommitFailures > 0
+            ? (() => {
+                this.stopAfterCommitFailures -= 1;
+                return errAsync(unavailable("request orb stop: acknowledgement lost"));
+              })()
+            : okAsync({ orb: result.orb, cancelledSleepId: result.cancelledSleepId }),
     );
   }
 
@@ -1025,6 +1269,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         updatedAt: params.now,
         lastError: null,
         stopReason: null,
+        sleepId: null,
+        sleepUntil: null,
         autoNameLeaseUntil: null,
         autoNameNextAttemptAt: null,
       };
@@ -1151,6 +1397,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         updatedAt: params.now,
         lastError: null,
         stopReason: null,
+        sleepId: null,
+        sleepUntil: null,
       };
       this.orbs.set(orb.id, updated);
       this.deletions.set(orb.id, {
@@ -1407,14 +1655,25 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return this.access(task, FAILPOINTS.storeWrite, `cas transition to ${params.toState}`, () => {
       const orb = this.orbs.get(params.orbId);
       const uploading =
-        params.stopReason === "idle" &&
+        (params.stopReason === "idle" || params.stopReason === "sleep") &&
         [...this.uploadRows.values()].some(
           (r) =>
             r.orbId === params.orbId &&
             ["transferring", "finalizing"].includes(r.status) &&
             r.activeUntil > params.now,
         );
-      if (uploading || orb === undefined || orb.stateVersion !== params.expectedStateVersion) {
+      const invalidSleepStop =
+        params.stopReason === "sleep" &&
+        (orb === undefined ||
+          orb.sleepId === null ||
+          orb.sleepUntil === null ||
+          params.now >= orb.sleepUntil);
+      if (
+        uploading ||
+        invalidSleepStop ||
+        orb === undefined ||
+        orb.stateVersion !== params.expectedStateVersion
+      ) {
         return { conflict: true as const, currentState: orb?.state };
       }
       const updated: OrbRow = {
@@ -1427,6 +1686,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         ...(params.hostRef !== undefined ? { hostRef: params.hostRef } : {}),
         ...(params.checkoutCommit !== undefined ? { checkoutCommit: params.checkoutCommit } : {}),
         ...(params.stopReason !== undefined ? { stopReason: params.stopReason } : {}),
+        ...(params.cancelSleep === true ? { sleepId: null, sleepUntil: null } : {}),
       };
       this.orbs.set(orb.id, updated);
       return { conflict: false as const, row: updated };
@@ -1695,7 +1955,9 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       }
       const deliveredIds = new Set(
         staged.flatMap((record) =>
-          record.type === "message" ? (record.inboxMessageIds ?? []) : [],
+          record.type === "message" || record.type === "event"
+            ? (record.inboxMessageIds ?? [])
+            : [],
         ),
       );
       if (deliveredIds.size > 0) {

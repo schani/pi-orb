@@ -136,6 +136,8 @@ interface EventRecord extends HistoryRecordBase {
   type: "event";
   eventType: string;
   content?: ContentBlock[];
+  /** System inbox identities acknowledged atomically with replication. */
+  inboxMessageIds?: string[];
 
   /** Present iff `eventType` is `"pi.bash_execution"`. */
   shell?: {

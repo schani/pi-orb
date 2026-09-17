@@ -1,23 +1,27 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   ID_TOKEN_PATH,
   type IdTokenErrorBody,
   IdTokenRequestSchema,
   type IdTokenResponseBody,
   MCP_RUNTIME_PATH,
+  ORB_BOOT_CONTEXT_PATH,
   ORB_INSPECTION_LIST_PATH,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
   ORB_NAME_TRIGGER_PATH,
   ORB_SELF_ARCHIVE_PATH,
+  ORB_SELF_SLEEP_PATH,
   ORB_SPAWN_MAX_BYTES,
   ORB_SPAWN_PATH,
   ORB_SPAWN_UUID,
   OrbArchiveRequestSchema,
+  OrbBootContextRequestSchema,
   type OrbInspectionError,
   type OrbInspectionItem,
   type OrbNameTriggerResponse,
   OrbNameTriggerSchema,
+  OrbSleepRequestSchema,
   type OrbSpawnRequest,
   OrbSpawnRequestSchema,
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
@@ -70,6 +74,18 @@ export interface RuntimeRouteDeps {
     orbId: string,
     request: OrbSpawnRequest,
   ) => ResultAsync<void, StoreError | SpawnConflict>;
+  readonly sleepSelf: (
+    task: SimulationTask,
+    orbId: string,
+    caller: ArchiveCaller,
+    durationSeconds: number,
+    sleepId: string,
+  ) => ResultAsync<{ sleepId: string; sleepUntil: number }, CommandError>;
+  readonly readBootContext: (
+    task: SimulationTask,
+    orbId: string,
+    caller: ArchiveCaller,
+  ) => ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError>;
   readonly archiveSelf: (
     task: SimulationTask,
     orbId: string,
@@ -297,6 +313,89 @@ export function registerRuntimeRoutes(
       });
     },
   );
+
+  app.post(ORB_SELF_SLEEP_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind !== "orb")
+      return reply.status(auth.kind === "unavailable" ? 503 : 401).send({
+        error: {
+          code: auth.kind === "unavailable" ? "unavailable" : "unauthorized",
+          message: auth.kind === "unavailable" ? "sleep unavailable" : "runtime identity rejected",
+          retryable: auth.kind === "unavailable",
+        },
+      });
+    if (!Check(OrbSleepRequestSchema, request.body))
+      return reply.status(400).send({
+        error: {
+          code: "invalid_request",
+          message: "durationSeconds must be a positive safe integer",
+          retryable: false,
+        },
+      });
+    const result = await deps.sleepSelf(
+      task,
+      auth.orb.id,
+      {
+        runtimeTokenHash: auth.orb.runtimeTokenHash as string,
+        hostIncarnation: auth.orb.hostIncarnation,
+      },
+      request.body.durationSeconds,
+      randomUUID(),
+    );
+    if (result.isErr())
+      return reply
+        .status(
+          result.error.code === "internal" ? 500 : result.error.code === "unavailable" ? 503 : 409,
+        )
+        .send({
+          error: {
+            code: result.error.code,
+            message: result.error.code === "internal" ? "sleep failed" : result.error.message,
+            retryable: result.error.retryable,
+          },
+        });
+    return reply.status(202).send({
+      v: 1,
+      sleepId: result.value.sleepId,
+      sleepUntil: new Date(result.value.sleepUntil).toISOString(),
+    });
+  });
+
+  app.post(ORB_BOOT_CONTEXT_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind !== "orb")
+      return reply.status(auth.kind === "unavailable" ? 503 : 401).send({
+        error: {
+          code: auth.kind === "unavailable" ? "unavailable" : "unauthorized",
+          message:
+            auth.kind === "unavailable" ? "boot context unavailable" : "runtime identity rejected",
+          retryable: auth.kind === "unavailable",
+        },
+      });
+    if (!Check(OrbBootContextRequestSchema, request.body))
+      return reply.status(400).send({
+        error: {
+          code: "invalid_request",
+          message: "invalid boot context request",
+          retryable: false,
+        },
+      });
+    const context = await deps.readBootContext(task, auth.orb.id, {
+      runtimeTokenHash: auth.orb.runtimeTokenHash as string,
+      hostIncarnation: auth.orb.hostIncarnation,
+    });
+    if (context.isErr())
+      return reply.status(context.error.code === "internal" ? 500 : 503).send({
+        error: {
+          code: context.error.code,
+          message: "boot context unavailable",
+          retryable: context.error.retryable,
+        },
+      });
+    return reply.send({ v: 1, context: context.value });
+  });
 
   app.post(ORB_SELF_ARCHIVE_PATH, async (request, reply) => {
     reply.header("cache-control", "no-store");

@@ -12,7 +12,7 @@ import {
 } from "../adapters/oidc/signer.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
-import { requestOrbArchive } from "../domain/lifecycle.ts";
+import { readOrbBootContext, requestOrbArchive, requestOrbSleep } from "../domain/lifecycle.ts";
 import type { OrbNameGenerator, SigningKeyRow, SigningKeyStore } from "../domain/ports.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "../domain/signing-keys.ts";
 import { MintDenialLog } from "../domain/workload-identity.ts";
@@ -312,6 +312,17 @@ describe("minted tokens verify against the served JWKS", () => {
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
       spawn: () => okAsync(undefined),
+      sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
+        requestOrbSleep(
+          task,
+          { ...makeHarness().deps, store },
+          orbId,
+          caller,
+          durationSeconds,
+          sleepId,
+        ),
+      readBootContext: (task, orbId, caller) =>
+        readOrbBootContext(task, { ...makeHarness().deps, store }, orbId, caller),
       archiveSelf: (task, orbId, caller) =>
         requestOrbArchive(task, { ...makeHarness().deps, store }, orbId, caller),
       store,

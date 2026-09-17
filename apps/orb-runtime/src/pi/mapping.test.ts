@@ -334,6 +334,47 @@ describe("Pi entry mapping", () => {
     expect(record.overflow.native).toMatchObject({ details: { messageId: "message-1" } });
   });
 
+  it("maps a combined sleep wake as a system event with inbox identity", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "pi-orb.sleep-wake",
+      content: "The host restarted after scheduled sleep.",
+      display: true,
+      details: {
+        messageIds: ["sleep-1"],
+        sleepUntil: "2026-09-18T04:05:06.000Z",
+        runtimeInstanceId: "runtime-2",
+        incarnation: "2",
+      },
+    });
+    expect(record).toMatchObject({
+      type: "event",
+      eventType: "pi.custom_message",
+      inboxMessageIds: ["sleep-1"],
+      custom: { customType: "pi-orb.sleep-wake", display: true },
+    });
+  });
+
+  it("maps an ordinary sleep expiry notice as a system event, never a human message", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom_message",
+      customType: "pi-orb.system-message",
+      content: [{ type: "text", text: "Sleep deadline expired while work was active." }],
+      display: true,
+      details: {
+        messageIds: ["sleep-2"],
+        system: { kind: "sleep_expired", sleepUntil: "2026-09-18T04:05:06.000Z" },
+      },
+    });
+    expect(record).toMatchObject({
+      type: "event",
+      inboxMessageIds: ["sleep-2"],
+      custom: { customType: "pi-orb.system-message", display: true },
+    });
+  });
+
   it("maps a squashed inbox batch to every client message id in order", () => {
     const record = expectMapped({
       ...base,

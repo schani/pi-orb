@@ -28,9 +28,12 @@ export function interruptedSubagents(entries: readonly unknown[]): readonly Suba
       pending.delete(data["id"]);
     } else if (
       entry["type"] === "custom_message" &&
-      ["pi-orb.host-restarted", "pi-orb.turn-resume", "pi-orb.turn-resume-declined"].includes(
-        String(entry["customType"]),
-      )
+      [
+        "pi-orb.host-restarted",
+        "pi-orb.sleep-wake",
+        "pi-orb.turn-resume",
+        "pi-orb.turn-resume-declined",
+      ].includes(String(entry["customType"]))
     ) {
       const runs = object(entry["details"])?.["interruptedSubagents"];
       if (!Array.isArray(runs)) continue;

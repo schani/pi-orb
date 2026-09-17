@@ -79,6 +79,17 @@ describe("dashboard layout contract", () => {
     expect(rule(".orb-entry-error")).toContain("color: var(--bad)");
   });
 
+  it("uses the stopped gray hue for sleeping rows without overriding selected fill", () => {
+    expect(rule(".s-sleep")).toContain("color: var(--st-stop)");
+    expect(rule(".orb-entry-sleep,\n.ix-row-sleep")).toContain("border-left-color: var(--st-stop)");
+    expect(
+      rule(
+        ".orb-entry-stop .orb-entry-link,\n.orb-entry-sleep .orb-entry-link,\n.orb-entry-arch .orb-entry-link,\n.orb-entry-archng .orb-entry-link,\n.orb-entry-del .orb-entry-link",
+      ),
+    ).toContain("color: var(--g3)");
+    expect(rule(".ix-row-current,\n.ix-row-current:hover")).toContain("background: var(--k)");
+  });
+
   it("inverts the selected find row and underlines the matched text", () => {
     expect(rule(".app-search-result")).toContain("height: var(--row)");
     expect(rule(".app-search-result.active")).toContain("background: var(--k)");

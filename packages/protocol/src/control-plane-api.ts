@@ -2,6 +2,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { MessageInputBlockSchema } from "./frames.ts";
 import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts";
 import { ORB_NAME_MAX_CHARS } from "./orb-naming.ts";
+import { OrbMessageSystemSchema } from "./orb-sleep.ts";
 
 const closed = { additionalProperties: false } as const;
 
@@ -63,7 +64,7 @@ export const OrbStateSchema = Type.Union([
 export type OrbState = Static<typeof OrbStateSchema>;
 
 /** Why an orb last entered `stopping`; absent for explicit stops (docs/lifecycle.md). */
-export const StopReasonSchema = Type.Literal("idle");
+export const StopReasonSchema = Type.Union([Type.Literal("idle"), Type.Literal("sleep")]);
 export type StopReason = Static<typeof StopReasonSchema>;
 
 export const PROJECT_NAME_MAX_CHARS = 80;
@@ -180,6 +181,15 @@ export const OrbStateDetailSchema = Type.Union([
   ),
   Type.Object(
     {
+      type: Type.Literal("waiting_for_sleep"),
+      sleepUntil: Type.String(),
+      phase: Type.Union([Type.Literal("waiting_for_idle"), Type.Literal("stopping")]),
+      message: Type.Optional(Type.String()),
+    },
+    closed,
+  ),
+  Type.Object(
+    {
       type: Type.Literal("waiting_for_runtime"),
       hostState: Type.Union([Type.String(), Type.Null()]),
       secondsSinceHostRunning: Type.Union([Type.Number(), Type.Null()]),
@@ -253,7 +263,9 @@ export const OrbViewSchema = Type.Object(
     lastError: Type.Optional(Type.String()),
     /** Synthesized from in-memory reconciler state; never stored. */
     stateDetail: Type.Optional(OrbStateDetailSchema),
-    /** Present when the last stop was automatic ("stopped (idle)", docs/lifecycle.md). */
+    /** Present while a scheduled sleep is pending. */
+    sleepUntil: Type.Optional(Type.String()),
+    /** Present when the last stop was automatic. */
     stopReason: Type.Optional(StopReasonSchema),
     stateChangedAt: Type.String(),
     archivedAt: Type.Optional(Type.String()),
@@ -303,6 +315,7 @@ export const OrbMessageViewSchema = Type.Object(
     id: Type.String(),
     orbId: Type.String(),
     content: Type.Array(MessageInputBlockSchema),
+    system: Type.Optional(OrbMessageSystemSchema),
     status: OrbMessageStatusSchema,
     delivery: Type.Optional(Type.Union([Type.Literal("turn"), Type.Literal("steer")])),
     operationId: Type.Optional(Type.String()),

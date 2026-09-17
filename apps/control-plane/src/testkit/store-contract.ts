@@ -4,7 +4,7 @@ import { NoSimulationTask } from "determined";
 import { err, ok } from "neverthrow";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ControlPlaneDatabase } from "../adapters/database.ts";
-import type { PostgreSQLClient } from "../adapters/pg/client.ts";
+import { jsonParam, type PostgreSQLClient } from "../adapters/pg/client.ts";
 import type { StoreError } from "../domain/errors.ts";
 import type { OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
@@ -58,6 +58,8 @@ const orb: OrbRow = {
   lastBusyAt: null,
   uploadActiveUntil: null,
   stopReason: null,
+  sleepId: null,
+  sleepUntil: null,
   lastMintAt: null,
   stateChangedAt: 1_000,
   createdAt: 1_000,
@@ -127,6 +129,106 @@ export function storeSemanticsContractTests(
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
+
+    it("atomically accepts and resolves scheduled sleep with singleton system provenance", async () => {
+      const running = {
+        ...orb,
+        state: "running" as const,
+        runtimeTokenHash: "caller",
+        hostIncarnation: 2,
+      };
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      expect((await store.insertOrb(task, running)).isOk()).toBe(true);
+      const sleepId = "00000000-0000-4000-8000-000000000041";
+      const accepted = await store.scheduleOrbSleep(task, {
+        orbId: orb.id,
+        caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
+        sleepId,
+        durationSeconds: 1,
+      });
+      const acceptedOrb = accepted._unsafeUnwrap();
+      expect(acceptedOrb.sleepUntil).not.toBeNull();
+      if (acceptedOrb.sleepUntil === null) throw new Error("accepted sleep must have a deadline");
+      const deadline = acceptedOrb.sleepUntil;
+      expect(acceptedOrb).toMatchObject({ sleepId, stateVersion: 1 });
+      expect(
+        (
+          await store.scheduleOrbSleep(task, {
+            orbId: orb.id,
+            caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
+            sleepId: "00000000-0000-4000-8000-000000000042",
+            durationSeconds: 2,
+          })
+        ).isErr(),
+      ).toBe(true);
+      const stopped = await store.casTransition(task, {
+        orbId: orb.id,
+        expectedStateVersion: 1,
+        toState: "stopped",
+        now: 2500,
+      });
+      expect(stopped.isOk()).toBe(true);
+      expect(
+        (
+          await store.processDueOrbSleep(task, {
+            orbId: orb.id,
+            sleepId,
+            expectedStateVersion: 2,
+            now: deadline - 1,
+          })
+        )._unsafeUnwrap(),
+      ).toBe("waiting");
+      expect(
+        (
+          await store.processDueOrbSleep(task, {
+            orbId: orb.id,
+            sleepId,
+            expectedStateVersion: 2,
+            now: deadline,
+          })
+        )._unsafeUnwrap(),
+      ).toBe("wake");
+      expect(
+        (
+          await store.processDueOrbSleep(task, {
+            orbId: orb.id,
+            sleepId,
+            expectedStateVersion: 2,
+            now: deadline,
+          })
+        )._unsafeUnwrap(),
+      ).toBe("stale");
+      const messages = (await store.listOrbMessages(task, orb.id))._unsafeUnwrap();
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({
+        messageId: sleepId,
+        system: { kind: "sleep_wake", sleepUntil: new Date(deadline).toISOString() },
+        autoStart: true,
+        wakeStateVersion: 3,
+      });
+      expect(
+        (
+          await store.casTransition(task, {
+            orbId: orb.id,
+            expectedStateVersion: 3,
+            toState: "starting",
+            now: deadline,
+          })
+        ).isOk(),
+      ).toBe(true);
+      const bootRequest = {
+        orbId: orb.id,
+        caller: { runtimeTokenHash: "caller", hostIncarnation: 2 },
+      };
+      expect((await store.readOrbBootContext(task, bootRequest))._unsafeUnwrap()).toMatchObject({
+        messageId: sleepId,
+        messageIds: [sleepId],
+        system: { kind: "sleep_wake" },
+      });
+      expect((await store.readOrbBootContext(task, bootRequest))._unsafeUnwrap()?.messageId).toBe(
+        sleepId,
+      );
+    });
 
     it("atomically registers immutable upload batch membership", async () => {
       await store.insertProject(task, project);
@@ -218,6 +320,7 @@ export function storeSemanticsContractTests(
         content: [{ type: "text" as const, text: "uploaded sample.bin" }],
         now: 2005,
         wake: false,
+        cancelSleep: false,
       };
       expect((await store.enqueueOrbMessage(task, message))._unsafeUnwrap().message.autoStart).toBe(
         false,
@@ -1224,7 +1327,13 @@ export function storeSemanticsContractTests(
       });
       expect(backToStopped.isOk()).toBe(true);
       expect(
-        (await store.clearOrbMessageAutoStart(task, { orbId: orb.id, now: 2_700 })).isOk(),
+        (
+          await store.requestOrbStop(task, {
+            orbId: orb.id,
+            expectedStateVersion: 5,
+            now: 2_700,
+          })
+        ).isOk(),
       ).toBe(true);
       const notWoken = await store.casStartOrbForQueuedMessage(task, {
         orbId: orb.id,
@@ -2128,6 +2237,27 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         true,
       );
       expect((await client.query("SELECT * FROM orb_spawns"))._unsafeUnwrap().rows).toHaveLength(0);
+    });
+
+    it("rejects malformed system inbox provenance at the schema boundary", async () => {
+      await seed();
+      for (const [index, system] of [
+        {},
+        { kind: null, sleepUntil: "x" },
+        { kind: "sleep_wake" },
+        { kind: "sleep_wake", sleepUntil: "x", extra: true },
+      ].entries()) {
+        const inserted = await client.query(
+          `INSERT INTO orb_messages (orb_id, message_id, content, system)
+           VALUES ($1, $2, '[]'::jsonb, $3::jsonb)`,
+          [
+            orb.id,
+            `00000000-0000-4000-8000-${String(index + 51).padStart(12, "0")}`,
+            jsonParam(system),
+          ],
+        );
+        expect(inserted.isErr()).toBe(true);
+      }
     });
 
     // The regression from

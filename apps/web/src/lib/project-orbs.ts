@@ -1,5 +1,5 @@
 import type { OrbState, OrbView, ProjectView } from "@pi-orb/protocol";
-import { FAVICON_HREFS } from "./favicon.ts";
+import { FAVICON_HREFS, isOrbSleeping } from "./favicon.ts";
 
 export type ProjectOrbShelf = "working" | "archive";
 
@@ -38,7 +38,16 @@ export function formatTimeRemaining(deadline: string, now: number): string | nul
   return formatCompactDuration(parsed - now);
 }
 
-export type OrbGlyphState = "busy" | "idle" | "start" | "stop" | "fail" | "arch" | "archng" | "del";
+export type OrbGlyphState =
+  | "busy"
+  | "idle"
+  | "start"
+  | "stop"
+  | "sleep"
+  | "fail"
+  | "arch"
+  | "archng"
+  | "del";
 
 export interface OrbGlyph {
   /** Selects the hue for the glyph and the entry's left border. */
@@ -53,6 +62,7 @@ const GLYPHS: Record<OrbGlyphState, string> = {
   idle: FAVICON_HREFS.running,
   start: FAVICON_HREFS.transitional,
   stop: FAVICON_HREFS.stopped,
+  sleep: FAVICON_HREFS.sleeping,
   fail: FAVICON_HREFS.failed,
   arch: FAVICON_HREFS.archived,
   archng: FAVICON_HREFS.archiving,
@@ -60,24 +70,35 @@ const GLYPHS: Record<OrbGlyphState, string> = {
 };
 
 /** Shared favicon/UI tile, refined by the latest activity observation. */
-export function projectOrbGlyph(state: OrbState, activity?: OrbView["activity"]): OrbGlyph {
+export function projectOrbGlyph(
+  state: OrbState,
+  activity?: OrbView["activity"],
+  sleepUntil?: OrbView["sleepUntil"],
+): OrbGlyph {
   const busy = state === "running" && activity === "busy";
+  const sleeping = isOrbSleeping(state, sleepUntil);
   const glyphState: OrbGlyphState = busy
     ? "busy"
     : state === "running"
       ? "idle"
-      : state === "stopped"
-        ? "stop"
-        : state === "failed"
-          ? "fail"
-          : state === "archived"
-            ? "arch"
-            : state === "archiving"
-              ? "archng"
-              : state === "deleting"
-                ? "del"
-                : "start";
-  return { state: glyphState, iconHref: GLYPHS[glyphState], label: busy ? "busy" : state };
+      : sleeping
+        ? "sleep"
+        : state === "stopped"
+          ? "stop"
+          : state === "failed"
+            ? "fail"
+            : state === "archived"
+              ? "arch"
+              : state === "archiving"
+                ? "archng"
+                : state === "deleting"
+                  ? "del"
+                  : "start";
+  return {
+    state: glyphState,
+    iconHref: GLYPHS[glyphState],
+    label: sleeping ? "Orb sleeping" : busy ? "busy" : state,
+  };
 }
 
 /** Disposal and retained transcripts leave the working set for the archive shelf. */

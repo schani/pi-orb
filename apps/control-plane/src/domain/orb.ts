@@ -2,6 +2,7 @@ import type {
   HarnessSessionMetadata,
   MessageInputBlock,
   OrbMessageStatus,
+  OrbMessageSystem,
   OrbState,
   ProjectState,
   StopReason,
@@ -59,6 +60,8 @@ export interface OrbRow {
   readonly uploadActiveUntil: number | null;
   /** Why the orb last entered `stopping`; null for explicit stops. */
   readonly stopReason: StopReason | null;
+  readonly sleepId: string | null;
+  readonly sleepUntil: number | null;
   /** Durable per-orb mint rate-limit floor; monotone, written outside the CAS. */
   readonly lastMintAt: number | null;
   readonly stateChangedAt: number;
@@ -72,6 +75,7 @@ export interface OrbMessageRow {
   readonly messageId: string;
   readonly ordinal: number;
   readonly content: readonly MessageInputBlock[];
+  readonly system: OrbMessageSystem | null;
   readonly status: OrbMessageStatus;
   readonly delivery: "turn" | "steer" | null;
   readonly operationId: string | null;

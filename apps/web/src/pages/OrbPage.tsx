@@ -398,6 +398,45 @@ export function isLiveBusy(
   return lifecycle === "running" && state.connection === "open" && state.activity === "busy";
 }
 
+export function canStopOrb(orb: OrbView): boolean {
+  if (orb.state === "creating" || orb.state === "starting" || orb.state === "running") return true;
+  if (orb.state === "stopping") return orb.stopReason === "sleep";
+  return (orb.state === "stopped" || orb.state === "failed") && orb.sleepUntil !== undefined;
+}
+
+export function orbLifecycleStatus(orb: OrbView, now: number): string {
+  if (orb.state === "failed") return "failed";
+  if (orb.stopReason === "idle" && (orb.state === "stopping" || orb.state === "stopped")) {
+    return `${orb.state} (idle)`;
+  }
+  if (orb.stopReason === "sleep" && orb.state === "stopping") return "stopping (sleep)";
+  if (orb.sleepUntil === undefined) {
+    return orb.activity === "busy" ? `${orb.state} · busy` : orb.state;
+  }
+
+  const parsedDeadline = Date.parse(orb.sleepUntil);
+  const deadline = Number.isFinite(parsedDeadline)
+    ? new Date(parsedDeadline).toISOString().replace(".000Z", "Z")
+    : orb.sleepUntil;
+  if (orb.state === "stopped") return `sleeping until ${deadline}`;
+  if (orb.state === "running") {
+    const remaining = formatTimeRemaining(orb.sleepUntil, now);
+    const wake = remaining === null ? "wake due" : `wakes in ${remaining}`;
+    const activity = orb.activity === "busy" ? " · busy" : "";
+    return `running${activity} · sleep pending · ${wake}`;
+  }
+  return orb.state;
+}
+
+export function sleepWaitingNotice(
+  detail: Extract<NonNullable<OrbView["stateDetail"]>, { type: "waiting_for_sleep" }>,
+): string {
+  if (detail.message !== undefined) return `Sleep pending: ${detail.message}`;
+  return detail.phase === "waiting_for_idle"
+    ? "Sleep pending: waiting for work and uploads…"
+    : "Sleep pending: stopping…";
+}
+
 export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageState {
   switch (action.type) {
     case "history_loaded":
@@ -803,6 +842,7 @@ function OrbConversation({
     orb?.state ?? null,
     state.connection,
     state.activity,
+    orb?.sleepUntil,
   );
   useEffect(() => setOrbFavicon(faviconStatus), [faviconStatus]);
   useEffect(() => () => setOrbFavicon("neutral"), []);
@@ -1176,9 +1216,7 @@ function OrbConversation({
   };
 
   const canStart = orb !== null && (orb.state === "stopped" || orb.state === "failed");
-  const canStop =
-    orb !== null &&
-    (orb.state === "creating" || orb.state === "starting" || orb.state === "running");
+  const canStop = orb !== null && canStopOrb(orb);
   const connected = state.connection === "open";
   const messageAccepting =
     orb !== null &&
@@ -1209,13 +1247,8 @@ function OrbConversation({
 
   if (orbNotFound) return <NotFoundPage resourceName="Orb" />;
 
-  const glyph = orb === null ? null : projectOrbGlyph(orb.state, orb.activity);
-  const lifecycleWord =
-    orb === null
-      ? null
-      : orb.stopReason === "idle" && (orb.state === "stopping" || orb.state === "stopped")
-        ? `${orb.state} (idle)`
-        : orb.state;
+  const glyph = orb === null ? null : projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil);
+  const lifecycleWord = orb === null ? null : orbLifecycleStatus(orb, ageNow);
   const busyLocked = orb?.state === "deleting" || orb?.state === "archiving";
   const expiresIn =
     orb?.actionRequired === undefined || orb.actionRequired.type === "owner_login_required"
@@ -1272,9 +1305,7 @@ function OrbConversation({
           {glyph !== null && lifecycleWord !== null && (
             <span className="orb-life">
               <StateTile glyph={glyph} decorative />
-              <span className="orb-life-word">
-                {orb?.activity === "busy" ? `${lifecycleWord} · busy` : lifecycleWord}
-              </span>
+              <span className="orb-life-word">{lifecycleWord}</span>
             </span>
           )}
           <button
@@ -1410,6 +1441,9 @@ function OrbConversation({
               {orb.stateDetail.retrying && " (retrying)"}
               {orb.stateDetail.message !== undefined && ` — ${orb.stateDetail.message}`}
             </OrbNotice>
+          )}
+          {orb?.stateDetail?.type === "waiting_for_sleep" && (
+            <OrbNotice>{sleepWaitingNotice(orb.stateDetail)}</OrbNotice>
           )}
           {orb?.stateDetail?.type === "waiting_for_runtime" && (
             <OrbNotice>

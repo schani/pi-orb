@@ -34,6 +34,8 @@ const orb: OrbRow = {
   lastBusyAt: null,
   uploadActiveUntil: null,
   stopReason: null,
+  sleepId: null,
+  sleepUntil: null,
   lastMintAt: null,
   stateChangedAt: 1_700_000_000_000,
   createdAt: 1_700_000_000_000,
@@ -78,6 +80,23 @@ describe("orbView activity", () => {
     const stopped = orbView({ ...orb, state: "stopped" }, control, {});
     expect(stopped.activity).toBeUndefined();
     expect("activity" in stopped).toBe(false);
+  });
+});
+
+describe("orbView sleep", () => {
+  it("shows the deadline and waiting phase", () => {
+    const view = orbView(
+      { ...orb, sleepId: "sleep-1", sleepUntil: 20_000 },
+      new ControlState(),
+      {},
+    );
+    expect(view.sleepUntil).toBe(new Date(20_000).toISOString());
+    expect(view.stateDetail).toEqual({
+      type: "waiting_for_sleep",
+      sleepUntil: new Date(20_000).toISOString(),
+      phase: "waiting_for_idle",
+    });
+    expect(Check(OrbViewSchema, view)).toBe(true);
   });
 });
 

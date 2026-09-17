@@ -283,6 +283,10 @@ h3 {
   color: var(--st-stop);
 }
 
+.s-sleep {
+  color: var(--st-stop);
+}
+
 .s-fail {
   font-weight: 700;
   color: var(--st-fail);
@@ -611,6 +615,11 @@ a.project-new-orb-icon:focus-visible {
   border-left-color: var(--st-stop);
 }
 
+.orb-entry-sleep,
+.ix-row-sleep {
+  border-left-color: var(--st-stop);
+}
+
 .orb-entry-fail,
 .ix-row-fail {
   border-left-color: var(--st-fail);
@@ -638,6 +647,7 @@ a.project-new-orb-icon:focus-visible {
 }
 
 .orb-entry-stop .orb-entry-link,
+.orb-entry-sleep .orb-entry-link,
 .orb-entry-arch .orb-entry-link,
 .orb-entry-archng .orb-entry-link,
 .orb-entry-del .orb-entry-link {

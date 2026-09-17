@@ -168,12 +168,31 @@ async function reconcileAndScheduleNext(
   reconcile: ReconcileOne = reconcileOrbOnce,
 ): Promise<void> {
   const outcome = await reconcile(task, deps, orb.id);
-  const delay = reconcileDelayMs(task, deps, orb.id, orb.state, outcome, retryKey);
+  const ordinaryDelay = reconcileDelayMs(task, deps, orb.id, orb.state, outcome, retryKey);
+  const delay =
+    orb.sleepUntil === null || outcome.type === "retryable"
+      ? ordinaryDelay
+      : Math.min(ordinaryDelay, Math.max(0, orb.sleepUntil - task.wallNow()));
   deps.control.setNextAttemptAtIfGeneration(
     retryKey,
     scheduleGeneration,
     task.monotonicNow() + delay,
     orb.stateVersion,
+  );
+}
+
+function isReconcileDue(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orb: OrbRow,
+  key: string,
+): boolean {
+  if (deps.control.isReconcileDue(key, orb.stateVersion, task.monotonicNow())) return true;
+  return (
+    orb.sleepUntil !== null &&
+    task.wallNow() >= orb.sleepUntil &&
+    !deps.control.hasRetryAttempts(key) &&
+    deps.control.getNextAttemptAt(key) !== PARKED_FOREVER
   );
 }
 
@@ -192,10 +211,9 @@ export async function reconcileAllOnce(
   if (deps.control.noteCondition("reconcile-loop:list", false)) {
     logEvent(task, "reconcile-loop-recovered");
   }
-  const now = task.monotonicNow();
   for (const orb of orbsResult.value) {
     const key = `reconcile:${orb.id}`;
-    if (!deps.control.isReconcileDue(key, orb.stateVersion, now)) continue;
+    if (!isReconcileDue(task, deps, orb, key)) continue;
     await reconcileAndScheduleNext(task, deps, orb, key, deps.control.getScheduleGeneration(key));
   }
 }
@@ -244,14 +262,9 @@ export class ReconcileDispatcher {
       logEvent(task, "reconcile-loop-recovered");
     }
 
-    const now = task.monotonicNow();
     for (const orb of orbsResult.value) {
       const key = `reconcile:${orb.id}`;
-      if (
-        !this.deps.control.isReconcileDue(key, orb.stateVersion, now) ||
-        this.inFlight.has(orb.id)
-      )
-        continue;
+      if (!isReconcileDue(task, this.deps, orb, key) || this.inFlight.has(orb.id)) continue;
       this.dispatch(task, orb, key, this.deps.control.getScheduleGeneration(key));
     }
   }

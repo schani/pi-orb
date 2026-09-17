@@ -100,6 +100,30 @@ describe("project orb presentation", () => {
     });
   });
 
+  it("uses sleeping only for stopped orbs with a deadline", () => {
+    const sleepUntil = "2026-09-18T00:00:00.000Z";
+    expect(projectOrbGlyph("stopped", undefined, sleepUntil)).toEqual({
+      state: "sleep",
+      iconHref: "/favicons/sleeping.svg",
+      label: "Orb sleeping",
+    });
+    expect(projectOrbGlyph("stopped", undefined, undefined).iconHref).toBe("/favicons/stopped.svg");
+    for (const state of [
+      "running",
+      "creating",
+      "starting",
+      "stopping",
+      "failed",
+      "archiving",
+      "archived",
+      "deleting",
+    ] as const) {
+      expect(
+        projectOrbGlyph(state, state === "running" ? "busy" : undefined, sleepUntil).iconHref,
+      ).not.toBe("/favicons/sleeping.svg");
+    }
+  });
+
   it("exposes only actions accepted by the lifecycle state", () => {
     expect(projectOrbActions("running")).toEqual({ archive: true, delete: true });
     expect(projectOrbActions("archiving")).toEqual({ archive: false, delete: true });

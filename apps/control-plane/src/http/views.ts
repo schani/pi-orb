@@ -64,6 +64,14 @@ function stateDetailOf(
       ...(orb.lastError !== null ? { message: orb.lastError } : {}),
     };
   }
+  if (orb.sleepId !== null && orb.sleepUntil !== null) {
+    return {
+      type: "waiting_for_sleep",
+      sleepUntil: iso(orb.sleepUntil),
+      phase: orb.state === "stopping" ? "stopping" : "waiting_for_idle",
+      ...(drain?.message !== undefined ? { message: drain.message } : {}),
+    };
+  }
   if (drain !== null) {
     return {
       type: "draining_history",
@@ -152,6 +160,7 @@ export function orbView(
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
     ...(stateDetail !== undefined ? { stateDetail } : {}),
+    ...(orb.sleepUntil !== null ? { sleepUntil: iso(orb.sleepUntil) } : {}),
     ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),
     stateChangedAt: iso(orb.stateChangedAt),
     ...(orb.archivedAt != null ? { archivedAt: iso(orb.archivedAt) } : {}),

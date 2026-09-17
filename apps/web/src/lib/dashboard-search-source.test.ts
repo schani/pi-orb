@@ -72,6 +72,26 @@ describe("dashboard search source", () => {
     );
   });
 
+  it("forwards sleep metadata into Find glyphs", () => {
+    const sleeping = {
+      ...orb("sleeping", "Delayed work", "stopped"),
+      sleepUntil: "2026-09-18T00:00:00.000Z",
+    };
+    const source = buildDashboardSearchSource({
+      projects: [project("project-1", "Atlas", "https://github.com/acme/atlas")],
+      projectsLoading: false,
+      projectsFailed: false,
+      now,
+      orbLists: { "project-1": { type: "loaded", items: [sleeping] } },
+    });
+
+    expect(source.items.find((item) => item.title === "Delayed work")?.glyph).toEqual({
+      state: "sleep",
+      iconHref: "/favicons/sleeping.svg",
+      label: "Orb sleeping",
+    });
+  });
+
   it("does not make ids or lifecycle state implicitly searchable", () => {
     const source = buildDashboardSearchSource({
       projects: [project("secret-project-id", "Atlas", "https://github.com/acme/atlas")],

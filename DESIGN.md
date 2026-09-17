@@ -20,7 +20,7 @@ The first target is deliberately narrow:
 - Embed Pi through its TypeScript SDK.
 - Provide a web UI; no terminal TUI and no tmux-based interaction.
 - Run exactly one Pi session/conversation per orb.
-- Support a linear conversation and compaction. Do not expose branching, session switching, cloning, or forking initially. Durable send-anytime input is implemented: a message steers when delivered to a busy agent and otherwise starts a turn, while submission to a stopped or failed orb durably queues the message and requests startup (`docs/runtime-protocol.md`).
+- Support a linear conversation and compaction. Do not expose branching, session switching, cloning, or forking initially. Durable send-anytime input is implemented: a message steers when delivered to a busy agent and otherwise starts a turn, while submission to a stopped or failed orb durably queues the message and requests startup (`docs/runtime-protocol.md`). Scheduled self-sleep is approved and under DST-first implementation: graceful stop/start with a durable deadline and combined first-wake notification (`docs/orb-sleep.md`).
 - Persist the orb itself only through its filesystem.
 - Replicate the complete conversation history to the control plane database.
 - Make stopped-orb history viewable immediately from the database without starting the orb.
@@ -101,6 +101,7 @@ Subsystem designs:
 - [docs/native-vm-prototype.md](docs/native-vm-prototype.md) — native Debian VM experiment, retention/failure evidence, image inventory, and limits
 - [docs/compute-replacement.md](docs/compute-replacement.md) — immutable-compute plan: dispose failed incarnations, replace stale host specifications on next Start, and retain the workspace throughout
 - [docs/lifecycle.md](docs/lifecycle.md) — orb states, reconciliation rules, idle auto-stop, the orphan-host sweep
+- [docs/orb-sleep.md](docs/orb-sleep.md) — approved, DST-first implementation contract for CLI-requested graceful stop/start and combined first-wake notice
 - [docs/orb-deletion.md](docs/orb-deletion.md) — permanent orb deletion, resource inventory, cleanup protocol, and verification plan
 - [docs/project-deletion.md](docs/project-deletion.md) — permanent project deletion by atomic fan-out through deletion-grade cleanup for every child orb
 - [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup

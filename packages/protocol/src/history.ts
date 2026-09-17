@@ -222,6 +222,8 @@ export const EventRecordSchema = Type.Object(
     custom: Type.Optional(CustomMessageSchema),
     /** Present iff the custom message is a subagent receipt. */
     subagent: Type.Optional(SubagentNoticeSchema),
+    /** Durable inbox identities delivered by this event, in order. */
+    inboxMessageIds: Type.Optional(Type.Array(Type.String())),
   },
   closed,
 );

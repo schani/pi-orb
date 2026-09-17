@@ -416,6 +416,7 @@ export const HistoryView = memo(function HistoryView({
         index === mergedTurnIndex ? renderTurn(turn, liveAgentContent, busy) : renderTurn(turn),
       )}
       {pendingMessages.map((message) => {
+        const system = message.system !== undefined;
         const record: MessageRecord = {
           id: `queued:${message.id}`,
           parentId: null,
@@ -436,8 +437,8 @@ export const HistoryView = memo(function HistoryView({
         // forever (docs/runtime-protocol.md).
         const failed = message.status === "failed";
         return (
-          <article className="rec rec-you rec-q" key={message.id}>
-            <span className="visually-hidden">You:</span>
+          <article className={`rec ${system ? "rec-orb" : "rec-you"} rec-q`} key={message.id}>
+            <span className="visually-hidden">{system ? "System:" : "You:"}</span>
             <div className="rec-bd">
               <span className="rec-status">{status}</span>
               {renderMessageBlocks(record)}

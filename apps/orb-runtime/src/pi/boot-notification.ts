@@ -1,3 +1,4 @@
+import type { OrbBootContext } from "@pi-orb/protocol";
 import {
   detectInterruptedTurn,
   type InterruptedTurnShape,
@@ -15,6 +16,7 @@ export interface BootIdentity {
 
 export const BOOT_BASELINE_TYPE = "pi-orb.boot";
 export const HOST_RESTARTED_TYPE = "pi-orb.host-restarted";
+export const SLEEP_WAKE_TYPE = "pi-orb.sleep-wake";
 export const HOST_RESTART_CONTEXT =
   "The host was restarted. All processes running before the restart were killed, including servers, background jobs, and shell sessions.";
 export const RUNTIME_RESTART_CONTEXT =
@@ -41,6 +43,8 @@ export type BootNotificationPlan =
           readonly headRecordId: string | null;
           readonly shape?: InterruptedTurnShape;
           readonly previousRuntimeInstanceId: string | null;
+          readonly messageIds?: readonly string[];
+          readonly sleepUntil?: string;
         };
       };
     };
@@ -63,6 +67,7 @@ function lastBoot(entries: readonly unknown[]): BootIdentity | null {
         HOST_RESTARTED_TYPE,
         TURN_RESUME_CUSTOM_TYPE,
         TURN_RESUME_DECLINED_CUSTOM_TYPE,
+        SLEEP_WAKE_TYPE,
       ].includes(String(type))
     )
       continue;
@@ -91,14 +96,27 @@ export function planBootNotification(
   entries: readonly unknown[],
   context: readonly unknown[],
   identity: BootIdentity,
+  sleepWake: OrbBootContext | null = null,
 ): BootNotificationPlan {
+  if (
+    sleepWake !== null &&
+    entries.some((raw) => {
+      const entry = object(raw);
+      if (entry?.["type"] !== "custom_message" || entry["customType"] !== SLEEP_WAKE_TYPE)
+        return false;
+      const details = object(entry["details"]);
+      const ids = details?.["messageIds"];
+      return Array.isArray(ids) && ids.includes(sleepWake.messageId);
+    })
+  )
+    return { kind: "none" };
   const previous = lastBoot(entries);
   if (previous?.runtimeInstanceId === identity.runtimeInstanceId) return { kind: "none" };
   const conversational = entries.some((raw) => {
     const entry = object(raw);
     return entry?.["type"] === "message" || entry?.["type"] === "custom_message";
   });
-  if (!conversational) return { kind: "baseline", identity };
+  if (!conversational && sleepWake === null) return { kind: "baseline", identity };
 
   const hostRestarted =
     previous !== null &&
@@ -120,17 +138,27 @@ export function planBootNotification(
     kind: "message",
     triggerTurn: !declined,
     marker: {
-      customType: resume.resume
-        ? TURN_RESUME_CUSTOM_TYPE
-        : declined
-          ? TURN_RESUME_DECLINED_CUSTOM_TYPE
-          : HOST_RESTARTED_TYPE,
+      customType:
+        sleepWake !== null
+          ? SLEEP_WAKE_TYPE
+          : resume.resume
+            ? TURN_RESUME_CUSTOM_TYPE
+            : declined
+              ? TURN_RESUME_DECLINED_CUSTOM_TYPE
+              : HOST_RESTARTED_TYPE,
       content: `${restartContext} ${
         resume.resume
           ? "The previous turn was interrupted — resuming it now. Continue from where you left off."
           : declined
             ? TURN_RESUME_DECLINED_CONTENT
             : SETTLED_INSTRUCTION
+      }${
+        sleepWake === null
+          ? ""
+          : ` ${sleepWake.content
+              .filter((block) => block.type === "text")
+              .map((block) => block.text)
+              .join(" ")}`
       }`,
       display: true,
       details: {
@@ -149,6 +177,12 @@ export function planBootNotification(
             : null,
         previousRuntimeInstanceId: previous?.runtimeInstanceId ?? null,
         ...(resume.resume ? { shape: resume.shape } : {}),
+        ...(sleepWake === null
+          ? {}
+          : {
+              messageIds: sleepWake.messageIds,
+              sleepUntil: sleepWake.system.sleepUntil,
+            }),
       },
     },
   };

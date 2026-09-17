@@ -257,6 +257,33 @@ describe("HistoryView turn structure", () => {
     expect(committedHtml.match(/queued while starting/g)).toHaveLength(1);
   });
 
+  it("renders system inbox notices without presenting them as human turns", () => {
+    const html = renderToStaticMarkup(
+      <HistoryView
+        records={[]}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+        queuedMessages={[
+          {
+            id: "00000000-0000-4000-8000-000000000124",
+            orbId: "orb-1",
+            content: [{ type: "text", text: "Scheduled sleep ended." }],
+            system: { kind: "sleep_wake", sleepUntil: "2026-09-17T01:00:00.000Z" },
+            status: "queued",
+            createdAt: "2026-09-17T01:00:00.000Z",
+            updatedAt: "2026-09-17T01:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("Scheduled sleep ended.");
+    expect(html).toContain("rec rec-orb rec-q");
+    expect(html).not.toContain("rec rec-you rec-q");
+    expect(html).not.toContain(">You:<");
+  });
+
   it("identifies steering messages without dropping their content", () => {
     const html = renderToStaticMarkup(
       <HistoryView

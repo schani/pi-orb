@@ -29,6 +29,8 @@ export interface LivenessEntry {
 export interface DrainStatus {
   retrying: boolean;
   message?: string;
+  /** Wall-clock start of the post-preparation history drain. */
+  startedAt?: number;
 }
 
 /** Live picture of a boot in progress (creating/starting). */
@@ -321,6 +323,10 @@ export class ControlState {
 
   clearRetryAttempts(orbId: string): void {
     this.retryAttempts.delete(orbId);
+  }
+
+  hasRetryAttempts(orbId: string): boolean {
+    return this.retryAttempts.has(orbId);
   }
 
   // -- OAuth device flow --

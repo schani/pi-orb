@@ -69,6 +69,43 @@ describe("boot notification decision", () => {
     const marker = persisted(notice(settled));
     expect(planBootNotification([...settled, marker], [finished], boot).kind).toBe("none");
   });
+  it("combines a sleep wake with restart context and inbox identity", () => {
+    const plan = planBootNotification(settled, settled, boot, {
+      messageId: "sleep-1",
+      messageIds: ["sleep-1"],
+      content: [{ type: "text", text: "Sleep ended at its scheduled deadline." }],
+      system: { kind: "sleep_wake", sleepUntil: "2026-09-18T04:05:06.000Z" },
+    });
+    expect(plan.kind).toBe("message");
+    if (plan.kind !== "message") throw new Error("expected message");
+    expect(plan.triggerTurn).toBe(true);
+    expect(plan.marker.customType).toBe("pi-orb.sleep-wake");
+    expect(plan.marker.content).toContain("All processes running before the restart were killed");
+    expect(plan.marker.content).toContain("Sleep ended at its scheduled deadline");
+    expect(plan.marker.details).toMatchObject({
+      ...boot,
+      messageIds: ["sleep-1"],
+      sleepUntil: "2026-09-18T04:05:06.000Z",
+    });
+  });
+  it("deduplicates sleep context already persisted before replication", () => {
+    const first = planBootNotification(settled, settled, boot, {
+      messageId: "sleep-1",
+      messageIds: ["sleep-1"],
+      content: [{ type: "text", text: "wake" }],
+      system: { kind: "sleep_wake", sleepUntil: "2026-09-18T04:05:06.000Z" },
+    });
+    if (first.kind !== "message") throw new Error("expected message");
+    const marker = { type: "custom_message", id: "wake", ...first.marker };
+    expect(
+      planBootNotification([...settled, marker], [...settled, marker], boot, {
+        messageId: "sleep-1",
+        messageIds: ["sleep-1"],
+        content: [{ type: "text", text: "wake" }],
+        system: { kind: "sleep_wake", sleepUntil: "2026-09-18T04:05:06.000Z" },
+      }).kind,
+    ).toBe("none");
+  });
   it("combines interrupted-turn resume and restart context in one record", () => {
     const plan = notice([initialBoot, user, dangling]);
     expect(plan.triggerTurn).toBe(true);

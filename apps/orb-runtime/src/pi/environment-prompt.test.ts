@@ -28,6 +28,12 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("briefly lag");
   });
 
+  it("documents scheduled self-sleep", () => {
+    expect(environmentPrompt).toContain("pi-orb sleep 1h");
+    expect(environmentPrompt).toContain("stops this orb after admitted work finishes");
+    expect(environmentPrompt).toContain("absolute wake deadline");
+  });
+
   it("explains browser-owned MCP setup even without configured servers", () => {
     expect(environmentPrompt).toContain(
       "To add an MCP server, ask the user to open the project's config gear and use MCPs (OAuth Connect) or Secrets (static keys); catalog changes apply on next start, but OAuth reauthorization needs no restart.",

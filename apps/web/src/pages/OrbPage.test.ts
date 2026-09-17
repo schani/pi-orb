@@ -1,5 +1,13 @@
+import type { OrbView } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
-import { initialState, isLiveBusy, reducer } from "./OrbPage.tsx";
+import {
+  canStopOrb,
+  initialState,
+  isLiveBusy,
+  orbLifecycleStatus,
+  reducer,
+  sleepWaitingNotice,
+} from "./OrbPage.tsx";
 
 function busyState() {
   const state = reducer(initialState("orb-1"), {
@@ -16,6 +24,90 @@ function busyState() {
     },
   });
 }
+
+describe("scheduled sleep lifecycle status", () => {
+  const at = Date.parse("2026-09-17T00:00:00.000Z");
+  const orb = (fields: Partial<OrbView> & { state: OrbView["state"] }) => fields as OrbView;
+
+  it("keeps the current lifecycle visible with the pending sleep deadline", () => {
+    expect(
+      orbLifecycleStatus(
+        orb({ state: "running", sleepUntil: "2026-09-17T01:00:00.000Z" } as Partial<OrbView> & {
+          state: "running";
+        }),
+        at,
+      ),
+    ).toBe("running · sleep pending · wakes in 1h");
+    expect(
+      orbLifecycleStatus(
+        orb({
+          state: "running",
+          activity: "busy",
+          sleepUntil: "2026-09-17T01:00:00.000Z",
+        } as Partial<OrbView> & { state: "running" }),
+        at,
+      ),
+    ).toBe("running · busy · sleep pending · wakes in 1h");
+  });
+
+  it("shows a stopped pending sleep as sleeping without masking failures", () => {
+    expect(
+      orbLifecycleStatus(
+        orb({ state: "stopped", sleepUntil: "2026-09-17T01:00:00.000Z" } as Partial<OrbView> & {
+          state: "stopped";
+        }),
+        at,
+      ),
+    ).toBe("sleeping until 2026-09-17T01:00:00Z");
+    expect(
+      orbLifecycleStatus(
+        orb({ state: "failed", sleepUntil: "2026-09-17T01:00:00.000Z" } as Partial<OrbView> & {
+          state: "failed";
+        }),
+        at,
+      ),
+    ).toBe("failed");
+  });
+
+  it("surfaces upload-specific waiting detail supplied by the lifecycle", () => {
+    expect(
+      sleepWaitingNotice({
+        type: "waiting_for_sleep",
+        sleepUntil: "2026-09-17T01:00:00.000Z",
+        phase: "waiting_for_idle",
+        message: "Waiting for 2 pending uploads.",
+      }),
+    ).toBe("Sleep pending: Waiting for 2 pending uploads.");
+  });
+});
+
+describe("OrbPage stop action", () => {
+  const orb = (fields: Partial<OrbView> & { state: OrbView["state"] }) => fields as OrbView;
+
+  it("does not stop an ordinarily stopped orb", () => {
+    expect(canStopOrb(orb({ state: "stopped" }))).toBe(false);
+  });
+
+  it.each(["stopped", "failed"] as const)("cancels pending sleep while %s", (state) => {
+    expect(canStopOrb(orb({ state, sleepUntil: "2026-09-17T01:00:00.000Z" }))).toBe(true);
+  });
+
+  it("interrupts a graceful sleep stop after its schedule was canceled", () => {
+    expect(canStopOrb(orb({ state: "stopping", stopReason: "sleep" }))).toBe(true);
+  });
+
+  it("does not override an ordinary stop", () => {
+    expect(canStopOrb(orb({ state: "stopping" }))).toBe(false);
+  });
+
+  it.each(["archiving", "deleting", "archived"] as const)(
+    "does not stop terminal cleanup state %s",
+    (state) =>
+      expect(
+        canStopOrb(orb({ state, sleepUntil: "2026-09-17T01:00:00.000Z", stopReason: "sleep" })),
+      ).toBe(false),
+  );
+});
 
 describe("OrbPage live activity", () => {
   it("replaces the child roster and invalidates it across disconnect and operation changes", () => {

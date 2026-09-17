@@ -1306,6 +1306,7 @@ async function reconcileRunning(
     if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
     const messageIds = pendingBatch.value.map((message) => message.messageId);
     const batchId = pendingBatch.value[0]?.deliveryBatchId ?? messageIds[0] ?? "";
+    const system = pendingBatch.value[0]?.system ?? null;
     const delivered = await withDeadline(
       task,
       deps.constants.runtimeRequestTimeoutMs,
@@ -1319,6 +1320,7 @@ async function reconcileRunning(
             messageId: batchId,
             messageIds,
             content: squashMessageBatch(pendingBatch.value),
+            ...(system !== null ? { system } : {}),
           },
           context,
         );
@@ -1377,6 +1379,37 @@ async function reconcileRunning(
     }
     // An undelivered message is user work in flight, so the idle countdown
     // below is deliberately not reached while a batch is outstanding.
+    return { type: "noop" };
+  }
+
+  // Scheduled sleep ignores browser presence but waits for runtime work,
+  // outstanding inbox delivery, and admitted uploads. The batch branch above
+  // returned while any inbox obligation remained.
+  const sleepNow = task.wallNow();
+  if (orb.sleepId !== null && orb.sleepUntil !== null && sleepNow < orb.sleepUntil) {
+    const uploadActive = orb.uploadActiveUntil !== null && orb.uploadActiveUntil > sleepNow;
+    if (liveness.activity === "idle" && !uploadActive) {
+      deps.control.noteCondition(`sleep-wait:${orb.id}`, false);
+      await task.checkpoint("sleep.stop-before-cas");
+      const transitioned = await transitionTo(task, deps, orb, "stopping", {
+        stopReason: "sleep",
+        reason: "sleep_idle",
+      });
+      if (transitioned.type === "transitioned") {
+        deps.control.markStopping(orb.id, orb.stateVersion + 1);
+        logOrbEvent(task, orb.id, "sleep-stop-initiated", {
+          sleep_id: orb.sleepId,
+          sleep_until: new Date(orb.sleepUntil).toISOString(),
+        });
+      }
+      return transitioned;
+    }
+    if (deps.control.noteCondition(`sleep-wait:${orb.id}`, true)) {
+      logOrbEvent(task, orb.id, "sleep-waiting", {
+        sleep_id: orb.sleepId,
+        reason: uploadActive ? "upload" : "runtime_busy",
+      });
+    }
     return { type: "noop" };
   }
 
@@ -1495,7 +1528,10 @@ async function reconcileStopping(
 
   // A drain stuck longer than the create/start deadline cannot be completed
   // by waiting: the runtime cannot be restored to ready (docs/lifecycle.md).
-  if (task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs) {
+  if (
+    orb.stopReason !== "sleep" &&
+    task.wallNow() - orb.stateChangedAt > deps.constants.createStartDeadlineMs
+  ) {
     return failOrb(
       task,
       deps,
@@ -1610,7 +1646,7 @@ async function reconcileStopping(
 
   // Close runtime admission before the final drain, not after its idle snapshot.
   // Explicit Stop retains whole-host authority and does not require cooperation.
-  if (orb.stopReason === "idle") {
+  if (orb.stopReason === "idle" || orb.stopReason === "sleep") {
     if (observation.runtimeAddress === undefined) return retryable("runtime address unavailable");
     const baseUrl = observation.runtimeAddress.baseUrl;
     const prepared = await withDeadline(
@@ -1624,15 +1660,51 @@ async function reconcileStopping(
         deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
       if (deps.control.getDrainStatus(orb.id)?.retrying !== true)
         logOrbEvent(task, orb.id, "idle-stop-prepare-blocked", { message: prepared.error.message });
-      deps.control.setDrainStatus(orb.id, { retrying: true, message: prepared.error.message });
+      const drain = deps.control.getDrainStatus(orb.id);
+      if (
+        orb.stopReason === "sleep" &&
+        drain?.startedAt !== undefined &&
+        task.wallNow() - drain.startedAt > deps.constants.createStartDeadlineMs
+      ) {
+        return failOrb(
+          task,
+          deps,
+          orb,
+          "drain_runtime_unrecoverable",
+          "history drain could not complete within the create/start deadline after sleep preparation",
+        );
+      }
+      deps.control.setDrainStatus(orb.id, {
+        retrying: true,
+        message: prepared.error.message,
+        ...(drain?.startedAt === undefined ? {} : { startedAt: drain.startedAt }),
+      });
       return retryable(prepared.error);
     }
     deps.control.noteRuntimeAnswered(orb.id, task.monotonicNow());
-    if (!prepared.value.prepared)
+    if (!prepared.value.prepared) {
+      if (orb.stopReason === "sleep") {
+        deps.control.setDrainStatus(orb.id, {
+          retrying: false,
+          message: "Waiting for admitted work to finish",
+        });
+        return waiting("drain_blocked");
+      }
       return transitionTo(task, deps, orb, "running", {
         stopReason: null,
         reason: "idle_stop_declined_busy",
       });
+    }
+    if (orb.stopReason === "sleep") {
+      const drain = deps.control.getDrainStatus(orb.id);
+      if (drain?.startedAt === undefined) {
+        deps.control.setDrainStatus(orb.id, {
+          retrying: drain?.retrying ?? false,
+          ...(drain?.message === undefined ? {} : { message: drain.message }),
+          startedAt: task.wallNow(),
+        });
+      }
+    }
   }
 
   // The controlled-shutdown pull barrier (docs/history-replication.md).
@@ -1642,26 +1714,61 @@ async function reconcileStopping(
       logOrbEvent(task, orb.id, "drain-caught-up", {
         records: outcome.committedRecords,
         idle_stop_prepared: orb.stopReason === "idle" ? true : undefined,
+        sleep_stop_prepared: orb.stopReason === "sleep" ? true : undefined,
         after_retrying: deps.control.getDrainStatus(orb.id)?.retrying === true ? true : undefined,
       });
-      deps.control.setDrainStatus(orb.id, { retrying: false });
+      const drain = deps.control.getDrainStatus(orb.id);
       const stopped = await stopHost(task, deps, orb.id, orb.hostRef, "drain_complete");
       if (stopped.isErr()) {
+        if (
+          stopped.error.retryable &&
+          orb.stopReason === "sleep" &&
+          drain?.startedAt !== undefined &&
+          task.wallNow() - drain.startedAt > deps.constants.createStartDeadlineMs
+        ) {
+          return failOrb(
+            task,
+            deps,
+            orb,
+            "drain_runtime_unrecoverable",
+            "provider stop could not complete within the create/start deadline after sleep preparation",
+          );
+        }
         return stopped.error.retryable
           ? retryable(stopped.error)
           : failOrb(task, deps, orb, "provider_failed", stopped.error.message);
       }
+      deps.control.setDrainStatus(orb.id, { retrying: false });
       return transitionTo(task, deps, orb, "stopped", { reason: "drain_complete" });
     }
-    case "retryable":
+    case "retryable": {
       // The stop must not proceed; the host stays running while we retry. A
       // blocked drain re-enters this branch every reconcile tick, so only the
       // edge into "retrying" is logged (docs/lifecycle.md noise rule).
       if (deps.control.getDrainStatus(orb.id)?.retrying !== true) {
         logOrbEvent(task, orb.id, "drain-blocked", { message: outcome.message });
       }
-      deps.control.setDrainStatus(orb.id, { retrying: true, message: outcome.message });
+      const drain = deps.control.getDrainStatus(orb.id);
+      if (
+        orb.stopReason === "sleep" &&
+        drain?.startedAt !== undefined &&
+        task.wallNow() - drain.startedAt > deps.constants.createStartDeadlineMs
+      ) {
+        return failOrb(
+          task,
+          deps,
+          orb,
+          "drain_runtime_unrecoverable",
+          "history drain could not complete within the create/start deadline after sleep preparation",
+        );
+      }
+      deps.control.setDrainStatus(orb.id, {
+        retrying: true,
+        message: outcome.message,
+        ...(drain?.startedAt === undefined ? {} : { startedAt: drain.startedAt }),
+      });
       return waiting("drain_blocked");
+    }
     case "integrity":
       // The poll atomically failed the orb and requested shared compute disposal.
       logOrbEvent(task, orb.id, "drain-integrity", { reason: outcome.reason });
@@ -2065,6 +2172,25 @@ export async function reconcileOrbOnce(
   if (orbResult.isErr()) return retryable(orbResult.error);
   const orb = orbResult.value;
   if (orb === null) return { type: "noop" };
+  if (orb.sleepId !== null && orb.sleepUntil !== null && task.wallNow() >= orb.sleepUntil) {
+    await task.checkpoint("sleep.due-observed");
+    const due = await deps.store.processDueOrbSleep(task, {
+      orbId: orb.id,
+      sleepId: orb.sleepId,
+      expectedStateVersion: orb.stateVersion,
+      now: task.wallNow(),
+    });
+    if (due.isErr()) return retryable(due.error);
+    if (due.value === "wake" || due.value === "expired") {
+      logOrbEvent(task, orb.id, due.value === "wake" ? "sleep-wake-queued" : "sleep-expired", {
+        sleep_id: orb.sleepId,
+        sleep_until: new Date(orb.sleepUntil).toISOString(),
+      });
+      deps.control.nudgeNextAttemptAt(`reconcile:${orb.id}`);
+      return { type: "progressed" };
+    }
+    if (due.value === "stale") return { type: "conflict" };
+  }
   // Everything this process remembers is scoped to the orb's current visit to
   // its state (docs/lifecycle.md): a reconciler that never made the transition
   // itself must not judge this episode by the previous one's clocks.
@@ -2183,6 +2309,69 @@ export function createOrb(
   return new ResultAsync(run());
 }
 
+export function readOrbBootContext(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+  caller: ArchiveCaller,
+): ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError> {
+  return deps.store
+    .readOrbBootContext(task, { orbId, caller })
+    .mapErr((error) =>
+      error.type === "state_conflict"
+        ? commandError("conflict", "runtime incarnation changed during boot", true)
+        : mapStoreError(error),
+    );
+}
+
+export function requestOrbSleep(
+  task: SimulationTask,
+  deps: ControlPlaneDeps,
+  orbId: string,
+  caller: ArchiveCaller,
+  durationSeconds: number,
+  sleepId: string,
+): ResultAsync<{ sleepId: string; sleepUntil: number }, CommandError> {
+  const run = async (): Promise<Result<{ sleepId: string; sleepUntil: number }, CommandError>> => {
+    const now = task.wallNow();
+    const sleepUntil = now + durationSeconds * 1_000;
+    if (
+      !Number.isSafeInteger(durationSeconds) ||
+      durationSeconds <= 0 ||
+      !Number.isFinite(sleepUntil) ||
+      Math.abs(sleepUntil) > 8_640_000_000_000_000
+    )
+      return err(commandError("conflict", "sleep deadline is not representable", false));
+    const scheduled = await deps.store.scheduleOrbSleep(task, {
+      orbId,
+      caller,
+      sleepId,
+      durationSeconds,
+    });
+    if (scheduled.isErr())
+      return scheduled.error.type === "state_conflict"
+        ? err(
+            commandError(
+              "conflict",
+              "orb is not a current running incarnation or already has a sleep",
+              false,
+            ),
+          )
+        : err(mapStoreError(scheduled.error));
+    const acceptedUntil = scheduled.value.sleepUntil;
+    if (acceptedUntil === null)
+      return err(commandError("internal", "accepted sleep has no deadline", false));
+    logOrbEvent(task, orbId, "sleep-accepted", {
+      sleep_id: sleepId,
+      sleep_until: new Date(acceptedUntil).toISOString(),
+      caller_incarnation: caller.hostIncarnation,
+    });
+    deps.control.nudgeNextAttemptAt(`reconcile:${orbId}`);
+    return ok({ sleepId, sleepUntil: acceptedUntil });
+  };
+  return new ResultAsync(run());
+}
+
 /**
  * Idempotent for creating/starting/running; from stopped/failed it clears
  * last_error and enters starting; 409 while stopping.
@@ -2201,8 +2390,23 @@ export function requestOrbStart(
       switch (orb.state) {
         case "creating":
         case "starting":
-        case "running":
-          return ok(orb);
+        case "running": {
+          if (orb.sleepId === null) return ok(orb);
+          const cancelled = await deps.store.cancelOrbSleep(task, {
+            orbId,
+            expectedStateVersion: orb.stateVersion,
+            now: task.wallNow(),
+          });
+          if (cancelled.isOk()) {
+            logOrbEvent(task, orbId, "sleep-cancelled", {
+              sleep_id: orb.sleepId,
+              command: "start",
+            });
+            return ok(cancelled.value);
+          }
+          if (cancelled.error.type === "state_conflict") continue;
+          return err(mapCasError(cancelled.error));
+        }
         case "stopping":
           return err(commandError("conflict", "orb is stopping; retry after it has stopped", true));
         case "deleting":
@@ -2219,6 +2423,7 @@ export function requestOrbStart(
             now: task.wallNow(),
             lastError: null,
             stopReason: null,
+            cancelSleep: true,
           });
           if (cas.isOk()) {
             deps.control.nudgeNextAttemptAt(`reconcile:${orbId}`);
@@ -2226,6 +2431,7 @@ export function requestOrbStart(
               from: orb.state,
               to: "starting",
               reason: "start_requested",
+              ...(orb.sleepId === null ? {} : { cancelled_sleep_id: orb.sleepId }),
             });
             return ok(cas.value);
           }
@@ -2282,6 +2488,7 @@ export function requestOrbArchive(
           reason: "archive_requested",
           source: caller === undefined ? "browser" : "self",
           ...(caller === undefined ? {} : { callerIncarnation: caller.hostIncarnation }),
+          ...(orb.sleepId === null ? {} : { cancelled_sleep_id: orb.sleepId }),
         });
         return ok(requested.value);
       }
@@ -2319,6 +2526,7 @@ export function requestOrbDeletion(
           from: orb.state,
           to: "deleting",
           reason: "delete_requested",
+          ...(orb.sleepId === null ? {} : { cancelled_sleep_id: orb.sleepId }),
         });
         return ok(requested.value);
       }
@@ -2341,75 +2549,61 @@ export function requestOrbStop(
   orbId: string,
 ): ResultAsync<OrbRow, CommandError> {
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
-    let lastClearError: StoreError | null = null;
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
       const orbResult = await deps.store.getOrb(task, orbId);
       if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
-      if (orb.state === "stopping" || orb.state === "stopped") {
-        // A stop with nothing left to transition is a no-op the UI issues
-        // freely; its answer must not depend on a bookkeeping write, so the
-        // clear is retried and then reported as an edge rather than turned
-        // into a 503 the user cannot act on.
-        const cleared = await deps.store.clearOrbMessageAutoStart(task, {
-          orbId,
-          now: task.wallNow(),
-        });
-        if (cleared.isOk()) return ok(orb);
-        lastClearError = cleared.error;
-        if (cleared.error.retryable && attempt < CAS_ATTEMPTS - 1) continue;
-        logOrbEvent(task, orbId, "stop-wake-clear-failed", {
-          state: orb.state,
-          error: cleared.error.message,
-          outcome: "stop_reported_ok",
-        });
-        return ok(orb);
-      }
       if (orb.state === "deleting") {
         return err(commandError("conflict", "orb is being permanently deleted", false));
       }
       if (orb.state === "archiving" || orb.state === "archived") {
         return err(commandError("conflict", "archived orbs cannot be stopped or restarted", false));
       }
-      // Clear before the transition: a stop that cannot cancel the wake
-      // intents recorded before it never happens at all, so the orb can never
-      // land in `stopped` with an intent that outlived the stop.
-      const clearedForStop = await deps.store.clearOrbMessageAutoStart(task, {
-        orbId,
-        now: task.wallNow(),
-      });
-      if (clearedForStop.isErr()) {
-        lastClearError = clearedForStop.error;
-        if (clearedForStop.error.retryable && attempt < CAS_ATTEMPTS - 1) continue;
-        return err(mapStoreError(clearedForStop.error));
-      }
-      const cas = await deps.store.casTransition(task, {
+      const overridesSleepStop = orb.state === "stopping" && orb.stopReason === "sleep";
+      const stopped = await deps.store.requestOrbStop(task, {
         orbId,
         expectedStateVersion: orb.stateVersion,
-        toState: "stopping",
         now: task.wallNow(),
-        // An explicit stop presents no reason, including over a stale one.
-        stopReason: null,
       });
-      if (cas.isOk()) {
+      if (stopped.isErr()) {
+        if (stopped.error.type === "state_conflict") continue;
+        return err(mapStoreError(stopped.error));
+      }
+      if (stopped.value.cancelledSleepId !== null) {
+        logOrbEvent(task, orbId, "sleep-cancelled", {
+          sleep_id: stopped.value.cancelledSleepId,
+          command: "stop",
+          ...(overridesSleepStop ? { override: "graceful_sleep_stop" } : {}),
+        });
+      }
+      if (orb.state !== "stopping" && orb.state !== "stopped") {
         logOrbEvent(task, orbId, "transition", {
           from: orb.state,
           to: "stopping",
           reason: "stop_requested",
+          ...(stopped.value.cancelledSleepId === null
+            ? {}
+            : { cancelled_sleep_id: stopped.value.cancelledSleepId }),
         });
-        deps.control.markStopping(orbId, cas.value.stateVersion);
+        deps.control.markStopping(orbId, stopped.value.orb.stateVersion);
         deps.control.closeBrowserConnections(orbId);
-        return ok(cas.value);
+      } else if (overridesSleepStop) {
+        logOrbEvent(task, orbId, "transition", {
+          from: "stopping",
+          to: "stopping",
+          reason: "stop_requested",
+          override: "graceful_sleep_stop",
+          ...(stopped.value.cancelledSleepId === null
+            ? {}
+            : { cancelled_sleep_id: stopped.value.cancelledSleepId }),
+        });
+        deps.control.markStopping(orbId, stopped.value.orb.stateVersion);
+        deps.control.closeBrowserConnections(orbId);
       }
-      if (cas.error.type === "state_conflict") continue;
-      return err(mapCasError(cas.error));
+      return ok(stopped.value.orb);
     }
-    return err(
-      lastClearError === null
-        ? commandError("conflict", "concurrent state changes; retry", true)
-        : mapStoreError(lastClearError),
-    );
+    return err(commandError("conflict", "concurrent state changes; retry", true));
   };
   return new ResultAsync(run());
 }
@@ -2449,6 +2643,13 @@ export function enqueueOrbMessage(
       return enqueued.error.type === "store_error"
         ? err(mapStoreError(enqueued.error))
         : err(commandError("conflict", "message id exists with different content", false));
+    }
+    if (orb.sleepId !== null && !enqueued.value.duplicate) {
+      logOrbEvent(task, params.orbId, "sleep-cancelled", {
+        sleep_id: orb.sleepId,
+        command: "message",
+        message_id: params.messageId,
+      });
     }
     // Wake latency is the reconciler tick, not the terminal backstop interval:
     // the orb is due now, so a stopped orb starts on the next scan.

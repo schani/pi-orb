@@ -68,6 +68,7 @@ function messageView(row: OrbMessageRow) {
     id: row.messageId,
     orbId: row.orbId,
     content: row.content,
+    ...(row.system !== null ? { system: row.system } : {}),
     status: row.status,
     ...(row.delivery !== null ? { delivery: row.delivery } : {}),
     ...(row.operationId !== null ? { operationId: row.operationId } : {}),

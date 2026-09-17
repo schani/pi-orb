@@ -1655,9 +1655,6 @@ describe("orb lifecycle (DST)", () => {
       const harness = makeHarness({ constants: { idleStopAfterMs: 3_600_000 } });
       const stop = new AbortController();
       const messageId = "00000000-0000-4000-8000-000000000131";
-      // The store blip that strands the wake intent: the backstop's clear
-      // fails once, after it has already moved the orb out of `stopped`.
-      harness.store.failNextClearOrbMessageAutoStart(1);
       let queued = false;
       const result = await sim.runTasks([
         {
@@ -1673,7 +1670,7 @@ describe("orb lifecycle (DST)", () => {
           f: async (task) => {
             seedRunningOrb(task, harness, ORB);
             // Delivery never completes — a legitimate retryable condition —
-            // so nothing else clears the wake intent along the way.
+            // so its wake authority remains until explicit Stop clears it.
             harness.world.scriptDeliverMessage(ORB, { kind: "hang", durationMs: 10 * 60_000 });
             const stopped = await requestOrbStop(task, harness.deps, ORB);
             expect(stopped.isOk()).toBe(true);
@@ -1722,10 +1719,10 @@ describe("orb lifecycle (DST)", () => {
     });
   });
 
-  it("stopping an already-stopped orb succeeds while the wake-intent clear fails", async () => {
+  it("reports a retryable error when stopped-orb wake cancellation fails", async () => {
     await runDst(
       {
-        name: "stop-idempotent-under-store-blip",
+        name: "stop-cancellation-failure-is-honest",
         iterations: 10,
         failpointProbabilities: { [FAILPOINTS.storeClearMessageAutoStart]: 1 },
       },
@@ -1737,22 +1734,26 @@ describe("orb lifecycle (DST)", () => {
             f: async (task) => {
               harness.store.seedProject(makeProjectRow(PROJECT));
               harness.store.seedOrb(makeOrbRow(ORB, PROJECT, "stopped"));
-              // Stopping a stopped orb is a no-op the UI issues freely; a
-              // bookkeeping write that fails underneath it must not turn that
-              // no-op into a 503.
+              const queued = await harness.store.enqueueOrbMessage(task, {
+                orbId: ORB,
+                messageId: "00000000-0000-4000-8000-000000000133",
+                content: [{ type: "text", text: "retain wake authority" }],
+                now: task.wallNow(),
+              });
+              expect(queued.isOk() && queued.value.message.autoStart).toBe(true);
+              const before = harness.store.orbSnapshot(ORB);
+
               const requested = await requestOrbStop(task, harness.deps, ORB);
-              expect(
-                requested.isOk(),
-                requested.isErr()
-                  ? `${requested.error.code}: ${requested.error.message}`
-                  : "stop succeeded",
-              ).toBe(true);
-              expect(requested.isOk() && requested.value.state).toBe("stopped");
+              expect(requested.isErr() && requested.error.code).toBe("unavailable");
+              expect(requested.isErr() && requested.error.retryable).toBe(true);
+              expect(harness.store.orbSnapshot(ORB)).toEqual(before);
+              expect(harness.store.messageSnapshots(ORB)[0]?.autoStart).toBe(true);
             },
           },
         ]);
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
         expect(harness.store.orbSnapshot(ORB)?.state).toBe("stopped");
+        expect(harness.store.messageSnapshots(ORB)[0]?.autoStart).toBe(true);
       },
     );
   });

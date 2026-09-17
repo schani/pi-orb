@@ -37,7 +37,9 @@ export function createMutationEpoch(): MutationEpoch {
 
 export function representedInboxMessageIds(records: readonly HistoryRecord[]): Set<string> {
   return new Set(
-    records.flatMap((record) => (record.type === "message" ? (record.inboxMessageIds ?? []) : [])),
+    records.flatMap((record) =>
+      record.type === "message" || record.type === "event" ? (record.inboxMessageIds ?? []) : [],
+    ),
   );
 }
 

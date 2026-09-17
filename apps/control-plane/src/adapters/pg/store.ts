@@ -1,6 +1,6 @@
 import type { HarnessSessionMetadata, HistoryRecord, OrbState, StopReason } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { err, ok, okAsync, type Result, ResultAsync } from "neverthrow";
+import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import type {
   CommitPullError,
   ProjectConflict,
@@ -27,6 +27,14 @@ import type {
 } from "../../domain/ports.ts";
 import { arrayParam, jsonParam, type PgRow, type PostgreSQLClient } from "./client.ts";
 import { PgWorkspaceUploads } from "./workspace-uploads.ts";
+
+const BOOT_CONTEXT_STATES: readonly OrbState[] = [
+  "creating",
+  "starting",
+  "running",
+  "stopping",
+  "archiving",
+];
 
 function toMs(value: unknown): number {
   if (value instanceof Date) return value.getTime();
@@ -77,6 +85,8 @@ function mapOrbRow(row: PgRow): OrbRow {
     lastBusyAt: row["last_busy_at"] == null ? null : toMs(row["last_busy_at"]),
     uploadActiveUntil: row["upload_active_until"] == null ? null : toMs(row["upload_active_until"]),
     stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
+    sleepId: row["sleep_id"] == null ? null : String(row["sleep_id"]),
+    sleepUntil: row["sleep_until"] == null ? null : toMs(row["sleep_until"]),
     lastMintAt: row["last_mint_at"] == null ? null : toMs(row["last_mint_at"]),
     stateChangedAt: toMs(row["state_changed_at"]),
     archivedAt: row["archived_at"] == null ? null : toMs(row["archived_at"]),
@@ -91,6 +101,7 @@ function mapMessageRow(row: PgRow): OrbMessageRow {
     messageId: String(row["message_id"]),
     ordinal: Number(row["ordinal"]),
     content: row["content"] as OrbMessageRow["content"],
+    system: (row["system"] ?? null) as OrbMessageRow["system"],
     status: String(row["status"]) as OrbMessageRow["status"],
     delivery: row["delivery"] == null ? null : (String(row["delivery"]) as "turn" | "steer"),
     operationId: row["operation_id"] == null ? null : String(row["operation_id"]),
@@ -136,7 +147,7 @@ function mapProjectRow(row: PgRow): ProjectRow {
 }
 
 function inboxMessageIds(record: HistoryRecord): readonly string[] {
-  return record.type === "message" ? (record.inboxMessageIds ?? []) : [];
+  return record.type === "message" || record.type === "event" ? (record.inboxMessageIds ?? []) : [];
 }
 
 const projectIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -319,11 +330,19 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const transitioned = await query(
         `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
            state_changed_at = $2, updated_at = $2, last_error = NULL, stop_reason = NULL,
+           sleep_id = NULL, sleep_until = NULL,
            auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
          WHERE project_id = $1 AND state <> 'deleting'`,
         [params.projectId, new Date(params.now)],
       );
       if (transitioned.isErr()) return err(transitioned.error);
+      const clearedDormantSleep = await query(
+        `UPDATE orbs SET sleep_id = NULL, sleep_until = NULL,
+           state_version = state_version + CASE WHEN sleep_id IS NULL THEN 0 ELSE 1 END,
+           updated_at = $2 WHERE project_id = $1 AND state = 'deleting'`,
+        [params.projectId, new Date(params.now)],
+      );
+      if (clearedDormantSleep.isErr()) return err(clearedDormantSleep.error);
       const intents = await query(
         `INSERT INTO orb_deletions
            (orb_id, host_kind, kind, requested_at, cleanup_after, last_error, updated_at)
@@ -472,9 +491,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            host_discard_evidence, host_discard_requested_at,
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
-           stop_reason, last_mint_at,
+           stop_reason, sleep_id, sleep_until, last_mint_at,
            state_changed_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
          RETURNING *`,
         [
           orb.id,
@@ -504,6 +523,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           orb.replicatedHeadId,
           orb.lastBusyAt === null ? null : new Date(orb.lastBusyAt),
           orb.stopReason,
+          orb.sleepId,
+          orb.sleepUntil === null ? null : new Date(orb.sleepUntil),
           orb.lastMintAt === null ? null : new Date(orb.lastMintAt),
           new Date(orb.stateChangedAt),
           new Date(orb.createdAt),
@@ -668,6 +689,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       content: OrbMessageRow["content"];
       now: number;
       wake?: boolean;
+      cancelSleep?: boolean;
     },
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
@@ -694,6 +716,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       if (existingRow !== undefined) {
         if (!jsonEqual(existingRow["content"], params.content)) return err(stateConflict(state));
         return ok({ message: mapMessageRow(existingRow), orb: mapOrbRow(orbRow), duplicate: true });
+      }
+      if (params.cancelSleep !== false && orbRow["sleep_id"] !== null) {
+        const cancelled = await query(
+          `UPDATE orbs SET sleep_id = NULL, sleep_until = NULL,
+             state_version = state_version + 1, updated_at = $2
+           WHERE id = $1 RETURNING *`,
+          [params.orbId, new Date(params.now)],
+        );
+        if (cancelled.isErr()) return err(cancelled.error);
+        orbRow = cancelled.value.rows[0] ?? orbRow;
       }
       // Admission records durable content and, when the orb cannot take
       // delivery right now, the wake intent — never a lifecycle transition.
@@ -743,6 +775,164 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map((result) => result.rows.map(mapMessageRow));
   }
 
+  scheduleOrbSleep(
+    task: SimulationTask,
+    params: {
+      orbId: string;
+      caller: import("../../domain/ports.ts").ArchiveCaller;
+      sleepId: string;
+      durationSeconds: number;
+    },
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
+      const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
+      if (locked.isErr()) return err(locked.error);
+      const row = locked.value.rows[0];
+      if (
+        row === undefined ||
+        row["state"] !== "running" ||
+        row["sleep_id"] !== null ||
+        row["runtime_token_hash"] !== params.caller.runtimeTokenHash ||
+        Number(row["host_incarnation"]) !== params.caller.hostIncarnation ||
+        row["host_discard_through_incarnation"] !== null
+      )
+        return err(stateConflict());
+      const now = task.wallNow();
+      const sleepUntil = now + params.durationSeconds * 1_000;
+      if (!Number.isFinite(sleepUntil) || sleepUntil > 8_640_000_000_000_000)
+        return err(stateConflict());
+      const updated = await query(
+        `UPDATE orbs SET sleep_id = $2, sleep_until = $3, state_version = state_version + 1,
+           updated_at = $4 WHERE id = $1 RETURNING *`,
+        [params.orbId, params.sleepId, new Date(sleepUntil), new Date(now)],
+      );
+      if (updated.isErr()) return err(updated.error);
+      const accepted = updated.value.rows[0];
+      return accepted === undefined ? err(stateConflict()) : ok(mapOrbRow(accepted));
+    });
+  }
+
+  cancelOrbSleep(
+    _task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<OrbRow, StoreError | StateConflict> {
+    return this.db
+      .query(
+        `UPDATE orbs SET sleep_id = NULL, sleep_until = NULL,
+         state_version = state_version + CASE WHEN sleep_id IS NULL THEN 0 ELSE 1 END,
+         updated_at = $3 WHERE id = $1 AND state_version = $2 RETURNING *`,
+        [params.orbId, params.expectedStateVersion, new Date(params.now)],
+      )
+      .andThen((result) =>
+        result.rows[0] === undefined
+          ? errAsync(stateConflict())
+          : okAsync(mapOrbRow(result.rows[0])),
+      );
+  }
+
+  processDueOrbSleep(
+    _task: SimulationTask,
+    params: { orbId: string; sleepId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<"wake" | "expired" | "waiting" | "stale", StoreError> {
+    return this.db.transaction<"wake" | "expired" | "waiting" | "stale", StoreError>(
+      async (query) => {
+        const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
+        if (locked.isErr()) return err(locked.error);
+        const row = locked.value.rows[0];
+        if (
+          row === undefined ||
+          row["sleep_id"] !== params.sleepId ||
+          Number(row["state_version"]) !== params.expectedStateVersion
+        )
+          return ok("stale");
+        const sleepUntil = toMs(row["sleep_until"]);
+        const state = String(row["state"]);
+        if (params.now < sleepUntil || state === "stopping") return ok("waiting");
+        if (state !== "running" && state !== "stopped" && state !== "failed") return ok("stale");
+        const kind = state === "running" ? "sleep_expired" : "sleep_wake";
+        const cleared = await query(
+          `UPDATE orbs SET sleep_id = NULL, sleep_until = NULL, state_version = state_version + 1,
+           updated_at = $4 WHERE id = $1 AND sleep_id = $2 AND state_version = $3 RETURNING state_version`,
+          [params.orbId, params.sleepId, params.expectedStateVersion, new Date(params.now)],
+        );
+        if (cleared.isErr()) return err(cleared.error);
+        const nextVersion = Number(cleared.value.rows[0]?.["state_version"]);
+        if (!Number.isFinite(nextVersion)) return ok("stale");
+        const inserted = await query(
+          `INSERT INTO orb_messages
+           (orb_id, message_id, content, system, status, auto_start, wake_state_version, created_at, updated_at)
+         VALUES ($1,$2,$3::jsonb,$4::jsonb,'queued',$5,$6,$7,$7)
+         ON CONFLICT (orb_id, message_id) DO NOTHING`,
+          [
+            params.orbId,
+            params.sleepId,
+            jsonParam([
+              {
+                type: "text",
+                text:
+                  kind === "sleep_wake"
+                    ? "Scheduled sleep finished."
+                    : "Scheduled sleep expired before compute stopped.",
+              },
+            ]),
+            jsonParam({ kind, sleepUntil: new Date(sleepUntil).toISOString() }),
+            kind === "sleep_wake",
+            kind === "sleep_wake" ? nextVersion : null,
+            new Date(params.now),
+          ],
+        );
+        if (inserted.isErr()) return err(inserted.error);
+        return ok(kind === "sleep_wake" ? "wake" : "expired");
+      },
+    );
+  }
+
+  readOrbBootContext(
+    _task: SimulationTask,
+    params: { orbId: string; caller: { runtimeTokenHash: string; hostIncarnation: number } },
+  ) {
+    return this.db.transaction<
+      import("@pi-orb/protocol").OrbBootContext | null,
+      StoreError | StateConflict
+    >(async (query) => {
+      const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
+      if (locked.isErr()) return err(locked.error);
+      const orb = locked.value.rows[0];
+      if (
+        orb === undefined ||
+        orb["runtime_token_hash"] !== params.caller.runtimeTokenHash ||
+        Number(orb["host_incarnation"]) !== params.caller.hostIncarnation ||
+        orb["host_discard_through_incarnation"] !== null ||
+        !BOOT_CONTEXT_STATES.includes(String(orb["state"]) as OrbState)
+      )
+        return err(stateConflict());
+      const head = await query(
+        `SELECT * FROM orb_messages WHERE orb_id = $1 AND status IN ('queued', 'delivering')
+         ORDER BY ordinal LIMIT 1 FOR UPDATE`,
+        [params.orbId],
+      );
+      if (head.isErr()) return err(head.error);
+      const row = head.value.rows[0];
+      const system = row?.["system"] as OrbMessageRow["system"] | undefined;
+      if (row === undefined || system?.kind !== "sleep_wake") return ok(null);
+      if (row["delivery_batch_id"] === null) {
+        const frozen = await query(
+          `UPDATE orb_messages SET status = 'delivering', delivery_batch_id = message_id
+           WHERE orb_id = $1 AND message_id = $2 RETURNING *`,
+          [params.orbId, row["message_id"]],
+        );
+        if (frozen.isErr()) return err(frozen.error);
+      }
+      const message = mapMessageRow(row);
+      return ok({
+        messageId: message.messageId,
+        messageIds: [message.messageId],
+        content: [...message.content],
+        system: { kind: "sleep_wake" as const, sleepUntil: system.sleepUntil },
+      });
+    });
+  }
+
   claimNextOrbMessageBatch(
     _task: SimulationTask,
     params: { orbId: string; now: number },
@@ -765,11 +955,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         );
       }
       const batchId = String(first["message_id"]);
+      const firstSystem = first["system"] !== null;
       const claimed = await query(
-        `UPDATE orb_messages SET delivery_batch_id = $2, status = 'delivering', updated_at = $3
-         WHERE orb_id = $1 AND status = 'queued' AND delivery_batch_id IS NULL
-         RETURNING *`,
-        [params.orbId, batchId, new Date(params.now)],
+        `UPDATE orb_messages m SET delivery_batch_id = $2, status = 'delivering', updated_at = $3
+         WHERE m.orb_id = $1 AND m.status = 'queued' AND m.delivery_batch_id IS NULL
+           AND ($4::boolean AND m.message_id = $2::uuid OR NOT $4::boolean AND m.system IS NULL
+             AND NOT EXISTS (SELECT 1 FROM orb_messages earlier
+               WHERE earlier.orb_id = m.orb_id AND earlier.ordinal < m.ordinal
+                 AND earlier.system IS NOT NULL AND earlier.status IN ('queued', 'delivering')))
+         RETURNING m.*`,
+        [params.orbId, batchId, new Date(params.now), firstSystem],
       );
       if (claimed.isErr()) return err(claimed.error);
       return ok(claimed.value.rows.map(mapMessageRow).sort((a, b) => a.ordinal - b.ordinal));
@@ -822,17 +1017,62 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map(() => undefined);
   }
 
-  clearOrbMessageAutoStart(
+  requestOrbStop(
     _task: SimulationTask,
-    params: { orbId: string; now: number },
-  ): ResultAsync<void, StoreError> {
-    return this.db
-      .query(
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<{ orb: OrbRow; cancelledSleepId: string | null }, StoreError | StateConflict> {
+    return this.db.transaction<
+      { orb: OrbRow; cancelledSleepId: string | null },
+      StoreError | StateConflict
+    >(async (query) => {
+      const locked = await query("SELECT * FROM orbs WHERE id = $1 FOR UPDATE", [params.orbId]);
+      if (locked.isErr()) return err(locked.error);
+      const row = locked.value.rows[0];
+      if (row === undefined || Number(row["state_version"]) !== params.expectedStateVersion)
+        return err(stateConflict());
+      const wake = await query(
+        `SELECT message_id FROM orb_messages WHERE orb_id = $1 AND auto_start = true
+           AND status IN ('queued','delivering') AND system->>'kind' = 'sleep_wake'
+         ORDER BY ordinal LIMIT 1 FOR UPDATE`,
+        [params.orbId],
+      );
+      if (wake.isErr()) return err(wake.error);
+      const cancelledSleepId =
+        row["sleep_id"] === null
+          ? wake.value.rows[0] === undefined
+            ? null
+            : String(wake.value.rows[0]["message_id"])
+          : String(row["sleep_id"]);
+      const state = String(row["state"]);
+      const transitions = state !== "stopping" && state !== "stopped";
+      const overridesSleepStop = state === "stopping" && row["stop_reason"] === "sleep";
+      const startsStopEpisode = transitions || overridesSleepStop;
+      const updated = await query(
+        `UPDATE orbs SET state = CASE WHEN $4 THEN 'stopping' ELSE state END,
+           stop_reason = CASE WHEN $5 THEN NULL ELSE stop_reason END,
+           sleep_id = NULL, sleep_until = NULL,
+           state_version = state_version + CASE WHEN $5 OR sleep_id IS NOT NULL THEN 1 ELSE 0 END,
+           state_changed_at = CASE WHEN $5 THEN $3 ELSE state_changed_at END,
+           updated_at = $3 WHERE id = $1 AND state_version = $2 RETURNING *`,
+        [
+          params.orbId,
+          params.expectedStateVersion,
+          new Date(params.now),
+          transitions,
+          startsStopEpisode,
+        ],
+      );
+      if (updated.isErr()) return err(updated.error);
+      const updatedRow = updated.value.rows[0];
+      if (updatedRow === undefined) return err(stateConflict());
+      const cleared = await query(
         `UPDATE orb_messages SET auto_start = false, updated_at = $2
-         WHERE orb_id = $1 AND auto_start = true AND status IN ('queued', 'delivering')`,
+         WHERE orb_id = $1 AND auto_start = true AND status IN ('queued','delivering')`,
         [params.orbId, new Date(params.now)],
-      )
-      .map(() => undefined);
+      );
+      if (cleared.isErr()) return err(cleared.error);
+      return ok({ orb: mapOrbRow(updatedRow), cancelledSleepId });
+    });
   }
 
   casStartOrbForQueuedMessage(
@@ -888,6 +1128,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       const updated = await query(
         `UPDATE orbs SET state = 'archiving', state_version = state_version + 1,
            state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
+           sleep_id = NULL, sleep_until = NULL,
            auto_name_lease_until = NULL, auto_name_next_attempt_at = NULL
          WHERE id = $1 AND state_version = $2
            AND ($4::text IS NULL OR (runtime_token_hash = $4 AND host_incarnation = $5
@@ -997,7 +1238,8 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     return this.db.transaction<OrbRow, StoreError | StateConflict>(async (query) => {
       const updated = await query(
         `UPDATE orbs SET state = 'deleting', state_version = state_version + 1,
-           state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL
+           state_changed_at = $3, updated_at = $3, last_error = NULL, stop_reason = NULL,
+           sleep_id = NULL, sleep_until = NULL
          WHERE id = $1 AND state_version = $2 RETURNING *`,
         [params.orbId, params.expectedStateVersion, new Date(params.now)],
       );
@@ -1287,6 +1529,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       values.push(params.stopReason);
       index += 1;
     }
+    if (params.cancelSleep === true) {
+      sets.push("sleep_id = NULL", "sleep_until = NULL");
+    }
     return this.casUpdate(
       params.orbId,
       params.expectedStateVersion,
@@ -1294,7 +1539,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       values,
       params.stopReason === "idle"
         ? "(upload_active_until IS NULL OR upload_active_until <= $4)"
-        : undefined,
+        : params.stopReason === "sleep"
+          ? "sleep_id IS NOT NULL AND sleep_until > $4 AND (upload_active_until IS NULL OR upload_active_until <= $4)"
+          : undefined,
     );
   }
 

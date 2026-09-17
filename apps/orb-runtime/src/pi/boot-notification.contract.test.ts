@@ -6,6 +6,7 @@ import { okAsync } from "neverthrow";
 import { afterEach, expect, it } from "vitest";
 import { PiOrbAgent, type PiSession } from "./agent.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
+import { mapPiEntry } from "./mapping.ts";
 import { interruptedSubagents } from "./subagent-recovery.ts";
 
 const roots: string[] = [];
@@ -105,6 +106,198 @@ it("persists a visible, model-visible user-role notice and deduplicates after re
       incarnation: "0",
     }).kind,
   ).toBe("none");
+});
+
+it("puts combined sleep and restart context in the first real-SDK inference record", () => {
+  const { agent, manager } = fixture();
+  let captured: unknown = null;
+  const pi = {
+    isIdle: true,
+    subscribe: () => () => undefined,
+    sendCustomMessage: (message: unknown) => {
+      captured = message;
+      const typed = message as {
+        customType: string;
+        content: string;
+        display: boolean;
+        details: unknown;
+      };
+      manager.appendCustomMessageEntry(
+        typed.customType,
+        typed.content,
+        typed.display,
+        typed.details,
+      );
+      return new Promise<void>(() => undefined);
+    },
+  } as unknown as PiSession;
+  agent.attachSession(pi, manager, { summarize: () => okAsync("") }, null, {
+    messageId: "sleep-1",
+    messageIds: ["sleep-1"],
+    content: [{ type: "text", text: "Sleep ended at its scheduled deadline." }],
+    system: { kind: "sleep_wake", sleepUntil: "2026-09-18T04:05:06.000Z" },
+  });
+  expect(captured).toMatchObject({
+    customType: "pi-orb.sleep-wake",
+    content: expect.stringContaining("Sleep ended at its scheduled deadline"),
+    details: { messageIds: ["sleep-1"] },
+  });
+  const messages = convertToLlm(manager.buildSessionContext().messages);
+  expect(messages.at(-1)).toMatchObject({
+    role: "user",
+    content: [{ type: "text", text: expect.stringContaining("host was restarted") }],
+  });
+  const mapped = manager.getEntries().map(mapPiEntry);
+  expect(mapped.at(-1)?._unsafeUnwrap()).toMatchObject({
+    type: "event",
+    inboxMessageIds: ["sleep-1"],
+  });
+});
+
+it("real SessionManager reopen preserves the sleep marker and declines a second automatic turn", () => {
+  const { agent, manager, root } = fixture();
+  const firstSession = {
+    isIdle: true,
+    subscribe: () => () => undefined,
+    sendCustomMessage: (message: {
+      customType: string;
+      content: string;
+      display: boolean;
+      details: unknown;
+    }) => {
+      manager.appendCustomMessageEntry(
+        message.customType,
+        message.content,
+        message.display,
+        message.details,
+      );
+      return Promise.resolve();
+    },
+  } as unknown as PiSession;
+  agent.attachSession(firstSession, manager, { summarize: () => okAsync("") }, null, {
+    messageId: "sleep-1",
+    messageIds: ["sleep-1"],
+    content: [{ type: "text", text: "Sleep ended at its scheduled deadline." }],
+    system: { kind: "sleep_wake", sleepUntil: "2026-09-18T04:05:06.000Z" },
+  });
+  const reopened = SessionManager.open(manager.getSessionFile() as string, root, root);
+  const next = new PiOrbAgent({
+    skillsDir: null,
+    orbId: "boot-test",
+    repositoryUrl: "https://example.com/repo",
+    workDir: root,
+    broker: null,
+    executionId: "third-host",
+  });
+  let triggered = 0;
+  next.attachSession(
+    {
+      ...firstSession,
+      sendCustomMessage: (message, options) => {
+        reopened.appendCustomMessageEntry(
+          message.customType,
+          message.content,
+          message.display,
+          message.details,
+        );
+        if (options?.triggerTurn) triggered++;
+        return Promise.resolve();
+      },
+    },
+    reopened,
+    { summarize: () => okAsync("") },
+  );
+  expect(triggered).toBe(0);
+  expect(reopened.getEntries().at(-1)).toMatchObject({
+    type: "custom_message",
+    customType: "pi-orb.turn-resume-declined",
+  });
+  expect(next.getHealth()).toMatchObject({
+    status: "ready",
+    activity: "idle",
+    turnResume: { outcome: "declined_already_resumed" },
+  });
+});
+
+it.each([
+  ["pi-orb.user-message", undefined],
+  ["pi-orb.system-message", { kind: "sleep_expired", sleepUntil: "2026-09-18T04:05:06.000Z" }],
+] as const)(
+  "deduplicates persisted %s records through the actual agent",
+  async (customType, system) => {
+    const { agent, manager } = fixture();
+    manager.appendCustomMessageEntry(customType, "persisted", true, {
+      messageIds: ["message-1"],
+      delivery: "turn",
+      operationId: "operation-1",
+      ...(system === undefined ? {} : { system }),
+    });
+    manager.appendCustomEntry(BOOT_BASELINE_TYPE, {
+      runtimeInstanceId: agent.runtimeInstanceId,
+      executionId: "new-host",
+      incarnation: "0",
+    });
+    const pi = { isIdle: true, subscribe: () => () => undefined } as unknown as PiSession;
+    agent.attachSession(pi, manager, { summarize: () => okAsync("") });
+    const duplicate = await agent.deliverInboxMessage(
+      "message-1",
+      ["message-1"],
+      [{ type: "text", text: "retry" }],
+      system,
+    );
+    expect(duplicate._unsafeUnwrap()).toMatchObject({
+      status: "persisted",
+      duplicate: true,
+      operationId: "operation-1",
+    });
+  },
+);
+
+it("persists ordinary system inbox delivery as a non-human event", async () => {
+  const { agent, manager } = fixture();
+  manager.appendCustomEntry(BOOT_BASELINE_TYPE, {
+    runtimeInstanceId: agent.runtimeInstanceId,
+    executionId: "new-host",
+    incarnation: "0",
+  });
+  const pi = {
+    isIdle: true,
+    subscribe: () => () => undefined,
+    sendCustomMessage: (message: {
+      customType: string;
+      content: string;
+      display: boolean;
+      details: unknown;
+    }) => {
+      manager.appendCustomMessageEntry(
+        message.customType,
+        message.content,
+        message.display,
+        message.details,
+      );
+      return Promise.resolve();
+    },
+  } as unknown as PiSession;
+  agent.attachSession(pi, manager, { summarize: () => okAsync("") });
+  const delivered = await agent.deliverInboxMessage(
+    "sleep-2",
+    ["sleep-2"],
+    [{ type: "text", text: "Sleep deadline expired while work was active." }],
+    { kind: "sleep_expired", sleepUntil: "2026-09-18T04:05:06.000Z" },
+  );
+  expect(delivered.isOk()).toBe(true);
+  expect(manager.getEntries().at(-1)).toMatchObject({
+    type: "custom_message",
+    customType: "pi-orb.system-message",
+    details: {
+      messageIds: ["sleep-2"],
+      system: { kind: "sleep_expired" },
+    },
+  });
+  expect(mapPiEntry(manager.getEntries().at(-1))._unsafeUnwrap()).toMatchObject({
+    type: "event",
+    inboxMessageIds: ["sleep-2"],
+  });
 });
 
 it.each([false, true])(

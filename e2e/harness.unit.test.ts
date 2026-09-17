@@ -1,5 +1,14 @@
+import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FAKE_ORIGIN, fakeRequest } from "./harness.ts";
+import {
+  attachControlledClock,
+  controlledClockSpawn,
+  FAKE_ORIGIN,
+  fakeRequest,
+  newModelRequestsById,
+  requestIds,
+} from "./harness.ts";
 
 const connectionReset = (): TypeError =>
   new TypeError("fetch failed", { cause: new Error("read ECONNRESET") });
@@ -14,6 +23,88 @@ const rejection = async (promise: Promise<unknown>): Promise<Error> => {
   if (error === null) throw new Error("expected a rejection");
   return error;
 };
+
+describe("controlled control-plane clock", () => {
+  const probe = resolve(import.meta.dirname, "testkit/control-plane-clock-probe.ts");
+
+  it("advances monotonically with acknowledgements and does not leak into runtime children", async () => {
+    const epoch = Date.parse("2040-01-01T00:00:00.000Z");
+    const spec = controlledClockSpawn(probe, epoch);
+    const child = spawn("node", spec.args, {
+      env: { ...process.env, ...spec.env },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    const clock = attachControlledClock(child);
+    try {
+      const ready = await clock.ready;
+      expect(ready.isOk()).toBe(true);
+      if (ready.isErr()) return;
+      expect(ready.value.now).toBeGreaterThan(epoch);
+
+      const target = epoch + 86_400_000;
+      const advanced = await clock.advanceTo(target);
+      expect(advanced.isOk()).toBe(true);
+      if (advanced.isErr()) return;
+      expect(advanced.value.now).toBeGreaterThan(target);
+      expect(advanced.value.now).toBeLessThan(target + 1_000);
+
+      const nextTarget = target + 60_000;
+      const next = await clock.advanceTo(nextTarget);
+      expect(next.isOk()).toBe(true);
+      if (next.isErr()) return;
+      expect(next.value.now).toBeGreaterThan(nextTarget);
+      expect(next.value.now).toBeGreaterThan(advanced.value.now);
+
+      const rollback = await clock.advanceTo(target - 1);
+      expect(rollback.isErr() && rollback.error.type).toBe("clock_rollback");
+
+      const runtime = await clock.probeRuntimeChild();
+      expect(runtime.isOk()).toBe(true);
+      if (runtime.isErr()) return;
+      expect(runtime.value.now).toBeLessThan(epoch);
+    } finally {
+      clock.dispose();
+      child.kill("SIGTERM");
+    }
+  });
+
+  it("returns typed protocol and closed-child failures and removes its listener", async () => {
+    const spec = controlledClockSpawn(probe, Date.parse("2040-01-01T00:00:00.000Z"));
+    const child = spawn("node", spec.args, {
+      env: { ...process.env, ...spec.env },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    const before = child.listenerCount("message");
+    const clock = attachControlledClock(child);
+    expect(child.listenerCount("message")).toBe(before + 1);
+    expect((await clock.ready).isOk()).toBe(true);
+    expect((await clock.advanceTo(Number.NaN))._unsafeUnwrapErr().type).toBe(
+      "invalid_clock_target",
+    );
+    clock.dispose();
+    expect(child.listenerCount("message")).toBe(before);
+    expect((await clock.advanceTo(Date.now()))._unsafeUnwrapErr().type).toBe("clock_closed");
+    child.kill("SIGTERM");
+  });
+});
+
+describe("fake request selection", () => {
+  it("selects only new model requests and restores recorded order", () => {
+    const before = [
+      { id: 20, surface: "auth", body: { client_id: "old" } },
+      { id: 19, surface: "model", body: { message: "old inference" } },
+    ];
+    const after = [
+      { id: 25, surface: "model", body: { message: "wake notification" } },
+      { id: 24, surface: "auth", body: { client_id: "new auth" } },
+      { id: 23, surface: "model", body: { message: "Luna completion" } },
+      { id: 22, surface: "model", body: { message: "combined wake context" } },
+      ...before,
+    ];
+
+    expect(newModelRequestsById(after, requestIds(before))).toEqual([after[3], after[2], after[0]]);
+  });
+});
 
 describe("fakeRequest", () => {
   it("retries a transport failure and returns the eventual response", async () => {

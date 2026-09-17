@@ -50,18 +50,21 @@ it("a late terminal from the previous operation cannot close a resumed execution
     ]),
   ).toEqual([{ childId: "a", operationId: "later" }]);
 });
-it("tracks the latest resumed run and records interruption exactly once across restarts", () => {
-  const runs = [admitted("a"), result("a"), admitted("a", "later")];
-  const interrupted = interruptedSubagents(runs);
-  expect(interrupted).toEqual([{ childId: "a", operationId: "later" }]);
-  expect(
-    interruptedSubagents([
-      ...runs,
-      {
-        type: "custom_message",
-        customType: "pi-orb.host-restarted",
-        details: { interruptedSubagents: interrupted },
-      },
-    ]),
-  ).toEqual([]);
-});
+it.each(["pi-orb.host-restarted", "pi-orb.sleep-wake"])(
+  "tracks the latest resumed run once in %s",
+  (customType) => {
+    const runs = [admitted("a"), result("a"), admitted("a", "later")];
+    const interrupted = interruptedSubagents(runs);
+    expect(interrupted).toEqual([{ childId: "a", operationId: "later" }]);
+    expect(
+      interruptedSubagents([
+        ...runs,
+        {
+          type: "custom_message",
+          customType,
+          details: { interruptedSubagents: interrupted },
+        },
+      ]),
+    ).toEqual([]);
+  },
+);

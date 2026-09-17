@@ -13,4 +13,6 @@ To add an MCP server, ask the user to open the project's config gear and use MCP
 
 Use \`pi-orb archive\` only when the user requested that you archive this orb. It retains the conversation but permanently deletes workspace files; push or export anything needed first.
 
+\`pi-orb sleep 1h\` schedules an absolute wake deadline and stops this orb after admitted work finishes. The command returns once the schedule is durably accepted.
+
 The repository may prepare its own orbs with two executable hooks in its root. \`.agents/setup\` runs once per compute incarnation, before the agent and without the orb's identity — install toolchains there. \`.agents/resume\` runs on every start with the identity available, so credentials are authenticated there. Both must be idempotent; their output lands in \`$HOME/.cache/pi-orb/logs\`.`;

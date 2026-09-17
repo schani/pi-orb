@@ -127,3 +127,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Additional project instructions
 
 67. **Resolved (2026-09-15): Config tab selected; implement the simplest design, DST/tests first.** Additional per-project instructions remain separate from account-wide personal instructions and repository `AGENTS.md`. The selected implementation uses one project-owned Markdown snapshot, explicit last-applied-wins Save, additive virtual context and adoption on the next runtime start. No live fan-out, compute wake or checkout writes. `docs/project-instructions.md` records the implementation and qualification plus rejected General fold, Column notebook, Project folio and Conversation sheet alternatives. The user subsequently authorized production deployment and then self-archival (2026-09-16); release evidence belongs in `docs/project-instructions.md`.
+
+## Scheduled orb sleep
+
+68. **Resolved (2026-09-17): user approved implementation, DST/tests first.** Sleep uses durable-acceptance deadlines, graceful aggregate/upload/inbox drain, no arbitrary maximum, cancellation by accepted commands or actual human input, and a source-aware FIFO system notice combined into the first normal wake inference. `docs/orb-sleep.md` is the complete selected contract and records the short rejected-scope rationale. Implementation and qualification are in progress; this decision does not claim completion or deployment.

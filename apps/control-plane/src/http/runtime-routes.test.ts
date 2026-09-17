@@ -22,7 +22,7 @@ import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
-import { requestOrbArchive } from "../domain/lifecycle.ts";
+import { readOrbBootContext, requestOrbArchive, requestOrbSleep } from "../domain/lifecycle.ts";
 import { spawnOrb } from "../domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
 import { putProjectSecret } from "../domain/project-secrets.ts";
@@ -90,6 +90,17 @@ describe("runtime broker routes", () => {
       appOrigin: "https://browser.test",
       spawn: (task, caller, orbId, request) =>
         spawnOrb(task, { ...makeHarness().deps, store: routeStore }, caller, orbId, request),
+      sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
+        requestOrbSleep(
+          task,
+          { ...makeHarness().deps, store: routeStore },
+          orbId,
+          caller,
+          durationSeconds,
+          sleepId,
+        ),
+      readBootContext: (task, orbId, caller) =>
+        readOrbBootContext(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
       archiveSelf: (task, orbId, caller) =>
         requestOrbArchive(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
       store: routeStore,
@@ -313,6 +324,134 @@ describe("runtime broker routes", () => {
       ])
         expect((await spawn(payload)).statusCode).toBe(400);
       expect(store.orbSnapshot(id)).toBeNull();
+    });
+  });
+
+  describe("self-sleep and boot context", () => {
+    it("accepts a representable deadline from the authenticated incarnation", async () => {
+      store.seedOrb(
+        makeOrbRow(ORB, PROJECT, "running", {
+          runtimeTokenHash: sha256(TOKEN),
+          hostIncarnation: 3,
+        }),
+      );
+      const response = await app.inject({
+        method: "POST",
+        url: "/runtime/v1/orb/sleep",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { v: 1, durationSeconds: 60 },
+      });
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toMatchObject({
+        v: 1,
+        sleepId: expect.any(String),
+        sleepUntil: expect.any(String),
+      });
+      expect(store.orbSnapshot(ORB)?.sleepId).toBe(response.json().sleepId);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/runtime/v1/orb/sleep",
+            headers: { authorization: `Bearer ${TOKEN}` },
+            payload: { v: 1, durationSeconds: 1 },
+          })
+        ).statusCode,
+      ).toBe(409);
+    });
+
+    it("rejects malformed and unrepresentable deadlines without mutation", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      for (const durationSeconds of [0, 1.5, Number.MAX_SAFE_INTEGER]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/runtime/v1/orb/sleep",
+          headers: { authorization: `Bearer ${TOKEN}` },
+          payload: { v: 1, durationSeconds },
+        });
+        expect([400, 409]).toContain(response.statusCode);
+        expect(response.json().error).toMatchObject({
+          code: expect.any(String),
+          message: expect.any(String),
+          retryable: false,
+        });
+      }
+      expect(store.orbSnapshot(ORB)?.sleepId).toBeNull();
+    });
+
+    it.each(["replacement", "discard"] as const)(
+      "revalidates the authenticated incarnation before freezing boot context after %s",
+      async (change) => {
+        const authenticated = makeOrbRow(ORB, PROJECT, "starting", {
+          runtimeTokenHash: sha256(TOKEN),
+          hostIncarnation: 3,
+        });
+        store.seedOrb(authenticated);
+        store.seedSystemMessage(
+          ORB,
+          "00000000-0000-4000-8000-000000000023",
+          { kind: "sleep_wake", sleepUntil: new Date(20_000).toISOString() },
+          20_000,
+        );
+        const readAuthenticated = store.getOrbByRuntimeTokenHash.bind(store);
+        vi.spyOn(store, "getOrbByRuntimeTokenHash").mockImplementation((task, hash) =>
+          readAuthenticated(task, hash).map((orb) => {
+            store.seedOrb(
+              change === "replacement"
+                ? {
+                    ...authenticated,
+                    runtimeTokenHash: sha256("replacement-token"),
+                    hostIncarnation: 4,
+                    stateVersion: authenticated.stateVersion + 1,
+                  }
+                : {
+                    ...authenticated,
+                    hostDiscardThroughIncarnation: authenticated.hostIncarnation,
+                    stateVersion: authenticated.stateVersion + 1,
+                  },
+            );
+            return orb;
+          }),
+        );
+
+        const response = await app.inject({
+          method: "POST",
+          url: "/runtime/v1/orb/boot-context",
+          headers: { authorization: `Bearer ${TOKEN}` },
+          payload: { v: 1 },
+        });
+
+        expect(response.statusCode).toBe(503);
+        expect(store.messageSnapshots(ORB)[0]).toMatchObject({
+          messageId: "00000000-0000-4000-8000-000000000023",
+          status: "queued",
+          deliveryBatchId: null,
+        });
+      },
+    );
+
+    it("returns only a FIFO-head sleep wake and does not acknowledge it", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "starting", { runtimeTokenHash: sha256(TOKEN) }));
+      store.seedSystemMessage(
+        ORB,
+        "00000000-0000-4000-8000-000000000021",
+        { kind: "sleep_wake", sleepUntil: new Date(20_000).toISOString() },
+        20_000,
+      );
+      const request = () =>
+        app.inject({
+          method: "POST",
+          url: "/runtime/v1/orb/boot-context",
+          headers: { authorization: `Bearer ${TOKEN}` },
+          payload: { v: 1 },
+        });
+      expect((await request()).json().context.messageId).toBe(
+        "00000000-0000-4000-8000-000000000021",
+      );
+      expect((await request()).json().context.messageId).toBe(
+        "00000000-0000-4000-8000-000000000021",
+      );
+      expect(store.messageSnapshots(ORB)[0]?.status).toBe("delivering");
     });
   });
 

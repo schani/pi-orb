@@ -21,6 +21,10 @@ case "${1:-}" in
     shift
     exec node "$app_root/apps/orb-runtime/src/archive/cli.ts" "$@"
     ;;
+  sleep)
+    shift
+    exec node "$app_root/apps/orb-runtime/src/sleep/cli.ts" "$@"
+    ;;
   host)
     shift
     exec node "$app_root/apps/orb-runtime/src/hosting/cli.ts" "$@"
@@ -32,6 +36,7 @@ case "${1:-}" in
     echo "usage:" >&2
     echo "  pi-orb spawn (--prompt <text> | --prompt-file <path|->) [--name <name>] [--id <uuid>] [--json]" >&2
     echo "  pi-orb archive" >&2
+    echo "  pi-orb sleep <positive integer><s|m|h|d>" >&2
     echo "  pi-orb host <file> [path] [--request-id <uuid>]" >&2
     echo "  pi-orb host ls" >&2
     echo "  pi-orb host rm <path>" >&2

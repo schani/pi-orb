@@ -2,6 +2,8 @@ import type {
   HarnessSessionMetadata,
   HistoryRecord,
   MessageInputBlock,
+  OrbBootContext,
+  OrbMessageSystem,
   OrbState,
   PullHistoryResponse,
   RuntimeHealth,
@@ -50,6 +52,7 @@ export interface CasTransitionParams {
   readonly checkoutCommit?: string | null;
   /** Set entering `stopping` (idle) and cleared on explicit stops/starts (docs/lifecycle.md). */
   readonly stopReason?: StopReason | null;
+  readonly cancelSleep?: boolean;
 }
 
 export interface CasUpdateFieldsParams {
@@ -242,14 +245,31 @@ export interface ControlPlaneStore {
       messageId: string;
       content: readonly MessageInputBlock[];
       now: number;
-      /** Upload notifications never request compute startup. */
+      /** Upload notifications never request compute startup or cancel sleep. */
       wake?: boolean;
+      cancelSleep?: boolean;
     },
   ): ResultAsync<
     { message: OrbMessageRow; orb: OrbRow; duplicate: boolean },
     StoreError | StateConflict
   >;
   listOrbMessages(task: SimulationTask, orbId: string): ResultAsync<OrbMessageRow[], StoreError>;
+  scheduleOrbSleep(
+    task: SimulationTask,
+    params: { orbId: string; caller: ArchiveCaller; sleepId: string; durationSeconds: number },
+  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+  cancelOrbSleep(
+    task: SimulationTask,
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<OrbRow, StoreError | StateConflict>;
+  processDueOrbSleep(
+    task: SimulationTask,
+    params: { orbId: string; sleepId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<"wake" | "expired" | "waiting" | "stale", StoreError>;
+  readOrbBootContext(
+    task: SimulationTask,
+    params: { orbId: string; caller: ArchiveCaller },
+  ): ResultAsync<OrbBootContext | null, StoreError | StateConflict>;
   /** Atomically freezes all currently queued messages into the next FIFO delivery batch. */
   claimNextOrbMessageBatch(
     task: SimulationTask,
@@ -285,10 +305,10 @@ export interface ControlPlaneStore {
       now: number;
     },
   ): ResultAsync<void, StoreError>;
-  clearOrbMessageAutoStart(
+  requestOrbStop(
     task: SimulationTask,
-    params: { orbId: string; now: number },
-  ): ResultAsync<void, StoreError>;
+    params: { orbId: string; expectedStateVersion: number; now: number },
+  ): ResultAsync<{ orb: OrbRow; cancelledSleepId: string | null }, StoreError | StateConflict>;
   /**
    * The one message-driven lifecycle transition, in one transaction: enters
    * `starting` if — and only if — some outstanding message still carries a
@@ -583,6 +603,7 @@ export interface DeliverMessageClientRequest {
   readonly messageId: string;
   readonly messageIds: readonly string[];
   readonly content: readonly MessageInputBlock[];
+  readonly system?: OrbMessageSystem;
 }
 
 export interface PullHistoryClientRequest {

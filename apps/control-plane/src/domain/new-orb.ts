@@ -34,6 +34,8 @@ export function newOrbRow(
     lastBusyAt: null,
     uploadActiveUntil: null,
     stopReason: null,
+    sleepId: null,
+    sleepUntil: null,
     lastMintAt: null,
     stateChangedAt: now,
     createdAt: now,

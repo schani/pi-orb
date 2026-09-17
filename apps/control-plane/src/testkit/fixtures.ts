@@ -303,6 +303,8 @@ export function makeOrbRow(
     lastBusyAt: null,
     uploadActiveUntil: null,
     stopReason: null,
+    sleepId: null,
+    sleepUntil: null,
     lastMintAt: null,
     stateChangedAt: 0,
     createdAt: 0,

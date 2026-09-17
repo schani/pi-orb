@@ -2,7 +2,8 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createPublicKey, createVerify } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { err, ok, type Result } from "neverthrow";
 
 export const FAKE_ORIGIN = process.env["PI_ORB_FAKE_OPENAI"] ?? "https://fake-openai.flingit.run";
 
@@ -112,6 +113,38 @@ export async function fakeControl(
     throw new Error(`fake control ${path} failed: HTTP ${response.status}`);
   }
   return (await response.json()) as Record<string, unknown>;
+}
+
+export interface RecordedFakeRequest {
+  readonly id: number;
+  readonly surface?: unknown;
+  readonly body?: unknown;
+  readonly [key: string]: unknown;
+}
+
+const recordedFakeRequest = (request: unknown): RecordedFakeRequest => {
+  if (
+    typeof request !== "object" ||
+    request === null ||
+    !Number.isSafeInteger((request as { id?: unknown }).id)
+  ) {
+    throw new Error("fake service returned a request without a numeric id");
+  }
+  return request as RecordedFakeRequest;
+};
+
+export function requestIds(requests: readonly unknown[]): ReadonlySet<number> {
+  return new Set(requests.map((request) => recordedFakeRequest(request).id));
+}
+
+export function newModelRequestsById(
+  requests: readonly unknown[],
+  previousIds: ReadonlySet<number>,
+): RecordedFakeRequest[] {
+  return requests
+    .map(recordedFakeRequest)
+    .filter((request) => request.surface === "model" && !previousIds.has(request.id))
+    .sort((left, right) => left.id - right.id);
 }
 
 export async function deleteFakeSession(sessionKey: string): Promise<void> {
@@ -341,8 +374,118 @@ export async function waitForPostgres(
   );
 }
 
+export type ControlledClockError =
+  | { type: "invalid_clock_target" }
+  | { type: "clock_rollback"; now: number }
+  | { type: "clock_closed" }
+  | { type: "clock_protocol"; message: string };
+
+export interface ControlledClock {
+  ready: Promise<Result<{ now: number }, ControlledClockError>>;
+  advanceTo(target: number): Promise<Result<{ now: number }, ControlledClockError>>;
+  probeRuntimeChild(): Promise<Result<{ now: number }, ControlledClockError>>;
+  dispose(): void;
+}
+
+export function controlledClockSpawn(
+  entry: string,
+  epoch: number,
+): { args: string[]; env: Record<string, string> } {
+  return {
+    args: ["--import", resolve(import.meta.dirname, "control-plane-clock-preload.ts"), entry],
+    env: { PI_ORB_E2E_CLOCK_EPOCH_MS: String(epoch) },
+  };
+}
+
+export function attachControlledClock(child: ChildProcess): ControlledClock {
+  let nextId = 1;
+  let closed = false;
+  let settleReady: (result: Result<{ now: number }, ControlledClockError>) => void = () => {};
+  const ready = new Promise<Result<{ now: number }, ControlledClockError>>((resolveReady) => {
+    settleReady = resolveReady;
+  });
+  const pending = new Map<
+    number,
+    (result: Result<{ now: number }, ControlledClockError>) => void
+  >();
+
+  const close = (): void => {
+    if (closed) return;
+    closed = true;
+    const failure = err<{ now: number }, ControlledClockError>({ type: "clock_closed" });
+    settleReady(failure);
+    for (const settle of pending.values()) settle(failure);
+    pending.clear();
+    child.off("message", onMessage);
+    child.off("exit", close);
+    child.off("error", close);
+  };
+  const onMessage = (message: unknown): void => {
+    if (typeof message !== "object" || message === null || !("type" in message)) return;
+    if (message.type === "pi-orb.clock.ready") {
+      if ("now" in message && typeof message.now === "number")
+        settleReady(ok({ now: message.now }));
+      else
+        settleReady(
+          err({ type: "clock_protocol", message: "controlled clock failed to initialize" }),
+        );
+      return;
+    }
+    if (
+      (message.type !== "pi-orb.clock.result" && message.type !== "pi-orb.runtime-clock.result") ||
+      !("id" in message) ||
+      typeof message.id !== "number"
+    )
+      return;
+    const settle = pending.get(message.id);
+    if (settle === undefined) return;
+    pending.delete(message.id);
+    if ("now" in message && typeof message.now === "number" && !("error" in message)) {
+      settle(ok({ now: message.now }));
+    } else if ("error" in message && message.error === "rollback") {
+      settle(
+        err({
+          type: "clock_rollback",
+          now: "now" in message && typeof message.now === "number" ? message.now : Number.NaN,
+        }),
+      );
+    } else {
+      settle(err({ type: "clock_protocol", message: "invalid controlled clock response" }));
+    }
+  };
+  const request = (
+    message: Record<string, unknown>,
+  ): Promise<Result<{ now: number }, ControlledClockError>> => {
+    if (closed || !child.connected) return Promise.resolve(err({ type: "clock_closed" } as const));
+    const id = nextId++;
+    return new Promise((settle) => {
+      pending.set(id, settle);
+      child.send({ ...message, id }, (error) => {
+        if (error === null) return;
+        const owner = pending.get(id);
+        pending.delete(id);
+        owner?.(err({ type: "clock_protocol", message: error.message }));
+      });
+    });
+  };
+
+  child.on("message", onMessage);
+  child.once("exit", close);
+  child.once("error", close);
+  return {
+    ready,
+    advanceTo: (target) =>
+      Number.isFinite(target)
+        ? request({ type: "pi-orb.clock.advance", target })
+        : Promise.resolve(err({ type: "invalid_clock_target" })),
+    probeRuntimeChild: () => request({ type: "pi-orb.runtime-clock.probe" }),
+    dispose: close,
+  };
+}
+
 export interface ControlPlaneHandle {
   process: ChildProcess;
+  clock?: ControlledClock;
   port: number;
   baseUrl: string;
   authDir: string;
@@ -452,15 +595,22 @@ export async function startControlPlane(options: {
   entry?: string;
   readinessHeaders?: Record<string, string>;
   extraEnv?: Readonly<Record<string, string>>;
+  controlledClockEpoch?: number;
 }): Promise<ControlPlaneHandle> {
   const authDir = options.authDir ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const ownedHostingRoot = options.hostingRoot === undefined;
   const hostingRoot = options.hostingRoot ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
   const logs: string[] = [];
-  const child = spawn("node", [options.entry ?? "apps/control-plane/src/main.ts"], {
+  const entry = options.entry ?? "apps/control-plane/src/main.ts";
+  const clockSpec =
+    options.controlledClockEpoch === undefined
+      ? null
+      : controlledClockSpawn(entry, options.controlledClockEpoch);
+  const child = spawn("node", clockSpec?.args ?? [entry], {
     cwd: join(import.meta.dirname, ".."),
     env: {
       ...process.env,
+      ...clockSpec?.env,
       ...(options.pglitePath === undefined
         ? { DATABASE_URL: options.databaseUrl }
         : {
@@ -488,15 +638,24 @@ export async function startControlPlane(options: {
         : { PI_ORB_NAME_INFERENCE_URL: options.nameFake.inferenceBaseUrl }),
       ...options.extraEnv,
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: clockSpec === null ? ["ignore", "pipe", "pipe"] : ["ignore", "pipe", "pipe", "ipc"],
   });
+  const clock = clockSpec === null ? undefined : attachControlledClock(child);
   child.stdout?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
   child.stderr?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
 
   const baseUrl = `http://127.0.0.1:${options.port}`;
+  if (clock !== undefined) {
+    const ready = await clock.ready;
+    if (ready.isErr()) {
+      child.kill("SIGTERM");
+      throw new Error(`controlled clock initialization failed: ${ready.error.type}`);
+    }
+  }
   await waitForOwnedControlPlane(child, logs, baseUrl, 30_000, options.readinessHeaders);
   return {
     process: child,
+    ...(clock === undefined ? {} : { clock }),
     port: options.port,
     baseUrl,
     authDir,
@@ -505,6 +664,7 @@ export async function startControlPlane(options: {
     stop: () =>
       new Promise((resolve) => {
         const finish = () => {
+          clock?.dispose();
           if (ownedHostingRoot) rmSync(hostingRoot, { recursive: true, force: true });
           resolve();
         };

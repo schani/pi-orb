@@ -107,6 +107,25 @@ const declineMarker = () =>
     details: {},
   });
 
+const sleepWakeMarker = () =>
+  entry("custom_message", {
+    customType: "pi-orb.sleep-wake",
+    content: "restart and sleep context",
+    display: true,
+    details: { messageIds: ["sleep-1"] },
+  });
+
+const systemInboxNotice = () =>
+  entry("custom_message", {
+    customType: "pi-orb.system-message",
+    content: "sleep expired",
+    display: true,
+    details: {
+      messageIds: ["sleep-2"],
+      system: { kind: "sleep_expired", sleepUntil: "2026-09-18T04:05:06.000Z" },
+    },
+  });
+
 /** The record ID detection reports as the interrupted head. */
 const idOf = (record: Record<string, unknown>): string => {
   const value = record["id"];
@@ -298,6 +317,32 @@ describe("detectInterruptedTurn", () => {
         shape: "trailing_tool_result",
         headRecordId: idOf(head),
         announced: true,
+      },
+    });
+  });
+
+  it("classifies a combined sleep wake as a boot marker", () => {
+    const marker = sleepWakeMarker();
+    expect(detectInterruptedTurn([user(), assistantText(), marker])).toEqual({
+      resume: false,
+      reason: "already_resumed",
+      suppressed: {
+        shape: "unanswered_user_message",
+        headRecordId: idOf(marker),
+        announced: false,
+      },
+    });
+  });
+
+  it("does not let an ordinary system inbox notice reset the human resume budget", () => {
+    const head = assistantToolCalls("call-2");
+    expect(detectInterruptedTurn([user(), resumeMarker(), systemInboxNotice(), head])).toEqual({
+      resume: false,
+      reason: "already_resumed",
+      suppressed: {
+        shape: "dangling_tool_calls",
+        headRecordId: idOf(head),
+        announced: false,
       },
     });
   });

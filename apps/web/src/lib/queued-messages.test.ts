@@ -124,6 +124,29 @@ describe("queued message list updates", () => {
     expect(hasDeliveredMessageAwaitingHistory([delivered], [represented])).toBe(false);
   });
 
+  it("retires a delivered system notice when an event names its inbox identity", () => {
+    const delivered: OrbMessageView = {
+      ...message("sleep-1", "delivered"),
+      system: { kind: "sleep_wake", sleepUntil: "2026-09-17T01:00:00.000Z" },
+    };
+    const represented: HistoryRecord = {
+      id: "event-sleep-1",
+      parentId: null,
+      timestamp: "2026-09-17T01:00:01.000Z",
+      type: "event",
+      eventType: "custom",
+      content: delivered.content,
+      inboxMessageIds: [delivered.id],
+      custom: { customType: "pi-orb.sleep-wake", display: true },
+      overflow: {},
+    };
+
+    expect(messagesAwaitingHistory([delivered], [])).toEqual([delivered]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered], [])).toBe(true);
+    expect(messagesAwaitingHistory([delivered], [represented])).toEqual([]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered], [represented])).toBe(false);
+  });
+
   it("does not read inbox identity from native overflow", () => {
     const delivered = message("a", "delivered");
     const legacy: HistoryRecord = {

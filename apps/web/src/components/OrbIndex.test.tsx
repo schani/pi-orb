@@ -74,6 +74,21 @@ describe("stacked project index", () => {
     expect(html).toContain('class="ix-age">…</span>');
   });
 
+  it("forwards sleep metadata into fleet rows while retaining selected fill", () => {
+    const sleeping = {
+      ...orb,
+      state: "stopped" as const,
+      sleepUntil: "2026-09-18T00:00:00.000Z",
+    };
+    const html = renderToStaticMarkup(
+      <IndexProject {...props} list={{ items: [sleeping], error: null }} />,
+    );
+    expect(html).toContain("ix-row-sleep ix-row-current");
+    expect(html).toContain('src="/favicons/sleeping.svg"');
+    expect(html).toContain('title="Orb sleeping"');
+    expect(html).toContain('aria-current="page"');
+  });
+
   it("retains stale rows and reports partial load errors locally", () => {
     const error = { type: "network" as const, message: "offline" };
     const stale = renderToStaticMarkup(<IndexProject {...props} list={{ items: [orb], error }} />);

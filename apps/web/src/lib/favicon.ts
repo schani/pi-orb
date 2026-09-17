@@ -4,6 +4,7 @@ import type { LiveConnectionStatus } from "./live.ts";
 export type OrbFaviconStatus =
   | "neutral"
   | "stopped"
+  | "sleeping"
   | "running"
   | "busy"
   | "transitional"
@@ -15,6 +16,7 @@ export type OrbFaviconStatus =
 export const FAVICON_HREFS: Record<OrbFaviconStatus, string> = {
   neutral: "/favicons/neutral.svg",
   stopped: "/favicons/stopped.svg",
+  sleeping: "/favicons/sleeping.svg",
   running: "/favicons/running.svg",
   busy: "/favicons/busy.svg",
   transitional: "/favicons/transitional.svg",
@@ -24,14 +26,20 @@ export const FAVICON_HREFS: Record<OrbFaviconStatus, string> = {
   deleting: "/favicons/deleting.svg",
 };
 
+export function isOrbSleeping(orbState: OrbState | null, sleepUntil: string | undefined): boolean {
+  return orbState === "stopped" && sleepUntil !== undefined;
+}
+
 /** Derives tab status from durable lifecycle state plus current live activity. */
 export function deriveOrbFaviconStatus(
   orbState: OrbState | null,
   connection: LiveConnectionStatus,
   activity: "idle" | "busy" | null,
+  sleepUntil?: string,
 ): OrbFaviconStatus {
   if (orbState === null) return "neutral";
   if (orbState === "failed") return "failed";
+  if (isOrbSleeping(orbState, sleepUntil)) return "sleeping";
   if (orbState === "stopped") return "stopped";
   if (orbState === "archived") return "archived";
   if (orbState === "archiving") return "archiving";

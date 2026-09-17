@@ -45,7 +45,7 @@ function IndexRow({
   pending: boolean;
   now: number;
 }) {
-  const glyph = projectOrbGlyph(orb.state, orb.activity);
+  const glyph = projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil);
   const current = orb.id === orbId;
   const name = orb.name ?? "untitled orb";
   return (

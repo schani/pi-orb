@@ -135,6 +135,7 @@ export function buildRuntimeServer(
         request.body.messageId,
         request.body.messageIds,
         request.body.content,
+        request.body.system,
       );
       return delivered.isErr()
         ? reply

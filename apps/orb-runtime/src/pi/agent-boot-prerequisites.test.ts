@@ -2,7 +2,7 @@ import type { ExecFileException } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ok, ResultAsync } from "neverthrow";
+import { errAsync, ok, ResultAsync } from "neverthrow";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const controls = vi.hoisted(() => ({
@@ -98,9 +98,15 @@ describe("agent boot prerequisites", () => {
       orbId: "orb",
       repositoryUrl: "https://github.com/example/repo.git",
       workDir,
-      broker: null,
+      broker: { controlPlaneUrl: "http://control-plane.test", runtimeToken: "secret" },
       skillsDir: null,
       hookSpawner,
+      bootContextReader: () =>
+        errAsync({
+          type: "boot_context_error",
+          message: "boot context is unavailable: injected failure",
+          retryable: true,
+        }),
     });
 
     const boot = agent.boot();
@@ -128,7 +134,11 @@ describe("agent boot prerequisites", () => {
     expect(setupCalls).toBe(1);
     expect(agent.getHealth()).toMatchObject({
       status: "failed",
-      error: { code: "project_secrets_unavailable" },
+      error: {
+        code: "boot_context_unavailable",
+        message: "boot context is unavailable: injected failure",
+        retryable: true,
+      },
     });
   });
 });

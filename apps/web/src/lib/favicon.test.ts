@@ -23,6 +23,16 @@ describe("deriveOrbFaviconStatus", () => {
     expect(deriveOrbFaviconStatus("archiving", "closed", null)).toBe("archiving");
     expect(deriveOrbFaviconStatus("deleting", "closed", null)).toBe("deleting");
   });
+
+  it("shows sleeping only for stopped orbs with a deadline", () => {
+    const sleepUntil = "2026-09-18T00:00:00.000Z";
+    expect(deriveOrbFaviconStatus("stopped", "closed", null, sleepUntil)).toBe("sleeping");
+    expect(deriveOrbFaviconStatus("stopped", "closed", null)).toBe("stopped");
+    expect(deriveOrbFaviconStatus("running", "open", "busy", sleepUntil)).toBe("busy");
+    expect(deriveOrbFaviconStatus("stopping", "closed", null, sleepUntil)).toBe("transitional");
+    expect(deriveOrbFaviconStatus("failed", "closed", null, sleepUntil)).toBe("failed");
+    expect(deriveOrbFaviconStatus("deleting", "closed", null, sleepUntil)).toBe("deleting");
+  });
 });
 
 describe("setOrbFavicon", () => {
@@ -40,5 +50,8 @@ describe("setOrbFavicon", () => {
 
     setOrbFavicon("busy", target);
     expect(attributes.get("href")).toBe("/favicons/busy.svg");
+
+    setOrbFavicon("sleeping", target);
+    expect(attributes.get("href")).toBe("/favicons/sleeping.svg");
   });
 });

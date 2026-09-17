@@ -19,6 +19,8 @@ import {
   type MessageInputBlock,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
+  type OrbBootContext,
+  type OrbMessageSystem,
   type RuntimeEvent,
   type RuntimeHealth,
   type RuntimeHooks,
@@ -58,7 +60,8 @@ import { readRootReadme } from "../naming/context.ts";
 import { fetchPersonalInstructions } from "../personal-instructions/endpoint.ts";
 import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
-import { BOOT_BASELINE_TYPE, planBootNotification } from "./boot-notification.ts";
+import { type BootContextError, fetchBootContext } from "./boot-context.ts";
+import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boot-notification.ts";
 import { settleBootPrerequisites } from "./boot-prerequisites.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
 import { FileIdleStopFence, type IdleStopFence } from "./idle-stop-fence.ts";
@@ -105,6 +108,10 @@ export interface PiOrbAgentOptions {
   readonly turnSummarizer?: TurnSummarizer;
   /** E2E composition seam: expose one selected incarnation as terminally failed. */
   readonly testLaunchFailure?: boolean;
+  /** Test seam; production reads mandatory context through the HTTP adapter. */
+  readonly bootContextReader?: (
+    broker: BrokerEnv,
+  ) => ResultAsync<{ readonly v: 1; readonly context: OrbBootContext | null }, BootContextError>;
 }
 
 export interface SnapshotError {
@@ -409,6 +416,16 @@ export class PiOrbAgent {
           "project_secrets_unavailable",
           "broker environment variables are missing",
           false,
+        ),
+      );
+    }
+    const bootContext = await (this.options.bootContextReader ?? fetchBootContext)(broker);
+    if (bootContext.isErr()) {
+      return err(
+        this.failed(
+          "boot_context_unavailable",
+          bootContext.error.message,
+          bootContext.error.retryable,
         ),
       );
     }
@@ -828,7 +845,13 @@ export class PiOrbAgent {
     };
     sdkSession.subscribe(() => this.observeSettings?.());
     const summarizer = this.options.turnSummarizer ?? new LunaTurnSummarizer(modelRuntime, model);
-    this.attachSession(sessionResult.value.session, sessionManager, summarizer);
+    this.attachSession(
+      sessionResult.value.session,
+      sessionManager,
+      summarizer,
+      this.settingsController,
+      bootContext.value.context,
+    );
     return ok(undefined);
   }
 
@@ -873,6 +896,7 @@ export class PiOrbAgent {
     manager: PiSessionManager,
     summarizer: TurnSummarizer,
     settingsController: AgentSettingsController | null = this.settingsController,
+    bootContext: OrbBootContext | null = null,
   ): void {
     this.settingsController = settingsController;
     this.session = session;
@@ -894,7 +918,7 @@ export class PiOrbAgent {
       },
     });
     this.liveHistory = new LiveHistoryPublisher(manager, (record, sourceMessage) => {
-      const batchId = record.type === "message" ? record.inboxMessageIds?.[0] : undefined;
+      const batchId = "inboxMessageIds" in record ? record.inboxMessageIds?.[0] : undefined;
       if (batchId !== undefined) this.pendingInboxMessages.delete(batchId);
       const retiredBlockIds =
         sourceMessage === null ? [] : (this.messageBlocks.get(sourceMessage) ?? []);
@@ -939,7 +963,7 @@ export class PiOrbAgent {
     // 5. Deliver restart context, including between turns (docs/lifecycle.md).
     // This synchronous final boot step claims any automatic turn before
     // another ingress can observe readiness; inference is never awaited.
-    this.notifyRestart(manager, session);
+    this.notifyRestart(manager, session, bootContext);
   }
 
   /**
@@ -950,7 +974,11 @@ export class PiOrbAgent {
    * decision is kept for `RuntimeHealth`, where the control plane's readiness
    * path turns it into one log line (docs/lifecycle.md).
    */
-  private notifyRestart(manager: PiSessionManager, session: PiSession): void {
+  private notifyRestart(
+    manager: PiSessionManager,
+    session: PiSession,
+    bootContext: OrbBootContext | null,
+  ): void {
     const identity = {
       runtimeInstanceId: this.runtimeInstanceId,
       executionId:
@@ -978,7 +1006,12 @@ export class PiOrbAgent {
       return;
     }
     if (fence.value) return;
-    const plan = planBootNotification(loaded.value.entries, loaded.value.context, identity);
+    const plan = planBootNotification(
+      loaded.value.entries,
+      loaded.value.context,
+      identity,
+      bootContext,
+    );
     if (plan.kind === "none") return;
     if (plan.kind === "baseline") {
       const saved = Result.fromThrowable(
@@ -1010,14 +1043,21 @@ export class PiOrbAgent {
       this.beginTurnStart();
     }
     const interrupted = interruptedSubagents(loaded.value.entries);
-    const marker =
-      interrupted.length === 0
-        ? plan.marker
+    const marker = {
+      ...plan.marker,
+      ...(interrupted.length === 0
+        ? {}
         : {
-            ...plan.marker,
             content: `${plan.marker.content} Local subagent runs (${interrupted.map((run) => run.childId).join(", ")}) were interrupted. They have not been automatically replayed; inspect existing work before deciding what is still needed.`,
-            details: { ...plan.marker.details, interruptedSubagents: interrupted },
-          };
+          }),
+      details: {
+        ...plan.marker.details,
+        ...(plan.marker.customType === SLEEP_WAKE_TYPE
+          ? { delivery: "turn" as const, operationId: operationId ?? "unknown" }
+          : {}),
+        ...(interrupted.length === 0 ? {} : { interruptedSubagents: interrupted }),
+      },
+    };
     const send = ResultAsync.fromThrowable(
       () => session.sendCustomMessage(marker, { triggerTurn: plan.triggerTurn }),
       toError,
@@ -1592,9 +1632,10 @@ export class PiOrbAgent {
     messageId: string,
     messageIds: readonly string[],
     content: readonly MessageInputBlock[],
+    system?: OrbMessageSystem,
   ): ResultAsync<DeliverOrbMessageResponse, { message: string; retryable: boolean }> {
     return ResultAsync.fromSafePromise(this.awaitTurnStart()).andThen(() =>
-      this.deliverSettledInboxMessage(messageId, messageIds, content),
+      this.deliverSettledInboxMessage(messageId, messageIds, content, system),
     );
   }
 
@@ -1602,6 +1643,7 @@ export class PiOrbAgent {
     messageId: string,
     messageIds: readonly string[],
     content: readonly MessageInputBlock[],
+    system?: OrbMessageSystem,
   ): ResultAsync<DeliverOrbMessageResponse, { message: string; retryable: boolean }> {
     const session = this.session;
     const manager = this.sessionManager;
@@ -1618,7 +1660,13 @@ export class PiOrbAgent {
     for (const entry of manager.getEntries()) {
       if (typeof entry !== "object" || entry === null) continue;
       const native = entry as { type?: string; customType?: string; details?: unknown };
-      if (native.type !== "custom_message" || native.customType !== "pi-orb.user-message") continue;
+      if (
+        native.type !== "custom_message" ||
+        !["pi-orb.user-message", "pi-orb.system-message", "pi-orb.sleep-wake"].includes(
+          native.customType ?? "",
+        )
+      )
+        continue;
       const details = native.details;
       if (typeof details !== "object" || details === null) continue;
       const typed = details as {
@@ -1678,14 +1726,19 @@ export class PiOrbAgent {
         ? { type: "text" as const, text: block.text }
         : { type: "image" as const, data: block.data, mimeType: block.mediaType },
     );
-    this.triggerAutoName(content);
+    if (system === undefined) this.triggerAutoName(content);
     return ResultAsync.fromPromise(
       session.sendCustomMessage(
         {
-          customType: "pi-orb.user-message",
+          customType: system === undefined ? "pi-orb.user-message" : "pi-orb.system-message",
           content: piContent,
           display: true,
-          details: { messageIds, delivery, operationId },
+          details: {
+            messageIds,
+            delivery,
+            operationId,
+            ...(system === undefined ? {} : { system }),
+          },
         },
         { triggerTurn: true, ...(delivery === "steer" ? { deliverAs: "steer" as const } : {}) },
       ),
