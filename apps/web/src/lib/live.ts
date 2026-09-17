@@ -8,6 +8,7 @@ import {
   ServerFrameSchema,
 } from "@pi-orb/protocol";
 import { Check } from "typebox/value";
+import { devConsoleDebug, historyFrameDebug } from "./dev-console-debug.ts";
 import { generateUuid } from "./uuid.ts";
 
 /** Stable UUID for this browser tab (docs/runtime-protocol.md). */
@@ -70,18 +71,49 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
   let disposed = false;
   let retryTimer: number | null = null;
   let runtimeInstanceId: string | null = null;
+  let connectionId: string | null = null;
   let sessionId = options.sessionId;
   let forceFullSync = false;
   const pending = new Map<string, PendingRequest>();
 
+  function reportStatus(status: LiveConnectionStatus): void {
+    devConsoleDebug.record({
+      event: "connection",
+      orbId: options.orbId,
+      outcome: status,
+      connectionId,
+    });
+    options.onStatus(status);
+  }
+
   function scheduleRetry(): void {
     if (disposed) return;
-    options.onStatus("retrying");
+    reportStatus("retrying");
     retryTimer = window.setTimeout(connect, RETRY_DELAY_MS);
   }
 
   function handleFrame(ws: WebSocket, frame: ServerFrame): void {
+    if (
+      frame.type === "server.welcome" ||
+      frame.type === "sync.started" ||
+      frame.type === "history.record" ||
+      frame.type === "sync.completed"
+    ) {
+      devConsoleDebug.record({
+        event: "frame_received",
+        orbId: options.orbId,
+        frameType: frame.type,
+        connectionId: frame.type === "server.welcome" ? frame.connectionId : connectionId,
+        ...(frame.type === "server.welcome"
+          ? { runtimeInstanceId: frame.runtimeInstanceId, sessionId: frame.sessionId }
+          : {}),
+        ...(frame.type === "sync.started" ? { syncMode: frame.mode } : {}),
+        ...(frame.type === "sync.completed" ? { headId: frame.headId } : {}),
+        ...historyFrameDebug(frame),
+      });
+    }
     if (frame.type === "server.welcome") {
+      connectionId = frame.connectionId;
       const changedSession = sessionId !== null && sessionId !== frame.sessionId;
       sessionId = frame.sessionId;
       if (changedSession) {
@@ -119,7 +151,8 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
   function connect(): void {
     if (disposed) return;
     retryTimer = null;
-    options.onStatus("connecting");
+    connectionId = null;
+    reportStatus("connecting");
 
     let ws: WebSocket;
     try {
@@ -132,30 +165,58 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
 
     ws.onopen = () => {
       if (ws !== socket) return;
+      const requestedCursor = forceFullSync ? null : options.getAfterRecordId();
       const hello: ClientHello = {
         v: 1,
         type: "client.hello",
         clientInstanceId: CLIENT_INSTANCE_ID,
-        afterRecordId: forceFullSync ? null : options.getAfterRecordId(),
+        afterRecordId: requestedCursor,
       };
+      devConsoleDebug.record({
+        event: "connection",
+        orbId: options.orbId,
+        outcome: "hello",
+        cursorAfter: requestedCursor,
+      });
       ws.send(JSON.stringify(hello));
       ws.send(JSON.stringify(presenceFrame(options.getVisible())));
-      options.onStatus("open");
+      reportStatus("open");
     };
 
     ws.onmessage = (event: MessageEvent) => {
       if (ws !== socket) return;
       const data: unknown = event.data;
-      if (typeof data !== "string") return; // binary frames are not part of the protocol
+      if (typeof data !== "string") {
+        devConsoleDebug.record({
+          event: "frame_rejected",
+          orbId: options.orbId,
+          outcome: "non_text",
+        });
+        return; // binary frames are not part of the protocol
+      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(data);
       } catch {
+        devConsoleDebug.record({
+          event: "frame_rejected",
+          orbId: options.orbId,
+          outcome: "invalid_json",
+          textLength: data.length,
+        });
         return; // ignore malformed frames
       }
       // Ignore frames failing validation; well-formed unknown event types
       // also fail the closed-union check and are ignored the same way.
-      if (!Check(ServerFrameSchema, parsed)) return;
+      if (!Check(ServerFrameSchema, parsed)) {
+        devConsoleDebug.record({
+          event: "frame_rejected",
+          orbId: options.orbId,
+          outcome: "schema_invalid",
+          textLength: data.length,
+        });
+        return;
+      }
       handleFrame(ws, parsed);
     };
 
@@ -163,7 +224,7 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
       if (ws !== socket) return;
       socket = null;
       if (disposed) {
-        options.onStatus("closed");
+        reportStatus("closed");
       } else {
         // Covers 1013 "try again later" and any other close cause; the page
         // disposes this connection once the orb is no longer running.
@@ -202,7 +263,7 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
         ws.onclose = null;
         ws.close();
       }
-      options.onStatus("closed");
+      reportStatus("closed");
     },
   };
 }

@@ -2,6 +2,7 @@ import type { ServerFrame } from "@pi-orb/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 import { initialState, reducer } from "../pages/OrbPage.tsx";
 import { history } from "../testkit/transcript.ts";
+import { devConsoleDebug } from "./dev-console-debug.ts";
 import { openLiveConnection } from "./live.ts";
 
 class Socket {
@@ -23,7 +24,10 @@ class Socket {
     this.onclose?.();
   }
   frame(frame: ServerFrame) {
-    this.onmessage?.({ data: JSON.stringify(frame) });
+    this.raw(JSON.stringify(frame));
+  }
+  raw(data: string) {
+    this.onmessage?.({ data });
   }
 }
 const welcome = (sessionId: string): ServerFrame => ({
@@ -66,8 +70,32 @@ it.each([false, true])(
     });
     const first = Socket.instances[0] ?? expect.fail("first socket missing");
     first.onopen?.();
+    expect(devConsoleDebug.dump().trace.at(-1)).toMatchObject({
+      event: "connection",
+      outcome: "open",
+      connectionId: null,
+    });
+    expect(devConsoleDebug.dump().trace.at(-2)).toMatchObject({
+      event: "connection",
+      outcome: "hello",
+      cursorAfter: "one",
+    });
+    first.raw("not json SECRET_FRAME_BODY");
+    first.raw(JSON.stringify({ type: "history.record", content: "SECRET_FRAME_BODY" }));
     expect(first.sent[0]?.afterRecordId).toBe("one");
-    first.frame(welcome(changed ? "replacement" : "session"));
+    const welcomedSession = changed ? "replacement" : "session";
+    first.frame(welcome(welcomedSession));
+    expect(
+      devConsoleDebug
+        .dump()
+        .trace.findLast(
+          (entry) => entry.frameType === "server.welcome" && entry.sessionId === welcomedSession,
+        ),
+    ).toMatchObject({
+      event: "frame_received",
+      connectionId: "c",
+      runtimeInstanceId: "new-runtime",
+    });
     if (changed) {
       expect(first.readyState).toBe(3);
       expect(state.records.size).toBe(0);
@@ -75,6 +103,11 @@ it.each([false, true])(
       const next = Socket.instances[1] ?? expect.fail("replacement socket missing");
       next.onopen?.();
       expect(next.sent[0]?.afterRecordId).toBeNull();
+      expect(devConsoleDebug.dump().trace.at(-2)).toMatchObject({
+        event: "connection",
+        outcome: "hello",
+        cursorAfter: null,
+      });
       next.frame(welcome("replacement"));
       expect(Socket.instances.length).toBe(2);
       // Even an old native callback after close cannot apply its old records.
@@ -88,6 +121,11 @@ it.each([false, true])(
       });
       expect(state.records.size).toBe(0);
       next.frame({ v: 1, at: "now", type: "sync.started", mode: "after", afterRecordId: null });
+      expect(devConsoleDebug.dump().trace.at(-1)).toMatchObject({
+        frameType: "sync.started",
+        connectionId: "c",
+        syncMode: "after",
+      });
       next.frame({
         v: 1,
         at: "now",
@@ -103,6 +141,57 @@ it.each([false, true])(
     } else {
       expect(Socket.instances.length).toBe(1);
       expect(state.records.has("one")).toBe(true);
+    }
+    const beforeStreaming = devConsoleDebug.dump();
+    const activeSocket = changed
+      ? (Socket.instances[1] ?? expect.fail("active socket missing"))
+      : first;
+    for (let revision = 1; revision <= 250; revision += 1) {
+      activeSocket.frame({
+        v: 1,
+        at: "now",
+        type: "runtime.event",
+        event: {
+          type: "output_patch",
+          operationId: "operation",
+          blockId: "block",
+          blockType: "text",
+          revision,
+          patch: { type: "append", text: "SECRET_STREAM_CONTENT" },
+        },
+      });
+    }
+    const afterStreaming = devConsoleDebug.dump();
+    expect(afterStreaming.trace).toHaveLength(beforeStreaming.trace.length);
+    expect(afterStreaming.traceDropped).toBe(beforeStreaming.traceDropped);
+    expect(JSON.stringify(afterStreaming.trace)).not.toContain("SECRET_STREAM_CONTENT");
+
+    const diagnosticJson = JSON.stringify(afterStreaming.trace);
+    expect(diagnosticJson).toContain("invalid_json");
+    expect(diagnosticJson).toContain("schema_invalid");
+    expect(diagnosticJson).not.toContain("SECRET_FRAME_BODY");
+    expect(
+      afterStreaming.trace.findLast((entry) => entry.outcome === "invalid_json"),
+    ).toMatchObject({ textLength: "not json SECRET_FRAME_BODY".length });
+    if (!changed) {
+      const diagnosticRecord =
+        history("a", ["diagnostic-record"]).records[0] ?? expect.fail("record missing");
+      first.frame({
+        v: 1,
+        at: "now",
+        type: "history.record",
+        record: diagnosticRecord,
+        headId: "diagnostic-record",
+        retiredBlockIds: [],
+      });
+      expect(devConsoleDebug.dump().trace.at(-1)).toMatchObject({
+        event: "frame_received",
+        frameType: "history.record",
+        recordId: "diagnostic-record",
+        parentId: null,
+        headId: "diagnostic-record",
+        connectionId: "c",
+      });
     }
     live.dispose();
     const before = state;

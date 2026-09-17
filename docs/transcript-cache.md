@@ -48,6 +48,18 @@ Use one explicit navigation/load ownership token and per-entry writer ownership;
 - Delta replay is ID-deduplicated; persist a newer cache snapshot only from the actual applied state. Stale HTTP, disposed sockets, deletion and interrupted full sync may neither advance its cursor incorrectly nor revive an invalidated entry.
 - Cached state never restores request replay or marks the runtime synchronized; existing live readiness and HTTP inbox admission remain authoritative.
 
+### Delivered-message ordering invariant (2026-09-17)
+
+Every applied transcript prefix must be ordered and parent-closed. Never advance a resumable cursor beyond a missing ancestor. A delivered inbox row remains provisional until its matching user record is applied, repaired, or a visible synchronization failure is shown. A field browser violated this invariant while the replicated parent chain remained correct; the initiating frame loss or mismatch is unproven, and no fix is deployed. Evidence: `docs/postmortems/2026-09-17-delivered-message-order.md`. Repair is tracked in `TODO.md`.
+
+### Dev-console incident dump (implemented locally, not deployed, 2026-09-17)
+
+The frontend exposes `window.piOrbDebug.dump()` in production builds and logs instructions once at load. In browser developer tools, `copy(piOrbDebug.dump())` copies a detached, JSON-serializable diagnostic. It contains only strictly selected IDs, counts, states, timestamps and classifications: the latest 200 navigation/cache and connection transitions, welcome/sync/history frames, parse/schema rejections and applied sync/cursor changes; plus an on-demand summary of the currently owned transcript, parent-order anomalies and unmatched inbox rows. Streaming runtime patches and tool deltas are not traced. Trace capacity/drop counts and summary truncation fields state when evidence is incomplete. Parse and schema failures retain only a fixed classification and UTF-16 text length, never the rejected value.
+
+No transcript block, prompt, live patch, tool argument/result, native overflow, message content, credential, token or authenticated URL is retained. The summary scans current records only when `dump()` is called; accepted history and sync transitions record bounded metadata rather than rescanning history. Conversation cleanup removes the snapshot provider, and ownership fencing prevents an old React cleanup from clearing or retaining a newer conversation.
+
+This is deliberately a small manual aid, not an observability or recovery system. State exists only in the current tab's memory and is erased by reload, tab close or process loss; the ring overwrites old events. It has no backend/runtime correlation, persistence, IndexedDB, automatic capture/upload or effect on reconciliation. Missing entries therefore do not prove that a frame was never sent or received. PostgreSQL history and inbox rows remain the durable authority. The dump can show where the browser first retained inconsistent evidence, but cannot by itself locate loss before browser receipt.
+
 ## Local qualification evidence (2026-09-15)
 
 Tests were written before integration. The initial missing-module failures established the unimplemented baseline; after the cache primitive existed, both composed DST regressions failed against the old reducer, were explicitly replayed before changes, and now pass the same traces:

@@ -361,6 +361,79 @@ describe("frontend-only browser behavior", () => {
     },
   );
 
+  it("exposes a clean JSON dev-console diagnostic dump", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/#/`);
+      const dump = await page.evaluate(() =>
+        (
+          globalThis as unknown as {
+            piOrbDebug: { dump: () => unknown };
+          }
+        ).piOrbDebug.dump(),
+      );
+      expectPage(dump).toMatchObject({
+        version: 1,
+        scope: "current-tab",
+        traceCapacity: 200,
+        traceDropped: 0,
+        current: null,
+      });
+      await page.evaluate((hash) => {
+        (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+      }, ORB_HASH);
+      await expectPage(page.locator(".history .rec-you").first()).toBeVisible();
+      await expectPage
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (
+                globalThis as unknown as {
+                  piOrbDebug: { dump: () => { current: { orbId: string } | null } };
+                }
+              ).piOrbDebug.dump().current?.orbId,
+          ),
+        )
+        .toBe("frontend-fixture-orb");
+
+      const orbDump = await page.evaluate(() =>
+        (
+          globalThis as unknown as {
+            piOrbDebug: { dump: () => unknown };
+          }
+        ).piOrbDebug.dump(),
+      );
+      expectPage(orbDump).toMatchObject({
+        current: { orbId: "frontend-fixture-orb" },
+        trace: expectPage.arrayContaining([
+          expectPage.objectContaining({ event: "navigation", orbId: "frontend-fixture-orb" }),
+        ]),
+      });
+      const diagnosticJson = JSON.stringify(orbDump);
+      expectPage(diagnosticJson).not.toContain("This oversized follow-up");
+      expectPage(diagnosticJson).not.toContain("frontend-playground");
+
+      await page.evaluate(() => {
+        (globalThis as unknown as { location: { hash: string } }).location.hash = "#/";
+      });
+      await expectPage(page.locator(".dashboard")).toBeVisible();
+      await expectPage
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (
+                globalThis as unknown as {
+                  piOrbDebug: { dump: () => { current: unknown } };
+                }
+              ).piOrbDebug.dump().current,
+          ),
+        )
+        .toBeNull();
+    } finally {
+      await page.close();
+    }
+  });
+
   it("copies response Markdown independently from code and reports success", async () => {
     const context = await browser.newContext({
       permissions: ["clipboard-read", "clipboard-write"],

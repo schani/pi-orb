@@ -49,6 +49,7 @@ import {
 } from "../lib/api.ts";
 import { loadComposerDraft, saveComposerDraft } from "../lib/composer-draft.ts";
 import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
+import { devConsoleDebug } from "../lib/dev-console-debug.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { canRepairFromReplica, mergeReplicatedHistory } from "../lib/history-refresh.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
@@ -618,8 +619,15 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
       cache,
       getOrb,
       getHistory: getOrbHistory,
-      diagnostic: (data) =>
-        console.debug("transcript navigation", { ...data, loadMs: performance.now() - started }),
+      diagnostic: (data) => {
+        devConsoleDebug.record({
+          event: "navigation",
+          orbId: data.orbId,
+          outcome: data.cacheHit ? "cache_hit" : "cache_miss",
+          recordCount: data.records,
+        });
+        console.debug("transcript navigation", { ...data, loadMs: performance.now() - started });
+      },
     });
     void load.result.then((value) => {
       const accepted = load.accept(value);
@@ -708,6 +716,40 @@ function OrbConversation({
   const [messageEpoch] = useState(createMutationEpoch);
   const transcriptRef = useRef(state);
   transcriptRef.current = state;
+  const queuedMessagesRef = useRef(queuedMessages);
+  queuedMessagesRef.current = queuedMessages;
+  useLayoutEffect(
+    () =>
+      devConsoleDebug.ownCurrent(() => {
+        const current = transcriptRef.current;
+        return {
+          orbId,
+          sessionId: current.sessionId,
+          records: current.records,
+          afterRecordId: current.afterRecordId,
+          headId: current.headId,
+          synced: current.synced,
+          connection: current.connection,
+          queuedMessages: queuedMessagesRef.current,
+        };
+      }),
+    [orbId],
+  );
+  const tracedCursor = useRef<string | null>(state.afterRecordId);
+  useEffect(() => {
+    const before = tracedCursor.current;
+    tracedCursor.current = state.afterRecordId;
+    devConsoleDebug.record({
+      event: "sync_state",
+      orbId,
+      outcome: state.synced ? "synced" : "unsynced",
+      sessionId: state.sessionId,
+      cursorBefore: before,
+      cursorAfter: state.afterRecordId,
+      headId: state.headId,
+      recordCount: state.records.size,
+    });
+  }, [orbId, state.afterRecordId, state.headId, state.records, state.sessionId, state.synced]);
   const [orbNotFound, setOrbNotFound] = useState(
     () =>
       initial.orb.isErr() && initial.orb.error.type === "http" && initial.orb.error.status === 404,
@@ -742,6 +784,14 @@ function OrbConversation({
     });
     if (admission !== cacheAdmission.current) {
       cacheAdmission.current = admission;
+      devConsoleDebug.record({
+        event: "cache",
+        orbId,
+        outcome: admission,
+        recordCount: state.records.size,
+        cursorAfter: state.afterRecordId,
+        headId: state.headId,
+      });
       console.debug("transcript cache", { orbId, admission, ...cache.stats });
     }
   }, [
