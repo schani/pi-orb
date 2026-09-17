@@ -60,7 +60,7 @@ export class FakeAuthGate implements AuthGate {
           // The flow is gone; a later start request may initiate a new one.
           this.flow = null;
           this.state = "unauthenticated";
-          return { status: "failed", message: "device login expired", retryable: true };
+          return { status: "failed", message: "device login expired", retryable: false };
         }
         if (
           mode.failFlow !== true &&

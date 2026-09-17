@@ -4,6 +4,7 @@ import type { PointerConflict, StoreError } from "../../domain/errors.ts";
 import type {
   CredentialPointerRow,
   CredentialPointerStore,
+  CredentialPointerStoreFactory,
   CredentialPointerWrite,
 } from "../../domain/ports.ts";
 import type { PgRow, PostgreSQLClient } from "./client.ts";
@@ -19,12 +20,13 @@ function mapRow(row: PgRow): CredentialPointerRow {
   };
 }
 
-/** PostgreSQL credential-pointer store (docs/credentials.md): CAS on `row_version`. */
-export class PostgreSQLCredentialPointerStore implements CredentialPointerStore {
+class BoundPostgreSQLCredentialPointerStore implements CredentialPointerStore {
   private readonly db: PostgreSQLClient;
+  private readonly userId: string;
 
-  constructor(db: PostgreSQLClient) {
+  constructor(db: PostgreSQLClient, userId: string) {
     this.db = db;
+    this.userId = userId;
   }
 
   readPointer(
@@ -32,7 +34,10 @@ export class PostgreSQLCredentialPointerStore implements CredentialPointerStore 
     provider: string,
   ): ResultAsync<CredentialPointerRow | null, StoreError> {
     return this.db
-      .query("SELECT * FROM credential_pointers WHERE provider = $1", [provider])
+      .query("SELECT * FROM credential_pointers WHERE user_id = $1 AND provider = $2", [
+        this.userId,
+        provider,
+      ])
       .map((result) => (result.rows[0] !== undefined ? mapRow(result.rows[0]) : null));
   }
 
@@ -47,11 +52,12 @@ export class PostgreSQLCredentialPointerStore implements CredentialPointerStore 
         expectedRowVersion === null
           ? await this.db.query(
               `INSERT INTO credential_pointers
-                 (provider, row_version, generation, secret_version, refresh_lease_until, last_refresh_at)
-               VALUES ($1, 1, $2, $3, $4, $5)
-               ON CONFLICT (provider) DO NOTHING
+                 (user_id, provider, row_version, generation, secret_version, refresh_lease_until, last_refresh_at)
+               VALUES ($1, $2, 1, $3, $4, $5, $6)
+               ON CONFLICT (user_id, provider) DO NOTHING
                RETURNING *`,
               [
+                this.userId,
                 provider,
                 next.generation,
                 next.secretVersion,
@@ -61,11 +67,12 @@ export class PostgreSQLCredentialPointerStore implements CredentialPointerStore 
             )
           : await this.db.query(
               `UPDATE credential_pointers
-               SET row_version = row_version + 1, generation = $3, secret_version = $4,
-                   refresh_lease_until = $5, last_refresh_at = $6
-               WHERE provider = $1 AND row_version = $2
+               SET row_version = row_version + 1, generation = $4, secret_version = $5,
+                   refresh_lease_until = $6, last_refresh_at = $7
+               WHERE user_id = $1 AND provider = $2 AND row_version = $3
                RETURNING *`,
               [
+                this.userId,
                 provider,
                 expectedRowVersion,
                 next.generation,
@@ -80,5 +87,18 @@ export class PostgreSQLCredentialPointerStore implements CredentialPointerStore 
       return ok(mapRow(row));
     };
     return new ResultAsync(run());
+  }
+}
+
+/** User-bound PostgreSQL credential-pointer adapter. */
+export class PostgreSQLCredentialPointerStore implements CredentialPointerStoreFactory {
+  private readonly db: PostgreSQLClient;
+
+  constructor(db: PostgreSQLClient) {
+    this.db = db;
+  }
+
+  forUser(userId: string): CredentialPointerStore {
+    return new BoundPostgreSQLCredentialPointerStore(this.db, userId);
   }
 }

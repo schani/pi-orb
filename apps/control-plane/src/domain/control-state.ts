@@ -98,9 +98,12 @@ export class ControlState {
   private readonly scheduleGeneration = new Map<string, number>();
   private readonly scheduledStateVersion = new Map<string, number>();
   private readonly retryAttempts = new Map<string, number>();
-  private readonly authBlocked = new Set<string>();
+  private readonly authBlocked = new Map<
+    string,
+    { ownerUserId: string; provider: string | null }
+  >();
   private readonly drainStatus = new Map<string, DrainStatus>();
-  private challenge: DeviceChallenge | null = null;
+  private readonly challenges = new Map<string, DeviceChallenge>();
   private readonly stoppingOrbs = new Map<string, number>();
 
   /**
@@ -322,29 +325,45 @@ export class ControlState {
 
   // -- OAuth device flow --
 
-  markAuthBlocked(orbId: string): void {
-    this.authBlocked.add(orbId);
+  markAuthBlocked(orbId: string, userId: string, provider: string | null = null): void {
+    this.authBlocked.set(orbId, { ownerUserId: userId, provider });
   }
 
   isAuthBlocked(orbId: string): boolean {
     return this.authBlocked.has(orbId);
   }
 
+  getAuthBlockedProvider(orbId: string): string | null {
+    return this.authBlocked.get(orbId)?.provider ?? null;
+  }
+
+  getAuthBlock(orbId: string): { ownerUserId: string; challenge: DeviceChallenge | null } | null {
+    const blocked = this.authBlocked.get(orbId);
+    return blocked === undefined
+      ? null
+      : {
+          ownerUserId: blocked.ownerUserId,
+          challenge: this.challenges.get(blocked.ownerUserId) ?? null,
+        };
+  }
+
   clearAuthBlocked(orbId: string): void {
     this.authBlocked.delete(orbId);
   }
 
-  /** The cohort of orbs waiting on the current device flow. */
-  getAuthBlockedOrbs(): string[] {
-    return [...this.authBlocked];
+  getAuthBlockedOrbs(userId: string): string[] {
+    return [...this.authBlocked]
+      .filter(([, blocked]) => blocked.ownerUserId === userId)
+      .map(([orbId]) => orbId);
   }
 
-  setChallenge(challenge: DeviceChallenge | null): void {
-    this.challenge = challenge;
+  setChallenge(userId: string, challenge: DeviceChallenge | null): void {
+    if (challenge === null) this.challenges.delete(userId);
+    else this.challenges.set(userId, challenge);
   }
 
-  getChallenge(): DeviceChallenge | null {
-    return this.challenge;
+  getChallenge(userId: string): DeviceChallenge | null {
+    return this.challenges.get(userId) ?? null;
   }
 
   // -- boot probing (creating/starting visibility, docs/lifecycle.md) --

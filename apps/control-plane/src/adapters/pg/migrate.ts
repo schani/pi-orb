@@ -52,7 +52,10 @@ export function runMigrations(
       if (applied.has(migration.name)) continue;
       options.observe?.(migration.name, "started");
       const outcome = await db.transaction<void, StoreError>(async (query, execute) => {
-        if (migration.name === "023_owned_projects_and_personal_instructions.sql") {
+        if (
+          migration.name === "023_owned_projects_and_personal_instructions.sql" ||
+          migration.name === "024_user_credential_pointers.sql"
+        ) {
           const owner = options.originalOwner;
           const configured = await query(
             `SELECT set_config('pi_orb.original_user_id', $1, true),

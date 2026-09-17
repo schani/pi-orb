@@ -9,7 +9,7 @@ import type { McpOAuthStore } from "../domain/mcp-oauth.ts";
 import type { PersonalInstructionsStore } from "../domain/personal-instructions.ts";
 import type {
   ControlPlaneStore,
-  CredentialPointerStore,
+  CredentialPointerStoreFactory,
   ProjectSecretPointerStore,
   SigningKeyStore,
 } from "../domain/ports.ts";
@@ -30,7 +30,7 @@ import { PostgreSQLUserStore } from "./pg/users.ts";
 
 export interface ControlPlaneDatabase {
   readonly store: ControlPlaneStore;
-  readonly pointers: CredentialPointerStore;
+  readonly pointers: CredentialPointerStoreFactory;
   readonly projectSecrets: ProjectSecretPointerStore;
   readonly personalInstructions: PersonalInstructionsStore;
   readonly projectInstructions: ProjectInstructionsStore;

@@ -253,7 +253,10 @@ describe("interrupted-turn resume E2E", () => {
       async () => {
         const view = await api(base, "GET", `/api/v1/orbs/${orbId}`);
         const action = view.body["actionRequired"] as Record<string, unknown> | undefined;
-        return typeof action?.["userCode"] === "string" && action["userCode"] !== ""
+        return typeof action?.["userCode"] === "string" &&
+          action["userCode"] !== "" &&
+          typeof action["verificationUri"] === "string" &&
+          action["verificationUri"] !== ""
           ? (action["userCode"] as string)
           : null;
       },

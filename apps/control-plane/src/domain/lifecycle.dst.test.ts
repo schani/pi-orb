@@ -13,6 +13,7 @@ import {
   seedProvisionedHost,
   seedRunningOrb,
   TEST_CONSTANTS,
+  TEST_USER_ID,
   type TestHarness,
 } from "../testkit/fixtures.ts";
 import { assertAtMostOneHost, assertReplicaComplete } from "../testkit/invariants.ts";
@@ -325,7 +326,7 @@ describe("orb lifecycle (DST)", () => {
               makeOrbRow("orb-2", PROJECT, "creating", { stateChangedAt: task.wallNow() }),
             );
             await waitUntil(task, "challenge displayed", () => {
-              challengeSeen = harness.deps.control.getChallenge() !== null;
+              challengeSeen = harness.deps.control.getChallenge(TEST_USER_ID) !== null;
               return challengeSeen;
             });
             await waitUntil(
@@ -410,7 +411,7 @@ describe("orb lifecycle (DST)", () => {
             before.world.configureOrb(ORB, { initDurationMs: 1_000 });
             seedCreatingOrb(task, before);
             await waitUntil(task, "challenge pending", () => {
-              return before.deps.control.getChallenge() !== null;
+              return before.deps.control.getChallenge(TEST_USER_ID) !== null;
             });
             stopBefore.abort();
           },
@@ -435,7 +436,7 @@ describe("orb lifecycle (DST)", () => {
           name: "driver-2",
           f: async (task) => {
             await waitUntil(task, "second challenge pending", () => {
-              return after.deps.control.getChallenge() !== null;
+              return after.deps.control.getChallenge(TEST_USER_ID) !== null;
             });
             after.authGate.completeLogin();
             await waitUntil(

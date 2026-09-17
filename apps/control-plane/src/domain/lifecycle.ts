@@ -655,23 +655,31 @@ async function reconcileCreateStart(
   }
 
   // 1. Codex auth is a prerequisite for host work (docs/credentials.md).
-  const auth = await deps.authGate.ensureAuth(task);
+  const auth = await deps.authGate.ensureAuth(task, project.ownerUserId);
   if (auth.isErr()) return retryable(auth.error);
   const resolution = auth.value;
   if (resolution.status === "pending") {
-    // Edge only: the readiness poll re-enters this branch every few seconds
-    // for as long as the user takes to log in.
-    if (!deps.control.isAuthBlocked(orb.id)) {
-      logOrbEvent(task, orb.id, "auth-blocked", { reason: "device_login_pending" });
+    const blockedProvider = deps.control.getAuthBlockedProvider(orb.id);
+    if (!deps.control.isAuthBlocked(orb.id) || blockedProvider !== resolution.challenge.provider) {
+      logOrbEvent(task, orb.id, "auth-blocked", {
+        reason: "device_login_pending",
+        owner_user_id: project.ownerUserId,
+        provider: resolution.challenge.provider,
+      });
     }
-    deps.control.markAuthBlocked(orb.id);
-    deps.control.setChallenge(resolution.challenge);
+    deps.control.markAuthBlocked(orb.id, project.ownerUserId, resolution.challenge.provider);
+    deps.control.setChallenge(project.ownerUserId, resolution.challenge);
     return waiting("auth");
   }
   if (resolution.status === "failed") {
-    // Every orb waiting on this flow moves to failed with a typed error.
-    deps.control.setChallenge(null);
-    const cohort = new Set([...deps.control.getAuthBlockedOrbs(), orb.id]);
+    const failedProvider =
+      deps.control.getChallenge(project.ownerUserId)?.provider ?? "openai-codex";
+    deps.control.setChallenge(project.ownerUserId, null);
+    logOrbEvent(task, orb.id, "auth-failed", {
+      owner_user_id: project.ownerUserId,
+      provider: failedProvider,
+    });
+    const cohort = new Set([...deps.control.getAuthBlockedOrbs(project.ownerUserId), orb.id]);
     let outcome: ReconcileOutcome = { type: "conflict" };
     for (const blockedId of cohort) {
       const blockedResult = await deps.store.getOrb(task, blockedId);
@@ -686,7 +694,11 @@ async function reconcileCreateStart(
     }
     return outcome;
   }
-  deps.control.setChallenge(null);
+  const resolvedProvider =
+    deps.control.getAuthBlockedProvider(orb.id) ??
+    deps.control.getChallenge(project.ownerUserId)?.provider ??
+    "openai-codex";
+  deps.control.setChallenge(project.ownerUserId, null);
   if (deps.control.isAuthBlocked(orb.id)) {
     // OAuth completed: re-enter with a fresh state_changed_at so login time
     // never consumes the create/start deadline (docs/lifecycle.md).
@@ -701,7 +713,11 @@ async function reconcileCreateStart(
         : retryable(reentered.error);
     }
     deps.control.clearAuthBlocked(orb.id);
-    logOrbEvent(task, orb.id, "auth-resolved", { reason: "state_reentered" });
+    logOrbEvent(task, orb.id, "auth-resolved", {
+      reason: "state_reentered",
+      owner_user_id: project.ownerUserId,
+      provider: resolvedProvider,
+    });
     orb = reentered.value;
   }
 

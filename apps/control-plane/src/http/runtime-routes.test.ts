@@ -70,6 +70,7 @@ describe("runtime broker routes", () => {
   let projectSecretPointers: FakeProjectSecretPointerStore;
   let personalInstructions: FakePersonalInstructionsStore;
   let projectInstructions: FakeProjectInstructionsStore;
+  let brokerUsers: string[];
 
   const nameGenerator: OrbNameGenerator = {
     generate: () => okAsync("Repair Runtime Auth"),
@@ -92,7 +93,10 @@ describe("runtime broker routes", () => {
       archiveSelf: (task, orbId, caller) =>
         requestOrbArchive(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
       store: routeStore,
-      broker,
+      brokerForUser: (userId) => {
+        brokerUsers.push(userId);
+        return broker;
+      },
       nameGenerator,
       nameLeaseMs: 30_000,
       projectSecrets: { pointers: projectSecretPointers, secrets },
@@ -132,6 +136,7 @@ describe("runtime broker routes", () => {
 
   beforeEach(async () => {
     store = new InMemoryControlPlaneStore(0);
+    brokerUsers = [];
     pointers = new FakePointerStore();
     secrets = new FakeSecretStore();
     signer = new FakeTokenSigner("route-key-1");
@@ -483,6 +488,7 @@ describe("runtime broker routes", () => {
     const body = response.json();
     expect(typeof body.accessToken).toBe("string");
     expect(body.generation).toBe(1);
+    expect(brokerUsers).toEqual([TEST_USER_ID]);
   });
 
   it("derives MCP project scope from incarnation authorization, never caller query parameters", async () => {

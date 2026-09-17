@@ -1,7 +1,7 @@
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { makeHarness, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeHarness, makeOrbRow, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { registerRoutes } from "./routes.ts";
 
 const task = new NoSimulationTask("orb create routes", false);
@@ -42,5 +42,13 @@ describe("orb creation ID validation", () => {
       expect(response.statusCode, `id ${JSON.stringify(id)}`).toBe(400);
       expect(response.json().error.code).toBe("invalid_request");
     }
+  });
+
+  it("shapes an existing orb without a second project lookup", async () => {
+    harness.store.seedOrb(makeOrbRow("orb-existing", "project-ids", "starting"));
+    const getProject = vi.spyOn(harness.store, "getProject");
+    const response = await app.inject({ method: "GET", url: "/api/v1/orbs/orb-existing" });
+    expect(response.statusCode).toBe(200);
+    expect(getProject).not.toHaveBeenCalled();
   });
 });

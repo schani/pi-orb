@@ -327,8 +327,10 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       "MCP login",
       async () => {
         const view = await api(cp.baseUrl, "GET", `/api/v1/orbs/${first}`);
-        const action = view.body["actionRequired"] as { userCode?: string } | undefined;
-        return action?.userCode || null;
+        const action = view.body["actionRequired"] as
+          | { userCode?: string; verificationUri?: string }
+          | undefined;
+        return action?.userCode && action.verificationUri ? action.userCode : null;
       },
       { timeoutMs: 60_000 },
     );

@@ -394,6 +394,7 @@ export async function waitForOwnedControlPlane(
   logs: string[],
   baseUrl: string,
   timeoutMs = 30_000,
+  readinessHeaders?: Record<string, string>,
 ): Promise<void> {
   await waitForChildListenAnnouncement(child, logs, timeoutMs);
 
@@ -418,7 +419,10 @@ export async function waitForOwnedControlPlane(
       waitFor(
         "control plane HTTP",
         async () => {
-          const response = await fetch(`${baseUrl}/api/v1/projects`);
+          const response = await fetch(
+            `${baseUrl}/api/v1/projects`,
+            readinessHeaders === undefined ? {} : { headers: readinessHeaders },
+          );
           return response.ok ? true : null;
         },
         { timeoutMs, intervalMs: 500 },
@@ -446,6 +450,8 @@ export async function startControlPlane(options: {
   hostingRoot?: string;
   webDist?: string;
   entry?: string;
+  readinessHeaders?: Record<string, string>;
+  extraEnv?: Readonly<Record<string, string>>;
 }): Promise<ControlPlaneHandle> {
   const authDir = options.authDir ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const ownedHostingRoot = options.hostingRoot === undefined;
@@ -480,6 +486,7 @@ export async function startControlPlane(options: {
       ...(options.nameFake === undefined
         ? {}
         : { PI_ORB_NAME_INFERENCE_URL: options.nameFake.inferenceBaseUrl }),
+      ...options.extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -487,7 +494,7 @@ export async function startControlPlane(options: {
   child.stderr?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
 
   const baseUrl = `http://127.0.0.1:${options.port}`;
-  await waitForOwnedControlPlane(child, logs, baseUrl);
+  await waitForOwnedControlPlane(child, logs, baseUrl, 30_000, options.readinessHeaders);
   return {
     process: child,
     port: options.port,

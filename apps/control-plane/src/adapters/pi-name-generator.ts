@@ -38,20 +38,31 @@ function prompt(input: {
 }
 
 export class PiOrbNameGenerator implements OrbNameGenerator {
-  private readonly broker: BrokerDeps;
+  private readonly brokerForUser: (userId: string) => BrokerDeps;
   private readonly inferenceBaseUrl: string | null;
 
-  constructor(broker: BrokerDeps, inferenceBaseUrl: string | null = null) {
-    this.broker = broker;
+  constructor(
+    brokerForUser: (userId: string) => BrokerDeps,
+    inferenceBaseUrl: string | null = null,
+  ) {
+    this.brokerForUser = brokerForUser;
     this.inferenceBaseUrl = inferenceBaseUrl;
   }
 
   generate(
     task: SimulationTask,
-    input: { projectName: string; repositoryUrl: string; message: string; readme: string | null },
+    input: {
+      ownerUserId: string;
+      projectName: string;
+      repositoryUrl: string;
+      message: string;
+      readme: string | null;
+    },
     context: OperationContext,
   ): ResultAsync<string, OrbNameGeneratorError> {
-    return new ResultAsync(getToken(task, this.broker, "openai-codex", { reason: "startup" }))
+    return new ResultAsync(
+      getToken(task, this.brokerForUser(input.ownerUserId), "openai-codex", { reason: "startup" }),
+    )
       .mapErr((error) =>
         failure(error.type === "auth_required" ? "model authentication required" : error.message),
       )

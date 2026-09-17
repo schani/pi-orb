@@ -245,6 +245,65 @@ describe("orbView workload identity", () => {
   });
 });
 
+describe("orbView credential challenge shaping", () => {
+  const owner = "00000000-0000-4000-8000-000000000001";
+  const coworker = "00000000-0000-4000-8000-000000000002";
+  const challenge = {
+    provider: "github" as const,
+    verificationUri: "https://github.test/device",
+    userCode: "SECRET-CODE",
+    expiresAt: 1_700_000_060_000,
+  };
+
+  it("shows codes only to the project owner", () => {
+    const control = new ControlState();
+    control.markAuthBlocked(orb.id, owner);
+    control.setChallenge(owner, challenge);
+    expect(orbView({ ...orb, state: "starting" }, control, {}, owner).actionRequired).toMatchObject(
+      { type: "github_device_login", userCode: "SECRET-CODE" },
+    );
+  });
+
+  it("shows a nonblocking preparing challenge only to the owner", () => {
+    const control = new ControlState();
+    control.markAuthBlocked(orb.id, owner, "openai-codex");
+    control.setChallenge(owner, {
+      provider: "openai-codex",
+      verificationUri: "",
+      userCode: "",
+      expiresAt: 1_700_000_000_000,
+    });
+    expect(orbView({ ...orb, state: "starting" }, control, {}, owner).actionRequired).toMatchObject(
+      {
+        type: "openai_codex_device_login",
+        verificationUri: "",
+        userCode: "",
+      },
+    );
+    expect(orbView({ ...orb, state: "starting" }, control, {}, coworker).actionRequired).toEqual({
+      type: "owner_login_required",
+      provider: "openai-codex",
+    });
+  });
+
+  it("shows coworkers and ops only an owner-required status", () => {
+    const control = new ControlState();
+    control.markAuthBlocked(orb.id, owner);
+    control.setChallenge(owner, challenge);
+    for (const viewerUserId of [coworker, null]) {
+      const action = orbView(
+        { ...orb, state: "starting" },
+        control,
+        {},
+        viewerUserId,
+      ).actionRequired;
+      expect(action).toEqual({ type: "owner_login_required", provider: "github" });
+      expect(JSON.stringify(action)).not.toContain("SECRET-CODE");
+      expect(JSON.stringify(action)).not.toContain("github.test");
+    }
+  });
+});
+
 describe("orbView previewHost", () => {
   it("derives the MagicDNS host when a tailnet is configured", () => {
     const view = orbView(orb, new ControlState(), { tailnetDnsName: "tailabc123.ts.net" });

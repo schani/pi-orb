@@ -202,6 +202,36 @@ describe("frontend-only browser behavior", () => {
     await vite?.close();
   });
 
+  it("renders an inert preparing-login notice before the device challenge arrives", async () => {
+    const page = await browser.newPage();
+    await page.route("**/api/v1/orbs/frontend-fixture-orb", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: {
+          ...(await response.json()),
+          actionRequired: {
+            type: "openai_codex_device_login",
+            verificationUri: "",
+            userCode: "",
+            expiresAt: new Date(Date.now() + 10_000).toISOString(),
+          },
+        },
+      });
+    });
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const notice = page.locator(".notice", { hasText: "Preparing OpenAI login…" });
+      await expectPage(notice).toBeVisible();
+      await expectPage(notice.locator("a")).toHaveCount(0);
+      await expectPage(notice.locator("button")).toHaveCount(0);
+      await expectPage(notice).not.toContainText("expires");
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each([1280, 600, 390, 320])(
     "renders gutter-free soft-inversion turns without overflow at %ipx",
     async (width) => {

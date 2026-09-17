@@ -164,6 +164,7 @@ export function generateOrbName(
         deps.generator.generate(
           task,
           {
+            ownerUserId: projectRow.ownerUserId,
             projectName: projectRow.name,
             repositoryUrl: projectRow.repositoryUrl,
             message: input.message,

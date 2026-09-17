@@ -322,12 +322,13 @@ it("browser OAuth → two real Pi runtimes reuse the grant → rejection/refresh
       if (index === 0) {
         const challenge = await waitFor(
           "model login",
-          async () =>
-            (
-              (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`)).body["actionRequired"] as
-                | { userCode?: string }
-                | undefined
-            )?.userCode ?? null,
+          async () => {
+            const view = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`);
+            const action = view.body["actionRequired"] as
+              | { userCode?: string; verificationUri?: string }
+              | undefined;
+            return action?.userCode && action.verificationUri ? action.userCode : null;
+          },
           { timeoutMs: 60_000 },
         );
         await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: challenge });

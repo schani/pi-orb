@@ -635,11 +635,8 @@ export type AuthResolution =
   | { readonly status: "failed"; readonly message: string; readonly retryable: boolean };
 
 export interface AuthGate {
-  /**
-   * Resolve/refresh the Codex credential; if missing, ensure exactly one
-   * global device-code login flow is running and report its challenge.
-   */
-  ensureAuth(task: SimulationTask): ResultAsync<AuthResolution, AuthGateError>;
+  /** Resolve/refresh credentials for the project's owner. */
+  ensureAuth(task: SimulationTask, userId: string): ResultAsync<AuthResolution, AuthGateError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -712,6 +709,10 @@ export interface CredentialPointerRow {
 }
 
 export type CredentialPointerWrite = Omit<CredentialPointerRow, "provider" | "rowVersion">;
+
+export interface CredentialPointerStoreFactory {
+  forUser(userId: string): CredentialPointerStore;
+}
 
 export interface CredentialPointerStore {
   readPointer(
@@ -989,6 +990,7 @@ export interface OrbNameGenerator {
   generate(
     task: SimulationTask,
     input: {
+      ownerUserId: string;
       projectName: string;
       repositoryUrl: string;
       message: string;

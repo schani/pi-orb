@@ -10,18 +10,18 @@ import type { AuthGate, AuthResolution } from "./ports.ts";
  */
 export class SerializedAuthGate implements AuthGate {
   private readonly gate: AuthGate;
-  private inFlight: Promise<Result<AuthResolution, AuthGateError>> | null = null;
+  private readonly inFlight = new Map<string, Promise<Result<AuthResolution, AuthGateError>>>();
 
   constructor(gate: AuthGate) {
     this.gate = gate;
   }
 
-  ensureAuth(task: SimulationTask): ResultAsync<AuthResolution, AuthGateError> {
-    const active = this.inFlight;
-    if (active !== null) return new ResultAsync(active);
+  ensureAuth(task: SimulationTask, userId: string): ResultAsync<AuthResolution, AuthGateError> {
+    const active = this.inFlight.get(userId);
+    if (active !== undefined) return new ResultAsync(active);
 
     const run = async (): Promise<Result<AuthResolution, AuthGateError>> =>
-      await this.gate.ensureAuth(task);
+      await this.gate.ensureAuth(task, userId);
     const operation = Promise.resolve(
       ResultAsync.fromPromise(
         run(),
@@ -32,9 +32,9 @@ export class SerializedAuthGate implements AuthGate {
         }),
       ).andThen((result) => result),
     );
-    this.inFlight = operation;
+    this.inFlight.set(userId, operation);
     void operation.then(() => {
-      if (this.inFlight === operation) this.inFlight = null;
+      if (this.inFlight.get(userId) === operation) this.inFlight.delete(userId);
     });
     return new ResultAsync(operation);
   }
@@ -52,10 +52,10 @@ export class CompositeAuthGate implements AuthGate {
     this.gates = gates;
   }
 
-  ensureAuth(task: SimulationTask): ResultAsync<AuthResolution, AuthGateError> {
+  ensureAuth(task: SimulationTask, userId: string): ResultAsync<AuthResolution, AuthGateError> {
     const run = async (): Promise<Result<AuthResolution, AuthGateError>> => {
       for (const gate of this.gates) {
-        const resolution = await gate.ensureAuth(task);
+        const resolution = await gate.ensureAuth(task, userId);
         if (resolution.isErr() || resolution.value.status !== "ok") return resolution;
       }
       return ok({ status: "ok" });

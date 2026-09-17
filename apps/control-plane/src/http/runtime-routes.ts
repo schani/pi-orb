@@ -76,7 +76,7 @@ export interface RuntimeRouteDeps {
     caller: ArchiveCaller,
   ) => ResultAsync<OrbRow, CommandError>;
   readonly store: ControlPlaneStore;
-  readonly broker: BrokerDeps;
+  readonly brokerForUser: (userId: string) => BrokerDeps;
   readonly nameGenerator: OrbNameGenerator;
   readonly nameLeaseMs: number;
   /** Identity issuance (docs/workload-identity.md); its own store lookup. */
@@ -591,7 +591,21 @@ export function registerRuntimeRoutes(
         ...(body.staleGeneration !== undefined ? { staleGeneration: body.staleGeneration } : {}),
       };
 
-      const grant = await getToken(task, deps.broker, TOKEN_PROVIDERS[name], tokenRequest);
+      const project = await deps.store.getProject(task, auth.orb.projectId);
+      if (project.isErr()) {
+        const body: TokenErrorBody = { error: "retryable", message: project.error.message };
+        return reply.status(503).send(body);
+      }
+      if (project.value === null) {
+        const body: TokenErrorBody = { error: "retryable", message: "orb project not found" };
+        return reply.status(500).send(body);
+      }
+      const grant = await getToken(
+        task,
+        deps.brokerForUser(project.value.ownerUserId),
+        TOKEN_PROVIDERS[name],
+        tokenRequest,
+      );
       if (grant.isErr()) {
         if (grant.error.type === "auth_required") {
           const errorBody: TokenErrorBody = { error: "auth_required" };

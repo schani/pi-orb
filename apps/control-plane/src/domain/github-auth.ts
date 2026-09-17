@@ -1,6 +1,6 @@
 import type { SimulationTask } from "determined";
-import { ResultAsync } from "neverthrow";
-import { commitLoginCredential, GITHUB_PROVIDER } from "./broker.ts";
+import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { commitLoginCredential, GITHUB_PROVIDER, getToken } from "./broker.ts";
 import type { AuthGateError } from "./errors.ts";
 import type {
   AuthGate,
@@ -10,21 +10,11 @@ import type {
   StoredCredential,
 } from "./ports.ts";
 
-/**
- * GitHub device-flow auth gate (docs/credentials.md). Unlike the Pi gate, the
- * flow has no background driver: every `ensureAuth` call — the reconciler's
- * cadence — advances it by at most one poll, respecting the device-flow
- * interval (and GitHub's `slow_down` backoff). That makes the whole ceremony
- * deterministically simulable. The refresh token reaches only
- * `commitLoginCredential`; nothing here returns secret material.
- */
-
 export interface GithubDeviceGrant {
   readonly deviceCode: string;
   readonly userCode: string;
   readonly verificationUri: string;
   readonly intervalMs: number;
-  /** Wall-clock ms. */
   readonly expiresAt: number;
 }
 
@@ -50,25 +40,28 @@ export interface GithubOAuthClient {
   ): ResultAsync<GithubPollOutcome, GithubOAuthTransientError>;
 }
 
-/** GitHub's device-flow `slow_down` asks for 5 extra seconds between polls. */
 const SLOW_DOWN_INCREMENT_MS = 5_000;
 
 interface ActiveFlow {
   readonly device: GithubDeviceGrant;
   intervalMs: number;
-  /** Wall-clock ms before which no poll happens. */
   nextPollAt: number;
-  /** Authorized but not yet durably committed (commit retries reuse it). */
   pendingCredential: StoredCredential | null;
 }
 
-export class GithubAuthGate implements AuthGate {
-  private readonly broker: BrokerDeps;
-  private readonly client: GithubOAuthClient;
-  private flow: ActiveFlow | null = null;
+const gateError = (message: string): AuthGateError => ({
+  type: "auth_gate_error",
+  message,
+  retryable: true,
+});
 
-  constructor(broker: BrokerDeps, client: GithubOAuthClient) {
-    this.broker = broker;
+export class GithubAuthGate implements AuthGate {
+  private readonly brokerForUser: (userId: string) => BrokerDeps;
+  private readonly client: GithubOAuthClient;
+  private readonly flows = new Map<string, ActiveFlow>();
+
+  constructor(brokerForUser: (userId: string) => BrokerDeps, client: GithubOAuthClient) {
+    this.brokerForUser = brokerForUser;
     this.client = client;
   }
 
@@ -81,90 +74,90 @@ export class GithubAuthGate implements AuthGate {
     };
   }
 
-  private async commit(task: SimulationTask, flow: ActiveFlow): Promise<AuthResolution> {
+  private async commit(
+    task: SimulationTask,
+    userId: string,
+    flow: ActiveFlow,
+  ): Promise<Result<AuthResolution, AuthGateError>> {
     const credential = flow.pendingCredential;
-    if (credential === null) return { status: "failed", message: "no credential", retryable: true };
-    const committed = await commitLoginCredential(task, this.broker, GITHUB_PROVIDER, credential);
+    if (credential === null) return err(gateError("no pending credential"));
+    const committed = await commitLoginCredential(
+      task,
+      this.brokerForUser(userId),
+      GITHUB_PROVIDER,
+      credential,
+    );
     if (committed.isErr()) {
-      // The device code is consumed; keep the credential for the next try
-      // instead of forcing a fresh ceremony.
-      return { status: "failed", message: committed.error.message, retryable: true };
+      if (committed.error.type === "login_commit_uncertain") this.flows.delete(userId);
+      return err(gateError(committed.error.message));
     }
-    this.flow = null;
-    return { status: "ok" };
+    this.flows.delete(userId);
+    return ok({ status: "ok" });
   }
 
-  ensureAuth(task: SimulationTask): ResultAsync<AuthResolution, AuthGateError> {
-    const run = async (): Promise<AuthResolution> => {
-      // The pointer is the durable authority: once a credential exists, no
-      // ceremony runs (an invalid_grant clears it, which re-opens the flow).
-      const pointer = await this.broker.pointers.readPointer(task, GITHUB_PROVIDER);
-      if (pointer.isErr()) {
-        return { status: "failed", message: pointer.error.message, retryable: true };
+  ensureAuth(task: SimulationTask, userId: string): ResultAsync<AuthResolution, AuthGateError> {
+    const run = async (): Promise<Result<AuthResolution, AuthGateError>> => {
+      const broker = this.brokerForUser(userId);
+      const token = await getToken(task, broker, GITHUB_PROVIDER, { reason: "startup" });
+      if (token.isOk()) {
+        this.flows.delete(userId);
+        return ok({ status: "ok" });
       }
-      if (pointer.value?.secretVersion != null) {
-        this.flow = null;
-        return { status: "ok" };
-      }
+      if (token.error.type !== "auth_required") return err(gateError(token.error.message));
 
-      let flow = this.flow;
-      if (flow !== null && flow.pendingCredential !== null) return this.commit(task, flow);
+      let flow = this.flows.get(userId) ?? null;
+      if (flow !== null && flow.pendingCredential !== null) return this.commit(task, userId, flow);
 
       if (flow === null) {
         const grant = await this.client.requestDeviceCode(task);
-        if (grant.isErr()) {
-          return { status: "failed", message: grant.error.message, retryable: true };
-        }
+        if (grant.isErr()) return err(gateError(grant.error.message));
         flow = {
           device: grant.value,
           intervalMs: grant.value.intervalMs,
           nextPollAt: task.wallNow() + grant.value.intervalMs,
           pendingCredential: null,
         };
-        this.flow = flow;
-        return { status: "pending", challenge: this.challenge(flow) };
+        this.flows.set(userId, flow);
+        return ok({ status: "pending", challenge: this.challenge(flow) });
       }
 
       const now = task.wallNow();
       if (now >= flow.device.expiresAt) {
-        this.flow = null;
-        return { status: "failed", message: "GitHub device code expired", retryable: true };
+        this.flows.delete(userId);
+        return ok({ status: "failed", message: "GitHub device code expired", retryable: false });
       }
-      if (now < flow.nextPollAt) return { status: "pending", challenge: this.challenge(flow) };
+      if (now < flow.nextPollAt) {
+        return ok({ status: "pending", challenge: this.challenge(flow) });
+      }
 
       const polled = await this.client.pollDeviceToken(task, flow.device.deviceCode);
       const after = task.wallNow();
       if (polled.isErr()) {
         flow.nextPollAt = after + flow.intervalMs;
-        return { status: "pending", challenge: this.challenge(flow) };
+        return ok({ status: "pending", challenge: this.challenge(flow) });
       }
-      const outcome = polled.value;
-      switch (outcome.kind) {
+      switch (polled.value.kind) {
         case "authorized":
-          flow.pendingCredential = outcome.credential;
-          return this.commit(task, flow);
+          flow.pendingCredential = polled.value.credential;
+          return this.commit(task, userId, flow);
         case "pending":
           flow.nextPollAt = after + flow.intervalMs;
-          return { status: "pending", challenge: this.challenge(flow) };
+          return ok({ status: "pending", challenge: this.challenge(flow) });
         case "slow_down":
           flow.intervalMs += SLOW_DOWN_INCREMENT_MS;
           flow.nextPollAt = after + flow.intervalMs;
-          return { status: "pending", challenge: this.challenge(flow) };
+          return ok({ status: "pending", challenge: this.challenge(flow) });
         case "expired":
-          this.flow = null;
-          return { status: "failed", message: "GitHub device code expired", retryable: true };
+          this.flows.delete(userId);
+          return ok({ status: "failed", message: "GitHub device code expired", retryable: false });
         case "denied":
-          this.flow = null;
-          return { status: "failed", message: "GitHub authorization denied", retryable: true };
+          this.flows.delete(userId);
+          return ok({ status: "failed", message: "GitHub authorization denied", retryable: false });
       }
     };
     return ResultAsync.fromPromise(
       run(),
-      (error): AuthGateError => ({
-        type: "auth_gate_error",
-        message: error instanceof Error ? error.message : String(error),
-        retryable: true,
-      }),
-    );
+      (error): AuthGateError => gateError(String(error)),
+    ).andThen((result) => result);
   }
 }

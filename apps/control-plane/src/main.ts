@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   MOCK_OPENAI_INFERENCE_URL_ENV,
   MOCK_OPENAI_OAUTH_URL_ENV,
+  type MockOpenAiConfig,
   readMockOpenAiEnv,
 } from "@pi-orb/mock-openai";
 import {
@@ -13,7 +14,7 @@ import {
   HOSTING_TRANSFER_TIMEOUT_MS,
   type SystemView,
 } from "@pi-orb/protocol";
-import { NoSimulationTask } from "determined";
+import { NoSimulationTask, type SimulationTask } from "determined";
 import Fastify from "fastify";
 import { err, okAsync } from "neverthrow";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
@@ -53,7 +54,12 @@ import {
 import { CryptoUserIdSource } from "./adapters/user-id.ts";
 import { uploadRequest } from "./adapters/workspace-upload-http.ts";
 import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
-import { CODEX_PROVIDER, GITHUB_PROVIDER } from "./domain/broker.ts";
+import {
+  bindUserBroker,
+  CODEX_PROVIDER,
+  GITHUB_PROVIDER,
+  type UserBrokerDeps,
+} from "./domain/broker.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
@@ -81,7 +87,10 @@ import {
   createConfiguredHostingAccessPolicy,
   readHostingConfiguration,
 } from "./hosting-config.ts";
-import { registerAuthenticatedBrowserRoutes } from "./http/browser-identity.ts";
+import {
+  type RequestPrincipalResolver,
+  registerAuthenticatedBrowserRoutes,
+} from "./http/browser-identity.ts";
 import { registerHostingAccessGuard } from "./http/hosting-access.ts";
 import {
   registerBrowserHostingRoutes,
@@ -148,7 +157,14 @@ const { version: CONTROL_PLANE_VERSION }: { version: string } = createRequire(im
 );
 
 export async function main(
-  adapters: { mcpOAuthProtocol?: (callback: string) => McpOAuthProtocol } = {},
+  adapters: {
+    mcpOAuthProtocol?: (callback: string) => McpOAuthProtocol;
+    requestPrincipalResolverFactory?: (
+      task: SimulationTask,
+      users: import("./domain/identity.ts").UserStore,
+    ) => RequestPrincipalResolver;
+    mockOpenAiForUser?: (userId: string) => MockOpenAiConfig | null;
+  } = {},
 ): Promise<void> {
   const bootTask = new NoSimulationTask("boot", true);
   const databaseUrl = env("DATABASE_URL", "postgres://pi-orb:pi-orb@127.0.0.1:5433/pi_orb");
@@ -310,7 +326,7 @@ export async function main(
   if (githubOauth === null) {
     bootTask.log("GitHub integration disabled (PI_ORB_GITHUB_CLIENT_ID/SECRET unset)");
   }
-  const broker: BrokerDeps = {
+  const brokerDeps: UserBrokerDeps = {
     pointers: database.pointers,
     secrets,
     upstreams: {
@@ -323,6 +339,7 @@ export async function main(
     },
     constants: DEFAULT_BROKER_CONSTANTS,
   };
+  const brokerForUser = (userId: string): BrokerDeps => bindUserBroker(brokerDeps, userId);
   const e2eLaunchFailureMarker = env("PI_ORB_E2E_LAUNCH_FAILURE_MARKER", "");
   const e2eHostSpec = env("PI_ORB_E2E_HOST_SPEC", "");
   const runtimeExtraEnv: Record<string, string> = {
@@ -450,7 +467,7 @@ export async function main(
           });
   const nameInferenceUrl = env("PI_ORB_NAME_INFERENCE_URL", mockOpenAi?.inferenceBaseUrl ?? "");
   const nameGenerator = new PiOrbNameGenerator(
-    broker,
+    brokerForUser,
     nameInferenceUrl === "" ? null : nameInferenceUrl,
   );
   const hostedBytes =
@@ -480,10 +497,10 @@ export async function main(
     authGate: new SerializedAuthGate(
       githubOauth !== null
         ? new CompositeAuthGate([
-            new PiAuthGate(authDir, mockOpenAi, broker),
-            new GithubAuthGate(broker, new GithubOAuthHttpClient(githubOauth)),
+            new PiAuthGate(authDir, adapters.mockOpenAiForUser ?? mockOpenAi, brokerForUser),
+            new GithubAuthGate(brokerForUser, new GithubOAuthHttpClient(githubOauth)),
           ])
-        : new PiAuthGate(authDir, mockOpenAi, broker),
+        : new PiAuthGate(authDir, adapters.mockOpenAiForUser ?? mockOpenAi, brokerForUser),
     ),
     nameGenerator,
     nameLeaseMs: 60_000,
@@ -536,19 +553,22 @@ export async function main(
       identityConfig.kind === "browser"
         ? new IapIdentityVerifier(identityConfig.audience, () => Date.now())
         : undefined;
-    const principalResolver = createRequestPrincipalResolver(
+    const configuredPrincipalResolver = createRequestPrincipalResolver(
       httpTask,
       identityConfig,
       database.users,
       new CryptoUserIdSource(),
       browserVerifier,
     );
-    if (principalResolver.isErr()) {
-      bootTask.error(principalResolver.error);
+    if (configuredPrincipalResolver.isErr()) {
+      bootTask.error(configuredPrincipalResolver.error);
       process.exitCode = 1;
       return;
     }
-    registerAuthenticatedBrowserRoutes(app, principalResolver.value, async (browser) => {
+    const principalResolver =
+      adapters.requestPrincipalResolverFactory?.(httpTask, database.users) ??
+      configuredPrincipalResolver.value;
+    registerAuthenticatedBrowserRoutes(app, principalResolver, async (browser) => {
       registerBrowserHostingRoutes(browser, httpTask, {
         store: deps.store,
         hosting: deps.hosting,
@@ -582,7 +602,7 @@ export async function main(
       spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
       archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
       store: deps.store,
-      broker,
+      brokerForUser,
       nameGenerator: deps.nameGenerator,
       nameLeaseMs: deps.nameLeaseMs,
       projectSecrets: deps.projectSecrets,

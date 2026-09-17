@@ -243,6 +243,13 @@ export function registerRoutes(
   system: SystemView,
   signingKeys?: SigningKeyDeps,
 ): void {
+  const viewerUserId = (request: FastifyRequest): string | null => {
+    const principal = requirePrincipal(request);
+    return principal.isOk() && principal.value.kind === "user" ? principal.value.user.id : null;
+  };
+  const viewOrb = (request: FastifyRequest, orb: import("../domain/orb.ts").OrbRow) =>
+    orbView(orb, deps.control, config, viewerUserId(request));
+
   app.get("/api/v1/session", async (request, reply) => {
     reply.header("cache-control", "no-store");
     const principal = requirePrincipal(request);
@@ -586,7 +593,9 @@ export function registerRoutes(
       if (orbs.isErr()) {
         return sendStoreError(reply, orbs.error);
       }
-      return reply.send({ items: orbs.value.map((orb) => orbView(orb, deps.control, config)) });
+      return reply.send({
+        items: orbs.value.map((orb) => orbView(orb, deps.control, config, viewerUserId(request))),
+      });
     },
   );
 
@@ -610,7 +619,7 @@ export function registerRoutes(
       });
       if (created.isErr()) return sendCommandError(reply, created.error);
       // Creation also requests the initial start; reconciliation picks it up.
-      return reply.status(202).send(orbView(created.value, deps.control, config));
+      return reply.status(202).send(viewOrb(request, created.value));
     },
   );
 
@@ -622,7 +631,7 @@ export function registerRoutes(
     if (orb.value === null) {
       return reply.status(404).send(httpError("not_found", "orb not found", false));
     }
-    return reply.send(orbView(orb.value, deps.control, config));
+    return reply.send(viewOrb(request, orb.value));
   });
 
   app.patch<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId", async (request, reply) => {
@@ -661,31 +670,31 @@ export function registerRoutes(
         .status(status)
         .send(httpError(code, updated.error.message, updated.error.retryable));
     }
-    return reply.send(orbView(updated.value, deps.control, config));
+    return reply.send(viewOrb(request, updated.value));
   });
 
   app.post<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/start", async (request, reply) => {
     const started = await requestOrbStart(task, deps, request.params.orbId);
     if (started.isErr()) return sendCommandError(reply, started.error);
-    return reply.status(202).send(orbView(started.value, deps.control, config));
+    return reply.status(202).send(viewOrb(request, started.value));
   });
 
   app.post<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/stop", async (request, reply) => {
     const stopped = await requestOrbStop(task, deps, request.params.orbId);
     if (stopped.isErr()) return sendCommandError(reply, stopped.error);
-    return reply.status(202).send(orbView(stopped.value, deps.control, config));
+    return reply.status(202).send(viewOrb(request, stopped.value));
   });
 
   app.post<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/archive", async (request, reply) => {
     const archived = await requestOrbArchive(task, deps, request.params.orbId);
     if (archived.isErr()) return sendCommandError(reply, archived.error);
-    return reply.status(202).send(orbView(archived.value, deps.control, config));
+    return reply.status(202).send(viewOrb(request, archived.value));
   });
 
   app.delete<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId", async (request, reply) => {
     const deleted = await requestOrbDeletion(task, deps, request.params.orbId);
     if (deleted.isErr()) return sendCommandError(reply, deleted.error);
-    return reply.status(202).send(orbView(deleted.value, deps.control, config));
+    return reply.status(202).send(viewOrb(request, deleted.value));
   });
 
   app.put<{ Params: { orbId: string; messageId: string } }>(

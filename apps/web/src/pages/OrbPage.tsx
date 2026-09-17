@@ -1218,7 +1218,7 @@ function OrbConversation({
         : orb.state;
   const busyLocked = orb?.state === "deleting" || orb?.state === "archiving";
   const expiresIn =
-    orb?.actionRequired === undefined
+    orb?.actionRequired === undefined || orb.actionRequired.type === "owner_login_required"
       ? null
       : formatTimeRemaining(orb.actionRequired.expiresAt, ageNow);
 
@@ -1441,16 +1441,28 @@ function OrbConversation({
           )}
           {orb?.actionRequired !== undefined && (
             <OrbNotice>
-              {orb.actionRequired.type === "github_device_login"
-                ? "GitHub device login required."
-                : "OpenAI device login required."}{" "}
-              Visit{" "}
-              <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
-                {orb.actionRequired.verificationUri}
-              </a>{" "}
-              and enter <span className="user-code">{orb.actionRequired.userCode}</span>
-              <CopyCodeButton code={orb.actionRequired.userCode} />
-              {expiresIn !== null && <span className="muted"> expires in {expiresIn}</span>}
+              {orb.actionRequired.type === "owner_login_required" ? (
+                <>Project owner login required for {orb.actionRequired.provider}.</>
+              ) : orb.actionRequired.verificationUri === "" ||
+                orb.actionRequired.userCode === "" ? (
+                <>
+                  Preparing{" "}
+                  {orb.actionRequired.type === "github_device_login" ? "GitHub" : "OpenAI"} login…
+                </>
+              ) : (
+                <>
+                  {orb.actionRequired.type === "github_device_login"
+                    ? "GitHub device login required."
+                    : "OpenAI device login required."}{" "}
+                  Visit{" "}
+                  <a href={orb.actionRequired.verificationUri} target="_blank" rel="noreferrer">
+                    {orb.actionRequired.verificationUri}
+                  </a>{" "}
+                  and enter <span className="user-code">{orb.actionRequired.userCode}</span>
+                  <CopyCodeButton code={orb.actionRequired.userCode} />
+                  {expiresIn !== null && <span className="muted"> expires in {expiresIn}</span>}
+                </>
+              )}
             </OrbNotice>
           )}
           <OrbFailureBanner message={orb?.lastError} />

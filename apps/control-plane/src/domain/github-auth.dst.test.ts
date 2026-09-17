@@ -1,4 +1,5 @@
 import type { SimulationTask } from "determined";
+import { ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { FakeAuthGate } from "../testkit/auth.ts";
 import {
@@ -9,14 +10,75 @@ import {
 } from "../testkit/broker.ts";
 import { FAILPOINTS } from "../testkit/failpoints.ts";
 import { FakeGithubOAuthClient } from "../testkit/github.ts";
+import {
+  PreCommitFailureSecretStore,
+  SupersedingLoginPointerStore,
+} from "../testkit/login-publication.ts";
 import { runDst } from "../testkit/sim.ts";
 import { CompositeAuthGate, SerializedAuthGate } from "./auth-gates.ts";
 import { GITHUB_PROVIDER, getToken } from "./broker.ts";
 import { DEFAULT_BROKER_CONSTANTS } from "./constants.ts";
-import { GithubAuthGate } from "./github-auth.ts";
+import {
+  GithubAuthGate,
+  type GithubDeviceGrant,
+  type GithubOAuthClient,
+  type GithubPollOutcome,
+} from "./github-auth.ts";
 import type { AuthResolution, BrokerDeps } from "./ports.ts";
 
 const CODEX = "openai-codex";
+const USER = "00000000-0000-4000-8000-000000000001";
+const OTHER_USER = "00000000-0000-4000-8000-000000000002";
+
+class TwoUserGithubClient implements GithubOAuthClient {
+  private issued = 0;
+  private readonly outcomes = new Map<string, "pending" | "approved" | "denied">();
+
+  requestDeviceCode(task: SimulationTask) {
+    return ResultAsync.fromSafePromise(
+      task.sleep(1, "two-user device code").then((): GithubDeviceGrant => {
+        this.issued += 1;
+        const deviceCode = `device-${this.issued}`;
+        this.outcomes.set(deviceCode, "pending");
+        return {
+          deviceCode,
+          userCode: `CODE-${this.issued}`,
+          verificationUri: `https://github.test/device/${this.issued}`,
+          intervalMs: 10,
+          expiresAt: task.wallNow() + 10_000,
+        };
+      }),
+    );
+  }
+
+  pollDeviceToken(task: SimulationTask, deviceCode: string) {
+    return ResultAsync.fromSafePromise(
+      task.sleep(1, "two-user device poll").then((): GithubPollOutcome => {
+        const outcome = this.outcomes.get(deviceCode) ?? "pending";
+        if (outcome === "denied") return { kind: "denied" };
+        if (outcome === "pending") return { kind: "pending" };
+        const suffix = deviceCode.slice("device-".length);
+        return {
+          kind: "authorized",
+          credential: {
+            access: `access-${suffix}`,
+            refresh: `refresh-${suffix}`,
+            accountId: `account-${suffix}`,
+            expiresAt: task.wallNow(),
+          },
+        };
+      }),
+    );
+  }
+
+  approve(deviceCode: string): void {
+    this.outcomes.set(deviceCode, "approved");
+  }
+
+  deny(deviceCode: string): void {
+    this.outcomes.set(deviceCode, "denied");
+  }
+}
 
 interface GithubHarness {
   readonly pointers: FakePointerStore;
@@ -39,7 +101,7 @@ function makeGithubHarness(clientOptions?: {
     upstreams: { [GITHUB_PROVIDER]: new FakeUpstream("unseeded") },
     constants: DEFAULT_BROKER_CONSTANTS,
   };
-  const gate = new GithubAuthGate(deps, client);
+  const gate = new GithubAuthGate(() => deps, client);
   return { pointers, secrets, client, gate, deps };
 }
 
@@ -54,25 +116,190 @@ async function driveUntil(
   const maxTicks = options?.maxTicks ?? 200;
   let last: AuthResolution | null = null;
   for (let i = 0; i < maxTicks; i++) {
-    const resolution = await gate.ensureAuth(task);
-    expect(resolution.isOk(), "ensureAuth must not hard-error").toBe(true);
-    if (resolution.isOk()) {
-      last = resolution.value;
-      if (done(last)) return last;
+    const resolution = await gate.ensureAuth(task, USER);
+    if (resolution.isErr()) {
+      expect(resolution.error.retryable).toBe(true);
+      await task.sleep(tickMs, "retry auth gate error");
+      continue;
     }
+    last = resolution.value;
+    if (done(last)) return last;
     await task.sleep(tickMs, "reconcile tick");
   }
   throw new Error(`driveUntil exhausted; last resolution: ${JSON.stringify(last)}`);
 }
 
 describe("GitHub auth gate (DST)", () => {
+  it("runs two owners through distinct challenges, failure, approval, and refresh", async () => {
+    await runDst(
+      { name: "github-gate-two-user-independent-flows", iterations: 20 },
+      async (sim) => {
+        const pointersA = new FakePointerStore();
+        const pointersB = new FakePointerStore();
+        const secrets = new FakeSecretStore();
+        const upstreamA = new FakeUpstream("refresh-1");
+        const upstreamB = new FakeUpstream("refresh-3");
+        const brokers = new Map<string, BrokerDeps>([
+          [
+            USER,
+            {
+              pointers: pointersA,
+              secrets,
+              upstreams: { [GITHUB_PROVIDER]: upstreamA },
+              constants: { ...DEFAULT_BROKER_CONSTANTS, minRefreshIntervalMs: 0 },
+            },
+          ],
+          [
+            OTHER_USER,
+            {
+              pointers: pointersB,
+              secrets,
+              upstreams: { [GITHUB_PROVIDER]: upstreamB },
+              constants: { ...DEFAULT_BROKER_CONSTANTS, minRefreshIntervalMs: 0 },
+            },
+          ],
+        ]);
+        const client = new TwoUserGithubClient();
+        const gate = new GithubAuthGate((userId) => brokers.get(userId) as BrokerDeps, client);
+
+        const result = await sim.runTasks([
+          {
+            name: "two-user-driver",
+            f: async (task) => {
+              const pendingA = (await gate.ensureAuth(task, USER))._unsafeUnwrap();
+              const pendingB = (await gate.ensureAuth(task, OTHER_USER))._unsafeUnwrap();
+              expect(pendingA.status).toBe("pending");
+              expect(pendingB.status).toBe("pending");
+              if (pendingA.status !== "pending" || pendingB.status !== "pending") return;
+              expect(pendingA.challenge.userCode).not.toBe(pendingB.challenge.userCode);
+
+              client.approve("device-1");
+              client.deny("device-2");
+              await task.sleep(11, "first independent polls due");
+              expect((await gate.ensureAuth(task, USER))._unsafeUnwrap().status).toBe("ok");
+              expect((await gate.ensureAuth(task, OTHER_USER))._unsafeUnwrap().status).toBe(
+                "failed",
+              );
+
+              const refreshedA = (await gate.ensureAuth(task, USER))._unsafeUnwrap();
+              expect(refreshedA.status).toBe("ok");
+              expect(upstreamA.calls).toBe(1);
+              expect(upstreamB.calls).toBe(0);
+
+              const retryB = (await gate.ensureAuth(task, OTHER_USER))._unsafeUnwrap();
+              expect(retryB.status).toBe("pending");
+              if (retryB.status !== "pending") return;
+              expect(retryB.challenge.userCode).toBe("CODE-3");
+              client.approve("device-3");
+              await task.sleep(11, "second owner retry poll due");
+              expect((await gate.ensureAuth(task, OTHER_USER))._unsafeUnwrap().status).toBe("ok");
+              expect((await gate.ensureAuth(task, OTHER_USER))._unsafeUnwrap().status).toBe("ok");
+              expect(upstreamB.calls).toBe(1);
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(pointersA.snapshot(GITHUB_PROVIDER)?.generation).toBe(2);
+        expect(pointersB.snapshot(GITHUB_PROVIDER)?.generation).toBe(2);
+      },
+    );
+  });
+
+  it("drops an ambiguously published pair and recovers the newer canonical credential", async () => {
+    await runDst(
+      { name: "github-gate-ambiguous-login-publication", iterations: 20 },
+      async (sim) => {
+        const secrets = new FakeSecretStore();
+        const winner = {
+          access: "winner-access",
+          refresh: "winner-refresh",
+          accountId: "winner-account",
+          expiresAt: 2_000_000_000_000,
+        };
+        const winnerVersion = secrets.seedSecret(GITHUB_PROVIDER, winner);
+        const pointers = new SupersedingLoginPointerStore({
+          provider: GITHUB_PROVIDER,
+          rowVersion: 2,
+          generation: 2,
+          secretVersion: winnerVersion,
+          refreshLeaseUntil: 0,
+          lastRefreshAt: 0,
+        });
+        const client = new FakeGithubOAuthClient({ intervalMs: 0 });
+        const deps: BrokerDeps = {
+          pointers,
+          secrets,
+          upstreams: { [GITHUB_PROVIDER]: new FakeUpstream("unused") },
+          constants: DEFAULT_BROKER_CONSTANTS,
+        };
+        const gate = new GithubAuthGate(() => deps, client);
+        client.authorize();
+        const result = await sim.runTasks([
+          {
+            name: "caller",
+            f: async (task) => {
+              expect((await gate.ensureAuth(task, USER))._unsafeUnwrap().status).toBe("pending");
+              expect((await gate.ensureAuth(task, USER)).isErr()).toBe(true);
+              expect((await gate.ensureAuth(task, USER))._unsafeUnwrap().status).toBe("ok");
+              return await getToken(task, deps, GITHUB_PROVIDER, { reason: "startup" });
+            },
+          },
+        ]);
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        if (result.isErr()) return;
+        expect(result.value[0]?._unsafeUnwrap().accessToken).toBe(winner.access);
+        expect(pointers.casCalls).toBe(1);
+        expect(pointers.committedWrites).toHaveLength(1);
+        expect(pointers.committedWrites[0]?.secretVersion).not.toBe(winnerVersion);
+        expect(pointers.snapshot(GITHUB_PROVIDER)?.secretVersion).toBe(winnerVersion);
+        expect(client.pollTimes).toHaveLength(1);
+      },
+    );
+  });
+
+  it("retains completed material after a known pre-commit failure and retries it", async () => {
+    await runDst({ name: "github-gate-precommit-login-retry", iterations: 20 }, async (sim) => {
+      const pointers = new FakePointerStore();
+      const secrets = new PreCommitFailureSecretStore();
+      const client = new FakeGithubOAuthClient({ intervalMs: 0 });
+      const deps: BrokerDeps = {
+        pointers,
+        secrets,
+        upstreams: { [GITHUB_PROVIDER]: new FakeUpstream("unused") },
+        constants: DEFAULT_BROKER_CONSTANTS,
+      };
+      const gate = new GithubAuthGate(() => deps, client);
+      client.authorize();
+      const result = await sim.runTasks([
+        {
+          name: "caller",
+          f: async (task) => {
+            expect((await gate.ensureAuth(task, USER))._unsafeUnwrap().status).toBe("pending");
+            expect((await gate.ensureAuth(task, USER)).isErr()).toBe(true);
+            expect((await gate.ensureAuth(task, USER))._unsafeUnwrap().status).toBe("ok");
+            return await getToken(task, deps, GITHUB_PROVIDER, { reason: "startup" });
+          },
+        },
+      ]);
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      if (result.isErr()) return;
+      expect(result.value[0]?._unsafeUnwrap().accessToken).toBe("gh-access-1");
+      expect(secrets.writeCalls).toBe(2);
+      expect(secrets.retriedCredentials).toMatchObject([
+        { access: "gh-access-1", refresh: "gh-refresh-1" },
+      ]);
+      expect(pointers.committedWrites).toHaveLength(1);
+      expect(client.pollTimes).toHaveLength(1);
+    });
+  });
+
   it("serializes concurrent callers onto one global device flow", async () => {
     await runDst({ name: "github-login-concurrent-single-flow", iterations: 30 }, async (sim) => {
       const harness = makeGithubHarness();
       const gate = new SerializedAuthGate(harness.gate);
       const result = await sim.runTasks([
-        { name: "orb-a", f: async (task) => await gate.ensureAuth(task) },
-        { name: "orb-b", f: async (task) => await gate.ensureAuth(task) },
+        { name: "orb-a", f: async (task) => await gate.ensureAuth(task, USER) },
+        { name: "orb-b", f: async (task) => await gate.ensureAuth(task, USER) },
       ]);
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       if (result.isErr()) return;
@@ -103,7 +330,7 @@ describe("GitHub auth gate (DST)", () => {
         {
           name: "prepare-flow",
           f: async (task) => {
-            const pending = await gate.ensureAuth(task);
+            const pending = await gate.ensureAuth(task, USER);
             expect(pending.isOk() && pending.value.status).toBe("pending");
             await task.sleep(101, "device poll becomes due");
             releaseCallers();
@@ -113,7 +340,7 @@ describe("GitHub auth gate (DST)", () => {
           name: "orb-a",
           f: async (task) => {
             await callersReady;
-            const resolution = await gate.ensureAuth(task);
+            const resolution = await gate.ensureAuth(task, USER);
             expect(resolution.isOk()).toBe(true);
             if (resolution.isOk()) resolutions.push(resolution.value);
           },
@@ -122,7 +349,7 @@ describe("GitHub auth gate (DST)", () => {
           name: "orb-b",
           f: async (task) => {
             await callersReady;
-            const resolution = await gate.ensureAuth(task);
+            const resolution = await gate.ensureAuth(task, USER);
             expect(resolution.isOk()).toBe(true);
             if (resolution.isOk()) resolutions.push(resolution.value);
           },
@@ -218,7 +445,7 @@ describe("GitHub auth gate (DST)", () => {
               (resolution) => resolution.status === "failed",
             );
             if (failed.status !== "failed") throw new Error("unreachable");
-            expect(failed.retryable).toBe(true);
+            expect(failed.retryable).toBe(false);
             expect(failed.message).toContain("expired");
 
             const fresh = await driveUntil(
@@ -273,11 +500,11 @@ describe("GitHub auth gate (DST)", () => {
             await driveUntil(task, harness.gate, (resolution) => resolution.status === "pending");
             harness.secrets.failWrites = true;
             harness.client.authorize();
-            // The poll succeeds but the commit cannot persist: the gate must
-            // hold the credential and keep failing retryably.
-            await driveUntil(task, harness.gate, (resolution) => resolution.status === "failed", {
-              maxTicks: 400,
-            });
+            // The poll succeeds but the known pre-commit write failure is a
+            // retryable gate error; the pending credential remains reusable.
+            await task.sleep(5_001, "device poll due");
+            const failed = await harness.gate.ensureAuth(task, USER);
+            expect(failed.isErr() && failed.error.retryable).toBe(true);
             harness.secrets.failWrites = false;
             await driveUntil(task, harness.gate, (resolution) => resolution.status === "ok");
           },

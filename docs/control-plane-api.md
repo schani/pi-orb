@@ -56,7 +56,7 @@ Still open:
 
 ## Minimal control-plane API
 
-The browser uses a small JSON API under `/api/v1`. Stages 1–2 application identity and ownership are deployed from `ec81e80`; stage 3 credentials is not deployed:
+The browser uses a small JSON API under `/api/v1`. Stages 1–2 application identity and ownership are deployed from `ec81e80`. Stage 3 owner-bound credentials is on `main`, qualified, and undeployed; deployment and coworker onboarding are not authorized:
 
 ```text
 GET  /api/v1/session
@@ -230,12 +230,17 @@ interface OrbView {
         logPath: string;
       };
   stateChangedAt: string;
-  actionRequired?: {
-    type: "openai_codex_device_login";
-    verificationUri: string;
-    userCode: string;
-    expiresAt: string;
-  };
+  actionRequired?:
+    | {
+        type: "openai_codex_device_login" | "github_device_login";
+        verificationUri: string;
+        userCode: string;
+        expiresAt: string;
+      }
+    | {
+        type: "owner_login_required";
+        provider: "openai-codex" | "github";
+      };
   createdAt: string;
   updatedAt: string;
 }
@@ -273,7 +278,7 @@ See `docs/runtime-protocol.md` for FIFO delivery, runtime-derived steering, dura
 
 An orb has a nullable, non-unique display name. A user may supply it in `CreateOrbRequest` or set/replace it through `PATCH /api/v1/orbs/:orbId`; manual naming is allowed in every lifecycle state and is idempotent. Names are trimmed, whitespace-normalized Unicode strings of 1–80 characters. Clearing a name is not initially supported. No name-source field is needed: both user and generated names occupy the same column, generation may write only while `name IS NULL`, and any later user rename is an ordinary unconditional name update. `OrbView.name` is nullable so an unnamed orb can render as “untitled orb” plus a short ID.
 
-Generation runs in the **control plane**, not in the orb. When the runtime accepts the first user `message` request, it reads bounded project context from its checkout and starts a bounded, non-blocking call to `POST /runtime/v1/orb-name-trigger`, authenticated by the existing per-incarnation orb bearer token. The body is `{ text: string, imageOnly: boolean, readme?: string }`, has a small fixed byte limit, and carries no orb ID because authentication already identifies the orb. A successful assignment, an already-named orb, or another worker holding the naming lease is an idempotent success; transient generation/storage failure is retryable. The endpoint fetches the project name and canonical repository URL, then its control-plane model adapter invokes the `openai-codex` catalog model `gpt-5.6-luna`. Keeping inference here centralizes the prompt/model policy, credential use, leases, retries, and conditional database write; the orb is only the source of checkout-local context. The request remains active until generation/assignment finishes rather than enqueueing fragile in-memory background work, but neither it nor Luna delays the agent turn.
+Generation runs in the **control plane**, not in the orb. When the runtime accepts the first user `message` request, it reads bounded project context from its checkout and starts a bounded, non-blocking call to `POST /runtime/v1/orb-name-trigger`, authenticated by the existing per-incarnation orb bearer token. The body is `{ text: string, imageOnly: boolean, readme?: string }`, has a small fixed byte limit, and carries no orb ID because authentication already identifies the orb. A successful assignment, an already-named orb, or another worker holding the naming lease is an idempotent success; transient generation/storage failure is retryable. The endpoint fetches the project, binds the credential broker to its owner, then supplies the project name and canonical repository URL to the control-plane model adapter invoking `openai-codex` model `gpt-5.6-luna`. Replicated-history fallback uses the same owner binding. The owner UUID is not model input. Keeping inference here centralizes prompt/model policy, credential use, leases, retries, and the conditional database write; the orb is only the source of checkout-local context. The request remains active until generation/assignment finishes rather than enqueueing fragile in-memory background work, but neither it nor Luna delays the agent turn.
 
 The runtime includes a root README when available. It chooses deterministically from regular, non-symlink files whose basename matches `README` or `README.*` case-insensitively, rejects a resolved path outside the checkout, decodes UTF-8 text only, and truncates it to a fixed byte budget before sending. README lookup/read failure is non-fatal and simply omits the field. Project metadata, README text, and first-message text are all quoted as untrusted prompt data. Shell records do not trigger naming. For an image-only first message, the trigger sends an explicit image-only marker rather than copying image bytes into a second inference call.
 
@@ -287,14 +292,14 @@ The browser shows the name as the primary identity in project orb lists and the 
 
 Implementation: PostgreSQL migration `005_orb_names.sql` (also exercised by the local PGlite backend); protocol schemas in `packages/protocol/src/orb-naming.ts` and `control-plane-api.ts`; lease/race domain logic in `domain/orb-naming.ts`; naming adapter `adapters/pi-name-generator.ts` over the shared `packages/luna` inference adapter; runtime trigger and replicated-history fallback in `http/runtime-routes.ts`, `orb-runtime/src/pi/agent.ts`, and `domain/replication.ts`. The user-wins and concurrent-trigger schedules are covered by `orb-naming.dst.test.ts`; the full-slice E2E asserts the generated name.
 
-Do not expose `host_ref`, model credentials, harness session ID, or internal replication fields in `OrbView`. `actionRequired` is synthesized from the current in-memory device flow and can contain only its public challenge; it is not stored in the orb row. `stateDetail` combines in-memory reconciler state with sanitized durable status: while `stopping` it reports the history-drain blocker — for example a retrying database outage — and while an incarnation-bounded discard intent exists it reports failed-compute disposal plus its persisted provider error; while the runtime reports the `setup_running` readiness phase it reports `running_setup`, and after a boot whose `.agents/setup` or `.agents/resume` did not succeed it reports `setup_failed` with the reason and the in-orb log path, relayed from the latest health report and stored nowhere (`docs/orb-setup-hook.md`). A control-plane restart therefore cannot erase the user-visible reason cleanup is blocked, and new detail variants can be added later without schema changes. For a running orb, optional `activity` is the latest `idle | busy` value observed by that control-plane process in a successful history pull; it is omitted when no observation is available and for every non-running lifecycle state. It is an advisory snapshot for ordinary resource reads, not a durable field or push subscription (decided 2026-08-13). The dedicated history response exposes only the cursor/head needed for live handoff. `OrbView` carries no workload-identity status: a denied mint is reported to the caller inside the orb as a typed error and to the operator as a deduplicated `identity-mint-denied` lifecycle edge, and nothing about it is persisted (decided 2026-08-25, `docs/workload-identity.md`).
+Do not expose `host_ref`, model credentials, harness session ID, or internal replication fields in `OrbView`. `actionRequired` is synthesized from the owner's in-memory device flow and is not stored in the orb row. Every route producing an `OrbView` shapes it from the reconciler's authoritative orb-to-owner auth block and the authenticated viewer: only the matching user sees the actionable code, URI, and expiry; coworkers and ops see only `owner_login_required` and provider. View shaping does not reread the project or silently drop auth state on a secondary lookup failure. The resource-request header cannot impersonate the owner. `stateDetail` combines in-memory reconciler state with sanitized durable status: while `stopping` it reports the history-drain blocker — for example a retrying database outage — and while an incarnation-bounded discard intent exists it reports failed-compute disposal plus its persisted provider error; while the runtime reports the `setup_running` readiness phase it reports `running_setup`, and after a boot whose `.agents/setup` or `.agents/resume` did not succeed it reports `setup_failed` with the reason and the in-orb log path, relayed from the latest health report and stored nowhere (`docs/orb-setup-hook.md`). A control-plane restart therefore cannot erase the user-visible reason cleanup is blocked, and new detail variants can be added later without schema changes. For a running orb, optional `activity` is the latest `idle | busy` value observed by that control-plane process in a successful history pull; it is omitted when no observation is available and for every non-running lifecycle state. It is an advisory snapshot for ordinary resource reads, not a durable field or push subscription (decided 2026-08-13). The dedicated history response exposes only the cursor/head needed for live handoff. `OrbView` carries no workload-identity status: a denied mint is reported to the caller inside the orb as a typed error and to the operator as a deduplicated `identity-mint-denied` lifecycle edge, and nothing about it is persisted (decided 2026-08-25, `docs/workload-identity.md`).
 
 Status behavior:
 
 - project creation returns `201`;
 - project delete returns `202` with `state: "deleting"`, atomically prevents new child creation, and eventually makes the project and all child orb resources return `404` (`docs/project-deletion.md`);
 - orb creation and start/stop requests return `202` with the current `OrbView`;
-- before creating/starting the host, the backend resolves and refreshes Codex OAuth; if user interaction is required, the orb remains in `creating`/`starting` and the response returns the device-login challenge in `actionRequired`;
+- before creating/starting the host, the backend resolves and refreshes the project owner's Codex/GitHub OAuth; if interaction is required, the orb remains in `creating`/`starting` and `actionRequired` returns an actionable challenge only to that owner;
 - the browser polls only the normal orb resource, not an auth resource; when login succeeds the backend resumes lifecycle work automatically;
 - lifecycle endpoints are idempotent when already moving toward or in the requested state;
 - delete returns `202` with `state: "deleting"`, conflicts with every other orb mutation once accepted, and eventually makes the orb and history endpoints return `404` (`docs/orb-deletion.md`);

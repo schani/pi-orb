@@ -2022,12 +2022,57 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
         ).isOk(),
       ).toBe(true);
       store = database.store;
-      pointers = database.pointers;
+      pointers = database.pointers.forUser(OWNER);
       projectSecrets = database.projectSecrets;
     });
 
     afterEach(async () => {
       expect((await database.close()).isOk()).toBe(true);
+    });
+
+    it("isolates credential pointer CAS and leases by user", async () => {
+      const otherOwner = "00000000-0000-4000-8000-000000000002";
+      expect(
+        (
+          await database.users.resolveUser(
+            task,
+            { issuer: "driver-contract", subject: `${name}-other`, email: null },
+            { id: otherOwner, now: 0 },
+          )
+        ).isOk(),
+      ).toBe(true);
+      const alice = database.pointers.forUser(OWNER);
+      const bob = database.pointers.forUser(otherOwner);
+      expect(
+        (
+          await alice.casWritePointer(task, "openai-codex", null, {
+            generation: 4,
+            secretVersion: "alice-v4",
+            refreshLeaseUntil: 111,
+            lastRefreshAt: 10,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect(
+        (
+          await bob.casWritePointer(task, "openai-codex", null, {
+            generation: 9,
+            secretVersion: "bob-v9",
+            refreshLeaseUntil: 222,
+            lastRefreshAt: 20,
+          })
+        ).isOk(),
+      ).toBe(true);
+      expect((await alice.readPointer(task, "openai-codex"))._unsafeUnwrap()).toMatchObject({
+        generation: 4,
+        secretVersion: "alice-v4",
+        refreshLeaseUntil: 111,
+      });
+      expect((await bob.readPointer(task, "openai-codex"))._unsafeUnwrap()).toMatchObject({
+        generation: 9,
+        secretVersion: "bob-v9",
+        refreshLeaseUntil: 222,
+      });
     });
 
     async function seed(): Promise<void> {

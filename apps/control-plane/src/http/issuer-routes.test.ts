@@ -315,12 +315,12 @@ describe("minted tokens verify against the served JWKS", () => {
       archiveSelf: (task, orbId, caller) =>
         requestOrbArchive(task, { ...makeHarness().deps, store }, orbId, caller),
       store,
-      broker: {
+      brokerForUser: () => ({
         pointers: new FakePointerStore(),
         secrets,
         upstreams: { "openai-codex": new FakeUpstream("unseeded") },
         constants: DEFAULT_BROKER_CONSTANTS,
-      },
+      }),
       nameGenerator,
       nameLeaseMs: 30_000,
       projectSecrets: { pointers: new FakeProjectSecretPointerStore(PROJECT), secrets },

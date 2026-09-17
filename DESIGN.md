@@ -35,7 +35,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
-- Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
+- Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Stage 3 per-user credentials is on `main`, qualified, and undeployed; coworker onboarding remains unauthorized. Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
 - After routing and runtime connection, the control plane proxies one live WebSocket between browser and runtime without interpreting agent content.
 - That WebSocket carries browser commands, transient streaming events, committed history-record notifications, runtime status, acknowledgements, and errors.
 - The control plane never uses WebSocket traffic for persistence. Replica persistence happens only through separate control-plane HTTP pulls from the runtime.
@@ -46,7 +46,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The composer supports foreground Pi user-shell commands through explicit `message`, `shell`, and `excluded shell` modes. `!` and `!!` at input offset zero enter the shell modes without leaving a visible prefix; both persist to history, while excluded shell alone is omitted from later model context. Shell submission requires an idle runtime and no image attachments (decided 2026-08-05).
 - Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes live mutations and broadcasts state. The send-anytime message inbox serializes messages durably at the control plane before runtime delivery.
 - Multiplayer product features such as presence, attribution, and per-user permissions are out of scope for the first slice.
-- Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): default lists are own-user, while existing direct project/orb/file/transcript/settings/lifecycle access stays company-wide. A project and its children have one owner; no coworker switcher, transfers or new permissions framework. Stages 1–2 are deployed for single-user use; stage 3 per-user credentials is authorized but not deployed. No coworker onboarding before stage 3 completes. `docs/multi-user.md`.
+- Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): default lists are own-user, while existing direct project/orb/file/transcript/settings/lifecycle access stays company-wide. A project and its children have one owner; its Codex/GitHub credentials, login cohort, runtime token grants, naming, and auxiliary inference follow that owner, never the viewer. No coworker switcher, transfers, quotas, security-boundary or roles framework. Stages 1–2 are deployed; stage 3 is on `main`, qualified, and undeployed. Coworker onboarding remains unauthorized. `docs/multi-user.md`.
 
 ## High-level architecture
 
@@ -110,7 +110,7 @@ Subsystem designs:
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
-- [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned-project/personal-settings decisions, stage-3 credential proposal, and tailnet options
+- [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules and deterministic/browser qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification

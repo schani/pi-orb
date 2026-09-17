@@ -217,18 +217,27 @@ export const OrbStateDetailSchema = Type.Union([
 ]);
 export type OrbStateDetail = Static<typeof OrbStateDetailSchema>;
 
-export const OrbActionRequiredSchema = Type.Object(
-  {
-    type: Type.Union([
-      Type.Literal("openai_codex_device_login"),
-      Type.Literal("github_device_login"),
-    ]),
-    verificationUri: Type.String(),
-    userCode: Type.String(),
-    expiresAt: Type.String(),
-  },
-  closed,
-);
+export const OrbActionRequiredSchema = Type.Union([
+  Type.Object(
+    {
+      type: Type.Union([
+        Type.Literal("openai_codex_device_login"),
+        Type.Literal("github_device_login"),
+      ]),
+      verificationUri: Type.String(),
+      userCode: Type.String(),
+      expiresAt: Type.String(),
+    },
+    closed,
+  ),
+  Type.Object(
+    {
+      type: Type.Literal("owner_login_required"),
+      provider: Type.Union([Type.Literal("openai-codex"), Type.Literal("github")]),
+    },
+    closed,
+  ),
+]);
 export type OrbActionRequired = Static<typeof OrbActionRequiredSchema>;
 
 export const OrbViewSchema = Type.Object(

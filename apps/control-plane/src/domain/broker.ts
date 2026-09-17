@@ -3,7 +3,21 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
 import { sleepResult, withDeadline } from "./dst.ts";
 import type { StoreError, TokenError } from "./errors.ts";
-import type { BrokerDeps, CredentialPointerRow, StoredCredential } from "./ports.ts";
+import type {
+  BrokerDeps,
+  CredentialPointerRow,
+  CredentialPointerStoreFactory,
+  StoredCredential,
+} from "./ports.ts";
+
+export interface UserBrokerDeps extends Omit<BrokerDeps, "pointers"> {
+  readonly pointers: CredentialPointerStoreFactory;
+}
+
+/** Construct a cheap user-bound broker; shared secrets and upstream clients stay shared. */
+export function bindUserBroker(deps: UserBrokerDeps, userId: string): BrokerDeps {
+  return { ...deps, pointers: deps.pointers.forUser(userId) };
+}
 
 /**
  * Credential broker (docs/credentials.md): serves short-lived access tokens to
@@ -249,12 +263,18 @@ export async function getToken(
  * logins, fenced by `rowVersion` so no write is ever silently dropped —
  * a conflicting write is re-read and retried on top of the newer state.
  */
+export interface LoginCommitUncertain {
+  readonly type: "login_commit_uncertain";
+  readonly message: string;
+  readonly retryable: true;
+}
+
 export async function commitLoginCredential(
   task: SimulationTask,
   deps: BrokerDeps,
   provider: string,
   credential: StoredCredential,
-): Promise<Result<void, StoreError>> {
+): Promise<Result<void, StoreError | LoginCommitUncertain>> {
   const write = await deps.secrets.writeSecret(task, provider, credential);
   if (write.isErr()) return err(write.error);
   const version = write.value.version;
@@ -284,12 +304,24 @@ export async function commitLoginCredential(
       return ok(undefined);
     }
     if (commit.error.type !== "pointer_conflict") {
-      // Ambiguous store failure: check whether the write landed.
+      // The CAS may have landed. Only an exact reread can acknowledge it;
+      // reusing this staged version could resurrect a superseded, destroyed
+      // version after another actor already rotated the credential.
       const reread = await deps.pointers.readPointer(task, provider);
       if (reread.isOk() && reread.value?.secretVersion === version) return ok(undefined);
+      return err({
+        type: "login_commit_uncertain",
+        message: "login credential commit uncertain",
+        retryable: true,
+      });
     }
     await sleepResult(task, 200, "login commit retry");
   }
+  // Every attempted CAS returned a definitive conflict (or no CAS was
+  // attempted after a failed read), so this staged version was never
+  // published. Destroy only that exact version before returning.
+  const cleanup = await deps.secrets.destroySecret(task, provider, version);
+  if (cleanup.isErr()) return err(cleanup.error);
   return err({
     type: "store_error",
     code: "unavailable",

@@ -43,7 +43,10 @@ export class FileSecretStore implements CredentialSecretStore {
     return ResultAsync.fromPromise(
       (async () => {
         await mkdir(this.dir, { recursive: true, mode: 0o700 });
-        await writeFile(this.path(provider, version), JSON.stringify(credential), { mode: 0o600 });
+        await writeFile(this.path(provider, version), JSON.stringify(credential), {
+          mode: 0o600,
+          flag: "wx",
+        });
         return { version };
       })(),
       toStoreError("write secret"),

@@ -125,13 +125,16 @@ function stateDetailOf(
  * (docs/control-plane-api.md). `actionRequired` and `stateDetail` are synthesized, never
  * stored; no host ref, credential, session ID, or replication field leaks.
  */
-export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig): OrbView {
-  const challenge = control.getChallenge();
+export function orbView(
+  orb: OrbRow,
+  control: ControlState,
+  config: ViewConfig,
+  viewerUserId: string | null = null,
+): OrbView {
+  const authBlock = control.getAuthBlock(orb.id);
+  const challenge = authBlock?.challenge ?? null;
   const showChallenge =
-    challenge !== null &&
-    (orb.state === "creating" || orb.state === "starting") &&
-    control.isAuthBlocked(orb.id) &&
-    challenge.verificationUri !== "";
+    challenge !== null && (orb.state === "creating" || orb.state === "starting");
   const drain = orb.state === "stopping" ? control.getDrainStatus(orb.id) : null;
   const liveness = orb.state === "running" ? control.getLiveness(orb.id) : null;
   const bootProbe =
@@ -157,15 +160,21 @@ export function orbView(orb: OrbRow, control: ControlState, config: ViewConfig):
       : { previewHost: previewHost(orb.id, config.tailnetDnsName) }),
     ...(showChallenge
       ? {
-          actionRequired: {
-            type:
-              challenge.provider === "github"
-                ? ("github_device_login" as const)
-                : ("openai_codex_device_login" as const),
-            verificationUri: challenge.verificationUri,
-            userCode: challenge.userCode,
-            expiresAt: iso(challenge.expiresAt),
-          },
+          actionRequired:
+            viewerUserId === authBlock?.ownerUserId
+              ? {
+                  type:
+                    challenge.provider === "github"
+                      ? ("github_device_login" as const)
+                      : ("openai_codex_device_login" as const),
+                  verificationUri: challenge.verificationUri,
+                  userCode: challenge.userCode,
+                  expiresAt: iso(challenge.expiresAt),
+                }
+              : {
+                  type: "owner_login_required" as const,
+                  provider: challenge.provider,
+                },
         }
       : {}),
     createdAt: iso(orb.createdAt),

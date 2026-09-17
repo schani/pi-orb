@@ -188,7 +188,10 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       "subagent login",
       async () => {
         const view = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`);
-        return (view.body["actionRequired"] as { userCode?: string } | undefined)?.userCode ?? null;
+        const action = view.body["actionRequired"] as
+          | { userCode?: string; verificationUri?: string }
+          | undefined;
+        return action?.userCode && action.verificationUri ? action.userCode : null;
       },
       { timeoutMs: 60_000 },
     );
