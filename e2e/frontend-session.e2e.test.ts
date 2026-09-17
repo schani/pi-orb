@@ -165,9 +165,13 @@ describe("frontend-only browser behavior", () => {
             if (!id.endsWith("/components/HistoryView.tsx")) return;
             // Count function executions, not DOM mutations: React can reparse the
             // entire transcript without changing a single DOM node.
+            const anchor = "const representedMessageIds =";
+            if (!code.includes(anchor)) {
+              throw new Error(`render-count anchor ${JSON.stringify(anchor)} not found in ${id}`);
+            }
             return code.replace(
-              "const representedMessageIds =",
-              'Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1); const representedMessageIds =',
+              anchor,
+              `Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1); ${anchor}`,
             );
           },
         },
