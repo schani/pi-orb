@@ -11,7 +11,7 @@ Decisions about where the control plane runs and how infrastructure is managed. 
 - The cloud control plane sits behind Identity-Aware Proxy restricted to the `heyglide.com` Google Workspace domain (`domain:heyglide.com` as the sole `iap.httpsResourceAccessor`; hardcoded for now). The control plane must never be directly reachable from the public internet. Validated interactively: browser WebSockets pass through IAP after sign-in.
 - **Application identity stage 1 (deployed 2026-09-16 from `1fcc261`):** the browser service verifies IAP's JWT as ES256 with issuer `https://cloud.google.com/iap` and exact direct Cloud Run audience `/projects/PROJECT_NUMBER/locations/REGION/services/SERVICE_NAME`, supplied as `PI_ORB_IAP_AUDIENCE`. Verification uses `google-auth-library` behind a narrow typed-error adapter and a provider-directed key cache: coalesced fetches, provider `max-age` capped at one hour, five-minute fallback, five-second HTTP timeout, and one unknown-key refresh per cache-wide 30-second cooldown. Missing or invalid assertions are 401; verification-key or database availability failures are 503; identity-store invariants are 500. Every browser API, hosted-file, callback and browser WebSocket route receives the serving role's principal: user on `browser`/`all`, ops on `ops`; static assets do not resolve one. Runtime bearer and public issuer routes remain separate. This stage adds authentication, not project authorization. Cloud request logs observed 100 guarded browser API calls returning 200 under the new revision; this was neither a dedicated session-response nor a two-user test. Full contract: `docs/multi-user.md`.
 - Local `PI_ORB_ROLE=all` explicitly uses fixed identity `pi-orb:local/developer`; tests inject Alice/Bob. The `ops` role requires `PI_ORB_OPS_PRINCIPAL=serviceAccount:pi-orb-debug@<project>.iam.gserviceaccount.com` and retains Cloud Run invoker IAM. It authenticates as that machine and never infers a human. Stage-2 default project list/create and personal-instructions GET/PUT therefore require an explicit `X-Pi-Orb-User-Id` resolving to a known UUID; resource-specific ops derive owner from the addressed project. User requests cannot override their principal with that header. No Google login is added locally and no application cookie/login system is introduced.
-- **Stage-2 migration 023 (implemented and qualified; production deployment authorized 2026-09-17, not deployed):** a fresh database with no projects and only initial-empty legacy personal instructions migrates without bootstrap input. Any existing project or noninitial legacy instruction snapshot requires all of `PI_ORB_ORIGINAL_USER_ID`, `PI_ORB_ORIGINAL_IDENTITY_ISSUER`, and `PI_ORB_ORIGINAL_IDENTITY_SUBJECT` from a trusted operator. The UUID and identity must have been independently verified through IAP. Partial/invalid input, an unapplied migration lacking required input, or an existing UUID/identity mismatch fails closed. One transaction inserts-or-verifies the exact mapping, assigns non-null project owners, installs per-owner project-name uniqueness, and copies personal content/revision/timestamp to that user. It never guesses email, selects a first user, creates placeholder/null owners, retargets an identity or dual-reads. A conflict rolls back. Once migration 023 is applied, bootstrap inputs are ignored for ownership and cannot remap it. Local, test and ops environments provide explicit known identities where noninitial fixtures require them. Production remains at `1fcc261` pending explicit, independently verified owner inputs; stage 3 is not part of this release.
+- **Stage-2 migration 023 (deployed and data-verified 2026-09-17):** a fresh database with no projects and only initial-empty legacy personal instructions migrates without bootstrap input. Any existing project or noninitial legacy instruction snapshot requires all of `PI_ORB_ORIGINAL_USER_ID`, `PI_ORB_ORIGINAL_IDENTITY_ISSUER`, and `PI_ORB_ORIGINAL_IDENTITY_SUBJECT` from a trusted operator. The production cutover used independently verified owner UUID `53da7ad4-6c53-4223-868e-0641bb4bcdd9`: all three projects received that owner with other metadata unchanged, and the one personal-instructions row retained content hash, revision, and timestamp. The three bootstrap variables were removed after verification; `PI_ORB_USER_ID` remains for smoke selection. Partial/invalid input, an unapplied migration lacking required input, or a UUID/identity mismatch fails closed. One transaction inserts-or-verifies the mapping, assigns non-null owners, installs per-owner project-name uniqueness, and copies personal content/revision/timestamp; conflicts roll back. It never guesses email, selects a first user, creates placeholder/null owners, retargets an identity, or dual-reads. Once 023 is applied, bootstrap inputs are ignored and cannot remap ownership. Local, test, and ops environments supply known identities for noninitial fixtures. Stage 3 is not deployed.
 - **Field finding resolved (2026-08-09):** independent verification after deploying `7918170` found IAP enabled and Cloud Run invocation correctly limited to the IAP service agent, but the IAP policy itself also granted `roles/iap.httpsResourceAccessor` to `pi-orb-debug@…`, violating the sole-accessor rule above. `infra/deploy.sh` now preserves unrelated roles while replacing all accessor bindings with the sole domain member and verifies the resulting policy. Deployment `959c0f6` removed the drift; independent post-deploy inspection returned exactly `domain:heyglide.com`, while the release smoke continued to use the separate `pi-orb-ops` Cloud Run invoker path successfully.
 - **Field finding (2026-08-11): deleting a drained Cloud Run revision is cleanup, not a generation fence.** Revision `pi-orb-00029-6hd` continued making background lifecycle decisions for 7 minutes 42 seconds after its successful deletion audit event, overlapping the new revision and contributing to a failed restart smoke. Autonomous lifecycle authority needs its own durable generation exclusion; revision deletion remains useful cleanup but cannot carry correctness. Incident: `docs/postmortems/2026-08-11-release-smoke-restart-registry-timeout.md`; remediation is tracked in `TODO.md`.
 - Infrastructure must be managed as code.
@@ -246,9 +246,13 @@ automatic rollback of committed schema changes, nor a promise of compatibility
 for arbitrary breaking runtime/schema changes.
 
 A release whose migration backfills record shapes the runtime writes — such as
-`022_typed_history_fields.sql` (2026-09-16) — requires stopping running orbs
-before the deploy and restarting them after it, because a one-time backfill
-cannot see rows a previous runtime image writes afterwards.
+`022_typed_history_fields.sql` — must fail closed unless it proves incompatible
+runtime processes are stopped before mutation and remain fenced through predicate
+verification. State labels alone are insufficient. Restart only onto the new image.
+Deploy `35168145109` violated this invariant. The initial bounded check found no
+affected rows, but a later cutoff found five repairable missing patch projections
+written by the unfenced runtime. Incident and recovery:
+`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`.
 
 `release_state.py` constructs and validates token-free records, including nested
 allowlists, before publishing. It records source and runner commits, accepted
@@ -285,7 +289,36 @@ owner tuple was supplied; it must not be guessed from row order or email. Retry 
 `PI_ORB_ORIGINAL_IDENTITY_ISSUER`, and `PI_ORB_ORIGINAL_IDENTITY_SUBJECT`.
 Stage 3 is not part of this release.
 
-**Latest validated production release (2026-09-16, stage-1 identity and native cleanup):**
+**Latest deployed release (2026-09-17, automated gates validated; runtime fence incomplete):**
+GitHub [run 35168145109](https://github.com/schani/pi-orb/actions/runs/35168145109)
+deployed `ec81e80d76541305c1c05578b89348ffca763a68`. GitHub completed successfully at
+`01:53:59Z`; durable record `r-1789606261-438efafc-cfc6-4137-81bd-881e5d3a2a03`
+finished `validated` at `01:53:47Z`. All encoded gates passed: 1,934 unit tests,
+eight conditional skips, 159 E2Es, four native cleanups, fixture deletion with
+four confirming `404`s, and absent release lock. Serving revisions
+`pi-orb-00060-mk7`, `pi-orb-ops-00057-kxt`, `pi-orb-runtime-api-00062-djj`, and
+`pi-orb-issuer-00022-btv` match digest
+`sha256:622da99b0825b380aa3f7d2e35d46e4e505dbec0190d8f02532ba5898d0156a2`;
+the three lifecycle roles use generation `1789608844`. Native image
+`pi-orb-image-v-ec81e80-0d871be33fdc4dba` has ID `1174324845786627241`;
+workspace image `pi-orb-image-workspace-v-ec81e80-0d871be33fdc4dba` has ID
+`8085093375860473631`. Durable record:
+`gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1789606261-438efafc-cfc6-4137-81bd-881e5d3a2a03.json`.
+
+Migrations 022 and 023 applied at `01:38:06.336Z` and `01:38:25.184Z`.
+Stage-2 ownership and personal-instructions preservation checks passed. However,
+the required stop-before-022 step was omitted: one running `1fcc261` runtime and
+three archiving `d110990` VMs remained. The `01:57Z` bounded predicates found zero
+missing typed projections. After five parent-orb edit-tool calls, a fresh read-only
+cutoff at `02:19:49.331Z` found five missing patch projections among that orb's 117
+post-022 rows; all other projection counts, all three archiving-orb post-022 row
+counts, and normalized-history-proven non-delivered message counts were zero.
+Native patch data remains present, so no native-data loss was observed. No legacy
+runtime was stopped or repaired. Therefore this is the latest deployed release
+with automated validation, not a fully qualified rollout.
+See `docs/postmortems/2026-09-17-typed-history-runtime-fence.md`.
+
+**Previous validated production release (2026-09-16, stage-1 identity and native cleanup):**
 GitHub [run 35148741056](https://github.com/schani/pi-orb/actions/runs/35148741056)
 deployed `1fcc26135807499382d7d5638bb4cb690b5e81f4` and completed durably at
 `2026-09-16T21:49:16Z` (GitHub completed at `21:49:25Z`). All gates passed,

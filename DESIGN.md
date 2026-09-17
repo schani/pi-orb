@@ -35,7 +35,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, and archive themselves on user request (`docs/orb-archival.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
-- Stage 1 application identity was deployed for existing single-user use from `1fcc261` on 2026-09-16. Stage 2 owned projects and per-user personal instructions is implemented and qualified on `main`, but not deployed. Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
+- Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified, but the rollout remains incomplete because legacy typed-history writers were not fenced (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
 - After routing and runtime connection, the control plane proxies one live WebSocket between browser and runtime without interpreting agent content.
 - That WebSocket carries browser commands, transient streaming events, committed history-record notifications, runtime status, acknowledgements, and errors.
 - The control plane never uses WebSocket traffic for persistence. Replica persistence happens only through separate control-plane HTTP pulls from the runtime.
@@ -46,7 +46,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The composer supports foreground Pi user-shell commands through explicit `message`, `shell`, and `excluded shell` modes. `!` and `!!` at input offset zero enter the shell modes without leaving a visible prefix; both persist to history, while excluded shell alone is omitted from later model context. Shell submission requires an idle runtime and no image attachments (decided 2026-08-05).
 - Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes live mutations and broadcasts state. The send-anytime message inbox serializes messages durably at the control plane before runtime delivery.
 - Multiplayer product features such as presence, attribution, and per-user permissions are out of scope for the first slice.
-- Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): default lists are own-user, while existing direct project/orb/file/transcript/settings/lifecycle access stays company-wide. A project and its children have one owner; no coworker switcher, transfers or new permissions framework. Stage 1 is deployed for single-user use; stage 2 is implemented and qualified but undeployed; stage 3 per-user credentials is authorized for implementation. No coworker onboarding before stages 1–3 complete. `docs/multi-user.md`.
+- Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): default lists are own-user, while existing direct project/orb/file/transcript/settings/lifecycle access stays company-wide. A project and its children have one owner; no coworker switcher, transfers or new permissions framework. Stages 1–2 are deployed for single-user use; stage 3 per-user credentials is authorized but not deployed. No coworker onboarding before stage 3 completes. `docs/multi-user.md`.
 
 ## High-level architecture
 
@@ -132,6 +132,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-17-typed-history-runtime-fence.md](docs/postmortems/2026-09-17-typed-history-runtime-fence.md) — typed-history backfill ran while a legacy runtime writer remained active
 - [docs/postmortems/2026-09-16-validator-cleanup-timeout.md](docs/postmortems/2026-09-16-validator-cleanup-timeout.md) — five-minute cleanup CLI timeout while the accepted GCE delete completed asynchronously
 - [docs/postmortems/2026-09-16-release-validation-blockers.md](docs/postmortems/2026-09-16-release-validation-blockers.md) — boot-hook DST, Find source-lifecycle and project-instructions activation-race corrections
 - [docs/postmortems/2026-09-16-codex-websocket-closures.md](docs/postmortems/2026-09-16-codex-websocket-closures.md) — persisted OpenAI Codex response-stream closures, automatic retry evidence, and limits of the production diagnosis

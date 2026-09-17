@@ -6,7 +6,7 @@
 
 `GET /runtime/v1/project-instructions` derives the project from the current active-incarnation bearer; it ignores caller project selectors and exposes no runtime write. Project instructions remain project-scoped under stage 2; they are not copied into the owner's personal instructions. Boot captures that snapshot for fresh and resumed sessions. Save never wakes compute or sends a message. Config tab, shared implementation boundaries, adoption metadata and tests: `docs/project-instructions.md`.
 
-## Personal instructions (stage 2 implemented and qualified 2026-09-16)
+## Personal instructions (stage 2 deployed 2026-09-17)
 
 `GET /api/v1/personal-instructions` returns `{content: string, revision: number}` for the signed-in user. A valid user with no row reads `{content: "", revision: 0}` until first write. `PUT` accepts only `{content}` and atomically updates that user's independent revision. Last-applied-wins, no automatic retries/CAS or per-project override. Empty content clears the managed instructions. Text preserves whitespace and is limited to 64 KiB UTF-8; NUL and unpaired surrogates are invalid. Both replies are `no-store`; invalid input returns 400, unavailable storage 503, inconsistent storage 500. Saving never changes lifecycle state or messages.
 
@@ -56,7 +56,7 @@ Still open:
 
 ## Minimal control-plane API
 
-The browser uses a small JSON API under `/api/v1`. Stage 1 application identity is deployed from `1fcc261`; stage 2 ownership is implemented and qualified on later `main`, but not deployed:
+The browser uses a small JSON API under `/api/v1`. Stages 1–2 application identity and ownership are deployed from `ec81e80`; stage 3 credentials is not deployed:
 
 ```text
 GET  /api/v1/session
@@ -109,7 +109,7 @@ Cloud browser requests carry an IAP assertion verified as specified in `docs/dep
 
 Issuer and subject are never browser response fields. No cookie, login endpoint or login UI is added; IAP remains the cloud login boundary. Production serves this principal response. Cloud request logs observed guarded API traffic, but no dedicated session-response or two-user test was run.
 
-### Stage-2 ownership selection (decided 2026-09-16)
+### Stage-2 ownership selection (deployed 2026-09-17)
 
 Browser `GET /api/v1/projects`, `POST /api/v1/projects`, and personal-instructions GET/PUT use the signed-in user. Default project/orb lists therefore show only that user's resources. Existing direct project, orb, history, hosted-file, settings and lifecycle routes remain accessible to any authenticated coworker; resource-specific services derive the addressed project's owner when owner context is needed. There is no user selector in the browser.
 
