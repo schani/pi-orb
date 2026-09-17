@@ -1,0 +1,1469 @@
+{
+  "name": "broker-refresh-replacement-lease",
+  "iteration": 0,
+  "error": "expected null not to be null",
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of first refresher, replacement refresher",
+      "value": 0.7247112251074044
+    },
+    {
+      "type": "timer-create",
+      "id": 1,
+      "reason": "replacement refresher sleep: await staged refresh",
+      "deadline": 10
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: read pointer",
+      "value": 0.11617816294310168
+    },
+    {
+      "type": "timer-create",
+      "id": 2,
+      "reason": "first refresher sleep: read pointer",
+      "deadline": 1.5808908147155085
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2973803170502347
+    },
+    {
+      "type": "timer-fire",
+      "id": 2,
+      "reason": "first refresher sleep: read pointer",
+      "virtualTime": 1.5808908147155085
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: read secret",
+      "value": 0.48394693923021825
+    },
+    {
+      "type": "timer-create",
+      "id": 3,
+      "reason": "first refresher sleep: read secret",
+      "deadline": 5.0006255108666
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4334516940657862
+    },
+    {
+      "type": "timer-fire",
+      "id": 3,
+      "reason": "first refresher sleep: read secret",
+      "virtualTime": 5.0006255108666
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: cas pointer (before)",
+      "value": 0.05259479227892616
+    },
+    {
+      "type": "timer-create",
+      "id": 4,
+      "reason": "first refresher sleep: cas pointer (before)",
+      "deadline": 6.26359947226123
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.11182445247116657
+    },
+    {
+      "type": "timer-fire",
+      "id": 4,
+      "reason": "first refresher sleep: cas pointer (before)",
+      "virtualTime": 6.26359947226123
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: cas pointer (after)",
+      "value": 0.7638971592979794
+    },
+    {
+      "type": "timer-create",
+      "id": 5,
+      "reason": "first refresher sleep: cas pointer (after)",
+      "deadline": 8.02749663155921
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.15613603258439246
+    },
+    {
+      "type": "timer-fire",
+      "id": 5,
+      "reason": "first refresher sleep: cas pointer (after)",
+      "virtualTime": 8.02749663155921
+    },
+    {
+      "type": "timer-create",
+      "id": 6,
+      "reason": "first refresher deadline: upstream refresh",
+      "deadline": 20008.02749663156
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: upstream latency",
+      "value": 0.07403218304889614
+    },
+    {
+      "type": "timer-create",
+      "id": 7,
+      "reason": "first refresher sleep: upstream refresh",
+      "deadline": 10.508140292537131
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.816106426484121
+    },
+    {
+      "type": "timer-fire",
+      "id": 1,
+      "reason": "replacement refresher sleep: await staged refresh",
+      "virtualTime": 10
+    },
+    {
+      "type": "timer-create",
+      "id": 8,
+      "reason": "replacement refresher sleep: await staged refresh",
+      "deadline": 20
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.11880133881321797
+    },
+    {
+      "type": "timer-fire",
+      "id": 7,
+      "reason": "first refresher sleep: upstream refresh",
+      "virtualTime": 10.508140292537131
+    },
+    {
+      "type": "timer-cancel",
+      "id": 6,
+      "reason": "first refresher deadline: upstream refresh"
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: write secret",
+      "value": 0.3718409024678101
+    },
+    {
+      "type": "timer-create",
+      "id": 9,
+      "reason": "first refresher sleep: write secret",
+      "deadline": 13.367344804876183
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.3882974545674812
+    },
+    {
+      "type": "timer-fire",
+      "id": 9,
+      "reason": "first refresher sleep: write secret",
+      "virtualTime": 13.367344804876183
+    },
+    {
+      "type": "timer-create",
+      "id": 10,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 23.367344804876183
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2921875075468543
+    },
+    {
+      "type": "timer-fire",
+      "id": 8,
+      "reason": "replacement refresher sleep: await staged refresh",
+      "virtualTime": 20
+    },
+    {
+      "type": "timer-create",
+      "id": 11,
+      "reason": "replacement refresher sleep: expire first lease",
+      "deadline": 30021
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9820307282751897
+    },
+    {
+      "type": "timer-fire",
+      "id": 10,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 23.367344804876183
+    },
+    {
+      "type": "timer-create",
+      "id": 12,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 33.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8797957080251066
+    },
+    {
+      "type": "timer-fire",
+      "id": 12,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 33.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 13,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 43.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5112251753521173
+    },
+    {
+      "type": "timer-fire",
+      "id": 13,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 43.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 14,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 53.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.43303335329729253
+    },
+    {
+      "type": "timer-fire",
+      "id": 14,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 53.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 15,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 63.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9765369994470567
+    },
+    {
+      "type": "timer-fire",
+      "id": 15,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 63.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 16,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 73.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.06620675690593147
+    },
+    {
+      "type": "timer-fire",
+      "id": 16,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 73.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 17,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 83.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9341667919238976
+    },
+    {
+      "type": "timer-fire",
+      "id": 17,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 83.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 18,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 93.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6162213543860992
+    },
+    {
+      "type": "timer-fire",
+      "id": 18,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 93.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 19,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 103.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2446953413332481
+    },
+    {
+      "type": "timer-fire",
+      "id": 19,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 103.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 20,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 113.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.29324477955852923
+    },
+    {
+      "type": "timer-fire",
+      "id": 20,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 113.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 21,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 123.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.1656863233452287
+    },
+    {
+      "type": "timer-fire",
+      "id": 21,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 123.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 22,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 133.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.47365165884810323
+    },
+    {
+      "type": "timer-fire",
+      "id": 22,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 133.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 23,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 143.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.3993232497331499
+    },
+    {
+      "type": "timer-fire",
+      "id": 23,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 143.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 24,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 153.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7718584364697298
+    },
+    {
+      "type": "timer-fire",
+      "id": 24,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 153.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 25,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 163.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.1624268936976787
+    },
+    {
+      "type": "timer-fire",
+      "id": 25,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 163.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 26,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 173.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2569564198126951
+    },
+    {
+      "type": "timer-fire",
+      "id": 26,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 173.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 27,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 183.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.658709615909515
+    },
+    {
+      "type": "timer-fire",
+      "id": 27,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 183.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 28,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 193.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6928466969271123
+    },
+    {
+      "type": "timer-fire",
+      "id": 28,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 193.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 29,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 203.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2986644904778848
+    },
+    {
+      "type": "timer-fire",
+      "id": 29,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 203.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 30,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 213.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7442022877209247
+    },
+    {
+      "type": "timer-fire",
+      "id": 30,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 213.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 31,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 223.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.1284277225233187
+    },
+    {
+      "type": "timer-fire",
+      "id": 31,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 223.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 32,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 233.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9238924323013932
+    },
+    {
+      "type": "timer-fire",
+      "id": 32,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 233.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 33,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 243.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.003721332452320869
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.6276673436394721
+    },
+    {
+      "type": "timer-fire",
+      "id": 33,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 243.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 34,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 253.36734480487618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5480019059407749
+    },
+    {
+      "type": "timer-fire",
+      "id": 34,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 253.36734480487618
+    },
+    {
+      "type": "timer-create",
+      "id": 35,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 263.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6278814730973574
+    },
+    {
+      "type": "timer-fire",
+      "id": 35,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 263.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 36,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 273.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9693101443439127
+    },
+    {
+      "type": "timer-fire",
+      "id": 36,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 273.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 37,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 283.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6165821278702686
+    },
+    {
+      "type": "timer-fire",
+      "id": 37,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 283.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 38,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 293.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6200001217740055
+    },
+    {
+      "type": "timer-fire",
+      "id": 38,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 293.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 39,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 303.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6236521735694027
+    },
+    {
+      "type": "timer-fire",
+      "id": 39,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 303.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 40,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 313.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5476375283578924
+    },
+    {
+      "type": "timer-fire",
+      "id": 40,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 313.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 41,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 323.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8051909048638666
+    },
+    {
+      "type": "timer-fire",
+      "id": 41,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 323.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 42,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 333.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5905415812678583
+    },
+    {
+      "type": "timer-fire",
+      "id": 42,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 333.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 43,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 343.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8425527283632425
+    },
+    {
+      "type": "timer-fire",
+      "id": 43,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 343.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 44,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 353.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8912075332959796
+    },
+    {
+      "type": "timer-fire",
+      "id": 44,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 353.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 45,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 363.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9782799230437164
+    },
+    {
+      "type": "timer-fire",
+      "id": 45,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 363.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 46,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 373.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.08855069102342739
+    },
+    {
+      "type": "timer-fire",
+      "id": 46,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 373.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 47,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 383.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5208963647070222
+    },
+    {
+      "type": "timer-fire",
+      "id": 47,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 383.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 48,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 393.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.3232111638927406
+    },
+    {
+      "type": "timer-fire",
+      "id": 48,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 393.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 49,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 403.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8002812989213233
+    },
+    {
+      "type": "timer-fire",
+      "id": 49,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 403.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 50,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 413.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8493892285388698
+    },
+    {
+      "type": "timer-fire",
+      "id": 50,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 413.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 51,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 423.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.40179448735333334
+    },
+    {
+      "type": "timer-fire",
+      "id": 51,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 423.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 52,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 433.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.827588489484892
+    },
+    {
+      "type": "timer-fire",
+      "id": 52,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 433.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 53,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 443.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.16969747768922405
+    },
+    {
+      "type": "timer-fire",
+      "id": 53,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 443.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 54,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 453.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9619327853085596
+    },
+    {
+      "type": "timer-fire",
+      "id": 54,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 453.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 55,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 463.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.14003407904484155
+    },
+    {
+      "type": "timer-fire",
+      "id": 55,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 463.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 56,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 473.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4083131240315677
+    },
+    {
+      "type": "timer-fire",
+      "id": 56,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 473.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 57,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 483.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7915804991413338
+    },
+    {
+      "type": "timer-fire",
+      "id": 57,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 483.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 58,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 493.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.13660281936249663
+    },
+    {
+      "type": "timer-fire",
+      "id": 58,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 493.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 59,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 503.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.1951182902236296
+    },
+    {
+      "type": "timer-fire",
+      "id": 59,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 503.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 60,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 513.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.3277259175355576
+    },
+    {
+      "type": "timer-fire",
+      "id": 60,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 513.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 61,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 523.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.31109597427223756
+    },
+    {
+      "type": "timer-fire",
+      "id": 61,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 523.3673448048762
+    },
+    {
+      "type": "timer-create",
+      "id": 62,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 533.3673448048762
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.014649167435257682
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.3557808508478677
+    },
+    {
+      "type": "timer-fire",
+      "id": 11,
+      "reason": "replacement refresher sleep: expire first lease",
+      "virtualTime": 30021
+    },
+    {
+      "type": "entropy",
+      "name": "replacement refresher random number: broker latency: read pointer",
+      "value": 0.8528254639942461
+    },
+    {
+      "type": "timer-create",
+      "id": 63,
+      "reason": "replacement refresher sleep: read pointer",
+      "deadline": 30026.26412731997
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2738336060993176
+    },
+    {
+      "type": "timer-fire",
+      "id": 62,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 30021
+    },
+    {
+      "type": "timer-create",
+      "id": 64,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 30031
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7753330889231906
+    },
+    {
+      "type": "timer-fire",
+      "id": 63,
+      "reason": "replacement refresher sleep: read pointer",
+      "virtualTime": 30026.26412731997
+    },
+    {
+      "type": "entropy",
+      "name": "replacement refresher random number: broker latency: read secret",
+      "value": 0.6066783793117526
+    },
+    {
+      "type": "timer-create",
+      "id": 65,
+      "reason": "replacement refresher sleep: read secret",
+      "deadline": 30030.29751921653
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.04225115100355881
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.3910312603791918
+    },
+    {
+      "type": "timer-fire",
+      "id": 64,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 30031
+    },
+    {
+      "type": "timer-create",
+      "id": 66,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 30041
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.026429105576190937
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.6888468053782897
+    },
+    {
+      "type": "timer-fire",
+      "id": 66,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 30041
+    },
+    {
+      "type": "timer-create",
+      "id": 67,
+      "reason": "first refresher sleep: await replacement lease",
+      "deadline": 30051
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9170593453317272
+    },
+    {
+      "type": "timer-fire",
+      "id": 65,
+      "reason": "replacement refresher sleep: read secret",
+      "virtualTime": 30041
+    },
+    {
+      "type": "entropy",
+      "name": "replacement refresher random number: broker latency: cas pointer (before)",
+      "value": 0.5437210582554555
+    },
+    {
+      "type": "timer-create",
+      "id": 68,
+      "reason": "replacement refresher sleep: cas pointer (before)",
+      "deadline": 30044.718605291277
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6156229956185102
+    },
+    {
+      "type": "timer-fire",
+      "id": 68,
+      "reason": "replacement refresher sleep: cas pointer (before)",
+      "virtualTime": 30044.718605291277
+    },
+    {
+      "type": "entropy",
+      "name": "replacement refresher random number: broker latency: cas pointer (after)",
+      "value": 0.1029126704384935
+    },
+    {
+      "type": "timer-create",
+      "id": 69,
+      "reason": "replacement refresher sleep: cas pointer (after)",
+      "deadline": 30045.821517961715
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.13144155144879677
+    },
+    {
+      "type": "timer-fire",
+      "id": 69,
+      "reason": "replacement refresher sleep: cas pointer (after)",
+      "virtualTime": 30045.821517961715
+    },
+    {
+      "type": "timer-create",
+      "id": 70,
+      "reason": "replacement refresher deadline: upstream refresh",
+      "deadline": 50045.82151796171
+    },
+    {
+      "type": "entropy",
+      "name": "replacement refresher random number: upstream latency",
+      "value": 0.43748525716601727
+    },
+    {
+      "type": "timer-create",
+      "id": 71,
+      "reason": "replacement refresher sleep: upstream refresh",
+      "deadline": 30055.571223105035
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4811818848678848
+    },
+    {
+      "type": "timer-fire",
+      "id": 67,
+      "reason": "first refresher sleep: await replacement lease",
+      "virtualTime": 30051
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: cas pointer (before)",
+      "value": 0.307567519334043
+    },
+    {
+      "type": "timer-create",
+      "id": 72,
+      "reason": "first refresher sleep: cas pointer (before)",
+      "deadline": 30053.53783759667
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.07376064707183816
+    },
+    {
+      "type": "timer-fire",
+      "id": 72,
+      "reason": "first refresher sleep: cas pointer (before)",
+      "virtualTime": 30053.53783759667
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: destroy secret",
+      "value": 0.7015421314957354
+    },
+    {
+      "type": "timer-create",
+      "id": 73,
+      "reason": "first refresher sleep: destroy secret",
+      "deadline": 30058.045548254147
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5673166738165731
+    },
+    {
+      "type": "timer-fire",
+      "id": 71,
+      "reason": "replacement refresher sleep: upstream refresh",
+      "virtualTime": 30055.571223105035
+    },
+    {
+      "type": "entropy",
+      "name": "replacement refresher random number: upstream latency",
+      "value": 0.6610529176630754
+    },
+    {
+      "type": "timer-create",
+      "id": 74,
+      "reason": "replacement refresher sleep: upstream refresh",
+      "deadline": 30069.792281458296
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8580366667181156
+    },
+    {
+      "type": "timer-fire",
+      "id": 73,
+      "reason": "first refresher sleep: destroy secret",
+      "virtualTime": 30058.045548254147
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: read pointer",
+      "value": 0.611826411539534
+    },
+    {
+      "type": "timer-create",
+      "id": 75,
+      "reason": "first refresher sleep: read pointer",
+      "deadline": 30062.104680311844
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.0670023365816993
+    },
+    {
+      "type": "timer-fire",
+      "id": 75,
+      "reason": "first refresher sleep: read pointer",
+      "virtualTime": 30062.104680311844
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: read secret",
+      "value": 0.3696818142862388
+    },
+    {
+      "type": "timer-create",
+      "id": 76,
+      "reason": "first refresher sleep: read secret",
+      "deadline": 30064.953089383274
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9672432803072416
+    },
+    {
+      "type": "timer-fire",
+      "id": 76,
+      "reason": "first refresher sleep: read secret",
+      "virtualTime": 30064.953089383274
+    },
+    {
+      "type": "timer-create",
+      "id": 77,
+      "reason": "first refresher sleep: broker pause",
+      "deadline": 30564.953089383274
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8083582407833967
+    },
+    {
+      "type": "timer-fire",
+      "id": 74,
+      "reason": "replacement refresher sleep: upstream refresh",
+      "virtualTime": 30069.792281458296
+    },
+    {
+      "type": "timer-cancel",
+      "id": 70,
+      "reason": "replacement refresher deadline: upstream refresh"
+    },
+    {
+      "type": "entropy",
+      "name": "replacement refresher random number: broker latency: cas pointer (before)",
+      "value": 0.4845449055554787
+    },
+    {
+      "type": "timer-create",
+      "id": 78,
+      "reason": "replacement refresher sleep: cas pointer (before)",
+      "deadline": 30073.215005986072
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4723603474402629
+    },
+    {
+      "type": "timer-fire",
+      "id": 78,
+      "reason": "replacement refresher sleep: cas pointer (before)",
+      "virtualTime": 30073.215005986072
+    },
+    {
+      "type": "entropy",
+      "name": "replacement refresher random number: broker latency: cas pointer (after)",
+      "value": 0.895678267662452
+    },
+    {
+      "type": "timer-create",
+      "id": 79,
+      "reason": "replacement refresher sleep: cas pointer (after)",
+      "deadline": 30075.110684253734
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7729390079487789
+    },
+    {
+      "type": "timer-fire",
+      "id": 79,
+      "reason": "replacement refresher sleep: cas pointer (after)",
+      "virtualTime": 30075.110684253734
+    },
+    {
+      "type": "timer-fire",
+      "id": 77,
+      "reason": "first refresher sleep: broker pause",
+      "virtualTime": 30564.953089383274
+    },
+    {
+      "type": "entropy",
+      "name": "first refresher random number: broker latency: read pointer",
+      "value": 0.6730993449533718
+    },
+    {
+      "type": "timer-create",
+      "id": 80,
+      "reason": "first refresher sleep: read pointer",
+      "deadline": 30569.318586108042
+    },
+    {
+      "type": "timer-fire",
+      "id": 80,
+      "reason": "first refresher sleep: read pointer",
+      "virtualTime": 30569.318586108042
+    }
+  ]
+}

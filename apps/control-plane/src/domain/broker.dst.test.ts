@@ -1,5 +1,5 @@
 import type { SimulationTask } from "determined";
-import type { Result } from "neverthrow";
+import { errAsync, type Result, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import {
   FakePointerStore,
@@ -512,6 +512,127 @@ describe("credential broker (DST)", () => {
       expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
       expect(harness.upstream.calls).toBe(2);
     });
+  });
+
+  it("retries refresh publication after a pointer failure that did not commit", async () => {
+    await runDst({ name: "broker-refresh-publication-retry", iterations: 10 }, async (sim) => {
+      const harness = makeBrokerHarness();
+      const writePointer = harness.pointers.casWritePointer.bind(harness.pointers);
+      let writes = 0;
+      harness.pointers.casWritePointer = (task, provider, expectedRowVersion, next) => {
+        writes += 1;
+        if (writes === 2) {
+          return errAsync({
+            type: "store_error" as const,
+            code: "unavailable" as const,
+            message: "refresh publication unavailable",
+            retryable: true,
+          });
+        }
+        return writePointer(task, provider, expectedRowVersion, next);
+      };
+
+      const result = await sim.runTasks([
+        {
+          name: "runtime",
+          f: async (task) => {
+            seedCredential(task, harness, { expiresInMs: 60_000 });
+            const grant = expectOk(
+              await getToken(task, harness.deps, PROVIDER, {
+                reason: "expiring",
+                staleGeneration: 1,
+              }),
+              "publication retry",
+            );
+            expect(grant.generation).toBe(2);
+          },
+        },
+      ]);
+
+      expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+      expect(harness.upstream.calls).toBe(1);
+      expect(writes).toBe(3);
+      expect(harness.pointers.snapshot(PROVIDER)?.generation).toBe(2);
+    });
+  });
+
+  it("publishes a staged refresh through the exact replacement-lease fence", async () => {
+    await runDst(
+      { name: "broker-refresh-replacement-lease", iterations: 20, lateTimerProbability: 0 },
+      async (sim) => {
+        const harness = makeBrokerHarness();
+        let oldVersion: string | null = null;
+        let publicationStarted = false;
+        let firstFinished = false;
+        let successfulLeases = 0;
+        let replacementLeaseAcquired = false;
+        const writePointer = harness.pointers.casWritePointer.bind(harness.pointers);
+        harness.pointers.casWritePointer = (task, provider, expectedRowVersion, next) => {
+          const publication = next.generation === 2 && next.secretVersion !== oldVersion;
+          const lease = next.generation === 1 && next.secretVersion === oldVersion;
+          const ready = publication
+            ? ResultAsync.fromSafePromise(
+                (async () => {
+                  publicationStarted = true;
+                  while (!replacementLeaseAcquired) {
+                    await task.sleep(500, "await replacement lease");
+                  }
+                })(),
+              ).andThen(() => writePointer(task, provider, expectedRowVersion, next))
+            : writePointer(task, provider, expectedRowVersion, next);
+          return ready.map((row) => {
+            if (lease) {
+              successfulLeases += 1;
+              replacementLeaseAcquired = successfulLeases === 2;
+            }
+            return row;
+          });
+        };
+        harness.upstream.pushScript({ kind: "ok" }, { kind: "until", ready: () => firstFinished });
+
+        const outcomes: Result<TokenGrant, TokenError>[] = [];
+        const result = await sim.runTasks([
+          {
+            name: "first refresher",
+            f: async (task) => {
+              seedCredential(task, harness, { expiresInMs: -1_000 });
+              oldVersion = harness.pointers.snapshot(PROVIDER)?.secretVersion ?? null;
+              if (oldVersion === null) throw new Error("seed missing");
+              outcomes.push(
+                await getToken(task, harness.deps, PROVIDER, {
+                  reason: "expiring",
+                  staleGeneration: 1,
+                }),
+              );
+              firstFinished = true;
+            },
+          },
+          {
+            name: "replacement refresher",
+            f: async (task) => {
+              while (!publicationStarted) {
+                await task.sleep(500, "await staged refresh");
+              }
+              await task.sleep(harness.deps.constants.leaseMs + 1, "expire first lease");
+              outcomes.push(
+                await getToken(task, harness.deps, PROVIDER, {
+                  reason: "expiring",
+                  staleGeneration: 1,
+                }),
+              );
+            },
+          },
+        ]);
+
+        expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
+        expect(harness.upstream.calls).toBe(2);
+        expect(harness.pointers.snapshot(PROVIDER)?.secretVersion).not.toBeNull();
+        expect(harness.pointers.snapshot(PROVIDER)?.generation).toBe(2);
+        expect(harness.pointers.snapshot(PROVIDER)?.rowVersion).toBe(4);
+        expect(harness.pointers.committedWrites.map((row) => row.generation)).toEqual([1, 1, 2]);
+        expect(outcomes.every((outcome) => outcome.isOk())).toBe(true);
+      },
+    );
   });
 
   it("a storm under store failpoints keeps generations monotonic and settles", async () => {

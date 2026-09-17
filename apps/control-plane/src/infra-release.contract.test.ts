@@ -66,12 +66,27 @@ esac\n`,
   );
   executable(
     join(bin, "docker"),
-    'echo "docker:$*" >> "$CALL_LOG"\ntest "$1" = info || test "$1" = build\n',
+    `echo "docker:$*" >> "$CALL_LOG"
+if [ "$1" = build ]; then
+  test -z "\${PI_ORB_USER_ID:-}"
+  test -z "\${PI_ORB_ORIGINAL_USER_ID:-}"
+  test -z "\${PI_ORB_ORIGINAL_IDENTITY_ISSUER:-}"
+  test -z "\${PI_ORB_ORIGINAL_IDENTITY_SUBJECT:-}"
+fi
+test "$1" = info || test "$1" = build
+`,
   );
   executable(join(bin, "uuidgen"), "echo 00000000-0000-4000-8000-000000000001\n");
   executable(
     join(bin, "npm"),
-    'test -z "${PI_ORB_RELEASE_RESULT_DIR:-}"\ntest -z "${PI_ORB_RELEASE_RECORD:-}"\necho "npm:$*" >> "$CALL_LOG"\n',
+    `test -z "\${PI_ORB_RELEASE_RESULT_DIR:-}"
+test -z "\${PI_ORB_RELEASE_RECORD:-}"
+test -z "\${PI_ORB_USER_ID:-}"
+test -z "\${PI_ORB_ORIGINAL_USER_ID:-}"
+test -z "\${PI_ORB_ORIGINAL_IDENTITY_ISSUER:-}"
+test -z "\${PI_ORB_ORIGINAL_IDENTITY_SUBJECT:-}"
+echo "npm:$*" >> "$CALL_LOG"
+`,
   );
   executable(
     join(bin, "gcloud"),
@@ -390,6 +405,34 @@ describe("infra/release.sh", () => {
     expect(planPath).toBeDefined();
     expect(calls).toContain(`tofu:-chdir=${join(root, "infra")} apply -input=false ${planPath}`);
     expect(readdirSync(join(root, "tmp"))).toEqual([]);
+  });
+
+  it("isolates release checks from owner input while passing the exact tuple to migration", () => {
+    const { root, log } = makeFixture();
+    const userId = "00000000-0000-4000-8000-000000000001";
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+        PI_ORB_USER_ID: userId,
+        PI_ORB_ORIGINAL_USER_ID: userId,
+        PI_ORB_ORIGINAL_IDENTITY_ISSUER: "https://issuer.example",
+        PI_ORB_ORIGINAL_IDENTITY_SUBJECT: "original-subject",
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toMatch(
+      /npm:ci[\s\S]*npm:run test:e2e:install[\s\S]*npm:run typecheck[\s\S]*npm:run lint[\s\S]*npm:test\n[\s\S]*docker:build[\s\S]*npm:run test:e2e/,
+    );
+    expect(calls).toContain(
+      `--set-env-vars=^@^PI_ORB_USER_ID=${userId}@PI_ORB_ORIGINAL_USER_ID=${userId}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=https://issuer.example@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=original-subject`,
+    );
   });
 
   it("validation-only neither builds, migrates nor applies", () => {

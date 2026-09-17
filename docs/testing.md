@@ -184,9 +184,15 @@ it does not reserve and release a port or assume startup finishes within a poll 
 
 Release subprocess fixtures must own their output paths and must not inherit
 `PI_ORB_RELEASE_RESULT_DIR` or `PI_ORB_RELEASE_RECORD` from the invoking workflow.
-Passing assertions did not detect an overwritten parent record in the first full
-workflow; the isolated sentinel reproduction and fix are recorded in
-`docs/postmortems/2026-09-09-release-test-environment.md`.
+Release check and preparation children also receive none of the deployment-only
+`PI_ORB_USER_ID` or `PI_ORB_ORIGINAL_*` owner inputs; test migrations construct
+owners from their fixtures. Shell contracts must exercise the complete boundary
+with owner inputs present and separately prove that the migration job receives the
+exact validated values. Passing assertions did not detect an overwritten parent
+record in the first full workflow; the isolated sentinel reproduction and fix are
+recorded in `docs/postmortems/2026-09-09-release-test-environment.md`. The later
+owner leak and preserved failed release are recorded in
+`docs/postmortems/2026-09-17-release-owner-environment-leak.md`.
 
 Release guards have deterministic coverage for conditional activation, malformed
 or regressed authority, stale/positive/missing retirement metrics, pagination,

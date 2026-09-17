@@ -1,0 +1,2551 @@
+{
+  "name": "broker-failpoint-storm",
+  "iteration": 19,
+  "error": "expected false to be true // Object.is equality",
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of seeder, runtime-0, runtime-1, runtime-2, runtime-3, runtime-4, runtime-5",
+      "value": 0.21598821953449143
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: stagger",
+      "value": 0.5686781431889327
+    },
+    {
+      "type": "timer-create",
+      "id": 1,
+      "reason": "runtime-0 sleep: stagger",
+      "deadline": 1138.3562863778654
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of seeder, runtime-1, runtime-2, runtime-3, runtime-4, runtime-5",
+      "value": 0.7163615309342388
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: stagger",
+      "value": 0.1440632353021234
+    },
+    {
+      "type": "timer-create",
+      "id": 2,
+      "reason": "runtime-4 sleep: stagger",
+      "deadline": 289.1264706042468
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of seeder, runtime-1, runtime-2, runtime-3, runtime-5",
+      "value": 0.2613049528563657
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-1 random number: stagger",
+      "value": 0.18034223103210067
+    },
+    {
+      "type": "timer-create",
+      "id": 3,
+      "reason": "runtime-1 sleep: stagger",
+      "deadline": 361.68446206420134
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of seeder, runtime-2, runtime-3, runtime-5",
+      "value": 0.7450465943936775
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-3 random number: stagger",
+      "value": 0.8147820532402776
+    },
+    {
+      "type": "timer-create",
+      "id": 4,
+      "reason": "runtime-3 sleep: stagger",
+      "deadline": 1630.5641064805552
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of seeder, runtime-2, runtime-5",
+      "value": 0.9062008307412347
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-5 random number: stagger",
+      "value": 0.9590357257585509
+    },
+    {
+      "type": "timer-create",
+      "id": 5,
+      "reason": "runtime-5 sleep: stagger",
+      "deadline": 1919.0714515171019
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of seeder, runtime-2",
+      "value": 0.8631775148799081
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: stagger",
+      "value": 0.7966551643547556
+    },
+    {
+      "type": "timer-create",
+      "id": 6,
+      "reason": "runtime-2 sleep: stagger",
+      "deadline": 1594.3103287095112
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8952128822639056
+    },
+    {
+      "type": "timer-fire",
+      "id": 2,
+      "reason": "runtime-4 sleep: stagger",
+      "virtualTime": 289.1264706042468
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: broker latency: read pointer",
+      "value": 0.3336645940837677
+    },
+    {
+      "type": "timer-create",
+      "id": 7,
+      "reason": "runtime-4 sleep: read pointer",
+      "deadline": 291.7947935746656
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9696266988731687
+    },
+    {
+      "type": "timer-fire",
+      "id": 7,
+      "reason": "runtime-4 sleep: read pointer",
+      "virtualTime": 291.7947935746656
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 failpoint: broker.pointer.read read pointer",
+      "value": 0.5908025775224709
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: broker latency: read secret",
+      "value": 0.4607303268093791
+    },
+    {
+      "type": "timer-create",
+      "id": 8,
+      "reason": "runtime-4 sleep: read secret",
+      "deadline": 295.0984452087125
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.0006494386584917633
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.2952987245524481
+    },
+    {
+      "type": "timer-fire",
+      "id": 3,
+      "reason": "runtime-1 sleep: stagger",
+      "virtualTime": 361.68446206420134
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-1 random number: broker latency: read pointer",
+      "value": 0.8064497140028768
+    },
+    {
+      "type": "timer-create",
+      "id": 9,
+      "reason": "runtime-1 sleep: read pointer",
+      "deadline": 366.7167106342157
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6642799600482329
+    },
+    {
+      "type": "timer-fire",
+      "id": 8,
+      "reason": "runtime-4 sleep: read secret",
+      "virtualTime": 361.68446206420134
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 failpoint: broker.secret.read read secret",
+      "value": 0.5149040108912043
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: broker latency: cas pointer (before)",
+      "value": 0.15744531227526692
+    },
+    {
+      "type": "timer-create",
+      "id": 10,
+      "reason": "runtime-4 sleep: cas pointer (before)",
+      "deadline": 363.47168862557766
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.0013004149287024758
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.20104135359731445
+    },
+    {
+      "type": "timer-fire",
+      "id": 4,
+      "reason": "runtime-3 sleep: stagger",
+      "virtualTime": 1630.5641064805552
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-3 random number: broker latency: read pointer",
+      "value": 0.8821763782545797
+    },
+    {
+      "type": "timer-create",
+      "id": 11,
+      "reason": "runtime-3 sleep: read pointer",
+      "deadline": 1635.9749883718282
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2020640229368611
+    },
+    {
+      "type": "timer-fire",
+      "id": 10,
+      "reason": "runtime-4 sleep: cas pointer (before)",
+      "virtualTime": 1630.5641064805552
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 failpoint: broker.pointer.write.before cas pointer (before)",
+      "value": 0.5764154502606392
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: broker latency: cas pointer (after)",
+      "value": 0.9814255661538438
+    },
+    {
+      "type": "timer-create",
+      "id": 12,
+      "reason": "runtime-4 sleep: cas pointer (after)",
+      "deadline": 1632.545532046709
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.45793856565797175
+    },
+    {
+      "type": "timer-fire",
+      "id": 9,
+      "reason": "runtime-1 sleep: read pointer",
+      "virtualTime": 1630.5641064805552
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-1 failpoint: broker.pointer.read read pointer",
+      "value": 0.6465860807860492
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-1 random number: broker latency: read secret",
+      "value": 0.8583188108304686
+    },
+    {
+      "type": "timer-create",
+      "id": 13,
+      "reason": "runtime-1 sleep: read secret",
+      "deadline": 1635.8557005347075
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5887917170899806
+    },
+    {
+      "type": "timer-fire",
+      "id": 1,
+      "reason": "runtime-0 sleep: stagger",
+      "virtualTime": 1630.5641064805552
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.1891397821793077
+    },
+    {
+      "type": "timer-create",
+      "id": 14,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 1632.5098053914517
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5161104364378277
+    },
+    {
+      "type": "timer-fire",
+      "id": 6,
+      "reason": "runtime-2 sleep: stagger",
+      "virtualTime": 1630.5641064805552
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.6766854642478292
+    },
+    {
+      "type": "timer-create",
+      "id": 15,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 1634.9475338017944
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8862282987599694
+    },
+    {
+      "type": "timer-fire",
+      "id": 14,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 1632.5098053914517
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.8391187904431047
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.3143163195212847
+    },
+    {
+      "type": "timer-create",
+      "id": 16,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 1635.081386989058
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4614114690197749
+    },
+    {
+      "type": "timer-fire",
+      "id": 12,
+      "reason": "runtime-4 sleep: cas pointer (after)",
+      "virtualTime": 1632.545532046709
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 failpoint: broker.pointer.write.after cas pointer (after)",
+      "value": 0.34508472599450346
+    },
+    {
+      "type": "timer-create",
+      "id": 17,
+      "reason": "runtime-4 deadline: upstream refresh",
+      "deadline": 21632.545532046708
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: upstream latency",
+      "value": 0.5135546537061476
+    },
+    {
+      "type": "timer-create",
+      "id": 18,
+      "reason": "runtime-4 sleep: upstream refresh",
+      "deadline": 1643.816625120832
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.1833548498672426
+    },
+    {
+      "type": "timer-fire",
+      "id": 15,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 1634.9475338017944
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.3850197564333362
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.7438040906729932
+    },
+    {
+      "type": "timer-create",
+      "id": 19,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 1639.6665542551593
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8672997965448145
+    },
+    {
+      "type": "timer-fire",
+      "id": 16,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 1635.081386989058
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.7434128365690665
+    },
+    {
+      "type": "timer-create",
+      "id": 20,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 2135.081386989058
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9263336125060465
+    },
+    {
+      "type": "timer-fire",
+      "id": 13,
+      "reason": "runtime-1 sleep: read secret",
+      "virtualTime": 1635.8557005347075
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-1 failpoint: broker.secret.read read secret",
+      "value": 0.4496170433381891
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8089244743674369
+    },
+    {
+      "type": "timer-fire",
+      "id": 11,
+      "reason": "runtime-3 sleep: read pointer",
+      "virtualTime": 1635.9749883718282
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-3 failpoint: broker.pointer.read read pointer",
+      "value": 0.017226185837043606
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.02388272312245443
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.21351041871342402
+    },
+    {
+      "type": "timer-fire",
+      "id": 17,
+      "reason": "runtime-4 deadline: upstream refresh",
+      "virtualTime": 21632.545532046708
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6368221732326198
+    },
+    {
+      "type": "timer-fire",
+      "id": 19,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 21632.545532046708
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.5001806121540937
+    },
+    {
+      "type": "timer-create",
+      "id": 21,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 22132.545532046708
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8029514469730646
+    },
+    {
+      "type": "timer-fire",
+      "id": 18,
+      "reason": "runtime-4 sleep: upstream refresh",
+      "virtualTime": 21632.545532046708
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: broker latency: write secret",
+      "value": 0.8597022972839606
+    },
+    {
+      "type": "timer-create",
+      "id": 22,
+      "reason": "runtime-4 sleep: write secret",
+      "deadline": 21637.84404353313
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.09428298926226886
+    },
+    {
+      "type": "timer-fire",
+      "id": 5,
+      "reason": "runtime-5 sleep: stagger",
+      "virtualTime": 21632.545532046708
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-5 random number: broker latency: read pointer",
+      "value": 0.1210899179718623
+    },
+    {
+      "type": "timer-create",
+      "id": 23,
+      "reason": "runtime-5 sleep: read pointer",
+      "deadline": 21634.15098163657
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.13754619933644474
+    },
+    {
+      "type": "timer-fire",
+      "id": 20,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 21632.545532046708
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.3382292293821064
+    },
+    {
+      "type": "timer-create",
+      "id": 24,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 21635.236678193618
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.3596349728628784
+    },
+    {
+      "type": "timer-fire",
+      "id": 23,
+      "reason": "runtime-5 sleep: read pointer",
+      "virtualTime": 21634.15098163657
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-5 failpoint: broker.pointer.read read pointer",
+      "value": 0.33310599271261043
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-5 random number: broker latency: read secret",
+      "value": 0.5663877249056322
+    },
+    {
+      "type": "timer-create",
+      "id": 25,
+      "reason": "runtime-5 sleep: read secret",
+      "deadline": 21637.982920261096
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.74082904687063
+    },
+    {
+      "type": "timer-fire",
+      "id": 24,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 21635.236678193618
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.581287351246091
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.07172515765210641
+    },
+    {
+      "type": "timer-create",
+      "id": 26,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 21636.595303981878
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2924456355656262
+    },
+    {
+      "type": "timer-fire",
+      "id": 26,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 21636.595303981878
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.24107448999349013
+    },
+    {
+      "type": "timer-create",
+      "id": 27,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 22136.595303981878
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6530117766256274
+    },
+    {
+      "type": "timer-fire",
+      "id": 22,
+      "reason": "runtime-4 sleep: write secret",
+      "virtualTime": 21637.84404353313
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 failpoint: broker.secret.write write secret",
+      "value": 0.3342664013889558
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: broker latency: cas pointer (before)",
+      "value": 0.49383813740479654
+    },
+    {
+      "type": "timer-create",
+      "id": 28,
+      "reason": "runtime-4 sleep: cas pointer (before)",
+      "deadline": 21641.313234220153
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.33820778011167085
+    },
+    {
+      "type": "timer-fire",
+      "id": 25,
+      "reason": "runtime-5 sleep: read secret",
+      "virtualTime": 21637.982920261096
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-5 failpoint: broker.secret.read read secret",
+      "value": 0.8118845108826368
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9036161294503653
+    },
+    {
+      "type": "timer-fire",
+      "id": 28,
+      "reason": "runtime-4 sleep: cas pointer (before)",
+      "virtualTime": 21641.313234220153
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 failpoint: broker.pointer.write.before cas pointer (before)",
+      "value": 0.07844486672576911
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 random number: broker latency: read pointer",
+      "value": 0.3060129569224752
+    },
+    {
+      "type": "timer-create",
+      "id": 29,
+      "reason": "runtime-4 sleep: read pointer",
+      "deadline": 21643.843299004766
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.07476476271732668
+    },
+    {
+      "type": "timer-fire",
+      "id": 29,
+      "reason": "runtime-4 sleep: read pointer",
+      "virtualTime": 21643.843299004766
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-4 failpoint: broker.pointer.read read pointer",
+      "value": 0.8313737556487856
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8774080460035663
+    },
+    {
+      "type": "timer-fire",
+      "id": 21,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 22132.545532046708
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.5865140717595098
+    },
+    {
+      "type": "timer-create",
+      "id": 30,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 22136.478102405505
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6707305745455712
+    },
+    {
+      "type": "timer-fire",
+      "id": 30,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 22136.478102405505
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.7245716475530278
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.8295715779963505
+    },
+    {
+      "type": "timer-create",
+      "id": 31,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 22141.625960295485
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.11955254698388817
+    },
+    {
+      "type": "timer-fire",
+      "id": 27,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 22136.595303981878
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.503684316858444
+    },
+    {
+      "type": "timer-create",
+      "id": 32,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 22140.11372556617
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5739871322204485
+    },
+    {
+      "type": "timer-fire",
+      "id": 32,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 22140.11372556617
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.20259727624356505
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.2440819290092121
+    },
+    {
+      "type": "timer-create",
+      "id": 33,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 22142.33413521122
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8791836410298861
+    },
+    {
+      "type": "timer-fire",
+      "id": 31,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 22141.625960295485
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.38465234501738665
+    },
+    {
+      "type": "timer-create",
+      "id": 34,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 22641.625960295485
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.820823588080214
+    },
+    {
+      "type": "timer-fire",
+      "id": 33,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 22142.33413521122
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.4702051617330789
+    },
+    {
+      "type": "timer-create",
+      "id": 35,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 22642.33413521122
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9454374725287851
+    },
+    {
+      "type": "timer-fire",
+      "id": 34,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 22641.625960295485
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.11554796610224893
+    },
+    {
+      "type": "timer-create",
+      "id": 36,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 22643.203700125996
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.02633558638836686
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.15561726549621158
+    },
+    {
+      "type": "timer-fire",
+      "id": 35,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 22642.33413521122
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.6010305549540816
+    },
+    {
+      "type": "timer-create",
+      "id": 37,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 22646.33928798599
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.26775991660564
+    },
+    {
+      "type": "timer-fire",
+      "id": 36,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 22643.203700125996
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.2608469275591645
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.7714113906076852
+    },
+    {
+      "type": "timer-create",
+      "id": 38,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 22648.060757079034
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.19445248994823472
+    },
+    {
+      "type": "timer-fire",
+      "id": 37,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 22646.33928798599
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.6787566363310591
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.41730379630729497
+    },
+    {
+      "type": "timer-create",
+      "id": 39,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 22649.425806967527
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7677249925315464
+    },
+    {
+      "type": "timer-fire",
+      "id": 38,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 22648.060757079034
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.075706212426493
+    },
+    {
+      "type": "timer-create",
+      "id": 40,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 23148.060757079034
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.23852621529793328
+    },
+    {
+      "type": "timer-fire",
+      "id": 39,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 22649.425806967527
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.35548191771111304
+    },
+    {
+      "type": "timer-create",
+      "id": 41,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 23149.425806967527
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5991088148727205
+    },
+    {
+      "type": "timer-fire",
+      "id": 40,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 23148.060757079034
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.21952461936837087
+    },
+    {
+      "type": "timer-create",
+      "id": 42,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 23150.158380175875
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5603605723561665
+    },
+    {
+      "type": "timer-fire",
+      "id": 41,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 23149.425806967527
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.9647144385213882
+    },
+    {
+      "type": "timer-create",
+      "id": 43,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 23155.249379160134
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.22029045311595485
+    },
+    {
+      "type": "timer-fire",
+      "id": 42,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 23150.158380175875
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.7778707787831488
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.41264791362716957
+    },
+    {
+      "type": "timer-create",
+      "id": 44,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 23153.22161974401
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.07396241856376029
+    },
+    {
+      "type": "timer-fire",
+      "id": 44,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 23153.22161974401
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.8725615312222653
+    },
+    {
+      "type": "timer-create",
+      "id": 45,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 23653.22161974401
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.45709630499760356
+    },
+    {
+      "type": "timer-fire",
+      "id": 43,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 23155.249379160134
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.32390176903412915
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.7607717389155841
+    },
+    {
+      "type": "timer-create",
+      "id": 46,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 23160.05323785471
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.576011420867659
+    },
+    {
+      "type": "timer-fire",
+      "id": 46,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 23160.05323785471
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.10943583292697423
+    },
+    {
+      "type": "timer-create",
+      "id": 47,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 23660.05323785471
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2220776936388965
+    },
+    {
+      "type": "timer-fire",
+      "id": 45,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 23653.22161974401
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.5827222699093891
+    },
+    {
+      "type": "timer-create",
+      "id": 48,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 23657.135231093558
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2532801540255394
+    },
+    {
+      "type": "timer-fire",
+      "id": 48,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 23657.135231093558
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.5738562156417487
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.9898921027524302
+    },
+    {
+      "type": "timer-create",
+      "id": 49,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 23663.08469160732
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4800222019605932
+    },
+    {
+      "type": "timer-fire",
+      "id": 47,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 23660.05323785471
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.8897926082174524
+    },
+    {
+      "type": "timer-create",
+      "id": 50,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 23665.502200895797
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8645022234332399
+    },
+    {
+      "type": "timer-fire",
+      "id": 49,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 23663.08469160732
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.6611173859120362
+    },
+    {
+      "type": "timer-create",
+      "id": 51,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 24163.08469160732
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2527561433860499
+    },
+    {
+      "type": "timer-fire",
+      "id": 50,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 23665.502200895797
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.7394818462280968
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.12573657826980633
+    },
+    {
+      "type": "timer-create",
+      "id": 52,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 23667.130883787147
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9603037129433251
+    },
+    {
+      "type": "timer-fire",
+      "id": 52,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 23667.130883787147
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.5928550074513703
+    },
+    {
+      "type": "timer-create",
+      "id": 53,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 24167.130883787147
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.31906845594749533
+    },
+    {
+      "type": "timer-fire",
+      "id": 51,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 24163.08469160732
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.8782555045292607
+    },
+    {
+      "type": "timer-create",
+      "id": 54,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 24168.475969129966
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.9823115216636198
+    },
+    {
+      "type": "timer-fire",
+      "id": 53,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 24167.130883787147
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.24131585956538604
+    },
+    {
+      "type": "timer-create",
+      "id": 55,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 24169.337463084976
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7083733621579101
+    },
+    {
+      "type": "timer-fire",
+      "id": 54,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 24168.475969129966
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.46835887407187604
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.5974833193565907
+    },
+    {
+      "type": "timer-create",
+      "id": 56,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 24172.463385726747
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4754640565561472
+    },
+    {
+      "type": "timer-fire",
+      "id": 55,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 24169.337463084976
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.9089078949235243
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.8518174043980415
+    },
+    {
+      "type": "timer-create",
+      "id": 57,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 24174.596550106966
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.09478892897194924
+    },
+    {
+      "type": "timer-fire",
+      "id": 56,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 24172.463385726747
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.9452933313632281
+    },
+    {
+      "type": "timer-create",
+      "id": 58,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 24672.463385726747
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.03331433294366848
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.8642852475027731
+    },
+    {
+      "type": "timer-fire",
+      "id": 58,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 24672.463385726747
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.3549930523845166
+    },
+    {
+      "type": "timer-create",
+      "id": 59,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 24675.23835098867
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.4489151189577958
+    },
+    {
+      "type": "timer-fire",
+      "id": 57,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 24672.463385726747
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.6117610580122453
+    },
+    {
+      "type": "timer-create",
+      "id": 60,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 25172.463385726747
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2222267196410157
+    },
+    {
+      "type": "timer-fire",
+      "id": 59,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 24675.23835098867
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.1466748127489833
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.2814999024845741
+    },
+    {
+      "type": "timer-create",
+      "id": 61,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 24677.645850501092
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8541087765387523
+    },
+    {
+      "type": "timer-fire",
+      "id": 61,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 24677.645850501092
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.2932888090764372
+    },
+    {
+      "type": "timer-create",
+      "id": 62,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 25177.645850501092
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.34838161273711077
+    },
+    {
+      "type": "timer-fire",
+      "id": 60,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 25172.463385726747
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.3751551444608182
+    },
+    {
+      "type": "timer-create",
+      "id": 63,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 25175.33916144905
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7389403004464082
+    },
+    {
+      "type": "timer-fire",
+      "id": 63,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 25175.33916144905
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.5337692897381883
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.4966947187955655
+    },
+    {
+      "type": "timer-create",
+      "id": 64,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 25178.822635043027
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.1608416879005884
+    },
+    {
+      "type": "timer-fire",
+      "id": 62,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 25177.645850501092
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.7964409132986184
+    },
+    {
+      "type": "timer-create",
+      "id": 65,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 25182.628055067584
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.029672014220538
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.8126822842469675
+    },
+    {
+      "type": "timer-fire",
+      "id": 65,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 25182.628055067584
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.4880370700210743
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.43613597902504264
+    },
+    {
+      "type": "timer-create",
+      "id": 66,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 25185.80873496271
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.08792627127555896
+    },
+    {
+      "type": "timer-fire",
+      "id": 64,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 25182.628055067584
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.23868599731661932
+    },
+    {
+      "type": "timer-create",
+      "id": 67,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 25682.628055067584
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5065046149294125
+    },
+    {
+      "type": "timer-fire",
+      "id": 66,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 25185.80873496271
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.7483450188940113
+    },
+    {
+      "type": "timer-create",
+      "id": 68,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 25685.80873496271
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.31490915205403336
+    },
+    {
+      "type": "timer-fire",
+      "id": 67,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 25682.628055067584
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.9261028776437236
+    },
+    {
+      "type": "timer-create",
+      "id": 69,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 25688.258569455804
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8560098887753533
+    },
+    {
+      "type": "timer-fire",
+      "id": 68,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 25685.80873496271
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.9123151152071098
+    },
+    {
+      "type": "timer-create",
+      "id": 70,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 25691.370310538747
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.21700477839422716
+    },
+    {
+      "type": "timer-fire",
+      "id": 69,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 25688.258569455804
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.7055335541325322
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.7810252033550422
+    },
+    {
+      "type": "timer-create",
+      "id": 71,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 25693.16369547258
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.45146429585213244
+    },
+    {
+      "type": "timer-fire",
+      "id": 70,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 25691.370310538747
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.9156080922248158
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read secret",
+      "value": 0.3844363668982249
+    },
+    {
+      "type": "timer-create",
+      "id": 72,
+      "reason": "runtime-2 sleep: read secret",
+      "deadline": 25694.29249237324
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.8437235802141594
+    },
+    {
+      "type": "timer-fire",
+      "id": 71,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 25693.16369547258
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.9620431977600901
+    },
+    {
+      "type": "timer-create",
+      "id": 73,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 26193.16369547258
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.5631442897067397
+    },
+    {
+      "type": "timer-fire",
+      "id": 72,
+      "reason": "runtime-2 sleep: read secret",
+      "virtualTime": 25694.29249237324
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.secret.read read secret",
+      "value": 0.9714374089715235
+    },
+    {
+      "type": "timer-create",
+      "id": 74,
+      "reason": "runtime-2 sleep: broker pause",
+      "deadline": 26194.29249237324
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.009157349708750706
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.5671644713037287
+    },
+    {
+      "type": "timer-fire",
+      "id": 74,
+      "reason": "runtime-2 sleep: broker pause",
+      "virtualTime": 26194.29249237324
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 random number: broker latency: read pointer",
+      "value": 0.09932685097026217
+    },
+    {
+      "type": "timer-create",
+      "id": 75,
+      "reason": "runtime-2 sleep: read pointer",
+      "deadline": 26195.78912662809
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.0622996415847884
+    },
+    {
+      "type": "timer-fire",
+      "id": 73,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 26194.29249237324
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.6140093261785668
+    },
+    {
+      "type": "timer-create",
+      "id": 76,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 26198.36253900413
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.457509864009787
+    },
+    {
+      "type": "timer-fire",
+      "id": 75,
+      "reason": "runtime-2 sleep: read pointer",
+      "virtualTime": 26195.78912662809
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-2 failpoint: broker.pointer.read read pointer",
+      "value": 0.026590458579896392
+    },
+    {
+      "type": "timer-fire",
+      "id": 76,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 26198.36253900413
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.9829586187605124
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.3515826051236888
+    },
+    {
+      "type": "timer-create",
+      "id": 77,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 26201.12045202975
+    },
+    {
+      "type": "timer-fire",
+      "id": 77,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 26201.12045202975
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.237391187532066
+    },
+    {
+      "type": "timer-create",
+      "id": 78,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 26701.12045202975
+    },
+    {
+      "type": "timer-fire",
+      "id": 78,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 26701.12045202975
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.14804640558321303
+    },
+    {
+      "type": "timer-create",
+      "id": 79,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 26702.860684057665
+    },
+    {
+      "type": "timer-fire",
+      "id": 79,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 26702.860684057665
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.9866511699343826
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.28155202482744035
+    },
+    {
+      "type": "timer-create",
+      "id": 80,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 26705.268444181802
+    },
+    {
+      "type": "timer-fire",
+      "id": 80,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 26705.268444181802
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.2791241351262056
+    },
+    {
+      "type": "timer-create",
+      "id": 81,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 27205.268444181802
+    },
+    {
+      "type": "timer-fire",
+      "id": 81,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 27205.268444181802
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.3148179501013846
+    },
+    {
+      "type": "timer-create",
+      "id": 82,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 27207.842533932308
+    },
+    {
+      "type": "timer-fire",
+      "id": 82,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 27207.842533932308
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.19509519919402107
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.3820908072933541
+    },
+    {
+      "type": "timer-create",
+      "id": 83,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 27210.752987968775
+    },
+    {
+      "type": "timer-fire",
+      "id": 83,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 27210.752987968775
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.8697850175874844
+    },
+    {
+      "type": "timer-create",
+      "id": 84,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 27710.752987968775
+    },
+    {
+      "type": "timer-fire",
+      "id": 84,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 27710.752987968775
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.09551580577938412
+    },
+    {
+      "type": "timer-create",
+      "id": 85,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 27712.230566997674
+    },
+    {
+      "type": "timer-fire",
+      "id": 85,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 27712.230566997674
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.7024930068572943
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.5204906680657474
+    },
+    {
+      "type": "timer-create",
+      "id": 86,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 27715.833020338003
+    },
+    {
+      "type": "timer-fire",
+      "id": 86,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 27715.833020338003
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.38433305385803807
+    },
+    {
+      "type": "timer-create",
+      "id": 87,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 28215.833020338003
+    },
+    {
+      "type": "timer-fire",
+      "id": 87,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 28215.833020338003
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.8070373729700937
+    },
+    {
+      "type": "timer-create",
+      "id": 88,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 28220.868207202853
+    },
+    {
+      "type": "timer-fire",
+      "id": 88,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 28220.868207202853
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.40117845418411324
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.022000751240075278
+    },
+    {
+      "type": "timer-create",
+      "id": 89,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 28221.978210959052
+    },
+    {
+      "type": "timer-fire",
+      "id": 89,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 28221.978210959052
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.5806484183833096
+    },
+    {
+      "type": "timer-create",
+      "id": 90,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 28721.978210959052
+    },
+    {
+      "type": "timer-fire",
+      "id": 90,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 28721.978210959052
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.11111575992041645
+    },
+    {
+      "type": "timer-create",
+      "id": 91,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 28723.533789758654
+    },
+    {
+      "type": "timer-fire",
+      "id": 91,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 28723.533789758654
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.39945077085105585
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.04758542316040715
+    },
+    {
+      "type": "timer-create",
+      "id": 92,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 28724.771716874457
+    },
+    {
+      "type": "timer-fire",
+      "id": 92,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 28724.771716874457
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.24987630062100175
+    },
+    {
+      "type": "timer-create",
+      "id": 93,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 29224.771716874457
+    },
+    {
+      "type": "timer-fire",
+      "id": 93,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 29224.771716874457
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.8757686409720407
+    },
+    {
+      "type": "timer-create",
+      "id": 94,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 29230.150560079317
+    },
+    {
+      "type": "timer-fire",
+      "id": 94,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 29230.150560079317
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.8439940250430797
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.40003423315119757
+    },
+    {
+      "type": "timer-create",
+      "id": 95,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 29233.150731245074
+    },
+    {
+      "type": "timer-fire",
+      "id": 95,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 29233.150731245074
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.934528627131394
+    },
+    {
+      "type": "timer-create",
+      "id": 96,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 29733.150731245074
+    },
+    {
+      "type": "timer-fire",
+      "id": 96,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 29733.150731245074
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.4036936676381182
+    },
+    {
+      "type": "timer-create",
+      "id": 97,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 29736.169199583266
+    },
+    {
+      "type": "timer-fire",
+      "id": 97,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 29736.169199583266
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.8254851527590992
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.8277397639687051
+    },
+    {
+      "type": "timer-create",
+      "id": 98,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 29741.30789840311
+    },
+    {
+      "type": "timer-fire",
+      "id": 98,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 29741.30789840311
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.8361621902923255
+    },
+    {
+      "type": "timer-create",
+      "id": 99,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 30241.30789840311
+    },
+    {
+      "type": "timer-fire",
+      "id": 99,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 30241.30789840311
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.23350241695638274
+    },
+    {
+      "type": "timer-create",
+      "id": 100,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 30243.475410487892
+    },
+    {
+      "type": "timer-fire",
+      "id": 100,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 30243.475410487892
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.24849937219864138
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.46160774791605597
+    },
+    {
+      "type": "timer-create",
+      "id": 101,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 30246.78344922747
+    },
+    {
+      "type": "timer-fire",
+      "id": 101,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 30246.78344922747
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.3553363174455457
+    },
+    {
+      "type": "timer-create",
+      "id": 102,
+      "reason": "runtime-0 sleep: broker pause",
+      "deadline": 30746.78344922747
+    },
+    {
+      "type": "timer-fire",
+      "id": 102,
+      "reason": "runtime-0 sleep: broker pause",
+      "virtualTime": 30746.78344922747
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read pointer",
+      "value": 0.36605887926021086
+    },
+    {
+      "type": "timer-create",
+      "id": 103,
+      "reason": "runtime-0 sleep: read pointer",
+      "deadline": 30749.613743623773
+    },
+    {
+      "type": "timer-fire",
+      "id": 103,
+      "reason": "runtime-0 sleep: read pointer",
+      "virtualTime": 30749.613743623773
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.read read pointer",
+      "value": 0.7439323334019718
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: read secret",
+      "value": 0.8177087542453323
+    },
+    {
+      "type": "timer-create",
+      "id": 104,
+      "reason": "runtime-0 sleep: read secret",
+      "deadline": 30754.702287395
+    },
+    {
+      "type": "timer-fire",
+      "id": 104,
+      "reason": "runtime-0 sleep: read secret",
+      "virtualTime": 30754.702287395
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.secret.read read secret",
+      "value": 0.9876867029783766
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: cas pointer (before)",
+      "value": 0.7988555287257133
+    },
+    {
+      "type": "timer-create",
+      "id": 105,
+      "reason": "runtime-0 sleep: cas pointer (before)",
+      "deadline": 30759.69656503863
+    },
+    {
+      "type": "timer-fire",
+      "id": 105,
+      "reason": "runtime-0 sleep: cas pointer (before)",
+      "virtualTime": 30759.69656503863
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.write.before cas pointer (before)",
+      "value": 0.3249844775618004
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: cas pointer (after)",
+      "value": 0.058614798215415265
+    },
+    {
+      "type": "timer-create",
+      "id": 106,
+      "reason": "runtime-0 sleep: cas pointer (after)",
+      "deadline": 30760.755179836844
+    },
+    {
+      "type": "timer-fire",
+      "id": 106,
+      "reason": "runtime-0 sleep: cas pointer (after)",
+      "virtualTime": 30760.755179836844
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.write.after cas pointer (after)",
+      "value": 0.885632365264744
+    },
+    {
+      "type": "timer-create",
+      "id": 107,
+      "reason": "runtime-0 deadline: upstream refresh",
+      "deadline": 50760.755179836844
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: upstream latency",
+      "value": 0.829937604166963
+    },
+    {
+      "type": "timer-create",
+      "id": 108,
+      "reason": "runtime-0 sleep: upstream refresh",
+      "deadline": 30778.353931920185
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.03653231243551236
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: index",
+      "value": 0.08670113008430069
+    },
+    {
+      "type": "timer-fire",
+      "id": 107,
+      "reason": "runtime-0 deadline: upstream refresh",
+      "virtualTime": 50760.755179836844
+    },
+    {
+      "type": "timer-fire",
+      "id": 108,
+      "reason": "runtime-0 sleep: upstream refresh",
+      "virtualTime": 50760.755179836844
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: cas pointer (before)",
+      "value": 0.051781543606271074
+    },
+    {
+      "type": "timer-create",
+      "id": 109,
+      "reason": "runtime-0 sleep: cas pointer (before)",
+      "deadline": 50762.014087554875
+    },
+    {
+      "type": "timer-fire",
+      "id": 109,
+      "reason": "runtime-0 sleep: cas pointer (before)",
+      "virtualTime": 50762.014087554875
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.write.before cas pointer (before)",
+      "value": 0.3561648430151545
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 random number: broker latency: cas pointer (after)",
+      "value": 0.504148225947348
+    },
+    {
+      "type": "timer-create",
+      "id": 110,
+      "reason": "runtime-0 sleep: cas pointer (after)",
+      "deadline": 50763.51823578082
+    },
+    {
+      "type": "timer-fire",
+      "id": 110,
+      "reason": "runtime-0 sleep: cas pointer (after)",
+      "virtualTime": 50763.51823578082
+    },
+    {
+      "type": "entropy",
+      "name": "runtime-0 failpoint: broker.pointer.write.after cas pointer (after)",
+      "value": 0.8575268991495059
+    }
+  ]
+}

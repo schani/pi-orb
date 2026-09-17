@@ -209,27 +209,51 @@ export async function getToken(
         await releaseLease(task, deps, provider, leased);
         return err(retryable("credential write failed after upstream refresh"));
       }
-      const commit = await deps.pointers.casWritePointer(task, provider, leased.rowVersion, {
-        generation: pointer.generation + 1,
-        secretVersion: version,
-        refreshLeaseUntil: 0,
-        lastRefreshAt: now,
-      });
-      if (commit.isOk()) {
-        await deps.secrets.destroySecret(task, provider, pointer.secretVersion);
-        return ok(grantOf(fresh, pointer.generation + 1));
+      let publicationSuperseded = false;
+      let expectedRowVersion = leased.rowVersion;
+      let firstPublicationAttempt = true;
+      while (firstPublicationAttempt || task.monotonicNow() <= deadline) {
+        firstPublicationAttempt = false;
+        const commit = await deps.pointers.casWritePointer(task, provider, expectedRowVersion, {
+          generation: pointer.generation + 1,
+          secretVersion: version,
+          refreshLeaseUntil: 0,
+          lastRefreshAt: now,
+        });
+        if (commit.isOk()) {
+          await deps.secrets.destroySecret(task, provider, pointer.secretVersion);
+          return ok(grantOf(fresh, pointer.generation + 1));
+        }
+
+        // A conflict may be only a replacement lease over the credential that
+        // this refresh consumed. Follow that exact fence; never overwrite a
+        // newer generation or secret, including a concurrent login.
+        for (;;) {
+          const reread = await deps.pointers.readPointer(task, provider);
+          if (reread.isOk()) {
+            if (reread.value?.secretVersion === version) {
+              await deps.secrets.destroySecret(task, provider, pointer.secretVersion);
+              return ok(grantOf(fresh, reread.value.generation));
+            }
+            if (
+              reread.value?.generation === pointer.generation &&
+              reread.value.secretVersion === pointer.secretVersion
+            ) {
+              expectedRowVersion = reread.value.rowVersion;
+              break;
+            }
+            await deps.secrets.destroySecret(task, provider, version);
+            publicationSuperseded = true;
+            break;
+          }
+          if (task.monotonicNow() > deadline) {
+            return err(retryable("credential commit uncertain"));
+          }
+          await pause(constants.waiterPollMs);
+        }
+        if (publicationSuperseded) break;
       }
-      if (commit.error.type === "pointer_conflict") {
-        // Our lease expired and someone else mutated: their state wins.
-        await deps.secrets.destroySecret(task, provider, version);
-        continue;
-      }
-      // Ambiguous store failure: check whether the commit landed.
-      const reread = await deps.pointers.readPointer(task, provider);
-      if (reread.isOk() && reread.value?.secretVersion === version) {
-        await deps.secrets.destroySecret(task, provider, pointer.secretVersion);
-        return ok(grantOf(fresh, reread.value.generation));
-      }
+      if (publicationSuperseded) continue;
       return err(retryable("credential commit uncertain"));
     }
 

@@ -76,6 +76,13 @@ if [ -z "$VALIDATE" ]; then
 fi
 
 state() { python3 -m infra.release_state "$1" "$RECORD" "${@:2}"; }
+release_run_check() {
+  release_run_child env \
+    -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD \
+    -u PI_ORB_USER_ID -u PI_ORB_ORIGINAL_USER_ID \
+    -u PI_ORB_ORIGINAL_IDENTITY_ISSUER -u PI_ORB_ORIGINAL_IDENTITY_SUBJECT \
+    "$@"
+}
 stage() {
   echo "release: $1"
   state stage "$1"
@@ -211,13 +218,13 @@ if [ -z "$VALIDATE" ]; then
   plan_and_guard "$WORK_DIR/current.tfvars" "$WORK_DIR/preflight.tfplan"
   python3 -m infra.release_retire inventory "$RECORD"
   stage checks
-  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm ci
-  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run test:e2e:install
-  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run typecheck
-  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run lint
-  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm test
-  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
-  release_run_child env -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD npm run test:e2e
+  release_run_check npm ci
+  release_run_check npm run test:e2e:install
+  release_run_check npm run typecheck
+  release_run_check npm run lint
+  release_run_check npm test
+  release_run_check docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
+  release_run_check npm run test:e2e
   stage build
   release_run_child "$INFRA/build-push.sh" > "$WORK_DIR/release.tfvars"
   state vars "$WORK_DIR/release.tfvars"
