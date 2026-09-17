@@ -12,16 +12,20 @@ Built:
 
 - sidebar of projects and their orbs from `GET /api/v1/projects` and `GET /api/v1/projects/:id/orbs`, polled every two seconds;
 - transcript from `GET /api/v1/orbs/:id/history` plus the live WebSocket at `/api/v1/orbs/:id/live`;
-- rendering of user text, assistant text as plain text, one line per `tool_call` with a mark from its later `tool_result`, `pi.bash_execution` shell command/output, and `custom.display` event text;
+- rendering of user text and shell output literally, assistant text as parsed Markdown, tool calls coalesced into one row per category, `pi.bash_execution` shell command/output, and `custom.display` event text;
 - live output blocks and tool chips while an operation runs, with a busy indicator driven by `status`/`operation_started`/`operation_finished`;
 - composer writing to the durable inbox with `PUT /api/v1/orbs/:id/messages/:uuid`, showing the message inline until a record claims it through `inboxMessageIds`;
 - Start and Stop.
 
-Excluded: authentication, terminal, uploads, settings, project configuration, Markdown, notifications, on-disk transcript cache, menu bar item, image input, shell composer modes, abort, subagent rosters, and turn notifications. Assistant reasoning is decoded and dropped. `overflow` is never read; the client decodes only the normalized fields it renders (`shell`, `custom`, `inboxMessageIds`, `failure`), and ignores `subagent` and the `tool_result` `patch` diff because nothing renders them.
+Excluded: authentication, terminal, uploads, settings, project configuration, notifications, on-disk transcript cache, menu bar item, image input, shell composer modes, abort, subagent rosters, and turn notifications. Assistant reasoning is decoded and dropped. `overflow` is never read; the client decodes only the normalized fields it renders (`shell`, `custom`, `inboxMessageIds`, `failure`, tool-call `arguments`, and the `tool_result` `patch`), and ignores `subagent`.
+
+**Markdown.** `parseMarkdown(_:) -> [MarkdownBlock]` turns assistant text into paragraphs with inline runs (text, code, emphasis, strong, link), headings, fenced code with its language, ordered and unordered lists, block quotes, thematic breaks and GFM tables. Apple's [swift-markdown](https://github.com/swiftlang/swift-markdown) is the package's only dependency; anything it produces that the tree cannot hold degrades to a paragraph or a code block rather than vanishing. User messages, shell output and tool results are literal and are never parsed.
+
+**Tool activity.** `toolGroups(runId:calls:) -> [ToolGroup]` ports `apps/web/src/components/ToolActivity.tsx`: adjacent calls inside an agent turn form one maximal run, which `present(_:pending:)` cuts at rendered prose, a shell block, a note, a failure or a user turn; each run splits into `edit` / `command` / `read` / other categories by tool name, and a category of one names its file or command while larger runs carry a count of unique paths, `N ran`, or `+A −R` from the result `patch`. Live `tool_state` chips join the same structure and are dropped when the call is already committed to history. Reasoning does not cut a run: this client drops it, so a cut there would show two rows with nothing between them to explain the break.
 
 ## Stack
 
-SwiftPM only — `swift build`, `swift test`, `swift run PiOrb` — with no Xcode project, on macOS 26 with the Swift 6.4 toolchain. `Sources/PiOrbModel` is a SwiftUI-free library: `Codable` protocol types, the `URLSession` API client, the `URLSessionWebSocketTask` live connection, a pure `TranscriptReducer`, and a pure `present(state:pending:)`. `Sources/PiOrb` is the SwiftUI executable. `Tests/PiOrbModelTests` covers decoding, reduction, and presentation with no network.
+SwiftPM only — `swift build`, `swift test`, `swift run PiOrb` — with no Xcode project, on macOS 26 with the Swift 6.4 toolchain. `Sources/PiOrbModel` is a SwiftUI-free library: `Codable` protocol types, the `URLSession` API client, the `URLSessionWebSocketTask` live connection, a pure `TranscriptReducer`, a pure Markdown parser, a pure tool-run grouper, and a pure `present(state:pending:)`. `Sources/PiOrb` is the SwiftUI executable. `Tests/PiOrbModelTests` covers decoding, reduction, and presentation with no network.
 
 A SwiftPM executable has no application bundle, so it launches as an accessory process; `AppDelegate` sets `.regular` activation and activates on launch.
 
@@ -56,3 +60,21 @@ There is no authentication. In the `dev:local` composition the control plane min
 ## Verified live
 
 Against `dev:local` on 2026-09-17: the sidebar listed the project and orb and tracked `stopped → starting` within the poll interval; Start, Stop, `GET /history`, and inbox enqueue on a stopped orb all succeeded from the client's own code path. The live WebSocket was not exercised end to end — no orb could reach `running` on that machine because its Codex OAuth refresh token is invalid — so the frame handling is covered by unit tests only.
+
+## Design study (2026-09-17)
+
+The first look was bland. Five transcript designs now render the same presented
+rows and are switched from `View › Design`, remembered in the `transcriptDesign`
+`UserDefaults` key. Each is one file under `Sources/PiOrb/Designs/`; they differ
+in typography, colour, spacing, turn treatment, tool-group presentation,
+composer and busy marker, not in a palette.
+
+- **Paper** (`pi-orb-design-paper.png`): warm stock, serif prose, hairline rules between turns, user turns as an indented quotation, tool runs as small-caps ledger lines, a breathing ink dot while busy.
+- **Terminal** (`pi-orb-design-terminal.png`): near-black ground and phosphor accent, monospace throughout, user turns behind a `❯` prompt, tool runs as log lines with a status glyph, a blinking block cursor, composer as the last prompt.
+- **Native** (`pi-orb-design-native.png`): `.regularMaterial`, system fonts, user turns as trailing accent bubbles, tool runs as `DisclosureGroup` rows with SF Symbols, a standard spinner.
+- **Inverted bands** (`pi-orb-design-bands.png`): the web UI's decided look — full-width monochrome bands, softly inverted user turns, the bit-register busy marker, a text field that inverts on focus.
+- **Ledger** (`pi-orb-design-ledger.png`): dense dark rows with a timestamp gutter, compact line height, tool runs as tabular columns of category, headline, count and state, for scanning a long transcript.
+
+All five drop the composer placeholder and leave the sidebar alone. The
+screenshots are of the live local control plane. **Awaiting the user's
+selection**; nothing here is decided.

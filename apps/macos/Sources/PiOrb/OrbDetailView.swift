@@ -5,6 +5,7 @@ struct OrbDetailView: View {
   let orb: OrbView
   let client: ControlPlaneClient
 
+  @AppStorage(TranscriptDesign.storageKey) private var design = TranscriptDesign.bands
   @State private var store: OrbStore
   @State private var draft = ""
 
@@ -15,9 +16,11 @@ struct OrbDetailView: View {
   }
 
   var body: some View {
-    BandsTranscript(
+    TranscriptSurface(
+      design: design,
       context: TranscriptContext(
-        rows: store.rows, busy: store.busy, error: store.error, draft: $draft, send: send))
+        rows: store.rows, busy: store.busy, error: store.error, draft: $draft, send: send)
+    )
     .toolbar {
       ToolbarItemGroup {
         Button("Start") { Task { await store.start() } }
