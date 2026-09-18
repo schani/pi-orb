@@ -3,13 +3,12 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { type Browser, chromium, expect as expectPage, type Page } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
-import { afterAll, beforeAll, describe, expect as expectTest, it } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import {
   gotoFrontendFixture,
   gotoFrontendHistory,
   observeFrontendBoot,
-  observeFrontendBrowser,
 } from "./testkit/frontend-fixture.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
@@ -244,7 +243,6 @@ describe("frontend-only browser behavior", () => {
           : {}),
       args: ["--no-sandbox"],
     });
-    observeFrontendBrowser(browser, () => expectTest.getState().currentTestName);
   });
 
   afterAll(async () => {

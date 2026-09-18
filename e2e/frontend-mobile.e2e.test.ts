@@ -3,13 +3,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { type Browser, chromium, expect as expectPage, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
-import { afterAll, beforeAll, describe, expect as expectTest, it } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
-import {
-  gotoFrontendFixture,
-  gotoFrontendHistory,
-  observeFrontendBrowser,
-} from "./testkit/frontend-fixture.ts";
+import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_HASH = "#/orbs/frontend-fixture-orb";
@@ -43,7 +39,6 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
             ...(executable === undefined ? {} : { executablePath: executable }),
             args: ["--no-sandbox"],
           });
-    observeFrontendBrowser(browser, () => expectTest.getState().currentTestName);
   });
 
   afterAll(async () => {

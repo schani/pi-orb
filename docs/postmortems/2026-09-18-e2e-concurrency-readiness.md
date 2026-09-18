@@ -1,6 +1,6 @@
 # E2E frontend fixture readiness races (2026-09-18)
 
-**Status:** Root-caused and corrected; full local qualification passed
+**Status:** readiness races corrected; two-fork schedule superseded after a confirmed hosted network abort
 
 ## First failure
 
@@ -61,3 +61,13 @@ After adding the shared initial fixture barrier, the complete `frontend-session`
 The final complete Docker-backed suite passed all 173 tests in 23 files in 577.68 seconds, from 06:27:46 to 06:37:24 UTC on 2026-09-18. It used the shared fixture barrier, one frontend thread, and two lifecycle forks with distinct fixture ports. Evidence: `.context/e2e-concurrency/full-accepted.log`. Earlier failed-run logs remain preserved; no deployment was performed.
 
 Browser tests must await the protocol or fixture response that enables the asserted state; navigation completion is not a substitute for a dependency readiness barrier.
+
+## Sequencing correction after hosted network abort
+
+GitHub run `35395261205` later failed during initial Chromium module loading with 20 `ERR_NETWORK_CHANGED` aborts, an empty application root, and no API request. That failure is distinct from the response-readiness races above. The two-project configuration overlapped frontend browsers with two lifecycle forks. Docker global setup and three lifecycle files mutate container networking; five lifecycle files also use Chromium.
+
+A controlled native-Linux reproduction held Chromium's first six of 64 module requests after the browser had announced all 64. Docker bridge creation, container start, and container stop each canceled the 58 queued modules with `ERR_NETWORK_CHANGED` and left the root empty. The no-mutation control and Docker start after module completion each had zero failures and one mounted root child. Chromium's `TransportClientSocketPool::OnIPAddressChanged` implementation at commit [`e9954a58`](https://chromium.googlesource.com/chromium/src/+/e9954a58c9ba085e2125a674078c1487cdba3330/net/socket/transport_client_socket_pool.cc#1147) flushes the pool with `ERR_NETWORK_CHANGED` and cancels queued requests. `scripts/network-change-fanout-repro.mjs` preserves the standalone, safely owned reproduction. This proves the mechanism matching the hosted failure without claiming which untraced Docker operation occurred at that instant or attributing older untraced runs.
+
+The suite now runs frontend first (`sequence.groupOrder: 0`) in one thread, then lifecycle (`groupOrder: 1`) in one fork. This is the smallest ownership boundary that also prevents lifecycle browser files from overlapping another lifecycle file's Docker mutation. The earlier fully serial configuration completed in about 32 minutes within the 40-minute job budget; that release cost is accepted. No timeout, retry, or cache machinery was added.
+
+`e2e/vitest-config.unit.test.ts` invokes Vitest through a generated config that imports the actual E2E config and replaces only includes and global setup with barrier-controlled fixtures. The first focused run disproved the assumption that grouped project setup waits for its group: it observed lifecycle setup before frontend. The corrected invariant accepts setup wholly before or wholly after frontend, never overlapping it. Vitest 3.2 completed setup before frontend, frontend before lifecycle files, and the two lifecycle files one at a time. The probe passed in 1.68 seconds. This preserves first-failure evidence rather than encoding an incorrect source-level assertion.

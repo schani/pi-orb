@@ -1,19 +1,9 @@
-import type {
-  Browser,
-  BrowserContext,
-  ConsoleMessage,
-  Frame,
-  Locator,
-  Page,
-  Request,
-  Response,
-} from "@playwright/test";
+import type { ConsoleMessage, Frame, Locator, Page, Request, Response } from "@playwright/test";
 
 const MAX_OBSERVATIONS = 12;
 const MAX_OBSERVATION_LENGTH = 240;
 const MAX_PENDING_REQUESTS = 8;
 const ROOT_SNAPSHOT_TIMEOUT_MS = 100;
-const SNAPSHOT_TIMEOUT_MS = 250;
 
 function sanitizeUrl(value: string): string {
   try {
@@ -66,9 +56,6 @@ function isProjects(request: Request): boolean {
 
 export function observeFrontendBoot(page: Page): {
   checkpoint(name: string): void;
-  dispose(): void;
-  report(): Promise<string>;
-  snapshot(): Promise<unknown>;
   wait<T>(pending: Promise<T>): Promise<T>;
 } {
   const checkpoints: string[] = [];
@@ -220,9 +207,6 @@ export function observeFrontendBoot(page: Page): {
     checkpoint(name: string) {
       checkpoints.push(sanitizeText(name));
     },
-    dispose,
-    report,
-    snapshot,
     async wait<T>(pending: Promise<T>): Promise<T> {
       try {
         return await pending;
@@ -233,107 +217,6 @@ export function observeFrontendBoot(page: Page): {
         dispose();
       }
     },
-  };
-}
-
-function boundedReport(observation: ReturnType<typeof observeFrontendBoot>): Promise<string> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<string>((resolve) => {
-    timer = setTimeout(() => resolve('{"snapshot":"timed-out"}'), SNAPSHOT_TIMEOUT_MS);
-    timer.unref?.();
-  });
-  return Promise.race([observation.report(), timeout]).finally(() => {
-    if (timer !== undefined) clearTimeout(timer);
-  });
-}
-
-/** Temporary hosted-run diagnostics. It only wraps page/context cleanup. */
-export function observeFrontendBrowser(
-  browser: Browser,
-  currentTestName: () => string | undefined,
-) {
-  const observations = new Map<
-    Page,
-    { observation: ReturnType<typeof observeFrontendBoot>; testName: string }
-  >();
-  const contexts = new Set<BrowserContext>();
-
-  const publish = async (page: Page) => {
-    const observed = observations.get(page);
-    if (observed === undefined) return;
-    observations.delete(page);
-    try {
-      const report = await boundedReport(observed.observation);
-      console.error(`[frontend-page] test=${JSON.stringify(observed.testName)} snapshot=${report}`);
-    } catch {
-      // Diagnostics must not affect the test result.
-    } finally {
-      observed.observation.dispose();
-    }
-  };
-
-  const observeContext = (context: BrowserContext) => {
-    if (contexts.has(context)) return;
-    contexts.add(context);
-    try {
-      context.on("page", observePage);
-      const close = context.close.bind(context);
-      context.close = async (...args: Parameters<BrowserContext["close"]>) => {
-        try {
-          await Promise.all(context.pages().map(publish));
-          context.off("page", observePage);
-          contexts.delete(context);
-        } catch {
-          // Diagnostics must not affect context cleanup.
-        }
-        return close(...args);
-      };
-    } catch {
-      // A diagnostic attachment failure must not affect the page.
-    }
-  };
-
-  const observePage = (page: Page) => {
-    if (observations.has(page)) return;
-    try {
-      observeContext(page.context());
-      observations.set(page, {
-        observation: observeFrontendBoot(page),
-        testName: sanitizeText(currentTestName() ?? "<unknown>"),
-      });
-      const close = page.close.bind(page);
-      page.close = async (...args: Parameters<Page["close"]>) => {
-        await publish(page);
-        return close(...args);
-      };
-    } catch {
-      observations.get(page)?.observation.dispose();
-      observations.delete(page);
-    }
-  };
-
-  const newPage = browser.newPage.bind(browser);
-  browser.newPage = async (...args: Parameters<Browser["newPage"]>) => {
-    const page = await newPage(...args);
-    observePage(page);
-    return page;
-  };
-  const newContext = browser.newContext.bind(browser);
-  browser.newContext = async (...args: Parameters<Browser["newContext"]>) => {
-    const context = await newContext(...args);
-    observeContext(context);
-    return context;
-  };
-  const close = browser.close.bind(browser);
-  browser.close = async (...args: Parameters<Browser["close"]>) => {
-    try {
-      await Promise.all([...observations.keys()].map(publish));
-      for (const context of contexts) context.off("page", observePage);
-      contexts.clear();
-    } catch {
-      // Diagnostics must not affect browser cleanup.
-    }
-    return close(...args);
   };
 }
 

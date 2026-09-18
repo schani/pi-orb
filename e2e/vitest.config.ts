@@ -14,7 +14,7 @@ const shared = {
 
 export default defineConfig({
   test: {
-    poolOptions: { forks: { minForks: 1, maxForks: 2 } },
+    poolOptions: { forks: { minForks: 1, maxForks: 1 } },
     projects: [
       {
         test: {
@@ -23,6 +23,7 @@ export default defineConfig({
           include: frontendFiles,
           pool: "threads",
           poolOptions: { threads: { singleThread: true } },
+          sequence: { groupOrder: 0 },
         },
       },
       {
@@ -33,6 +34,7 @@ export default defineConfig({
           globalSetup: ["e2e/global-setup.ts"],
           exclude: frontendFiles,
           pool: "forks",
+          sequence: { groupOrder: 1 },
         },
       },
     ],
