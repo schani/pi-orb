@@ -134,6 +134,7 @@ Subsystem designs:
 Tracking:
 
 - [docs/postmortems/2026-09-18-boot-context-cold-start.md](docs/postmortems/2026-09-18-boot-context-cold-start.md) — two runtime-API cold starts exhausted a mandatory boot read; bounded retry is implemented locally
+- [docs/postmortems/2026-09-18-webkit-missing-resource-race.md](docs/postmortems/2026-09-18-webkit-missing-resource-race.md) — stale metadata polling resurrected an orb after a definitive history 404
 - [docs/postmortems/2026-09-18-e2e-concurrency-readiness.md](docs/postmortems/2026-09-18-e2e-concurrency-readiness.md) — frontend assertions raced their dependent fixture responses under suite load
 - [docs/postmortems/2026-09-17-broker-refresh-publication-retry.md](docs/postmortems/2026-09-17-broker-refresh-publication-retry.md) — refresh publication stopped after a proved pre-commit pointer failure
 - [docs/postmortems/2026-09-17-release-owner-environment-leak.md](docs/postmortems/2026-09-17-release-owner-environment-leak.md) — deployment owner input leaked into fresh-database release E2E migrations

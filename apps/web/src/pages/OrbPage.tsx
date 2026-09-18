@@ -128,6 +128,13 @@ interface OrbPageState {
   notice: string | null;
 }
 
+export function missingResourceReducer(
+  missing: boolean,
+  observation: "found" | "missing",
+): boolean {
+  return missing || observation === "missing";
+}
+
 type OrbPageAction =
   | { type: "history_loaded"; view: OrbHistoryView }
   | { type: "history_restored"; snapshot: CachedTranscript }
@@ -751,9 +758,9 @@ function OrbConversation({
       recordCount: state.records.size,
     });
   }, [orbId, state.afterRecordId, state.headId, state.records, state.sessionId, state.synced]);
-  const [orbNotFound, setOrbNotFound] = useState(
-    () =>
-      initial.orb.isErr() && initial.orb.error.type === "http" && initial.orb.error.status === 404,
+  const [orbNotFound, observeOrbResource] = useReducer(
+    missingResourceReducer,
+    initial.orb.isErr() && initial.orb.error.type === "http" && initial.orb.error.status === 404,
   );
   const cacheOwner = useRef<TranscriptOwner | null>(null);
   const lifecycle = orb?.state ?? null;
@@ -825,7 +832,7 @@ function OrbConversation({
         cache.invalidate(orbId);
         setOrb(null);
         setOrbError(null);
-        setOrbNotFound(true);
+        observeOrbResource("missing");
         return;
       }
       if (history.isOk() && history.value.orbId !== orbId) {
@@ -918,12 +925,12 @@ function OrbConversation({
       if (result.isOk()) {
         setOrb(result.value);
         setOrbError(null);
-        setOrbNotFound(false);
+        observeOrbResource("found");
       } else {
         if (result.error.type === "http" && result.error.status === 404) {
           setOrb(null);
           setOrbError(null);
-          setOrbNotFound(true);
+          observeOrbResource("missing");
           return;
         }
         setOrbError(result.error);

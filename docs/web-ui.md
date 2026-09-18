@@ -38,7 +38,7 @@ The 2026-09-16 white-on-black treatment was rejected because it replaced the wri
 
 Ink Rail was rejected after production use: its writing-edge placement formed a distracting double edge. [`design-prototypes/ink-rail-refinements.html`](../design-prototypes/ink-rail-refinements.html) preserves Detached rail, Short rail, Heavy rail, Open edge, and Margin bracket. Detached rail was briefly selected, then rejected because avoiding clipping encouraged unwanted spacing and alignment changes. Browser regressions cover every field family, transparent centers, focus/blur geometry, original form layout at 320/390px, native textarea resizing, and caret behavior.
 
-**Validation:** 315 web tests, repository typechecking, and 10 targeted desktop/mobile browser cases pass. The full frontend run passed 85 of 86 cases; the WebKit missing-resource transition did not render its expected message within five seconds. Its cause is unresolved, the run was not repeated, and evidence is preserved in `test-failures/2026-09-18-crop-marks-full-frontend-webkit-missing-resource.md`. No deployment was performed.
+**Validation:** 315 web tests, repository typechecking, and 10 targeted desktop/mobile browser cases pass. The full frontend run passed 85 of 86 cases; first evidence from the WebKit missing-resource failure remains in `test-failures/2026-09-18-crop-marks-full-frontend-webkit-missing-resource.md`. The untraced failure cannot be attributed conclusively; follow-up found and fixed a compatible stale-metadata resurrection race, while no evidence links it to crop-mark rendering. The deterministic reducer regression and controlled Chromium/WebKit integration pass (`docs/postmortems/2026-09-18-webkit-missing-resource-race.md`). No deployment was performed.
 
 ## Transcript thinking markers (Bit register selected and implemented, 2026-09-16)
 
@@ -413,6 +413,8 @@ Loading is exposed through the selected-row indicator and `aria-busy`; HTTP/hist
 ## Missing resources (decided 2026-08-08)
 
 A direct URL for a resource that does not exist stays at that URL and renders a resource-specific message (for example, “Orb doesn't exist”) with a link to the dashboard. Silently redirecting to the dashboard was rejected because it hides whether the resource was deleted, the URL is stale, or navigation failed. This behavior applies consistently to every resource type and to unknown application routes; unknown routes render “Page doesn't exist.” The browser uses hash routing, so the server serves its app shell only at `/` and `/index.html`; known built assets keep their static paths, while another path is a missing page rather than an SPA fallback.
+
+**Orb authority correction (2026-09-18):** a metadata or history 404 is definitive for the mounted orb route. Earlier successful polling responses cannot clear the missing state or restore a live socket; recovery requires a new navigation/load owner. Evidence: `docs/postmortems/2026-09-18-webkit-missing-resource-race.md`.
 
 ## Comprehensive frontend failure handling (current proposal, 2026-09-03)
 

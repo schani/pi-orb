@@ -23,10 +23,15 @@ it.each(["chromium", "webkit"] as const)(
     const a = "frontend-long-history",
       b = "frontend-fixture-orb";
     let state = "stopped",
-      refresh = false;
-    let release = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
+      refresh = false,
+      holdMetadata = false;
+    let releaseHistory = () => {},
+      releaseMetadata = () => {};
+    const historyGate = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    const metadataGate = new Promise<void>((resolve) => {
+      releaseMetadata = resolve;
     });
     const sockets = new Set<WebSocket>();
     page.on("websocket", (socket) => {
@@ -36,12 +41,17 @@ it.each(["chromium", "webkit"] as const)(
     });
     try {
       await page.route(`**/api/v1/orbs/${a}`, async (route) => {
+        const responseState = state;
         const response = await route.fetch();
-        return route.fulfill({ response, json: { ...(await response.json()), state } });
+        if (holdMetadata) await metadataGate;
+        return route.fulfill({
+          response,
+          json: { ...(await response.json()), state: responseState },
+        });
       });
       await page.route(`**/orbs/${a}/history`, async (route) => {
         if (!refresh) return route.continue();
-        await gate;
+        await historyGate;
         return route.fulfill({
           status: 404,
           json: { error: { code: "not_found", message: "Orb doesn't exist", retryable: false } },
@@ -52,19 +62,38 @@ it.each(["chromium", "webkit"] as const)(
       await page.locator(`.orb-index a[href="#/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
       refresh = true;
+      const historyRequested = page.waitForRequest((request) =>
+        request.url().endsWith(`/orbs/${a}/history`),
+      );
       await page.locator(`.orb-index a[href="#/orbs/${a}"]`).click();
       await check(page.locator(".history")).toContainText("Review 100");
+      await historyRequested;
       // A newer metadata poll starts live synchronization while the older HTTP
       // request is held. Its definitive 404 must still retire all live ownership.
       state = "running";
       await check(page.getByRole("button", { name: "Change thinking", exact: true })).toBeEnabled();
       await check.poll(() => sockets.size).toBe(1);
-      release();
+      const metadataRequested = page.waitForRequest((request) =>
+        request.url().endsWith(`/api/v1/orbs/${a}`),
+      );
+      holdMetadata = true;
+      await metadataRequested;
+      const missingResponse = page.waitForResponse(
+        (response) => response.url().endsWith(`/orbs/${a}/history`) && response.status() === 404,
+      );
+      releaseHistory();
+      await missingResponse;
+      const staleMetadataResponse = page.waitForResponse(
+        (response) => response.url().endsWith(`/api/v1/orbs/${a}`) && response.status() === 200,
+      );
+      releaseMetadata();
+      await staleMetadataResponse;
       await check(page.getByText("Orb doesn't exist", { exact: true })).toBeVisible();
       await check.poll(() => sockets.size).toBe(0);
       check(page.url()).toBe(`${origin}/#/orbs/${a}`);
     } finally {
-      release();
+      releaseHistory();
+      releaseMetadata();
       await page.close();
       await browser.close();
       await vite.close();

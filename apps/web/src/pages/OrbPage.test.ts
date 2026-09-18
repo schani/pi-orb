@@ -4,6 +4,7 @@ import {
   canStopOrb,
   initialState,
   isLiveBusy,
+  missingResourceReducer,
   orbLifecycleStatus,
   reducer,
   sleepWaitingNotice,
@@ -24,6 +25,11 @@ function busyState() {
     },
   });
 }
+
+it("keeps missing sticky when stale success publishes before effect cleanup", () => {
+  const afterMissing = missingResourceReducer(false, "missing");
+  expect(missingResourceReducer(afterMissing, "found")).toBe(true);
+});
 
 describe("scheduled sleep lifecycle status", () => {
   const at = Date.parse("2026-09-17T00:00:00.000Z");

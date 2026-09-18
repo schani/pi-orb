@@ -1,5 +1,9 @@
 # Testing strategy
 
+## Missing-resource request ordering (2026-09-18)
+
+A definitive orb-history 404 is monotonic for the mounted route: an older successful metadata poll cannot restore the resource or its live socket. Browser regressions must observe the held history request before changing fixture lifecycle, snapshot mutable response state when a request enters its route, and await exact browser responses before asserting their effects. The controlled stale-poll schedule, first failure, correction, and unrelated GitHub-run failures are recorded in `docs/postmortems/2026-09-18-webkit-missing-resource-race.md`.
+
 ## E2E resource ownership and concurrency (2026-09-18)
 
 The E2E suite has two concurrent Vitest projects. Frontend remains one thread because its files share the web source tree/Vite dependency cache and launch multiple browser engines. Lifecycle uses a fork pool bounded at one to two workers. The fork bounds live at the root because Vitest project options do not apply per-project `minForks`/`maxForks`. A five-file synthetic probe using the exact pool settings ran two 600 ms frontend files serially and three lifecycle files with peak concurrency two; the third lifecycle file started only after one of the first pair ended. All five passed in 1.96 seconds. An earlier inline-project `fileParallelism: false`/`maxWorkers: 1` attempt was rejected after a four-file probe started three workers and ran two files from one project together. The first full run with that unsafe config also logged Vite dependency re-optimization while frontend files overlapped.
