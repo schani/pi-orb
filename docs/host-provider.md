@@ -135,7 +135,7 @@ new DockerOrbHostProvider({
 new GceOrbHostProvider({
   projectId: "playground-dev-6ae7",
   zone: "us-central1-a",
-  machineType: "n2d-highmem-4",
+  machineType: "n2d-highmem-2",
   runtimeImage: "us-central1-docker.pkg.dev/…/pi-orb-runtime:<digest>",
 });
 ```
@@ -247,7 +247,7 @@ Expected initialization failures such as clone failure, invalid repository state
 - All cloud orbs will live in one GCP project rather than one GCP project per source project.
 - The development GCP project has display name `playground-dev` and project ID `playground-dev-6ae7`.
 - The current prescribed cloud location is the single hardcoded zone `us-central1-a`. No multi-zone or multi-region logic initially.
-- The current prescribed GCE shape is Spot `n2d-highmem-4`: 4 vCPUs and 32 GiB RAM.
+- **Orb VM sizing (decided 2026-09-18).** The prescribed GCE shape is Spot `n2d-highmem-2`: 2 vCPUs and 16 GiB RAM. This halves CPU and RAM from `n2d-highmem-4` to halve per-orb compute cost. Machine type remains part of the immutable host-spec fingerprint, so existing compute adopts the smaller shape through replacement on its next ordinary Start after deployment.
 - Spot capacity exhaustion (`ZONE_RESOURCE_POOL_EXHAUSTED` on instance create or start) maps to a typed provisioning error that fails the orb and is shown to the user. There is no zone or on-demand fallback initially.
 - Boot-failure detection (implemented; born from cloud smoke-testing): while an orb is `creating`/`starting`, the reconciler records a per-probe boot picture (host state, attempts, whether the runtime ever answered, last error) exposed to the UI as a `waiting_for_runtime` state detail. Because the runtime's health server starts before slow initialization, a running host whose runtime has never answered past `unreachableBootDeadlineMs` (12 minutes for native GCE; 3 minutes for Docker/process) fails fast as `runtime_never_answered` instead of burning the 15-minute deadline; the terminal error carries the probes plus provider diagnostics (`OrbHostProvider.diagnose`, reading the GCE guest-attribute startup markers). A transiently failing diagnose defers the failure one poll so evidence is never dropped. Deadline failures carry the same evidence. Covered by DST scenarios including the adversarial-scheduling case where a best-effort host stop is cancelled and repaired by the backstop sweep.
 - The earlier in-place repair fence did not fence lifecycle authority: on 2026-08-11 a deleted stale Cloud Run revision continued reconciling for 7 minutes 42 seconds and could still start compute and fail durable orb state. Drained-revision deletion is cleanup, not correctness. Incident: `docs/postmortems/2026-08-11-release-smoke-restart-registry-timeout.md`.

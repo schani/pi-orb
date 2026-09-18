@@ -43,7 +43,7 @@ The environment is prescribed initially:
 
 - Debian 12 on native GCE hosts and in the local runtime image;
 - Node.js 24;
-- a versioned native Debian image on Spot `n2d-highmem-4` GCE VMs;
+- a versioned native Debian image on Spot `n2d-highmem-2` GCE VMs (2 vCPUs, 16 GiB RAM);
 - a fixed runtime container image for the local Docker provider;
 - no required orb configuration for a simple TypeScript project.
 

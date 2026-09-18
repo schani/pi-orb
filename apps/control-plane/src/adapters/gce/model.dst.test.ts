@@ -39,7 +39,7 @@ function provider(
   return new GceOrbHostProvider(model, {
     projectId: "proj",
     zone: "us-central1-a",
-    machineType: "n2d-highmem-4",
+    machineType: "n2d-highmem-2",
     subnetwork: "regions/us-central1/subnetworks/pi-orb-us-central1",
     serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
     imageResource: "projects/projxx/global/images/pi-orb-native-20260905",

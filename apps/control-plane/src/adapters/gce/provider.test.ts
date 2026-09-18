@@ -77,7 +77,7 @@ function makeProvider(
   return new GceOrbHostProvider(transport, {
     projectId: "proj",
     zone: "us-central1-a",
-    machineType: "n2d-highmem-4",
+    machineType: "n2d-highmem-2",
     subnetwork: "regions/us-central1/subnetworks/pi-orb-us-central1",
     serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
     imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
@@ -973,7 +973,7 @@ describe("GceOrbHostProvider host specification", () => {
     return new GceOrbHostProvider(new FakeTransport([]), {
       projectId: "proj",
       zone: "us-central1-a",
-      machineType: "n2d-highmem-4",
+      machineType: "n2d-highmem-2",
       subnetwork: "regions/us-central1/subnetworks/pi-orb-us-central1",
       serviceAccount: "orb-vm@proj.iam.gserviceaccount.com",
       imageResource: "projects/projxx/global/images/pi-orb-native-20260905",
