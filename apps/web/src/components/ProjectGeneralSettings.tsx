@@ -1,6 +1,7 @@
 import { PROJECT_NAME_MAX_CHARS, type ProjectView, validateRepositoryUrl } from "@pi-orb/protocol";
 import { useEffect, useRef, useState } from "react";
 import { describeApiError, updateProject } from "../lib/api.ts";
+import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 export function ProjectGeneralSettings({
   project,
@@ -56,25 +57,29 @@ export function ProjectGeneralSettings({
       >
         <label>
           Name
-          <input
-            value={name}
-            maxLength={PROJECT_NAME_MAX_CHARS}
-            disabled={saving}
-            required
-            data-1p-ignore="true"
-            onChange={(event) => setName(event.target.value)}
-          />
+          <TextFieldFrame>
+            <input
+              value={name}
+              maxLength={PROJECT_NAME_MAX_CHARS}
+              disabled={saving}
+              required
+              data-1p-ignore="true"
+              onChange={(event) => setName(event.target.value)}
+            />
+          </TextFieldFrame>
         </label>
         <label>
           Repository URL
-          <input
-            value={repositoryUrl}
-            disabled={saving}
-            required
-            aria-invalid={repository.isErr()}
-            aria-describedby={repository.isErr() ? "project-repository-error" : undefined}
-            onChange={(event) => setRepositoryUrl(event.target.value)}
-          />
+          <TextFieldFrame>
+            <input
+              value={repositoryUrl}
+              disabled={saving}
+              required
+              aria-invalid={repository.isErr()}
+              aria-describedby={repository.isErr() ? "project-repository-error" : undefined}
+              onChange={(event) => setRepositoryUrl(event.target.value)}
+            />
+          </TextFieldFrame>
         </label>
         {repository.isErr() && (
           <p id="project-repository-error" role="alert" className="banner banner-error">

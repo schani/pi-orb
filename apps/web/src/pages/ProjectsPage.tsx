@@ -20,6 +20,7 @@ import { ProjectConfigModal } from "../components/ProjectConfigModal.tsx";
 import { ProjectHeader } from "../components/ProjectHeader.tsx";
 import { ProjectNewOrbLink } from "../components/ProjectNewOrbLink.tsx";
 import { StateTile } from "../components/StateTile.tsx";
+import { TextFieldFrame } from "../components/TextFieldFrame.tsx";
 import {
   type ApiError,
   archiveOrb,
@@ -485,20 +486,24 @@ export function ProjectsPage({
           <form onSubmit={onCreateProject}>
             <label>
               project name
-              <input
-                type="text"
-                value={name}
-                maxLength={80}
-                onChange={(event) => setName(event.target.value)}
-              />
+              <TextFieldFrame>
+                <input
+                  type="text"
+                  value={name}
+                  maxLength={80}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </TextFieldFrame>
             </label>
             <label>
               repository URL
-              <input
-                type="text"
-                value={repositoryUrl}
-                onChange={(event) => setRepositoryUrl(event.target.value)}
-              />
+              <TextFieldFrame>
+                <input
+                  type="text"
+                  value={repositoryUrl}
+                  onChange={(event) => setRepositoryUrl(event.target.value)}
+                />
+              </TextFieldFrame>
             </label>
             <button type="submit" disabled={submitting}>
               {submitting ? "creating…" : "Create project"}

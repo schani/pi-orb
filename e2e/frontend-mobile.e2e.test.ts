@@ -83,6 +83,39 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       });
       try {
         await page.goto(`${origin}/${ORB_HASH}`);
+        await page.getByRole("button", { name: "Rename orb" }).tap();
+        const rename = page.getByRole("textbox", { name: "orb name" });
+        await expectPage(rename).toBeFocused();
+        const renameGeometry = await rename.evaluate((element) => {
+          const frame = element.closest(".text-field-frame");
+          const save = frame?.nextElementSibling;
+          const view = element.ownerDocument.defaultView;
+          if (frame === null || frame.parentElement === null || save === null || view === null)
+            return null;
+          const marks = view.getComputedStyle(frame, "::after");
+          const fieldBox = element.getBoundingClientRect();
+          const frameBox = frame.getBoundingClientRect();
+          const saveBox = save.getBoundingClientRect();
+          return {
+            cropLeft: frameBox.left + Number.parseFloat(marks.left),
+            fieldLeft: fieldBox.left,
+            fieldWidth: fieldBox.width,
+            flexWrap: view.getComputedStyle(frame.parentElement).flexWrap,
+            frameWidth: frameBox.width,
+            overlap:
+              fieldBox.left < saveBox.right &&
+              fieldBox.right > saveBox.left &&
+              fieldBox.top < saveBox.bottom &&
+              fieldBox.bottom > saveBox.top,
+          };
+        });
+        expectPage(renameGeometry).not.toBeNull();
+        expectPage(renameGeometry?.cropLeft).toBeCloseTo((renameGeometry?.fieldLeft ?? 0) - 3, 5);
+        expectPage(renameGeometry?.flexWrap).toBe("wrap");
+        expectPage(renameGeometry?.frameWidth).toBeCloseTo(renameGeometry?.fieldWidth ?? 0, 5);
+        expectPage(renameGeometry?.overlap).toBe(false);
+        await page.getByRole("button", { name: "cancel", exact: true }).tap();
+
         const composer = page.locator(".composer");
         const input = composer.getByRole("textbox", { name: "Message the orb" });
         const write = composer.getByRole("button", { name: "Write message" });
@@ -105,6 +138,42 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(await input.evaluate((element) => element.getBoundingClientRect().height)).toBe(
           88,
         );
+        const focusStyle = await input.evaluate((element) => {
+          const frame = element.closest(".text-field-frame");
+          if (frame === null) return null;
+          const view = element.ownerDocument.defaultView;
+          if (view === null) return null;
+          const inputStyle = view.getComputedStyle(element);
+          const marks = view.getComputedStyle(frame, "::after");
+          const inputBox = element.getBoundingClientRect();
+          const frameBox = frame.getBoundingClientRect();
+          return {
+            background: inputStyle.backgroundColor,
+            caret: inputStyle.caretColor,
+            color: inputStyle.color,
+            cropBottom: frameBox.bottom - Number.parseFloat(marks.bottom),
+            cropLeft: frameBox.left + Number.parseFloat(marks.left),
+            cropRight: frameBox.right - Number.parseFloat(marks.right),
+            cropTop: frameBox.top + Number.parseFloat(marks.top),
+            field: {
+              bottom: inputBox.bottom,
+              left: inputBox.left,
+              right: inputBox.right,
+              top: inputBox.top,
+            },
+            gradientCount: marks.backgroundImage.split("linear-gradient").length - 1,
+            center: marks.backgroundColor,
+          };
+        });
+        expectPage(focusStyle?.background).toBe("rgb(255, 255, 255)");
+        expectPage(focusStyle?.caret).toBe("rgb(0, 0, 0)");
+        expectPage(focusStyle?.color).toBe("rgb(0, 0, 0)");
+        expectPage(focusStyle?.gradientCount).toBe(8);
+        expectPage(focusStyle?.center).toBe("rgba(0, 0, 0, 0)");
+        expectPage(focusStyle?.cropLeft).toBeCloseTo((focusStyle?.field.left ?? 0) - 3, 5);
+        expectPage(focusStyle?.cropRight).toBeCloseTo((focusStyle?.field.right ?? 0) + 3, 5);
+        expectPage(focusStyle?.cropTop).toBeCloseTo((focusStyle?.field.top ?? 0) - 3, 5);
+        expectPage(focusStyle?.cropBottom).toBeCloseTo((focusStyle?.field.bottom ?? 0) + 3, 5);
         const draft = `phone ${width} ${randomUUID()}`;
         await input.fill(draft);
         await input.press("Enter");
@@ -149,6 +218,313 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         ).toBe(236);
       } finally {
         releaseAcceptance();
+        await page.close();
+      }
+    },
+  );
+
+  it("keeps modal close contrast through keyboard and hover focus", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 844 } });
+    const expectCloseColors = async (
+      close: ReturnType<typeof page.getByRole>,
+      background: string,
+      color: string,
+    ) => {
+      expectPage(
+        await close.evaluate((element) => {
+          const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+          return { background: style?.backgroundColor, color: style?.color };
+        }),
+      ).toEqual({ background, color });
+    };
+    const transparent = "rgba(0, 0, 0, 0)";
+    const black = "rgb(0, 0, 0)";
+    const white = "rgb(255, 255, 255)";
+    try {
+      await page.goto(`${origin}/`);
+      const configOpener = page.getByTitle("project config").first();
+      await configOpener.click();
+      const config = page.getByRole("dialog");
+      const configClose = config.getByRole("button", { name: "Close project config" });
+      await expectCloseColors(configClose, transparent, black);
+      await page.keyboard.press("Shift+Tab");
+      await expectPage(configClose).toBeFocused();
+      await expectCloseColors(configClose, black, white);
+      await page.keyboard.press("Tab");
+      await configClose.hover();
+      await expectCloseColors(configClose, black, white);
+      await page.mouse.move(0, 0);
+      await expectCloseColors(configClose, transparent, black);
+      await page.keyboard.press("Shift+Tab");
+      await expectPage(configClose).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expectPage(config).toBeHidden();
+      await expectPage(configOpener).toBeFocused();
+
+      const personalOpener = page.getByRole("button", { name: "Personal instructions" });
+      await personalOpener.click();
+      const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
+      const personalClose = personal.getByRole("button", { name: "Close personal instructions" });
+      const personalEditor = personal.getByRole("textbox", { name: "Personal AGENTS.md" });
+      await expectPage(personalEditor).toBeEnabled();
+      await page.keyboard.press("Tab");
+      await expectPage(personalEditor).toBeFocused();
+      await expectCloseColors(personalClose, transparent, black);
+      await page.keyboard.press("Shift+Tab");
+      await expectPage(personalClose).toBeFocused();
+      await expectCloseColors(personalClose, black, white);
+      await page.keyboard.press("Tab");
+      await personalClose.hover();
+      await expectCloseColors(personalClose, black, white);
+      await page.mouse.move(0, 0);
+      await expectCloseColors(personalClose, transparent, black);
+      await page.keyboard.press("Shift+Tab");
+      await expectPage(personalClose).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expectPage(personal).toBeHidden();
+      await expectPage(personalOpener).toBeFocused();
+    } finally {
+      await page.close();
+    }
+  });
+
+  it.each([1280, 390, 320])(
+    "keeps modal closes in the corner and composer geometry fixed across modes at %ipx",
+    async (width) => {
+      const phone = width <= 600;
+      const page = await browser.newPage({
+        viewport: { width, height: 844 },
+        ...(phone ? { isMobile: true, hasTouch: true } : {}),
+      });
+      const expectModalClose = async (
+        dialog: ReturnType<typeof page.getByRole>,
+        closeName: string,
+      ) => {
+        const close = dialog.getByRole("button", { name: closeName });
+        const geometry = await close.evaluate((element) => {
+          const dialog = element.closest("[role='dialog']");
+          const icon = element.querySelector("svg");
+          const title = dialog?.querySelector("[id$='title']");
+          if (dialog === null || icon === null || title === null) return null;
+          const dialogBox = dialog.getBoundingClientRect();
+          const closeBox = element.getBoundingClientRect();
+          const iconBox = icon.getBoundingClientRect();
+          return {
+            bottom: closeBox.bottom,
+            left: closeBox.left,
+            dialogRight: dialogBox.right,
+            dialogTop: dialogBox.top,
+            height: closeBox.height,
+            iconHeight: iconBox.height,
+            iconWidth: iconBox.width,
+            right: closeBox.right,
+            titleRight: title.getBoundingClientRect().right,
+            top: closeBox.top,
+            width: closeBox.width,
+          };
+        });
+        expectPage(geometry).not.toBeNull();
+        expectPage(geometry?.top).toBeCloseTo((geometry?.dialogTop ?? 0) + 1, 5);
+        expectPage(geometry?.right).toBeCloseTo((geometry?.dialogRight ?? 0) - 1, 5);
+        expectPage(geometry?.width).toBe(phone ? 44 : 32);
+        expectPage(geometry?.height).toBe(phone ? 44 : 32);
+        expectPage(geometry?.iconWidth).toBe(18);
+        expectPage(geometry?.iconHeight).toBe(18);
+        expectPage(geometry?.titleRight).toBeLessThanOrEqual(geometry?.left ?? 0);
+      };
+      try {
+        await page.goto(`${origin}/`);
+        await page.getByTitle("project config").first().click();
+        const config = page.getByRole("dialog");
+        await expectModalClose(config, "Close project config");
+        const configTitle = config.locator("#project-config-title");
+        const originalTitle = await configTitle.textContent();
+        await configTitle.evaluate((element) => {
+          element.textContent = `Config for ${"unbroken-project-name".repeat(8)}`;
+        });
+        await expectModalClose(config, "Close project config");
+        expectPage(
+          await config.locator(".project-secrets-header").evaluate((element) => ({
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+          })),
+        ).toEqual({
+          clientWidth: Math.min(558, width - 26),
+          scrollWidth: Math.min(558, width - 26),
+        });
+        await configTitle.evaluate((element, title) => {
+          element.textContent = title;
+        }, originalTitle);
+        const generalHeaderHeight = await config
+          .locator(".project-secrets-header")
+          .evaluate((element) => element.getBoundingClientRect().height);
+        await config.getByRole("tab", { name: "Instructions" }).click();
+        await expectModalClose(config, "Close project config");
+        const instructionsHeaderHeight = await config
+          .locator(".project-secrets-header")
+          .evaluate((element) => element.getBoundingClientRect().height);
+        expectPage(instructionsHeaderHeight).toBe(phone ? 44 : 32);
+        expectPage(generalHeaderHeight).toBeGreaterThanOrEqual(instructionsHeaderHeight);
+        await config.getByRole("button", { name: "Close project config" }).click();
+
+        await page.getByRole("button", { name: "Personal instructions" }).click();
+        const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
+        await expectModalClose(personal, "Close personal instructions");
+        await personal.getByRole("button", { name: "Close personal instructions" }).click();
+
+        await page.keyboard.press("Meta+k");
+        const search = page.getByRole("dialog", { name: "Find projects and orbs" });
+        await expectPage(search.getByRole("button", { name: /close/i })).toHaveCount(0);
+        await page.keyboard.press("Escape");
+
+        await page.goto(`${origin}/${ORB_HASH}`);
+        const composer = page.locator(".composer");
+        const input = composer.getByRole("textbox");
+        if (phone) await composer.getByRole("button", { name: "Write message" }).tap();
+        const measureComposer = async (glyph: ">" | "!" | "!!" | "/") => {
+          const prefix = composer.locator(".composer-line > .composer-prefix");
+          await expectPage(prefix).toHaveText(glyph);
+          return composer.locator(".composer-line").evaluate((line) => {
+            const prefix = line.querySelector(":scope > .composer-prefix");
+            const editor = line.querySelector(":scope > .composer-editor");
+            const input = editor?.querySelector("textarea");
+            const caret = editor?.querySelector(".composer-caret");
+            const composer = line.closest(".composer");
+            const picker = composer?.querySelector(".command-picker");
+            const view = line.ownerDocument.defaultView;
+            if (
+              prefix === null ||
+              editor === null ||
+              input === null ||
+              composer === null ||
+              view === null
+            )
+              return null;
+            const prefixBox = prefix.getBoundingClientRect();
+            const prefixRange = line.ownerDocument.createRange();
+            prefixRange.selectNodeContents(prefix);
+            const editorBox = editor.getBoundingClientRect();
+            const composerBox = composer.getBoundingClientRect();
+            const pickerBox = picker?.getBoundingClientRect();
+            const caretBox = caret?.getBoundingClientRect();
+            const gap = Number.parseFloat(view.getComputedStyle(line).columnGap);
+            return {
+              caretLeft: caretBox?.left ?? null,
+              columnWidth: editorBox.left - gap - line.getBoundingClientRect().left,
+              editorLeft: editorBox.left,
+              editorWidth: editorBox.width,
+              gap,
+              pickerLeft: pickerBox?.left ?? null,
+              pickerRight: pickerBox?.right ?? null,
+              expectedPickerRight: Math.min(editorBox.left + 420, composerBox.right - 12),
+              prefixTextWidth: prefixRange.getBoundingClientRect().width,
+              prefixWidth: prefixBox.width,
+              selectionEnd: input.selectionEnd,
+              selectionStart: input.selectionStart,
+            };
+          });
+        };
+        const expectStableEditor = (
+          geometry: Awaited<ReturnType<typeof measureComposer>>,
+          original: NonNullable<Awaited<ReturnType<typeof measureComposer>>>,
+        ) => {
+          expectPage(geometry).not.toBeNull();
+          expectPage(geometry?.editorLeft).toBeCloseTo(original.editorLeft, 5);
+          expectPage(geometry?.editorWidth).toBeCloseTo(original.editorWidth, 5);
+          expectPage(geometry?.columnWidth).toBeCloseTo(original.columnWidth, 5);
+          expectPage(geometry?.selectionStart).toBe(0);
+          expectPage(geometry?.selectionEnd).toBe(0);
+          if (!phone) expectPage(geometry?.caretLeft).toBeCloseTo(original.caretLeft ?? 0, 5);
+        };
+
+        const messageGeometry = await measureComposer(">");
+        expectPage(messageGeometry).not.toBeNull();
+        if (messageGeometry === null) throw new Error("composer geometry unavailable");
+        expectPage(messageGeometry.gap).toBeGreaterThan(0);
+        expectPage(messageGeometry.gap).toBeLessThanOrEqual(9);
+
+        await input.fill("!");
+        await expectPage(input).toHaveAttribute("aria-label", "Run a shell command");
+        const shellGeometry = await measureComposer("!");
+        expectStableEditor(shellGeometry, messageGeometry);
+        await input.fill("!");
+        const excludedGeometry = await measureComposer("!!");
+        expectStableEditor(excludedGeometry, messageGeometry);
+        expectPage(excludedGeometry?.prefixTextWidth).toBeGreaterThan(
+          shellGeometry?.prefixTextWidth ?? Number.POSITIVE_INFINITY,
+        );
+        expectPage(excludedGeometry?.prefixWidth).toBeCloseTo(
+          excludedGeometry?.columnWidth ?? 0,
+          2,
+        );
+
+        if (phone) {
+          await composer.getByRole("button", { name: "Fold editor" }).tap();
+          const collapsed = composer.locator(".composer-open");
+          await expectPage(collapsed.locator(".composer-prefix")).toHaveText("!!");
+          const collapsedGeometry = await collapsed.evaluate((button) => {
+            const prefix = button.querySelector(".composer-prefix");
+            const preview = button.querySelector(".composer-draft-preview");
+            const view = button.ownerDocument.defaultView;
+            if (prefix === null || preview === null || view === null) return null;
+            const gap = Number.parseFloat(view.getComputedStyle(button).columnGap);
+            return {
+              columnWidth:
+                preview.getBoundingClientRect().left - gap - button.getBoundingClientRect().left,
+              previewLeft: preview.getBoundingClientRect().left,
+              prefixWidth: prefix.getBoundingClientRect().width,
+            };
+          });
+          expectPage(collapsedGeometry?.columnWidth).toBeCloseTo(messageGeometry.columnWidth, 5);
+          expectPage(collapsedGeometry?.previewLeft).toBeCloseTo(messageGeometry.editorLeft, 5);
+          expectPage(collapsedGeometry?.prefixWidth).toBeCloseTo(
+            excludedGeometry?.prefixWidth ?? 0,
+            5,
+          );
+          await collapsed.tap();
+          expectStableEditor(await measureComposer("!!"), messageGeometry);
+        }
+
+        await input.press("Backspace");
+        expectStableEditor(await measureComposer("!"), messageGeometry);
+        await input.press("Backspace");
+        expectStableEditor(await measureComposer(">"), messageGeometry);
+        await input.press("/");
+        await expectPage(input).toHaveValue("");
+        const commandGeometry = await measureComposer("/");
+        expectStableEditor(commandGeometry, messageGeometry);
+        expectPage(commandGeometry?.pickerLeft).toBeCloseTo(messageGeometry.editorLeft, 5);
+        expectPage(commandGeometry?.pickerRight).toBeCloseTo(
+          commandGeometry?.expectedPickerRight ?? 0,
+          1,
+        );
+        await input.press("Escape");
+        expectStableEditor(await measureComposer(">"), messageGeometry);
+
+        const sent = `composer geometry ${width} ${randomUUID()}`;
+        const submitted = page.waitForRequest(
+          (request) =>
+            request.method() === "PUT" &&
+            request.url().includes("/api/v1/orbs/frontend-fixture-orb/messages/"),
+        );
+        await input.fill(sent);
+        if (phone) {
+          const send = composer.getByRole("button", { name: "Send message" });
+          const sendBox = await send.boundingBox();
+          expectPage(sendBox?.x ?? width).toBeGreaterThanOrEqual(0);
+          expectPage((sendBox?.x ?? width) + (sendBox?.width ?? 0)).toBeLessThanOrEqual(width);
+          await send.tap();
+        } else {
+          await input.press("Control+Enter");
+        }
+        expectPage((await submitted).postDataJSON()).toEqual({
+          content: [{ type: "text", text: sent }],
+        });
+        if (phone) {
+          await expectPage(input).toBeHidden();
+          await expectPage(composer.locator(".composer-draft-preview")).toHaveText("");
+        } else await expectPage(input).toHaveValue("");
+      } finally {
         await page.close();
       }
     },

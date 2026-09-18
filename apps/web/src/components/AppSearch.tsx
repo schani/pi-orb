@@ -24,6 +24,7 @@ import {
   shouldCloseAppSearchForActivation,
 } from "../lib/app-search.ts";
 import { useInitialFocus } from "../lib/use-initial-focus.ts";
+import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 interface SearchRegistration {
   owner: symbol;
@@ -187,19 +188,21 @@ export function AppSearchDialog({
         }}
       >
         <search className="app-search-query-row">
-          <input
-            ref={inputRef}
-            type="search"
-            className="app-search-input"
-            aria-label={source.label}
-            aria-activedescendant={
-              selectedIndex < 0 ? undefined : `app-search-result-${selectedIndex}`
-            }
-            autoComplete="off"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            onKeyDown={onInputKeyDown}
-          />
+          <TextFieldFrame>
+            <input
+              ref={inputRef}
+              type="search"
+              className="app-search-input"
+              aria-label={source.label}
+              aria-activedescendant={
+                selectedIndex < 0 ? undefined : `app-search-result-${selectedIndex}`
+              }
+              autoComplete="off"
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              onKeyDown={onInputKeyDown}
+            />
+          </TextFieldFrame>
         </search>
         <div className="app-search-result-region">
           {query.trim() !== "" && visibleMatches.length === 0 && (

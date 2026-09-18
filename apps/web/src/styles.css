@@ -197,9 +197,41 @@ textarea {
 input:focus,
 textarea:focus {
   outline: 0;
-  background: var(--k);
-  color: var(--w);
-  caret-color: var(--w);
+  background: var(--w);
+  color: var(--k);
+  caret-color: var(--k);
+}
+
+.text-field-frame {
+  display: block;
+  position: relative;
+  min-width: 0;
+}
+
+.text-field-frame > input,
+.text-field-frame > textarea {
+  display: block;
+}
+
+.text-field-frame:focus-within::after {
+  position: absolute;
+  z-index: 2;
+  inset: -3px;
+  background:
+    linear-gradient(var(--k), var(--k)) left top / 11px 1px no-repeat,
+    linear-gradient(var(--k), var(--k)) left top / 1px 11px no-repeat,
+    linear-gradient(var(--k), var(--k)) right top / 11px 1px no-repeat,
+    linear-gradient(var(--k), var(--k)) right top / 1px 11px no-repeat,
+    linear-gradient(var(--k), var(--k)) left bottom / 11px 1px no-repeat,
+    linear-gradient(var(--k), var(--k)) left bottom / 1px 11px no-repeat,
+    linear-gradient(var(--k), var(--k)) right bottom / 11px 1px no-repeat,
+    linear-gradient(var(--k), var(--k)) right bottom / 1px 11px no-repeat;
+  content: "";
+  pointer-events: none;
+}
+
+.text-field-frame-inset:focus-within::after {
+  inset: 3px;
 }
 
 /* One neutral highlight stays visible on both paper and inverted surfaces. */
@@ -212,6 +244,12 @@ textarea:focus {
   outline: 0;
   background: var(--k);
   color: var(--w);
+}
+
+.text-field-frame > input:focus-visible,
+.text-field-frame > textarea:focus-visible {
+  background: var(--w);
+  color: var(--k);
 }
 
 h1,
@@ -880,13 +918,10 @@ button.personal-instructions-gear {
 }
 .personal-instructions-header {
   display: flex;
-  height: 24px;
+  min-height: 32px;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 42px 0 10px;
   border-bottom: 1px solid var(--k);
-}
-.personal-instructions-header button {
-  margin-left: auto;
 }
 .personal-instructions-dialog form,
 .project-instructions-editor {
@@ -951,11 +986,8 @@ button.personal-instructions-gear {
     margin-top: 24px;
   }
   .personal-instructions-header {
-    height: 44px;
-  }
-  .personal-instructions-header button {
-    height: 44px;
-    width: 44px;
+    min-height: 44px;
+    padding-right: 54px;
   }
   .personal-instructions-dialog textarea,
   .project-instructions-editor textarea {
@@ -990,10 +1022,19 @@ button.personal-instructions-gear {
 
 .project-secrets-header {
   display: flex;
+  min-height: 32px;
   align-items: flex-start;
   gap: 8px;
-  padding: 0 10px;
+  padding: 0 42px 0 10px;
   border-bottom: 1px solid var(--k);
+}
+
+.project-secrets-header > div {
+  min-width: 0;
+}
+
+.project-secrets-header h2 {
+  overflow-wrap: anywhere;
 }
 
 .project-secrets-header p {
@@ -1001,11 +1042,23 @@ button.personal-instructions-gear {
   color: var(--g3);
 }
 
-.project-secrets-close {
-  margin-left: auto;
-  flex: none;
-  border: 0;
-  padding: 0 4px;
+button.modal-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 32px;
+  height: 32px;
+  color: var(--k);
+}
+
+button.modal-close .ic {
+  width: 18px;
+  height: 18px;
+}
+
+button.modal-close:focus-visible {
+  color: var(--w);
+  background: var(--k);
 }
 
 .project-secrets-lock {
@@ -1035,6 +1088,14 @@ button.personal-instructions-gear {
 }
 
 @media (max-width: 600px) {
+  .project-secrets-header {
+    min-height: 44px;
+    padding-right: 54px;
+  }
+  button.modal-close {
+    width: 44px;
+    height: 44px;
+  }
   .project-config-tabs {
     gap: 4px;
     padding: 4px 6px;
@@ -1377,9 +1438,14 @@ button.personal-instructions-gear {
   gap: 6px;
 }
 
-.orb-rename-form input {
+.orb-rename-form > .text-field-frame {
   min-width: 0;
   flex: 1;
+}
+
+.orb-rename-form input {
+  width: 100%;
+  min-width: 0;
 }
 
 .orb-rename-form button {
@@ -2034,8 +2100,8 @@ button.personal-instructions-gear {
 
 .composer-line {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: 2ch minmax(0, 1fr) auto;
+  gap: 1ch;
 }
 
 .composer-prefix {
@@ -2096,7 +2162,7 @@ button.personal-instructions-gear {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 4px 44px;
+  margin: 0 0 4px;
 }
 
 .composer-attachment {
@@ -2353,8 +2419,11 @@ button.orb-phone-menu {
     flex-wrap: wrap;
   }
 
-  .orb-rename-form input {
+  .orb-rename-form > .text-field-frame {
     width: 80px;
+  }
+
+  .orb-rename-form input {
     font-size: 16px;
   }
 
@@ -2387,8 +2456,8 @@ button.orb-phone-menu {
 
   .composer-open {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: 2ch minmax(0, 1fr);
+    gap: 1ch;
     align-items: center;
     min-width: 0;
     height: 44px;
@@ -2430,7 +2499,7 @@ button.orb-phone-menu {
   }
 
   .composer-line {
-    grid-template-columns: 32px minmax(0, 1fr) 44px;
+    grid-template-columns: 2ch minmax(0, 1fr) 44px;
   }
 
   .composer-line > .composer-prefix {
@@ -2447,7 +2516,7 @@ button.orb-phone-menu {
   }
 
   .composer-input[data-block-caret="true"] {
-    caret-color: var(--w);
+    caret-color: var(--k);
   }
 
   .composer-caret {
@@ -2492,8 +2561,8 @@ button.orb-phone-menu {
   position: absolute;
   z-index: 25;
   bottom: 100%;
-  left: 56px;
-  width: min(420px, calc(100% - 68px));
+  left: calc(12px + 3ch);
+  width: min(420px, calc(100% - 24px - 3ch));
   max-height: 280px;
   overflow-y: auto;
   padding: 4px;
@@ -2619,8 +2688,6 @@ button.orb-phone-menu {
 }
 @media (max-width: 600px) {
   .command-picker {
-    left: 8px;
-    width: calc(100% - 16px);
     max-height: min(240px, 35dvh);
   }
   .command-picker button {

@@ -17,6 +17,7 @@ import {
   mcpDraft,
 } from "../lib/mcp-form.ts";
 import { useMcpAuthorization } from "./McpOAuthControls.tsx";
+import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 interface Shared {
   projectId: string;
@@ -63,29 +64,33 @@ export function McpEditor({
     >
       <label>
         Name
-        <input
-          ref={nameInput}
-          required
-          maxLength={64}
-          pattern="[a-z][a-z0-9_-]{0,63}"
-          readOnly={!!previous}
-          disabled={saving}
-          value={draft.name}
-          data-1p-ignore="true"
-          onChange={(e) => change("name", e.target.value)}
-        />
+        <TextFieldFrame>
+          <input
+            ref={nameInput}
+            required
+            maxLength={64}
+            pattern="[a-z][a-z0-9_-]{0,63}"
+            readOnly={!!previous}
+            disabled={saving}
+            value={draft.name}
+            data-1p-ignore="true"
+            onChange={(e) => change("name", e.target.value)}
+          />
+        </TextFieldFrame>
       </label>
       <label>
         Endpoint
-        <input
-          type="url"
-          required
-          pattern="https://.+"
-          maxLength={2048}
-          disabled={saving}
-          value={draft.url}
-          onChange={(e) => change("url", e.target.value)}
-        />
+        <TextFieldFrame>
+          <input
+            type="url"
+            required
+            pattern="https://.+"
+            maxLength={2048}
+            disabled={saving}
+            value={draft.url}
+            onChange={(e) => change("url", e.target.value)}
+          />
+        </TextFieldFrame>
       </label>
       <label>
         Authentication
@@ -127,12 +132,14 @@ export function McpEditor({
       {previous && (
         <label className="mcp-full">
           Description
-          <input
-            maxLength={240}
-            disabled={saving}
-            value={draft.description}
-            onChange={(e) => change("description", e.target.value)}
-          />
+          <TextFieldFrame>
+            <input
+              maxLength={240}
+              disabled={saving}
+              value={draft.description}
+              onChange={(e) => change("description", e.target.value)}
+            />
+          </TextFieldFrame>
         </label>
       )}
       <div className="mcp-full mcp-actions">

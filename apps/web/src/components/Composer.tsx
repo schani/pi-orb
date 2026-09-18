@@ -21,6 +21,7 @@ import {
 import { Icon } from "./Icons.tsx";
 import { OrbLinkPicker } from "./OrbLinkPicker.tsx";
 import { isSendShortcut } from "./send-shortcut.ts";
+import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 export interface ComposerImage {
   id: string;
@@ -291,7 +292,7 @@ export function Composer({
       )}
       <div className="composer-line">
         <span className="composer-prefix">{composerModeGlyph(mode)}</span>
-        <div className="composer-editor">
+        <TextFieldFrame className="composer-editor">
           <textarea
             ref={inputRef}
             className="composer-input"
@@ -400,7 +401,7 @@ export function Composer({
             rows={4}
           />
           <ComposerCaret inputRef={inputRef} text={text} />
-        </div>
+        </TextFieldFrame>
         <div className="composer-phone-rail">
           <button
             type="button"

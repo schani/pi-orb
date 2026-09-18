@@ -15,6 +15,7 @@ import {
   putProjectSecret,
 } from "../lib/api.ts";
 import { ProjectSecretKeyIcon } from "./ProjectSecretKeyIcon.tsx";
+import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 export interface ProjectSecretsSettingsProps {
   readonly project: Pick<ProjectView, "id" | "name">;
@@ -175,26 +176,30 @@ export function ProjectSecretsSettings({
       <form className="project-secret-form" onSubmit={(event) => void save(event)}>
         <label>
           name
-          <input
-            ref={nameInput}
-            disabled={saving}
-            data-1p-ignore="true"
-            value={name}
-            autoComplete="off"
-            onChange={(event) => setName(event.target.value)}
-          />
+          <TextFieldFrame>
+            <input
+              ref={nameInput}
+              disabled={saving}
+              data-1p-ignore="true"
+              value={name}
+              autoComplete="off"
+              onChange={(event) => setName(event.target.value)}
+            />
+          </TextFieldFrame>
         </label>
         <label>
           secret value
-          <input
-            ref={valueInput}
-            disabled={saving}
-            type="password"
-            value={value}
-            maxLength={PROJECT_SECRET_MAX_VALUE_BYTES}
-            autoComplete="new-password"
-            onChange={(event) => setValue(event.target.value)}
-          />
+          <TextFieldFrame>
+            <input
+              ref={valueInput}
+              disabled={saving}
+              type="password"
+              value={value}
+              maxLength={PROJECT_SECRET_MAX_VALUE_BYTES}
+              autoComplete="new-password"
+              onChange={(event) => setValue(event.target.value)}
+            />
+          </TextFieldFrame>
         </label>
         <button type="submit" disabled={saving || loading}>
           {saving ? "saving…" : "save secret"}

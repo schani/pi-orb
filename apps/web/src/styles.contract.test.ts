@@ -19,16 +19,40 @@ describe("subagent roster", () => {
 });
 
 describe("shared text fields", () => {
-  it("inverts every focused input and textarea without local exceptions", () => {
+  it("overlays shared crop marks without changing field spacing", () => {
     const focused = rule("input:focus,\ntextarea:focus");
-    expect(focused).toContain("background: var(--k)");
-    expect(focused).toContain("color: var(--w)");
-    expect(focused).toContain("caret-color: var(--w)");
-    expect(css).not.toMatch(/\.(?:app-search-input|composer-input):focus\s*\{/);
-    expect(css).not.toMatch(/\.project-instructions-editor textarea\s*\{[^}]*background:/s);
+    expect(focused).toContain("background: var(--w)");
+    expect(focused).toContain("color: var(--k)");
+    expect(focused).toContain("caret-color: var(--k)");
+    const frame = rule(".text-field-frame");
+    expect(frame).not.toMatch(/padding|margin/);
+    const marks = rule(".text-field-frame:focus-within::after");
+    expect(marks).toContain("inset: -3px");
+    expect(marks).toContain("pointer-events: none");
+    expect(marks.match(/linear-gradient/g)).toHaveLength(8);
+    expect(marks.match(/11px 1px/g)).toHaveLength(4);
+    expect(marks.match(/1px 11px/g)).toHaveLength(4);
+    expect(rule(".text-field-frame-inset:focus-within::after")).toContain("inset: 3px");
+    expect(css).not.toContain("text-field-frame-search");
+    expect(css).not.toContain("text-field-frame-composer");
+    expect(rule(":focus-visible")).toContain("background: var(--k)");
+    const exemption = rule(
+      ".text-field-frame > input:focus-visible,\n.text-field-frame > textarea:focus-visible",
+    );
+    expect(exemption).toContain("background: var(--w)");
+    expect(exemption).toContain("color: var(--k)");
+    expect(
+      rule(".personal-instructions-dialog textarea,\n.project-instructions-editor textarea"),
+    ).toContain("border: 0");
+    expect(css).toMatch(
+      /@media \(max-width: 600px\)[\s\S]*?\.orb-rename-form \{[^}]*flex-wrap: wrap/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 600px\)[\s\S]*?\.orb-rename-form > \.text-field-frame \{[^}]*width: 80px/,
+    );
   });
 
-  it("uses a contrasting neutral highlight on both paper and inverted controls", () => {
+  it("uses a neutral highlight on every paper surface", () => {
     expect(rule("::selection")).toContain("background: var(--g2)");
     expect(rule("::selection")).toContain("color: var(--k)");
   });

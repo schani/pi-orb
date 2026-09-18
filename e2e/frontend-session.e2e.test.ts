@@ -23,7 +23,7 @@ async function removeFixtureOrb(page: Page, orbId: string) {
     .toBe(404);
 }
 
-async function expectTextFieldContrast(page: Page, scope = page.locator("body")) {
+async function expectTextFieldCropMarks(page: Page, scope = page.locator("body")) {
   const fields = scope.locator(
     'input:not([type="file"]):not(:disabled):visible, textarea:not(:disabled):visible',
   );
@@ -34,32 +34,75 @@ async function expectTextFieldContrast(page: Page, scope = page.locator("body"))
     const field = fields.nth(index);
     await expectPage(field).not.toHaveAttribute("placeholder");
     await field.evaluate((element) => element.blur());
-    expectPage(
-      await field.evaluate((element) => {
-        const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-        return {
-          background: style?.backgroundColor,
-          caret: style?.caretColor,
-          color: style?.color,
-        };
-      }),
-    ).toEqual({ background: "rgb(255, 255, 255)", caret: "rgb(0, 0, 0)", color: "rgb(0, 0, 0)" });
-    await field.focus();
-    const focused = await field.evaluate((element) => {
-      const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+    const blurred = await field.evaluate((element) => {
+      const frame = element.closest(".text-field-frame");
+      const view = element.ownerDocument.defaultView;
+      const style = view?.getComputedStyle(element);
+      const box = element.getBoundingClientRect();
       return {
         background: style?.backgroundColor,
         caret: style?.caretColor,
         color: style?.color,
-        customCaret: element.classList.contains("composer-input"),
+        marks: frame === null ? undefined : view?.getComputedStyle(frame, "::after").content,
+        rect: { height: box.height, left: box.left, top: box.top, width: box.width },
       };
     });
-    expectPage(focused).toEqual({
-      background: "rgb(0, 0, 0)",
-      caret: focused.customCaret ? "rgba(0, 0, 0, 0)" : "rgb(255, 255, 255)",
-      color: "rgb(255, 255, 255)",
-      customCaret: focused.customCaret,
+    expectPage(blurred.background).toBe("rgb(255, 255, 255)");
+    expectPage(blurred.caret).toBe("rgb(0, 0, 0)");
+    expectPage(blurred.color).toBe("rgb(0, 0, 0)");
+    expectPage(blurred.marks).toBe("none");
+    await field.focus();
+    const focused = await field.evaluate((element) => {
+      const frame = element.closest(".text-field-frame");
+      if (frame === null) return null;
+      const view = element.ownerDocument.defaultView;
+      if (view === null) return null;
+      const style = view.getComputedStyle(element);
+      const marks = view.getComputedStyle(frame, "::after");
+      const fieldBox = element.getBoundingClientRect();
+      const frameBox = frame.getBoundingClientRect();
+      return {
+        background: style.backgroundColor,
+        caret: style.caretColor,
+        color: style.color,
+        customCaret: element.classList.contains("composer-input"),
+        cropBounds: {
+          bottom: frameBox.bottom - Number.parseFloat(marks.bottom),
+          left: frameBox.left + Number.parseFloat(marks.left),
+          right: frameBox.right - Number.parseFloat(marks.right),
+          top: frameBox.top + Number.parseFloat(marks.top),
+        },
+        gradientCount: marks.backgroundImage.split("linear-gradient").length - 1,
+        center: marks.backgroundColor,
+        inset: frame.classList.contains("text-field-frame-inset"),
+        pointerEvents: marks.pointerEvents,
+        rect: {
+          height: fieldBox.height,
+          left: fieldBox.left,
+          top: fieldBox.top,
+          width: fieldBox.width,
+        },
+      };
     });
+    expectPage(focused).not.toBeNull();
+    expectPage(focused?.background).toBe("rgb(255, 255, 255)");
+    expectPage(focused?.color).toBe("rgb(0, 0, 0)");
+    expectPage(focused?.caret).toBe(focused?.customCaret ? "rgba(0, 0, 0, 0)" : "rgb(0, 0, 0)");
+    expectPage(focused?.gradientCount).toBe(8);
+    expectPage(focused?.center).toBe("rgba(0, 0, 0, 0)");
+    expectPage(focused?.pointerEvents).toBe("none");
+    const cropInset = focused?.inset ? 3 : -3;
+    expectPage(focused?.cropBounds.left).toBeCloseTo((focused?.rect.left ?? 0) + cropInset, 5);
+    expectPage(focused?.cropBounds.right).toBeCloseTo(
+      (focused?.rect.left ?? 0) + (focused?.rect.width ?? 0) - cropInset,
+      5,
+    );
+    expectPage(focused?.cropBounds.top).toBeCloseTo((focused?.rect.top ?? 0) + cropInset, 5);
+    expectPage(focused?.cropBounds.bottom).toBeCloseTo(
+      (focused?.rect.top ?? 0) + (focused?.rect.height ?? 0) - cropInset,
+      5,
+    );
+    expectPage(focused?.rect).toEqual(blurred.rect);
   }
 }
 
@@ -1819,23 +1862,23 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("inverts every production text-field surface on focus and restores it on blur", async () => {
+  it("marks every production text-field family with crop corners on focus", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     try {
       await gotoFrontendFixture(page, `${origin}/`);
       await expectPage(
         page.getByRole("heading", { name: "New project", exact: true }),
       ).toBeVisible();
-      await expectTextFieldContrast(page, page.locator(".new-project"));
+      await expectTextFieldCropMarks(page, page.locator(".new-project"));
 
       await page.keyboard.press("Meta+k");
       const search = page.getByRole("dialog", { name: "Find projects and orbs" });
-      await expectTextFieldContrast(page, search);
+      await expectTextFieldCropMarks(page, search);
       await page.keyboard.press("Escape");
 
       await page.getByRole("button", { name: "Personal instructions" }).click();
       const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
-      await expectTextFieldContrast(page, personal);
+      await expectTextFieldCropMarks(page, personal);
       await personal.getByRole("button", { name: "Close personal instructions" }).click();
 
       await page
@@ -1843,20 +1886,24 @@ describe("frontend-only browser behavior", () => {
         .first()
         .click();
       const config = page.getByRole("dialog");
-      await expectTextFieldContrast(page, config.getByRole("tabpanel", { name: "General" }));
+      await expectTextFieldCropMarks(page, config.getByRole("tabpanel", { name: "General" }));
       await config.getByRole("tab", { name: "Instructions" }).click();
-      await expectTextFieldContrast(page, config.getByRole("tabpanel", { name: "Instructions" }));
+      await expectTextFieldCropMarks(page, config.getByRole("tabpanel", { name: "Instructions" }));
       await config.getByRole("tab", { name: "MCPs" }).click();
-      await config.getByRole("button", { name: "add server", exact: true }).click();
-      await expectTextFieldContrast(page, config.getByRole("tabpanel", { name: "MCPs" }));
+      const mcpPanel = config.getByRole("tabpanel", { name: "MCPs" });
+      const existingMcp = mcpPanel.locator(".project-mcp-connection").first();
+      await existingMcp.locator("summary").click();
+      await expectTextFieldCropMarks(page, existingMcp);
+      await mcpPanel.getByRole("button", { name: "add server", exact: true }).click();
+      await expectTextFieldCropMarks(page, mcpPanel);
       await config.getByRole("tab", { name: "Secrets" }).click();
-      await expectTextFieldContrast(page, config.getByRole("tabpanel", { name: "Secrets" }));
+      await expectTextFieldCropMarks(page, config.getByRole("tabpanel", { name: "Secrets" }));
       await config.getByRole("button", { name: "Close project config" }).click();
 
       await page.goto(`${origin}/${ORB_HASH}`);
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await expectPage(composer).toBeVisible();
-      await expectTextFieldContrast(page, page.locator(".composer"));
+      await expectTextFieldCropMarks(page, page.locator(".composer"));
       const blockCaret = page.locator(".composer-caret");
       await composer.focus();
       await expectPage(composer).toHaveAttribute("data-block-caret", "true");
@@ -1864,13 +1911,219 @@ describe("frontend-only browser behavior", () => {
       await expectPage(blockCaret).toHaveCSS("background-color", "rgb(255, 255, 255)");
       await expectPage(blockCaret).toHaveCSS("mix-blend-mode", "difference");
       await page.getByRole("button", { name: "Rename orb" }).click();
-      await expectTextFieldContrast(page, page.locator(".orb-rename-form"));
+      await expectTextFieldCropMarks(page, page.locator(".orb-rename-form"));
     } finally {
       await page.close();
     }
   });
 
-  it("keeps native selection visible on normal and inverted surfaces", async () => {
+  it.each([1280, 390, 320])("preserves form spacing at %ipx", async (width) => {
+    const page = await browser.newPage({
+      viewport: { width, height: 844 },
+      ...(width < 600 ? { isMobile: true, hasTouch: true } : {}),
+    });
+    try {
+      await page.goto(`${origin}/`);
+      const newProject = page.locator(".new-project");
+      const newProjectName = newProject.getByRole("textbox", { name: "Name" });
+      const create = newProject.getByRole("button", { name: "create project" });
+      const newProjectGeometry = await newProjectName.evaluate((element) => {
+        const label = element.closest("label");
+        const form = element.closest("form");
+        const button = form?.querySelector("button");
+        if (label === null || form === null || button === null) return null;
+        const fieldBox = element.getBoundingClientRect();
+        const labelBox = label.getBoundingClientRect();
+        const formBox = form.getBoundingClientRect();
+        const buttonBox = button.getBoundingClientRect();
+        return {
+          buttonLeft: buttonBox.left,
+          fieldLeft: fieldBox.left,
+          fieldWidth: fieldBox.width,
+          formLeft: formBox.left,
+          formWidth: formBox.width,
+          labelWidth: labelBox.width,
+        };
+      });
+      expectPage(newProjectGeometry).not.toBeNull();
+      expectPage(newProjectGeometry?.fieldLeft).toBeCloseTo(newProjectGeometry?.formLeft ?? 0, 5);
+      expectPage(newProjectGeometry?.buttonLeft).toBeCloseTo(newProjectGeometry?.formLeft ?? 0, 5);
+      expectPage(newProjectGeometry?.fieldWidth).toBeCloseTo(newProjectGeometry?.formWidth ?? 0, 5);
+      expectPage(newProjectGeometry?.labelWidth).toBeCloseTo(newProjectGeometry?.formWidth ?? 0, 5);
+      await expectPage(create).toBeVisible();
+
+      await page.getByTitle("project config").first().click();
+      const config = page.getByRole("dialog");
+      const name = config.getByRole("tabpanel", { name: "General" }).getByRole("textbox", {
+        name: "Name",
+      });
+      await name.focus();
+      const nameGeometry = await name.evaluate((element) => {
+        const frame = element.closest(".text-field-frame");
+        const label = element.closest("label");
+        const form = element.closest("form");
+        const save = form?.querySelector("button[type='submit']");
+        const labelText = label?.firstChild;
+        const view = element.ownerDocument.defaultView;
+        if (
+          frame === null ||
+          label === null ||
+          labelText === null ||
+          labelText === undefined ||
+          form === null ||
+          save === null ||
+          view === null
+        )
+          return null;
+        const marks = view.getComputedStyle(frame, "::after");
+        const frameBox = frame.getBoundingClientRect();
+        const fieldBox = element.getBoundingClientRect();
+        const labelRange = element.ownerDocument.createRange();
+        labelRange.selectNodeContents(labelText);
+        return {
+          borderLeft: Number.parseFloat(view.getComputedStyle(element).borderLeftWidth),
+          fieldLeft: fieldBox.left,
+          fieldRight: fieldBox.right,
+          fieldWidth: fieldBox.width,
+          formLeft: form.getBoundingClientRect().left,
+          formWidth: form.getBoundingClientRect().width,
+          labelLeft: labelRange.getBoundingClientRect().left,
+          labelWidth: label.getBoundingClientRect().width,
+          cropLeft: frameBox.left + Number.parseFloat(marks.left),
+          saveLeft: save.getBoundingClientRect().left,
+        };
+      });
+      expectPage(nameGeometry).not.toBeNull();
+      expectPage(nameGeometry?.borderLeft).toBe(1);
+      expectPage(nameGeometry?.cropLeft).toBeCloseTo((nameGeometry?.fieldLeft ?? 0) - 3, 5);
+      expectPage(nameGeometry?.fieldRight).toBeLessThanOrEqual(width);
+      expectPage(nameGeometry?.fieldLeft).toBeCloseTo(nameGeometry?.formLeft ?? 0, 5);
+      expectPage(nameGeometry?.labelLeft).toBeCloseTo(nameGeometry?.formLeft ?? 0, 5);
+      expectPage(nameGeometry?.saveLeft).toBeCloseTo(nameGeometry?.formLeft ?? 0, 5);
+      expectPage(nameGeometry?.fieldWidth).toBeCloseTo(nameGeometry?.formWidth ?? 0, 5);
+      expectPage(nameGeometry?.labelWidth).toBeCloseTo(nameGeometry?.formWidth ?? 0, 5);
+
+      await config.getByRole("tab", { name: "Instructions" }).click();
+      const instructions = config.getByRole("textbox", {
+        name: "Additional project instructions",
+      });
+      await instructions.focus();
+      const instructionsGeometry = await instructions.evaluate((element) => {
+        const frame = element.closest(".text-field-frame");
+        const view = element.ownerDocument.defaultView;
+        if (frame === null || view === null) return null;
+        const marks = view.getComputedStyle(frame, "::after");
+        const frameBox = frame.getBoundingClientRect();
+        const fieldBox = element.getBoundingClientRect();
+        const parentBox = frame.parentElement?.getBoundingClientRect();
+        return {
+          borderLeft: Number.parseFloat(view.getComputedStyle(element).borderLeftWidth),
+          crop: {
+            bottom: frameBox.bottom - Number.parseFloat(marks.bottom),
+            left: frameBox.left + Number.parseFloat(marks.left),
+            right: frameBox.right - Number.parseFloat(marks.right),
+            top: frameBox.top + Number.parseFloat(marks.top),
+          },
+          field: {
+            bottom: fieldBox.bottom,
+            left: fieldBox.left,
+            right: fieldBox.right,
+            top: fieldBox.top,
+          },
+          padding: view.getComputedStyle(element).padding,
+          parent: parentBox
+            ? {
+                bottom: parentBox.bottom,
+                left: parentBox.left,
+                right: parentBox.right,
+                top: parentBox.top,
+              }
+            : null,
+          pointerEvents: marks.pointerEvents,
+          resize: view.getComputedStyle(element).resize,
+        };
+      });
+      expectPage(instructionsGeometry).not.toBeNull();
+      expectPage(instructionsGeometry?.borderLeft).toBe(0);
+      expectPage(instructionsGeometry?.padding).toBe("8px 10px");
+      expectPage(instructionsGeometry?.pointerEvents).toBe("none");
+      expectPage(instructionsGeometry?.resize).toBe("vertical");
+      expectPage(instructionsGeometry?.crop.left).toBeCloseTo(
+        (instructionsGeometry?.field.left ?? 0) + 3,
+        5,
+      );
+      expectPage(instructionsGeometry?.crop.right).toBeCloseTo(
+        (instructionsGeometry?.field.right ?? 0) - 3,
+        5,
+      );
+      expectPage(instructionsGeometry?.crop.top).toBeCloseTo(
+        (instructionsGeometry?.field.top ?? 0) + 3,
+        5,
+      );
+      expectPage(instructionsGeometry?.crop.bottom).toBeCloseTo(
+        (instructionsGeometry?.field.bottom ?? 0) - 3,
+        5,
+      );
+      expectPage(instructionsGeometry?.crop.left).toBeGreaterThanOrEqual(
+        instructionsGeometry?.parent?.left ?? 0,
+      );
+      expectPage(instructionsGeometry?.crop.right).toBeLessThanOrEqual(
+        instructionsGeometry?.parent?.right ?? width,
+      );
+      const resized = await instructions.evaluate((element) => {
+        element.style.height = `${element.getBoundingClientRect().height + 20}px`;
+        const frame = element.closest(".text-field-frame");
+        const view = element.ownerDocument.defaultView;
+        if (frame === null || view === null) return null;
+        const marks = view.getComputedStyle(frame, "::after");
+        const frameBox = frame.getBoundingClientRect();
+        return {
+          cropBottom: frameBox.bottom - Number.parseFloat(marks.bottom),
+          cropHeight: Number.parseFloat(marks.height),
+          fieldBottom: element.getBoundingClientRect().bottom,
+          fieldHeight: element.getBoundingClientRect().height,
+          frameHeight: frameBox.height,
+        };
+      });
+      expectPage(resized?.cropHeight).toBeCloseTo((resized?.fieldHeight ?? 0) - 6, 5);
+      expectPage(resized?.cropBottom).toBeCloseTo((resized?.fieldBottom ?? 0) - 3, 5);
+      expectPage(resized?.frameHeight).toBeCloseTo(resized?.fieldHeight ?? 0, 5);
+
+      await config.getByRole("button", { name: "Close project config" }).click();
+      await page.getByRole("button", { name: "Personal instructions" }).click();
+      const personal = page.getByRole("dialog", { name: "~/AGENTS.md" });
+      await expectTextFieldCropMarks(page, personal);
+      const personalEditor = personal.getByRole("textbox", { name: "Personal AGENTS.md" });
+      const personalBounds = await personalEditor.evaluate((element) => {
+        const frame = element.closest(".text-field-frame-inset");
+        const dialog = element.closest("[role='dialog']");
+        const view = element.ownerDocument.defaultView;
+        if (frame === null || dialog === null || view === null) return null;
+        const marks = view.getComputedStyle(frame, "::after");
+        const frameBox = frame.getBoundingClientRect();
+        const dialogBox = dialog.getBoundingClientRect();
+        return {
+          cropBottom: frameBox.bottom - Number.parseFloat(marks.bottom),
+          cropLeft: frameBox.left + Number.parseFloat(marks.left),
+          cropRight: frameBox.right - Number.parseFloat(marks.right),
+          cropTop: frameBox.top + Number.parseFloat(marks.top),
+          dialogBottom: dialogBox.bottom,
+          dialogLeft: dialogBox.left,
+          dialogRight: dialogBox.right,
+          dialogTop: dialogBox.top,
+        };
+      });
+      expectPage(personalBounds).not.toBeNull();
+      expectPage(personalBounds?.cropLeft).toBeGreaterThan(personalBounds?.dialogLeft ?? 0);
+      expectPage(personalBounds?.cropRight).toBeLessThan(personalBounds?.dialogRight ?? width);
+      expectPage(personalBounds?.cropTop).toBeGreaterThan(personalBounds?.dialogTop ?? 0);
+      expectPage(personalBounds?.cropBottom).toBeLessThan(personalBounds?.dialogBottom ?? 844);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("keeps native selection visible on white and dark surfaces", async () => {
     const page = await browser.newPage();
     try {
       await gotoFrontendFixture(page, `${origin}/`);

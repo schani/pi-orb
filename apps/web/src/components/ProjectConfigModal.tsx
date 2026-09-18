@@ -1,6 +1,7 @@
 import type { ProjectView } from "@pi-orb/protocol";
 import { type RefObject, useRef, useState } from "react";
 import { useInitialFocus } from "../lib/use-initial-focus.ts";
+import { Icon } from "./Icons.tsx";
 import { ProjectGeneralSettings } from "./ProjectGeneralSettings.tsx";
 import {
   type ProjectInstructionsDraft,
@@ -89,13 +90,14 @@ export function ProjectConfigModal({
             )}
           </div>
           <button
-            className="project-secrets-close"
+            className="icon-button modal-close"
             type="button"
             disabled={saving}
             onClick={onClose}
             aria-label="Close project config"
+            title="Close project config"
           >
-            ×
+            <Icon name="x" />
           </button>
         </header>
         <div className="project-config-tabs" role="tablist" aria-label="Project config">

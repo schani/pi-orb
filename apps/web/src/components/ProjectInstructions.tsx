@@ -1,6 +1,7 @@
 import { type ProjectInstructions, validateProjectInstructions } from "@pi-orb/protocol";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { describeApiError, getProjectInstructions, saveProjectInstructions } from "../lib/api.ts";
+import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 export interface ProjectInstructionsDraft {
   snapshot: ProjectInstructions | null;
@@ -95,18 +96,20 @@ export function ProjectInstructionsEditor({
         void save();
       }}
     >
-      <textarea
-        aria-label="Additional project instructions"
-        spellCheck={false}
-        autoComplete="off"
-        value={document.content}
-        disabled={loading || awaitingLoad || saving || document.snapshot === null}
-        onChange={(event) => {
-          remember({ ...document, content: event.target.value });
-          setSaved(false);
-          setError(null);
-        }}
-      />
+      <TextFieldFrame className="text-field-frame-inset">
+        <textarea
+          aria-label="Additional project instructions"
+          spellCheck={false}
+          autoComplete="off"
+          value={document.content}
+          disabled={loading || awaitingLoad || saving || document.snapshot === null}
+          onChange={(event) => {
+            remember({ ...document, content: event.target.value });
+            setSaved(false);
+            setError(null);
+          }}
+        />
+      </TextFieldFrame>
       <div className="personal-instructions-feedback">
         {error !== null ? (
           <span role="alert" className="personal-instructions-error">

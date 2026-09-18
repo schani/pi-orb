@@ -1,5 +1,11 @@
 # Web UI
 
+## Composer spacing and modal close controls (implemented, 2026-09-18)
+
+The composer keeps its functional `>` / `!` / `!!` / `/` mode prefix in a reserved `2ch` column with a `1ch` gap. This is compact without letting `!!` move or resize the editor; desktop, expanded phone, and collapsed phone use the same geometry. Attachments remain unindented, and the command picker aligns with the editor while preserving the right margin. Submission, mode transitions, block-caret measurement, and phone controls are unchanged.
+
+Project Config and Personal Instructions share an X close control flush with the dialog's inner top-right corner: 32px square on desktop, 44px on phone, with an 18px icon. Header text retains its left inset and reserves the close width; the control is independent of Config's optional description line. App Search has no close button and remains Escape-dismissed. Non-modal X controls are unchanged. This browser-local geometry needs no telemetry.
+
 ## Response copy (Corner action selected and implemented, 2026-09-16)
 
 **Selected: Corner action.** Every non-empty assistant response has the shared copy icon at the top right of its first non-empty text block. A historical response with multiple text blocks still has one action: placement belongs to the first block while copied source joins every non-empty text block in original order with `\n\n`. This minimal boundary preserves existing tool grouping. Short, long, fenced-code and mixed-block responses reserve the action width so content cannot overlap it or overflow. Phone response blocks also reserve the action's 44px height, and feedback stays in the narrower content lane. Desktop reveals the action when its response block is hovered or contains keyboard focus, not when an unrelated part of the surrounding agent turn is hovered. Touch and phone layouts keep it visible; phone targets are 44px square. Inline tail was rejected after use by user preference.
@@ -20,11 +26,19 @@ Production text inputs and textareas show no placeholder copy in any state, incl
 
 Dashboard orb title rows vertically center the 16px status tile against the fixed 22px, single-line orb name. Names continue to truncate rather than wrap. Source and browser regressions cover absent production placeholders and alignment at desktop, phone width and 150% CSS zoom. Validation passed 274 web tests, repository typechecking and all 65 frontend browser tests. The final collapsed-phone copy removal then passed focused Composer and 320px Chromium/WebKit regressions. The freshly restarted shared preview was checked on dashboard and orb routes.
 
-## Text-field focus inversion (selected and implemented, 2026-09-16)
+## Text-field focus (Crop marks selected and implemented, 2026-09-18)
 
-**Selected: white on black.** Every production text input and textarea now has black text and caret on white while blurred, then a black background with white text and caret on focus. The shared neutral selection treatment is unchanged. This applies through one global rule to new-project fields, Find, orb rename, the composer, project General / Instructions / MCPs / Secrets, and personal `~/AGENTS.md`. File pickers and selects are not text fields. The App Search, project-instructions and composer focus overrides are removed. The desktop composer retains its difference-blended white block caret over the focused black field; phone uses the native white caret.
+**Selected: Crop marks.** Focus overlays four 11px × 11px black registration corners 3px outside production text inputs and textareas. The full-bleed project and personal instructions editors instead place them 3px inside existing field padding so they cannot collide with the modal frame. Normal bordered fields and the composer stay outside. The center and edges remain open. Fields retain their borders, spacing, dimensions, padding, native events/refs, and textarea resizing. Desktop, 390px, and 320px browser checks cover both full-bleed editors and resizing. This browser-local state needs no telemetry.
 
-[`design-prototypes/text-field-focus.html`](../design-prototypes/text-field-focus.html) preserves the selected inverted option and rejected inset-rule alternative. The production browser regression visits every text-field style family, checks exact focus and blur colors, absent placeholders, and the custom composer caret. The CSS contract prevents local search/composer/instructions overrides from returning. Validation passed 273 web unit/contract tests, repository typechecking, and all 64 frontend browser tests across Chromium and WebKit. The first full browser run failed only because managed WebKit was absent; `npm run test:e2e:install` installed the lockfile-pinned engine, after which the unchanged suite passed.
+The 2026-09-16 white-on-black treatment was rejected because it replaced the writing surface. [`design-prototypes/text-field-focus.html`](../design-prototypes/text-field-focus.html) preserves that study.
+
+### Focus studies
+
+[`design-prototypes/focus-alternatives.html`](../design-prototypes/focus-alternatives.html) preserves Ink rail, selected Crop marks, Ledger, Carbon lift, and Graphite wash. Crop marks identify the active field without consuming space or changing its frame. Ledger, Carbon lift, and Graphite wash remain rejected.
+
+Ink Rail was rejected after production use: its writing-edge placement formed a distracting double edge. [`design-prototypes/ink-rail-refinements.html`](../design-prototypes/ink-rail-refinements.html) preserves Detached rail, Short rail, Heavy rail, Open edge, and Margin bracket. Detached rail was briefly selected, then rejected because avoiding clipping encouraged unwanted spacing and alignment changes. Browser regressions cover every field family, transparent centers, focus/blur geometry, original form layout at 320/390px, native textarea resizing, and caret behavior.
+
+**Validation:** 315 web tests, repository typechecking, and 10 targeted desktop/mobile browser cases pass. The full frontend run passed 85 of 86 cases; the WebKit missing-resource transition did not render its expected message within five seconds. Its cause is unresolved, the run was not repeated, and evidence is preserved in `test-failures/2026-09-18-crop-marks-full-frontend-webkit-missing-resource.md`. No deployment was performed.
 
 ## Transcript thinking markers (Bit register selected and implemented, 2026-09-16)
 

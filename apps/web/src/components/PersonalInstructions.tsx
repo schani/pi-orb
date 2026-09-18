@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { describeApiError, getPersonalInstructions, savePersonalInstructions } from "../lib/api.ts";
 import { Icon } from "./Icons.tsx";
+import { TextFieldFrame } from "./TextFieldFrame.tsx";
 
 /** Account scope lives with home, never inside a project header. Drafts stay in memory only. */
 export function PersonalInstructionsButton() {
@@ -137,7 +138,7 @@ export function PersonalInstructionsButton() {
                 <span id="personal-instructions-title">~/AGENTS.md</span>
                 <button
                   ref={closeButton}
-                  className="icon-button"
+                  className="icon-button modal-close"
                   aria-label="Close personal instructions"
                   title="Close personal instructions"
                   type="button"
@@ -153,18 +154,20 @@ export function PersonalInstructionsButton() {
                   void save();
                 }}
               >
-                <textarea
-                  aria-label="Personal AGENTS.md"
-                  spellCheck={false}
-                  autoComplete="off"
-                  value={draft}
-                  disabled={loading || saving || snapshot === null}
-                  onChange={(event) => {
-                    setDraft(event.target.value);
-                    setSaved(false);
-                    setError(null);
-                  }}
-                />
+                <TextFieldFrame className="text-field-frame-inset">
+                  <textarea
+                    aria-label="Personal AGENTS.md"
+                    spellCheck={false}
+                    autoComplete="off"
+                    value={draft}
+                    disabled={loading || saving || snapshot === null}
+                    onChange={(event) => {
+                      setDraft(event.target.value);
+                      setSaved(false);
+                      setError(null);
+                    }}
+                  />
+                </TextFieldFrame>
                 <div className="personal-instructions-feedback">
                   {error !== null ? (
                     <span role="alert" className="personal-instructions-error">

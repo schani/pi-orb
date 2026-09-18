@@ -32,6 +32,7 @@ import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
 import { StateTile } from "../components/StateTile.tsx";
 import { SubagentRail } from "../components/SubagentRail.tsx";
+import { TextFieldFrame } from "../components/TextFieldFrame.tsx";
 import { useWorkspaceUploads } from "../components/useWorkspaceUploads.tsx";
 import {
   type ApiError,
@@ -1321,13 +1322,15 @@ function OrbConversation({
                   void saveName();
                 }}
               >
-                <input
-                  ref={renameInputRef}
-                  aria-label="orb name"
-                  value={renameText}
-                  maxLength={80}
-                  onChange={(event) => setRenameText(event.target.value)}
-                />
+                <TextFieldFrame>
+                  <input
+                    ref={renameInputRef}
+                    aria-label="orb name"
+                    value={renameText}
+                    maxLength={80}
+                    onChange={(event) => setRenameText(event.target.value)}
+                  />
+                </TextFieldFrame>
                 <button type="submit">save</button>
                 <button type="button" onClick={() => setRenaming(false)}>
                   cancel

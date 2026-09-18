@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Text field focus alternatives</title>
+<style>
+:root{color-scheme:light;--w:#fff;--k:#000;--g1:#f2f2f2;--g2:#999;--g3:#555;--ok:#1a7e37;--mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;--row:20px}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--w);color:var(--k);font:13px/20px var(--mono);font-variant-numeric:tabular-nums}button,input,textarea{margin:0;border:0;border-radius:0;background:transparent;color:inherit;font:inherit}button{min-height:20px;padding:0 8px;cursor:pointer;border:1px solid var(--k);background:var(--w);line-height:18px}button:hover{background:var(--k);color:var(--w)}button:focus-visible{outline:2px solid var(--k);outline-offset:2px}.study{min-height:100dvh}.study-head{position:sticky;z-index:10;top:0;background:var(--w);border-bottom:1px solid var(--k)}.title-row{display:flex;min-height:25px;align-items:center;gap:10px;padding-left:10px}.title{font-weight:700;text-transform:uppercase;letter-spacing:.08em}.preview-control{margin-left:auto;border-width:0 0 0 1px;align-self:stretch}.preview-control[aria-pressed=true]{background:var(--k);color:var(--w)}.variant-nav{display:flex;overflow-x:auto;border-top:1px solid var(--g1);scrollbar-width:none}.variant-nav button{flex:1;min-width:max-content;border-width:0 1px 0 0;padding:1px 9px;line-height:21px}.variant-nav button[aria-pressed=true]{background:var(--k);color:var(--w)}.gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px;align-items:start}.gallery[data-view="selected"]{grid-template-columns:minmax(0,1fr)}.candidate{min-width:0;border:1px solid var(--k)}.candidate[hidden]{display:none}.candidate-head{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 10px;padding:5px 8px;border-bottom:1px solid var(--k)}.number{grid-row:1/3;display:grid;width:32px;height:40px;place-items:center;background:var(--k);color:var(--w);font-weight:700}.candidate h2{margin:0;font-size:13px;line-height:20px;text-transform:uppercase;letter-spacing:.08em}.rationale{margin:0;color:var(--g3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.specimen{background:var(--w)}.orb-head{display:flex;height:24px;align-items:center;gap:8px;padding:0 8px;border-bottom:1px solid var(--k)}.orb-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.state{margin-left:auto;color:var(--ok)}.transcript{padding-top:4px}.turn{padding:4px 10px;overflow-wrap:anywhere}.turn.user{margin:4px 0;color:var(--w);background:var(--k);border-block:1px solid var(--k)}.composer{position:relative;padding:4px 12px;border-top:1px solid var(--k)}.composer-line{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px}.prefix{font-weight:700;text-align:right}.preview-flag{position:absolute;top:-20px;right:7px;padding:0 4px;color:var(--g3);background:var(--w);border:1px solid var(--g2);font-size:10px;line-height:15px;text-transform:uppercase;letter-spacing:.05em}.study:not(.previewing) .preview-flag{display:none}.fields{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:8px 10px 10px;background:var(--g1);border-top:1px solid var(--g2)}label{display:block;color:var(--g3)}.field-shell{position:relative;min-width:0;background:var(--w);border:1px solid var(--k)}.composer-shell{border:0}.study-field{position:relative;z-index:1;display:block;width:100%;min-width:0;padding:0 6px;color:var(--k);background:transparent;border:0;caret-color:var(--k);line-height:18px}.study-field:focus{outline:0;color:var(--k);background:transparent;caret-color:var(--k)}input.study-field{height:20px}textarea.study-field{height:60px;resize:vertical;line-height:20px}.composer-field{height:80px!important;min-height:80px;padding:0;resize:none!important}.field-shell::before,.field-shell::after{pointer-events:none}
+/* 1 — a single typographic margin stroke. */
+[data-variant="ink"] .field-shell:focus-within::before,[data-variant="ink"].is-preview .composer-shell::before{content:"";position:absolute;z-index:2;inset:0 auto 0 -5px;width:2px;background:var(--k)}
+/* 2 — four registration corners, leaving every edge open. */
+[data-variant="crop"] .field-shell:focus-within::after,[data-variant="crop"].is-preview .composer-shell::after{content:"";position:absolute;z-index:2;inset:-3px;background:linear-gradient(var(--k),var(--k)) left top/11px 1px no-repeat,linear-gradient(var(--k),var(--k)) left top/1px 11px no-repeat,linear-gradient(var(--k),var(--k)) right top/11px 1px no-repeat,linear-gradient(var(--k),var(--k)) right top/1px 11px no-repeat,linear-gradient(var(--k),var(--k)) left bottom/11px 1px no-repeat,linear-gradient(var(--k),var(--k)) left bottom/1px 11px no-repeat,linear-gradient(var(--k),var(--k)) right bottom/11px 1px no-repeat,linear-gradient(var(--k),var(--k)) right bottom/1px 11px no-repeat}
+/* 3 — writing paper tied to the product's 20px rhythm. */
+[data-variant="ledger"] .field-shell:focus-within,[data-variant="ledger"].is-preview .composer-shell{background:repeating-linear-gradient(to bottom,var(--w) 0,var(--w) 19px,#d6d6d6 19px,#d6d6d6 20px);box-shadow:inset 0 -2px 0 var(--k)}
+/* 4 — a hard printed offset, without changing layout position. */
+[data-variant="carbon"] .field-shell:focus-within,[data-variant="carbon"].is-preview .composer-shell{box-shadow:3px 3px 0 var(--k)}
+/* 5 — a quiet surface change with an exact inset keyline. */
+[data-variant="graphite"] .field-shell:focus-within,[data-variant="graphite"].is-preview .composer-shell{background:#ededed;box-shadow:inset 0 0 0 1px var(--k)}
+.footer-note{padding:0 12px 12px;color:var(--g3)}
+@media(max-width:760px){.gallery{grid-template-columns:minmax(0,1fr)}.rationale{white-space:normal}.title-row{flex-wrap:wrap;padding:0 0 0 8px}.preview-control,.variant-nav button{min-height:44px}.candidate-head{padding:5px 7px}.gallery{gap:10px;padding:10px}.study-field{font-size:16px}.composer-field{height:88px!important;min-height:88px;line-height:20px}.fields{padding-inline:8px}}
+@media(max-width:360px){.gallery{padding:8px}.variant-nav button{padding-inline:8px}.title{font-size:12px}.preview-control{padding-inline:6px}.turn,.composer{padding-inline:8px}}
+</style>
+</head>
+<body>
+<div class="study previewing" id="study">
+<header class="study-head">
+  <div class="title-row"><span class="title">Focus alternatives</span><span class="muted">text stays black</span><button id="preview-toggle" class="preview-control" type="button" aria-pressed="true">Focus preview: on</button></div>
+  <nav class="variant-nav" aria-label="Displayed alternatives">
+    <button type="button" data-select="all" aria-pressed="true">All</button>
+    <button type="button" data-select="ink" aria-pressed="false">Ink rail</button>
+    <button type="button" data-select="crop" aria-pressed="false">Crop marks</button>
+    <button type="button" data-select="ledger" aria-pressed="false">Ledger</button>
+    <button type="button" data-select="carbon" aria-pressed="false">Carbon lift</button>
+    <button type="button" data-select="graphite" aria-pressed="false">Graphite wash</button>
+  </nav>
+</header>
+<main class="gallery" id="gallery"></main>
+<p class="footer-note">Study only · fields are local drafts · no submission or backend.</p>
+</div>
+<script>
+const variants=[
+  {slug:'ink',number:'01',name:'Ink rail',why:'A decisive margin stroke marks the writing edge without enclosing it.'},
+  {slug:'crop',number:'02',name:'Crop marks',why:'Registration corners identify the active field while leaving its frame untouched.'},
+  {slug:'ledger',number:'03',name:'Ledger',why:'Baselines turn focus into writing paper aligned to the 20px text rhythm.'},
+  {slug:'carbon',number:'04',name:'Carbon lift',why:'A hard offset edge gives the white sheet physical weight without movement.'},
+  {slug:'graphite',number:'05',name:'Graphite wash',why:'A pale graphite surface and inset keyline provide the quietest state change.'}
+];
+const gallery=document.querySelector('#gallery');
+for(const item of variants){
+  const article=document.createElement('article');
+  article.className='candidate is-preview';
+  article.dataset.variant=item.slug;
+  article.innerHTML=`<header class="candidate-head"><span class="number">${item.number}</span><h2>${item.name}</h2><p class="rationale">${item.why}</p></header>
+  <section class="specimen" aria-label="${item.name} conversation specimen">
+    <header class="orb-head"><span class="orb-name">focus study</span><span class="state">■ running</span></header>
+    <div class="transcript"><div class="turn user"><span class="visually-hidden">You: </span>Keep the composer legible while I write.</div><div class="turn"><span class="visually-hidden">Orb: </span>Focus can be emphatic without reversing the paper.</div></div>
+    <form><div class="composer"><span class="preview-flag" aria-hidden="true">study preview</span><div class="composer-line"><span class="prefix" aria-hidden="true">&gt;</span><div class="field-shell composer-shell"><textarea class="study-field composer-field" data-draft="composer" aria-label="${item.name} message">Compare this treatment against the transcript.</textarea></div></div></div>
+    <div class="fields"><label>Name<div class="field-shell"><input class="study-field" data-draft="name" aria-label="${item.name} name" value="focus study"></div></label><label>Instructions<div class="field-shell"><textarea class="study-field" data-draft="instructions" aria-label="${item.name} instructions">Keep the interface monochrome. Preserve the 20px writing rhythm.</textarea></div></label></div></form>
+  </section>`;
+  gallery.append(article);
+}
+const study=document.querySelector('#study');
+const toggle=document.querySelector('#preview-toggle');
+const choices=[...document.querySelectorAll('[data-select]')];
+let selected='all';
+let preview=true;
+function setPreview(next){
+  preview=next;
+  study.classList.toggle('previewing',preview);
+  document.querySelectorAll('.candidate').forEach(card=>card.classList.toggle('is-preview',preview));
+  toggle.setAttribute('aria-pressed',String(preview));
+  toggle.textContent=preview?'Focus preview: on':'Restore focus preview';
+}
+function select(slug){
+  selected=variants.some(item=>item.slug===slug)?slug:'all';
+  document.querySelectorAll('.candidate').forEach(card=>card.hidden=selected!=='all'&&card.dataset.variant!==selected);
+  gallery.dataset.view=selected==='all'?'all':'selected';
+  choices.forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.select===selected)));
+  const next=new URL(location.href);next.searchParams.delete('variant');if(selected!=='all')next.searchParams.set('variant',selected);history.replaceState(null,'',next);
+}
+toggle.addEventListener('click',()=>setPreview(!preview));
+choices.forEach(button=>button.addEventListener('click',()=>select(button.dataset.select)));
+document.addEventListener('focusin',event=>{if(event.target.matches?.('.study-field'))setPreview(false)});
+document.addEventListener('submit',event=>event.preventDefault());
+select(new URLSearchParams(location.search).get('variant')||'all');
+</script>
+<style>.muted{color:var(--g3)}.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}</style>
+</body>
+</html>

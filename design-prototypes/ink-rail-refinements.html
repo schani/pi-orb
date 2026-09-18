@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ink rail refinements</title>
+<style>
+:root{color-scheme:light;--w:#fff;--k:#000;--g1:#f2f2f2;--g2:#999;--g3:#555;--ok:#1a7e37;--mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--w);color:var(--k);font:13px/20px var(--mono);font-variant-numeric:tabular-nums}button,input,textarea{margin:0;border:0;border-radius:0;background:transparent;color:inherit;font:inherit}button{min-height:20px;padding:0 8px;cursor:pointer;border:1px solid var(--k);background:var(--w);line-height:18px}button:hover{background:var(--k);color:var(--w)}button:focus-visible{outline:2px solid var(--k);outline-offset:2px}.study{min-height:100dvh}.study-head{position:sticky;z-index:10;top:0;background:var(--w);border-bottom:1px solid var(--k)}.title-row{display:flex;min-height:25px;align-items:center;gap:10px;padding-left:10px}.title{font-weight:700;text-transform:uppercase;letter-spacing:.08em}.annotation{color:var(--g3)}.preview-control{margin-left:auto;align-self:stretch;border-width:0 0 0 1px}.preview-control[aria-pressed=true]{background:var(--k);color:var(--w)}.variant-nav{display:flex;overflow-x:auto;border-top:1px solid var(--g1);scrollbar-width:none}.variant-nav button{flex:1;min-width:max-content;border-width:0 1px 0 0;padding:1px 9px;line-height:21px}.variant-nav button[aria-pressed=true]{background:var(--k);color:var(--w)}.gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px;align-items:start}.gallery[data-view=selected]{grid-template-columns:minmax(0,1fr)}.candidate{min-width:0;border:1px solid var(--k)}.candidate[hidden]{display:none}.candidate:last-child:nth-child(odd){grid-column:1/-1}.candidate-head{display:grid;grid-template-columns:32px minmax(0,1fr);column-gap:10px;padding:5px 8px;border-bottom:1px solid var(--k)}.number{grid-row:1/3;display:grid;width:32px;height:40px;place-items:center;background:var(--k);color:var(--w);font-weight:700}.candidate h2{margin:0;font-size:13px;line-height:20px;text-transform:uppercase;letter-spacing:.08em}.tradeoff{margin:0;color:var(--g3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.specimen{background:var(--w)}.orb-head{display:flex;height:24px;align-items:center;gap:8px;padding:0 8px;border-bottom:1px solid var(--k)}.orb-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.state{margin-left:auto;color:var(--ok)}.name-hero{padding:12px 10px 10px;background:var(--w);border-bottom:1px solid var(--g2)}.field-line{display:block}.field-line+.field-line{margin-top:8px}.field-label{display:block;margin-left:16px;color:var(--g3);font-weight:400}.focus-frame{--gutter:16px;--rail-width:2px;--rail-gap:4px;position:relative;min-width:0;padding-left:var(--gutter)}.study-field{position:relative;z-index:1;display:block;width:100%;min-width:0;padding:0 6px;color:var(--k);background:var(--w);border:1px solid var(--k);caret-color:var(--k);line-height:18px}.study-field:focus{outline:0;color:var(--k);background:var(--w);caret-color:var(--k)}input.study-field{height:20px}.instructions{padding:10px;background:var(--w)}textarea.study-field{height:80px;resize:vertical;line-height:20px}.transcript{padding:8px 10px}.turn{overflow-wrap:anywhere}.turn.user{margin:4px -10px;padding:4px 10px;color:var(--w);background:var(--k)}.composer{padding:5px 10px 8px;border-top:1px solid var(--k)}.composer-line{display:grid;grid-template-columns:32px minmax(0,1fr);gap:12px}.prefix{font-weight:700;text-align:right}.composer-field{height:80px!important;min-height:80px;padding:0;border:0;resize:none!important}.focus-frame::before,.focus-frame::after{pointer-events:none}.focus-frame:focus-within::before,.previewing .name-row .focus-frame::before{content:"";position:absolute;z-index:2;top:0;bottom:0;left:calc(var(--gutter) - var(--rail-gap) - var(--rail-width));width:var(--rail-width);background:var(--k)}
+/* 01 — full-height rail, four paper pixels clear of the intact border. */
+[data-variant=detached] .focus-frame{--rail-gap:4px;--rail-width:2px}
+/* 02 — a centered, shorter signal. */
+[data-variant=short] .focus-frame{--rail-gap:5px;--rail-width:2px}
+[data-variant=short] .focus-frame:focus-within::before,.previewing [data-variant=short] .name-row .focus-frame::before{top:20%;bottom:20%}
+/* 03 — more weight and more separation. */
+[data-variant=heavy] .focus-frame{--rail-gap:6px;--rail-width:3px}
+/* 04 — border geometry stays; only the focused left stroke clears. */
+[data-variant=open] .focus-frame{--rail-gap:4px;--rail-width:2px}
+[data-variant=open] .focus-frame:focus-within .study-field,.previewing [data-variant=open] .name-row .study-field{border-left-color:transparent}
+/* 05 — short ticks point inward but stop inside the reserved gutter. */
+[data-variant=bracket] .focus-frame{--rail-gap:6px;--rail-width:2px;--tick:3px}
+[data-variant=bracket] .focus-frame:focus-within::after,.previewing [data-variant=bracket] .name-row .focus-frame::after{content:"";position:absolute;z-index:2;top:0;bottom:0;left:calc(var(--gutter) - var(--rail-gap));width:var(--tick);background:linear-gradient(var(--k),var(--k)) left top/var(--tick) 2px no-repeat,linear-gradient(var(--k),var(--k)) left bottom/var(--tick) 2px no-repeat}
+.footer-note{padding:0 12px 12px;color:var(--g3)}.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media(max-width:760px){.gallery{grid-template-columns:minmax(0,1fr);gap:10px;padding:10px}.candidate:last-child:nth-child(odd){grid-column:auto}.title-row{flex-wrap:wrap;padding-left:8px}.annotation{order:3;flex-basis:100%;padding-bottom:2px}.preview-control,.variant-nav button{min-height:44px}.candidate-head{padding:5px 7px}.tradeoff{white-space:normal}.study-field{font-size:16px}.composer-field,textarea.study-field{height:88px!important;min-height:88px}}
+@media(max-width:360px){.gallery{padding:8px}.variant-nav button{padding-inline:8px}.title{font-size:12px}.preview-control{padding-inline:6px}.name-hero,.instructions,.transcript,.composer{padding-inline:8px}}
+</style>
+</head>
+<body>
+<div class="study previewing" id="study">
+<header class="study-head">
+  <div class="title-row"><span class="title">Ink rail refinements</span><span class="annotation">Rails sit outside the field boundary.</span><button id="preview-toggle" class="preview-control" type="button" aria-pressed="true">Study focus: on</button></div>
+  <nav class="variant-nav" aria-label="Displayed refinements">
+    <button type="button" data-select="all" aria-pressed="true">All</button>
+    <button type="button" data-select="detached" aria-pressed="false">Detached</button>
+    <button type="button" data-select="short" aria-pressed="false">Short</button>
+    <button type="button" data-select="heavy" aria-pressed="false">Heavy</button>
+    <button type="button" data-select="open" aria-pressed="false">Open edge</button>
+    <button type="button" data-select="bracket" aria-pressed="false">Margin bracket</button>
+  </nav>
+</header>
+<main class="gallery" id="gallery"></main>
+<p class="footer-note">Refinement study only · production is unchanged · local drafts are not submitted.</p>
+</div>
+<script>
+const variants=[
+  {slug:'detached',number:'01',name:'Detached rail',tradeoff:'Clearest continuity; the 4px gap keeps border and mark independent.'},
+  {slug:'short',number:'02',name:'Short rail',tradeoff:'Quieter at 60% height, but less immediate in tall fields.'},
+  {slug:'heavy',number:'03',name:'Heavy rail',tradeoff:'Strongest signal; 3px weight asks for more margin.'},
+  {slug:'open',number:'04',name:'Open edge',tradeoff:'Lets the rail own the left edge while preserving field geometry.'},
+  {slug:'bracket',number:'05',name:'Margin bracket',tradeoff:'Ticks locate both ends, with more detail than a plain stroke.'}
+];
+const gallery=document.querySelector('#gallery');
+for(const item of variants){
+  const article=document.createElement('article');
+  article.className='candidate';article.dataset.variant=item.slug;
+  article.innerHTML=`<header class="candidate-head"><span class="number">${item.number}</span><h2>${item.name}</h2><p class="tradeoff">${item.tradeoff}</p></header>
+  <section class="specimen" aria-label="${item.name} product specimen">
+    <header class="orb-head"><span class="orb-name">field study</span><span class="state">■ running</span></header>
+    <form>
+      <div class="name-hero"><div class="field-line name-row"><label class="field-label" for="${item.slug}-name">Name</label><div class="focus-frame"><input id="${item.slug}-name" class="study-field name-field" data-draft="name" value="ink rail study"></div></div></div>
+      <div class="instructions"><div class="field-line"><label class="field-label" for="${item.slug}-instructions">Instructions</label><div class="focus-frame"><textarea id="${item.slug}-instructions" class="study-field" data-draft="instructions">White field. Focus mark stays outside.</textarea></div></div></div>
+      <div class="transcript"><div class="turn user"><span class="visually-hidden">You: </span>Move the focus rail out of the field.</div><div class="turn"><span class="visually-hidden">Orb: </span>The border and writing area now remain separate from the mark.</div></div>
+      <div class="composer"><div class="composer-line"><span class="prefix" aria-hidden="true">&gt;</span><div class="focus-frame"><textarea class="study-field composer-field" data-draft="composer" aria-label="${item.name} message">Compare the rail beside this borderless composer.</textarea></div></div></div>
+    </form>
+  </section>`;
+  gallery.append(article);
+}
+const study=document.querySelector('#study');const toggle=document.querySelector('#preview-toggle');const choices=[...document.querySelectorAll('[data-select]')];let preview=true;
+function setPreview(next){preview=next;study.classList.toggle('previewing',preview);toggle.setAttribute('aria-pressed',String(preview));toggle.textContent=preview?'Study focus: on':'Study focus: off'}
+function select(slug){const selected=variants.some(item=>item.slug===slug)?slug:'all';document.querySelectorAll('.candidate').forEach(card=>card.hidden=selected!=='all'&&card.dataset.variant!==selected);gallery.dataset.view=selected==='all'?'all':'selected';choices.forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.select===selected)));const next=new URL(location.href);next.searchParams.delete('variant');if(selected!=='all')next.searchParams.set('variant',selected);history.replaceState(null,'',next)}
+toggle.addEventListener('click',()=>setPreview(!preview));choices.forEach(button=>button.addEventListener('click',()=>select(button.dataset.select)));document.addEventListener('focusin',event=>{if(event.target.matches?.('.study-field'))setPreview(false)});document.addEventListener('submit',event=>event.preventDefault());select(new URLSearchParams(location.search).get('variant')||'all');
+</script>
+</body>
+</html>
