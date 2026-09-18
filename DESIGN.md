@@ -133,6 +133,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-18-boot-context-cold-start.md](docs/postmortems/2026-09-18-boot-context-cold-start.md) — two runtime-API cold starts exhausted a mandatory boot read; bounded retry is implemented locally
 - [docs/postmortems/2026-09-17-broker-refresh-publication-retry.md](docs/postmortems/2026-09-17-broker-refresh-publication-retry.md) — refresh publication stopped after a proved pre-commit pointer failure
 - [docs/postmortems/2026-09-17-release-owner-environment-leak.md](docs/postmortems/2026-09-17-release-owner-environment-leak.md) — deployment owner input leaked into fresh-database release E2E migrations
 - [docs/postmortems/2026-09-17-e2e-job-budget.md](docs/postmortems/2026-09-17-e2e-job-budget.md) — serial E2E growth exceeded the GitHub job's whole-path timeout

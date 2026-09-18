@@ -1,8 +1,10 @@
 # Scheduled orb sleep
 
-> **Status:** Approved, implemented DST/tests first, and qualified locally 2026-09-17; Slender sleep tile implemented locally; not deployed. Results: `docs/testing.md`.
+> **Status:** Approved, implemented, and deployed by 2026-09-18. Local qualification results: `docs/testing.md`.
 
 ## Decision and scope
+
+**Field finding 2026-09-18:** the deployed mandatory boot-context read failed two boots when scale-from-zero runtime-API startup exceeded its single 10-second request deadline. The fail-closed inference boundary held; failed health made each boot terminal. A local, undeployed fix now retries only retryable failures for up to 180 seconds with 1/2/4-second capped backoff while retaining the 10-second deadline per request. Evidence and remaining diagnostics: `docs/postmortems/2026-09-18-boot-context-cold-start.md`.
 
 `pi-orb sleep 1h` schedules a graceful stop/start of this orb, retains its workspace, then gives the first wake-triggered inference one combined restart/sleep notification. It is not RAM suspend and adds no lifecycle state.
 
@@ -58,7 +60,7 @@ Before session attachment, readiness, or inference, the runtime calls authentica
 }
 ```
 
-The control plane selects and freezes only a FIFO-head `sleep_wake`. A human head returns `context:null`; ordinary delivery preserves it first. A typed prerequisite-read failure fails readiness closed and remains visible rather than starting context-free inference.
+The control plane selects and freezes only a FIFO-head `sleep_wake`. A human head returns `context:null`; ordinary delivery preserves it first. Each prerequisite request retains a 10-second timeout. Retryable transport or typed service failures use 1/2/4-second capped backoff; no attempt starts at or after the 180-second retry deadline, while an admitted attempt retains its full timeout. Permanent authorization, malformed JSON/schema failures, and exhaustion fail readiness closed and remain visible rather than starting context-free inference.
 
 For the normal wake, the boot planner combines existing restart/interruption wording with sleep context in one visible `pi-orb.sleep-wake` custom record. It retains boot identity, trigger/guard classification, and the notice message IDs. The record is a system event, never a human user message, and cannot renew or reset crash-loop/resume authority. Its identity participates in boot and turn-resume classification. If the crash guard declines inference, the persisted visible non-triggering outcome remains authoritative.
 

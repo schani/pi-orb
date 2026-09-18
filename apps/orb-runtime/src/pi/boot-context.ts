@@ -3,14 +3,25 @@ import {
   type OrbBootContextResponse,
   OrbBootContextResponseSchema,
 } from "@pi-orb/protocol";
-import { err, ok, ResultAsync } from "neverthrow";
+import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
+
+export const BOOT_CONTEXT_REQUEST_TIMEOUT_MS = 10_000;
+export const BOOT_CONTEXT_BOOT_RETRY_WINDOW_MS = 180_000;
+const BOOT_CONTEXT_RETRY_BASE_MS = 1_000;
+const BOOT_CONTEXT_RETRY_CAP_MS = 4_000;
 
 export interface BootContextError {
   readonly type: "boot_context_error";
   readonly message: string;
   readonly retryable: boolean;
+}
+
+export interface BootContextRetryOptions {
+  readonly retryWindowMs?: number;
+  readonly now?: () => number;
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 const unavailable = (detail?: string): BootContextError => ({
@@ -31,9 +42,7 @@ function responseError(payload: unknown): { message: string; retryable: boolean 
 }
 
 /** Immediate HTTP adapter: no thrown fetch, JSON, or schema failure crosses this boundary. */
-export function fetchBootContext(
-  env: BrokerEnv,
-): ResultAsync<OrbBootContextResponse, BootContextError> {
+function requestBootContext(env: BrokerEnv): ResultAsync<OrbBootContextResponse, BootContextError> {
   return ResultAsync.fromThrowable(
     async () => {
       const response = await fetch(`${env.controlPlaneUrl}${ORB_BOOT_CONTEXT_PATH}`, {
@@ -43,12 +52,15 @@ export function fetchBootContext(
           "content-type": "application/json",
         },
         body: JSON.stringify({ v: 1 }),
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(BOOT_CONTEXT_REQUEST_TIMEOUT_MS),
       });
       const payload: unknown = await response.json();
       return { status: response.status, payload };
     },
-    (cause) => unavailable(cause instanceof Error ? cause.message : String(cause)),
+    (cause) =>
+      cause instanceof SyntaxError
+        ? { ...unavailable("malformed response"), retryable: false }
+        : unavailable(cause instanceof Error ? cause.message : String(cause)),
   )().andThen(({ status, payload }) => {
     if (status === 200 && Check(OrbBootContextResponseSchema, payload)) return ok(payload);
     const failure = responseError(payload);
@@ -58,6 +70,31 @@ export function fetchBootContext(
         message: `boot context is unavailable: ${failure.message}`,
         retryable: failure.retryable,
       });
-    return err(unavailable("malformed response"));
+    return err({ ...unavailable("malformed response"), retryable: false });
   });
+}
+
+/** Mandatory boot read with a bounded, clock-injected retry window. */
+export function fetchBootContext(
+  env: BrokerEnv,
+  options: BootContextRetryOptions = {},
+): ResultAsync<OrbBootContextResponse, BootContextError> {
+  const now = options.now ?? Date.now;
+  const sleep =
+    options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const deadline = now() + (options.retryWindowMs ?? BOOT_CONTEXT_BOOT_RETRY_WINDOW_MS);
+
+  const run = async (): Promise<Result<OrbBootContextResponse, BootContextError>> => {
+    let delayMs = BOOT_CONTEXT_RETRY_BASE_MS;
+    while (true) {
+      const result = await requestBootContext(env);
+      if (result.isOk() || !result.error.retryable || now() >= deadline) return result;
+
+      await sleep(Math.min(delayMs, deadline - now()));
+      if (now() >= deadline) return result;
+      delayMs = Math.min(BOOT_CONTEXT_RETRY_CAP_MS, delayMs * 2);
+    }
+  };
+
+  return new ResultAsync(run());
 }
