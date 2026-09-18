@@ -1,8 +1,19 @@
-import type { Locator, Page, Request } from "@playwright/test";
+import type {
+  Browser,
+  BrowserContext,
+  ConsoleMessage,
+  Frame,
+  Locator,
+  Page,
+  Request,
+  Response,
+} from "@playwright/test";
 
 const MAX_OBSERVATIONS = 12;
 const MAX_OBSERVATION_LENGTH = 240;
 const MAX_PENDING_REQUESTS = 8;
+const ROOT_SNAPSHOT_TIMEOUT_MS = 100;
+const SNAPSHOT_TIMEOUT_MS = 250;
 
 function sanitizeUrl(value: string): string {
   try {
@@ -10,7 +21,9 @@ function sanitizeUrl(value: string): string {
     url.username = "";
     url.password = "";
     url.search = "";
-    url.hash = "";
+    const hash = url.hash;
+    const hashQuery = hash.indexOf("?");
+    url.hash = hash.startsWith("#/") ? hash.slice(0, hashQuery < 0 ? undefined : hashQuery) : "";
     return url.toString();
   } catch {
     return "<invalid-url>";
@@ -21,36 +34,79 @@ function sanitizeText(value: string): string {
   const sanitized = value
     .replace(/https?:\/\/[^\s"')]+/gu, (url) => sanitizeUrl(url))
     .replace(/((?:\/|\.\/|\.\.\/)[^\s"'()?#]+)[?#][^\s"'()]*/gu, "$1")
+    .replace(/\b(Bearer)\s+[^\s"']+/giu, "$1 <redacted>")
+    .replace(
+      /(\b(?:access[_-]?token|api[_-]?key|authorization|cookie|password|secret)\b["']?\s*[:=]\s*)[^\s,;}]+/giu,
+      "$1<redacted>",
+    )
     .replace(/[\r\n\t]+/gu, " ");
   return sanitized.slice(0, MAX_OBSERVATION_LENGTH);
 }
 
+function increment(counts: Record<string, number>, key: string): void {
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function isApi(request: Request): boolean {
+  try {
+    return new URL(request.url()).pathname.startsWith("/api/");
+  } catch {
+    return false;
+  }
+}
+
+function isProjects(request: Request): boolean {
+  try {
+    const path = new URL(request.url()).pathname;
+    return path === "/api/v1/projects" || path.startsWith("/api/v1/projects/");
+  } catch {
+    return false;
+  }
+}
+
 export function observeFrontendBoot(page: Page): {
   checkpoint(name: string): void;
+  dispose(): void;
+  report(): Promise<string>;
+  snapshot(): Promise<unknown>;
   wait<T>(pending: Promise<T>): Promise<T>;
 } {
   const checkpoints: string[] = [];
   const observations: string[] = [];
+  const navigations: string[] = [];
   const trackedRequests = new Map<Request, { resource: string; url: string }>();
+  const apiResponses: Record<string, number> = {};
+  const projectResponses: Record<string, number> = {};
+  const moduleResponses: Record<string, number> = {};
   let startedRequests = 0;
   let finishedRequests = 0;
   let failedRequests = 0;
+  let apiRequests = 0;
+  let projectRequests = 0;
+  let moduleRequests = 0;
+  let disposed = false;
+  let mainFrameUrl = sanitizeUrl(page.url());
   const record = (value: string) => {
     observations.push(sanitizeText(value));
     if (observations.length > MAX_OBSERVATIONS) observations.shift();
   };
   const onRequest = (request: Request) => {
     const resource = request.resourceType();
-    if (resource !== "document" && resource !== "script") return;
-    startedRequests += 1;
-    trackedRequests.set(request, { resource, url: sanitizeUrl(request.url()) });
+    if (resource === "document" || resource === "script") {
+      startedRequests += 1;
+      trackedRequests.set(request, { resource, url: sanitizeUrl(request.url()) });
+    }
+    if (resource === "script") moduleRequests += 1;
+    if (isApi(request)) apiRequests += 1;
+    if (isProjects(request)) projectRequests += 1;
   };
   const onRequestFinished = (request: Request) => {
     if (!trackedRequests.delete(request)) return;
     finishedRequests += 1;
   };
   const onPageError = (error: Error) => record(`pageerror: ${error.name}: ${error.message}`);
-  const onConsole = (message: { type(): string; text(): string }) => {
+  const onCrash = () => record("page: crashed");
+  const onConsole = (message: ConsoleMessage) => {
     if (message.type() === "error") record(`console: ${message.text()}`);
   };
   const onRequestFailed = (request: Request) => {
@@ -59,75 +115,225 @@ export function observeFrontendBoot(page: Page): {
       `requestfailed: ${request.method()} ${sanitizeUrl(request.url())} ${request.failure()?.errorText ?? "unknown"}`,
     );
   };
-  const onResponse = (response: {
-    request(): { resourceType(): string };
-    status(): number;
-    url(): string;
-  }) => {
+  const onResponse = (response: Response) => {
+    const request = response.request();
+    const status = String(response.status());
+    if (request.resourceType() === "script") {
+      increment(moduleResponses, status);
+      if (response.status() >= 400)
+        record(`module: ${response.status()} ${sanitizeUrl(response.url())}`);
+    }
+    if (isApi(request)) increment(apiResponses, status);
+    if (isProjects(request)) increment(projectResponses, status);
     if (
       response.status() >= 400 &&
-      ["document", "script", "stylesheet"].includes(response.request().resourceType())
+      ["document", "script", "stylesheet"].includes(request.resourceType())
     )
       record(`response: ${response.status()} ${sanitizeUrl(response.url())}`);
+  };
+  const onFrameNavigated = (frame: Frame) => {
+    if (frame !== page.mainFrame()) return;
+    mainFrameUrl = sanitizeUrl(frame.url());
+    navigations.push(mainFrameUrl);
+    if (navigations.length > MAX_OBSERVATIONS) navigations.shift();
+  };
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    page.off("request", onRequest);
+    page.off("requestfinished", onRequestFinished);
+    page.off("pageerror", onPageError);
+    page.off("crash", onCrash);
+    page.off("console", onConsole);
+    page.off("requestfailed", onRequestFailed);
+    page.off("response", onResponse);
+    page.off("framenavigated", onFrameNavigated);
   };
   page.on("request", onRequest);
   page.on("requestfinished", onRequestFinished);
   page.on("pageerror", onPageError);
+  page.on("crash", onCrash);
   page.on("console", onConsole);
   page.on("requestfailed", onRequestFailed);
   page.on("response", onResponse);
+  page.on("framenavigated", onFrameNavigated);
+
+  const snapshot = async () => {
+    let rootTimer: ReturnType<typeof setTimeout> | undefined;
+    const rootTimeout = new Promise<{ documentReadyState: string }>((resolve) => {
+      rootTimer = setTimeout(
+        () => resolve({ documentReadyState: "timed-out" }),
+        ROOT_SNAPSHOT_TIMEOUT_MS,
+      );
+      rootTimer.unref?.();
+    });
+    const root = await Promise.race([
+      page
+        .evaluate(() => {
+          const browserDocument = (
+            globalThis as unknown as {
+              document: {
+                readyState: string;
+                querySelector(selector: string): { childElementCount: number } | null;
+              };
+            }
+          ).document;
+          const element = browserDocument.querySelector("#root");
+          return {
+            documentReadyState: browserDocument.readyState,
+            present: element !== null,
+            childCount: element?.childElementCount ?? 0,
+            fixtureControl:
+              browserDocument.querySelector(".frontend-fixture-auth-control") !== null,
+          };
+        })
+        .catch(() => ({ documentReadyState: "unavailable" })),
+      rootTimeout,
+    ]).finally(() => {
+      if (rootTimer !== undefined) clearTimeout(rootTimer);
+    });
+    return {
+      url: mainFrameUrl,
+      navigations,
+      checkpoints,
+      root,
+      requests: {
+        started: startedRequests,
+        finished: finishedRequests,
+        failed: failedRequests,
+        pending: [...trackedRequests.values()]
+          .slice(-MAX_PENDING_REQUESTS)
+          .map(({ resource, url }) => `${resource} ${url}`),
+      },
+      modules: { requested: moduleRequests, responses: moduleResponses },
+      api: {
+        requested: apiRequests,
+        responses: apiResponses,
+        projects: { requested: projectRequests, responses: projectResponses },
+      },
+      errors: observations,
+    };
+  };
+  const report = async () => JSON.stringify(await snapshot());
 
   return {
     checkpoint(name: string) {
       checkpoints.push(sanitizeText(name));
     },
+    dispose,
+    report,
+    snapshot,
     async wait<T>(pending: Promise<T>): Promise<T> {
       try {
         return await pending;
       } catch (cause) {
-        const readiness = await page
-          .evaluate(() => {
-            const browserDocument = (
-              globalThis as unknown as {
-                document: {
-                  readyState: string;
-                  querySelector(selector: string): { childElementCount: number } | null;
-                };
-              }
-            ).document;
-            const root = browserDocument.querySelector("#root");
-            return {
-              document: browserDocument.readyState,
-              appRoot: root !== null,
-              appChildren: root?.childElementCount ?? 0,
-              fixtureControl:
-                browserDocument.querySelector(".frontend-fixture-auth-control") !== null,
-            };
-          })
-          .catch(() => ({ document: "unavailable" }));
         const reason = sanitizeText(cause instanceof Error ? cause.message : String(cause));
-        const pendingRequests = [...trackedRequests.values()]
-          .slice(-MAX_PENDING_REQUESTS)
-          .map(({ resource, url }) => `${resource} ${url}`);
-        throw new Error(
-          `Frontend readiness failed: ${reason}; ` +
-            `url=${sanitizeUrl(page.url())}; checkpoints=${JSON.stringify(checkpoints)}; ` +
-            `readiness=${JSON.stringify(readiness)}; requests=${JSON.stringify({
-              started: startedRequests,
-              finished: finishedRequests,
-              failed: failedRequests,
-              pending: pendingRequests,
-            })}; browser=${JSON.stringify(observations)}`,
-        );
+        throw new Error(`Frontend readiness failed: ${reason}; snapshot=${await report()}`);
       } finally {
-        page.off("request", onRequest);
-        page.off("requestfinished", onRequestFinished);
-        page.off("pageerror", onPageError);
-        page.off("console", onConsole);
-        page.off("requestfailed", onRequestFailed);
-        page.off("response", onResponse);
+        dispose();
       }
     },
+  };
+}
+
+function boundedReport(observation: ReturnType<typeof observeFrontendBoot>): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve('{"snapshot":"timed-out"}'), SNAPSHOT_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  return Promise.race([observation.report(), timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
+/** Temporary hosted-run diagnostics. It only wraps page/context cleanup. */
+export function observeFrontendBrowser(
+  browser: Browser,
+  currentTestName: () => string | undefined,
+) {
+  const observations = new Map<
+    Page,
+    { observation: ReturnType<typeof observeFrontendBoot>; testName: string }
+  >();
+  const contexts = new Set<BrowserContext>();
+
+  const publish = async (page: Page) => {
+    const observed = observations.get(page);
+    if (observed === undefined) return;
+    observations.delete(page);
+    try {
+      const report = await boundedReport(observed.observation);
+      console.error(`[frontend-page] test=${JSON.stringify(observed.testName)} snapshot=${report}`);
+    } catch {
+      // Diagnostics must not affect the test result.
+    } finally {
+      observed.observation.dispose();
+    }
+  };
+
+  const observeContext = (context: BrowserContext) => {
+    if (contexts.has(context)) return;
+    contexts.add(context);
+    try {
+      context.on("page", observePage);
+      const close = context.close.bind(context);
+      context.close = async (...args: Parameters<BrowserContext["close"]>) => {
+        try {
+          await Promise.all(context.pages().map(publish));
+          context.off("page", observePage);
+          contexts.delete(context);
+        } catch {
+          // Diagnostics must not affect context cleanup.
+        }
+        return close(...args);
+      };
+    } catch {
+      // A diagnostic attachment failure must not affect the page.
+    }
+  };
+
+  const observePage = (page: Page) => {
+    if (observations.has(page)) return;
+    try {
+      observeContext(page.context());
+      observations.set(page, {
+        observation: observeFrontendBoot(page),
+        testName: sanitizeText(currentTestName() ?? "<unknown>"),
+      });
+      const close = page.close.bind(page);
+      page.close = async (...args: Parameters<Page["close"]>) => {
+        await publish(page);
+        return close(...args);
+      };
+    } catch {
+      observations.get(page)?.observation.dispose();
+      observations.delete(page);
+    }
+  };
+
+  const newPage = browser.newPage.bind(browser);
+  browser.newPage = async (...args: Parameters<Browser["newPage"]>) => {
+    const page = await newPage(...args);
+    observePage(page);
+    return page;
+  };
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (...args: Parameters<Browser["newContext"]>) => {
+    const context = await newContext(...args);
+    observeContext(context);
+    return context;
+  };
+  const close = browser.close.bind(browser);
+  browser.close = async (...args: Parameters<Browser["close"]>) => {
+    try {
+      await Promise.all([...observations.keys()].map(publish));
+      for (const context of contexts) context.off("page", observePage);
+      contexts.clear();
+    } catch {
+      // Diagnostics must not affect browser cleanup.
+    }
+    return close(...args);
   };
 }
 

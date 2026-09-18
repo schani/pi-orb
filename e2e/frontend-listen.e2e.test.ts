@@ -92,10 +92,10 @@ it("reports bounded browser request progress when application boot stalls", asyn
     }
     expect(diagnostic).toContain("controlled readiness rejection https://example.test/module");
     expect(diagnostic).toContain(
-      'readiness={"document":"complete","appRoot":true,"appChildren":0,"fixtureControl":false}',
+      '"root":{"documentReadyState":"complete","present":true,"childCount":0,"fixtureControl":false}',
     );
     expect(diagnostic).toMatch(
-      /requests={"started":6,"finished":4,"failed":1,"pending":\["script http:\/\/127\.0\.0\.1:\d+\/controlled-pending\.js"\]}/,
+      /"requests":{"started":6,"finished":4,"failed":1,"pending":\["script http:\/\/127\.0\.0\.1:\d+\/controlled-pending\.js"\]}/,
     );
     expect(diagnostic).toMatch(/response: 404 http:\/\/127\.0\.0\.1:\d+\/src\/missing\.ts/);
     expect(diagnostic).not.toMatch(/hidden|fixture-user|fixture-password|fragment/);
@@ -145,7 +145,7 @@ it("rejects old-document readiness and diagnoses missing application UI", async 
     expect(diagnostic).toContain("navigation:200");
     expect(diagnostic).not.toContain("ui:visible");
     expect(diagnostic).toContain(
-      'readiness={"document":"complete","appRoot":true,"appChildren":1,"fixtureControl":false}',
+      '"root":{"documentReadyState":"complete","present":true,"childCount":1,"fixtureControl":false}',
     );
   } finally {
     await browser.close();
