@@ -29,7 +29,7 @@ import type { GceApiTransport, GceResponse } from "./api.ts";
 export interface GceOrbHostProviderOptions {
   readonly projectId: string;
   readonly zone: string;
-  /** e.g. "n2d-highmem-4"; provisioned as Spot with STOP on preemption. */
+  /** e.g. "n2d-highmem-2"; provisioned as Spot with STOP on preemption. */
   readonly machineType: string;
   /** Full or partial subnetwork URL, e.g. "regions/us-central1/subnetworks/pi-orb-us-central1". */
   readonly subnetwork: string;

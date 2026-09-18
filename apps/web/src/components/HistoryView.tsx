@@ -20,6 +20,7 @@ import {
   type ToolCallBlock,
   type ToolResultBlock,
 } from "./ToolActivity.tsx";
+import { ToolImagePreview } from "./ToolImagePreview.tsx";
 
 /** Streaming output block accumulated from `output_patch` events. */
 export interface LiveBlock {
@@ -73,12 +74,27 @@ function renderToolResult(
   block: ContentBlock & { type: "tool_result" },
   key: string | number,
 ): ReactNode {
+  const images = block.content.filter((item) => item.type === "image");
   return (
-    <details className="tool-details" key={key}>
-      <summary>{block.isError === true ? "tool error" : "tool output"}</summary>
+    <details className="tool-details" key={key} open={images.length > 0 || undefined}>
+      <summary>
+        {block.isError === true ? "tool error" : "tool output"}
+        {images.length > 0 && <> · {block.callId}</>}
+      </summary>
       <pre className={block.isError === true ? "tool-output tool-error" : "tool-output"}>
         {blockText(block.content)}
       </pre>
+      {images.length > 0 && (
+        <div className="tool-image-previews">
+          {images.map((image, index) => (
+            <ToolImagePreview
+              block={image}
+              key={`${block.callId}-image-${index}`}
+              toolName={`tool result ${block.callId}`}
+            />
+          ))}
+        </div>
+      )}
     </details>
   );
 }

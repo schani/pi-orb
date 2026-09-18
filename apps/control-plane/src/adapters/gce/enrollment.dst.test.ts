@@ -17,7 +17,7 @@ function provider(gce: GceApiTransport, minter: HttpTailscaleAuthKeyMinter): Gce
   return new GceOrbHostProvider(gce, {
     projectId: "proj",
     zone: "zone",
-    machineType: "n2d-highmem-4",
+    machineType: "n2d-highmem-2",
     subnetwork: "regions/region/subnetworks/orbs",
     serviceAccount: "orb@proj.iam.gserviceaccount.com",
     imageResource: "projects/projxx/global/images/pi-orb-native-20260905",

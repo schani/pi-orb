@@ -989,4 +989,35 @@ describe("HistoryView", () => {
     expect(html).toContain("✕ failed");
     expect(html).toContain("one test failed");
   });
+
+  it("opens unmatched image results with previews inside their fallback drawer", () => {
+    const record: HistoryRecord = {
+      id: "orphan-result",
+      parentId: null,
+      timestamp: "time-orphan",
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "missing-call",
+          content: [
+            { type: "text", text: "fallback text" },
+            { type: "image", url: "https://example.test/fallback.png" },
+          ],
+        },
+      ],
+      overflow: {},
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+
+    expect(html).toContain("tool output · missing-call");
+    expect(html).toMatch(
+      /<details class="tool-details" open="">[\s\S]*<div class="tool-image-previews">[\s\S]*<\/div><\/details>/,
+    );
+    expect(html).toContain('alt="Image returned by tool result missing-call"');
+    expect(html.match(/fallback text/g)).toHaveLength(1);
+  });
 });

@@ -7,6 +7,7 @@ interface ActivityRailRowProps {
   state?: "neutral" | "running" | "completed" | "failed";
   className?: string;
   children?: ReactNode;
+  defaultOpen?: boolean;
 }
 
 /**
@@ -21,9 +22,13 @@ export function ActivityRailRow({
   state = "neutral",
   className = "",
   children,
+  defaultOpen = false,
 }: ActivityRailRowProps) {
   return (
-    <details className={`activity-rail-row activity-rail-row-${state} ${className}`.trim()}>
+    <details
+      className={`activity-rail-row activity-rail-row-${state} ${className}`.trim()}
+      open={defaultOpen || undefined}
+    >
       <summary>
         <span className="activity-rail-marker" aria-hidden="true" />
         <span className="activity-rail-summary">

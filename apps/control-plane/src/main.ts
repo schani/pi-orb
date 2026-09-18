@@ -441,7 +441,7 @@ export async function main(
       ? new GceOrbHostProvider(new RestGceApiTransport(), {
           projectId: env("PI_ORB_GCP_PROJECT", ""),
           zone: env("PI_ORB_GCE_ZONE", "us-central1-a"),
-          machineType: env("PI_ORB_GCE_MACHINE_TYPE", "n2d-highmem-4"),
+          machineType: env("PI_ORB_GCE_MACHINE_TYPE", "n2d-highmem-2"),
           subnetwork: env(
             "PI_ORB_GCE_SUBNETWORK",
             "regions/us-central1/subnetworks/pi-orb-us-central1",

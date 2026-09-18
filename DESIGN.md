@@ -133,6 +133,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-18-image-preview-validation.md](docs/postmortems/2026-09-18-image-preview-validation.md) — mutable-source qualification, subpixel geometry inference, and undrained browser-route teardown failures
 - [docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md](docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md) — hosted blank-shell cause remains unresolved; browser assertions now own their fixture-response readiness
 - [docs/postmortems/2026-09-18-boot-context-cold-start.md](docs/postmortems/2026-09-18-boot-context-cold-start.md) — two runtime-API cold starts exhausted a mandatory boot read; bounded retry is implemented locally
 - [docs/postmortems/2026-09-18-webkit-missing-resource-race.md](docs/postmortems/2026-09-18-webkit-missing-resource-race.md) — stale metadata polling resurrected an orb after a definitive history 404

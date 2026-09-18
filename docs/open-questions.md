@@ -131,3 +131,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Scheduled orb sleep
 
 68. **Resolved (2026-09-17): user approved implementation, DST/tests first.** Sleep uses durable-acceptance deadlines, graceful aggregate/upload/inbox drain, no arbitrary maximum, cancellation by accepted commands or actual human input, and a source-aware FIFO system notice combined into the first normal wake inference. `docs/orb-sleep.md` is the complete selected contract and records the short rejected-scope rationale. Implementation and qualification are in progress; this decision does not claim completion or deployment.
+
+## Transcript tool images
+
+69. **Resolved (2026-09-18): medium inline preview selected by the user.** The user clarified that images belong inside the tool drawer: image-bearing drawers start open, and collapsing hides the whole result. Click-to-enlarge remains available. The five-way study and rationale are in `docs/web-ui.md`.

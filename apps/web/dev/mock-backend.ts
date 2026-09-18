@@ -39,6 +39,30 @@ const ARCHIVED_ORB_ID = "frontend-archived-orb";
 const NEW_ORB_STARTUP_DELAY_MS = 10_000;
 const now = () => new Date().toISOString();
 
+const fixtureSvg = (svg: string) => Buffer.from(svg).toString("base64");
+const dashboardPreview =
+  fixtureSvg(`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef3ff"/><stop offset="1" stop-color="#fdf7ef"/></linearGradient><linearGradient id="chart" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#675cff"/><stop offset="1" stop-color="#29c5a5"/></linearGradient></defs>
+  <rect width="960" height="540" rx="28" fill="url(#bg)"/><rect x="24" y="24" width="912" height="492" rx="22" fill="#fff" stroke="#d8deea"/>
+  <rect x="24" y="24" width="188" height="492" rx="22" fill="#182238"/><circle cx="64" cy="66" r="16" fill="#ffd66b"/><text x="91" y="73" fill="#fff" font-family="system-ui" font-size="20" font-weight="700">Northstar</text>
+  <g fill="#9facbe" font-family="system-ui" font-size="14"><text x="52" y="130">Overview</text><text x="52" y="174">Projects</text><text x="52" y="218">Reports</text><text x="52" y="262">Settings</text></g><rect x="40" y="103" width="154" height="42" rx="10" fill="#2b3851"/>
+  <text x="246" y="70" fill="#172033" font-family="system-ui" font-size="26" font-weight="700">Workspace pulse</text><text x="246" y="96" fill="#68748a" font-family="system-ui" font-size="14">Tuesday, September 18</text>
+  <g font-family="system-ui"><rect x="246" y="126" width="194" height="104" rx="16" fill="#f7f8fb" stroke="#e2e6ee"/><text x="266" y="156" fill="#68748a" font-size="13">ACTIVE ORBS</text><text x="266" y="204" fill="#172033" font-size="38" font-weight="700">24</text><text x="376" y="202" fill="#119b7d" font-size="13">↑ 18%</text>
+  <rect x="458" y="126" width="194" height="104" rx="16" fill="#f7f8fb" stroke="#e2e6ee"/><text x="478" y="156" fill="#68748a" font-size="13">COMPLETED</text><text x="478" y="204" fill="#172033" font-size="38" font-weight="700">186</text><text x="584" y="202" fill="#675cff" font-size="13">this week</text>
+  <rect x="670" y="126" width="234" height="104" rx="16" fill="#fff7e2"/><text x="690" y="156" fill="#8d6b10" font-size="13">FOCUS TIME</text><text x="690" y="204" fill="#493805" font-size="38" font-weight="700">31.4h</text></g>
+  <rect x="246" y="254" width="420" height="226" rx="16" fill="#f7f8fb" stroke="#e2e6ee"/><text x="266" y="287" fill="#172033" font-family="system-ui" font-size="16" font-weight="700">Activity</text><path d="M270 430 C320 390 337 408 380 356 S460 390 506 322 S584 348 640 292" fill="none" stroke="url(#chart)" stroke-width="8" stroke-linecap="round"/><g fill="#cbd2df"><rect x="270" y="449" width="362" height="1"/><rect x="270" y="397" width="362" height="1"/><rect x="270" y="345" width="362" height="1"/></g>
+  <rect x="686" y="254" width="218" height="226" rx="16" fill="#182238"/><text x="708" y="288" fill="#fff" font-family="system-ui" font-size="16" font-weight="700">Next up</text><circle cx="720" cy="329" r="6" fill="#ffd66b"/><text x="740" y="334" fill="#fff" font-family="system-ui" font-size="14">Review launch copy</text><circle cx="720" cy="374" r="6" fill="#29c5a5"/><text x="740" y="379" fill="#fff" font-family="system-ui" font-size="14">Ship usage report</text><circle cx="720" cy="419" r="6" fill="#8a82ff"/><text x="740" y="424" fill="#fff" font-family="system-ui" font-size="14">Plan next sprint</text>
+</svg>`);
+const mobilePreview = fixtureSvg(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="720" viewBox="0 0 420 720"><rect width="420" height="720" rx="32" fill="#182238"/><rect x="18" y="18" width="384" height="684" rx="24" fill="#f7f8fb"/><circle cx="48" cy="57" r="12" fill="#ffd66b"/><text x="70" y="63" font-family="system-ui" font-size="18" font-weight="700" fill="#172033">Northstar</text><text x="38" y="118" font-family="system-ui" font-size="28" font-weight="700" fill="#172033">Good morning</text><rect x="38" y="150" width="344" height="142" rx="18" fill="#675cff"/><text x="60" y="186" font-family="system-ui" font-size="13" fill="#dcd9ff">WEEKLY PROGRESS</text><text x="60" y="246" font-family="system-ui" font-size="48" font-weight="700" fill="#fff">78%</text><path d="M60 270H360" stroke="#8f88ff" stroke-width="8"/><path d="M60 270H294" stroke="#ffd66b" stroke-width="8"/><text x="38" y="342" font-family="system-ui" font-size="16" font-weight="700" fill="#172033">Today</text><g font-family="system-ui" font-size="14" fill="#172033"><rect x="38" y="364" width="344" height="76" rx="14" fill="#fff"/><circle cx="64" cy="402" r="9" fill="#29c5a5"/><text x="86" y="407">Publish release notes</text><rect x="38" y="454" width="344" height="76" rx="14" fill="#fff"/><circle cx="64" cy="492" r="9" fill="#ffd66b"/><text x="86" y="497">Review accessibility pass</text><rect x="38" y="544" width="344" height="76" rx="14" fill="#fff"/><circle cx="64" cy="582" r="9" fill="#8a82ff"/><text x="86" y="587">Prepare customer demo</text></g></svg>`,
+);
+const chartPreview = fixtureSvg(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420" viewBox="0 0 800 420"><rect width="800" height="420" rx="24" fill="#fffaf1"/><text x="42" y="58" font-family="system-ui" font-size="22" font-weight="700" fill="#172033">Weekly completions</text><g fill="#ded8ca"><rect x="42" y="340" width="716" height="2"/><rect x="42" y="260" width="716" height="1"/><rect x="42" y="180" width="716" height="1"/><rect x="42" y="100" width="716" height="1"/></g><g fill="#675cff"><rect x="72" y="252" width="58" height="88" rx="8"/><rect x="170" y="205" width="58" height="135" rx="8"/><rect x="268" y="224" width="58" height="116" rx="8"/><rect x="366" y="154" width="58" height="186" rx="8"/><rect x="464" y="176" width="58" height="164" rx="8"/><rect x="562" y="112" width="58" height="228" rx="8"/><rect x="660" y="76" width="58" height="264" rx="8"/></g><g font-family="system-ui" font-size="13" fill="#68748a"><text x="86" y="372">Mon</text><text x="184" y="372">Tue</text><text x="282" y="372">Wed</text><text x="380" y="372">Thu</text><text x="478" y="372">Fri</text><text x="576" y="372">Sat</text><text x="674" y="372">Sun</text></g></svg>`,
+);
+const failedPreview = fixtureSvg(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="360" viewBox="0 0 800 360"><rect width="800" height="360" rx="24" fill="#fff"/><rect x="24" y="24" width="752" height="312" rx="18" fill="#f8f1ef" stroke="#ead6d1"/><circle cx="400" cy="148" r="54" fill="#c74b3f"/><path d="M375 123l50 50m0-50l-50 50" stroke="#fff" stroke-width="10" stroke-linecap="round"/><text x="400" y="236" text-anchor="middle" font-family="system-ui" font-size="22" font-weight="700" fill="#54241f">Visual comparison failed</text><text x="400" y="270" text-anchor="middle" font-family="system-ui" font-size="15" fill="#87534d">Header alignment differs by 12 px</text></svg>`,
+);
+
 interface MockState {
   projects: Map<string, ProjectView>;
   orbs: Map<string, OrbView>;
@@ -116,6 +140,12 @@ function initialState(): MockState {
   const firstReadResultId = randomUUID();
   const secondReadResultId = randomUUID();
   const activityAnswerId = randomUUID();
+  const imageRequestId = randomUUID();
+  const imageCallsId = randomUUID();
+  const imageReadResultId = randomUUID();
+  const snapshotResultId = randomUUID();
+  const visualDiffResultId = randomUUID();
+  const imageAnswerId = randomUUID();
   const records: HistoryRecord[] = [
     {
       id: welcomeId,
@@ -291,6 +321,112 @@ function initialState(): MockState {
       type: "message",
       role: "assistant",
       content: [{ type: "text", text: "The activity rail is implemented and verified." }],
+      overflow: {},
+    },
+    {
+      id: imageRequestId,
+      parentId: activityAnswerId,
+      timestamp: createdAt,
+      type: "message",
+      role: "user",
+      content: [{ type: "text", text: "Inspect the responsive dashboard captures." }],
+      overflow: {},
+    },
+    {
+      id: imageCallsId,
+      parentId: imageRequestId,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [
+        {
+          type: "tool_call",
+          callId: "fixture-image-read",
+          name: "read",
+          arguments: { path: "artifacts/dashboard-preview.svg" },
+        },
+        {
+          type: "tool_call",
+          callId: "fixture-browser-snapshot",
+          name: "browser_snapshot",
+          arguments: { url: "http://dashboard.local/overview", fullPage: true },
+        },
+        {
+          type: "tool_call",
+          callId: "fixture-visual-diff",
+          name: "visual_diff",
+          arguments: {
+            actual: "artifacts/dashboard-current.png",
+            expected: "artifacts/dashboard-approved.png",
+          },
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: imageReadResultId,
+      parentId: imageCallsId,
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "fixture-image-read",
+          content: [
+            { type: "text", text: "Dashboard preview (960 × 540)" },
+            { type: "image", mediaType: "image/svg+xml", data: dashboardPreview },
+          ],
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: snapshotResultId,
+      parentId: imageReadResultId,
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "fixture-browser-snapshot",
+          content: [
+            { type: "text", text: "Desktop and mobile viewport captures" },
+            { type: "image", mediaType: "image/svg+xml", data: dashboardPreview },
+            { type: "image", mediaType: "image/svg+xml", data: mobilePreview },
+            { type: "image", mediaType: "image/svg+xml", data: chartPreview },
+          ],
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: visualDiffResultId,
+      parentId: snapshotResultId,
+      timestamp: createdAt,
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "fixture-visual-diff",
+          isError: true,
+          content: [
+            { type: "text", text: "Header alignment differs by 12 px" },
+            { type: "image", mediaType: "image/svg+xml", data: failedPreview },
+          ],
+        },
+      ],
+      overflow: {},
+    },
+    {
+      id: imageAnswerId,
+      parentId: visualDiffResultId,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "The responsive captures are ready for review." }],
       overflow: {},
     },
   ];

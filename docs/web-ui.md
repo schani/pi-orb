@@ -1,5 +1,23 @@
 # Web UI
 
+## Tool-returned images in the transcript (inline preview implemented, 2026-09-18)
+
+Tool-returned images belong inside their tool drawer. Image-bearing drawers open by default; closing the drawer hides both images and output, and unrelated rerenders preserve the user's choice. Text-only drawers start closed. This applies to normalized returned image blocks from every tool, not filenames or only `read`. Preserve each image's call/result provenance and result ordering; stopped history renders the same content. Do not imply that the model viewed an image, duplicate it, or expose base64. Missing, expired, or failed image data has an explicit inline unavailable/failed state. The selected treatment retains the existing light-only Signal / Boards language and click-to-enlarge inspection. Question 69 of `docs/open-questions.md` records the selection.
+
+[Interactive study](https://files---pi-orb-1077475695242.us-central1.run.app/s/602520a2-562c-4baa-8eef-4c922634c10d/transcript-images/index.html) (standalone mockups, not product implementation).
+
+The five-way study:
+
+1. **Compact row thumbnail:** a small thumbnail beside the originating tool row. Lowest transcript cost; detail is hard to inspect and multiple images crowd the row.
+2. **Medium inline preview (selected; drawer behavior clarified 2026-09-18):** a medium preview inside its initially open tool drawer. Chosen for visible image detail without dominating the transcript. The user rejected keeping images visible outside a collapsed drawer; one disclosure owns the whole result.
+3. **Image-first card:** a full-width image card with an understated source path. Gives pixels priority and room; large results dominate the conversation.
+4. **Activity contact sheet:** one ordered sheet for contiguous tool activity, with every image traceable to its source call. Efficient for batches; grouping must stop at prose and other authored boundaries, and mixed aspect ratios need careful layout.
+5. **Thumbnail + inspector:** a visible transcript thumbnail opens a desktop side inspector and a mobile modal. Supports close inspection without enlarging history; introduces a second reading surface and obscures content on phones.
+
+The other four treatments remain unselected alternatives. Previews preserve aspect ratio within 32rem × 22rem. Each image-bearing call has its own header; text-only runs retain category grouping. A native modal enlarges the returned image, supports Escape, and returns focus to its trigger. Phone close targets are 44px. Unmatched results retain their call ID. Load failures appear inline; this browser-local presentation needs no new runtime events or persistence.
+
+The frontend fixture includes nested read, generic-tool, multi-image, and failed-tool captures. Validation: 323 web unit tests and web/E2E typechecks passed. After the drawer clarification, 16 Chromium/WebKit image cases passed, including default-open behavior, collapse/reopen, and preserved collapse across polling. The broader frontend run passed 103/109 cases; its six geometry assertions passed after the diagnosed harness correction. Evidence and the route-teardown correction are in `docs/postmortems/2026-09-18-image-preview-validation.md`. No production deployment.
+
 ## Composer spacing and modal close controls (implemented, 2026-09-18)
 
 The composer keeps its functional `>` / `!` / `!!` / `/` mode prefix in a reserved `2ch` column with a `1ch` gap. This is compact without letting `!!` move or resize the editor; desktop, expanded phone, and collapsed phone use the same geometry. Attachments remain unindented, and the command picker aligns with the editor while preserving the right margin. Submission, mode transitions, block-caret measurement, and phone controls are unchanged.
