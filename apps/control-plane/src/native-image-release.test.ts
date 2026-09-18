@@ -86,7 +86,7 @@ describe("native image release manifest", () => {
 
 // The shell stage is exercised with process adapters, including its publication order.
 describe("native build release stage", () => {
-  it.each(["accepted", "failed", "wrong-commit"])(
+  it.each(["accepted", "failed", "wrong-commit", "container-failed"])(
     "publishes only after an accepted build: %s",
     (outcome) => {
       const root = mkdtempSync(join(tmpdir(), "pi-orb-build-release-"));
@@ -120,6 +120,16 @@ while [ "$#" -gt 0 ]; do
 done
 [[ "$version" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]] || exit 64
 echo "native-build:$version" >> "$CALL_LOG"
+for _ in {1..200}; do
+  grep -q '^docker:build$' "$CALL_LOG" && break
+  sleep 0.01
+done
+grep -q '^docker:build$' "$CALL_LOG"
+if [ "${outcome}" = container-failed ]; then
+  trap 'echo native-clean >> "$CALL_LOG"; exit 143' TERM
+  echo native-block-ready >> "$CALL_LOG"
+  while :; do sleep 1; done
+fi
 mkdir -p "$IMAGE_BUILD_DIR"
 cat > "$IMAGE_BUILD_DIR/manifest.json" <<'JSON'
 ${JSON.stringify({ ...accepted, status: outcome === "failed" ? "failed" : "accepted", sourceCommit: outcome === "wrong-commit" ? "b".repeat(40) : commit })}
@@ -128,6 +138,10 @@ JSON`,
         script(
           "docker",
           `echo "docker:$1" >> "$CALL_LOG"
+if [ "$1" = build ] && [ "${outcome}" = container-failed ]; then
+  while ! grep -q '^native-block-ready$' "$CALL_LOG"; do sleep 0.01; done
+  exit 9
+fi
 if [ "$1" = inspect ]; then echo 'registry/control@sha256:${"a".repeat(64)}'; fi`,
         );
         const result = spawnSync("bash", [join(root, "infra/build-push.sh")], {
@@ -141,19 +155,18 @@ if [ "$1" = inspect ]; then echo 'registry/control@sha256:${"a".repeat(64)}'; fi
             REAL_NODE: process.execPath,
           },
         });
-        const calls = readFileSync(log, "utf8");
+        const calls = readFileSync(log, "utf8").trim().split("\n");
+        expect(calls).toContain(`native-build:v-${shortCommit}`);
+        expect(calls).toContain("docker:build");
         if (outcome === "accepted") {
           expect(result.status, result.stderr).toBe(0);
-          expect(calls.trim().split("\n")).toEqual([
-            `native-build:v-${shortCommit}`,
-            "docker:build",
-            "docker:push",
-            "docker:inspect",
-          ]);
+          expect(calls.indexOf("docker:push")).toBeGreaterThan(calls.indexOf("docker:build"));
+          expect(calls.at(-1)).toBe("docker:inspect");
           expect(result.stdout).toContain('native_image_id = "1234567890123456789"');
         } else {
-          expect(result.status).toBe(1);
-          expect(calls.trim()).toBe(`native-build:v-${shortCommit}`);
+          expect(result.status).toBe(outcome === "container-failed" ? 9 : 1);
+          expect(calls).not.toContain("docker:push");
+          if (outcome === "container-failed") expect(calls).toContain("native-clean");
           expect(result.stdout).toBe("");
         }
       } finally {
@@ -161,4 +174,97 @@ if [ "$1" = inspect ]; then echo 'registry/control@sha256:${"a".repeat(64)}'; fi
       }
     },
   );
+});
+
+describe("release child ownership", () => {
+  it("handles an empty child set under nounset with Bash 3-compatible primitives", () => {
+    const helper = resolve("infra/release-child.sh");
+    const source = readFileSync(helper, "utf8");
+    expect(source).not.toContain("wait -n");
+    expect(source).not.toContain("declare -A");
+    expect(source).not.toContain("RELEASE_CHILD_COUNT");
+    expect(source).not.toContain("=()");
+
+    const shells = ["bash"];
+    if (spawnSync("bash3", ["--version"], { stdio: "ignore" }).status === 0) shells.push("bash3");
+    for (const shell of shells) {
+      const result = spawnSync(
+        shell,
+        [
+          "-uc",
+          'source "$1"; release_stop_children; release_start_child true; release_wait_children; release_stop_children',
+          "release-child-test",
+          helper,
+        ],
+        { encoding: "utf8" },
+      );
+      expect(result.status, `${shell}: ${result.stderr}`).toBe(0);
+    }
+  });
+
+  it.each(["failure", "signal"])("terminates and waits for every child on %s", (mode) => {
+    const root = mkdtempSync(join(tmpdir(), "pi-orb-release-children-"));
+    try {
+      const helper = join(root, "release-child.sh");
+      const child = join(root, "child.sh");
+      const runner = join(root, "runner.sh");
+      const log = join(root, "calls");
+      copyFileSync(resolve("infra/release-child.sh"), helper);
+      writeFileSync(
+        child,
+        `#!/bin/bash
+set -eu
+log=$1
+name=$2
+trap 'echo "$name-cleaning" >> "$log"; sleep 0.1; echo "$name-clean" >> "$log"; exit 143' TERM
+echo "$name-ready" >> "$log"
+if [ "$name" = failing ]; then
+  while ! grep -q sibling-ready "$log"; do sleep 0.01; done
+  exit 7
+fi
+while :; do sleep 1; done
+`,
+      );
+      chmodSync(child, 0o755);
+      writeFileSync(
+        runner,
+        `#!/bin/bash
+set -eu
+source "$1"
+log=$2
+child=$3
+trap 'release_stop_children; echo parent-exit >> "$log"; exit 143' TERM
+if [ "$4" = failure ]; then
+  release_start_child "$child" "$log" failing
+  release_start_child "$child" "$log" sibling
+  release_wait_children
+else
+  release_start_child "$child" "$log" first
+  release_start_child "$child" "$log" second
+  while [ "$(grep -c -- '-ready' "$log" 2>/dev/null || true)" -lt 2 ]; do sleep 0.01; done
+  kill -TERM $$
+fi
+`,
+      );
+      chmodSync(runner, 0o755);
+
+      const result = spawnSync(runner, [helper, log, child, mode], {
+        encoding: "utf8",
+        timeout: 5_000,
+      });
+      expect(result.status, result.stderr).toBe(mode === "failure" ? 7 : 143);
+      const calls = readFileSync(log, "utf8").trim().split("\n");
+      const children = mode === "failure" ? ["sibling"] : ["first", "second"];
+      for (const name of children) {
+        expect(calls).toContain(`${name}-cleaning`);
+        expect(calls).toContain(`${name}-clean`);
+      }
+      if (mode === "signal") {
+        expect(calls.indexOf("parent-exit")).toBeGreaterThan(calls.indexOf("first-clean"));
+        expect(calls.indexOf("parent-exit")).toBeGreaterThan(calls.indexOf("second-clean"));
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

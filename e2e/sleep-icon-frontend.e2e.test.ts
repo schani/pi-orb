@@ -4,6 +4,7 @@ import { chromium, expect, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s: shows and cancels sleeping across dashboard, index, header, favicon, and Find",
@@ -60,7 +61,7 @@ it.each(["chromium", "webkit"] as const)(
           });
 
           const sleepingImage = 'img[src="/favicons/sleeping.svg"]';
-          await page.goto(`http://127.0.0.1:${address.port}/#/`);
+          await gotoFrontendFixture(page, `http://127.0.0.1:${address.port}/#/`);
           const dashboardEntry = page.locator(".orb-entry", { hasText: "Frontend Playground" });
           await expect(dashboardEntry.locator(sleepingImage)).toHaveAttribute(
             "title",

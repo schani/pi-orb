@@ -247,7 +247,7 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
   const oldCert = process.env["NODE_EXTRA_CA_CERTS"];
   process.env["NODE_EXTRA_CA_CERTS"] = cert;
   const cp = await startControlPlane({
-    port: 7168,
+    port: 7169,
     fake,
     nameFake,
     pglitePath: join(root, "db"),

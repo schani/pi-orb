@@ -1,7 +1,7 @@
 import { NoSimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
-import { pollAllOnce, reconcileAllOnce } from "./loops.ts";
+import { pollAllOnce, ReconcileDispatcher, reconcileAllOnce } from "./loops.ts";
 
 /** A `NoSimulationTask` that keeps the lifecycle lines instead of dropping them. */
 class RecordingTask extends NoSimulationTask {
@@ -13,6 +13,11 @@ class RecordingTask extends NoSimulationTask {
 
   override log(...parts: readonly unknown[]): void {
     this.lines.push(parts.map((part) => String(part)).join(" "));
+  }
+
+  override checkpoint(...parts: readonly unknown[]): Promise<void> {
+    this.lines.push(parts.map((part) => String(part)).join(" "));
+    return Promise.resolve();
   }
 }
 
@@ -61,6 +66,43 @@ describe("loop handling of a store invariant", () => {
 
     await pollAllOnce(task, harness.deps);
     expect(task.lines.filter((line) => line.includes("pull-failed"))).toHaveLength(1);
+  });
+
+  it("correlates a nudge arriving during an in-flight pass with the later pass", async () => {
+    const task = new RecordingTask("reconcile correlation");
+    const harness = makeHarness();
+    harness.store.seedProject(makeProjectRow("project-correlation"));
+    harness.store.seedOrb(makeOrbRow("orb-correlation", "project-correlation", "stopped"));
+    let releaseFirst = (): void => {};
+    const firstHeld = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let calls = 0;
+    const dispatcher = new ReconcileDispatcher(
+      harness.deps,
+      (_orbId, operation) => operation(task),
+      async () => {
+        calls += 1;
+        if (calls === 1) await firstHeld;
+        return { type: "noop" };
+      },
+    );
+
+    await dispatcher.dispatchDue(task);
+    const key = "reconcile:orb-correlation";
+    harness.deps.control.nudgeNextAttemptAt(key);
+    const requestedGeneration = harness.deps.control.getScheduleGeneration(key);
+    releaseFirst();
+    await dispatcher.drain();
+
+    expect(task.lines).toContain("reconcile.completed orb-correlation 0 noop");
+    expect(task.lines).not.toContain(
+      `reconcile.completed orb-correlation ${requestedGeneration} noop`,
+    );
+    await dispatcher.dispatchDue(task);
+    await dispatcher.drain();
+    expect(task.lines).toContain(`reconcile.completed orb-correlation ${requestedGeneration} noop`);
+    expect(calls).toBe(2);
   });
 
   it("keeps ordinary store outages on their normal retry cadence", async () => {

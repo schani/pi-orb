@@ -51,8 +51,12 @@ describe("orb runtime Dockerfile contract", () => {
     expect(dockerfile).toContain("pkg-config");
     expect(dockerfile).toContain("rustup/archive/1.29.0");
     expect(dockerfile).toContain("sha256sum --check");
+    expect(dockerfile).toContain(
+      "for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver",
+    );
     expect(dockerfile).toContain("ENV RUSTUP_HOME=/workspace/home/.rustup");
     expect(dockerfile).toContain("ENV CARGO_HOME=/workspace/home/.cargo");
+    expect(dockerfile).not.toContain("rustup default stable");
   });
 
   it("builds the node-pty Linux addon while keeping other lifecycle scripts disabled", () => {

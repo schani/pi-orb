@@ -12,7 +12,7 @@ installed size; transitive libraries remain only as dependencies of this baselin
 - Chromium and agent-browser: prescribed browser automation.
 - Python, venv, zip/unzip, curl, ripgrep: prescribed agent tools.
 - build-essential, pkg-config: native addon builds, including project addons.
-- rustup: prescribed Rust bootstrap; toolchains are installed in durable home.
+- rustup and its proxies: prescribed Rust bootstrap; no toolchain is preinstalled, and explicit installs use durable home.
 - sudo: repository setup hooks; orb UID/GID is fixed at 2000 in this experiment.
 - Tailscale: existing userspace preview support, supervised by the runtime.
 

@@ -1,5 +1,5 @@
 import type { ExecFileException } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
@@ -21,6 +21,7 @@ const controls = vi.hoisted(() => ({
   session: null as null | DeferredPiSession,
   sessionCreationStarted: false,
   awaitSessionCreation: undefined as undefined | (() => Promise<void>),
+  executedFiles: [] as string[],
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -28,20 +29,18 @@ vi.mock("node:child_process", async (importOriginal) => {
   return {
     ...original,
     execFile: (
-      _file: string,
+      file: string,
       _args: string[],
       _options: unknown,
       callback: (error: ExecFileException | null, stdout: string, stderr: string) => void,
     ) => {
+      controls.executedFiles.push(file);
       callback(null, "commit\n", "");
       return {} as ReturnType<typeof original.execFile>;
     },
   };
 });
 
-vi.mock("../domain/rust.ts", () => ({
-  ensurePersistentRustToolchain: () => okAsync(undefined),
-}));
 vi.mock("../project-secrets/endpoint.ts", () => ({
   fetchProjectSecretSnapshotAtBoot: () => okAsync({ revision: 1, values: {} }),
 }));
@@ -158,6 +157,7 @@ afterEach(() => {
   controls.session = null;
   controls.sessionCreationStarted = false;
   controls.awaitSessionCreation = undefined;
+  controls.executedFiles.length = 0;
   for (const [name, value] of Object.entries(originalEnvironment)) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
@@ -180,10 +180,14 @@ const wake: OrbBootContext = {
   system: { kind: "sleep_wake", sleepUntil: "2026-09-18T04:05:06.000Z" },
 };
 
-it("actual boot fails closed before session creation when context cannot be read", async () => {
+it("actual boot preserves Rust state without spawning an installer", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-sleep-boot-error-"));
   roots.push(root);
   mkdirSync(join(root, "repo"), { recursive: true });
+  const installedToolchain = join(root, "home", ".rustup", "toolchains", "custom");
+  const installedToolchainMarker = join(installedToolchain, "marker");
+  mkdirSync(installedToolchain, { recursive: true });
+  writeFileSync(installedToolchainMarker, "preserved");
   const agent = new PiOrbAgent({
     orbId: "orb",
     repositoryUrl: "https://example.com/repo.git",
@@ -207,6 +211,10 @@ it("actual boot fails closed before session creation when context cannot be read
     },
   });
   expect(controls.session).toBeNull();
+  expect(controls.executedFiles).not.toContain("rustup");
+  expect(process.env.RUSTUP_HOME).toBe(join(root, "home", ".rustup"));
+  expect(process.env.CARGO_HOME).toBe(join(root, "home", ".cargo"));
+  expect(existsSync(installedToolchainMarker)).toBe(true);
   expect(
     (await agent.deliverInboxMessage("sleep-1", ["sleep-1"], wake.content, wake.system)).isErr(),
   ).toBe(true);

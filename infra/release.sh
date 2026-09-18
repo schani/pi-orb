@@ -99,7 +99,7 @@ repair_iap_after_attempt() {
 cleanup() {
   local status=$?
   trap - EXIT HUP INT TERM
-  release_stop_child
+  release_stop_children
   repair_iap_after_attempt || status=1
   if [ -n "$RECORD" ] && [ -f "$RECORD" ]; then
     state finish "$status" || status=1
@@ -122,7 +122,7 @@ cleanup() {
 }
 on_signal() {
   trap '' HUP INT TERM
-  release_stop_child
+  release_stop_children
   exit "$1"
 }
 trap cleanup EXIT
@@ -223,7 +223,6 @@ if [ -z "$VALIDATE" ]; then
   release_run_check npm run typecheck
   release_run_check npm run lint
   release_run_check npm test
-  release_run_check docker build -f apps/orb-runtime/Dockerfile -t pi-orb-runtime:dev .
   release_run_check npm run test:e2e
   stage build
   release_run_child "$INFRA/build-push.sh" > "$WORK_DIR/release.tfvars"

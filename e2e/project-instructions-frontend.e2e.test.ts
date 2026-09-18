@@ -3,6 +3,7 @@ import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s project Instructions tab: explicit acceptance, draft ownership, scope and phone layout",
@@ -45,7 +46,7 @@ it.each(["chromium", "webkit"] as const)(
           });
         await route.continue();
       });
-      await page.goto(`http://127.0.0.1:${address.port}/#/`);
+      await gotoFrontendFixture(page, `http://127.0.0.1:${address.port}/#/`);
       const gears = page.getByRole("button", { name: /^Configure / });
       await check(gears.first()).toBeVisible();
       const name = await gears.first().getAttribute("aria-label");

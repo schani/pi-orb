@@ -29,9 +29,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends gh tailscale chromium google-cloud-cli \
   && rm -rf /var/lib/apt/lists/*
 
-# Install only the pinned rustup multiplexer in the disposable image. The
-# runtime installs stable on first boot into the orb's persistent home, where
-# project rust-toolchain.toml overrides and Cargo caches survive image updates.
+# Install only the pinned rustup multiplexer and its proxies in the disposable
+# image. Explicit and repository-selected toolchains, plus Cargo state, live in
+# the orb's persistent home and survive image updates.
 ARG TARGETARCH
 RUN case "$TARGETARCH" in \
       amd64) rust_arch=x86_64; rustup_sha=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10 ;; \

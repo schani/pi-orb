@@ -5,6 +5,7 @@ import { type Browser, chromium, expect as expectPage, type Page } from "@playwr
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_HASH = "#/orbs/frontend-fixture-orb";
@@ -1010,7 +1011,7 @@ describe("frontend-only browser behavior", () => {
   it("opens the OAuth return dialog over the loaded dashboard and preserves it on close", async () => {
     const page = await browser.newPage();
     try {
-      await page.goto(`${origin}/#/projects/frontend-fixture-project/mcp`);
+      await gotoFrontendFixture(page, `${origin}/#/projects/frontend-fixture-project/mcp`);
       const dialog = page.getByRole("dialog");
       await expectPage(dialog.getByRole("tab", { name: "MCPs", exact: true })).toBeFocused();
       const dashboard = page.locator(".dashboard");
@@ -1061,7 +1062,7 @@ describe("frontend-only browser behavior", () => {
       await route.continue();
     });
     try {
-      await page.goto(`${origin}/#/projects/frontend-fixture-project`);
+      await gotoFrontendFixture(page, `${origin}/#/projects/frontend-fixture-project`);
       const heading = page.getByRole("heading", { name: "Frontend playground", exact: true });
       await expectPage(heading).toBeFocused();
       await expectPage
@@ -1217,6 +1218,10 @@ describe("frontend-only browser behavior", () => {
   it("loads addressed orb project context omitted from the default list", async () => {
     const page = await browser.newPage();
     let directReads = 0;
+    let releaseDirectRead!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseDirectRead = resolve;
+    });
     await page.route("**/api/v1/projects", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -1226,14 +1231,31 @@ describe("frontend-only browser behavior", () => {
       await route.fulfill({ response, json: body });
     });
     await page.route("**/api/v1/projects/frontend-fixture-project", async (route) => {
-      if (route.request().method() === "GET") directReads += 1;
+      if (route.request().method() === "GET") {
+        directReads += 1;
+        await gate;
+      }
       await route.continue();
     });
     try {
+      const directRequest = page.waitForRequest(
+        (request) =>
+          request.method() === "GET" &&
+          request.url().endsWith("/api/v1/projects/frontend-fixture-project"),
+      );
       await page.goto(`${origin}/${ORB_HASH}`);
       const project = page.locator(".orb-index .ix-project", {
         has: page.getByRole("heading", { name: "Frontend playground", exact: true }),
       });
+      await directRequest;
+      await expectPage(project).toHaveCount(0);
+      const directResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          response.url().endsWith("/api/v1/projects/frontend-fixture-project"),
+      );
+      releaseDirectRead();
+      await directResponse;
       await expectPage(project).toBeVisible();
       await expectPage(
         project.getByRole("button", { name: "Configure Frontend playground" }),
@@ -1241,6 +1263,7 @@ describe("frontend-only browser behavior", () => {
       await expectPage(page).toHaveTitle("Frontend playground · Frontend Playground");
       expectPage(directReads).toBeGreaterThan(0);
     } finally {
+      releaseDirectRead();
       await page.close();
     }
   });
@@ -1259,7 +1282,7 @@ describe("frontend-only browser behavior", () => {
       route.fulfill({ json: { revision: 0, servers: [] } }),
     );
     try {
-      await page.goto(`${origin}/`);
+      await gotoFrontendFixture(page, `${origin}/`);
       await page
         .getByRole("button", { name: /^Configure / })
         .first()
@@ -1340,7 +1363,7 @@ describe("frontend-only browser behavior", () => {
         });
       });
       try {
-        await page.goto(`${origin}/${hash}`);
+        await gotoFrontendFixture(page, `${origin}/${hash}`);
         const gear = page.getByRole("button", { name: /^Configure / }).first();
         await expectPage(gear).toBeVisible();
         expectPage(
@@ -1501,7 +1524,7 @@ describe("frontend-only browser behavior", () => {
       );
       expectPage(blocked.status()).toBe(409);
       expectPage((await blocked.json()).error.message).toContain("beta");
-      await page.goto(`${origin}/#/projects/${projectId}/mcp`);
+      await gotoFrontendFixture(page, `${origin}/#/projects/${projectId}/mcp`);
       const dialog = page.getByRole("dialog");
       const mcp = dialog.getByRole("tabpanel", { name: "MCPs", exact: true });
       const alpha = mcp
@@ -1615,7 +1638,7 @@ describe("frontend-only browser behavior", () => {
   it("ends every desktop index header at the trashcan cell without an extra gutter", async () => {
     const page = await browser.newPage();
     try {
-      await page.goto(`${origin}/${ORB_HASH}`);
+      await gotoFrontendFixture(page, `${origin}/${ORB_HASH}`);
       const headers = page.locator(".orb-index .project-head");
       await expectPage(headers).toHaveCount(4);
       for (const header of await headers.all()) {
@@ -1647,9 +1670,14 @@ describe("frontend-only browser behavior", () => {
       const response = await page.request.get(`${origin}/api/v1/projects`);
       let project = (await response.json()).items[0];
       const requests: unknown[] = [];
-      await page.route("**/api/v1/projects", (route) =>
-        route.fulfill({ json: { items: [project] } }),
-      );
+      let releaseProjectList!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseProjectList = resolve;
+      });
+      await page.route("**/api/v1/projects", async (route) => {
+        await gate;
+        await route.fulfill({ json: { items: [project] } });
+      });
       await page.route(`**/api/v1/projects/${project.id}`, async (route) => {
         if (route.request().method() === "PATCH") {
           const update = route.request().postDataJSON();
@@ -1668,8 +1696,19 @@ describe("frontend-only browser behavior", () => {
         await route.fulfill({ json: project });
       });
       try {
+        const projectListRequest = page.waitForRequest(
+          (request) => request.method() === "GET" && request.url().endsWith("/api/v1/projects"),
+        );
         await page.goto(`${origin}/${hash}`);
         const header = page.locator(".project-head").first();
+        await projectListRequest;
+        await expectPage(header).toHaveCount(0);
+        const projectListResponse = page.waitForResponse(
+          (candidate) =>
+            candidate.request().method() === "GET" && candidate.url().endsWith("/api/v1/projects"),
+        );
+        releaseProjectList();
+        await projectListResponse;
         await expectPage(header.getByRole("button", { name: /^Configure / })).toBeVisible();
         await expectPage(header.locator(".project-name")).toHaveCSS("font-size", "18px");
         await expectPage(header.getByRole("button")).toHaveCount(2);
@@ -1736,6 +1775,7 @@ describe("frontend-only browser behavior", () => {
             .getByLabel("Name", { exact: true }),
         ).toHaveValue("Updated project");
       } finally {
+        releaseProjectList();
         await page.close();
       }
     },
@@ -1782,7 +1822,7 @@ describe("frontend-only browser behavior", () => {
   it("inverts every production text-field surface on focus and restores it on blur", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     try {
-      await page.goto(`${origin}/`);
+      await gotoFrontendFixture(page, `${origin}/`);
       await expectPage(
         page.getByRole("heading", { name: "New project", exact: true }),
       ).toBeVisible();
@@ -1833,7 +1873,7 @@ describe("frontend-only browser behavior", () => {
   it("keeps native selection visible on normal and inverted surfaces", async () => {
     const page = await browser.newPage();
     try {
-      await page.goto(`${origin}/`);
+      await gotoFrontendFixture(page, `${origin}/`);
       await expectPage(
         page.getByRole("heading", { name: "New project", exact: true }),
       ).toBeVisible();

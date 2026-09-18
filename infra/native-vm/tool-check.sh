@@ -7,9 +7,12 @@ cd /workspace/repo
 printf '#include <stdio.h>\nint main(){puts("NATIVE_C_OK");}\n' >native-check.c
 cc native-check.c -o native-check
 ./native-check
-printf 'fn main(){println!("NATIVE_RUST_OK");}\n' >native-check.rs
-rustc native-check.rs -o native-rust-check
-./native-rust-check
+rustup --version
+# Acceptance starts with a newly seeded fixture home and reuses it for replacement.
+test "$(rustup toolchain list)" = "no installed toolchains"
+for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do
+  test -x "/usr/local/bin/$proxy"
+done
 python3 -m venv /workspace/python-check
 /workspace/python-check/bin/python -c 'print("PYTHON_VENV_OK")'
 agent-browser --session native-vm open file:///workspace/repo/index.html

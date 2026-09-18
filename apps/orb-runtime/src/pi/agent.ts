@@ -38,7 +38,7 @@ import { BrokerTokenClient } from "../domain/broker-client.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { AgentGateView } from "../domain/requests.ts";
-import { ensurePersistentRustToolchain } from "../domain/rust.ts";
+import { configurePersistentRust } from "../domain/rust.ts";
 import { type SubagentError, type SubagentRun, SubagentWork } from "../domain/subagent-work.ts";
 import {
   buildTurnSummaryInput,
@@ -62,7 +62,6 @@ import { fetchProjectInstructions } from "../project-instructions/endpoint.ts";
 import { fetchProjectSecretSnapshotAtBoot } from "../project-secrets/endpoint.ts";
 import { type BootContextError, fetchBootContext } from "./boot-context.ts";
 import { BOOT_BASELINE_TYPE, planBootNotification, SLEEP_WAKE_TYPE } from "./boot-notification.ts";
-import { settleBootPrerequisites } from "./boot-prerequisites.ts";
 import { readExecutionIdentity } from "./execution-identity.ts";
 import { FileIdleStopFence, type IdleStopFence } from "./idle-stop-fence.ts";
 import {
@@ -76,7 +75,6 @@ import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 import { codexModelDisplayName, eligibleCodexModels } from "./model-select.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
 import { restoreSessionSettings, settingsFallbackMessage } from "./restore-settings.ts";
-import { reportRustToolchainEdge } from "./rust-toolchain-reporter.ts";
 import { sessionFlushed } from "./session-flush.ts";
 import { createPersistentSession, syncSessionFile } from "./settings-persistence.ts";
 import { interruptedSubagents } from "./subagent-recovery.ts";
@@ -371,21 +369,14 @@ export class PiOrbAgent {
     if (home.isErr()) {
       return err(this.failed("home_init_failed", home.error.message, false));
     }
-    // 1. Rust setup and checkout are independent after HOME is configured.
-    // Wait for both so a failure cannot leave background boot work running.
+    // 1. Keep explicit rustup toolchain installs and Cargo state in the durable
+    // home. The orb does not select or install a toolchain automatically.
+    configurePersistentRust(home.value, process.env);
     this.health = this.initializing("cloning");
     const repoDir = join(this.options.workDir, "repo");
-    const prerequisites = await settleBootPrerequisites(
-      () =>
-        ensurePersistentRustToolchain(home.value, process.env, undefined, {
-          now: performance.now.bind(performance),
-          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-          report: (event, timeoutMs) => reportRustToolchainEdge(event, Math.min(20_000, timeoutMs)),
-        }).mapErr((error) => this.failed("rust_toolchain_init_failed", error.message, true)),
-      () => this.prepareCheckout(repoDir),
-    );
-    if (prerequisites.isErr()) return err(prerequisites.error);
-    this.checkoutCommit = prerequisites.value[1];
+    const checkout = await this.prepareCheckout(repoDir);
+    if (checkout.isErr()) return err(checkout.error);
+    this.checkoutCommit = checkout.value;
 
     // 1b. The repository's `.agents/setup` (docs/orb-setup-hook.md) — it needs
     // the checkout, and everything after it may depend on what it installs.

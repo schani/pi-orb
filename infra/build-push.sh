@@ -9,7 +9,7 @@ source infra/release-child.sh
 on_signal() {
   local status=$1
   trap '' HUP INT TERM
-  release_stop_child
+  release_stop_children
   exit "$status"
 }
 trap 'on_signal 129' HUP
@@ -27,20 +27,24 @@ IMAGE_BUILD_DIR=${IMAGE_BUILD_DIR:-$PWD/.context/native-image-release/$(date -u 
 IMAGE_BUILDER_SA=${IMAGE_BUILDER_SA:-pi-orb-image-builder@$PROJECT.iam.gserviceaccount.com}
 IMAGE_BUILD_SUBNET=${IMAGE_BUILD_SUBNET:-projects/$PROJECT/regions/$REGION/subnetworks/pi-orb-image-build-$REGION}
 
-release_run_child node --experimental-strip-types packages/native-image/src/cli.ts \
+CP_IMAGE="$REPO/control-plane:$TAG"
+release_start_child node --experimental-strip-types packages/native-image/src/cli.ts \
   --project "$PROJECT" --zone "$ZONE" \
   --base-image "$BASE_IMAGE" --version "$TAG" --subnet "$IMAGE_BUILD_SUBNET" \
   --builder-service-account "$IMAGE_BUILDER_SA" \
   --validation-service-account "pi-orb-orb-vm@$PROJECT.iam.gserviceaccount.com" \
   --validation-repository-url https://github.com/octocat/Hello-World --output-dir "$IMAGE_BUILD_DIR" >&2
-
-# Recheck both provenance and acceptance before publishing the release artifact.
-node infra/native-image-vars.mjs "$IMAGE_BUILD_DIR/manifest.json" "$COMMIT" "$PROJECT" > "$IMAGE_BUILD_DIR/native.tfvars"
-CP_IMAGE="$REPO/control-plane:$TAG"
-docker build --platform linux/amd64 -q -f apps/control-plane/Dockerfile \
+release_start_child docker build --platform linux/amd64 -q -f apps/control-plane/Dockerfile \
   --label "org.opencontainers.image.revision=$COMMIT" \
   --label "org.opencontainers.image.source=https://github.com/schani/pi-orb" \
   -t "$CP_IMAGE" . >&2
+
+# Fail fast in either branch, but wait for every terminated sibling so the
+# native builder's remote cleanup completes before this wrapper exits.
+release_wait_children
+
+# Recheck native provenance and acceptance before publishing either artifact.
+node infra/native-image-vars.mjs "$IMAGE_BUILD_DIR/manifest.json" "$COMMIT" "$PROJECT" > "$IMAGE_BUILD_DIR/native.tfvars"
 docker push -q "$CP_IMAGE" >&2
 CP=$(docker inspect --format='{{index .RepoDigests 0}}' "$CP_IMAGE")
 if ! [[ "$CP" =~ ^[^[:space:]]+@sha256:[a-f0-9]{64}$ ]]; then

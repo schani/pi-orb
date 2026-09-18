@@ -80,6 +80,31 @@ A new project should require variables plus one audited foundation apply and the
 
 **Native acceptance finding and simplification (2026-09-08):** the orb-local SSH correction passed real GCE installation/sealing and validator identity checks, but workspace growth blocked that candidate's acceptance. A successful read-only `e2fsck` does not necessarily establish the persistent check state `resize2fs` requires. Validate the captured template's actual mount/check history; do not bypass the damaged-workspace repair refusal. A local real-loop-device reproduction confirmed the same failure after template mount/unmount and confirmed that a final writable check of the fresh empty template before capture lets the unchanged read-only boot gate and growth succeed. That writable-check workaround was subsequently rejected in favor of removing growth entirely: the template, validation disk and production workspace are now all 50 GiB, with no configurable workspace capacity. Admission only reads metadata and rejects mismatches; retained disks are never reformatted or resized. The builder retains a read-only integrity gate on the empty template. Production capacity cost is unchanged because it already provisioned 50 GiB. Disposable build `v-fixed-workspace-20260908-a28c6fb5b1e24029` subsequently passed the full GCE image/guest/Cloud Logging acceptance gate in 7m34s; the 50 GiB workspace template occupied only 160,256 compressed bytes. All test resources were removed. This validates the standalone image, not a production application deployment. Evidence: `docs/postmortems/2026-09-08-workspace-image-readonly-check.md`.
 
+## Measured release latency (2026-09-18)
+
+[Deploy 35290276292](https://github.com/schani/pi-orb/actions/runs/35290276292)
+took 62m15s. Timestamped logs attribute 33m14s to checks (including 27m40s
+of E2E), 9m51s to image build/acceptance/publication, 3m30s to the migration
+job, 1m08s to application apply, 1m33s to retirement, and 10m36s to lifecycle
+and identity smokes including fixture cleanup. Setup, preflight, planning,
+repair, activation and finalization account for the remainder. Migration time
+was mostly Cloud Run job provisioning/startup, not SQL execution. The preceding
+successful release took 63m56s, including 24m48s of E2E. These measurements
+identify checks and image/smoke qualification—not application apply or runner
+queueing—as the dominant costs; they do not authorize bypassing release gates.
+
+**Release build concurrency (decided 2026-09-18):** the remote native image
+build and local control-plane container build run together, but no container is
+pushed until both builds succeed and the native manifest passes provenance and
+acceptance validation. A failure or handled signal terminates every remaining
+owned child and waits for cleanup, preserving native remote-resource cleanup.
+Typecheck, lint, database migration, apply, retirement, activation, and
+post-deploy smokes remain serial; short npm children are not parallelized because
+terminating npm does not guarantee termination of its tool subprocess. E2E owns its one runtime image
+build rather than release wrappers rebuilding it. Deploy and E2E cache npm data
+and Playwright browser binaries by OS and exact lockfile only; release records,
+test output, credentials, and other mutable state are not cached.
+
 ## Native runtime VM image release (implemented 2026-09-05; first deployed 2026-09-07)
 
 The native Debian direction selected on 2026-09-05 in `docs/host-provider.md` adds a custom VM image build and an actual-VM boot gate to the release path. The control plane remains an OCI image; local Docker runtime builds remain useful for development and E2E. The release manifest and application configuration carry the exact uniquely named VM image resource and recorded image identity instead of the GCE runtime container digest, alongside the monotonic host-spec generation. Retain previous images for rollback, performed as a new forward-generation release through ordinary stopped-compute replacement. Builder/image-publishing permissions and the control plane’s read-only use of private images belong to the foundation; orb VMs must not receive image-publishing authority. The builder must remove build credentials and instance-specific state before image capture. VM and container builds share runtime source and the npm lockfile; the native OS/tool recipe is in `infra/native-vm/`.

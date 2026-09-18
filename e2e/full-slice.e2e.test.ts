@@ -35,6 +35,7 @@ import {
   FatalProbeError,
   fakeControl,
   fetchIssuerKeys,
+  forceReconcilePass,
   orbContainerNames,
   removeOrbContainers,
   startControlPlane,
@@ -315,19 +316,14 @@ async function waitForDiscardFenceCleared(id: string): Promise<void> {
   );
 }
 
-/**
- * Each failure test has exactly one deliberate 65-second negative-observation
- * window: observe more than two terminal-backstop intervals and fail
- * immediately if compute reappears without explicit Start/message intent.
- */
-async function observeNoAutonomousReplacement(id: string, workspaceFile?: string): Promise<void> {
-  const negativeDeadline = Date.now() + 65_000;
-  while (Date.now() < negativeDeadline) {
+/** Three completed terminal reconciliation passes replace elapsed negative observation. */
+async function assertNoAutonomousReplacement(id: string, workspaceFile?: string): Promise<void> {
+  for (let pass = 0; pass < 3; pass += 1) {
+    await forceReconcilePass(controlPlane, id);
     expect(await computeAbsent(id, workspaceFile)).toBe(true);
     expect((await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${id}`)).body["state"]).toBe(
       "failed",
     );
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 }
 
@@ -576,14 +572,12 @@ beforeAll(async () => {
       e2eHostSpec: "stage2-spec-a",
       hostingRoot: hostingRootDirectory,
       webDist: webDistDirectory,
+      extraEnv: { PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1" },
     });
     return;
   }
 
   await docker(["network", "create", NETWORK]).catch(() => undefined);
-  // Always rebuild: a build-if-absent gate silently runs stale runtime code.
-  // With a warm layer cache this takes seconds.
-  await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
 
   await docker([
     "run",
@@ -614,6 +608,7 @@ beforeAll(async () => {
     e2eHostSpec: "stage2-spec-a",
     hostingRoot: hostingRootDirectory,
     webDist: webDistDirectory,
+    extraEnv: { PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1" },
   });
 }, 720_000);
 
@@ -656,6 +651,7 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
     authDir,
     hostingRoot: hostingRootDirectory,
     webDist: webDistDirectory,
+    extraEnv: { PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1" },
   });
 }
 
@@ -894,7 +890,7 @@ describe("full slice E2E", () => {
         expect(staleMint.status, JSON.stringify(staleMint.body)).toBe(401);
         expect(staleMint.body["error"]).toBe("unauthorized");
 
-        await observeNoAutonomousReplacement(replacementOrbId, "replacement-sentinel");
+        await assertNoAutonomousReplacement(replacementOrbId, "replacement-sentinel");
 
         expect((await api(base, "POST", `/api/v1/orbs/${replacementOrbId}/start`)).status).toBe(
           202,
@@ -1136,11 +1132,11 @@ describe("full slice E2E", () => {
         } else {
           await restartControlPlaneWithSpec("stage2-spec-b", 2);
         }
-        // Deliberate elapsed-time wait #2 in this suite (docs/compute-replacement.md):
-        // the assertion is a negative one — several reconcile passes at the new
-        // specification must leave the running orb's compute completely alone —
-        // and a negative has no completion signal to wait on.
-        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        // Several completed passes at the new specification must leave the
+        // running orb's compute completely alone.
+        for (let pass = 0; pass < 3; pass += 1) {
+          await forceReconcilePass(controlPlane, specOrbId);
+        }
         expect(
           (await api(controlPlane.baseUrl, "GET", `/api/v1/orbs/${specOrbId}`)).body["state"],
         ).toBe("running");
@@ -1329,7 +1325,7 @@ describe("full slice E2E", () => {
           ).resolves.toContain(failedOrbId);
         }
 
-        await observeNoAutonomousReplacement(failedOrbId);
+        await assertNoAutonomousReplacement(failedOrbId);
 
         const durable = await api(base, "GET", `/api/v1/orbs/${failedOrbId}`);
         expect(durable.body["lastError"]).toBe(failed["lastError"]);

@@ -179,6 +179,7 @@ async function reconcileAndScheduleNext(
     task.monotonicNow() + delay,
     orb.stateVersion,
   );
+  await task.checkpoint("reconcile.completed", orb.id, scheduleGeneration, outcome.type);
 }
 
 function isReconcileDue(

@@ -389,9 +389,8 @@ describe("infra/release.sh", () => {
     expect(calls).toMatch(
       /gcloud:storage cp[\s\S]*tofu:.* init[\s\S]*tofu:.* plan[\s\S]*\nbuild[\s\S]*tofu:.* plan[\s\S]*run jobs create[\s\S]*tofu:.* apply[\s\S]*deploy:[\s\S]*infra.release_retire wait[\s\S]*infra.release_state activate[\s\S]*smoke[\s\S]*wif-smoke[\s\S]*gcloud:storage rm/,
     );
-    expect(calls).toMatch(
-      /npm:ci[\s\S]*npm:test\n[\s\S]*docker:build -f apps\/orb-runtime\/Dockerfile -t pi-orb-runtime:dev \.[\s\S]*npm:run test:e2e[\s\S]*\nbuild\n/,
-    );
+    expect(calls).toMatch(/npm:ci[\s\S]*npm:test\n[\s\S]*npm:run test:e2e[\s\S]*\nbuild\n/);
+    expect(calls).not.toContain("docker:build");
     // The workload-identity smoke runs inside the lock, after the lifecycle
     // smoke, and is handed the project and zone its GCE legs need.
     expect(calls).toContain("wif-smoke:test-project:us-central1-a");
@@ -428,8 +427,9 @@ describe("infra/release.sh", () => {
     expect(result.status, result.stderr).toBe(0);
     const calls = readFileSync(log, "utf8");
     expect(calls).toMatch(
-      /npm:ci[\s\S]*npm:run test:e2e:install[\s\S]*npm:run typecheck[\s\S]*npm:run lint[\s\S]*npm:test\n[\s\S]*docker:build[\s\S]*npm:run test:e2e/,
+      /npm:ci[\s\S]*npm:run test:e2e:install[\s\S]*npm:run typecheck[\s\S]*npm:run lint[\s\S]*npm:test\n[\s\S]*npm:run test:e2e/,
     );
+    expect(calls).not.toContain("docker:build");
     expect(calls).toContain(
       `--set-env-vars=^@^PI_ORB_USER_ID=${userId}@PI_ORB_ORIGINAL_USER_ID=${userId}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=https://issuer.example@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=original-subject`,
     );

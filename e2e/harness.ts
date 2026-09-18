@@ -1,5 +1,5 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { createPublicKey, createVerify } from "node:crypto";
+import { createPublicKey, createVerify, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -638,7 +638,7 @@ export async function startControlPlane(options: {
         : { PI_ORB_NAME_INFERENCE_URL: options.nameFake.inferenceBaseUrl }),
       ...options.extraEnv,
     },
-    stdio: clockSpec === null ? ["ignore", "pipe", "pipe"] : ["ignore", "pipe", "pipe", "ipc"],
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   const clock = clockSpec === null ? undefined : attachControlledClock(child);
   child.stdout?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
@@ -676,6 +676,42 @@ export async function startControlPlane(options: {
         }, 10_000).unref();
       }),
   };
+}
+
+export async function forceReconcilePass(
+  controlPlane: ControlPlaneHandle,
+  orbId: string,
+): Promise<void> {
+  const requestId = randomUUID();
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`timed out waiting for forced reconciliation of ${orbId}`));
+    }, 30_000);
+    const onMessage = (message: unknown): void => {
+      if (
+        typeof message !== "object" ||
+        message === null ||
+        !("type" in message) ||
+        message.type !== "pi-orb.e2e.reconcile-completed" ||
+        !("requestId" in message) ||
+        message.requestId !== requestId
+      )
+        return;
+      cleanup();
+      resolve();
+    };
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      controlPlane.process.off("message", onMessage);
+    };
+    controlPlane.process.on("message", onMessage);
+    controlPlane.process.send({ type: "pi-orb.e2e.reconcile", orbId, requestId }, (error) => {
+      if (error === null) return;
+      cleanup();
+      reject(error);
+    });
+  });
 }
 
 export async function api(

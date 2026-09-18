@@ -3,6 +3,7 @@ import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s personal editor: explicit save, load/failure gates, retained drafts, scope and phone geometry",
@@ -60,7 +61,7 @@ it.each(["chromium", "webkit"] as const)(
         }
         await route.continue();
       });
-      await page.goto(url);
+      await gotoFrontendFixture(page, url);
       const gear = page.getByRole("button", { name: "Personal instructions", exact: true });
       await check(
         page.locator(".dashboard-totals").getByRole("button", { name: "Personal instructions" }),

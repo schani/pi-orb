@@ -56,6 +56,16 @@ class PreflightTest(unittest.TestCase):
             self.assertLess(script.index("npm run test:e2e:install"),
                             script.index("npm run test:e2e\n"))
 
+    def test_release_workflows_cache_only_dependencies_and_do_not_prebuild_runtime(self):
+        key = "key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}"
+        for path in [".github/workflows/deploy.yml", ".github/workflows/e2e.yml"]:
+            workflow = Path(path).read_text()
+            self.assertIn("path: ~/.cache/ms-playwright", workflow)
+            self.assertIn(key, workflow)
+            self.assertNotIn("apps/orb-runtime/Dockerfile", workflow)
+        self.assertIn("cache: npm", Path(".github/workflows/deploy.yml").read_text())
+        self.assertNotIn("apps/orb-runtime/Dockerfile", Path("infra/release.sh").read_text())
+
     def test_check_precedes_checks_build_schema_and_apply(self):
         script = Path("infra/release.sh").read_text()
         check = script.index('python3 -m infra.release_preflight "$PROJECT"')

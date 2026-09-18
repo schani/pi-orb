@@ -82,6 +82,7 @@ import { waitForReleaseActivation } from "./domain/release-activation.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
 import { UserScope } from "./domain/user-scope.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
+import { E2eReconcileCheckpoints } from "./e2e-reconcile-checkpoints.ts";
 import {
   type ControlPlaneRole,
   createConfiguredHostingAccessPolicy,
@@ -116,6 +117,8 @@ const env = (name: string, fallback: string): string => {
   return value !== undefined && value !== "" ? value : fallback;
 };
 
+const e2eReconcileCheckpoints = new E2eReconcileCheckpoints();
+
 /**
  * The production task: real time, and `task.log` on stdout so the reconciler's
  * event log reaches Cloud Logging (docs/lifecycle.md). `noSimulation` cannot be
@@ -124,12 +127,28 @@ const env = (name: string, fallback: string): string => {
  * (`docs/postmortems/2026-08-05-unreachable-restart-livelock.md`).
  * Checkpoints, failpoints and blockpoints stay silent: they are
  * simulation-control primitives, and one of them fires on every history commit.
+ * The E2E-only reconciliation checkpoint is exposed when its explicit fixture
+ * flag is set, so tests can synchronize completed passes without elapsed waits.
  */
 class ControlPlaneTask extends NoSimulationTask {
   constructor(name: string) {
     super(name, true);
   }
-  override checkpoint(): Promise<void> {
+  override checkpoint(...log: readonly unknown[]): Promise<void> {
+    if (
+      process.env["PI_ORB_E2E_RECONCILE_CHECKPOINTS"] === "1" &&
+      log[0] === "reconcile.completed" &&
+      typeof log[1] === "string" &&
+      typeof log[2] === "number"
+    ) {
+      for (const requestId of e2eReconcileCheckpoints.complete(log[1], log[2])) {
+        try {
+          process.send?.({ type: "pi-orb.e2e.reconcile-completed", requestId }, () => undefined);
+        } catch {
+          // The parent may disconnect during teardown after the pass completed.
+        }
+      }
+    }
     return Promise.resolve();
   }
   override failpoint(): Promise<void> {
@@ -517,6 +536,30 @@ export async function main(
     },
   };
 
+  const e2eReconcileMessageHandler = (message: unknown): void => {
+    if (
+      typeof message !== "object" ||
+      message === null ||
+      !("type" in message) ||
+      message.type !== "pi-orb.e2e.reconcile" ||
+      !("orbId" in message) ||
+      typeof message.orbId !== "string" ||
+      !("requestId" in message) ||
+      typeof message.requestId !== "string"
+    )
+      return;
+    const key = `reconcile:${message.orbId}`;
+    deps.control.nudgeNextAttemptAt(key);
+    e2eReconcileCheckpoints.request(
+      message.orbId,
+      message.requestId,
+      deps.control.getScheduleGeneration(key),
+    );
+  };
+  if (process.env["PI_ORB_E2E_RECONCILE_CHECKPOINTS"] === "1") {
+    process.on("message", e2eReconcileMessageHandler);
+  }
+
   const app = Fastify({ logger: false });
   const oauthNetwork = createMcpOAuthFetch();
   const mcpOAuth = new McpOAuth(
@@ -697,6 +740,7 @@ export async function main(
   const shutdown = (): void => {
     if (stop.signal.aborted) return;
     bootTask.log("shutting down");
+    process.off("message", e2eReconcileMessageHandler);
     stop.abort();
     // Stop accepting requests immediately, but the browser service keeps its
     // provider/database boundaries open until concurrent reconciliations drain.

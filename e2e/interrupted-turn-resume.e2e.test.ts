@@ -151,9 +151,6 @@ beforeAll(async () => {
   nameFake = await createFakeSession(`pi-orb-name-e2e-resume-${Date.now()}`, NAME_SCENARIO);
 
   await docker(["network", "create", NETWORK]).catch(() => undefined);
-  // Always rebuild: a build-if-absent gate silently runs stale runtime code.
-  // With a warm layer cache this takes seconds.
-  await docker(["build", "-f", "apps/orb-runtime/Dockerfile", "-t", RUNTIME_IMAGE, "."], 600_000);
 
   await docker(["rm", "-f", PG_CONTAINER]).catch(() => undefined);
   await docker([
