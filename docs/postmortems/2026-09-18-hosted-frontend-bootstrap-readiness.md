@@ -1,6 +1,6 @@
 # Hosted frontend bootstrap readiness failures (2026-09-18)
 
-**Status:** latest blank shell and Docker-triggered Chromium mechanism reproduced; earlier untraced stalls remain unclassified; no deployment
+**Status:** Docker-triggered Chromium abort reproduced; sequencing fix qualified in GitHub; earlier untraced stalls remain unclassified; no deployment
 
 GitHub run [35377639910](https://github.com/schani/pi-orb/actions/runs/35377639910) failed three Chromium cases. `Change thinking` and `.subagent-live-rail` were absent after five seconds. A dashboard case observed no `GET /api/v1/projects` in 30 seconds. The first failure's accessibility snapshot contained only the fixture's independent inline session strip. The evidence establishes that HTML and the fixture plugin loaded while the application had not reached its first API request. It does not identify why, or implicate settings, subagent, or project reducers.
 
@@ -44,4 +44,4 @@ Chromium source independently pins the path: [`TransportClientSocketPool::OnIPAd
 
 The correction orders frontend before lifecycle with Vitest `sequence.groupOrder` and bounds lifecycle to one fork. An actual-config synthetic probe uses explicit file barriers. It observed lifecycle global setup start and finish before frontend start, frontend finish before lifecycle test start, and peak lifecycle file concurrency one; it passed in 1.68 seconds. This matters because Vitest initializes global setup before grouped tests: the Docker build may precede frontend, but cannot overlap it. Serial release cost is accepted: the earlier fully serial suite completed in about 32 minutes within the 40-minute job budget. No timeout, retry, Vite optimizer isolation, or cache machinery was added. Temporary browser/context/page method wrappers and success-page dumps were removed after capturing the transport evidence. Failure-only boot snapshots retain bounded root, module, API, checkpoint, and sanitized error diagnostics.
 
-The serialized configuration has not yet run in CI. No production deployment has occurred.
+Hosted [run 35398292499](https://github.com/schani/pi-orb/actions/runs/35398292499) qualified the serialized configuration at `2e85897`: 103 frontend tests followed by 83 lifecycle tests, all 186 passing in 23 files and 1,506.35 seconds, with no `ERR_NETWORK_CHANGED`. No production deployment has occurred.
