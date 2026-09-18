@@ -3,6 +3,7 @@ import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s: lifecycle cluster and slash settings preserve drafts and synchronize tabs",
@@ -21,7 +22,7 @@ it.each(["chromium", "webkit"] as const)(
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     const url = `http://127.0.0.1:${address.port}/#/orbs/frontend-fixture-orb`;
     try {
-      await page.goto(url);
+      await gotoFrontendFixture(page, url);
       const thinking = page.getByRole("button", { name: "Change thinking", exact: true });
       await check(thinking).toBeEnabled();
       const modelButton = page.getByRole("button", { name: "Change model", exact: true });

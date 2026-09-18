@@ -3,6 +3,7 @@ import { expect as check, chromium, type WebSocket, webkit } from "@playwright/t
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 
 it.each(["chromium", "webkit"] as const)(
   "%s: history 404 retires live ownership even when metadata is still running",
@@ -57,7 +58,7 @@ it.each(["chromium", "webkit"] as const)(
           json: { error: { code: "not_found", message: "Orb doesn't exist", retryable: false } },
         });
       });
-      await page.goto(`${origin}/#/orbs/${a}`);
+      await gotoFrontendHistory(page, `${origin}/#/orbs/${a}`, a);
       await check(page.locator(".history")).toContainText("Review 100");
       await page.locator(`.orb-index a[href="#/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");

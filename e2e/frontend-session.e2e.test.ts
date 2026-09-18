@@ -5,7 +5,11 @@ import { type Browser, chromium, expect as expectPage, type Page } from "@playwr
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
-import { gotoFrontendFixture } from "./testkit/frontend-fixture.ts";
+import {
+  gotoFrontendFixture,
+  gotoFrontendHistory,
+  observeFrontendBoot,
+} from "./testkit/frontend-fixture.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_HASH = "#/orbs/frontend-fixture-orb";
@@ -281,7 +285,7 @@ describe("frontend-only browser behavior", () => {
     async (width) => {
       const page = await browser.newPage({ viewport: { width, height: 740 } });
       try {
-        await page.goto(`${origin}/${ORB_HASH}`);
+        await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb");
         const user = page.locator(".history .rec-you").first();
         const orb = page.locator(".history .rec-orb").first();
         await expectPage(user).toBeVisible();
@@ -708,7 +712,7 @@ describe("frontend-only browser behavior", () => {
         });
       });
       try {
-        await page.goto(`${origin}/#/orbs/${id}`);
+        await gotoFrontendFixture(page, `${origin}/#/orbs/${id}`);
         const rail = page.locator(".subagent-live-rail");
         await expectPage(rail).toContainText("1 running");
         await expectPage(rail).toContainText("1 queued");
@@ -1128,12 +1132,8 @@ describe("frontend-only browser behavior", () => {
     const page = await browser.newPage();
     const response = await page.request.get(`${origin}/api/v1/projects/frontend-fixture-project`);
     let project = await response.json();
-    let directReads = 0;
-    let staleReadArrived!: () => void;
+    let holdNextAddressedRead = false;
     let releaseStaleRead!: () => void;
-    const arrived = new Promise<void>((resolve) => {
-      staleReadArrived = resolve;
-    });
     const gate = new Promise<void>((resolve) => {
       releaseStaleRead = resolve;
     });
@@ -1144,20 +1144,25 @@ describe("frontend-only browser behavior", () => {
         await route.fulfill({ json: project });
         return;
       }
-      directReads += 1;
       const snapshot = { ...project };
-      if (directReads === 2) {
-        staleReadArrived();
+      if (holdNextAddressedRead) {
+        holdNextAddressedRead = false;
         await gate;
       }
       await route.fulfill({ json: snapshot });
     });
     try {
-      await page.goto(`${origin}/#/projects/frontend-fixture-project`);
+      await gotoFrontendFixture(page, `${origin}/#/projects/frontend-fixture-project`);
       await expectPage(
         page.getByRole("heading", { name: "Frontend playground", exact: true }),
       ).toBeVisible();
-      await arrived;
+      const staleRequest = page.waitForRequest(
+        (request) =>
+          request.method() === "GET" &&
+          request.url().endsWith("/api/v1/projects/frontend-fixture-project"),
+      );
+      holdNextAddressedRead = true;
+      await staleRequest;
       await page.getByRole("button", { name: "Configure Frontend playground" }).click();
       const general = page
         .getByRole("dialog")
@@ -1739,12 +1744,12 @@ describe("frontend-only browser behavior", () => {
         await route.fulfill({ json: project });
       });
       try {
+        const boot = observeFrontendBoot(page);
         const projectListRequest = page.waitForRequest(
           (request) => request.method() === "GET" && request.url().endsWith("/api/v1/projects"),
         );
-        await page.goto(`${origin}/${hash}`);
+        await boot.wait(Promise.all([page.goto(`${origin}/${hash}`), projectListRequest]));
         const header = page.locator(".project-head").first();
-        await projectListRequest;
         await expectPage(header).toHaveCount(0);
         const projectListResponse = page.waitForResponse(
           (candidate) =>
@@ -1833,7 +1838,7 @@ describe("frontend-only browser behavior", () => {
         { width: 1280, height: 900, zoom: 1.5 },
       ]) {
         await page.setViewportSize({ width: scenario.width, height: scenario.height });
-        await page.goto(`${origin}/`);
+        await gotoFrontendFixture(page, `${origin}/`);
         await page.locator(".orb-entry-title").first().waitFor();
         await page.locator("html").evaluate((element, zoom) => {
           element.setAttribute("style", zoom === 1 ? "" : `zoom: ${zoom}`);

@@ -1,0 +1,33 @@
+# Hosted frontend bootstrap readiness failures (2026-09-18)
+
+**Status:** assertion-readiness and project-poll orchestration corrected locally; original blank-shell cause unresolved; no deployment
+
+GitHub run [35377639910](https://github.com/schani/pi-orb/actions/runs/35377639910) failed three Chromium cases. `Change thinking` and `.subagent-live-rail` were absent after five seconds. A dashboard case observed no `GET /api/v1/projects` in 30 seconds. The first failure's accessibility snapshot contained only the fixture's independent inline session strip. The evidence establishes that HTML and the fixture plugin loaded while the application had not reached its first API request. It does not identify why, or implicate settings, subagent, or project reducers.
+
+The supported schedule had one serial frontend thread. The rail failure occurred after ten successful browser cases against the same long-lived Vite server. Other frontend servers ran only before or after it, never concurrently. Therefore neither concurrent frontend servers nor a cold server/application graph explains that failure.
+
+A diagnostic experiment deliberately overlapped two independent Vitest commands, outside the supported schedule. It reproduced a blank shell with `504 Outdated Optimize Dep` responses for React dependencies because both Vite servers shared `apps/web/node_modules/.vite` while using different inline configurations. This proves a failure mode only for unsupported concurrent frontend processes. It is not causal evidence for the hosted run, so per-server cache isolation is not part of the correction.
+
+Vite warmup is also not an optimizer-readiness boundary. In the pinned Vite implementation, `warmupRequest` transforms the entry and schedules static imports; `waitForRequestsIdle` resolves the crawl boundary whose continuation then starts dependency optimization. Awaiting both can still return before optimizer commit. No warmup claim or machinery is retained.
+
+The run began after frontend and lifecycle projects were made concurrent. On the four-vCPU runner, the serial frontend thread can overlap two lifecycle forks, browsers, Docker, and PostgreSQL. CPU, memory, filesystem, or browser pressure remains plausible. A four-core experiment with 70% synthetic CPU consumption passed the then-listed 94 frontend cases, but that does not model or exclude the supported mixed workload. A read-only shared-mutation audit found no lifecycle path that rewrites the frontend optimizer or source state: lifecycle builds own temporary output, omit the optimized-dependencies plugin, use unique transient Vite config files, ignore `node_modules` in the watcher, run Docker `npm ci` inside the image, and give runtime hooks temporary workspaces. This narrows resource interference to shared pressure; it is not causal evidence. No controlled supported-schedule reproduction has identified the original cause.
+
+The failed five-second cases now await the successful fixture response that enables their assertions, rather than treating document navigation as application readiness. Boot waits capture root mount state, page and console errors, failed requests, failing document/script/style responses, and bounded document/script transfer progress: started, finished, failed, and sanitized pending URLs. This distinguishes an empty root with a pending module from completed transfers followed by a runtime exception, but does not infer either merely because the first projects request is absent. URL credentials, queries, fragments, and response bodies are excluded. The dashboard's existing 30-second request fence is retained with the same diagnostics; this does not explain or mask another 30-second blank shell. A controlled browser regression holds one script request pending, completes another, checks the report, then releases and observes cleanup.
+
+The first corrected-tree Docker-backed run preserved two further first failures in `.context/gh-e2e-35377639910/full-after.log`: a soft-inversion case and the Chromium missing-resource case asserted `.history` before the addressed history response. Both had awaited only navigation. They now await successful initial projects and addressed-orb history responses. The next full run passed those cases, then preserved one dashboard-geometry failure in `.context/gh-e2e-35377639910/full-final.log`: one of three same-page navigations waited for a rendered orb row without awaiting that navigation's projects response. It now uses the same response barrier. These failures directly demonstrated missing response ownership; they do not identify the original blank-shell cause.
+
+The project-poll test that failed in older run [35370665671](https://github.com/schani/pi-orb/actions/runs/35370665671) also had an orchestration defect; its original untraced failure cannot be attributed conclusively. The project-poll fence held absolute addressed-read number two. React StrictMode could assign that ordinal to an initial owner before the heading rendered, deadlocking the test. The fixture now waits for the original heading, arms `holdNextAddressedRead`, observes that exact subsequent GET, snapshots state at route entry, mutates, then releases and awaits the stale response. The production mutation-revision fence is unchanged.
+
+## Validation
+
+- Unsupported concurrent-process diagnostic: reproduced a blank shell with three React dependency `504 Outdated Optimize Dep` responses; not attributed to GitHub.
+- Four-core 70% synthetic CPU contention: all then-listed 94 frontend cases passed; insufficient to exclude supported-workload contention.
+- First Docker-backed matrix after readiness changes: 183 passed; the two history-readiness failures above were preserved.
+- Next matrix after history barriers: 185 passed; the dashboard projects-response failure above was preserved.
+- Final frontend project: 103 Chromium/WebKit tests passed in 356.86 seconds, including the four corrected assertions. This does not establish the original cause.
+- The supported mixed frontend-plus-lifecycle schedule passed once: 23 files and 185 tests in 608.14 seconds. Frontend overlapped lifecycle work, including the long-lived frontend-session server. Evidence: `.context/gh-e2e-35377639910/full-diagnostic.log`. A passing run does not clear the original failure.
+- Typecheck, lint, and whitespace checks passed. Lint retained existing warnings and one informational diagnostic.
+
+GitHub run [35381868791](https://github.com/schani/pi-orb/actions/runs/35381868791) later passed unchanged `main`; a passing rerun does not settle the failure.
+
+No timeout increased, product code changed, hosted run triggered, deployment, commit, or push occurred.

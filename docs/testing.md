@@ -1,5 +1,9 @@
 # Testing strategy
 
+## Hosted frontend bootstrap readiness (2026-09-18)
+
+Frontend pages await the fixture response that enables their assertions. Boot failures report root mount state, page/console errors, failed requests, failing module responses, and bounded document/script started, finished, failed, and sanitized-pending summaries. They exclude response bodies and URL credentials, queries, and fragments. Missing the first projects request alone does not classify the failure. Navigation and a static fixture strip are not application readiness. The original hosted blank-shell cause remains unresolved: an overlapping-server optimizer failure used an unsupported schedule; lifecycle work does not mutate shared frontend optimizer/source state; and synthetic or one passing supported mixed-workload run does not exclude shared resource pressure. Evidence, readiness corrections, and the project-poll fence correction are recorded in `docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md`.
+
 ## Missing-resource request ordering (2026-09-18)
 
 A definitive orb-history 404 is monotonic for the mounted route: an older successful metadata poll cannot restore the resource or its live socket. Browser regressions must observe the held history request before changing fixture lifecycle, snapshot mutable response state when a request enters its route, and await exact browser responses before asserting their effects. The controlled stale-poll schedule, first failure, correction, and unrelated GitHub-run failures are recorded in `docs/postmortems/2026-09-18-webkit-missing-resource-race.md`.
