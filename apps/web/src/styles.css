@@ -1855,6 +1855,107 @@ button.modal-close:focus-visible {
   border-color: var(--bad);
 }
 
+.tool-image-previews {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  background: var(--w);
+  border: 1px solid var(--g2);
+  border-top: 0;
+}
+
+.tool-details > .tool-image-previews {
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 2px;
+  border-top: 1px solid var(--g2);
+}
+
+.tool-image-preview {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tool-image-trigger {
+  display: block;
+  width: max-content;
+  max-width: min(100%, calc(32rem + 2px));
+  padding: 0;
+  color: var(--k);
+  background: var(--w);
+  border: 1px solid var(--k);
+  border-radius: 0;
+  cursor: zoom-in;
+}
+
+.tool-image-trigger:focus-visible,
+.tool-image-dialog-close:focus-visible {
+  outline: 2px solid var(--k);
+  outline-offset: 2px;
+}
+
+.tool-image-thumbnail {
+  display: block;
+  width: auto;
+  max-width: min(100%, 32rem);
+  max-height: 22rem;
+  object-fit: contain;
+}
+
+.tool-image-state {
+  display: grid;
+  width: min(100%, 32rem);
+  min-height: 8rem;
+  place-items: center;
+  color: var(--g3);
+  background: var(--w);
+  border: 1px solid var(--k);
+}
+
+.tool-image-state-failed {
+  color: var(--bad);
+}
+
+.tool-image-dialog {
+  width: fit-content;
+  height: fit-content;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  padding: 28px 8px 8px;
+  color: var(--k);
+  background: var(--w);
+  border: 1px solid var(--k);
+  border-radius: 0;
+}
+
+.tool-image-dialog::backdrop {
+  background: rgb(0 0 0 / 72%);
+}
+
+.tool-image-dialog-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font: inherit;
+  color: var(--w);
+  background: var(--k);
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.tool-image-full {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 50px);
+  max-height: calc(100vh - 70px);
+  object-fit: contain;
+}
+
 .tool-command {
   margin-top: 3px;
   padding-top: 3px;
@@ -2687,6 +2788,16 @@ button.orb-phone-menu {
   }
 }
 @media (max-width: 600px) {
+  .tool-image-dialog {
+    padding-top: 44px;
+  }
+  .tool-image-dialog-close {
+    width: 44px;
+    height: 44px;
+  }
+  .tool-image-full {
+    max-height: calc(100vh - 86px);
+  }
   .command-picker {
     max-height: min(240px, 35dvh);
   }

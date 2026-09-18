@@ -1,6 +1,7 @@
 import type { ContentBlock, JsonValue } from "@pi-orb/protocol";
 import type { ReactNode } from "react";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
+import { ToolImagePreview } from "./ToolImagePreview.tsx";
 
 export type ToolCallBlock = ContentBlock & { type: "tool_call" };
 export type ToolResultBlock = ContentBlock & { type: "tool_result" };
@@ -78,6 +79,10 @@ function resultText(result: ToolResultBlock | undefined): string {
     .join("\n");
 }
 
+function resultImages(result: ToolResultBlock | undefined) {
+  return result?.content.filter((block) => block.type === "image") ?? [];
+}
+
 function patchStats(patch: string | null): DiffStats | null {
   if (patch === null) return null;
   let added = 0;
@@ -129,6 +134,33 @@ function categorize(calls: readonly ActivityCall[]): ActivityCategory[] {
     }
   }
   return [...categories.values()];
+}
+
+/** Image calls stay in call order and get their own visible provenance header. */
+function displayCategories(calls: readonly ActivityCall[]): ActivityCategory[] {
+  if (!calls.some((call) => resultImages(call.result).length > 0)) return categorize(calls);
+  const categories: ActivityCategory[] = [];
+  let textCalls: ActivityCall[] = [];
+  const flushText = () => {
+    categories.push(
+      ...categorize(textCalls).map((category) => ({
+        ...category,
+        key: `${category.key}:segment:${category.calls[0]?.callId ?? "empty"}`,
+      })),
+    );
+    textCalls = [];
+  };
+  for (const call of calls) {
+    if (resultImages(call.result).length === 0) {
+      textCalls.push(call);
+      continue;
+    }
+    flushText();
+    const descriptor = categoryFor(call.name);
+    categories.push({ ...descriptor, key: `${descriptor.key}:${call.callId}`, calls: [call] });
+  }
+  flushText();
+  return categories;
 }
 
 function uniquePathCount(calls: readonly ActivityCall[]): number {
@@ -238,7 +270,15 @@ function CommandCall({ call }: { call: ActivityCall }) {
   );
 }
 
-function FileCall({ call, kind }: { call: ActivityCall; kind: "edit" | "read" }) {
+function FileCall({
+  call,
+  kind,
+  flat = false,
+}: {
+  call: ActivityCall;
+  kind: "edit" | "read";
+  flat?: boolean;
+}) {
   const path = kind === "read" ? readCallLabel(call) : (callPath(call) ?? call.name);
   const output = resultText(call.result);
   const stats = kind === "edit" ? patchStats(call.result?.patch ?? null) : null;
@@ -253,6 +293,17 @@ function FileCall({ call, kind }: { call: ActivityCall; kind: "edit" | "read" })
         <span className="tool-diff-removed">−{stats.removed}</span>
       </>
     );
+  if (flat) {
+    return detail === "" ? null : (
+      <pre
+        className={
+          call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
+        }
+      >
+        {detail}
+      </pre>
+    );
+  }
   if (detail === "") {
     return (
       <div className="tool-activity-call">
@@ -309,13 +360,26 @@ function OtherCall({ call, single }: { call: ActivityCall; single: boolean }) {
   );
 }
 
-function CategoryCalls({ category }: { category: ActivityCategory }) {
+function CategoryCalls({
+  category,
+  flattenSingle = false,
+}: {
+  category: ActivityCategory;
+  flattenSingle?: boolean;
+}) {
   return (
     <div className="tool-activity-calls">
       {category.calls.map((call) => {
         if (category.kind === "command") return <CommandCall call={call} key={call.callId} />;
         if (category.kind === "edit" || category.kind === "read") {
-          return <FileCall call={call} kind={category.kind} key={call.callId} />;
+          return (
+            <FileCall
+              call={call}
+              flat={flattenSingle && category.calls.length === 1}
+              kind={category.kind}
+              key={call.callId}
+            />
+          );
         }
         return <OtherCall call={call} single={category.calls.length === 1} key={call.callId} />;
       })}
@@ -342,18 +406,40 @@ export function ToolActivity({ persisted = [], live = [] }: ToolActivityProps) {
   if (calls.length === 0) return null;
   return (
     <div className="tool-activity">
-      {categorize(calls).map((category) => {
+      {displayCategories(calls).map((category) => {
         const state = categoryState(category);
+        const imageCall =
+          category.calls.length === 1 && resultImages(category.calls[0]?.result).length > 0
+            ? category.calls[0]
+            : undefined;
+        const previews =
+          imageCall === undefined ? undefined : (
+            <div className="tool-image-previews">
+              {resultImages(imageCall.result).map((image, index) => (
+                <ToolImagePreview
+                  block={image}
+                  key={`${imageCall.callId}-image-${index}`}
+                  toolName={imageCall.name}
+                />
+              ))}
+            </div>
+          );
         return (
           <ActivityRailRow
-            className="tool-activity-category"
+            className={
+              previews === undefined
+                ? "tool-activity-category"
+                : "tool-activity-category tool-image-activity"
+            }
+            defaultOpen={previews !== undefined}
             headline={categoryHeadline(category)}
             key={category.key}
             label={category.label}
             metric={categoryMetric(category)}
             state={state}
           >
-            <CategoryCalls category={category} />
+            {previews}
+            <CategoryCalls category={category} flattenSingle={imageCall !== undefined} />
           </ActivityRailRow>
         );
       })}

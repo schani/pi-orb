@@ -243,4 +243,29 @@ describe("orb workspace layout contract", () => {
     ).toContain("color: var(--ok)");
     expect(rule(".reasoning-body,\n.tool-activity-calls")).toContain("background: var(--g1)");
   });
+
+  it("contains inline tool images without cropping and keeps the viewer monochrome", () => {
+    const thumbnail = rule(".tool-image-thumbnail");
+    expect(thumbnail).toContain("max-width: min(100%, 32rem)");
+    expect(thumbnail).toContain("max-height: 22rem");
+    expect(thumbnail).toContain("object-fit: contain");
+    const preview = rule(".tool-image-preview");
+    expect(preview).toContain("min-width: 0");
+    expect(preview).toContain("max-width: 100%");
+    const trigger = rule(".tool-image-trigger");
+    expect(trigger).toContain("width: max-content");
+    expect(trigger).toContain("max-width: min(100%, calc(32rem + 2px))");
+    expect(trigger).toContain("border: 1px solid var(--k)");
+    const dialog = rule(".tool-image-dialog");
+    expect(dialog).toContain("width: fit-content");
+    expect(dialog).toContain("height: fit-content");
+    expect(dialog).toContain("border-radius: 0");
+    const full = rule(".tool-image-full");
+    expect(full).toContain("width: auto");
+    expect(full).toContain("height: auto");
+    expect(full).toContain("object-fit: contain");
+    expect(css).toMatch(
+      /@media \(max-width: 600px\)[\s\S]*?\.tool-image-dialog-close \{[^}]*width: 44px;[^}]*height: 44px/,
+    );
+  });
 });

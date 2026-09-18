@@ -408,17 +408,18 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
             const pickerBox = picker?.getBoundingClientRect();
             const caretBox = caret?.getBoundingClientRect();
             const gap = Number.parseFloat(view.getComputedStyle(line).columnGap);
+            const prefixTextBox = prefixRange.getBoundingClientRect();
             return {
               caretLeft: caretBox?.left ?? null,
-              columnWidth: editorBox.left - gap - line.getBoundingClientRect().left,
+              prefixTrackWidth: prefixBox.width,
+              prefixTextRight: prefixTextBox.right,
               editorLeft: editorBox.left,
               editorWidth: editorBox.width,
               gap,
               pickerLeft: pickerBox?.left ?? null,
               pickerRight: pickerBox?.right ?? null,
               expectedPickerRight: Math.min(editorBox.left + 420, composerBox.right - 12),
-              prefixTextWidth: prefixRange.getBoundingClientRect().width,
-              prefixWidth: prefixBox.width,
+              prefixTextWidth: prefixTextBox.width,
               selectionEnd: input.selectionEnd,
               selectionStart: input.selectionStart,
             };
@@ -431,7 +432,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           expectPage(geometry).not.toBeNull();
           expectPage(geometry?.editorLeft).toBeCloseTo(original.editorLeft, 5);
           expectPage(geometry?.editorWidth).toBeCloseTo(original.editorWidth, 5);
-          expectPage(geometry?.columnWidth).toBeCloseTo(original.columnWidth, 5);
+          expectPage(geometry?.prefixTrackWidth).toBeCloseTo(original.prefixTrackWidth, 5);
+          expectPage(geometry?.prefixTextRight).toBeLessThanOrEqual(geometry?.editorLeft ?? 0);
           expectPage(geometry?.selectionStart).toBe(0);
           expectPage(geometry?.selectionEnd).toBe(0);
           if (!phone) expectPage(geometry?.caretLeft).toBeCloseTo(original.caretLeft ?? 0, 5);
@@ -442,6 +444,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         if (messageGeometry === null) throw new Error("composer geometry unavailable");
         expectPage(messageGeometry.gap).toBeGreaterThan(0);
         expectPage(messageGeometry.gap).toBeLessThanOrEqual(9);
+        expectPage(messageGeometry.prefixTextRight).toBeLessThanOrEqual(messageGeometry.editorLeft);
 
         await input.fill("!");
         await expectPage(input).toHaveAttribute("aria-label", "Run a shell command");
@@ -453,9 +456,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(excludedGeometry?.prefixTextWidth).toBeGreaterThan(
           shellGeometry?.prefixTextWidth ?? Number.POSITIVE_INFINITY,
         );
-        expectPage(excludedGeometry?.prefixWidth).toBeCloseTo(
-          excludedGeometry?.columnWidth ?? 0,
-          2,
+        expectPage(excludedGeometry?.prefixTextRight).toBeLessThanOrEqual(
+          excludedGeometry?.editorLeft ?? 0,
         );
 
         if (phone) {
@@ -465,20 +467,25 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           const collapsedGeometry = await collapsed.evaluate((button) => {
             const prefix = button.querySelector(".composer-prefix");
             const preview = button.querySelector(".composer-draft-preview");
-            const view = button.ownerDocument.defaultView;
-            if (prefix === null || preview === null || view === null) return null;
-            const gap = Number.parseFloat(view.getComputedStyle(button).columnGap);
+            if (prefix === null || preview === null) return null;
+            const prefixRange = button.ownerDocument.createRange();
+            prefixRange.selectNodeContents(prefix);
             return {
-              columnWidth:
-                preview.getBoundingClientRect().left - gap - button.getBoundingClientRect().left,
+              prefixTrackWidth: prefix.getBoundingClientRect().width,
+              prefixTextRight: prefixRange.getBoundingClientRect().right,
               previewLeft: preview.getBoundingClientRect().left,
-              prefixWidth: prefix.getBoundingClientRect().width,
             };
           });
-          expectPage(collapsedGeometry?.columnWidth).toBeCloseTo(messageGeometry.columnWidth, 5);
+          expectPage(collapsedGeometry?.prefixTrackWidth).toBeCloseTo(
+            messageGeometry.prefixTrackWidth,
+            5,
+          );
           expectPage(collapsedGeometry?.previewLeft).toBeCloseTo(messageGeometry.editorLeft, 5);
-          expectPage(collapsedGeometry?.prefixWidth).toBeCloseTo(
-            excludedGeometry?.prefixWidth ?? 0,
+          expectPage(collapsedGeometry?.prefixTextRight).toBeLessThanOrEqual(
+            collapsedGeometry?.previewLeft ?? 0,
+          );
+          expectPage(collapsedGeometry?.prefixTrackWidth).toBeCloseTo(
+            excludedGeometry?.prefixTrackWidth ?? 0,
             5,
           );
           await collapsed.tap();

@@ -111,7 +111,11 @@ it.each(["chromium", "webkit"] as const)(
             fullPage: true,
           });
         } finally {
-          await page.close();
+          try {
+            await page.unrouteAll({ behavior: "wait" });
+          } finally {
+            await page.close();
+          }
         }
       } finally {
         await browser.close();
