@@ -1,4 +1,4 @@
-import type { Page, Request } from "@playwright/test";
+import type { Locator, Page, Request } from "@playwright/test";
 
 const MAX_OBSERVATIONS = 12;
 const MAX_OBSERVATION_LENGTH = 240;
@@ -26,8 +26,10 @@ function sanitizeText(value: string): string {
 }
 
 export function observeFrontendBoot(page: Page): {
+  checkpoint(name: string): void;
   wait<T>(pending: Promise<T>): Promise<T>;
 } {
+  const checkpoints: string[] = [];
   const observations: string[] = [];
   const trackedRequests = new Map<Request, { resource: string; url: string }>();
   let startedRequests = 0;
@@ -76,6 +78,9 @@ export function observeFrontendBoot(page: Page): {
   page.on("response", onResponse);
 
   return {
+    checkpoint(name: string) {
+      checkpoints.push(sanitizeText(name));
+    },
     async wait<T>(pending: Promise<T>): Promise<T> {
       try {
         return await pending;
@@ -105,9 +110,9 @@ export function observeFrontendBoot(page: Page): {
           .slice(-MAX_PENDING_REQUESTS)
           .map(({ resource, url }) => `${resource} ${url}`);
         throw new Error(
-          `Frontend boot did not reach its fixture request: ${reason}; ` +
-            `url=${sanitizeUrl(page.url())}; readiness=${JSON.stringify(readiness)}; ` +
-            `requests=${JSON.stringify({
+          `Frontend readiness failed: ${reason}; ` +
+            `url=${sanitizeUrl(page.url())}; checkpoints=${JSON.stringify(checkpoints)}; ` +
+            `readiness=${JSON.stringify(readiness)}; requests=${JSON.stringify({
               started: startedRequests,
               finished: finishedRequests,
               failed: failedRequests,
@@ -126,36 +131,81 @@ export function observeFrontendBoot(page: Page): {
   };
 }
 
+function isGetPath(request: { method(): string; url(): string }, path: string): boolean {
+  return request.method() === "GET" && new URL(request.url()).pathname === path;
+}
+
 function projectsResponse(page: Page) {
-  return page.waitForResponse((response) => {
-    const request = response.request();
-    return request.method() === "GET" && new URL(response.url()).pathname === "/api/v1/projects";
-  });
+  return page.waitForResponse((response) => isGetPath(response.request(), "/api/v1/projects"));
 }
 
-export async function gotoFrontendFixture(page: Page, url: string): Promise<void> {
+export async function gotoFrontendFixture(page: Page, url: string, ready?: Locator): Promise<void> {
   const boot = observeFrontendBoot(page);
-  const projects = projectsResponse(page);
-  const [, response] = await boot.wait(Promise.all([page.goto(url), projects]));
-  if (!response.ok())
-    throw new Error(`Initial project fixture request failed: ${response.status()}`);
+  const projectsRequested = page
+    .waitForRequest((request) => isGetPath(request, "/api/v1/projects"))
+    .then(() => {
+      boot.checkpoint("projects:requested");
+    });
+  const projects = projectsResponse(page).then((response) => {
+    boot.checkpoint(`projects:response:${response.status()}`);
+    if (!response.ok())
+      throw new Error(`Initial project fixture request failed: ${response.status()}`);
+    return response;
+  });
+  const navigation = page.goto(url).then((response) => {
+    boot.checkpoint(`navigation:${response?.status() ?? "none"}`);
+    return response;
+  });
+  const readiness = navigation.then(async () => {
+    if (ready === undefined) return;
+    await ready.waitFor({ state: "visible" });
+    boot.checkpoint("ui:visible");
+  });
+  await boot.wait(Promise.all([navigation, projectsRequested, projects, readiness]));
 }
 
-export async function gotoFrontendHistory(page: Page, url: string, orbId: string): Promise<void> {
+export async function gotoFrontendHistory(
+  page: Page,
+  url: string,
+  orbId: string,
+  ready?: Locator,
+): Promise<void> {
   const boot = observeFrontendBoot(page);
-  const history = page.waitForResponse((response) => {
-    const request = response.request();
-    return (
-      request.method() === "GET" &&
-      new URL(response.url()).pathname === `/api/v1/orbs/${orbId}/history`
-    );
+  const historyPath = `/api/v1/orbs/${orbId}/history`;
+  const historyRequested = page
+    .waitForRequest((request) => isGetPath(request, historyPath))
+    .then(() => {
+      boot.checkpoint("history:requested");
+    });
+  const history = page
+    .waitForResponse((response) => isGetPath(response.request(), historyPath))
+    .then((response) => {
+      boot.checkpoint(`history:response:${response.status()}`);
+      if (!response.ok())
+        throw new Error(`Initial history fixture request failed: ${response.status()}`);
+      return response;
+    });
+  const projectsRequested = page
+    .waitForRequest((request) => isGetPath(request, "/api/v1/projects"))
+    .then(() => {
+      boot.checkpoint("projects:requested");
+    });
+  const projects = projectsResponse(page).then((response) => {
+    boot.checkpoint(`projects:response:${response.status()}`);
+    if (!response.ok())
+      throw new Error(`Initial project fixture request failed: ${response.status()}`);
+    return response;
   });
-  const projects = projectsResponse(page);
-  const [, loadedProjects, loadedHistory] = await boot.wait(
-    Promise.all([page.goto(url), projects, history]),
+  const navigation = page.goto(url).then((response) => {
+    boot.checkpoint(`navigation:${response?.status() ?? "none"}`);
+    return response;
+  });
+  const readiness = navigation.then(async () => {
+    if (ready === undefined) return;
+    await ready.waitFor({ state: "visible" });
+    boot.checkpoint("ui:visible");
+  });
+  await boot.wait(
+    Promise.all([navigation, projectsRequested, projects, historyRequested, history, readiness]),
   );
-  if (!loadedProjects.ok() || !loadedHistory.ok())
-    throw new Error(
-      `Initial frontend fixture requests failed: projects=${loadedProjects.status()} history=${loadedHistory.status()}`,
-    );
 }

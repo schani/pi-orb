@@ -5,6 +5,7 @@ import { type Browser, chromium, expect as expectPage, webkit } from "@playwrigh
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
+import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_HASH = "#/orbs/frontend-fixture-orb";
@@ -82,8 +83,14 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         await route.fulfill({ response });
       });
       try {
-        await page.goto(`${origin}/${ORB_HASH}`);
-        await page.getByRole("button", { name: "Rename orb" }).tap();
+        const renameButton = page.getByRole("button", { name: "Rename orb" });
+        await gotoFrontendHistory(
+          page,
+          `${origin}/${ORB_HASH}`,
+          "frontend-fixture-orb",
+          renameButton,
+        );
+        await renameButton.tap();
         const rename = page.getByRole("textbox", { name: "orb name" });
         await expectPage(rename).toBeFocused();
         const renameGeometry = await rename.evaluate((element) => {
@@ -241,8 +248,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     const black = "rgb(0, 0, 0)";
     const white = "rgb(255, 255, 255)";
     try {
-      await page.goto(`${origin}/`);
       const configOpener = page.getByTitle("project config").first();
+      await gotoFrontendFixture(page, `${origin}/`, configOpener);
       await configOpener.click();
       const config = page.getByRole("dialog");
       const configClose = config.getByRole("button", { name: "Close project config" });
@@ -333,8 +340,9 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(geometry?.titleRight).toBeLessThanOrEqual(geometry?.left ?? 0);
       };
       try {
-        await page.goto(`${origin}/`);
-        await page.getByTitle("project config").first().click();
+        const configOpener = page.getByTitle("project config").first();
+        await gotoFrontendFixture(page, `${origin}/`, configOpener);
+        await configOpener.click();
         const config = page.getByRole("dialog");
         await expectModalClose(config, "Close project config");
         const configTitle = config.locator("#project-config-title");
@@ -377,8 +385,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         await expectPage(search.getByRole("button", { name: /close/i })).toHaveCount(0);
         await page.keyboard.press("Escape");
 
-        await page.goto(`${origin}/${ORB_HASH}`);
         const composer = page.locator(".composer");
+        await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb", composer);
         const input = composer.getByRole("textbox");
         if (phone) await composer.getByRole("button", { name: "Write message" }).tap();
         const measureComposer = async (glyph: ">" | "!" | "!!" | "/") => {
@@ -545,8 +553,9 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await route.fulfill({ response, json: body });
     });
     try {
-      await page.goto(`${origin}/${ORB_HASH}`);
-      await expectPage(page.getByRole("button", { name: "Write message" })).toBeVisible();
+      const write = page.getByRole("button", { name: "Write message" });
+      await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb", write);
+      await expectPage(write).toBeVisible();
       await page.clock.runFor(100);
       const scroller = page.locator(".orb-transcript-scroll");
       await expectPage
@@ -595,9 +604,15 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     // input backend at phone width to exercise native scrolling and raster output.
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     try {
-      await page.goto(`${origin}/#/orbs/frontend-long-history`);
       const scroller = page.locator(".orb-transcript-scroll");
-      await expectPage(page.getByRole("button", { name: "Write message" })).toBeVisible();
+      const write = page.getByRole("button", { name: "Write message" });
+      await gotoFrontendHistory(
+        page,
+        `${origin}/#/orbs/frontend-long-history`,
+        "frontend-long-history",
+        write,
+      );
+      await expectPage(write).toBeVisible();
       await expectPage
         .poll(() => scroller.evaluate((element) => element.scrollTop))
         .toBeGreaterThan(0);
@@ -636,8 +651,13 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       };
     `);
     try {
-      await page.goto(`${origin}/#/orbs/frontend-long-history`);
       const composer = page.locator(".composer");
+      await gotoFrontendHistory(
+        page,
+        `${origin}/#/orbs/frontend-long-history`,
+        "frontend-long-history",
+        composer,
+      );
       const scroller = page.locator(".orb-transcript-scroll");
       const app = page.locator(".app");
       await expectPage(composer.getByRole("button", { name: "Write message" })).toBeVisible();
@@ -780,7 +800,12 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       });
     });
     try {
-      await page.goto(`${origin}/${ORB_HASH}`);
+      await gotoFrontendHistory(
+        page,
+        `${origin}/${ORB_HASH}`,
+        "frontend-fixture-orb",
+        page.locator(".composer"),
+      );
       await initialIdle;
       startOperation();
       const composer = page.locator(".composer");

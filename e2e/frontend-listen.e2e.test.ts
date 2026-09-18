@@ -6,7 +6,7 @@ import { chromium } from "@playwright/test";
 import { createServer } from "vite";
 import { expect, it, vi } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
-import { observeFrontendBoot } from "./testkit/frontend-fixture.ts";
+import { gotoFrontendFixture, observeFrontendBoot } from "./testkit/frontend-fixture.ts";
 
 it("reports listen failures through the test framework and releases its error listener", async () => {
   const httpServer = createHttpServer();
@@ -106,6 +106,48 @@ it("reports bounded browser request progress when application boot stalls", asyn
     await pendingFinished;
   } finally {
     releasePending();
+    await browser.close();
+    await vite.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("rejects old-document readiness and diagnoses missing application UI", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-orb-frontend-ui-diagnostic-"));
+  await writeFile(
+    join(root, "index.html"),
+    `<main id="root"><p>mounted without expected control</p></main>
+     <script type="module">await fetch("/api/v1/projects")</script>`,
+  );
+  const vite = await createServer({ root, configFile: false });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    await listenFrontend(vite);
+    const address = vite.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("No diagnostic fixture port");
+    const page = await browser.newPage();
+    page.setDefaultTimeout(2_000);
+    await page.route("**/api/v1/projects", (route) => route.fulfill({ json: [] }));
+    await page.setContent('<button title="project config">old document control</button>');
+    let diagnostic = "";
+    try {
+      await gotoFrontendFixture(
+        page,
+        `http://127.0.0.1:${address.port}/`,
+        page.getByTitle("project config"),
+      );
+    } catch (cause) {
+      diagnostic = cause instanceof Error ? cause.message : String(cause);
+    }
+    expect(diagnostic).toContain("Frontend readiness failed: locator.waitFor");
+    expect(diagnostic).toContain("projects:requested");
+    expect(diagnostic).toContain("projects:response:200");
+    expect(diagnostic).toContain("navigation:200");
+    expect(diagnostic).not.toContain("ui:visible");
+    expect(diagnostic).toContain(
+      'readiness={"document":"complete","appRoot":true,"appChildren":1,"fixtureControl":false}',
+    );
+  } finally {
     await browser.close();
     await vite.close();
     await rm(root, { recursive: true, force: true });
