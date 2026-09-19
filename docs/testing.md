@@ -1,5 +1,11 @@
 # Testing strategy
 
+## Orb self-deletion qualification (2026-09-19)
+
+`docs/orb-deletion.md` records the contract and tests-first coverage: transactional caller fencing, competing requests, stale-authority races, busy deletion after lost acknowledgement and control-plane restart, CLI transport errors, and a real agent invoking `pi-orb delete`. The E2E verifies complete owned-resource removal and sibling isolation without requiring CLI output or a final reply; archive's finish-the-turn regression remains intact.
+
+Typecheck and lint pass (three existing warnings and one info). `npm test` passes **2,153 tests**, eight conditional skips, and all infrastructure suites. The complete process-backed E2E passes **138 tests**, with two expected Docker-interruption/network-PostgreSQL skips; PGlite's full 51-case store contract passes separately in the unit suite. Logs: `.context/self-delete/`. No deployment.
+
 ## Hosted frontend bootstrap readiness (2026-09-18)
 
 Frontend pages await the fixture response that enables their assertions. Boot failures report completed navigation/API/UI checkpoints, root mount state, page/console errors, failed requests, failing module responses, and bounded document/script started, finished, failed, and sanitized-pending summaries. They exclude response bodies and URL credentials, queries, and fragments. Mobile fresh-page gates remain attached through an exact route UI control; orb gates also await addressed history. This distinguishes successful API plus mounted root but missing UI from bootstrap or transfer failure. Missing the first projects request alone does not classify the failure. Navigation and a static fixture strip are not application readiness. GitHub run `35395261205` established that its empty root was caused by Chromium aborting module transfers with `ERR_NETWORK_CHANGED`. A controlled native-Linux reproduction then proved that Docker bridge creation and container start/stop each trigger Chromium's IP-change handling and cancel queued module requests. Earlier hosted stalls lacked transport traces and are not individually attributed to this mechanism. Evidence and readiness corrections are recorded in `docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md`.

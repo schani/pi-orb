@@ -135,3 +135,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Transcript tool images
 
 69. **Resolved (2026-09-18): medium inline preview selected by the user.** The user clarified that images belong inside the tool drawer: image-bearing drawers start open, and collapsing hides the whole result. Click-to-enlarge remains available. The five-way study and rationale are in `docs/web-ui.md`.
+
+## Orb self-deletion
+
+70. **Resolved (2026-09-19):** the user approved plain `pi-orb delete`, self-only and explicit-user-request-only, reusing immediate permanent deletion rather than waiting for the requesting turn, and requested review of the agent prompt change. The invocation, authorization fences, observability, and test/DST plan are in `docs/orb-deletion.md`. Implementation is authorized; deployment is not.

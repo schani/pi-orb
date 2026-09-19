@@ -8,7 +8,7 @@ Permanent removal of an orb and every resource owned by it.
 
 Export-before-delete is not part of this requirement and remains open in `docs/open-questions.md`.
 
-**Hosted-file extension required 2026-09-07; not implemented:** permanent deletion also removes
+**Hosted-file extension (implemented):** permanent deletion also removes
 the orb's hosted-file catalog, operations, and objects as specified in `docs/hosting.md`. Cleanup
 retains exact object inventory until absence is confirmed.
 
@@ -92,6 +92,41 @@ Do not add soft-delete columns to history and do not retain a browsable transcri
 ## Sharing with archival
 
 `docs/orb-archival.md` extends this tombstone into a generalized cleanup intent and extracts a shared resource-disposal routine. Permanent deletion semantics do not change: it still skips history drain and purges database records. Archive adds a history-seal precondition and a retaining finalizer, while calling these exact Tailscale cleanup, host `destroy`, quarantine, and final-absence operations. Delete may upgrade an in-progress archive and remains available after archival.
+
+## Self-deletion (implemented locally 2026-09-19)
+
+The user approved in-orb CLI self-deletion and requested review of its agent prompt guidance (`docs/open-questions.md`, question 70). The CLI, runtime route, transactional authority fences, and prompt are implemented locally. Deployment is not authorized.
+
+### Invocation and semantics
+
+Use plain `pi-orb delete`, matching `pi-orb archive`: no target argument, interactive prompt, or `--yes` flag. Target identity comes exclusively from the runtime bearer. A confirmation flag does not strengthen authorization for code already holding that bearer. Agent guidance must require an explicit user request to delete this orb and pushing/exporting needed work first.
+
+Reuse permanent deletion unchanged: remove compute, workspace, hosted files, and replicated conversation, but not the parent project or siblings. Unlike archive, deletion does not wait for the current turn, child agents, uploads, or history sealing. It may kill the CLI before its acknowledgement arrives; neither a tool result nor a final assistant reply is guaranteed. Quarantine delays final database removal, not initial host destruction. Graceful self-deletion would require a separate lifecycle decision and is not proposed here.
+
+`POST /runtime/v1/orb/delete` accepts no body or `{}` and returns non-cacheable `202 { "orbId": "<caller-id>", "state": "deleting" }` once intent is durable. Reject extra fields. Print “Deletion requested” only on acknowledgement; never wait for completion or claim resources are already gone. Bound the request and report a lost response as unknown acceptance, not failure to delete.
+
+Route through the existing domain deletion operation and durable cleanup machinery; add no state, table, grace period, or cleanup loop. Admit self-deletion only from `running`. Carry caller hash/incarnation through the domain CAS loop and check hash, incarnation, lifecycle state, and absence of pending compute disposal atomically at the deletion write in both PostgreSQL and the simulation store. Revalidate on each retry. Browser deletion keeps its every-state authority.
+
+Preserve immediate runtime credential revocation in `deleting`; do not broaden broker authorization for retry acknowledgements. Requests after acceptance normally receive `401`, which proves neither successful deletion nor its absence. Concurrent requests must produce at most one accepted transition and cannot alter another incarnation.
+
+Extend the durable `delete_requested` lifecycle event with `source: "self" | "browser"` and self-request `callerIncarnation`; never record bearer credentials. Existing `deleting` state, cleanup blockers, recovered edges, and final removal remain the user/operator outcome surfaces. The CLI, protocol, runtime API documentation, environment prompt, and `DESIGN.md` share this contract.
+
+### Verification contract
+
+Implementation follows tests-first coverage:
+
+- **CLI/endpoint:** real dispatcher invocation, argument/target rejection, missing environment, exact authenticated request, response validation, acceptance-only output, typed/sanitized error exit codes, deadline, and unknown acceptance after a lost response. Prompt tests require explicit-user-request guidance and warn that deletion can interrupt the turn.
+- **Runtime routes:** self-only targeting; malformed/extra fields; missing, stale, and discard-fenced credentials; non-running rejection; first acceptance followed by revoked authorization; sanitized store errors; sibling isolation; one secret-free self-request event. Keep browser routes unavailable under runtime credentials.
+- **Shared store contract:** correct authority atomically writes state and cleanup intent; wrong hash/incarnation, non-running state, or discard fence writes neither. Exercise PostgreSQL/PGlite and the simulation store; retain unrestricted browser-deletion tests.
+- **Authority DST:** force stop, replacement, discard, archive, and competing delete between authentication/domain read and deletion write, including CAS retries. Assert no stale caller can delete replacement compute or create unauthorized intent; duplicate requests yield one transition.
+- **Lifecycle DST:** accept while continuously busy, then reconstruct control-plane ephemeral state. Prove cleanup proceeds without idle preparation, history drain, or seal; workspace, replica, and hosted resources disappear while siblings survive. Inject a lost response after commit and crashes/failures around external cleanup and finalization. Reuse existing deletion retry, quarantine, late-provision, and busy-child scenarios rather than introducing a second cleanup model.
+- **Full-slice E2E:** a disposable orb's real agent invokes the real CLI. Observe acceptance through control-plane evidence and eventual API `404`, history/resource absence, and sibling survival. Do not assert receipt of CLI output or a final reply. Use explicit synchronization rather than timing sleeps. Retain the self-archive E2E proving its different finish-the-turn behavior.
+
+Run typecheck, lint, unit/store/DST suites, and `npm run test:e2e` before deployment. Preserve and replay any first DST failure trace before changing code or scenario assumptions.
+
+The prompt adds, after archive guidance: “Use `pi-orb delete` only when the user explicitly requests deletion of this orb. It permanently deletes the workspace, conversation, and hosted files; push or export anything needed first. It may interrupt the current turn before acknowledgement.”
+
+**Local qualification (2026-09-19):** typecheck and lint pass (three existing warnings and one informational diagnostic). `npm test` passes 2,153 tests with eight conditional skips plus the infrastructure suites, including the full 51-case PGlite store contract. The full `PI_ORB_E2E_BACKEND=process npm run test:e2e` passes 138 tests with two expected skips for Docker interruption and network PostgreSQL. The self-delete E2E holds the requesting tool on a fixture FIFO after the CLI so cleanup is proven while busy, without an optional follow-up inference consuming later archive rules. It verifies lifecycle acceptance, final `404`, history/workspace/hosted-object removal, and surviving sibling history/compute; the existing self-archive final-reply checks still pass. Tests-first red baselines and validation logs are retained under `.context/self-delete/`. No deployment.
 
 ## Verification
 

@@ -7,6 +7,7 @@ export * from "./hosting.ts";
 export * from "./json.ts";
 export * from "./mcp.ts";
 export * from "./orb-archive.ts";
+export * from "./orb-delete.ts";
 export * from "./orb-inspection.ts";
 export * from "./orb-naming.ts";
 export * from "./orb-sleep.ts";

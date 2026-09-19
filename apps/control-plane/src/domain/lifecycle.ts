@@ -2504,6 +2504,7 @@ export function requestOrbDeletion(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orbId: string,
+  caller?: ArchiveCaller,
 ): ResultAsync<OrbRow, CommandError> {
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
@@ -2511,9 +2512,19 @@ export function requestOrbDeletion(
       if (orbResult.isErr()) return err(mapStoreError(orbResult.error));
       const orb = orbResult.value;
       if (orb === null) return err(commandError("not_found", `orb ${orbId} not found`, false));
+      if (
+        caller !== undefined &&
+        (orb.runtimeTokenHash !== caller.runtimeTokenHash ||
+          orb.hostIncarnation !== caller.hostIncarnation ||
+          orb.hostDiscardThroughIncarnation !== null ||
+          orb.state !== "running")
+      ) {
+        return err(commandError("conflict", "this runtime can no longer request deletion", false));
+      }
       if (orb.state === "deleting") return ok(orb);
       const now = task.wallNow();
       const requested = await deps.store.requestOrbDeletion(task, {
+        ...(caller === undefined ? {} : { caller }),
         orbId,
         expectedStateVersion: orb.stateVersion,
         now,
@@ -2526,6 +2537,8 @@ export function requestOrbDeletion(
           from: orb.state,
           to: "deleting",
           reason: "delete_requested",
+          source: caller === undefined ? "browser" : "self",
+          ...(caller === undefined ? {} : { callerIncarnation: caller.hostIncarnation }),
           ...(orb.sleepId === null ? {} : { cancelled_sleep_id: orb.sleepId }),
         });
         return ok(requested.value);

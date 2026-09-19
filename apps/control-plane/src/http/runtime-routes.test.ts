@@ -22,7 +22,12 @@ import { Check } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BROKER_CONSTANTS } from "../domain/constants.ts";
 import type { StoreError } from "../domain/errors.ts";
-import { readOrbBootContext, requestOrbArchive, requestOrbSleep } from "../domain/lifecycle.ts";
+import {
+  readOrbBootContext,
+  requestOrbArchive,
+  requestOrbDeletion,
+  requestOrbSleep,
+} from "../domain/lifecycle.ts";
 import { spawnOrb } from "../domain/orb-spawning.ts";
 import type { BrokerDeps, ControlPlaneStore, OrbNameGenerator } from "../domain/ports.ts";
 import { putProjectSecret } from "../domain/project-secrets.ts";
@@ -103,6 +108,8 @@ describe("runtime broker routes", () => {
         readOrbBootContext(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
       archiveSelf: (task, orbId, caller) =>
         requestOrbArchive(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
+      deleteSelf: (task, orbId, caller) =>
+        requestOrbDeletion(task, { ...makeHarness().deps, store: routeStore }, orbId, caller),
       store: routeStore,
       brokerForUser: (userId) => {
         brokerUsers.push(userId);
@@ -452,6 +459,121 @@ describe("runtime broker routes", () => {
         "00000000-0000-4000-8000-000000000021",
       );
       expect(store.messageSnapshots(ORB)[0]?.status).toBe("delivering");
+    });
+  });
+
+  describe("self-delete", () => {
+    const deleteSelf = (payload: unknown = {}) =>
+      app.inject({
+        method: "POST",
+        url: "/runtime/v1/orb/delete",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload,
+      });
+
+    it("deletes only its authenticated caller and revokes retries", async () => {
+      const log = vi.spyOn(task, "log");
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      store.seedOrb(makeOrbRow("sibling", PROJECT, "running"));
+      const response = await deleteSelf();
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual({ orbId: ORB, state: "deleting" });
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect((await deleteSelf()).statusCode).toBe(401);
+      expect(store.orbSnapshot("sibling")?.state).toBe("running");
+      expect(store.orbSnapshot(ORB)?.stateVersion).toBe(1);
+      const transitions = log.mock.calls
+        .map(([line]) => line)
+        .filter((line) => typeof line === "string" && line.includes("delete_requested"));
+      expect(transitions).toHaveLength(1);
+      expect(transitions[0]).toContain("source=self callerIncarnation=0");
+      expect(transitions[0]).not.toContain(sha256(TOKEN));
+      expect(transitions[0]).not.toContain(TOKEN);
+    });
+
+    it("accepts a bodyless request", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      const response = await app.inject({
+        method: "POST",
+        url: "/runtime/v1/orb/delete",
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      expect(response.statusCode).toBe(202);
+      expect(response.json()).toEqual({ orbId: ORB, state: "deleting" });
+    });
+
+    it.each([undefined, "Bearer wrong-token"])(
+      "rejects missing or stale bearer: %s",
+      async (authorization) => {
+        store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+        const response = await app.inject({
+          method: "POST",
+          url: "/runtime/v1/orb/delete",
+          headers: authorization === undefined ? {} : { authorization },
+        });
+        expect(response.statusCode).toBe(401);
+        expect(store.orbSnapshot(ORB)?.state).toBe("running");
+      },
+    );
+
+    it("rejects target fields without mutation", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      expect((await deleteSelf({ orbId: "sibling" })).statusCode).toBe(400);
+      expect(store.orbSnapshot(ORB)?.state).toBe("running");
+    });
+
+    it.each([
+      "creating",
+      "starting",
+      "stopping",
+      "stopped",
+      "failed",
+      "archiving",
+      "archived",
+      "deleting",
+    ] as const)("refuses %s callers", async (state) => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, state, { runtimeTokenHash: sha256(TOKEN) }));
+      expect([401, 409]).toContain((await deleteSelf()).statusCode);
+      expect(store.orbSnapshot(ORB)?.state).toBe(state);
+    });
+
+    it.each(["unavailable", "invariant"] as const)(
+      "sanitizes %s failures without changing state",
+      async (code) => {
+        store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+        const failing = new Proxy(store, {
+          get(target, property) {
+            if (property === "getOrb")
+              return () =>
+                errAsync({
+                  type: "store_error" as const,
+                  code,
+                  message: "private database detail",
+                  retryable: code === "unavailable",
+                });
+            const value: unknown = Reflect.get(target, property);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+        await app.close();
+        await startApp(TEST_ISSUER_CONSTANTS, failing);
+        const response = await deleteSelf();
+        expect(response.statusCode).toBe(code === "invariant" ? 500 : 503);
+        expect(response.body).not.toContain("private database detail");
+        expect(store.orbSnapshot(ORB)?.state).toBe("running");
+      },
+    );
+
+    it("rejects absent credentials and discard-fenced compute", async () => {
+      expect((await deleteSelf()).statusCode).toBe(401);
+      store.seedOrb(
+        makeOrbRow(ORB, PROJECT, "running", {
+          runtimeTokenHash: sha256(TOKEN),
+          hostDiscardThroughIncarnation: 1,
+        }),
+      );
+      expect((await deleteSelf()).statusCode).toBe(401);
+      expect(store.orbSnapshot(ORB)?.state).toBe("running");
     });
   });
 

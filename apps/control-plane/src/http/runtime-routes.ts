@@ -11,12 +11,14 @@ import {
   ORB_NAME_README_MAX_BYTES,
   ORB_NAME_TRIGGER_PATH,
   ORB_SELF_ARCHIVE_PATH,
+  ORB_SELF_DELETE_PATH,
   ORB_SELF_SLEEP_PATH,
   ORB_SPAWN_MAX_BYTES,
   ORB_SPAWN_PATH,
   ORB_SPAWN_UUID,
   OrbArchiveRequestSchema,
   OrbBootContextRequestSchema,
+  OrbDeleteRequestSchema,
   type OrbInspectionError,
   type OrbInspectionItem,
   type OrbNameTriggerResponse,
@@ -87,6 +89,11 @@ export interface RuntimeRouteDeps {
     caller: ArchiveCaller,
   ) => ResultAsync<import("@pi-orb/protocol").OrbBootContext | null, CommandError>;
   readonly archiveSelf: (
+    task: SimulationTask,
+    orbId: string,
+    caller: ArchiveCaller,
+  ) => ResultAsync<OrbRow, CommandError>;
+  readonly deleteSelf: (
     task: SimulationTask,
     orbId: string,
     caller: ArchiveCaller,
@@ -441,6 +448,51 @@ export function registerRuntimeRoutes(
       });
     }
     return reply.status(202).send({ orbId: result.value.id, state: "archiving" });
+  });
+  app.post(ORB_SELF_DELETE_PATH, async (request, reply) => {
+    reply.header("cache-control", "no-store");
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind !== "orb") {
+      const unavailable = auth.kind === "unavailable";
+      return reply.status(unavailable ? 503 : 401).send({
+        error: {
+          code: unavailable ? "unavailable" : "unauthorized",
+          message: unavailable ? "deletion unavailable" : "runtime identity rejected",
+          retryable: unavailable,
+        },
+      });
+    }
+    if (!Check(OrbDeleteRequestSchema, request.body === undefined ? {} : request.body)) {
+      return reply.status(400).send({
+        error: {
+          code: "invalid_request",
+          message: "self-delete accepts no fields",
+          retryable: false,
+        },
+      });
+    }
+    const result = await deps.deleteSelf(task, auth.orb.id, {
+      runtimeTokenHash: auth.orb.runtimeTokenHash as string,
+      hostIncarnation: auth.orb.hostIncarnation,
+    });
+    if (result.isErr()) {
+      const status = { not_found: 404, conflict: 409, unavailable: 503, internal: 500 }[
+        result.error.code
+      ];
+      return reply.status(status).send({
+        error: {
+          code: result.error.code,
+          message:
+            result.error.code === "internal"
+              ? "deletion failed"
+              : result.error.code === "unavailable"
+                ? "deletion unavailable; acceptance may be unknown"
+                : result.error.message,
+          retryable: result.error.retryable,
+        },
+      });
+    }
+    return reply.status(202).send({ orbId: result.value.id, state: "deleting" });
   });
 
   if (deps.mcp) {

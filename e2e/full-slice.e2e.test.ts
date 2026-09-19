@@ -148,6 +148,17 @@ const SCENARIO = {
         ],
       },
       {
+        match: { userMessage: { regex: "^please delete this orb$" } },
+        steps: [
+          {
+            type: "toolCall",
+            name: "bash",
+            arguments: { command: "pi-orb delete; cat ../self-delete-hold" },
+          },
+          { type: "stop", status: "completed" },
+        ],
+      },
+      {
         match: { userMessage: { regex: "^please archive this orb$" } },
         steps: [
           { type: "toolCall", name: "bash", arguments: { command: "pi-orb archive" } },
@@ -2091,6 +2102,69 @@ describe("full slice E2E", () => {
       { timeoutMs: 30_000, intervalMs: 200 },
     );
 
+    const siblingHistoryBeforeDelete = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+    const siblingComputeBeforeDelete = await computeIdentity(secondOrbId, 0);
+    const hostedObjectsBeforeDelete = readdirSync(hostingRootDirectory, { recursive: true }).map(
+      String,
+    );
+    await writeWorkspaceFiles(spawnedOrbId, 0, {
+      "repo/deleted.html": "self-deleted-hosted-file",
+    });
+    // The FIFO holds the tool after either CLI outcome. Only host destruction
+    // releases it: no optional continuation can consume the archive model rules.
+    const deletionHosting = await terminalRun(
+      spawnedOrbId,
+      String.raw`mkfifo ../self-delete-hold && pi-orb host deleted.html delete/index.html --request-id ${randomUUID()}; printf '\104\105\114\105\124\105\137\110\117\123\124\105\104\012'`,
+      "DELETE_HOSTED",
+    );
+    const deletedHostedUrl = /http:\/\/files\.localhost:\d+\/s\/[^\s]+\/delete\/index\.html/.exec(
+      deletionHosting,
+    )?.[0];
+    if (deletedHostedUrl === undefined) throw new Error("delete hosting URL was absent");
+    expect(await (await fetch(deletedHostedUrl)).text()).toBe("self-deleted-hosted-file");
+    const deletedObjects = readdirSync(hostingRootDirectory, { recursive: true }).filter(
+      (entry) =>
+        basename(String(entry)) === "data" && !hostedObjectsBeforeDelete.includes(String(entry)),
+    );
+    expect(deletedObjects).toHaveLength(1);
+    const deleteMessage = await api(
+      base,
+      "PUT",
+      `/api/v1/orbs/${spawnedOrbId}/messages/${randomUUID()}`,
+      { content: [{ type: "text", text: "please delete this orb" }] },
+    );
+    expect(deleteMessage.status).toBe(202);
+    await waitForLifecycleEdges("self-deletion accepted", spawnedOrbId, (lines) =>
+      lines.some((line) => line.includes("delete_requested") && line.includes("source=self")),
+    );
+    await waitFor(
+      "self-deletion complete",
+      async () => {
+        const view = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}`);
+        return view.status === 404 ? true : null;
+      },
+      { timeoutMs: 240_000, intervalMs: 1_000 },
+    );
+    expect((await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/history`)).status).toBe(404);
+    expect((await fetch(deletedHostedUrl)).status).toBe(404);
+    for (const object of deletedObjects) {
+      expect(existsSync(join(hostingRootDirectory, String(object)))).toBe(false);
+    }
+    if (PROCESS_BACKEND) {
+      expect(existsSync(processHostDirectory(spawnedOrbId))).toBe(false);
+    } else {
+      expect(await orbContainerNames(spawnedOrbId)).toEqual([]);
+      await expect(docker(["volume", "inspect", `pi-orb-data-${spawnedOrbId}`])).rejects.toThrow();
+    }
+    expect((await api(base, "GET", `/api/v1/projects/${projectId}`)).status).toBe(200);
+    expect((await api(base, "GET", `/api/v1/orbs/${orbId}`)).body["state"]).toBe("stopped");
+    expect((await api(base, "GET", `/api/v1/orbs/${orbId}/history`)).body).toEqual(
+      siblingHistoryBeforeDelete.body,
+    );
+    expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
+    expect((await api(base, "GET", `/api/v1/orbs/${secondOrbId}`)).body["state"]).toBe("running");
+    expect(await computeIdentity(secondOrbId, 0)).toEqual(siblingComputeBeforeDelete);
+
     await writeWorkspaceFiles(secondOrbId, 0, {
       "repo/archived.html": "archived-hosted-file",
     });
@@ -2142,8 +2216,8 @@ describe("full slice E2E", () => {
     expect(deletion.status, JSON.stringify(deletion.body)).toBe(202);
     expect(deletion.body["state"]).toBe("deleting");
     expect(deletion.body["deletionProgress"]).toMatchObject({
-      total: 3,
-      remaining: 3,
+      total: 2,
+      remaining: 2,
       blocked: 0,
     });
     const lateChild = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {

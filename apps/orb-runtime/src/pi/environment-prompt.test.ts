@@ -28,6 +28,18 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("briefly lag");
   });
 
+  it("limits permanent self-deletion to explicit requests and warns of interruption", () => {
+    expect(environmentPrompt).toContain(
+      "Use `pi-orb delete` only when the user explicitly requests deletion of this orb.",
+    );
+    expect(environmentPrompt).toContain(
+      "It permanently deletes the workspace, conversation, and hosted files; push or export anything needed first.",
+    );
+    expect(environmentPrompt).toContain(
+      "It may interrupt the current turn before acknowledgement.",
+    );
+  });
+
   it("documents scheduled self-sleep", () => {
     expect(environmentPrompt).toContain("pi-orb sleep 1h");
     expect(environmentPrompt).toContain("stops this orb after admitted work finishes");

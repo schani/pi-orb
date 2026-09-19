@@ -63,7 +63,12 @@ import {
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/constants.ts";
 import { ControlState } from "./domain/control-state.ts";
 import { GithubAuthGate } from "./domain/github-auth.ts";
-import { readOrbBootContext, requestOrbArchive, requestOrbSleep } from "./domain/lifecycle.ts";
+import {
+  readOrbBootContext,
+  requestOrbArchive,
+  requestOrbDeletion,
+  requestOrbSleep,
+} from "./domain/lifecycle.ts";
 import { logEvent, logOrbEvent } from "./domain/log.ts";
 import {
   hostingCleanupLoop,
@@ -646,6 +651,7 @@ export async function main(
         requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),
       readBootContext: (task, orbId, caller) => readOrbBootContext(task, deps, orbId, caller),
       archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
+      deleteSelf: (task, orbId, caller) => requestOrbDeletion(task, deps, orbId, caller),
       store: deps.store,
       brokerForUser,
       nameGenerator: deps.nameGenerator,

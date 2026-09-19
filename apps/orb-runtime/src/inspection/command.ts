@@ -10,7 +10,8 @@ export const INSPECTION_USAGE = `usage:
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
   pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]
-  pi-orb archive`;
+  pi-orb archive
+  pi-orb delete`;
 
 export type InspectionCommand =
   | { readonly type: "orbs"; readonly query: string | null; readonly json: boolean }

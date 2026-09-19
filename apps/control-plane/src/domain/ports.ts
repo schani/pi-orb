@@ -114,6 +114,7 @@ export type HostSpecReplacementOutcome =
   | { readonly type: "declined"; readonly orb: OrbRow; readonly committedGeneration: number };
 
 export interface RequestOrbDeletionParams {
+  readonly caller?: ArchiveCaller;
   readonly orbId: string;
   readonly expectedStateVersion: number;
   readonly now: number;
