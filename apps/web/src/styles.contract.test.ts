@@ -93,9 +93,9 @@ describe("dashboard layout contract", () => {
     expect(rule(".orb-entry-link")).toContain("line-height: 22px");
   });
 
-  it("keeps every orb entry on its line grid behind its state hue", () => {
+  it("keeps every dashboard orb entry on its line grid behind its state hue", () => {
     expect(rule(".orb-entry")).toContain("border-left: 2px solid var(--g2)");
-    expect(rule(".orb-entry-del,\n.ix-row-del")).toContain("border-left-style: dotted");
+    expect(rule(".orb-entry-del")).toContain("border-left-style: dotted");
     expect(rule(".orb-entry-title")).toContain("height: 22px");
     expect(rule(".orb-entry-title")).toContain("align-items: center");
     expect(rule(".orb-entry-link")).toContain("white-space: nowrap");
@@ -105,7 +105,7 @@ describe("dashboard layout contract", () => {
 
   it("uses the stopped gray hue for sleeping rows without overriding selected fill", () => {
     expect(rule(".s-sleep")).toContain("color: var(--st-stop)");
-    expect(rule(".orb-entry-sleep,\n.ix-row-sleep")).toContain("border-left-color: var(--st-stop)");
+    expect(rule(".orb-entry-sleep")).toContain("border-left-color: var(--st-stop)");
     expect(
       rule(
         ".orb-entry-stop .orb-entry-link,\n.orb-entry-sleep .orb-entry-link,\n.orb-entry-arch .orb-entry-link,\n.orb-entry-archng .orb-entry-link,\n.orb-entry-del .orb-entry-link",
@@ -164,13 +164,19 @@ describe("orb workspace layout contract", () => {
     expect(rule(".composer")).toContain("bottom: 0");
   });
 
-  it("keeps the project index beside the transcript at full viewport height", () => {
+  it("keeps the project index beside the transcript with plain hover rows", () => {
     expect(rule(".orb-index")).toContain("position: sticky");
     expect(rule(".orb-index")).toContain("max-height: 100dvh");
     expect(rule(".orb-index")).toContain("border-right: 1px solid var(--k)");
-    expect(rule(".ix-row")).toContain("grid-template-columns: 16px minmax(0, 1fr) auto");
-    expect(rule(".ix-row")).toContain("border-left: 2px solid var(--g2)");
-    expect(rule(".ix-row-current,\n.ix-row-current:hover")).toContain("background: var(--k)");
+    const row = rule(".ix-row");
+    expect(row).toContain("grid-template-columns: 16px minmax(0, 1fr) auto");
+    expect(row).not.toContain("border-left");
+    const hover = rule(".ix-row:hover");
+    expect(hover).toContain("background: var(--g1)");
+    expect(hover).toContain("border-bottom-color: var(--g1)");
+    const current = rule(".ix-row-current,\n.ix-row-current:hover");
+    expect(current).toContain("background: var(--k)");
+    expect(current).toContain("border-bottom-color: var(--k)");
   });
 
   it("keeps stacked project actions and headers on the existing grid", () => {

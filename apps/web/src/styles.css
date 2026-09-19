@@ -633,48 +633,39 @@ a.project-new-orb-icon:focus-visible {
   color: var(--bad);
 }
 
-.orb-entry-busy,
-.ix-row-busy {
+.orb-entry-busy {
   border-left-color: var(--st-busy);
 }
 
-.orb-entry-idle,
-.ix-row-idle {
+.orb-entry-idle {
   border-left-color: var(--st-idle);
 }
 
-.orb-entry-start,
-.ix-row-start {
+.orb-entry-start {
   border-left-color: var(--st-start);
 }
 
-.orb-entry-stop,
-.ix-row-stop {
+.orb-entry-stop {
   border-left-color: var(--st-stop);
 }
 
-.orb-entry-sleep,
-.ix-row-sleep {
+.orb-entry-sleep {
   border-left-color: var(--st-stop);
 }
 
-.orb-entry-fail,
-.ix-row-fail {
+.orb-entry-fail {
   border-left-color: var(--st-fail);
 }
 
-.orb-entry-arch,
-.ix-row-arch {
+.orb-entry-arch {
   border-left-color: var(--st-arch);
 }
 
-.orb-entry-archng,
-.ix-row-archng {
+.orb-entry-archng {
   border-left-color: var(--st-archng);
 }
 
-.orb-entry-del,
-.ix-row-del {
+.orb-entry-del {
   border-left-color: var(--st-del);
   border-left-style: dotted;
 }
@@ -1321,20 +1312,21 @@ button.modal-close:focus-visible {
   gap: 8px;
   align-items: center;
   height: var(--row);
-  padding: 0 10px;
-  border-left: 2px solid var(--g2);
+  padding: 0 10px 0 12px;
   border-bottom: 1px solid var(--g1);
 }
 
 .ix-row:hover {
   color: inherit;
   background: var(--g1);
+  border-bottom-color: var(--g1);
 }
 
 .ix-row-current,
 .ix-row-current:hover {
   color: var(--w);
   background: var(--k);
+  border-bottom-color: var(--k);
   font-weight: 700;
 }
 
