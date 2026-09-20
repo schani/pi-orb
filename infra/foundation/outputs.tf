@@ -6,7 +6,6 @@ output "state_bucket" { value = google_storage_bucket.state.name }
 output "artifact_registry_repository" { value = google_artifact_registry_repository.pi_orb.id }
 output "control_plane_service_account_email" { value = google_service_account.control_plane.email }
 output "orb_vm_service_account_email" { value = google_service_account.orb_vm.email }
-output "issuer_service_account_email" { value = google_service_account.issuer.email }
 output "image_builder_service_account_email" { value = google_service_account.image_builder.email }
 output "image_build_subnetwork" { value = google_compute_subnetwork.image_build.self_link }
 output "pi_orb_network" { value = google_compute_network.pi_orb.id }

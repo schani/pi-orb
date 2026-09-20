@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getSystem, listHostedFiles, probeSession } from "./api.ts";
-import { readBrowserSession, resetBrowserSessionForTest } from "./session.ts";
+import { getSystem, listHostedFiles, logout, probeSession } from "./api.ts";
+import { readBrowserSession, readSessionPrincipal, resetBrowserSessionForTest } from "./session.ts";
 
 describe("API session handling", () => {
   beforeEach(resetBrowserSessionForTest);
   afterEach(() => vi.unstubAllGlobals());
 
-  it("asks IAP for an AJAX 401 and classifies an HTML 401 as expired auth", async () => {
+  it("classifies an HTML 401 as missing auth without provider-specific headers", async () => {
     const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
-      expect(new Headers(init?.headers).get("x-requested-with")).toBe("XMLHttpRequest");
+      expect(new Headers(init?.headers).get("x-requested-with")).toBeNull();
       return new Response("<title>Sign in</title>", {
         status: 401,
         headers: { "content-type": "text/html" },
@@ -49,6 +49,93 @@ describe("API session handling", () => {
 
     expect(result.isOk()).toBe(true);
     expect(readBrowserSession()).toEqual({ status: "active" });
+  });
+
+  it.each([403, 503])("does not recover an expired session on HTTP %i", async (status) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+    await probeSession();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status })),
+    );
+    await probeSession();
+    expect(readBrowserSession().status).toBe("auth_required");
+  });
+
+  it("keeps the principal on provider failure and forbidden logout", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          principal: { kind: "user", user: { id: "alice", email: null } },
+        }),
+      ),
+    );
+    await probeSession();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 503 })),
+    );
+    await probeSession();
+    expect(readSessionPrincipal()).toBe("user:alice");
+    expect(readBrowserSession().status).toBe("active");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 403 })),
+    );
+    expect((await logout()).isErr()).toBe(true);
+    expect(readSessionPrincipal()).toBe("user:alice");
+  });
+
+  it("cannot restore Alice from a response body held across Bob's login", async () => {
+    let release!: (value: unknown) => void;
+    const body = new Promise((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ status: 200, ok: true, json: () => body })),
+    );
+    const alice = probeSession();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          principal: { kind: "user", user: { id: "bob", email: null } },
+        }),
+      ),
+    );
+    await probeSession();
+    release({ status: "ok", principal: { kind: "user", user: { id: "alice", email: null } } });
+    expect((await alice).isErr()).toBe(true);
+    expect(readSessionPrincipal()).toBe("user:bob");
+  });
+
+  it("fences a response body held across logout", async () => {
+    let release!: (body: unknown) => void;
+    const body = new Promise((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === "/auth/logout") {
+          expect(init?.method).toBe("POST");
+          return new Response(null, { status: 204 });
+        }
+        return { status: 200, ok: true, json: () => body };
+      }),
+    );
+    const old = getSystem();
+    await logout();
+    release({ hostProvider: "process", databaseKind: "pglite", version: "old" });
+    expect((await old).isErr()).toBe(true);
+    expect(readBrowserSession().status).toBe("auth_required");
   });
 
   it("rejects a system response that does not match the closed schema", async () => {

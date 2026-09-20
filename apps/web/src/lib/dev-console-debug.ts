@@ -189,6 +189,14 @@ export class DevConsoleDebug {
   private owner: object | null = null;
   private projection: (() => TranscriptProjection) | null = null;
 
+  clear(): void {
+    this.trace = [];
+    this.seq = 0;
+    this.dropped = 0;
+    this.owner = null;
+    this.projection = null;
+  }
+
   record(input: DebugTraceInput): void {
     this.trace.push(safeTrace(input, ++this.seq));
     if (this.trace.length > TRACE_LIMIT) {

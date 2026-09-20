@@ -19,7 +19,7 @@ def epoch(value):
 
 def metrics(cloud, project, region, start, end):
     query = {
-        "filter": f'metric.type="run.googleapis.com/container/instance_count" AND resource.type="cloud_run_revision" AND resource.labels.service_name="pi-orb" AND resource.labels.location="{region}"',
+        "filter": f'metric.type="run.googleapis.com/container/instance_count" AND resource.type="cloud_run_revision" AND (resource.labels.service_name="pi-orb" OR resource.labels.service_name="pi-orb-ops" OR resource.labels.service_name="pi-orb-runtime-api" OR resource.labels.service_name="pi-orb-issuer") AND resource.labels.location="{region}"',
         "interval.startTime": start, "interval.endTime": end, "view": "FULL", "pageSize": "10000",
     }
     result, seen = [], set()
@@ -52,7 +52,7 @@ def samples(series, region, end):
         metric_labels = item["metric"].get("labels", {})
         if not isinstance(labels, dict) or not isinstance(metric_labels, dict):
             return fail("invalid", "malformed instance-count labels")
-        if labels.get("service_name") != "pi-orb" or labels.get("location") != region:
+        if labels.get("service_name") not in ("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer") or labels.get("location") != region:
             continue
         revision, state = labels.get("revision_name"), metric_labels.get("state")
         if not valid_id(revision) or state not in ("active", "idle") or not isinstance(item.get("points"), list):
@@ -69,19 +69,20 @@ def samples(series, region, end):
     return Result(result)
 
 
-def inventory(cloud, record, wall=now):
-    revisions = cloud.json(["run", "revisions", "list", "--service", "pi-orb", "--project", record["project"], "--region", record["region"]])
-    if revisions.error:
-        return revisions
-    if not isinstance(revisions.value, list):
-        return fail("invalid", "malformed revision inventory")
+def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
     names = set()
-    for revision in revisions.value:
-        metadata = revision.get("metadata") if isinstance(revision, dict) else None
-        name = metadata.get("name") if isinstance(metadata, dict) else None
-        if not valid_id(name):
-            return fail("invalid", "invalid revision name")
-        names.add(name)
+    for service in services:
+        revisions = cloud.json(["run", "revisions", "list", "--service", service, "--project", record["project"], "--region", record["region"]])
+        if revisions.error:
+            return revisions
+        if not isinstance(revisions.value, list):
+            return fail("invalid", "malformed revision inventory")
+        for revision in revisions.value:
+            metadata = revision.get("metadata") if isinstance(revision, dict) else None
+            name = metadata.get("name") if isinstance(metadata, dict) else None
+            if not valid_id(name):
+                return fail("invalid", "invalid revision name")
+            names.add(name)
     boundary = wall()
     at = epoch(boundary)
     if at is None:
@@ -93,7 +94,11 @@ def inventory(cloud, record, wall=now):
     parsed = samples(observed.value, record["region"], epoch(boundary))
     if parsed.error:
         return parsed
+    admitted = {item['resource']['labels'].get('revision_name') for item in observed.value
+                if isinstance(item['resource'].get('labels'), dict) and item['resource']['labels'].get('service_name') in services}
     for revision, states in parsed.value.items():
+        if revision not in admitted:
+            continue
         if any(points and max(points)[1] > 0 for points in states.values()):
             names.add(revision)
     operations = pending_operations(cloud, record["project"])
@@ -109,7 +114,7 @@ def evidence(record, series, end):
     parsed = samples(series, record["region"], epoch(end))
     if parsed.error:
         return parsed
-    current = next(item["revision"] for item in record["serving"] if item["service"] == "pi-orb")
+    current = next((item["revision"] for item in record["serving"] or [] if item["service"] == "pi-orb-issuer"), None)
     retirement = record["retirement"]
     targets = set(retirement["revisions"])
     for revision, states in parsed.value.items():
@@ -161,8 +166,8 @@ def pending_operations(cloud, project):
 
 
 def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sleep=time.sleep, checkpoint=lambda _record: Result(), limit=75 * 60):
-    if record["retirement"] is None or record["serving"] is None:
-        return fail("invalid", "retirement inventory and serving snapshot are required")
+    if record["retirement"] is None:
+        return fail("invalid", "retirement inventory is required")
     deadline = monotonic() + limit
     previous = None
     while True:
@@ -185,7 +190,7 @@ def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sl
             stored = checkpoint(record)
             if stored.error:
                 return stored
-            print("release: waiting for old browser processes: " + (", ".join(pending) or "none"), flush=True)
+            print("release: waiting for old application processes: " + (", ".join(pending) or "none"), flush=True)
             if record["retirement"]["operations"]:
                 print("release: waiting for compute operations: " + ", ".join(record["retirement"]["operations"]), flush=True)
             previous = waiting
@@ -193,7 +198,7 @@ def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sl
             return Result(record)
         if monotonic() >= deadline:
             stored = checkpoint(record)
-            return stored if stored.error else fail("timeout", "old browser retirement is not proven; UI was not paused and new loops remain gated")
+            return stored if stored.error else fail("timeout", "old application retirement is not proven; activation remains gated")
         sleep(max(0, min(15, deadline - monotonic())))
 
 

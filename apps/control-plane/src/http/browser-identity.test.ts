@@ -57,6 +57,55 @@ describe("authenticated browser route scope", () => {
     expect((await app.inject({ url: "/v1/runtime" })).statusCode).toBe(200);
   });
 
+  it("only initiates files login for top-level GET navigation", async () => {
+    const app = Fastify();
+    apps.push(app);
+    registerAuthenticatedBrowserRoutes(
+      app,
+      () => errAsync({ type: "unauthenticated", message: "denied" }),
+      (scope) => {
+        scope.get("/s/orb/file", async () => ({}));
+        scope.get("/api/private", async () => ({}));
+      },
+      {
+        origins: { appOrigin: "https://app.test", filesOrigin: "https://files.test" },
+        auth: {
+          startLogin: (_origin, returnTo) =>
+            okAsync({
+              authorizationUrl: `https://provider.test/login?return=${encodeURIComponent(returnTo)}`,
+              loginCookieValue: "sealed",
+            }),
+        },
+      },
+    );
+    const navigation = {
+      host: "files.test",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-dest": "document",
+    };
+    expect((await app.inject({ url: "/s/orb/file?q=1", headers: navigation })).statusCode).toBe(
+      302,
+    );
+    expect(
+      (await app.inject({ method: "HEAD", url: "/s/orb/file", headers: navigation })).statusCode,
+    ).toBe(401);
+    expect(
+      (await app.inject({ url: "/s/orb/file", headers: { host: "files.test" } })).statusCode,
+    ).toBe(401);
+    expect(
+      (await app.inject({ url: "/api/private", headers: { ...navigation, host: "app.test" } }))
+        .statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          url: "/s/orb/file",
+          headers: { ...navigation, authorization: "invalid" },
+        })
+      ).statusCode,
+    ).toBe(401);
+  });
+
   it("keeps concurrent principals request-local with explicit scheduling", async () => {
     const app = Fastify();
     apps.push(app);

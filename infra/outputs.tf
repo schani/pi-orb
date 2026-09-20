@@ -1,22 +1,15 @@
-output "browser_url" {
-  value = google_cloud_run_v2_service.browser.uri
+output "app_url" {
+  value      = local.app_origin
+  depends_on = [google_cloud_run_v2_service.issuer]
 }
 
 output "hosting_url" {
   value      = local.hosting_origin
-  depends_on = [google_cloud_run_v2_service.browser]
-}
-
-output "runtime_url" {
-  value = google_cloud_run_v2_service.runtime.uri
+  depends_on = [google_cloud_run_v2_service.issuer]
 }
 
 output "sql_private_ip" {
   value = google_sql_database_instance.pi_orb.private_ip_address
-}
-
-output "ops_url" {
-  value = google_cloud_run_v2_service.ops.uri
 }
 
 # The public OIDC issuer origin: the exact `iss` of every minted token, the

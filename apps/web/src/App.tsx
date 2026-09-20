@@ -2,6 +2,7 @@ import { useState, useSyncExternalStore } from "react";
 import { AppSearchProvider } from "./components/AppSearch.tsx";
 import { IconSprite } from "./components/Icons.tsx";
 import { SessionRibbon } from "./components/SessionRibbon.tsx";
+import { readSessionPrincipal, subscribeToBrowserSession } from "./lib/session.ts";
 import { TranscriptCache } from "./lib/transcript-cache.ts";
 import { TranscriptCacheContext } from "./lib/transcript-cache-context.ts";
 import { CreateOrbPage } from "./pages/CreateOrbPage.tsx";
@@ -59,17 +60,28 @@ function AppRoutes({ cache }: { cache: TranscriptCache }) {
   );
 }
 
-export function App() {
+function PrivateApp() {
   const [cache] = useState(() => new TranscriptCache());
   return (
     <TranscriptCacheContext.Provider value={cache}>
       <AppSearchProvider>
-        <div className="app">
-          <IconSprite />
-          <SessionRibbon />
-          <AppRoutes cache={cache} />
-        </div>
+        <AppRoutes cache={cache} />
       </AppSearchProvider>
     </TranscriptCacheContext.Provider>
+  );
+}
+
+export function App() {
+  const principal = useSyncExternalStore(
+    subscribeToBrowserSession,
+    readSessionPrincipal,
+    readSessionPrincipal,
+  );
+  return (
+    <div className="app">
+      <IconSprite />
+      <SessionRibbon />
+      {principal !== null && <PrivateApp key={principal} />}
+    </div>
   );
 }

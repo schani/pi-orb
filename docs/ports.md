@@ -49,6 +49,14 @@ On Docker these are ordinary `--env` values. On GCE they are fields in the `pi-o
 
 **Deletion extension implemented 2026-08-08.** Orb deletion revokes every auth key with the orb's exact pi-orb description and removes every exactly matching `tag:pi-orb` device before host destruction; repeated quarantine passes verify all three resource classes remain absent before database finalization. Cleanup is idempotent. The Tailscale adapter and OAuth client therefore need key/device list and delete permissions (`auth_keys` plus `devices:core`), not key creation alone; details and race ordering are in `docs/orb-deletion.md`.
 
+## Consolidation and a Tailscale-free preview proxy (2026-09-19; deferred)
+
+The user explicitly deferred this feature; consolidation does not change Tailscale or preview behavior.
+
+The single-service plan in `docs/control-plane-consolidation.md` is compatible with authenticated HTTP/WebSocket previews without a tailnet client, but does not implement them. The path is browser → application preview proxy → existing private runtime connection → runtime localhost port. Current GCE connectivity already permits the control plane to reach the runtime, so this does not require a new outbound reverse-tunnel protocol. Consolidation is not a prerequisite; application-owned authentication makes preview admission fit the same service.
+
+This remains a separate feature: stream requests/responses and WebSocket upgrades, authenticate preview access, restrict runtime forwarding to permitted localhost ports, and isolate untrusted preview origins from the app and other previews. Hostname routing and TLS still need a design; putting a dev server under an app-origin path is not safe or generally compatible. Cloud Run's request-duration limits still apply. This can replace Tailscale for browser/dev-server access, not transparently expose arbitrary TCP/UDP services to native clients. No Tailscale removal or preview implementation is authorized by the consolidation plan.
+
 ## Tier model and upgrade path
 
 Evaluated 2026-08-05 during the design conversation:
