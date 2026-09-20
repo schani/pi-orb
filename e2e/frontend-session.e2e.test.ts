@@ -907,6 +907,9 @@ describe("frontend-only browser behavior", () => {
           await expectPage(history.locator(".cur")).toHaveCount(0);
         };
         await singleMarker();
+        const waitingMarkerLeft = await marker.evaluate(
+          (element) => element.getBoundingClientRect().left,
+        );
         await expectPage(history.locator(".rec-orb")).toHaveCount(0);
         const strip = marker.locator(".bit-register-frames");
         const frames = ["001", "011", "010", "110", "111", "101", "100", "000"];
@@ -975,6 +978,9 @@ describe("frontend-only browser behavior", () => {
         });
         await expectPage(history).toContainText("Live register output");
         await singleMarker();
+        expectPage(await marker.evaluate((element) => element.getBoundingClientRect().left)).toBe(
+          waitingMarkerLeft,
+        );
         emit({
           type: "tool_state",
           operationId: "bits-op",
@@ -983,8 +989,15 @@ describe("frontend-only browser behavior", () => {
           revision: 1,
           state: "running",
         });
-        await expectPage(history.locator(".tool-activity-category")).toContainText("bash");
+        const activityRow = history.locator(".tool-activity-category");
+        await expectPage(activityRow).toContainText("bash");
         await singleMarker();
+        expectPage(await marker.evaluate((element) => element.getBoundingClientRect().left)).toBe(
+          waitingMarkerLeft,
+        );
+        expectPage(
+          await activityRow.evaluate((element) => element.getBoundingClientRect().left),
+        ).toBe(waitingMarkerLeft);
         send({
           type: "history.record",
           headId: "bits-record",

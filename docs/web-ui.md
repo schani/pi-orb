@@ -1,5 +1,9 @@
 # Web UI
 
+## Thinking activity alignment (implemented 2026-09-20)
+
+The bit-register activity marker uses the orb turn's 12px transcript inset both while waiting for first output and after text, reasoning, or tools arrive. Streaming phase changes must not shift the marker horizontally.
+
 ## Orb-tab composer focus (implemented 2026-09-20)
 
 A desktop orb view focuses its message input on arrival and whenever its mounted browser tab becomes visible again. Ordinary rerenders do not move focus. An open dialog retains focus, and phone views keep their collapsed, no-autofocus composer behavior. This is browser-local and adds no telemetry.

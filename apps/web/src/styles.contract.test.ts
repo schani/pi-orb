@@ -191,6 +191,7 @@ describe("orb workspace layout contract", () => {
   it("retains the type gutter only for shell records and keeps queue state visible", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
     expect(rule(".rec-you,\n.rec-orb")).toContain("display: block");
+    expect(rule(".busy-indicator")).toContain("padding: 0 12px");
     expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--w)");
     expect(rule(".rec-status")).toContain("border: 1px solid currentcolor");
   });

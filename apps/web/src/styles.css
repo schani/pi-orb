@@ -2151,7 +2151,7 @@ button.modal-close:focus-visible {
 }
 
 .busy-indicator {
-  padding: 0 12px 0 44px;
+  padding: 0 12px;
 }
 
 /* ---------- lifecycle and auth diagnostics ---------- */
