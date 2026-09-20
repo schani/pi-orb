@@ -35,10 +35,6 @@ import {
   id = "projects/${var.project}/serviceAccounts/pi-orb-control-plane@${var.project}.iam.gserviceaccount.com"
 }
 import {
-  to = google_service_account.issuer
-  id = "projects/${var.project}/serviceAccounts/pi-orb-issuer@${var.project}.iam.gserviceaccount.com"
-}
-import {
   to = google_service_account.deployer
   id = "projects/${var.project}/serviceAccounts/pi-orb-amp-deployer@${var.project}.iam.gserviceaccount.com"
 }

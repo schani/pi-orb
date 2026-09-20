@@ -139,3 +139,11 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Orb self-deletion
 
 70. **Resolved (2026-09-19):** the user approved plain `pi-orb delete`, self-only and explicit-user-request-only, reusing immediate permanent deletion rather than waiting for the requesting turn, and requested review of the agent prompt change. The invocation, authorization fences, observability, and test/DST plan are in `docs/orb-deletion.md`. Implementation is authorized; deployment is not.
+
+## Control-plane service consolidation
+
+71. **Resolved for planning (2026-09-19):** the user selected one application service with application-enforced authentication and requested a detailed, simple, DST-first plan. Google login/sessions replace browser IAP; existing orb bearers and application-verified machine identity protect their respective routes. `docs/control-plane-consolidation.md` records the implementation/qualification plan and accepted direction's exposure tradeoffs. The user subsequently authorized implementation, DST/tests first; deployment remains unauthorized. Qualification and release work is tracked in `TODO.md`.
+
+72. **Resolved for the plan (2026-09-19):** the user removed existing-URL preservation and requested simplification. Reuse the issuer service as the single application, preserving its exact issuer identity and federation trust while changing app/files/broker URLs and callback registrations. No redirects, aliases or trust migration. The earlier app-origin-preserving recommendation is rejected because it adds an unnecessary federation cutover. `docs/control-plane-consolidation.md` records the simplified plan. Implementation is authorized; production maintenance remains unauthorized.
+
+73. **Resolved (2026-09-19):** the user selected library-sealed, origin/purpose-bound fixed-expiry session cookies. No session table/store/lookup/cleanup or individual server-side revocation. Logout clears the browser cookie; a copied cookie remains valid until expiry. `docs/control-plane-consolidation.md` records this accepted limitation and the updated DST/library/browser tests. Implementation remains tracked in `TODO.md`; the user subsequently authorized implementation, DST/tests first, but not deployment.

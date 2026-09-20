@@ -256,7 +256,11 @@ export function registerRoutes(
     const principal = requirePrincipal(request);
     return principal.isErr()
       ? reply.status(500).send(httpError("internal", "request principal missing", false))
-      : reply.send({ status: "ok", principal: principal.value });
+      : reply.send({
+          status: "ok",
+          principal: principal.value,
+          ...(request.authExpiresAt !== undefined ? { logoutAvailable: true } : {}),
+        });
   });
 
   // Which host provider, which database, which build. Resolved at boot and

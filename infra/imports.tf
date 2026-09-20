@@ -33,18 +33,3 @@ import {
   to = google_secret_manager_secret.codex_credential
   id = "projects/${var.project}/secrets/pi-orb-credential-openai-codex"
 }
-
-import {
-  to = google_cloud_run_v2_service.browser
-  id = "projects/${var.project}/locations/${var.region}/services/pi-orb"
-}
-
-import {
-  to = google_cloud_run_v2_service.ops
-  id = "projects/${var.project}/locations/${var.region}/services/pi-orb-ops"
-}
-
-import {
-  to = google_cloud_run_v2_service.runtime
-  id = "projects/${var.project}/locations/${var.region}/services/pi-orb-runtime-api"
-}

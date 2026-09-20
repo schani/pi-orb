@@ -31,7 +31,14 @@ export interface OriginalOwnerMigrationInput {
   readonly identityIssuer: string;
   readonly identitySubject: string;
 }
+export interface GoogleIdentityMapping {
+  readonly userId: string;
+  readonly oldIssuer: string;
+  readonly oldSubject: string;
+  readonly googleSubject: string;
+}
 export interface MigrationOptions {
+  readonly googleIdentityMappings?: readonly GoogleIdentityMapping[];
   readonly originalOwner?: OriginalOwnerMigrationInput;
   readonly credentialOwnerUserId?: string;
   readonly observe?: MigrationObserver;
@@ -97,6 +104,13 @@ export function runMigrations(
                     set_config('pi_orb.original_identity_issuer', $2, true),
                     set_config('pi_orb.original_identity_subject', $3, true)`,
             [owner?.userId ?? "", owner?.identityIssuer ?? "", owner?.identitySubject ?? ""],
+          );
+          if (configured.isErr()) return err(configured.error);
+        }
+        if (migration.name === "026_google_identities.sql") {
+          const configured = await query(
+            "SELECT set_config('pi_orb.google_identity_mappings', $1, true)",
+            [JSON.stringify(options.googleIdentityMappings ?? [])],
           );
           if (configured.isErr()) return err(configured.error);
         }

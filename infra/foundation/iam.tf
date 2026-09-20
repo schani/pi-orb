@@ -20,10 +20,6 @@ resource "google_service_account" "control_plane" {
   display_name = "pi-orb control plane"
 }
 
-resource "google_service_account" "issuer" {
-  account_id   = "pi-orb-issuer"
-  display_name = "pi-orb public OIDC issuer"
-}
 
 # This is the identity attached to disposable image-builder VMs. Build
 # orchestration runs as the deployer; the builder itself can only emit logs.
@@ -49,11 +45,6 @@ resource "google_project_iam_member" "image_builder_log_writer" {
   member  = "serviceAccount:${google_service_account.image_builder.email}"
 }
 
-resource "google_project_iam_member" "issuer_log_writer" {
-  project = var.project
-  role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.issuer.email}"
-}
 
 resource "google_project_iam_member" "control_plane_image_user" {
   project = var.project
@@ -182,16 +173,6 @@ resource "google_project_iam_member" "deployer_orb_ssh_key_writer" {
   }
 }
 
-resource "google_project_iam_member" "deployer_application_iap_admin" {
-  project = var.project
-  role    = "roles/iap.admin"
-  member  = "serviceAccount:${google_service_account.deployer.email}"
-  condition {
-    title       = "cloud-run-iap-web-services-only"
-    description = "Manage IAP web-service policies without granting tunnel administration."
-    expression  = "resource.type == \"iap.googleapis.com/WebService\""
-  }
-}
 
 resource "google_artifact_registry_repository_iam_member" "deployer_writer" {
   location   = google_artifact_registry_repository.pi_orb.location
@@ -331,7 +312,6 @@ resource "google_storage_bucket_iam_member" "deployer_foundation_state_reader" {
 resource "google_service_account_iam_member" "deployer_uses_runtime_accounts" {
   for_each = {
     control_plane = google_service_account.control_plane.name
-    issuer        = google_service_account.issuer.name
     orb_vm        = google_service_account.orb_vm.name
     image_builder = google_service_account.image_builder.name
   }

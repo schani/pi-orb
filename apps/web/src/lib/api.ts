@@ -36,8 +36,10 @@ import { type Static, type TSchema, Type } from "typebox";
 import { Check } from "typebox/value";
 import {
   beginSessionRequest,
-  reportApplicationReached,
+  readSessionGeneration,
   reportAuthenticationRequired,
+  reportLoggedOut,
+  reportSessionPrincipal,
 } from "./session.ts";
 
 /** Typed failure of a control-plane HTTP call. */
@@ -170,11 +172,9 @@ async function apiFetch<S extends TSchema>(
   init?: RequestInit,
 ): Promise<Result<Static<S>, ApiError>> {
   const sequence = beginSessionRequest();
+  const generation = readSessionGeneration();
+  const stale = () => generation !== readSessionGeneration();
   const headers = new Headers(init?.headers);
-  // IAP returns 401 to AJAX requests instead of redirecting them to Google.
-  // Without this signal, fetch can flatten the cross-origin redirect into an
-  // indistinguishable network/CORS failure.
-  headers.set("x-requested-with", "XMLHttpRequest");
 
   let response: Response;
   try {
@@ -183,14 +183,14 @@ async function apiFetch<S extends TSchema>(
     return err({ type: "network", message: describeThrown(cause) });
   }
 
+  if (stale()) return err({ type: "auth_required", message: "Session changed." });
   if (response.status === 401) {
     reportAuthenticationRequired(sequence);
     return err({
       type: "auth_required",
-      message: "Your pi-orb session expired. Sign in again to continue.",
+      message: "Sign in to continue.",
     });
   }
-  reportApplicationReached(sequence);
 
   let body: unknown = null;
   try {
@@ -199,6 +199,7 @@ async function apiFetch<S extends TSchema>(
     body = null;
   }
 
+  if (stale()) return err({ type: "auth_required", message: "Session changed." });
   if (!response.ok) {
     if (Check(ControlPlaneHttpErrorSchema, body)) {
       return err({
@@ -224,6 +225,15 @@ async function apiFetch<S extends TSchema>(
       message: `unexpected response shape from ${path}`,
     });
   }
+  if (path === "/api/v1/session" && Check(SessionProbeSchema, body)) {
+    const principal = body.principal;
+    reportSessionPrincipal(
+      sequence,
+      principal.kind === "user" ? `user:${principal.user.id}` : `ops:${principal.id}`,
+      body.logoutAvailable === true,
+    );
+  }
+  if (path === "/auth/logout") reportLoggedOut();
   return ok(body);
 }
 
@@ -266,6 +276,10 @@ export const workspaceUploadAction = (
 
 const ProjectListSchema = ListResponseSchema(ProjectViewSchema);
 const OrbListSchema = ListResponseSchema(OrbViewSchema);
+
+export function logout() {
+  return apiFetch(Type.Null(), "/auth/logout", { method: "POST" });
+}
 
 export function probeSession() {
   return apiFetch(SessionProbeSchema, "/api/v1/session", { cache: "no-store" });

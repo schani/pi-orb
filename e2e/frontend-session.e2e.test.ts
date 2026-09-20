@@ -112,7 +112,7 @@ async function expectTextFieldCropMarks(page: Page, scope = page.locator("body")
 
 /**
  * Browser E2E for the exact cross-boundary path that unit tests cannot prove:
- * Vite fixture control -> IAP-shaped HTML 401 -> shared API adapter -> React
+ * Vite fixture control -> HTML 401 -> shared API adapter -> React
  * ribbon -> same-tab top-level auth round trip -> draft/session restoration.
  */
 describe("frontend-only browser behavior", () => {
@@ -3910,11 +3910,134 @@ describe("frontend-only browser behavior", () => {
     await page.close();
   });
 
+  it("serves a public shell without starting login until requested", async () => {
+    const page = await browser.newPage();
+    let logins = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/auth/login") logins += 1;
+    });
+    await page.request.post(`${origin}/__pi_orb_fixture/session/expire`);
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      await expectPage(page.locator(".session-ribbon")).toContainText("sign in required");
+      await expectPage(page.locator(".history")).toHaveCount(0);
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      expectPage(logins).toBe(0);
+      await page.getByRole("button", { name: "sign in", exact: true }).click();
+      await expectPage(
+        page.getByRole("textbox", { name: "Message the orb", exact: true }),
+      ).toBeVisible();
+      expectPage(logins).toBe(1);
+      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+    } finally {
+      await page.request.post(`${origin}/__pi_orb_fixture/session/restore`);
+      await page.close();
+    }
+  });
+
+  it("keeps private state through provider outage but replaces it on account change and logout", async () => {
+    const page = await browser.newPage();
+    let account = "alice";
+    let unavailable = false;
+    await page.route("**/api/v1/session", (route) =>
+      route.fulfill(
+        unavailable
+          ? {
+              status: 503,
+              json: {
+                error: {
+                  code: "unavailable",
+                  message: "identity provider unavailable",
+                  retryable: true,
+                },
+              },
+            }
+          : {
+              json: {
+                status: "ok",
+                logoutAvailable: true,
+                principal: { kind: "user", user: { id: account, email: null } },
+              },
+            },
+      ),
+    );
+    const focus = () => page.evaluate("window.dispatchEvent(new Event('focus'))");
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+      await composer.fill("Alice private draft");
+      await composer.evaluate((node) => node.setAttribute("data-owner", "alice"));
+      unavailable = true;
+      await focus();
+      await expectPage(page.locator(".session-ribbon")).toContainText(
+        "identity provider unavailable",
+      );
+      await expectPage(composer).toHaveAttribute("data-owner", "alice");
+      await expectPage(composer).toHaveValue("Alice private draft");
+      unavailable = false;
+      account = "bob";
+      await focus();
+      await expectPage(composer).not.toHaveAttribute("data-owner", "alice");
+      await expectPage(composer).toHaveValue("");
+      await page.evaluate("window.location.hash = '/'");
+      const signOut = page.getByRole("button", { name: "Sign out", exact: true });
+      await expectPage(signOut).toBeVisible();
+      await page.route("**/auth/logout", (route) =>
+        route.fulfill({
+          status: 503,
+          json: { error: { code: "unavailable", message: "logout unavailable", retryable: true } },
+        }),
+      );
+      await signOut.click();
+      await expectPage(page.getByRole("alert")).toContainText("logout unavailable");
+      await expectPage(signOut).toBeEnabled();
+      await expectPage(page.locator(".dashboard-footer")).toBeVisible();
+      await page.unroute("**/auth/logout");
+      let releaseLateResponse!: () => void;
+      const release = new Promise<void>((resolve) => {
+        releaseLateResponse = resolve;
+      });
+      let responseHeld!: () => void;
+      const held = new Promise<void>((resolve) => {
+        responseHeld = resolve;
+      });
+      await page.route("**/api/v1/system", async (route) => {
+        const response = await route.fetch();
+        responseHeld();
+        await release;
+        await route.fulfill({ response });
+      });
+      const lateResponse = page.evaluate(
+        "import('/src/lib/api.ts').then(api => api.getSystem()).then(result => result.isErr() && result.error.type)",
+      );
+      await held;
+      const loggedOut = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/auth/logout" &&
+          response.request().method() === "POST",
+      );
+      await signOut.click();
+      expectPage((await loggedOut).status()).toBe(204);
+      releaseLateResponse();
+      expectPage(await lateResponse).toBe("auth_required");
+      await expectPage(page.locator(".dashboard-footer")).toHaveCount(0);
+      expectPage(
+        await page.evaluate("import('/src/lib/session.ts').then(s => s.readSessionPrincipal())"),
+      ).toBeNull();
+      await expectPage(composer).toHaveCount(0);
+      await expectPage(page.locator(".history")).toHaveCount(0);
+      await expectPage(page.locator(".session-ribbon")).toContainText("sign in required");
+    } finally {
+      await page.request.post(`${origin}/__pi_orb_fixture/session/restore`);
+      await page.close();
+    }
+  });
+
   it("shows the ribbon and recovers session, route, and composer draft in the same tab", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/${ORB_HASH}`);
 
-    const draft = "Keep this exact draft through IAP sign-in";
+    const draft = "Keep this exact draft through Google sign-in";
     const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
     const historyAlerts = page.locator(".history").getByRole("alert");
     await expectPage(historyAlerts).toHaveCount(3);
@@ -3922,11 +4045,15 @@ describe("frontend-only browser behavior", () => {
 
     await page.getByRole("button", { name: "expire session" }).click();
     const ribbon = page.locator(".session-ribbon");
-    await expectPage(ribbon).toContainText("session expired");
+    await expectPage(ribbon).toContainText("sign in required");
     await expectPage(composer).toHaveValue(draft);
 
+    const login = page.waitForRequest(
+      (request) => new URL(request.url()).pathname === "/auth/login",
+    );
     const loaded = page.waitForEvent("load");
-    await ribbon.getByRole("button", { name: "sign in again" }).click();
+    await ribbon.getByRole("button", { name: "sign in", exact: true }).click();
+    expectPage(new URL((await login).url()).searchParams.get("returnTo")).toBe(`/${ORB_HASH}`);
     await loaded;
 
     await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);

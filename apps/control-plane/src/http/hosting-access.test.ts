@@ -1,253 +1,263 @@
-import { describe, expect, it } from "vitest";
-import { createHostingAccessPolicy } from "./hosting-access.ts";
+import Fastify from "fastify";
+import { expect, it } from "vitest";
+import {
+  createHostingAccessPolicy,
+  type HostingAccessOutcome,
+  registerHostingAccessGuard,
+} from "./hosting-access.ts";
 
-const configured = () =>
+const policy = (trustedLocal = false) =>
   createHostingAccessPolicy({
-    filesOrigin: "https://files.pi-orb.example.test",
-    trustedBrowserOrigins: ["http://localhost:5173", "http://vibestation:5173"],
-  });
-
-describe("hosting HTTP access policy", () => {
-  it.each([
-    "ftp://files.example.test",
-    "https://user@files.example.test",
-    "https://files.example.test/path",
-    "https://files.example.test?query=yes",
-    "https://files.example.test/#fragment",
-  ])("rejects an invalid files origin: %s", (filesOrigin) => {
-    const result = createHostingAccessPolicy({
-      filesOrigin,
-    });
-    expect(result.isErr()).toBe(true);
-  });
-
-  it("accepts only GET and HEAD hosted paths on the files host", () => {
-    const result = configured();
-    expect(result.isOk()).toBe(true);
-    if (result.isErr()) return;
-    for (const method of ["GET", "HEAD"]) {
-      expect(
-        result.value.decide({
-          method,
-          path: "/s/00000000-0000-4000-8000-000000000001/design/index.html",
-          host: "files.pi-orb.example.test",
-        }),
-      ).toEqual({ kind: "allow", surface: "hosted_read" });
-    }
-    expect(
-      result.value.decide({
-        method: "POST",
-        path: "/s/00000000-0000-4000-8000-000000000001/design/index.html",
-        host: "files.pi-orb.example.test",
-      }),
-    ).toEqual({ kind: "reject", reason: "files_method" });
-  });
-
-  it("isolates every non-file route on the files host as a safe 404", () => {
-    const policy = configured()._unsafeUnwrap();
-    for (const path of [
-      "/",
-      "/index.html",
-      "/api/v1/projects",
-      "/runtime/v1/tokens/model",
-      "/.well-known/jwks.json",
-      "/s/not-enough-segments",
-    ]) {
-      expect(policy.decide({ method: "GET", path, host: "files.pi-orb.example.test" })).toEqual({
-        kind: "isolated_not_found",
-      });
-    }
-    expect(
-      policy.decide({
-        method: "GET",
-        path: "/api/v1/orbs/o/live",
-        host: "files.pi-orb.example.test",
-        upgrade: "websocket",
-        origin: "https://files.pi-orb.example.test",
-      }),
-    ).toEqual({ kind: "reject", reason: "files_websocket" });
-  });
-
-  it("never serves /s paths through a non-files host", () => {
-    const policy = configured()._unsafeUnwrap();
-    expect(
-      policy.decide({ method: "GET", path: "/s/orb/file", host: "pi-orb.example.test" }),
-    ).toEqual({ kind: "reject", reason: "files_wrong_host" });
-    expect(
-      policy.decide({ method: "GET", path: "/s/orb/file", host: "attacker.example.test" }),
-    ).toEqual({ kind: "reject", reason: "files_wrong_host" });
-  });
-
-  it("allows only the OAuth callback GET across sites, never a files-host or websocket bypass", () => {
-    const policy = configured()._unsafeUnwrap();
-    const request = {
-      method: "GET",
-      path: "/api/v1/mcp/oauth/callback?code=synthetic",
-      host: "pi-orb.example.test",
-      secFetchSite: "cross-site",
-    };
-    expect(policy.decide(request)).toEqual({ kind: "allow", surface: "app" });
-    expect(policy.decide({ ...request, method: "POST" }).kind).toBe("reject");
-    expect(policy.decide({ ...request, path: "/api/v1/mcp/oauth/callback/other" }).kind).toBe(
+    appOrigin: "https://app.test",
+    filesOrigin: "https://files.test",
+    trustedLocal,
+  })._unsafeUnwrap();
+it("limits the configured runtime authority to runtime routes", () => {
+  const config = {
+    appOrigin: "https://app.test",
+    filesOrigin: "https://files.test",
+    runtimeOrigin: "https://broker.test:8443",
+  };
+  const access = createHostingAccessPolicy(config)._unsafeUnwrap();
+  for (const path of [
+    "/runtime",
+    "/runtime/v1/orb/boot-context",
+    "/runtime/v1/model-token?scope=test",
+  ])
+    expect(access.decide({ method: "POST", path, host: "broker.test:8443" }).kind).toBe("allow");
+  for (const path of [
+    "/",
+    "/api/v1/orbs",
+    "/auth/login",
+    "/s/orb/index.html",
+    "/runtime-other",
+    "/runtimeevil",
+  ])
+    expect(access.decide({ method: "GET", path, host: "broker.test:8443" }).kind).toBe("reject");
+  for (const host of ["broker.test", "unknown.test", "broker.test:8444"])
+    expect(access.decide({ method: "POST", path: "/runtime/v1/model-token", host }).kind).toBe(
       "reject",
     );
-    expect(policy.decide({ ...request, upgrade: "websocket" }).kind).toBe("reject");
-    expect(policy.decide({ ...request, host: "files.pi-orb.example.test" }).kind).toBe(
+  expect(
+    access.decide({ method: "GET", path: "/runtime/v1/orb/boot-context", host: "files.test" }).kind,
+  ).toBe("isolated_not_found");
+  expect(
+    access.decide({ method: "POST", path: "/runtime/v1/model-token", host: "files.test" }).kind,
+  ).toBe("reject");
+});
+it.each([
+  "https://broker.test/path",
+  "https://user:secret@broker.test",
+  "https://broker.test?q=1",
+  "https://broker.test#fragment",
+  "ftp://broker.test",
+  "https://files.test:8443",
+])("rejects invalid runtime origin %s", (runtimeOrigin) => {
+  const config = {
+    appOrigin: "https://app.test",
+    filesOrigin: "https://files.test",
+    runtimeOrigin,
+  };
+  expect(createHostingAccessPolicy(config).isErr()).toBe(true);
+});
+it("passes runtime requests through to bearer authentication", async () => {
+  const config = {
+    appOrigin: "https://app.test",
+    filesOrigin: "https://files.test",
+    runtimeOrigin: "https://broker.test",
+  };
+  const app = Fastify();
+  registerHostingAccessGuard(
+    app,
+    createHostingAccessPolicy(config)._unsafeUnwrap(),
+    "https://app.test",
+  );
+  app.post("/runtime/v1/model-token", async (request, reply) => {
+    if (request.headers.authorization !== "Bearer runtime-secret")
+      return reply.code(401).send({ error: "unauthorized" });
+    return { token: "issued" };
+  });
+  try {
+    for (const authorization of [undefined, "Bearer invalid", "Bearer runtime-secret"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/runtime/v1/model-token",
+        headers: { host: "broker.test", ...(authorization === undefined ? {} : { authorization }) },
+      });
+      expect(response.statusCode).toBe(authorization === "Bearer runtime-secret" ? 200 : 401);
+    }
+  } finally {
+    await app.close();
+  }
+});
+it("trusts only configured hosts, not request-derived origins", () => {
+  for (const host of ["evil.test", "app.test:8443", "files.test:8443", "app.test@evil.test"])
+    expect(policy().decide({ method: "GET", path: "/", host }).kind).toBe("reject");
+  expect(policy().decide({ method: "GET", path: "/", host: "app.test" }).kind).toBe("allow");
+});
+it("leaves credential-specific Origin checks to authentication", () => {
+  for (const method of ["GET", "POST"])
+    for (const origin of [undefined, "null", "https://files.test", "https://evil.test"])
+      expect(
+        policy().decide({
+          method,
+          path: "/api/write",
+          host: "app.test",
+          ...(origin === undefined ? {} : { origin }),
+        }).kind,
+      ).toBe("allow");
+});
+it("files exposes only reads and GET authentication entrypoints", () => {
+  for (const path of ["/auth/login", "/auth/callback", "/s/orb/index.html"])
+    expect(policy().decide({ method: "GET", path, host: "files.test" }).kind).toBe("allow");
+  for (const path of ["/api/v1/orbs", "/runtime/v1", "/.well-known/jwks.json", "/auth/logout", "/"])
+    expect(policy().decide({ method: "GET", path, host: "files.test" }).kind).toBe(
       "isolated_not_found",
     );
-  });
-
-  it("allows same-origin and explicit Vite development browser requests", () => {
-    const policy = configured()._unsafeUnwrap();
-    for (const origin of [
-      "https://pi-orb.example.test",
-      "http://localhost:5173",
-      "http://vibestation:5173",
-    ]) {
-      expect(
-        policy.decide({
-          method: "POST",
-          path: "/api/v1/projects",
-          host: "pi-orb.example.test",
-          origin,
-          secFetchSite: origin.startsWith("https://pi-orb") ? "same-origin" : "same-site",
-        }),
-      ).toEqual({ kind: "allow", surface: "app" });
-    }
-  });
-
-  it("rejects files-origin and other cross-origin API and WebSocket requests", () => {
-    const policy = configured()._unsafeUnwrap();
-    for (const origin of [
-      "https://files.pi-orb.example.test",
-      "https://attacker.example.test",
-    ] as const) {
-      expect(
-        policy.decide({
-          method: "POST",
-          path: "/api/v1/orbs/o/start",
-          host: "pi-orb.example.test",
-          origin,
-          secFetchSite: "cross-site",
-        }),
-      ).toEqual({ kind: "reject", reason: "untrusted_origin" });
-      expect(
-        policy.decide({
-          method: "GET",
-          path: "/api/v1/orbs/o/live",
-          host: "pi-orb.example.test",
-          origin,
-          upgrade: "websocket",
-        }),
-      ).toEqual({ kind: "reject", reason: "untrusted_origin" });
-    }
-  });
-
-  it("rejects browser cross-site API requests even when Origin is absent", () => {
-    const policy = configured()._unsafeUnwrap();
+  expect(policy().decide({ method: "POST", path: "/s/orb/file", host: "files.test" }).kind).toBe(
+    "reject",
+  );
+  expect(
+    policy().decide({
+      method: "GET",
+      path: "/s/orb/file",
+      host: "files.test",
+      upgrade: "websocket",
+    }).kind,
+  ).toBe("reject");
+  expect(policy().decide({ method: "GET", path: "/s/orb/file", host: "app.test" }).kind).toBe(
+    "reject",
+  );
+});
+it("preserves trusted-local Origin protection and GET OAuth callback exceptions", async () => {
+  const app = Fastify();
+  registerHostingAccessGuard(app, policy(true), "https://app.test");
+  app.post("/api/write", async () => ({}));
+  app.get("/auth/callback", async () => ({}));
+  for (const origin of ["null", "https://files.test", "https://evil.test"])
     expect(
-      policy.decide({
-        method: "DELETE",
-        path: "/api/v1/orbs/o",
-        host: "pi-orb.example.test",
-        secFetchSite: "cross-site",
-      }),
-    ).toEqual({ kind: "reject", reason: "cross_site" });
-  });
-
-  it("preserves origin-less runtime and trusted tooling requests", () => {
-    const policy = configured()._unsafeUnwrap();
-    for (const request of [
-      { method: "POST", path: "/runtime/v1/tokens/model", host: "pi-orb.example.test" },
-      { method: "DELETE", path: "/api/v1/orbs/o", host: "pi-orb.example.test" },
-      { method: "GET", path: "/.well-known/jwks.json", host: "pi-orb.example.test" },
-    ]) {
-      expect(policy.decide(request)).toEqual({ kind: "allow", surface: "app" });
-    }
-  });
-
-  it("normalizes method, host case, and an explicit default port", () => {
-    const policy = configured()._unsafeUnwrap();
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/write",
+          headers: { host: "app.test", origin },
+        })
+      ).statusCode,
+    ).toBe(403);
+  expect(
+    (await app.inject({ method: "POST", url: "/api/write", headers: { host: "app.test" } }))
+      .statusCode,
+  ).toBe(200);
+  expect(
+    (
+      await app.inject({
+        url: "/auth/callback",
+        headers: { host: "app.test", origin: "https://provider.test" },
+      })
+    ).statusCode,
+  ).toBe(200);
+  for (const path of ["/auth/callback", "/api/v1/mcp/oauth/callback"]) {
     expect(
-      policy.decide({
-        method: "get",
-        path: "/s/orb/file.txt?download=1",
-        host: "FILES.PI-ORB.EXAMPLE.TEST:443",
-      }),
-    ).toEqual({ kind: "allow", surface: "hosted_read" });
+      policy(true).decide({
+        method: "GET",
+        path,
+        host: "app.test",
+        origin: "https://provider.test",
+      }).kind,
+    ).toBe("allow");
+    expect(
+      policy(true).decide({
+        method: "POST",
+        path,
+        host: "app.test",
+        origin: "https://provider.test",
+      }).kind,
+    ).toBe("reject");
+  }
+  await app.close();
+});
+it("records sanitized host and route denials, never accepted requests", async () => {
+  const outcomes: HostingAccessOutcome[] = [];
+  const app = Fastify();
+  registerHostingAccessGuard(app, policy(), "https://app.test", (outcome) =>
+    outcomes.push(outcome),
+  );
+  let calls = 0;
+  app.get("/", async () => {
+    calls++;
+    return {};
   });
-
-  it("derives an app origin from each raw Host when appOrigin is omitted", () => {
-    const result = createHostingAccessPolicy({
-      filesOrigin: "https://files.pi-orb.example.test",
-      trustedBrowserOrigins: ["http://localhost:5173"],
+  const cases = [
+    {
+      host: "secret.evil.test",
+      url: "/?code=secret",
+      reason: "unknown_host",
+      surface: "unknown",
+      status: 403,
+    },
+    {
+      host: "app.test@secret.evil.test",
+      url: "/?code=secret",
+      reason: "invalid_host",
+      surface: "unknown",
+      status: 403,
+    },
+    {
+      host: "app.test",
+      url: "/s/private-orb/secret?token=secret",
+      reason: "files_wrong_host",
+      surface: "app",
+      status: 403,
+    },
+    {
+      host: "files.test",
+      url: "/auth/callback?code=secret",
+      method: "POST" as const,
+      reason: "files_method",
+      surface: "files",
+      status: 403,
+    },
+    {
+      host: "files.test",
+      url: "/?code=secret",
+      reason: "files_route",
+      surface: "files",
+      status: 404,
+    },
+    {
+      host: "files.test",
+      url: "/s/private-orb/secret",
+      upgrade: "websocket",
+      reason: "files_websocket",
+      surface: "files",
+      status: 403,
+    },
+  ];
+  for (const test of cases) {
+    const result = await app.inject({
+      method: test.method ?? "GET",
+      url: test.url,
+      headers: {
+        host: test.host,
+        cookie: "secret",
+        authorization: "Bearer secret",
+        origin: "https://secret.test",
+        ...(test.upgrade ? { upgrade: test.upgrade } : {}),
+      },
     });
-    expect(result.isOk()).toBe(true);
-    if (result.isErr()) return;
-    for (const host of ["pi-orb.example.test", "pi-orb-alt.example.test:8443"]) {
-      expect(
-        result.value.decide({
-          method: "POST",
-          path: "/api/v1/projects",
-          host,
-          origin: `https://${host}`,
-        }),
-      ).toEqual({ kind: "allow", surface: "app" });
-    }
-  });
-
-  it("rejects foreign and files origins in auto-host mode and trusts no forwarded host", () => {
-    const policy = createHostingAccessPolicy({
-      filesOrigin: "https://files.pi-orb.example.test",
-    })._unsafeUnwrap();
-    for (const origin of [
-      "https://files.pi-orb.example.test",
-      "https://attacker.example.test",
-      "https://spoofed-forwarded-host.example.test",
-    ]) {
-      expect(
-        policy.decide({
-          method: "POST",
-          path: "/api/v1/projects",
-          host: "actual-app.example.test",
-          origin,
-        }),
-      ).toEqual({ kind: "reject", reason: "untrusted_origin" });
-    }
-  });
-
-  it("rejects /s on every non-files host in auto-host mode", () => {
-    const policy = createHostingAccessPolicy({
-      filesOrigin: "https://files.pi-orb.example.test",
-    })._unsafeUnwrap();
-    expect(
-      policy.decide({ method: "GET", path: "/s/orb/file", host: "pi-orb-alt.example.test" }),
-    ).toEqual({ kind: "reject", reason: "files_wrong_host" });
-  });
-
-  it("rejects a backslash in the raw Host header", () => {
-    const policy = createHostingAccessPolicy({
-      filesOrigin: "https://files.pi-orb.example.test",
-    })._unsafeUnwrap();
-    expect(
-      policy.decide({
-        method: "GET",
-        path: "/api/v1/session",
-        host: "pi-orb.example.test\\attacker.example.test",
-      }),
-    ).toEqual({ kind: "reject", reason: "invalid_host" });
-  });
-
-  it("does not treat the files hostname on another port as an app host", () => {
-    const policy = createHostingAccessPolicy({
-      filesOrigin: "https://files.pi-orb.example.test",
-    })._unsafeUnwrap();
-    expect(
-      policy.decide({
-        method: "GET",
-        path: "/api/v1/session",
-        host: "files.pi-orb.example.test:8443",
-      }),
-    ).toEqual({ kind: "reject", reason: "unknown_host" });
-  });
+    expect(result.statusCode).toBe(test.status);
+    expect(outcomes.at(-1)).toEqual({
+      event: "hosting_denial",
+      reason: test.reason,
+      surface: test.surface,
+      requestId: expect.any(String),
+    });
+  }
+  expect(calls).toBe(0);
+  expect(outcomes).toHaveLength(cases.length);
+  expect(JSON.stringify(outcomes)).not.toMatch(/secret|private-orb|code=|token=/u);
+  expect((await app.inject({ url: "/", headers: { host: "app.test" } })).statusCode).toBe(200);
+  expect(calls).toBe(1);
+  expect(outcomes).toHaveLength(cases.length);
+  await app.close();
 });

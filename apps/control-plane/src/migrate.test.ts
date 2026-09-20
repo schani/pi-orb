@@ -103,6 +103,42 @@ it("logs credential owner resolution without identity values", async () => {
   expect(lines.join("\n")).not.toContain("00000000");
 });
 
+it("passes verified Google mappings only to the migration job and logs counts, not identities", async () => {
+  const lines: string[] = [];
+  const googleIdentityMappings = [
+    {
+      userId: "00000000-0000-4000-8000-000000000001",
+      oldIssuer: "https://cloud.google.com/iap",
+      oldSubject: "private-old-subject",
+      googleSubject: "private-google-subject",
+    },
+  ];
+  expect(
+    await migrateDatabase(
+      {
+        migrate: (options) => {
+          expect(options?.googleIdentityMappings).toEqual(googleIdentityMappings);
+          options?.observe?.("026_google_identities.sql", "applied");
+          return okAsync(["026_google_identities.sql"]);
+        },
+        close: () => okAsync(undefined),
+      },
+      (line) => lines.push(line),
+      { googleIdentityMappings },
+    ),
+  ).toBe(0);
+  expect(lines).toContain("lifecycle: migration-google-identities mapped=1");
+  expect(lines.join("\n")).not.toContain("private-");
+  expect(lines.join("\n")).not.toContain("00000000");
+  const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+  expect(main).not.toContain("googleIdentityMigrationInput");
+  expect(
+    migrationOwnerInput({
+      PI_ORB_GOOGLE_IDENTITY_MAPPINGS: JSON.stringify(googleIdentityMappings),
+    })._unsafeUnwrap(),
+  ).toEqual({});
+});
+
 it("reports successful migration and treats close failure as a failed job", async () => {
   const lines: string[] = [];
   expect(

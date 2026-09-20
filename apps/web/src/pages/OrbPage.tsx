@@ -73,6 +73,7 @@ import {
   withQueuedMessage,
 } from "../lib/queued-messages.ts";
 import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
+import { readSessionPrincipal } from "../lib/session.ts";
 import {
   type CachedTranscript,
   snapshotFromHistory,
@@ -726,18 +727,30 @@ function OrbConversation({
   const liveBlocks = useMemo(() => [...state.liveBlocks.values()], [state.liveBlocks]);
   const tools = useMemo(() => [...state.tools.values()], [state.tools]);
   const draftStorageErrorShown = useRef(false);
+  const [draftPrincipal] = useState(readSessionPrincipal);
 
   useEffect(() => {
-    const saved = saveComposerDraft(orbId, {
-      text: state.commandDraft?.text ?? state.composerText,
-      mode: state.commandDraft?.mode ?? state.composerMode,
-      images: state.composerImages,
-    });
+    const saved = saveComposerDraft(
+      orbId,
+      {
+        text: state.commandDraft?.text ?? state.composerText,
+        mode: state.commandDraft?.mode ?? state.composerMode,
+        images: state.composerImages,
+      },
+      draftPrincipal,
+    );
     if (saved.isErr() && !draftStorageErrorShown.current) {
       draftStorageErrorShown.current = true;
       dispatch({ type: "notice", message: saved.error.message });
     }
-  }, [orbId, state.composerImages, state.composerMode, state.composerText, state.commandDraft]);
+  }, [
+    orbId,
+    draftPrincipal,
+    state.composerImages,
+    state.composerMode,
+    state.composerText,
+    state.commandDraft,
+  ]);
   const [orb, setOrb] = useState<OrbView | null>(() =>
     initial.orb.isOk() ? initial.orb.value : null,
   );

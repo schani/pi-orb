@@ -94,26 +94,28 @@ WS   /api/v1/orbs/:orbId/live
 WS   /api/v1/orbs/:orbId/terminal
 ```
 
-### Application principal (deployed 2026-09-16 from `1fcc261`)
+### Application principal (implementation updated 2026-09-19; not deployed)
 
-Stage 1 resolves a role-appropriate principal before every browser API, hosted-file read, OAuth callback, live WebSocket and terminal WebSocket handler: user on `browser`/`all`, ops on `ops`. Static assets do not require a database lookup. Runtime bearer routes and the public issuer retain their separate authentication. Stage 1 authenticates requests. Stage 2 scopes default lists, browser project creation and personal settings to that user while deliberately retaining trusted-company direct-resource access.
+**Implemented 2026-09-19; not deployed, qualification ongoing.** The single application resolves a user from a stateless sealed Google-login session or an ops principal from a verified Google machine ID token on the ordinary API. Local development explicitly selects `PI_ORB_AUTH_MODE=local`; Google mode requires exact configured origins, client credentials, sealing key and immutable machine subject. Cookie sessions have fixed twelve-hour expiry, no database session row and no individual revocation: logout clears the browser cookie, but a copied cookie works until expiry. Full contract: `docs/credentials.md`; UUID-preserving migration 026: `docs/multi-user.md`; composition and cutover: `docs/deployment.md`, `docs/control-plane-consolidation.md`.
 
-Cloud browser requests carry an IAP assertion verified as specified in `docs/deployment.md`. Its verified issuer/subject resolves a stable user UUID; email is mutable, nullable display data only. Domain unauthenticated failures return 401, verification-key or user-store availability failures return 503, and identity-store invariants return 500. Local `all` uses fixed `pi-orb:local/developer` identity without Google login, tests supply Alice/Bob, and `ops` uses only its configured machine principal without user-store access. Details: `docs/multi-user.md`.
+Cookie-authenticated unsafe requests and browser WebSocket upgrades require the exact configured Origin; absent/null/foreign origins fail. Any foreign Origin on cookie reads also fails. Bound OAuth GET callbacks are narrow exceptions. No separate CSRF-token exchange or credentialed CORS is used. Invalid explicit Authorization never falls back to cookies. Machine tokens require the exact app-origin audience and immutable admitted subject; runtime bearers remain separate and neither bearer class requires browser Origin. Spoofed IAP headers grant no authority.
 
-`GET /api/v1/session` is a non-cacheable principal probe:
+`GET /auth/login?returnTo=<local-path>` starts login; `GET /auth/callback` validates the sealed ten-minute transaction, PKCE, state, nonce and Google identity. `POST /auth/logout` requires app Origin and clears the app cookie. APIs never redirect into login. The files host allows only hosted GET/HEAD and login/callback. Authentication failures are typed 401/403/503 (internal invariants 500), not redirects. Public shell, minimal health and workload discovery/JWKS remain accessible.
+
+`GET /api/v1/session` returns a no-store principal (cookie sessions additionally set `logoutAvailable: true`):
 
 ```ts
 { status: "ok", principal: { kind: "user", user: { id: string, email: string | null } } }
 { status: "ok", principal: { kind: "ops", id: string } }
 ```
 
-Issuer and subject are never browser response fields. No cookie, login endpoint or login UI is added; IAP remains the cloud login boundary. Production serves this principal response. Cloud request logs observed guarded API traffic, but no dedicated session-response or two-user test was run.
+Issuer and subject are never browser response fields. Principal resolution precedes protected handlers; it does not change company-wide direct-resource access.
 
 ### Stage-2 ownership selection (deployed 2026-09-17)
 
 Browser `GET /api/v1/projects`, `POST /api/v1/projects`, and personal-instructions GET/PUT use the signed-in user. Default project/orb lists therefore show only that user's resources. Existing direct project, orb, history, hosted-file, settings and lifecycle routes remain accessible to any authenticated coworker; resource-specific services derive the addressed project's owner when owner context is needed. There is no user selector in the browser.
 
-The ops role requires `X-Pi-Orb-User-Id` with a known UUID for exactly those four user-context operations: project list, project create, personal-instructions GET and PUT. Missing, malformed or unknown selection fails explicitly. User principals cannot override their identity with this header. Owner IDs and typed failures may be logged for correlation; identity assertions, instruction bodies and secrets may not.
+The machine ops principal requires `X-Pi-Orb-User-Id` with a known UUID for exactly those four user-context operations: project list, project create, personal-instructions GET and PUT. Missing, malformed or unknown selection fails explicitly. User principals cannot override their identity with this header. Owner IDs and typed failures may be logged for correlation; identity assertions, instruction bodies and secrets may not.
 
 ### Hosted files (decided 2026-09-07)
 
@@ -128,11 +130,11 @@ wire protocol, storage, and lifecycle contract.
 
 ### Deployment facts (decided and implemented 2026-09-04)
 
-`GET /api/v1/system` returns `{ hostProvider, databaseKind, version }` — the host provider this process constructs (`process` | `docker` | `gce`), the database it opened (`pglite` | `postgres`), and the control-plane package version. It exists so the dashboard footer can state which deployment the browser is looking at, which is the first question asked when a local window and a cloud window are open side by side. Every value is resolved once at boot and constant for the process's lifetime, so the route reads nothing — no store, no filesystem — per request. It carries deployment facts only: no connection strings, project or zone names, image references, secrets, or counts of anything the fleet is doing. It is registered with the rest of the browser API, so it exists on the `all`, `browser`, and `ops` roles and nowhere else.
+`GET /api/v1/system` returns `{ hostProvider, databaseKind, version }` — the host provider this process constructs (`process` | `docker` | `gce`), the database it opened (`pglite` | `postgres`), and the control-plane package version. It exists so the dashboard footer can state which deployment the browser is looking at, which is the first question asked when a local window and a cloud window are open side by side. Every value is resolved once at boot and constant for the process's lifetime, so the route reads nothing — no store, no filesystem — per request. It carries deployment facts only: no connection strings, project or zone names, image references, secrets, or counts of anything the fleet is doing. It is registered with the rest of the browser API, and requires an application principal.
 
 ### In-orb inspection API (ownership scope updated 2026-09-16)
 
-The production URL injected into an orb points at the runtime-only Cloud Run role, not at the browser API. The `pi-orb` CLI therefore uses two dedicated runtime-facing reads:
+The production URL injected into an orb points at the single app origin; the incarnation bearer authorizes runtime routes, not browser APIs. The `pi-orb` CLI therefore uses two dedicated runtime-facing reads:
 
 ```text
 GET /runtime/v1/orbs
@@ -143,7 +145,7 @@ Both require the existing per-incarnation runtime bearer and are available only 
 
 The explicit transcript route remains trusted-company cross-user access. It returns the exact consistent replicated-history snapshot used by the browser, plus the same compact orb/project identity. It does not start the target orb or contact its runtime. Archived transcripts are sealed and complete; stopped/running transcripts have the completeness and lag semantics of `docs/history-replication.md`, so an active turn may briefly be newer than the returned replica. Missing targets return a typed `404`; deleting targets return a typed `409`, never another resource or a dashboard redirect. Both successful responses set `Cache-Control: no-store`. The default CLI renderer omits `overflow.native` while retaining normalized messages, reasoning, tool calls/results, compactions, and events; `--json` returns the complete replica wire response. Native conversation records remain lossless, but harness system prompt/tool state is reduced to identity before either response is built.
 
-This is intentionally not implemented by calling `/api/v1/*`: the cloud runtime role hard-registers only `/runtime/v1/*`. It adds no table, migration, search cache, pagination, or mutable operation. Because these reads make no autonomous decision and write no state, durable lifecycle events would be noise; typed CLI errors are the user-visible observability, and route logging must never include transcript content. Conventional boundary tests cover protocol validation, CLI stdout/stderr and exit classes, bearer authorization, sanitized retryable/non-retryable store failures, and missing/deleting targets; the full-slice E2E covers one real sibling reading another. DST was rejected for this read path: it has no retry loop, lease, CAS, durable mutation, or concurrent state machine whose interleavings define correctness. If a stronger cross-row snapshot contract is later required during concurrent project/orb deletion, define that transaction boundary first and test it at the store/route concurrency boundary rather than adding schedule permutations to the current sequential reads.
+This is intentionally not implemented by calling `/api/v1/*`: incarnation bearers authorize `/runtime/v1/*`, not browser APIs. It adds no table, migration, search cache, pagination, or mutable operation. Because these reads make no autonomous decision and write no state, durable lifecycle events would be noise; typed CLI errors are the user-visible observability, and route logging must never include transcript content. Conventional boundary tests cover protocol validation, CLI stdout/stderr and exit classes, bearer authorization, sanitized retryable/non-retryable store failures, and missing/deleting targets; the full-slice E2E covers one real sibling reading another. DST was rejected for this read path: it has no retry loop, lease, CAS, durable mutation, or concurrent state machine whose interleavings define correctness. If a stronger cross-row snapshot contract is later required during concurrent project/orb deletion, define that transaction boundary first and test it at the store/route concurrency boundary rather than adding schedule permutations to the current sequential reads.
 
 ### In-orb spawning (decided and implemented 2026-09-08)
 
@@ -151,7 +153,7 @@ This is intentionally not implemented by calling `/api/v1/*`: the cloud runtime 
 
 ### In-orb self-archival (decided and implemented 2026-09-05)
 
-`POST /runtime/v1/orb/archive` is the mutation behind plain `pi-orb archive`. It accepts `{}` (or no body), derives the target from the per-incarnation bearer, and returns non-cacheable `202 { "orbId": "<caller-id>", "state": "archiving" }` at durable acceptance, never after waiting for completion. Extra fields are `400`; invalid identity is `401`; incompatible lifecycle/changed caller authority is `409`; store failures use sanitized `503`/`500` responses. Errors have `{ "error": { "code": "...", "message": "...", "retryable": false } }`, with `retryable` reflecting the failure. New requests require `running`; an authorized `archiving` retry is idempotent. Caller hash/incarnation and absence of a discard fence are checked at the database mutation, not merely at HTTP authentication. It grants no sibling mutation authority and does not enable browser `/api/v1/*` routes on the runtime role. CLI failure after a lost response explicitly reports unknown acceptance. The agent prompt permits use only on user request. Irreversible file loss, turn completion, sealing, and observability: `docs/orb-archival.md`.
+`POST /runtime/v1/orb/archive` is the mutation behind plain `pi-orb archive`. It accepts `{}` (or no body), derives the target from the per-incarnation bearer, and returns non-cacheable `202 { "orbId": "<caller-id>", "state": "archiving" }` at durable acceptance, never after waiting for completion. Extra fields are `400`; invalid identity is `401`; incompatible lifecycle/changed caller authority is `409`; store failures use sanitized `503`/`500` responses. Errors have `{ "error": { "code": "...", "message": "...", "retryable": false } }`, with `retryable` reflecting the failure. New requests require `running`; an authorized `archiving` retry is idempotent. Caller hash/incarnation and absence of a discard fence are checked at the database mutation, not merely at HTTP authentication. It grants no sibling mutation authority and does not grant browser `/api/v1/*` authority to runtime bearers. CLI failure after a lost response explicitly reports unknown acceptance. The agent prompt permits use only on user request. Irreversible file loss, turn completion, sealing, and observability: `docs/orb-archival.md`.
 
 ### In-orb self-deletion (implemented locally 2026-09-19)
 

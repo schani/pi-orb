@@ -41,7 +41,7 @@ test("preview health is mandatory and uses an owned peer instead of runner tailn
   assert.match(smoke, /\.status == "ready"/);
 });
 
-test("ops API bearer travels through stdin, not curl arguments", () => {
+test("application API bearer travels through stdin, not curl arguments", () => {
   const api = readFileSync(new URL("./api.sh", import.meta.url), "utf8");
   assert.match(api, /printf 'header = "Authorization: Bearer %s"/);
   assert.match(api, /curl -s -K - -X/);
@@ -94,16 +94,20 @@ test("release validates explicit user and one-shot owner configuration before ex
   assert.match(conflicting.stderr, /conflicts/);
 });
 
-test("workflow forwards only the selected migration user", () => {
+test("workflow forwards the selected user and guarded Google mappings", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/deploy.yml", import.meta.url),
     "utf8",
   );
   assert.match(workflow, /PI_ORB_USER_ID: \$\{\{ vars\.PI_ORB_USER_ID \}\}/);
   assert.doesNotMatch(workflow, /PI_ORB_ORIGINAL_/);
+  assert.match(
+    workflow,
+    /PI_ORB_GOOGLE_IDENTITY_MAPPINGS: \$\{\{ secrets\.PI_ORB_GOOGLE_IDENTITY_MAPPINGS \}\}/,
+  );
 });
 
-test("ops user header requires the domain UUID shape", () => {
+test("machine user header requires the domain UUID shape", () => {
   const api = readFileSync(new URL("./api.sh", import.meta.url), "utf8");
   assert.match(api, /X-Pi-Orb-User-Id: \$PI_ORB_USER_ID/);
   assert.match(api, /\[1-5\].*\[89aAbB\]/);

@@ -1,5 +1,11 @@
 # Orb workload identity requirements
 
+**Implemented 2026-09-19; not deployed, qualification ongoing.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` defines the implemented topology/configuration. Dated live evidence below describes earlier releases, not this implementation.
+
+The application preserves the exact issuer `https://pi-orb-issuer-<project-number>.<region>.run.app`, signing-key versions, discovery/JWKS and federation trust. App/API/broker now use that same origin; files use its separate `files` tag hostname. Public handlers share the control-plane account and runtime ingress is public, with incarnation bearer authentication unchanged. This intentionally reduces infrastructure isolation. Google machine ID tokens for the ordinary API are a different credential class from orb workload tokens. Current wiring: `apps/control-plane/src/main.ts`, `infra/{run,oidc,hosting}.tf`; authentication: `docs/credentials.md`.
+
+The dated stage/release record below predates consolidation; its role-specific observations describe those releases only.
+
 > **Status:** Requirements accepted 2026-08-21; implementation plan added 2026-08-21 (see
 > "Implementation plan" below). **Implemented through stage 4 locally as of 2026-08-21**: the
 > domain core, the crypto adapter and key management, the mint route, the `issuer` role's
@@ -610,7 +616,7 @@ Reconciled 2026-08-21 against what stage 4 leaves true:
 | 6 | **Met for provider unawareness, partial for test parity.** No provider knows about OIDC; the four launch inputs were already injected before stage 1. The identity E2E legs go through `docker exec`, so they run only on the Docker backend — the process backend has no exec seam (its CLI path is covered by unit tests only). The GCE composition passed its live smoke on 2026-08-26, but "all supported host providers pass the same contract tests" is still not demonstrated for the identity path (noted 2026-08-22). |
 | 7 | **Met at the last full run.** Re-run both before the live gate. |
 
-## Implementation plan
+## Implementation stages and historical evidence
 
 Four stages, each independently mergeable and leaving `main` deployable. Stages 1–2 are inert in
 the product until the CLI ships in stage 3; that is deliberate, so the security-critical core is
@@ -694,11 +700,7 @@ perturbing the immutable host-spec fingerprint (`docs/compute-replacement.md`).
   governs, while removing the row and destroying its material is later work under the same TODO
   item. A retired row carrying no `retiredAt` is kept rather than guessed about, since publishing a
   spare public key is harmless where dropping one too early breaks live tokens.
-- A new `PI_ORB_ROLE=issuer` branch registering `GET /.well-known/openid-configuration` and the
-  JWKS endpoint (active plus retiring keys) straight from `oidc_signing_keys` — public,
-  cacheable, secret-free, so the issuer service needs no secret-store access. The issuer URL
-  comes from a required `PI_ORB_OIDC_ISSUER_URL` validated at boot, never from request headers;
-  `role=all` serves the same routes locally.
+- Public `GET /.well-known/openid-configuration` and JWKS publish the database's public keys. `PI_ORB_OIDC_ISSUER_URL` is validated at boot, never derived from request headers. The single application serves these alongside authenticated routes.
 - Tests: route tests via injection, discovery-document conformance, and signature verification of
   minted JWTs against the served JWKS using `node:crypto` verify.
 
@@ -736,8 +738,7 @@ decisions taken while implementing it:
   `localhost`, and `[::1]`, so local development needs no certificate. A path is refused rather
   than dropped: the well-known endpoints are served at the origin root, so a path-carrying issuer
   URL would advertise documents that are not there, and `https://x` versus `https://x/` must never
-  become two trust identities. `role=all` defaults it to `http://127.0.0.1:<port>`; `issuer` and
-  `runtime` must be told, and refuse to boot otherwise.
+  become two trust identities. Local authentication defaults it to `http://127.0.0.1:<port>`; Google mode requires an explicit value.
 - **Discovery advertises only what exists**: `response_types_supported: ["id_token"]` (the field is
   REQUIRED by OpenID Discovery and this issuer mints ID tokens directly, with no authorization or
   token endpoint to advertise), `subject_types_supported: ["public"]`,
@@ -748,12 +749,12 @@ decisions taken while implementing it:
   answered uncached (see "Issuer hardening" above). The two document shapes stay in the
   control plane — one producer, and the consumers are external verifiers reading OIDC Discovery
   and RFC 7517.
-- **The boot key hook never fails the boot.** `runtime`/`all` run `ensureActiveSigningKey` with a
+- **The boot key hook never fails the boot.** The application runs `ensureActiveSigningKey` with a
   small bounded retry; on persistent failure they log one durable operator-visible edge and keep
-  serving. The runtime role is also the credential broker every running orb depends on, so failing
+  serving. The application is also the credential broker every running orb depends on, so failing
   closed at boot would trade a feature outage for a fleet outage. Minting then fails closed per
   request with typed retryable errors, and the next boot or an operator rotation repairs it.
-  Migrations remain the browser role's job alone.
+  Production migrations run in the release job before consumers; local startup migrates.
 
 ### Issuer hardening (2026-08-22)
 
@@ -898,15 +899,9 @@ existing broker 401, and the replacement incarnation's
 successful mint carrying `host_incarnation=1`. The `docker exec` legs are Docker-only, like the
 suite's other container-shell steps.
 
-### Stage 4 — cloud deployment and federation
+### Stage 4 — historical cloud deployment and federation (2026-08)
 
-- `infra/run.tf`: a fourth Cloud Run service with `PI_ORB_ROLE=issuer`, public ingress, invoker
-  IAM disabled — the first public unauthenticated surface, serving only discovery and JWKS. A
-  tofu-managed parent secret for signing keys with accessor bindings for the minting service;
-  `PI_ORB_OIDC_ISSUER_URL` in the shared environment. **This is now a hard boot requirement**: as of
-  stage 2B the `runtime` and `issuer` roles refuse to start without it, so the deploy that ships
-  stage 2B's control-plane image to Cloud Run must set it in the same change. `PI_ORB_ROLE` is
-  likewise an allowlist now (`all | browser | runtime | ops | issuer`) and a typo refuses to boot.
+- The 2026-08-21 release introduced the separate public issuer; the implemented 2026-09-19 composition retains that resource and exact issuer origin as the single application (`docs/deployment.md`).
 - Workload Identity Federation bootstrap as a separately invoked script (the
   `bootstrap-amp-oidc.sh` tier, outside the recurring plan): pool and provider with exact issuer
   and audience, attribute mappings for `project_id`/`orb_id`/`host_incarnation`, the
@@ -942,18 +937,7 @@ while implementing it:
   original `.uri` equality assumption: `.uri` is the hashed canonical origin while `.urls` contains
   both origins. The three older services predate the deterministic scheme and still carry hashed
   canonical URLs, which is why this is only sound for a service created now.
-- **The public issuer runs as its own service account.** The requirement is that the issuer holds
-  no signing material, but all three existing services share one `pi-orb-control-plane` account
-  that can read every brokered credential — so simply not granting the new secret to "the control
-  plane" would have granted it to the public service anyway. `google_service_account.issuer` can
-  read exactly one secret (the database URL, for the *public* JWKs in `oidc_signing_keys`) and
-  write logs. The signing-key grants name only the control-plane account. Splitting `browser`/`ops`
-  off that account is separate pre-existing work; what stage 4 required was that "unauthenticated"
-  and "can read private keys" never be the same identity. That separation is a Secret Manager
-  boundary and stops there (POC limitation, recorded 2026-08-22): the database URL it reads is the
-  deployment's single full read/write application credential, so at the PostgreSQL layer the public
-  issuer holds the same rights as every other service — only its route allowlist keeps it to two
-  public documents. A read-only PostgreSQL role for the issuer is tracked in `TODO.md`.
+- **Historical privilege boundary (2026-08-22):** the separate issuer account could read only the database secret and write logs, unlike the control-plane account holding signing-key access. This isolated Secret Manager access, not PostgreSQL: the database credential was full read/write. The single-service decision accepts shared control-plane privileges; a separate read-only issuer account is not its design.
 - **The parent secret is `pi-orb-credential-oidc-signing-key`**, not the prettier
   `pi-orb-oidc-signing-key`. `GsmSecretStore` addresses `<prefix>-<provider>` with the prefix
   defaulting to `pi-orb-credential`, and `domain/signing-keys.ts` writes under provider
@@ -961,13 +945,7 @@ while implementing it:
   credential bindings are mirrored: `secretAccessor` for the signer's per-signature read of an
   exact version, `secretVersionManager` for `addSecretVersion` on generation and
   `destroySecretVersion` when a boot-race loser drops an unreferenced version.
-- **The issuer service's environment is trimmed to `PI_ORB_ROLE`, `PI_ORB_OIDC_ISSUER_URL`, and
-  `DATABASE_URL`**, with every omission from `local.shared_env` commented in place. Leaving
-  `PI_ORB_SECRET_STORE` unset means the process never even constructs a Secret Manager client;
-  leaving `PI_ORB_HOST_PROVIDER` unset also keeps the GCE digest-pin boot gate off a service that
-  creates no compute. Scaling stays capped at one instance: on the deployment's only public
-  unauthenticated endpoint that cap is the spend bound, and `public, max-age=300` on both documents
-  means a whole verifier fleet costs one request per key set per five minutes.
+- **Historical exposure bound:** the separate public issuer used a trimmed environment and a one-instance cap. The single application retains the cap and cacheable public documents, but runs full application composition.
 - **The smoke uses two orbs.** Proving "a stopped orb cannot mint" needs both a stopped orb and a
   caller that can reach the internal-ingress runtime service — and a stopped orb has no compute
   left to be that caller. The second orb boots concurrently with the first, so it costs a VM and

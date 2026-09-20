@@ -27,7 +27,11 @@ describe("hosting HTTP routes", () => {
     app = Fastify();
     registerHostingAccessGuard(
       app,
-      createHostingAccessPolicy({ filesOrigin: "https://files.example.test" })._unsafeUnwrap(),
+      createHostingAccessPolicy({
+        trustedLocal: true,
+        appOrigin: "https://app.example.test",
+        filesOrigin: "https://files.example.test",
+      })._unsafeUnwrap(),
       "https://app.example.test",
     );
     const deps = {

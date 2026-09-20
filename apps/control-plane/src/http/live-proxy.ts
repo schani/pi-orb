@@ -11,6 +11,7 @@ import { Check } from "typebox/value";
 import { WebSocket } from "ws";
 import { withDeadline } from "../domain/dst.ts";
 import type { ControlPlaneDeps } from "../domain/ports.ts";
+import { type SessionExpiryScheduler, watchSessionExpiry } from "./session-expiry.ts";
 import { monitorWebSocketLiveness } from "./websocket-heartbeat.ts";
 
 const TRY_AGAIN_LATER = 1013;
@@ -34,6 +35,7 @@ export async function registerLiveProxy(
   app: FastifyInstance,
   task: SimulationTask,
   deps: ControlPlaneDeps,
+  scheduleSessionExpiry?: SessionExpiryScheduler,
 ): Promise<void> {
   await app.register(websocketPlugin, {
     options: {
@@ -69,6 +71,18 @@ export async function registerLiveProxy(
           // Socket already closing; nothing to do.
         }
       };
+      const session = watchSessionExpiry(
+        request.authExpiresAt,
+        () => task.wallNow(),
+        () => {
+          browserClosed = true;
+          closeBoth(1008, "session expired");
+        },
+        scheduleSessionExpiry,
+      );
+      browserSocket.once("close", session.stop);
+      browserSocket.once("error", session.stop);
+      if (!session.admit()) return;
       deps.control.registerBrowserConnection(orbId, connectionId, () =>
         closeBoth(TRY_AGAIN_LATER, "orb is being deleted"),
       );
@@ -81,6 +95,7 @@ export async function registerLiveProxy(
       // as its upgrade completes, while routing below crosses async adapter
       // boundaries. Queue frames until the runtime socket is open.
       browserSocket.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!session.admit()) return;
         if (isBinary) {
           closeBoth(UNSUPPORTED_DATA, "binary frames are not accepted");
           return;
@@ -163,7 +178,7 @@ export async function registerLiveProxy(
         closeBoth(TRY_AGAIN_LATER, "runtime unavailable");
         return;
       }
-      if (browserClosed) return;
+      if (browserClosed || !session.admit()) return;
 
       const wsUrl = `${observed.value.runtimeAddress.baseUrl.replace(/^http/, "ws")}/v1/live`;
       const runtimeSocket = new WebSocket(wsUrl, [RUNTIME_SUBPROTOCOL]);
@@ -174,11 +189,16 @@ export async function registerLiveProxy(
       });
 
       runtimeSocket.on("open", () => {
+        if (!session.admit()) {
+          closeBoth(1008, "session expired");
+          return;
+        }
         upstreamOpen = true;
         for (const message of pendingToUpstream) runtimeSocket.send(message);
         pendingToUpstream.length = 0;
       });
       runtimeSocket.on("message", (data, isBinary) => {
+        if (!session.admit()) return;
         if (isBinary) {
           closeBoth(UNSUPPORTED_DATA, "binary frames are not accepted");
           return;
@@ -225,11 +245,24 @@ export async function registerLiveProxy(
           /* already closing */
         }
       };
+      const session = watchSessionExpiry(
+        request.authExpiresAt,
+        () => task.wallNow(),
+        () => {
+          browserClosed = true;
+          closeBoth(1008, "session expired");
+        },
+        scheduleSessionExpiry,
+      );
+      browserSocket.once("close", session.stop);
+      browserSocket.once("error", session.stop);
+      if (!session.admit()) return;
       deps.control.registerBrowserConnection(orbId, connectionId, () =>
         closeBoth(TRY_AGAIN_LATER, "orb is stopping"),
       );
 
       browserSocket.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!session.admit()) return;
         const copy = Buffer.from(data);
         if (copy.byteLength > TERMINAL_MAX_INPUT_BYTES) {
           closeBoth(1009, "terminal frame is too large");
@@ -304,12 +337,16 @@ export async function registerLiveProxy(
         closeBoth(TRY_AGAIN_LATER, "runtime unavailable");
         return;
       }
-      if (browserClosed) return;
+      if (browserClosed || !session.admit()) return;
 
       const wsUrl = `${observed.value.runtimeAddress.baseUrl.replace(/^http/, "ws")}/v1/terminal`;
       const runtimeSocket = new WebSocket(wsUrl, [TERMINAL_SUBPROTOCOL]);
       upstream = runtimeSocket;
       runtimeSocket.on("open", () => {
+        if (!session.admit()) {
+          closeBoth(1008, "session expired");
+          return;
+        }
         upstreamOpen = true;
         try {
           for (const frame of pending) runtimeSocket.send(frame.data, { binary: frame.isBinary });
@@ -320,6 +357,7 @@ export async function registerLiveProxy(
         pendingBytes = 0;
       });
       runtimeSocket.on("message", (data, isBinary) => {
+        if (!session.admit()) return;
         if (browserSocket.bufferedAmount > TERMINAL_PROXY_BUFFER_BYTES) {
           closeBoth(TRY_AGAIN_LATER, "terminal output consumer is too slow");
           return;

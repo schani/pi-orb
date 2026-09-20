@@ -15,6 +15,7 @@ import {
 } from "react";
 import { useAppSearchSource } from "../components/AppSearch.tsx";
 import { Icon } from "../components/Icons.tsx";
+import { LogoutButton } from "../components/LogoutButton.tsx";
 import { PersonalInstructionsButton } from "../components/PersonalInstructions.tsx";
 import { ProjectConfigModal } from "../components/ProjectConfigModal.tsx";
 import { ProjectHeader } from "../components/ProjectHeader.tsx";
@@ -534,6 +535,7 @@ export function ProjectsPage({
       )}
 
       <div className="dashboard-footer">
+        <LogoutButton />
         {system !== null && (
           <>
             <span>{system.hostProvider} host</span>

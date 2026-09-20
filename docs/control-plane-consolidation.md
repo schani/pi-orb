@@ -1,0 +1,123 @@
+# Single-service control plane
+
+## Direction
+
+**Implemented tests first, 2026-09-19; local qualification completed 2026-09-20; not deployed.** Existing URLs need not survive. Reuse `pi-orb-issuer` as the one application service: this preserves workload federation without any trust migration, while app, hosted-file and runtime-broker URLs change. No redirects, aliases, dual deployments or compatibility protocol. The user authorized implementation, not deployment. Work is tracked in `TODO.md`; URL choice is resolved in `docs/open-questions.md`, question 72.
+
+Keep PostgreSQL, GCS, orb VMs and the existing lifecycle/release machinery. One Cloud Run service serves everything and runs background work. Keep always-allocated CPU, minimum one instance, the current request timeout and private VPC egress. Use the existing control-plane service account; remove the issuer-only account with the other obsolete infrastructure.
+
+The service has two browser origins: app and hosted files. They reach the same process but must remain separate because uploaded HTML can execute scripts. This is origin isolation, not another deployment. The configured broker authority is additionally admitted only on runtime routes, retaining bearer authentication; local Docker's `host.docker.internal` is not a browser API alias. Provider-specific E2E must exercise that authority (`docs/postmortems/2026-09-19-consolidation-docker-broker-host.md`).
+
+## Authentication
+
+| Surface | Authentication |
+| --- | --- |
+| Browser API and WebSockets | Google login, then an application session |
+| Tooling, on the ordinary API | Verified Google token for the existing admitted machine identity |
+| Runtime routes | Existing orb-incarnation bearer |
+| Hosted files | Same login mechanism, separate host-only session |
+| Login, static shell, minimal health, workload discovery/JWKS | Explicit public allowlist |
+
+Everything else is protected by default. Test the actual registered routes, including WebSocket upgrades and host allowlists. Credentials cannot cross surfaces; an invalid explicit Authorization header cannot fall back to a cookie. Ignore spoofed IAP headers. Keep existing company admission, owner-selected credentials and ops user-selection rules; no new permissions framework.
+
+Remove role-based deployment composition. Keep explicit trusted-local authentication for development, but fail closed if it is configured for cloud production. Today's `all` role is not a production authentication mode.
+
+### Google login: no persisted login workflow
+
+Use a maintained OIDC library behind a narrow typed adapter. The library handles authorization-code flow, PKCE, state, nonce and Google token verification. Require the correct issuer/client audience, expiry, verified email and verified Workspace `hd=heyglide.com`; do not link accounts by email.
+
+Keep the ten-minute login transaction in a short-lived **encrypted and authenticated cookie**, using maintained cookie-library primitives and one restart-stable Secret Manager key, separate from workload signing keys. Use `__Host-`, Secure, HttpOnly, SameSite=Lax and Path=/ attributes. Check its authenticated expiry server-side; cookie lifetime alone is insufficient. Bind it to the callback origin and a validated local return path bounded to fit cookie limits. There is one pending login per origin/browser cookie jar; starting another replaces it. No login table, worker, lease, resumable callback or exchange retry.
+
+The callback requires that cookie and validates state, nonce, PKCE and the exact destination host/path. Google returns by cross-site GET, often without Origin; this callback is a narrow exception to normal origin checks. Google's single-use authorization code prevents successful replay. Concurrent callbacks for the same code may both attempt exchange, but only one can succeed. This is a per-code guarantee, not one-time consumption of the entire cookie-carried login flow. An uncertain exchange or failed callback means starting a new login. A losing callback must not clear an already-issued application session.
+
+### Sessions: stateless cookies
+
+**Selected by the user, 2026-09-19.** Use a maintained library to encrypt/authenticate a cookie containing the user UUID, nullable email, origin, session purpose and fixed twelve-hour expiry. Reuse the restart-stable sealing-key infrastructure with explicit purpose separation from login cookies; never use workload signing keys. Set `__Host-`, Secure, HttpOnly, SameSite=Lax and Path=/ attributes. Validate authenticity, purpose, origin and authenticated expiry on every request and WebSocket upgrade. No session table, session-store adapter, session lookup, cleanup, sliding refresh or revocation version.
+
+Resolve the verified Google identity to its durable user UUID before issuing the cookie. Uncertain identity persistence fails closed and requires a new login; losing the cookie response also requires a new login, not token recovery. User mappings, ownership and application data remain in PostgreSQL; stateless authentication does not remove ordinary data authorization.
+
+**Accepted logout limitation:** logout clears the browser's app cookie and closes the initiating tab's sockets/private state; it cannot revoke a copied cookie. A copied cookie can authenticate new requests/connections until expiry. Already-admitted requests may finish and other open sockets may continue until disconnect or expiry. Close both proxy legs at expiry. There is no individual server-side session revocation or revocation bus. Replacing the sealing key and retiring every old-key process invalidates all affected cookies, not one session.
+
+### CSRF and hosted files
+
+Require **exact configured Origin** on every cookie-authenticated unsafe method and browser WebSocket upgrade; reject missing, `null` or mismatched origins. Never derive trust from Host/forwarded headers. Keep ordinary GET/HEAD read-only and do not enable credentialed cross-origin API access. Bearer clients do not need browser Origin headers. This removes the separate CSRF-token endpoint, derivation and client plumbing; SameSite cookies are an additional defense, not the only check. The global hosting guard enforces configured hosts and files-route isolation, not cookie CSRF: public shell/discovery/JWKS and valid machine/runtime bearers accept arbitrary Origin without credentialed CORS. The cookie resolver enforces browser Origin. Explicit trusted-local mode retains global Origin protection because its resolver grants ambient local authority. Hosting denials emit a bounded reason, surface and request ID, never request URLs or credentials.
+
+Files use the same login code with their own registered callback and origin-bound cookie. Their hostname exposes only hosted GET/HEAD and login/callback, never ordinary APIs or WebSockets. No shared-domain cookie, session-token handoff, signed public download or app-origin HTML. There is no separate files logout UI; its session expires independently of app logout. Hosted scripts can navigate their own origin, but cannot gain app authority.
+
+Only explicit app login and top-level unauthenticated file navigation initiate Google login. APIs, HEAD and asset requests return typed failures rather than login redirects. Keep private caching, streaming and missing-resource behavior. Preserve current URLs through a login round trip, including hashes, and retain recoverable drafts; this does not promise old deployment URLs survive.
+
+MCP OAuth retains its existing state/PKCE/browser binding. If the application session expires during that ceremony, fail visibly and restart the connection flow; do not replay callback codes through Google login.
+
+## Implementation: three slices, tests first
+
+### 1. Authentication
+
+Write failing cookie/session, callback and route-policy tests, then implement the library adapters and shared auth service. No authentication-session schema is added. Use existing user/principal/store abstractions. HTTP → auth service → provider/store adapters; first-party failures remain typed `Result`/`ResultAsync`. Inject clocks, entropy, persistence and provider transport for simulation. Do not build custom OAuth cryptography or a second auth framework.
+
+Wire both origins, live/terminal upgrades and frontend login recovery. Verify machine tokens in the application: the current fixed ops principal assumes Cloud Run IAM has already authenticated the caller and must not survive that boundary's removal. Preserve drafts and clear principal-bound UI caches on logout/account change.
+
+**Preserve user UUIDs and data.** Explicitly map independently verified Google identities onto existing user UUIDs in a guarded migration. Reject unexpected old mappings and conflicts. Do not create replacement users or a generic multi-provider identity framework. This remains necessary even though URLs may change.
+
+**Identity migration implementation, 2026-09-19:** The normal migration job reads nonsecret `PI_ORB_GOOGLE_IDENTITY_MAPPINGS` as a JSON array of `{userId, oldIssuer, oldSubject, googleSubject}`. Supply independently verified exact values; `oldIssuer` must be `https://cloud.google.com/iap`. Migration `026_google_identities.sql` changes only the matched users' issuer/subject to `https://accounts.google.com` and the supplied Google subject. It locks users and atomically rejects missing IAP coverage, unexpected old tuples, malformed inputs, duplicates and occupied destinations; UUIDs, emails, timestamps and dependent records remain unchanged. Fresh databases need no input. Applied migrations need no mapping on subsequent jobs. Runtime startup does not read this variable. Migration lifecycle logs record the filename, outcome and mapped count, never identity values; `schema_migrations` records committed completion. PGlite and PostgreSQL share preservation/rejection contracts. Old identity-serving processes must still be retired before migration; the table lock does not prevent a retired process from returning later.
+
+**Auth core implementation, 2026-09-19:** `domain/application-auth.ts` owns origin/purpose/expiry checks and confirmed user resolution. `openid-client` performs signed Google code exchange with PKCE, state and nonce; `@hapi/iron` seals cookies using a separate restart-stable key. Cookie expiry uses the injected service clock, not the browser or library wall clock. Production Google endpoints are fixed; constructor-only metadata/transport injection permits real signed fake-provider tests. Machine verification uses `google-auth-library`, an exact audience and immutable subject, five-second key-fetch timeout, singleflight and a thirty-second refresh/outage cooldown. Fresh known keys bypass unrelated refresh work; key-provider outage/recovery emits sanitized edges. Google `server_error`, `temporarily_unavailable` and `invalid_client` failures are unavailable, never automatically retried code exchanges. Signed-token adapter contracts freeze library wall time separately from domain DST; verified machine `nbf` is checked explicitly. Domain simulation ports model atomic code consumption and pre/post-commit response loss; cookies contain the full principal and require no request-time identity lookup.
+
+Primary code: `apps/control-plane/src/{main,identity-composition}.ts`, `domain/{identity,user-scope}.ts`, `adapters/pg/`, `http/{browser-identity,hosting-access,live-proxy}.ts`, and `apps/web/src/lib/{api,session}.ts`.
+
+### 2. One service and one maintenance cutover
+
+Extend the existing issuer service to run the whole application. Preserve its exact configured issuer URL—not an interchangeable Cloud Run `.uri`—plus signing keys, discovery contract and relying-party trust. Adopt its origin for the app/API/broker and a files traffic-tag hostname for hosted content. Update CLI outputs, runtime launch configuration, Google/MCP callback registrations and provider allowlists. Reconnect affected integrations where necessary rather than retain old callbacks.
+
+Remove browser/runtime/ops service resources, role env/outputs, browser IAP wiring and ops invoker bindings, plus obsolete code/tests/docs. Update release tooling to the surviving service. Keep Compute SSH IAP, private networking, immutable artifacts, schema-before-consumer ordering, generation fences and controller activation/retirement proofs. The first cutover must retire old controllers from the former browser service, not merely revisions of the surviving issuer.
+
+Use a single maintenance window, not a compatibility rollout:
+
+1. Prepare the qualified image, callback configuration, verified identity mappings, database recovery point and independent restoration safeguard. Run through the independent GitHub deployment identity, not the orb being stopped.
+2. Drain/stop affected orbs. Block old browser/ops invocation, including tagged/revision URLs; drain admitted work and prove old identity-serving processes and controllers have stopped. Keep them from reactivating. A delayed old IAP request must not recreate an identity after migration. Deletion alone is not retirement proof.
+3. Run migrations; apply the single-service configuration and remove obsolete services. Keep autonomous work behind the existing activation barrier until retirement is proven. No external federation-trust change or staged issuer-removal protocol is needed.
+4. Activate and test owned smoke orbs first. Changing broker URLs may require existing workspace-preserving compute replacement, not just restart; update the host specification accordingly. Account for pending wake intents before activating, then resume the inventoried fleet after acceptance.
+
+Rehearse failed migration/apply/recovery against an isolated deployment. Recover explicitly through the independent identity and existing forward-generation procedure; do not assume reverting an image undoes an identity migration. Keep the issuer resource itself in place throughout.
+
+Primary code: `infra/{run,hosting,oidc,outputs}.tf`, `infra/{api,deploy,release,smoke,smoke-workload-identity}.sh`, `infra/release_*.py`, and their tests. Update relevant design/configuration docs with implementation, removing obsolete options rather than leaving tombstones.
+
+### 3. Qualification
+
+**DST first:** run production auth/session services under `determined`, with explicit scheduling checkpoints and pre/post-commit failpoints. The fake Google adapter models atomic single-use code consumption; real-library contracts separately verify token/cookie behavior.
+
+| Schedule | Invariant |
+| --- | --- |
+| Duplicate callbacks for the same code across instances | At most one successful exchange/session per code; losing callback cannot erase the winner |
+| Code accepted but response lost; crash during identity resolution | No partial authority or automatic code retry; fresh login works |
+| Identity commit uncertain or cookie response lost | Cookie only after confirmed identity resolution; new login, no token recovery |
+| Two logins resolve the same identity | One user UUID; ownership unchanged |
+| Expiry races request/socket admission | No admission after expiry; both proxy legs close at expiry |
+| Logout followed by normal reconnect or copied-cookie replay | Cleared browser cookie fails; a valid copied cookie still works until expiry |
+| Restart or new revision during login/session use | Shared sealing key preserves valid cookies without sticky routing |
+| Late Alice response after logout/Bob login | No stale private UI, principal or socket resurrection |
+
+Replay saved DST failures before fixes; preserve traces and use seeded sweeps after forced schedules. Retain existing release-activation, spec-replacement, signing-key and workload-identity DST rather than rewrite those subsystems.
+
+**Store/security contracts:** PGlite and real PostgreSQL cover concurrent user resolution and guarded migration/data preservation. Real cookie-library tests cover tampering, authenticated expiry, origin/purpose separation, shared-key continuity and rejection after key replacement. Signed-token/login tests cover code replay, company/subject rejection, wrong issuer/audience/origin, provider outages, timeout and secret-free errors. Explicitly test accepted session-cookie replay before expiry, including after logout. Exhaust the route-policy matrix: missing/invalid/wrong-class credentials, forged IAP/Host headers, absent/null/cross-site Origin, real WebSocket upgrade denial, callback exceptions, files-host isolation and public discovery. Denials cause no downstream mutation. Keep public-request limits and bounded key-fetch/signing work; no new distributed quota system.
+
+**Browser/runtime E2E:** use a fake Google provider with real signed tokens and browser redirects, not injected principals. Run Chromium and WebKit over test-owned HTTPS with distinct app/files cookie hosts and a cross-site provider host; separate localhost ports are insufficient. Prove login/replay/expiry/logout, safe return URLs and drafts, second-tab socket semantics, private files and relative assets, and hostile hosted scripts attempting app fetch/form/WebSocket access. Preserve missing-resource URLs/messages.
+
+Extend the real full-slice flow through Google login → orb start → first message/handshake → tool/history → upload/download → terminal → restart. Keep two-user owner credentials and workload mint/STS tests. Infrastructure contracts assert exactly one service, unchanged issuer identity, production auth fail-closed, updated callbacks/broker configuration, and old-service controller retirement.
+
+Before deployment, run `npm ci`, browser prerequisites, typecheck, lint, the complete unit/infra suite and **`npm run test:e2e`** on unchanged source. Keep required real PostgreSQL, native-image and live-cloud gates. Use owned fixtures and explicit readiness barriers, not sleeps or larger timeouts. Flaky failures block release until root-caused; retain first-failure evidence.
+
+### Local qualification completed, 2026-09-20
+
+Frozen-source validation passed: typecheck, lint, **2,200 unit tests** (nine conditional skips), infrastructure suites and the full Docker-backed **215-test E2E suite** across 26 files. Separate identity-migration checks passed against PostgreSQL. Source hashes and first-failure evidence are retained in `.context/consolidation/`; `docs/testing.md` records scope and results.
+
+Qualification found and causally corrected the Docker broker-host rejection and a WebKit caret event-ordering race, without relaxing assertions or timeouts. Forensics: `docs/postmortems/2026-09-19-consolidation-docker-broker-host.md` and `docs/postmortems/2026-09-19-composer-caret-ordering.md`. Live Google/GCE, tagged-host routing, STS and isolated cutover/recovery remain unqualified. No deployment occurred.
+
+## Observability and acceptance
+
+Use durable, queryable, sanitized Cloud Logging for login/admission outcomes, logout, provider outage/recovery and configuration failures, with correlation IDs. Keep existing lifecycle and release evidence. No per-poll success noise, credential values or callback query strings: install Google callback request-log exclusions before enabling login, preserving MCP exclusions. Distinguish 401 unauthenticated, 403 forbidden and 503 unavailable in the product; reuse existing session/error UI.
+
+Live acceptance verifies real Google/company admission, unchanged user UUIDs/data, machine access, files isolation/streaming, both WebSockets, native orb boot/broker calls, and actual workload token exchange against the **unchanged issuer trust**. Confirm one Cloud Run application, no old-controller overlap and no anonymous private routes. Runtime ingress becomes public and issuer handlers share control-plane privileges; this deliberately reduces infrastructure isolation, not authentication requirements.
+
+## Simplifications and rationale
+
+The earlier plan preserved app/files URLs at the cost of a federation migration and ordered trust cutover. The user removed URL preservation, so retaining the existing issuer eliminates that work. Cookie-carried login state replaces the proposed login-transaction table; Google's single-use code owns replay rejection. Strict mandatory Origin checks replace custom CSRF-token plumbing. The user selected stateless sealed session cookies over database sessions, accepting that logout cannot revoke a copied cookie until expiry (resolved question 73 in `docs/open-questions.md`). This removes session persistence, lookups and cleanup while retaining expiry, origin isolation and DST/browser security coverage. No extra services, compatibility machinery, refresh workers or new lifecycle protocol.

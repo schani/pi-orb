@@ -16,7 +16,7 @@ import {
 } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import Fastify from "fastify";
-import { err, okAsync } from "neverthrow";
+import { err, ok, okAsync } from "neverthrow";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
 import { RestGceApiTransport } from "./adapters/gce/api.ts";
@@ -27,9 +27,12 @@ import {
   GithubOAuthHttpClient,
   GithubUpstreamRefresher,
 } from "./adapters/github-oauth/client.ts";
+import {
+  createGoogleLoginProvider,
+  createGoogleMachineVerifier,
+} from "./adapters/google-application-auth.ts";
 import { createFilesystemHostedByteStore } from "./adapters/hosting/filesystem.ts";
 import { createGcsHostedByteStore, createGcsTokenProvider } from "./adapters/hosting/gcs.ts";
-import { IapIdentityVerifier } from "./adapters/iap-identity.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./adapters/mcp-oauth.ts";
 import { probeMcp } from "./adapters/mcp-probe.ts";
 import { OAuthUpstreamRefresher } from "./adapters/oauth/refresher.ts";
@@ -44,6 +47,7 @@ import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
 import { createReleaseActivationReader } from "./adapters/release-activation.ts";
 import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
+import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
 import {
@@ -53,6 +57,11 @@ import {
 } from "./adapters/tailscale/client.ts";
 import { CryptoUserIdSource } from "./adapters/user-id.ts";
 import { uploadRequest } from "./adapters/workspace-upload-http.ts";
+import {
+  type ApplicationAuth,
+  createApplicationAuth,
+  type GoogleLoginProvider,
+} from "./domain/application-auth.ts";
 import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
 import {
   bindUserBroker,
@@ -88,11 +97,8 @@ import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain
 import { UserScope } from "./domain/user-scope.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
 import { E2eReconcileCheckpoints } from "./e2e-reconcile-checkpoints.ts";
-import {
-  type ControlPlaneRole,
-  createConfiguredHostingAccessPolicy,
-  readHostingConfiguration,
-} from "./hosting-config.ts";
+import { createConfiguredHostingAccessPolicy, readHostingConfiguration } from "./hosting-config.ts";
+import { type AuthOutcomeSink, registerAuthRoutes } from "./http/auth-routes.ts";
 import {
   type RequestPrincipalResolver,
   registerAuthenticatedBrowserRoutes,
@@ -165,13 +171,6 @@ class ControlPlaneTask extends NoSimulationTask {
 }
 
 /**
- * Every deployment role this binary knows how to be. `all` is the local
- * single-process composition; the cloud deployment runs one service per other
- * role (docs/deployment.md, docs/workload-identity.md).
- */
-const ROLES: readonly string[] = ["all", "browser", "runtime", "ops", "issuer"];
-
-/**
  * This build's version, read once. `/api/v1/system` states it on every
  * dashboard, and the answer cannot change while the process lives, so it is
  * never re-read per request.
@@ -183,6 +182,7 @@ const { version: CONTROL_PLANE_VERSION }: { version: string } = createRequire(im
 export async function main(
   adapters: {
     mcpOAuthProtocol?: (callback: string) => McpOAuthProtocol;
+    googleLoginProvider?: GoogleLoginProvider;
     requestPrincipalResolverFactory?: (
       task: SimulationTask,
       users: import("./domain/identity.ts").UserStore,
@@ -209,74 +209,43 @@ export async function main(
     return;
   }
 
-  // Which route families this process registers (docs/credentials.md): the
-  // cloud deployment splits "browser", "runtime", and the public "issuer" into
-  // separate services; local development serves all of them from one process.
-  // A hard allowlist: a typo must refuse to boot rather than come up healthy
-  // and serve nothing but 404s.
-  const configuredRole = env("PI_ORB_ROLE", "all");
-  if (!ROLES.includes(configuredRole)) {
-    bootTask.error(`PI_ORB_ROLE must be one of ${ROLES.join(", ")}`);
-    process.exitCode = 1;
-    return;
-  }
-  const role = configuredRole as ControlPlaneRole;
-  const browserRole = role === "all" || role === "browser";
-  const activationBucket = browserRole ? env("PI_ORB_RELEASE_ACTIVATION_BUCKET", "") : "";
-  // "ops": the browser API surface for tooling, with no background loops,
-  // no migrations, and no web assets — invoker-IAM keeps it private.
-  const opsRole = role === "ops";
-  const requestIdentity = readRequestIdentityConfig(role, process.env);
+  const activationBucket = env("PI_ORB_RELEASE_ACTIVATION_BUCKET", "");
+  const requestIdentity = readRequestIdentityConfig(process.env);
   if (requestIdentity.isErr()) {
     bootTask.error(requestIdentity.error);
     process.exitCode = 1;
     return;
   }
-  const runtimeRole = role === "all" || role === "runtime";
-  // "issuer": the deployment's only public unauthenticated surface, serving
-  // OIDC discovery and JWKS and nothing else (docs/workload-identity.md).
-  const issuerRole = role === "all" || role === "issuer";
-  const hostingConfiguration = readHostingConfiguration(process.env, role, port, homedir());
+  const hostingConfiguration = readHostingConfiguration(process.env, port, homedir());
   if (hostingConfiguration.isErr()) {
     bootTask.error(hostingConfiguration.error.message);
     process.exitCode = 1;
     return;
   }
   const hosting = hostingConfiguration.value;
-  const hostingRole = hosting !== null;
-  const hostingOrigin = hosting?.filesOrigin ?? "";
-  const appOrigin = hosting?.appOrigin ?? "";
-  const hostingAccessResult =
-    hosting === null ? null : createConfiguredHostingAccessPolicy(hosting);
-  let hostingAccess = null;
-  if (hostingAccessResult !== null) {
-    if (hostingAccessResult.isErr()) {
-      bootTask.error(hostingAccessResult.error.message);
-      process.exitCode = 1;
-      return;
-    }
-    hostingAccess = hostingAccessResult.value;
+  const hostingOrigin = hosting.filesOrigin;
+  const appOrigin = hosting.appOrigin;
+  const hostingAccessResult = createConfiguredHostingAccessPolicy(hosting);
+  if (hostingAccessResult.isErr()) {
+    bootTask.error(hostingAccessResult.error.message);
+    process.exitCode = 1;
+    return;
   }
+  const hostingAccess = hostingAccessResult.value;
 
-  // The issuer URL is part of the security identity of every minted token, so
-  // it is configuration and is validated before any side effect, exactly like
-  // the digest pin above. Every role that mints or publishes the issuer's
-  // metadata needs it; the others never look at it.
+  // Issuer identity must match configured federation trust exactly.
   const configuredIssuerUrl = readIssuerUrl(
     env("PI_ORB_OIDC_ISSUER_URL", ""),
-    // Local development serves the issuer from the same process it mints in,
-    // so the loopback origin it is already listening on is the truthful
-    // default. A split deployment has no such default and must be told.
-    role === "all" ? `http://127.0.0.1:${port}` : null,
+    requestIdentity.value.kind === "local" ? `http://127.0.0.1:${port}` : null,
   );
-  if ((runtimeRole || issuerRole) && configuredIssuerUrl.isErr()) {
+  if (configuredIssuerUrl.isErr()) {
     bootTask.error(`PI_ORB_OIDC_ISSUER_URL ${configuredIssuerUrl.error}`);
     process.exitCode = 1;
     return;
   }
-  const issuerUrl = configuredIssuerUrl.isOk() ? configuredIssuerUrl.value : "";
+  const issuerUrl = configuredIssuerUrl.value;
   const migrationOwner = migrationOwnerInput(process.env);
-  if (browserRole && activationBucket === "" && migrationOwner.isErr()) {
+  if (requestIdentity.value.kind === "local" && migrationOwner.isErr()) {
     bootTask.error("migration owner configuration invalid");
     process.exitCode = 1;
     return;
@@ -294,11 +263,8 @@ export async function main(
     return;
   }
   const database = openedDatabase.value;
-  // Only the single-instance browser role migrates; the runtime and issuer
-  // roles' queries fail retryably until the schema exists.
-  // Production's release job migrates before any new service consumes schema.
-  // Local development still initializes its own database.
-  if (browserRole && activationBucket === "") {
+  // Production's release job migrates before consumers; local development initializes itself.
+  if (requestIdentity.value.kind === "local") {
     const migrated = await database.migrate(migrationOwner._unsafeUnwrap());
     if (migrated.isErr()) {
       bootTask.error(`migration failed code=${migrated.error.code}`);
@@ -494,13 +460,13 @@ export async function main(
     nameInferenceUrl === "" ? null : nameInferenceUrl,
   );
   const hostedBytes =
-    hosting?.store.kind === "gcs"
+    hosting.store.kind === "gcs"
       ? createGcsHostedByteStore({
           bucket: hosting.store.bucket,
           auth: createGcsTokenProvider(),
         })
       : createFilesystemHostedByteStore({
-          root: hosting?.store.root ?? join(homedir(), ".pi-orb", "hosting"),
+          root: hosting.store.root,
         });
   const deps: ControlPlaneDeps = {
     workspaceUploadRuntime: (task) => ({
@@ -576,12 +542,12 @@ export async function main(
   app.addHook("onClose", async () => {
     await oauthNetwork.close();
   });
-  if (hostingRole && hostingAccess !== null)
-    registerHostingAccessGuard(app, hostingAccess, appOrigin);
-  // Commands issued over HTTP log their transitions too (docs/lifecycle.md).
   const httpTask = new ControlPlaneTask("http");
-  // Everything key management needs. Shared by the boot hook below and, on the
-  // private roles, by the staged rotation routes.
+  registerHostingAccessGuard(app, hostingAccess, appOrigin, ({ reason, surface, requestId }) =>
+    logEvent(httpTask, "auth-hosting-denied", { reason, surface, requestId }),
+  );
+  app.get("/health", async () => ({ status: "ok" }));
+  // Key management dependencies are shared by the boot hook and authenticated rotation routes.
   const signingKeyDeps: SigningKeyDeps = {
     keys: database.signingKeys,
     secrets,
@@ -589,33 +555,60 @@ export async function main(
     bootstrap: createSigningKeyBootstrapState(),
     constants: DEFAULT_ISSUER_CONSTANTS,
   };
-  if (browserRole || opsRole) {
-    const identityConfig = requestIdentity.value;
-    if (identityConfig.kind === "none") {
-      bootTask.error("browser route identity configuration missing");
+  const identityConfig = requestIdentity.value;
+  let applicationAuth: ApplicationAuth | undefined;
+  const authOutcome: AuthOutcomeSink = ({ event, outcome, requestId }) =>
+    logEvent(httpTask, `auth-${event}`, { outcome, requestId });
+  if (identityConfig.kind === "google") {
+    const cookies = createSealedAuthCookies(identityConfig.cookieSecret);
+    const provider =
+      adapters.googleLoginProvider === undefined
+        ? createGoogleLoginProvider(identityConfig)
+        : ok(adapters.googleLoginProvider);
+    if (cookies.isErr() || provider.isErr()) {
+      bootTask.error("application authentication initialization failed");
       process.exitCode = 1;
+      await database.close();
       return;
     }
-    const browserVerifier =
-      identityConfig.kind === "browser"
-        ? new IapIdentityVerifier(identityConfig.audience, () => Date.now())
-        : undefined;
-    const configuredPrincipalResolver = createRequestPrincipalResolver(
-      httpTask,
-      identityConfig,
-      database.users,
-      new CryptoUserIdSource(),
-      browserVerifier,
-    );
-    if (configuredPrincipalResolver.isErr()) {
-      bootTask.error(configuredPrincipalResolver.error);
-      process.exitCode = 1;
-      return;
-    }
-    const principalResolver =
-      adapters.requestPrincipalResolverFactory?.(httpTask, database.users) ??
-      configuredPrincipalResolver.value;
-    registerAuthenticatedBrowserRoutes(app, principalResolver, async (browser) => {
+    applicationAuth = createApplicationAuth({
+      task: httpTask,
+      users: database.users,
+      ids: new CryptoUserIdSource(),
+      cookies: cookies.value,
+      provider: provider.value,
+      machine: createGoogleMachineVerifier(
+        {
+          audience: appOrigin,
+          subject: identityConfig.machineSubject,
+        },
+        {
+          onKeyProviderOutcome: ({ type }) => logEvent(httpTask, type, {}),
+        },
+      ),
+      origins: [appOrigin, hostingOrigin],
+    });
+    registerAuthRoutes(app, identityConfig, applicationAuth, authOutcome);
+  }
+  const configuredPrincipalResolver = createRequestPrincipalResolver(
+    httpTask,
+    identityConfig,
+    database.users,
+    new CryptoUserIdSource(),
+    applicationAuth,
+  );
+  if (configuredPrincipalResolver.isErr()) {
+    bootTask.error(configuredPrincipalResolver.error);
+    process.exitCode = 1;
+    return;
+  }
+  const principalResolver =
+    adapters.requestPrincipalResolverFactory?.(httpTask, database.users) ??
+    configuredPrincipalResolver.value;
+  registerAuthenticatedBrowserRoutes(
+    app,
+    principalResolver,
+    async (browser) => {
       registerBrowserHostingRoutes(browser, httpTask, {
         store: deps.store,
         hosting: deps.hosting,
@@ -632,64 +625,66 @@ export async function main(
           : probeMcp(config, snapshot.value.values);
       });
       registerWorkspaceUploadRoutes(browser, httpTask, deps);
-    });
-    // Static assets do not resolve an application user.
-    const webDist = browserRole ? env("PI_ORB_WEB_DIST", "") : "";
-    if (webDist !== "") await registerWebAssets(app, webDist);
-  }
-  if (runtimeRole) {
-    await registerRuntimeHostingRoutes(app, httpTask, {
+    },
+    applicationAuth === undefined || identityConfig.kind !== "google"
+      ? undefined
+      : {
+          origins: identityConfig,
+          auth: applicationAuth,
+          outcome: authOutcome,
+        },
+  );
+  // Static assets do not resolve an application user.
+  const webDist = env("PI_ORB_WEB_DIST", "");
+  if (webDist !== "") await registerWebAssets(app, webDist);
+  await registerRuntimeHostingRoutes(app, httpTask, {
+    store: deps.store,
+    hosting: deps.hosting,
+    filesOrigin: hostingOrigin,
+    appOrigin,
+  });
+  registerRuntimeRoutes(app, httpTask, {
+    appOrigin,
+    spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
+    sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
+      requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),
+    readBootContext: (task, orbId, caller) => readOrbBootContext(task, deps, orbId, caller),
+    archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
+    deleteSelf: (task, orbId, caller) => requestOrbDeletion(task, deps, orbId, caller),
+    store: deps.store,
+    brokerForUser,
+    nameGenerator: deps.nameGenerator,
+    nameLeaseMs: deps.nameLeaseMs,
+    projectSecrets: deps.projectSecrets,
+    personalInstructions: deps.personalInstructions,
+    projectInstructions: deps.projectInstructions,
+    mcp: database.mcp,
+    mcpOAuth,
+    mint: {
       store: deps.store,
-      hosting: deps.hosting,
-      filesOrigin: hostingOrigin,
-      appOrigin,
-    });
-    registerRuntimeRoutes(app, httpTask, {
-      appOrigin,
-      spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
-      sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
-        requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),
-      readBootContext: (task, orbId, caller) => readOrbBootContext(task, deps, orbId, caller),
-      archiveSelf: (task, orbId, caller) => requestOrbArchive(task, deps, orbId, caller),
-      deleteSelf: (task, orbId, caller) => requestOrbDeletion(task, deps, orbId, caller),
-      store: deps.store,
-      brokerForUser,
-      nameGenerator: deps.nameGenerator,
-      nameLeaseMs: deps.nameLeaseMs,
-      projectSecrets: deps.projectSecrets,
-      personalInstructions: deps.personalInstructions,
-      projectInstructions: deps.projectInstructions,
-      mcp: database.mcp,
-      mcpOAuth,
-      mint: {
-        store: deps.store,
-        // The signer reads the active key row per signature and caches only
-        // its material, so a rotation takes effect without a restart
-        // (docs/workload-identity.md).
-        signer: new OidcTokenSigner({
-          keys: database.signingKeys,
-          secrets,
-          constants: DEFAULT_ISSUER_CONSTANTS,
-        }),
-        mintIds: new CryptoMintIdSource(),
-        denials: new MintDenialLog(),
+      // The signer reads the active key row per signature and caches only
+      // its material, so a rotation takes effect without a restart
+      // (docs/workload-identity.md).
+      signer: new OidcTokenSigner({
+        keys: database.signingKeys,
+        secrets,
         constants: DEFAULT_ISSUER_CONSTANTS,
-        issuerUrl,
-      },
-    });
-  }
-  if (issuerRole) {
-    // Public, cacheable, secret-free: no auth gate, no orb data, no secret
-    // store (docs/workload-identity.md).
-    registerIssuerRoutes(app, httpTask, {
-      keys: database.signingKeys,
+      }),
+      mintIds: new CryptoMintIdSource(),
+      denials: new MintDenialLog(),
       constants: DEFAULT_ISSUER_CONSTANTS,
       issuerUrl,
-    });
-  }
+    },
+  });
+  // Public, cacheable, secret-free handlers have no secret-store dependency.
+  registerIssuerRoutes(app, httpTask, {
+    keys: database.signingKeys,
+    constants: DEFAULT_ISSUER_CONSTANTS,
+    issuerUrl,
+  });
 
   /**
-   * Boot key ensure for the roles that mint (docs/workload-identity.md).
+   * Boot key ensure (docs/workload-identity.md).
    * Idempotent, so every instance runs it and the losers adopt the winner's
    * key.
    *
@@ -748,10 +743,8 @@ export async function main(
     bootTask.log("shutting down");
     process.off("message", e2eReconcileMessageHandler);
     stop.abort();
-    // Stop accepting requests immediately, but the browser service keeps its
-    // provider/database boundaries open until concurrent reconciliations drain.
+    // Stop accepting requests; keep provider/database boundaries open until reconciliations drain.
     void closeApp();
-    if (!browserRole) void closeResources();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
@@ -769,60 +762,51 @@ export async function main(
 
   // Fire and forget: the socket is already accepting, and this repairs the
   // issuer behind it (see `ensureSigningKeyInBackground`).
-  if (runtimeRole) void ensureSigningKeyInBackground();
+  void ensureSigningKeyInBackground();
 
   // Background loops: history polling and lifecycle reconciliation
   // (docs/history-replication.md). Same domain code as the simulations, on real time.
-  // Only the browser-role service runs them — it is the always-on one; the
-  // scale-to-zero runtime service must not depend on background work.
-  if (browserRole) {
-    if (activationBucket !== "") {
-      const activated = await waitForReleaseActivation(
-        new ControlPlaneTask("release-activation"),
-        createReleaseActivationReader(activationBucket, createGcsTokenProvider()),
-        specGeneration,
-        stop.signal,
-        (status) => {
-          if (status === null) delete systemView.deploymentStatus;
-          else systemView.deploymentStatus = status;
-        },
-      );
-      if (!activated) {
-        await closeResources();
-        return;
-      }
+  if (activationBucket !== "") {
+    const activated = await waitForReleaseActivation(
+      new ControlPlaneTask("release-activation"),
+      createReleaseActivationReader(activationBucket, createGcsTokenProvider()),
+      specGeneration,
+      stop.signal,
+      (status) => {
+        if (status === null) delete systemView.deploymentStatus;
+        else systemView.deploymentStatus = status;
+      },
+    );
+    if (!activated) {
+      await closeResources();
+      return;
     }
-    const runReconcileTask: ReconcileTaskRunner = (orbId, operation) =>
-      operation(new ControlPlaneTask(`reconciler:${orbId}`));
-    const loops: readonly Promise<void>[] = [
-      pollLoop(new ControlPlaneTask("poller"), deps, stop.signal),
-      reconcileLoop(
-        new ControlPlaneTask("reconcile-scheduler"),
-        deps,
-        stop.signal,
-        runReconcileTask,
-      ),
-      projectDeletionLoop(new ControlPlaneTask("project-deletion"), deps, stop.signal),
-      orphanSweepLoop(new ControlPlaneTask("sweeper"), deps, stop.signal),
-      hostingCleanupLoop(new ControlPlaneTask("hosting-cleanup"), deps, stop.signal),
-      mcpOAuthCleanupLoop(
-        new ControlPlaneTask("mcp-credential-cleanup"),
-        database.mcpOAuth,
-        secrets,
-        stop.signal,
-      ),
-    ];
-    try {
-      await Promise.all(loops);
-    } catch (error) {
-      bootTask.error("background loop crashed:", error);
-      process.exitCode = 1;
-      stop.abort();
-      void closeApp();
-      await Promise.allSettled(loops);
-    }
-    await closeResources();
   }
+  const runReconcileTask: ReconcileTaskRunner = (orbId, operation) =>
+    operation(new ControlPlaneTask(`reconciler:${orbId}`));
+  const loops: readonly Promise<void>[] = [
+    pollLoop(new ControlPlaneTask("poller"), deps, stop.signal),
+    reconcileLoop(new ControlPlaneTask("reconcile-scheduler"), deps, stop.signal, runReconcileTask),
+    projectDeletionLoop(new ControlPlaneTask("project-deletion"), deps, stop.signal),
+    orphanSweepLoop(new ControlPlaneTask("sweeper"), deps, stop.signal),
+    hostingCleanupLoop(new ControlPlaneTask("hosting-cleanup"), deps, stop.signal),
+    mcpOAuthCleanupLoop(
+      new ControlPlaneTask("mcp-credential-cleanup"),
+      database.mcpOAuth,
+      secrets,
+      stop.signal,
+    ),
+  ];
+  try {
+    await Promise.all(loops);
+  } catch (error) {
+    bootTask.error("background loop crashed:", error);
+    process.exitCode = 1;
+    stop.abort();
+    void closeApp();
+    await Promise.allSettled(loops);
+  }
+  await closeResources();
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) void main();

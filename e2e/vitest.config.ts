@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 const frontendFiles = [
+  "e2e/application-auth.e2e.test.ts",
   "e2e/*-frontend.e2e.test.ts",
   "e2e/frontend-*.e2e.test.ts",
   "e2e/transcript-cache-*.e2e.test.ts",

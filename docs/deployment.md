@@ -2,6 +2,22 @@
 
 Decisions about where the control plane runs and how infrastructure is managed. The operational workflow (build, apply, deploy, gotchas) lives in `infra/README.md`.
 
+## Single application service (implemented 2026-09-19; not deployed)
+
+Qualification is ongoing; implementation is not deployment evidence. `docs/control-plane-consolidation.md` records the decision, acceptance gates and maintenance cutover; `docs/testing.md` records qualification. Current composition is in `apps/control-plane/src/{main,identity-composition}.ts` and `infra/{run,auth,hosting,oidc}.tf`.
+
+One Cloud Run application, **`pi-orb-issuer`**, serves browser/API, runtime broker, files, discovery/JWKS and background work. It retains the exact configured issuer `https://pi-orb-issuer-<project-number>.<region>.run.app`, signing keys and relying-party trust. The app/API/broker use that origin; files use `https://files---pi-orb-issuer-<project-number>.<region>.run.app`. These are new app/files/broker URLs, without aliases. The deterministic issuer must belong to Cloud Run's `.urls`; `.uri` is not an interchangeable trust anchor.
+
+The application runs as `pi-orb-control-plane` with public ingress, IAM invocation disabled, always-allocated CPU, min/max one instance, 3600-second request timeout and private-ranges-only VPC egress. Runtime bearers still fence each incarnation. Public issuer handlers now share control-plane privileges and runtime ingress is public: reduced infrastructure isolation is intentional, not reduced authentication. Compute SSH IAP remains separate.
+
+`PI_ORB_AUTH_MODE` is explicitly `local` or `google`; missing/unknown values fail startup, and `local` is forbidden in Cloud Run. Google mode requires `PI_ORB_GOOGLE_CLIENT_ID`, `PI_ORB_GOOGLE_CLIENT_SECRET`, `PI_ORB_COOKIE_SECRET`, `PI_ORB_MACHINE_SUBJECT`, `PI_ORB_APP_ORIGIN` and `PI_ORB_HOSTING_ORIGIN`. Origins must be exact HTTPS origins on different hostnames. The machine subject is the independently verified numeric `uniqueId` of `pi-orb-debug`, not its email. Tooling sends Google ID tokens to the ordinary API with the exact app-origin audience (`infra/api.sh`). Register `/auth/callback` on both origins and update MCP callbacks/provider allowlists. Secret Manager supplies the restart-stable cookie sealing key and Google client secret; install Google and MCP callback request-log exclusions before enabling login. Authentication/session and migration-026 contracts: `docs/credentials.md`, `docs/multi-user.md`.
+
+The release uses an independently admitted GitHub identity, qualified artifacts, a database recovery point and an independent restoration safeguard. Drain affected orbs; block old identity-serving processes, including tagged/revision URLs, and prove controller retirement before migration 026. Apply the single-service configuration, preserve activation/generation fences, then test owned fixtures before fleet resumption. Broker URL changes may require workspace-preserving compute replacement. Exact sequencing and failure recovery are in `docs/control-plane-consolidation.md` and `infra/release_cutover.py`.
+
+## Historical deployment record (before consolidation)
+
+The following dated evidence describes the deployed split-service system, not instructions for the implemented single-service release.
+
 - The cloud control plane is expected to run on Cloud Run.
 - At least one Cloud Run instance must remain provisioned so active-orb history polling can run continuously.
 - The polling process must use always-allocated CPU/instance-based billing; a minimum instance with request-only CPU allocation is insufficient for reliable background work.
@@ -49,17 +65,11 @@ Storage belongs to the control plane, independently of `PI_ORB_HOST_PROVIDER`:
 
 `PI_ORB_HOSTING_ORIGIN` is the separate files origin; `PI_ORB_APP_ORIGIN` supplies dashboard links.
 Local defaults are `http://files.localhost:7100` and `http://127.0.0.1:7100` (using `PORT` when set).
-The local `all` role alone supplies those origin defaults, the filesystem default, and trust for
-the Vite origins on port 5173. Split `browser`, `runtime`, and `ops` roles require an explicit store
-kind and both origins; GCS also requires the bucket. The public `issuer` role reads no hosting
-configuration and registers no hosting guard or route.
-The cloud browser service exposes its latest revision with traffic tag `files`; uploads use the
-existing runtime service and downloads use the browser service's IAP policy. No additional serving
-service, public bucket URL, or orb-host credential is introduced. A non-GCP deployment must provide
-its own authenticated ingress for both hostnames; local development retains its trusted-local
-access boundary. The full post-apply step verifies fresh Cloud Run traffic status before revision
-pruning; the IAP-only repair path remains available when application traffic is malformed. See
-`docs/hosting.md` for origin isolation, first-adoption rationale, and transfer limits.
+`PI_ORB_AUTH_MODE=local` supplies those origin defaults, the filesystem default and trust for
+Vite on port 5173. Google mode requires the store kind and both origins; GCS requires the bucket.
+The single application exposes its latest revision with traffic tag `files`. Uploads use runtime
+bearers; private downloads use the files origin's Google session. The post-apply step verifies
+fresh Cloud Run traffic status before revision pruning. See `docs/hosting.md`.
 
 ## Decision: split portable foundation and application roots before remote builds
 
@@ -68,7 +78,7 @@ pruning; the IAP-only repair path remains available when application traffic is 
 1. Create a separately-stateful **foundation root** for project services, the state bucket, Artifact Registry, deployment/build identities, workload-identity pools and providers, and their IAM. Where project creation is in scope, its folder and billing attachment belong here too. This root is applied by an organization/bootstrap authority; the recurring deployer must not control the trust policy that grants its own authority.
 2. Leave the recurring **application root** responsible for the two application firewall rules, Cloud SQL, Secret Manager parents and runtime grants, Cloud Run, and the other serving resources. The foundation owns both VPCs, their subnets, and the private-services connection because Compute IAM Conditions cannot isolate network, subnet, or address names. The application consumes their explicit foundation outputs. The Cloud Run egress subnet output is the project-qualified `projects/PROJECT/regions/REGION/subnetworks/NAME` resource name required by the Cloud Run API.
 3. Adopt the current live resources into the two states under the existing global release lock, using an offline, generation-checked state projection that preserves the complete resource-identity inventory without applying cloud changes. Review the subsequent foundation and application plans separately; the application plan intentionally includes the native runtime change. The state bucket's own bootstrap uses an organization-owned state location or an explicit one-time state migration; it cannot recursively create the backend in which its first plan is already stored.
-4. After foundation adoption and its reviewed permission changes, the manual release builds and validates a native image on disposable GCE VMs, then publishes the control-plane container. Its handoff carries the exact VM image resource/ID and container digest. Automatic deployment and remote control-plane container builds remain separate proposals; the release lock, exact-plan apply, unconditional IAP repair, and smoke gates remain mandatory.
+4. After foundation adoption and its reviewed permission changes, the manual release builds and validates a native image on disposable GCE VMs, then publishes the control-plane container. Its handoff carries the exact VM image resource/ID and container digest. Automatic deployment and remote control-plane container builds remain separate proposals; the release lock, exact-plan apply, retirement/activation, and smoke gates remain mandatory.
 
 A new project should require variables plus one audited foundation apply and the normal release command, not console-created resources. Irreducible external inputs remain: an initial organization/folder/billing authority, a globally unique project ID, and credentials or values owned by external systems such as GitHub OAuth and Tailscale. OpenTofu manages their GCP containers and grants, but cannot safely invent those external authorities or secret values. Implementation is tracked in `TODO.md`.
 
@@ -235,14 +245,11 @@ not relabel the original full run green or claim a second fresh full deployment.
 Dedicated hosted-file and upload streaming/memory qualification remains separate
 in `TODO.md`. The database password was left unchanged per user decision.
 
-### Implemented release safety design (2026-09-09; live-validated)
+### Release safety design (single-service update implemented 2026-09-19; not deployed)
 
 The external entry point reuses `infra/release.sh`. A read-only application plan,
-ops access and retirement inventory precede expensive image builds. Google
-provider `7.21.0` manages `iap_enabled = true` natively, eliminating the deliberate
-out-of-band detach/repair window; exact IAP accessor reconciliation is retained.
-
-The browser starts HTTP but waits before starting **all five autonomous loops**.
+machine API access and retirement inventory precede expensive image builds.
+The application starts HTTP but waits before starting **all five autonomous loops**.
 Its one-object GCS reader accepts only its exact generation from
 `static-plane/releases/active.json`. Missing, malformed or unavailable authority
 fails closed, and a process that observes a later generation never opens after a
@@ -263,7 +270,7 @@ retirement without a UI pause (the observed incident took roughly 44 minutes);
 time passing is never the proof. Failure leaves new loops gated and HTTP available.
 
 A one-task, no-retry Cloud Run job runs migrations from the accepted image before
-any new service consumes schema. Production browser startup no longer migrates;
+any new service consumes schema. Production application startup does not migrate;
 local development still does. Migration filenames and outcomes are logged without
 raw database errors. An uncertain job execution retains the global release lock
 and job identity for inspection. Successful jobs are removed. There is no
@@ -299,11 +306,10 @@ must cover. Incident and follow-up:
 
 `release_state.py` constructs and validates token-free records, including nested
 allowlists, before publishing. It records source and runner commits, accepted
-artifacts, all four serving image/revision identities, lifecycle generations
-(the issuer deliberately has none), stage verdicts, retirement evidence and
+artifacts, the serving application image/revision identity and lifecycle generation, stage verdicts, retirement evidence and
 fixture outcomes. Apply is conservatively marked unvalidated before invocation.
 `--validate RELEASE_ID|latest` creates a new record referencing the original,
-checks deployment identity, and runs only post-apply IAP repair/revision pruning,
+checks deployment identity, and runs only post-apply revision pruning,
 retirement/activation/validation—not build, migrations or infrastructure apply. The original failure is never rewritten into success.
 
 Successful smoke fixtures are deleted and verified absent; failed fixtures remain
@@ -568,12 +574,13 @@ could corrupt local evidence; no application change occurred. The reproduction,
 fix and exact-generation cleanup are in
 `docs/postmortems/2026-09-09-release-test-environment.md`.
 Registry access uses the same refreshing keyless
-identity as deployment. Preflight also reads the browser IAP policy to verify
+identity as deployment. The pre-consolidation preflight also read the browser IAP policy to verify
 beta command availability and scoped access before mutation. The first successful
 infrastructure apply exposed this missing component during reconciliation;
 `docs/postmortems/2026-09-09-release-iap-sdk-component.md` preserves the failed run.
-A separate `repair` phase now distinguishes reconciliation from infrastructure
-apply and runs during validation-only recovery as well.
+That release added a separate `repair` phase. Current `infra/deploy.sh` verifies the
+single application's files routing and prunes drained revisions; Monitoring evidence,
+not deletion, establishes retirement.
 
 An empty `validate_release` input performs a release. An explicit release ID or
 `latest` invokes validation-only recovery. Inputs enter through quoted environment
@@ -592,12 +599,12 @@ then preserves the release sequence as one serialized critical section:
 1. build/seal the native Debian runtime and fixed-size workspace images on disposable GCE compute, and pass fresh-VM acceptance; build the `linux/amd64` control-plane container;
 2. publish to the existing GCE image inventory and Artifact Registry repository, carrying exact VM/workspace image resources and numeric identities plus the immutable control-plane digest into the release;
 3. hold the existing global release lock and clamp the generation, require the exact saved plan to preserve the database and its credentials, run migrations in a same-image no-retry job, then apply the saved plan against the GCS backend; retain only allowlisted evidence — binary plans and unsanitized JSON contain state secrets and must never be uploaded;
-4. after any attempted apply, restore IAP with unconditional/finally semantics because OpenTofu can change the browser service and then fail; verify the serving revision and establish old-controller isolation before smoke. Revision deletion remains cleanup, not proof of quiescence. Any deliberate maintenance pause requires the independent restoration safeguard;
+4. after apply, verify the serving revision and establish old-controller isolation before smoke. Revision deletion remains cleanup, not proof of quiescence. Any deliberate maintenance pause requires the independent restoration safeguard;
 5. run `infra/smoke.sh`, including its load-bearing stop/start leg, and `infra/smoke-workload-identity.sh`. Record fixture IDs immediately; delete successful fixtures and poll to `404`. Retain failed fixtures for diagnosis and surface their ownership/cost and cleanup commands, rather than erase evidence.
 
-The shared entry point separates IAP-only repair from revision pruning through `infra/deploy.sh --iap-only` and preserves its finally behavior. `infra/api.sh` keeps its bearer out of argv; ops URLs are passed directly. Successful smoke cleanup is verified; failure retains fixtures and reports their IDs rather than erasing diagnostic evidence.
+`infra/api.sh` keeps its Google ID token out of argv and uses the app-origin audience on the ordinary API. Successful smoke cleanup is verified; failure retains fixtures and reports their IDs rather than erasing diagnostic evidence.
 
-Apply, IAP repair, old-revision deletion, and smoke must share one GitHub Actions concurrency group with in-progress cancellation disabled and the workflow must acquire the same GCS release lock used by `infra/release.sh`. OpenTofu's state lock covers only state mutation; the release lock serializes the shell-side repair and smoke work and makes the live-generation clamp safe across CI, manual releases, clock skew, and same-second runs. GitHub's concurrency group remains defense in depth and controls pending-run behavior: by default it coalesces older pending runs, implementing “deploy the newest eligible `main` state after the current deploy,” not a literal durable FIFO for every transient push. The current `queue: max` option can retain up to 100 pending runs, but GitHub orders them by when they begin waiting rather than by commit chronology and does not guarantee dispatch order; a strict chronological every-push policy therefore still needs an explicit ordering check/queue rather than an inaccurate workflow comment.
+Apply, old-revision deletion, and smoke must share one GitHub Actions concurrency group with in-progress cancellation disabled and the workflow must acquire the same GCS release lock used by `infra/release.sh`. OpenTofu's state lock covers only state mutation; the release lock serializes the shell-side retirement and smoke work and makes the live-generation clamp safe across CI, manual releases, clock skew, and same-second runs. GitHub's concurrency group remains defense in depth and controls pending-run behavior: by default it coalesces older pending runs, implementing “deploy the newest eligible `main` state after the current deploy,” not a literal durable FIFO for every transient push. The current `queue: max` option can retain up to 100 pending runs, but GitHub orders them by when they begin waiting rather than by commit chronology and does not guarantee dispatch order; a strict chronological every-push policy therefore still needs an explicit ordering check/queue rather than an inaccurate workflow comment.
 
 Authentication must be keyless: GitHub OIDC to a Google Workload Identity Federation provider, then short-lived service-account impersonation. Admission must be restricted by the repository's numeric GitHub IDs (repository `1307054237`, owner `61363`), `refs/heads/main`, the chosen workflow event (`workflow_dispatch` for the proposed manual entry point; `push` only if that policy is approved), and preferably the protected deployment environment subject; name-only trust is vulnerable to repository or owner-name reuse. The pool/provider and CI identities need a separately bootstrapped trust boundary so the recurring deploy does not depend on creating the identity it is currently using.
 
