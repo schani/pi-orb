@@ -1,5 +1,7 @@
 # Workload identity federation recipes
 
+**Implementation update, 2026-09-19; not deployed, qualification ongoing:** the single application retains `pi-orb-issuer` and its exact configured issuer `https://pi-orb-issuer-<project-number>.<region>.run.app`, keys and discovery/JWKS contract. These relying-party recipes require no trust migration. Do not substitute Cloud Run's hashed `.uri`. App/files/broker URLs change separately (`docs/deployment.md`); Google machine ID tokens to the ordinary API use the app-origin audience, not the workload audience recipes below. Decision and gates: `docs/control-plane-consolidation.md`.
+
 > **Status:** Written 2026-08-21 with stage 4 of `docs/workload-identity.md`. The GCP recipe is
 > the one the repository exercises end to end (`infra/bootstrap-pi-orb-oidc.sh`,
 > `infra/smoke-workload-identity.sh`); the AWS and generic recipes are reviewed guidance that has

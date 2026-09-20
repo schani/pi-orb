@@ -17,7 +17,7 @@ describe("hosted-file cloud infrastructure", () => {
     expect(hosting).not.toContain("retention_policy");
   });
 
-  it("grants the browser and runtime identity object access", () => {
+  it("grants the application identity object access", () => {
     const hosting = readFileSync(resolve("infra/hosting.tf"), "utf8");
 
     expect(hosting).toMatch(
@@ -25,18 +25,16 @@ describe("hosted-file cloud infrastructure", () => {
     );
   });
 
-  it("configures both serving roles with one store and isolated files origin", () => {
+  it("configures the application with one store and isolated files origin", () => {
     const hosting = readFileSync(resolve("infra/hosting.tf"), "utf8");
     const run = readFileSync(resolve("infra/run.tf"), "utf8");
     const outputs = readFileSync(resolve("infra/outputs.tf"), "utf8");
 
+    expect(hosting).toMatch(/app_origin\s+=\s+local\.oidc_issuer_url/);
     expect(hosting).toMatch(
-      /app_origin\s+=\s+"https:\/\/\$\{local\.browser_service_name\}-\$\{local\.foundation\.project_number\}\.\$\{var\.region\}\.run\.app"/,
+      /hosting_origin\s+=\s+"https:\/\/files---\$\{local\.issuer_service_name\}/,
     );
-    expect(hosting).toMatch(
-      /hosting_origin\s+=\s+"https:\/\/files---\$\{local\.browser_service_name\}/,
-    );
-    expect(run).toMatch(/name\s+=\s+local\.browser_service_name/);
+    expect(run).toMatch(/name\s+=\s+local\.issuer_service_name/);
     expect(run).toMatch(
       /traffic\s*{[\s\S]*type\s+=\s+"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"[\s\S]*percent\s+=\s+100[\s\S]*tag\s+=\s+"files"/,
     );
@@ -46,10 +44,8 @@ describe("hosted-file cloud infrastructure", () => {
     expect(run).toMatch(/contains\(self\.urls, local\.app_origin\)/);
     expect(run).not.toContain("self.traffic_statuses");
     expect(run).toMatch(/PI_ORB_APP_ORIGIN\s*=\s*local\.app_origin/);
-    expect(run.match(/for_each\s*=\s*local\.hosting_env/g)).toHaveLength(3);
+    expect(run.match(/for_each\s*=\s*local\.hosting_env/g)).toHaveLength(1);
     expect(outputs).toMatch(/output "hosting_url"[\s\S]*value\s+=\s+local\.hosting_origin/);
-    expect(outputs).toMatch(
-      /output "browser_url"[\s\S]*value\s+=\s+google_cloud_run_v2_service\.browser\.uri/,
-    );
+    expect(outputs).toMatch(/output "app_url"[\s\S]*value\s+=\s+local\.app_origin/);
   });
 });

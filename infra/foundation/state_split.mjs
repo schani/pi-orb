@@ -11,10 +11,8 @@ export const foundationAddresses = new Set([
   "google_project_iam_member.cp_compute_admin",
   "google_project_iam_member.cp_compute_viewer",
   "google_project_iam_member.cp_log_writer",
-  "google_project_iam_member.issuer_log_writer",
   "google_project_iam_member.orb_vm_log_writer",
   "google_service_account.control_plane",
-  "google_service_account.issuer",
   "google_service_account.orb_vm",
   "google_service_account_iam_member.cp_uses_orb_vm",
   "google_service_networking_connection.private_services",
@@ -84,10 +82,6 @@ function generatedOutputs(scope) {
     },
     orb_vm_service_account_email: {
       value: `pi-orb-orb-vm@${scope.project}.iam.gserviceaccount.com`,
-      type: "string",
-    },
-    issuer_service_account_email: {
-      value: `pi-orb-issuer@${scope.project}.iam.gserviceaccount.com`,
       type: "string",
     },
     image_builder_service_account_email: {

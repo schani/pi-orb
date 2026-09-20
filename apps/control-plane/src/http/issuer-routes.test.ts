@@ -269,8 +269,7 @@ describe("issuer discovery and JWKS", () => {
 });
 
 /**
- * The two HTTP surfaces composed the way `PI_ORB_ROLE=all` composes them: a
- * token minted over the runtime route must verify against the key set the
+ * A token minted over the runtime route must verify against the key set the
  * public issuer route serves, using nothing but the JWT header's `kid` and the
  * published JWK. That is the whole feature's contract with a relying party.
  */

@@ -1,138 +1,133 @@
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { createConfiguredHostingAccessPolicy, readHostingConfiguration } from "./hosting-config.ts";
 
-const split = {
-  PI_ORB_APP_ORIGIN: "https://app.example",
-  PI_ORB_HOSTING_ORIGIN: "https://files.example",
+const env = {
+  PI_ORB_AUTH_MODE: "google",
+  PI_ORB_APP_ORIGIN: "https://app.test",
+  PI_ORB_HOSTING_ORIGIN: "https://files.test",
   PI_ORB_HOSTING_STORE: "gcs",
-  PI_ORB_HOSTING_BUCKET: "private-files",
+  PI_ORB_HOSTING_BUCKET: "private",
 };
-
-describe("hosting boot configuration", () => {
-  it("requires no hosting configuration for the public issuer", () => {
-    const result = readHostingConfiguration(
-      { PI_ORB_HOSTING_STORE: "unknown" },
-      "issuer",
-      7100,
-      "/home/test",
+it("requires production origins and separate hostnames", () => {
+  expect(readHostingConfiguration(env, 7100, "/h").isOk()).toBe(true);
+  for (const value of ["", "https://app.test/path", "https://files.test", "http://app.test"])
+    expect(readHostingConfiguration({ ...env, PI_ORB_APP_ORIGIN: value }, 7100, "/h").isErr()).toBe(
+      true,
     );
-    expect(result).toEqual({ value: null });
-  });
-
-  it.each(["browser", "runtime", "ops"] as const)(
-    "requires explicit split-role storage and origins for %s",
-    (role) => {
-      expect(readHostingConfiguration({}, role, 7100, "/home/test").isErr()).toBe(true);
-      expect(readHostingConfiguration(split, role, 7100, "/home/test")).toEqual({
-        value: {
-          appOrigin: "https://app.example",
-          filesOrigin: "https://files.example",
-          store: { bucket: "private-files", kind: "gcs" },
-          trustedBrowserOrigins: [],
-        },
-      });
-    },
+  expect(readHostingConfiguration({ ...env, PI_ORB_HOSTING_BUCKET: "" }, 7100, "/h").isErr()).toBe(
+    true,
   );
-
-  it("rejects unknown stores, missing GCS buckets, invalid origins, and a shared host", () => {
-    expect(
-      readHostingConfiguration(
-        { ...split, PI_ORB_HOSTING_STORE: "s3" },
-        "browser",
-        7100,
-        "/h",
-      ).isErr(),
-    ).toBe(true);
-    for (const appOrigin of [
-      "ftp://app.example",
-      "https://user@app.example",
-      "https://app.example/path",
-      "https://app.example?query=yes",
-      "https://app.example/#fragment",
-    ]) {
-      expect(
-        readHostingConfiguration(
-          { ...split, PI_ORB_APP_ORIGIN: appOrigin },
-          "browser",
-          7100,
-          "/h",
-        ).isErr(),
-      ).toBe(true);
-    }
-    expect(
-      readHostingConfiguration(
-        { ...split, PI_ORB_HOSTING_BUCKET: "" },
-        "browser",
-        7100,
-        "/h",
-      ).isErr(),
-    ).toBe(true);
-    expect(
-      readHostingConfiguration(
-        { ...split, PI_ORB_HOSTING_ORIGIN: "files.example" },
-        "browser",
-        7100,
-        "/h",
-      ).isErr(),
-    ).toBe(true);
-    expect(
-      readHostingConfiguration(
-        { ...split, PI_ORB_HOSTING_ORIGIN: "https://app.example" },
-        "browser",
-        7100,
-        "/h",
-      ).isErr(),
-    ).toBe(true);
-  });
-
-  it("requires different hostnames, not merely different ports", () => {
-    expect(
-      readHostingConfiguration(
-        {
-          ...split,
-          PI_ORB_APP_ORIGIN: "https://app.example:443",
-          PI_ORB_HOSTING_ORIGIN: "https://app.example:8443",
-        },
-        "browser",
-        7100,
-        "/h",
-      ).isErr(),
-    ).toBe(true);
-  });
-
-  it("uses filesystem and split local origins only for the all role", () => {
-    expect(readHostingConfiguration({}, "all", 7123, "/home/test")).toEqual({
-      value: {
-        appOrigin: "http://127.0.0.1:7123",
-        filesOrigin: "http://files.localhost:7123",
-        store: { kind: "filesystem", root: "/home/test/.pi-orb/hosting" },
-        trustedBrowserOrigins: ["http://localhost:5173", "http://127.0.0.1:5173"],
+  expect(
+    readHostingConfiguration(
+      { PI_ORB_AUTH_MODE: "local", K_SERVICE: "production" },
+      7100,
+      "/h",
+    ).isErr(),
+  ).toBe(true);
+});
+it.each([undefined, "docker"])(
+  "admits default Docker runtime broker with provider %s",
+  (provider) => {
+    const configuration = readHostingConfiguration(
+      {
+        PI_ORB_AUTH_MODE: "local",
+        ...(provider === undefined ? {} : { PI_ORB_HOST_PROVIDER: provider }),
       },
-    });
-  });
-
-  it("keeps app host aliases dynamic while isolating the files hostname", () => {
-    const configured = readHostingConfiguration(split, "runtime", 7100, "/home/test");
-    expect(configured.isOk() && configured.value !== null).toBe(true);
-    if (configured.isErr() || configured.value === null) return;
-    const policy = createConfiguredHostingAccessPolicy(configured.value)._unsafeUnwrap();
+      7100,
+      "/h",
+    )._unsafeUnwrap();
+    const access = createConfiguredHostingAccessPolicy(configuration)._unsafeUnwrap();
+    for (const path of [
+      "/runtime/v1/orb/boot-context",
+      "/runtime/v1/model-token",
+      "/runtime/v1/tokens/github",
+    ])
+      expect(access.decide({ method: "POST", path, host: "host.docker.internal:7100" }).kind).toBe(
+        "allow",
+      );
+    for (const path of ["/api/v1/orbs", "/auth/login", "/s/orb/index.html", "/runtime-other"])
+      expect(access.decide({ method: "GET", path, host: "host.docker.internal:7100" }).kind).toBe(
+        "reject",
+      );
+  },
+);
+it("uses the configured broker authority without trusting it for browser routes", () => {
+  const configuration = readHostingConfiguration(
+    { ...env, PI_ORB_BROKER_URL: "https://broker.test:8443" },
+    7100,
+    "/h",
+  )._unsafeUnwrap();
+  const access = createConfiguredHostingAccessPolicy(configuration)._unsafeUnwrap();
+  expect(
+    access.decide({ method: "GET", path: "/runtime/v1/orb/boot-context", host: "broker.test:8443" })
+      .kind,
+  ).toBe("allow");
+  for (const host of ["broker.test", "host.docker.internal:7100", "unknown.test"])
+    expect(access.decide({ method: "GET", path: "/runtime/v1/orb/boot-context", host }).kind).toBe(
+      "reject",
+    );
+  expect(
+    access.decide({ method: "GET", path: "/api/v1/orbs", host: "broker.test:8443" }).kind,
+  ).toBe("reject");
+});
+it("does not implicitly trust the Docker alias in cloud hosting", () => {
+  const access = createConfiguredHostingAccessPolicy(
+    readHostingConfiguration(env, 7100, "/h")._unsafeUnwrap(),
+  )._unsafeUnwrap();
+  expect(
+    access.decide({ method: "GET", path: "/runtime/v1/orb/boot-context", host: "app.test" }).kind,
+  ).toBe("allow");
+  expect(
+    access.decide({
+      method: "GET",
+      path: "/runtime/v1/orb/boot-context",
+      host: "host.docker.internal:7100",
+    }).kind,
+  ).toBe("reject");
+});
+it("retains the process provider's app authority", () => {
+  const access = createConfiguredHostingAccessPolicy(
+    readHostingConfiguration(
+      { PI_ORB_AUTH_MODE: "local", PI_ORB_HOST_PROVIDER: "process" },
+      7100,
+      "/h",
+    )._unsafeUnwrap(),
+  )._unsafeUnwrap();
+  expect(
+    access.decide({ method: "GET", path: "/runtime/v1/orb/boot-context", host: "127.0.0.1:7100" })
+      .kind,
+  ).toBe("allow");
+});
+it.each([
+  "https://broker.test/path",
+  "https://user:secret@broker.test",
+  "https://broker.test?query=1",
+  "https://broker.test#fragment",
+  "ftp://broker.test",
+  "https://files.test:8443",
+])("rejects invalid or files-colliding broker %s", (broker) => {
+  expect(readHostingConfiguration({ ...env, PI_ORB_BROKER_URL: broker }, 7100, "/h").isErr()).toBe(
+    true,
+  );
+});
+it("uses local defaults only for explicit local auth", () => {
+  const local = readHostingConfiguration({ PI_ORB_AUTH_MODE: "local" }, 7100, "/h")._unsafeUnwrap();
+  const policy = createConfiguredHostingAccessPolicy(local)._unsafeUnwrap();
+  for (const origin of ["http://localhost:5173", "http://127.0.0.1:5173"])
     expect(
-      policy.decide({
-        method: "POST",
-        path: "/runtime/v1/hosting/files",
-        host: "host.docker.internal:7100",
-      }),
-    ).toEqual({ kind: "allow", surface: "app" });
-    expect(
-      policy.decide({
-        method: "GET",
-        path: "/api/v1/orbs",
-        host: "browser-hashed.run.app",
-        origin: "https://browser-hashed.run.app",
-      }),
-    ).toEqual({ kind: "allow", surface: "app" });
-    expect(
-      policy.decide({ method: "GET", path: "/s/orb/file", host: "files.example:8443" }).kind,
-    ).toBe("reject");
-  });
+      policy.decide({ method: "POST", path: "/api/write", host: new URL(origin).host, origin })
+        .kind,
+    ).toBe("allow");
+  expect(
+    policy.decide({
+      method: "POST",
+      path: "/api/write",
+      host: "127.0.0.1:7100",
+      origin: "http://files.localhost:7100",
+    }).kind,
+  ).toBe("reject");
+  expect(readHostingConfiguration({}, 7100, "/h").isErr()).toBe(true);
+  expect(
+    readHostingConfiguration({ PI_ORB_AUTH_MODE: "local" }, 7100, "/h")._unsafeUnwrap().filesOrigin,
+  ).toBe("http://files.localhost:7100");
 });

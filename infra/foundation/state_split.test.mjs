@@ -39,7 +39,7 @@ test("projects the project-qualified subnetwork name required by Cloud Run", () 
   );
 
   const application = readFileSync(new URL("../run.tf", import.meta.url), "utf8");
-  assert.equal(application.match(/subnetwork = local\.run_egress_subnetwork/g)?.length, 4);
+  assert.equal(application.match(/subnetwork = local\.run_egress_subnetwork/g)?.length, 1);
 });
 
 test("moves complete resource objects and preserves every cloud identity", () => {
