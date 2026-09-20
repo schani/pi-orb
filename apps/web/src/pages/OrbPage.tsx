@@ -61,6 +61,7 @@ import {
   createMutationEpoch,
   hasDeliveredMessageAwaitingHistory,
   messagesAwaitingHistory,
+  reuseQueuedMessages,
   withQueuedMessage,
 } from "../lib/queued-messages.ts";
 import { isPinnedAfterScroll } from "../lib/scroll-pin.ts";
@@ -470,23 +471,43 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       if (state.sessionId !== null && sessionId !== state.sessionId) {
         return reducer(state, { type: "history_loaded", view: action.view });
       }
+      const liveBlocks =
+        state.liveBlocks.size === 0 ? state.liveBlocks : new Map<string, LiveBlock>();
+      const currentRecords = [...state.records.values()];
       const merged = mergeReplicatedHistory(
         {
-          records: [...state.records.values()],
+          records: currentRecords,
           afterRecordId: state.afterRecordId,
           headId: state.headId,
         },
         action.view,
       );
+      const recordsUnchanged =
+        merged.records.length === currentRecords.length &&
+        merged.records.every((record, index) => record === currentRecords[index]);
+      const records = recordsUnchanged
+        ? state.records
+        : new Map(merged.records.map((record) => [record.id, record]));
+      if (
+        sessionId === state.sessionId &&
+        state.cacheReady &&
+        state.historyLoaded &&
+        records === state.records &&
+        merged.afterRecordId === state.afterRecordId &&
+        merged.headId === state.headId &&
+        liveBlocks === state.liveBlocks &&
+        state.historyError === null
+      )
+        return state;
       return {
         ...state,
         sessionId,
         cacheReady: true,
         historyLoaded: true,
-        records: new Map(merged.records.map((record) => [record.id, record])),
+        records,
         afterRecordId: merged.afterRecordId,
         headId: merged.headId,
-        liveBlocks: new Map(),
+        liveBlocks,
         historyError: null,
       };
     }
@@ -977,7 +998,8 @@ function OrbConversation({
         if (cancelled || messageEpoch.isStale(token) || result.isErr()) return;
         const transcript = transcriptRef.current;
         const records = [...transcript.records.values()];
-        setQueuedMessages(messagesAwaitingHistory(result.value.items, records));
+        const awaiting = messagesAwaitingHistory(result.value.items, records);
+        setQueuedMessages((current) => reuseQueuedMessages(current, awaiting));
 
         // `delivered` and replicated history commit together. PostgreSQL can
         // repair a disconnected tab without hiding provisional turns. The

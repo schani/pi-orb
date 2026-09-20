@@ -25,10 +25,12 @@ export interface LocalHistory {
  * stay after them in their existing live order.
  */
 export function mergeReplicatedHistory(current: LocalHistory, view: OrbHistoryView): LocalHistory {
+  const currentById = new Map(current.records.map((record) => [record.id, record]));
   const replicatedIds = new Set(view.records.map((record) => record.id));
+  const replicatedPrefix = view.records.map((record) => currentById.get(record.id) ?? record);
   const liveSuffix = current.records.filter((record) => !replicatedIds.has(record.id));
   return {
-    records: [...view.records, ...liveSuffix],
+    records: [...replicatedPrefix, ...liveSuffix],
     afterRecordId: liveSuffix.length > 0 ? current.afterRecordId : view.cursor,
     headId: liveSuffix.length > 0 ? current.headId : view.headId,
   };

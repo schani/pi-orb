@@ -72,6 +72,78 @@ it("same-session lagging replica preserves newer live records; empty uninitializ
   expect(unchanged.afterRecordId).toBe("two");
 });
 
+it("repairs a missing ancestor even when the cursor and head already match", () => {
+  const complete = history("a", ["one", "middle", "three"]);
+  const state = reducer(initialState("a"), {
+    type: "history_loaded",
+    view: { ...complete, records: complete.records.filter((record) => record.id !== "middle") },
+  });
+  const repaired = reducer(state, {
+    type: "history_refreshed",
+    view: complete,
+    epoch: state.historyEpoch,
+  });
+
+  expect([...repaired.records.keys()]).toEqual(["one", "middle", "three"]);
+  expect(repaired.records.get("one")).toBe(state.records.get("one"));
+  expect(repaired.records.get("three")).toBe(state.records.get("three"));
+});
+
+it("ignores repeated authoritative snapshots without rebuilding transcript state", () => {
+  const state = reducer(initialState("a"), { type: "history_loaded", view: history() });
+  const refreshed = reducer(state, {
+    type: "history_refreshed",
+    view: history(),
+    epoch: state.historyEpoch,
+  });
+
+  expect(refreshed).toBe(state);
+  expect(refreshed.records).toBe(state.records);
+});
+
+it("applies repair side effects without rebuilding an unchanged transcript", () => {
+  const state = reducer(initialState("a"), { type: "history_loaded", view: history() });
+  const withTransientState = {
+    ...state,
+    liveBlocks: new Map([
+      [
+        "live",
+        {
+          blockId: "live",
+          blockType: "text" as const,
+          text: "partial",
+          revision: 1,
+        },
+      ],
+    ]),
+    historyError: { type: "network" as const, message: "temporary" },
+  };
+  const repaired = reducer(withTransientState, {
+    type: "history_refreshed",
+    view: history(),
+    epoch: state.historyEpoch,
+  });
+
+  expect(repaired).not.toBe(withTransientState);
+  expect(repaired.records).toBe(state.records);
+  expect(repaired.liveBlocks.size).toBe(0);
+  expect(repaired.historyError).toBeNull();
+});
+
+it("updates changed authoritative history while retaining immutable record identities", () => {
+  const state = reducer(initialState("a"), { type: "history_loaded", view: history() });
+  const existing = state.records.get("one");
+  const refreshed = reducer(state, {
+    type: "history_refreshed",
+    view: history("a", ["one", "two"]),
+    epoch: state.historyEpoch,
+  });
+
+  expect(refreshed).not.toBe(state);
+  expect([...refreshed.records.keys()]).toEqual(["one", "two"]);
+  expect(refreshed.records.get("one")).toBe(existing);
+});
+
 it("a confirmed new replica session replaces rather than concatenates histories", () => {
   const state = reducer(initialState("a"), { type: "history_loaded", view: history() });
   const changed = reducer(state, {

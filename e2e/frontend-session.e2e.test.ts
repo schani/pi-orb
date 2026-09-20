@@ -211,6 +211,24 @@ describe("frontend-only browser behavior", () => {
                   'new WebSocket(terminalUrl(orbId) + (gate ? "?ready=" + gate.ordinal : ""), TERMINAL_SUBPROTOCOL)',
                 );
             }
+            if (id.endsWith("/pages/OrbPage.tsx")) {
+              const historyAnchor = /case\s*["']history_refreshed["']\s*:\s*\{/;
+              const inboxAnchor =
+                /setQueuedMessages\(\s*\(current\)\s*=>\s*reuseQueuedMessages\(current,\s*awaiting\)\s*\);/;
+              if (!historyAnchor.test(code) || !inboxAnchor.test(code)) {
+                throw new Error(`refresh checkpoint anchor not found in ${id}`);
+              }
+              return code
+                .replace(
+                  historyAnchor,
+                  (match) =>
+                    `${match} Reflect.set(globalThis, "__historyRefreshes", (Reflect.get(globalThis, "__historyRefreshes") ?? 0) + 1);`,
+                )
+                .replace(
+                  inboxAnchor,
+                  'setQueuedMessages((current) => { Reflect.set(globalThis, "__inboxRefreshes", (Reflect.get(globalThis, "__inboxRefreshes") ?? 0) + 1); return reuseQueuedMessages(current, awaiting); });',
+                );
+            }
             if (!id.endsWith("/components/HistoryView.tsx")) return;
             // Count function executions, not DOM mutations: React can reparse the
             // entire transcript without changing a single DOM node.
@@ -2850,6 +2868,63 @@ describe("frontend-only browser behavior", () => {
       await expectPage(composer).toHaveValue("keep focus here");
       expectPage(opens).toBe(recoveredOpens);
       expectPage([...active]).toEqual([4]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("does not reparse unchanged long history during inbox repair polling", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.route("**/api/v1/orbs/frontend-long-history", async (route) => {
+        const response = await route.fetch();
+        const orb = await response.json();
+        await route.fulfill({ response, json: { ...orb, state: "stopped" } });
+      });
+      await page.route("**/api/v1/orbs/frontend-long-history/history", async (route) => {
+        await route.fulfill({ response: await route.fetch() });
+      });
+      await page.route("**/api/v1/orbs/frontend-long-history/messages", async (route) => {
+        await route.fulfill({
+          json: {
+            items: [
+              {
+                id: "delivered-awaiting-history",
+                orbId: "frontend-long-history",
+                content: [{ type: "text", text: "Delivered provisional" }],
+                status: "delivered",
+                createdAt: "2026-09-18T00:00:00.000Z",
+                updatedAt: "2026-09-18T00:00:01.000Z",
+              },
+            ],
+          },
+        });
+      });
+      await page.goto(`${origin}/#/orbs/frontend-long-history`);
+      await expectPage(page.locator(".history")).toContainText("Review 100");
+      await expectPage(page.locator(".history")).toContainText("Delivered provisional");
+      await expectPage
+        .poll(() => page.evaluate(() => Reflect.get(globalThis, "__historyRefreshes") ?? 0))
+        .toBeGreaterThan(0);
+      await expectPage
+        .poll(() => page.evaluate(() => Reflect.get(globalThis, "__inboxRefreshes") ?? 0))
+        .toBeGreaterThan(0);
+      const before = await page.evaluate(() => ({
+        historyRenders: Reflect.get(globalThis, "__historyRenders") as number,
+        historyRefreshes: Reflect.get(globalThis, "__historyRefreshes") as number,
+        inboxRefreshes: Reflect.get(globalThis, "__inboxRefreshes") as number,
+      }));
+
+      await expectPage
+        .poll(() => page.evaluate(() => Reflect.get(globalThis, "__historyRefreshes") ?? 0))
+        .toBeGreaterThan(before.historyRefreshes);
+      await expectPage
+        .poll(() => page.evaluate(() => Reflect.get(globalThis, "__inboxRefreshes") ?? 0))
+        .toBeGreaterThan(before.inboxRefreshes);
+
+      expectPage(await page.evaluate(() => Reflect.get(globalThis, "__historyRenders"))).toBe(
+        before.historyRenders,
+      );
     } finally {
       await page.close();
     }

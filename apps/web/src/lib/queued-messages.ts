@@ -58,6 +58,35 @@ export function messagesAwaitingHistory(
   return items.filter((message) => message.status !== "delivered" || !represented.has(message.id));
 }
 
+function sameMessageRevision(left: OrbMessageView, right: OrbMessageView): boolean {
+  return (
+    left.id === right.id &&
+    left.orbId === right.orbId &&
+    left.status === right.status &&
+    left.delivery === right.delivery &&
+    left.operationId === right.operationId &&
+    left.error === right.error &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt
+  );
+}
+
+/** Reuses unchanged inbox row revisions and the list when a fresh poll changes nothing. */
+export function reuseQueuedMessages(
+  current: OrbMessageView[],
+  next: readonly OrbMessageView[],
+): OrbMessageView[] {
+  const currentById = new Map(current.map((message) => [message.id, message]));
+  const reused = next.map((message) => {
+    const existing = currentById.get(message.id);
+    return existing !== undefined && sameMessageRevision(existing, message) ? existing : message;
+  });
+  return reused.length === current.length &&
+    reused.every((message, index) => message === current[index])
+    ? current
+    : reused;
+}
+
 export function hasDeliveredMessageAwaitingHistory(
   items: readonly OrbMessageView[],
   records: readonly HistoryRecord[],

@@ -11,6 +11,7 @@ import {
   createMutationEpoch,
   hasDeliveredMessageAwaitingHistory,
   messagesAwaitingHistory,
+  reuseQueuedMessages,
   withQueuedMessage,
 } from "./queued-messages.ts";
 
@@ -166,6 +167,35 @@ describe("queued message list updates", () => {
     };
 
     expect(messagesAwaitingHistory([delivered], [legacy])).toEqual([delivered]);
+  });
+
+  it("reuses an unchanged polled list and updates changed message metadata", () => {
+    const current = [message("a", "delivered")];
+    const unchanged = reuseQueuedMessages(current, [message("a", "delivered")]);
+    expect(unchanged).toBe(current);
+    expect(unchanged[0]).toBe(current[0]);
+
+    const rich: OrbMessageView = {
+      ...message("system", "delivered"),
+      content: [{ type: "image", mediaType: "image/png", data: "aW1hZ2U=" }],
+      system: { kind: "sleep_wake", sleepUntil: "2026-08-10T01:00:00.000Z" },
+    };
+    expect(
+      reuseQueuedMessages(
+        [rich],
+        [
+          {
+            ...rich,
+            content: [{ type: "image", mediaType: "image/png", data: "aW1hZ2U=" }],
+            system: { kind: "sleep_wake", sleepUntil: "2026-08-10T01:00:00.000Z" },
+          },
+        ],
+      )[0],
+    ).toBe(rich);
+
+    const changed = reuseQueuedMessages(current, [message("a", "failed")]);
+    expect(changed).not.toBe(current);
+    expect(changed[0]?.status).toBe("failed");
   });
 
   it("replaces an existing entry instead of duplicating it", () => {
