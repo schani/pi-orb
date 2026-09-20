@@ -2,7 +2,9 @@ import type { AgentSettingsEvent, SettingsAction } from "@pi-orb/protocol";
 import {
   type ClipboardEvent,
   type KeyboardEvent,
+  type Ref,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
@@ -31,7 +33,12 @@ export interface ComposerImage {
   data: string;
 }
 
+export interface ComposerHandle {
+  focus: () => void;
+}
+
 interface ComposerProps {
+  ref?: Ref<ComposerHandle>;
   text: string;
   mode: ComposerMode;
   onValueChange: (text: string, mode: ComposerMode) => void;
@@ -56,6 +63,7 @@ interface ComposerProps {
 }
 
 export function Composer({
+  ref,
   text,
   mode,
   onValueChange,
@@ -92,6 +100,16 @@ export function Composer({
   const padRef = useRef<HTMLButtonElement>(null);
   const awaitingClear = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => {
+        if (phone) setExpanded(true);
+        inputRef.current?.focus({ preventScroll: true });
+      },
+    }),
+    [phone],
+  );
   const commandPickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isCommand || (phone && !expanded)) return;

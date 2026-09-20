@@ -61,7 +61,15 @@ function copySelection(event: React.ClipboardEvent<HTMLDivElement>): void {
 }
 
 /** Render directly in the orb header's shared action row. */
-export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolean }) {
+export function OrbTerminal({
+  orbId,
+  enabled,
+  onClose,
+}: {
+  orbId: string;
+  enabled: boolean;
+  onClose: () => void;
+}) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [started, setStarted] = useState(false);
   const [open, setOpen] = useState(false);
@@ -82,7 +90,6 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
   const [error, setError] = useState<string | null>(null);
   const { ref, write, focus } = useTerminal();
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const readyRef = useRef(false);
   const openRef = useRef(open);
@@ -188,16 +195,13 @@ export function OrbTerminal({ orbId, enabled }: { orbId: string; enabled: boolea
     if (openRef.current) {
       openRef.current = false;
       setOpen(false);
-      const previous = returnFocusRef.current;
-      (previous?.isConnected ? previous : buttonRef.current)?.focus({ preventScroll: true });
+      onClose();
     } else {
-      returnFocusRef.current =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null;
       openRef.current = true;
       setStarted(true);
       setOpen(true);
     }
-  }, []);
+  }, [onClose]);
 
   useEffect(() => {
     if (!enabled) return;

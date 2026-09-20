@@ -21,7 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Composer, type ComposerImage } from "../components/Composer.tsx";
+import { Composer, type ComposerHandle, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
 import { HostedFiles } from "../components/HostedFiles.tsx";
@@ -681,6 +681,7 @@ function OrbConversation({
   projectName: string | null;
 }) {
   const orbId = initial.orbId;
+  const composerRef = useRef<ComposerHandle>(null);
   const phone = usePhoneLayout();
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollContentRef = useRef<HTMLDivElement>(null);
@@ -1404,7 +1405,11 @@ function OrbConversation({
             </button>
           </div>
           <div className="orb-header-actions">
-            <OrbTerminal orbId={orbId} enabled={orb?.state === "running"} />
+            <OrbTerminal
+              orbId={orbId}
+              enabled={orb?.state === "running"}
+              onClose={() => composerRef.current?.focus()}
+            />
             {uploads.button}
             {canStart && (
               <button
@@ -1595,6 +1600,7 @@ function OrbConversation({
       </div>
       {orb?.state !== "archived" && orb?.state !== "archiving" && (
         <Composer
+          ref={composerRef}
           settings={settingsAvailable ? state.settings : null}
           settingsDisabled={settingsDisabled}
           settingsPending={state.pendingRequest?.kind === "settings"}

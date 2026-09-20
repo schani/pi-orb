@@ -2432,6 +2432,51 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it.each([1440, 390])("focuses the composer after terminal closure at %ipx", async (width) => {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    try {
+      await gotoFrontendFixture(page, `${origin}/${ORB_HASH}`);
+      const composer = page.locator(".composer");
+      if (width < 600) await composer.getByRole("button", { name: "Write message" }).click();
+      const input = composer.getByRole("textbox");
+      await input.fill("!retained shell draft");
+      await expectPage(input).toHaveAttribute("aria-label", "Run a shell command");
+      const panel = page.getByRole("complementary", { name: "Interactive terminal" });
+      for (const shortcut of [false, true]) {
+        if (width < 600) {
+          await composer.getByRole("button", { name: "Fold editor" }).click();
+          await page.getByRole("button", { name: "Orb actions", exact: true }).click();
+        }
+        const open = page.getByRole("button", { name: "Open terminal", exact: true });
+        // Both entry paths begin outside the composer.
+        await open.focus();
+        if (shortcut) await page.keyboard.press("Meta+j");
+        else await open.click();
+        await expectPage(panel).toContainText("frontend fixture terminal");
+        await expectPage(panel.locator(".orb-terminal-loading")).toHaveCount(0);
+        const emulator = await panel.locator(".wterm").elementHandle();
+        await page.keyboard.type("FOCUS_SESSION");
+        await expectPage(panel).toContainText("FOCUS_SESSION");
+        if (shortcut) await page.keyboard.press("Meta+j");
+        else await page.getByRole("button", { name: "Hide terminal", exact: true }).click();
+        await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
+        await expectPage(input).toBeFocused();
+        await expectPage(input).toHaveValue("retained shell draft");
+        await expectPage(input).toHaveAttribute("aria-label", "Run a shell command");
+        if (width < 600) await expectPage(composer).toHaveAttribute("data-expanded", "true");
+        await page.keyboard.press("Meta+j");
+        await expectPage(panel).toContainText("FOCUS_SESSION");
+        expectPage(await emulator?.evaluate((node) => node.isConnected)).toBe(true);
+        await page.keyboard.press("Meta+j");
+        await expectPage(input).toBeFocused();
+        if (width < 600)
+          await page.getByRole("button", { name: "Orb actions", exact: true }).click();
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   it("toggles a headerless terminal shade without moving history or replacing its session", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const controls: { type: string; cols: number; rows: number }[] = [];
