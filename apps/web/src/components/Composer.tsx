@@ -151,7 +151,17 @@ export function Composer({
   };
 
   useEffect(() => {
-    if (!phone) inputRef.current?.focus({ preventScroll: true });
+    if (phone) return;
+    const focus = () => {
+      if (
+        document.visibilityState === "visible" &&
+        document.querySelector('[role="dialog"]') === null
+      )
+        inputRef.current?.focus({ preventScroll: true });
+    };
+    focus();
+    document.addEventListener("visibilitychange", focus);
+    return () => document.removeEventListener("visibilitychange", focus);
   }, [phone]);
 
   useLayoutEffect(() => {

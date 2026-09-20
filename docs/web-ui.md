@@ -1,5 +1,9 @@
 # Web UI
 
+## Orb-tab composer focus (implemented 2026-09-20)
+
+A desktop orb view focuses its message input on arrival and whenever its mounted browser tab becomes visible again. Ordinary rerenders do not move focus. An open dialog retains focus, and phone views keep their collapsed, no-autofocus composer behavior. This is browser-local and adds no telemetry.
+
 ## Tool-returned images in the transcript (inline preview implemented, 2026-09-18)
 
 Tool-returned images belong inside their tool drawer. Image-bearing drawers open by default; closing the drawer hides both images and output, and unrelated rerenders preserve the user's choice. Text-only drawers start closed. This applies to normalized returned image blocks from every tool, not filenames or only `read`. Preserve each image's call/result provenance and result ordering; stopped history renders the same content. Do not imply that the model viewed an image, duplicate it, or expose base64. Missing, expired, or failed image data has an explicit inline unavailable/failed state. The selected treatment retains the existing light-only Signal / Boards language and click-to-enlarge inspection. Question 69 of `docs/open-questions.md` records the selection.

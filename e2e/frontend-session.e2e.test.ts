@@ -119,6 +119,7 @@ describe("frontend-only browser behavior", () => {
   beforeAll(async () => {
     vite = await createServer({
       root: WEB_ROOT,
+      cacheDir: join(WEB_ROOT, "node_modules/.vite-test/frontend-session"),
       configFile: join(WEB_ROOT, "vite.config.ts"),
       mode: "frontend",
       plugins: [
@@ -248,6 +249,37 @@ describe("frontend-only browser behavior", () => {
   afterAll(async () => {
     await browser?.close();
     await vite?.close();
+  });
+
+  it("focuses a mounted desktop orb composer when its browser tab becomes visible", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/${ORB_HASH}`);
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+      await expectPage(composer).toBeFocused();
+
+      const rename = page.getByRole("button", { name: "Rename orb", exact: true });
+      await rename.focus();
+      await expectPage(rename).toBeFocused();
+
+      await page.evaluate(() => {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          get: () => Reflect.get(globalThis, "__testVisibilityState"),
+        });
+        Reflect.set(globalThis, "__testVisibilityState", "hidden");
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await expectPage(rename).toBeFocused();
+
+      await page.evaluate(() => {
+        Reflect.set(globalThis, "__testVisibilityState", "visible");
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await expectPage(composer).toBeFocused();
+    } finally {
+      await page.close();
+    }
   });
 
   it("renders an inert preparing-login notice before the device challenge arrives", async () => {
