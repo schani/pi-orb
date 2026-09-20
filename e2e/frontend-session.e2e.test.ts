@@ -281,18 +281,19 @@ describe("frontend-only browser behavior", () => {
       await expectPage(rename).toBeFocused();
 
       await page.evaluate(() => {
-        Object.defineProperty(document, "visibilityState", {
+        const pageDocument = Reflect.get(globalThis, "document");
+        Object.defineProperty(pageDocument, "visibilityState", {
           configurable: true,
           get: () => Reflect.get(globalThis, "__testVisibilityState"),
         });
         Reflect.set(globalThis, "__testVisibilityState", "hidden");
-        document.dispatchEvent(new Event("visibilitychange"));
+        pageDocument.dispatchEvent(new Event("visibilitychange"));
       });
       await expectPage(rename).toBeFocused();
 
       await page.evaluate(() => {
         Reflect.set(globalThis, "__testVisibilityState", "visible");
-        document.dispatchEvent(new Event("visibilitychange"));
+        Reflect.get(globalThis, "document").dispatchEvent(new Event("visibilitychange"));
       });
       await expectPage(composer).toBeFocused();
     } finally {
@@ -1990,6 +1991,18 @@ describe("frontend-only browser behavior", () => {
       viewport: { width, height: 844 },
       ...(width < 600 ? { isMobile: true, hasTouch: true } : {}),
     });
+    let releaseInstructions = () => {};
+    const instructionsGate = new Promise<void>((resolve) => {
+      releaseInstructions = resolve;
+    });
+    await page.route("**/api/v1/projects/frontend-fixture-project/instructions", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      await instructionsGate;
+      await route.continue();
+    });
     try {
       await page.goto(`${origin}/`);
       const newProject = page.locator(".new-project");
@@ -2071,11 +2084,25 @@ describe("frontend-only browser behavior", () => {
       expectPage(nameGeometry?.fieldWidth).toBeCloseTo(nameGeometry?.formWidth ?? 0, 5);
       expectPage(nameGeometry?.labelWidth).toBeCloseTo(nameGeometry?.formWidth ?? 0, 5);
 
-      await config.getByRole("tab", { name: "Instructions" }).click();
+      const instructionsRequest = page.waitForRequest(
+        (request) =>
+          request.method() === "GET" &&
+          request.url() === `${origin}/api/v1/projects/frontend-fixture-project/instructions`,
+      );
+      await Promise.all([
+        instructionsRequest,
+        config.getByRole("tab", { name: "Instructions" }).click(),
+      ]);
       const instructions = config.getByRole("textbox", {
         name: "Additional project instructions",
       });
+      await expectPage(instructions).toBeDisabled();
       await instructions.focus();
+      await expectPage(instructions).not.toBeFocused();
+      releaseInstructions();
+      await expectPage(instructions).toBeEnabled();
+      await instructions.focus();
+      await expectPage(instructions).toBeFocused();
       const instructionsGeometry = await instructions.evaluate((element) => {
         const frame = element.closest(".text-field-frame");
         const view = element.ownerDocument.defaultView;
@@ -2187,6 +2214,7 @@ describe("frontend-only browser behavior", () => {
       expectPage(personalBounds?.cropTop).toBeGreaterThan(personalBounds?.dialogTop ?? 0);
       expectPage(personalBounds?.cropBottom).toBeLessThan(personalBounds?.dialogBottom ?? 844);
     } finally {
+      releaseInstructions();
       await page.close();
     }
   });

@@ -1,5 +1,9 @@
 # Testing strategy
 
+## Project-instructions focus readiness (2026-09-20)
+
+Browser assertions for focus-dependent styles await both enabled and focused state; native focus on a disabled field is a no-op, and later enabling does not restore focus. The form-spacing regression owns and releases a held instructions read while proving both states. All 97 frontend E2Es and 323 web unit tests pass; typecheck and lint pass with three existing warnings and one informational diagnostic. Cause and controlled reproduction: `docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md`.
+
 ## Orb self-deletion qualification (2026-09-19)
 
 `docs/orb-deletion.md` records the contract and tests-first coverage: transactional caller fencing, competing requests, stale-authority races, busy deletion after lost acknowledgement and control-plane restart, CLI transport errors, and a real agent invoking `pi-orb delete`. The E2E verifies complete owned-resource removal and sibling isolation without requiring CLI output or a final reply; archive's finish-the-turn regression remains intact.
