@@ -15,7 +15,7 @@ export interface ImageBuildError {
   readonly stage: ImageBuildStage;
   readonly message: string;
   readonly retryable?: true;
-  readonly reason?: "ssh_host_key_mismatch";
+  readonly reason?: "ssh_host_key_mismatch" | "seal_guard_failed";
 }
 
 export interface ImageBuildProgress {

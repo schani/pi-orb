@@ -7,6 +7,10 @@ import { describe, expect, it } from "vitest";
 
 const sealPath = new URL("../../../infra/native-vm/seal.sh", import.meta.url);
 const barrierPath = new URL("../../../infra/native-vm/wait-google-host-keys.sh", import.meta.url);
+const graphVerifierPath = new URL(
+  "../../../infra/native-vm/boot-graph-verifier.sh",
+  import.meta.url,
+);
 const verifierPath = new URL(
   "../../../infra/native-vm/verify-google-host-key-owner.sh",
   import.meta.url,
@@ -142,8 +146,9 @@ describe("native image SSH host-key boot contract", () => {
     expect(barrier).toContain("/etc/google_instance_id");
     expect(seal).toMatch(/Requires=pi-orb-host-key-ready\.service/);
     expect(seal).toMatch(/After=pi-orb-host-key-ready\.service/);
-    expect(seal).toContain(
-      "systemd-analyze --man=no verify pi-orb-host-key-ready.service ssh.service",
+    expect(seal).toContain("boot-graph-verifier.sh pi-orb-host-key-ready.service ssh.service");
+    expect(seal.indexOf('systemctl stop "$unit"')).toBeLessThan(
+      seal.indexOf("install -m755 /app/infra/native-vm/wait-google-host-keys.sh"),
     );
   });
 
@@ -159,8 +164,11 @@ describe("native image SSH host-key boot contract", () => {
         join(bin, "systemctl"),
         `#!/bin/bash
 case "$*" in
+  *'sshd.service -p Id --value') printf %s "\${SSHD_ID-\${SSH_ID:-ssh.service}}";;
+  *'ssh.service -p Id --value') printf %s "\${SSH_ID:-ssh.service}";;
+  *'-p Id --value') set -- $*; printf %s "$3";;
   *'-p Type --value') printf %s notify;;
-  *'-p Before --value') printf %s "\${BEFORE:-ssh.service sshd.service}";;
+  *'-p Before --value') printf %s "\${BEFORE-ssh.service}";;
   *'-p ExecStart --value') printf %s "\${EXEC_START:-{ path=/usr/bin/google_guest_agent_manager ; argv[]=/usr/bin/google_guest_agent_manager ; }}";;
   'is-enabled google-guest-agent-manager.service') printf %s enabled;;
   'is-enabled google-guest-agent.service') printf %s disabled;;
@@ -174,10 +182,58 @@ esac
           env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
         });
       await expect(run()).resolves.toBeDefined();
-      await expect(run({ BEFORE: "ssh.service" })).rejects.toMatchObject({ code: 1 });
+      await expect(run({ BEFORE: "ssh.service sshd.service" })).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("PI_ORB_SEAL_GUARD_FAILED=google_manager_before_ssh"),
+      });
+      for (const env of [{ BEFORE: "" }, { BEFORE: "network.target" }])
+        await expect(run(env)).rejects.toMatchObject({
+          code: 1,
+          stderr: expect.stringContaining("PI_ORB_SEAL_GUARD_FAILED=google_manager_before_ssh"),
+        });
+      for (const env of [{ SSHD_ID: "sshd.service" }, { SSHD_ID: "" }])
+        await expect(run(env)).rejects.toMatchObject({
+          code: 1,
+          stderr: expect.stringContaining("PI_ORB_SEAL_GUARD_FAILED=google_ssh_canonical_id"),
+        });
       await expect(
         run({ EXEC_START: "{ path=/usr/bin/overridden ; argv[]=/usr/bin/overridden ; }" }),
-      ).rejects.toMatchObject({ code: 1 });
+      ).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringContaining("PI_ORB_SEAL_GUARD_FAILED=google_manager_exec"),
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["successful graph", "", 0, undefined],
+    ["reported cycle", "ordering cycle found", 0, "boot_graph_ordering_cycle"],
+    ["analyzer failure", "invalid unit", 1, "boot_graph_verify"],
+  ])("checks %s", async (_name, output, status, failureCode) => {
+    const root = await mkdtemp(join(tmpdir(), "pi-orb-graph-test-"));
+    try {
+      const analyzer = join(root, "systemd-analyze");
+      await writeFile(
+        analyzer,
+        `#!/bin/bash\nprintf '%s\\n' "\${GRAPH_OUTPUT}"\nexit \${GRAPH_STATUS}\n`,
+        { mode: 0o755 },
+      );
+      const run = execute(graphVerifierPath.pathname, ["multi-user.target"], {
+        env: {
+          ...process.env,
+          PATH: `${root}:${process.env.PATH}`,
+          GRAPH_OUTPUT: output,
+          GRAPH_STATUS: String(status),
+        },
+      });
+      if (failureCode === undefined) await expect(run).resolves.toBeDefined();
+      else
+        await expect(run).rejects.toMatchObject({
+          code: 1,
+          stderr: expect.stringContaining(`PI_ORB_SEAL_GUARD_FAILED=${failureCode}`),
+        });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

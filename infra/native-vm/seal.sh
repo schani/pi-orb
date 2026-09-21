@@ -1,15 +1,25 @@
 #!/bin/bash
 # Run after collecting builder evidence, immediately before stopping for capture.
 set -euo pipefail
+trap 'status=$?; printf "PI_ORB_SEAL_FAILED=phase=seal,line=%s,status=%s\n" "$LINENO" "$status" >&2' ERR
+fail() { printf 'PI_ORB_SEAL_GUARD_FAILED=%s\n' "$1" >&2; exit 1; }
 systemctl stop docker.service docker.socket containerd.service tailscaled.service
 # Retain the administrative account, never its credentials. It is separate from
 # the UID-2000 runtime identity and can receive new instance-scoped SSH keys.
-test "$(id -u pi-orb-build)" != 2000
-test "$(getent passwd pi-orb-build | cut -d: -f6)" = /home/pi-orb-build
+[ "$(id -u pi-orb-build)" != 2000 ] || fail build_admin_uid
+[ "$(getent passwd pi-orb-build | cut -d: -f6)" = /home/pi-orb-build ] || fail build_admin_home
 usermod --lock pi-orb-build
 # Pin Google's host-key owner to the inspected package and effective unit.
 # The readiness barrier independently verifies the resulting keys.
 /app/infra/native-vm/verify-google-host-key-owner.sh
+
+# Stop reconciliation before installing the new Requires graph: once installed,
+# stopping the manager can propagate to SSH through the readiness unit.
+for unit in google-guest-agent.service google-guest-agent-manager.service google-guest-compat-manager.service; do
+  if systemctl cat "$unit" >/dev/null 2>&1; then
+    systemctl stop "$unit"
+  fi
+done
 
 install -m755 /app/infra/native-vm/wait-google-host-keys.sh /usr/local/sbin/pi-orb-wait-google-host-keys
 cat >/etc/systemd/system/pi-orb-host-key-ready.service <<'EOF'
@@ -30,31 +40,18 @@ systemctl enable pi-orb-host-key-ready.service
 mkdir -p /etc/systemd/system/ssh.service.d
 printf '[Unit]\nRequires=pi-orb-host-key-ready.service\nAfter=pi-orb-host-key-ready.service\n' >/etc/systemd/system/ssh.service.d/host-keys.conf
 systemctl daemon-reload
-if ! boot_graph=$(LC_ALL=C systemd-analyze --man=no verify pi-orb-host-key-ready.service ssh.service 2>&1); then
-  printf '%s\n' "$boot_graph" >&2
-  exit 1
-fi
-printf '%s\n' "$boot_graph"
-! grep -q 'ordering cycle' <<<"$boot_graph"
+/app/infra/native-vm/boot-graph-verifier.sh pi-orb-host-key-ready.service ssh.service
 
-# Fence guest-account reconciliation before deleting authorized keys. Otherwise
-# the builder's still-present instance metadata can repopulate them at capture.
-# Units stay enabled and restart against the new instance's metadata at boot.
-for unit in google-guest-agent.service google-guest-agent-manager.service google-guest-compat-manager.service; do
-  if systemctl cat "$unit" >/dev/null 2>&1; then
-    systemctl stop "$unit"
-  fi
-done
 rm -rf /root/.ssh /root/.config /root/.cache /root/.npm /root/.docker /root/.gsutil /var/lib/tailscale/*
 rm -f /root/.npmrc /root/.bash_history
 for user_dir in /home/*; do
   rm -rf "$user_dir/.ssh" "$user_dir/.config" "$user_dir/.cache" "$user_dir/.docker" "$user_dir/.gsutil"
   rm -f "$user_dir/.npmrc" "$user_dir/.bash_history"
 done
-test ! -e /home/pi-orb-build/.ssh
+[ ! -e /home/pi-orb-build/.ssh ] || fail build_admin_ssh_present
 case "$(getent shadow pi-orb-build | cut -d: -f2)" in
   '!'*) ;;
-  *) echo 'build administrator password is not locked' >&2; exit 1 ;;
+  *) fail build_admin_password_unlocked ;;
 esac
 # Removing SSH host keys is the final remote operation: collect evidence first.
 rm -f /etc/ssh/ssh_host_* /var/lib/dbus/machine-id

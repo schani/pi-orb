@@ -1,0 +1,5 @@
+{
+  "command": "pre-fix verify-google-host-key-owner.sh with Debian 12 effective Before=ssh.service and ssh.service/sshd.service Id=ssh.service fixture",
+  "exitCode": 1,
+  "stdoutAndStderr": ""
+}

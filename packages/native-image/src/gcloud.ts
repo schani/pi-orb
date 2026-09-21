@@ -17,6 +17,42 @@ import { validationStartupScript } from "./validation-broker.ts";
 
 const execFileAsync = promisify(execFile);
 
+const sealGuardCodes = new Set([
+  "google_package_version",
+  "google_manager_type",
+  "google_manager_enabled",
+  "google_ssh_canonical_id",
+  "google_manager_before_ssh",
+  "google_manager_exec",
+  "google_classic_disabled",
+  "boot_graph_verify",
+  "boot_graph_ordering_cycle",
+  "build_admin_uid",
+  "build_admin_home",
+  "build_admin_ssh_present",
+  "build_admin_password_unlocked",
+]);
+
+function publicSealDiagnostic(stderr: string): {
+  readonly message: string;
+  readonly reason?: "seal_guard_failed";
+} {
+  const guards = [...stderr.matchAll(/^PI_ORB_SEAL_GUARD_FAILED=([^\r\n]+)$/gm)];
+  if (guards.length === 1 && sealGuardCodes.has(guards[0]?.[1] ?? "")) {
+    const code = guards[0]?.[1] as string;
+    return { message: `seal guard failed: ${code}`, reason: "seal_guard_failed" };
+  }
+  const failures = [
+    ...stderr.matchAll(/^PI_ORB_SEAL_FAILED=phase=seal,line=([0-9]+),status=([1-9][0-9]*)$/gm),
+  ];
+  if (guards.length === 0 && failures.length === 1) {
+    return {
+      message: `seal failed: phase seal, line ${failures[0]?.[1]}, status ${failures[0]?.[2]}`,
+    };
+  }
+  return { message: "seal failed; inspect private command log" };
+}
+
 type RunResult = { readonly stdout: string; readonly stderr: string };
 export type CommandRunner = (
   command: string,
@@ -246,6 +282,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           const offered = output.stderr.match(
             /fingerprint for the [^\r\n]+ key sent by the remote host is\s+(SHA256:[A-Za-z0-9+/]+={0,2})/i,
           )?.[1];
+          const sealDiagnostic = stage === "seal" ? publicSealDiagnostic(output.stderr) : undefined;
           outcome = err({
             type: signal.aborted ? "cancelled" : "image_build_failed",
             stage,
@@ -253,8 +290,12 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
               ? baseline === undefined
                 ? "SSH host-key mismatch before a readiness fingerprint was recorded"
                 : `SSH host key changed after readiness (ready ${baseline}${offered === undefined ? "" : `, offered ${offered}`})`
-              : failure.message,
-            ...(hostKeyMismatch ? { reason: "ssh_host_key_mismatch" as const } : {}),
+              : (sealDiagnostic?.message ?? failure.message),
+            ...(hostKeyMismatch
+              ? { reason: "ssh_host_key_mismatch" as const }
+              : sealDiagnostic?.reason === undefined
+                ? {}
+                : { reason: sealDiagnostic.reason }),
           });
         }
         const recorded = await this.commandLogWriter(

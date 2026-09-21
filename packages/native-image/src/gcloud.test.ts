@@ -139,6 +139,52 @@ describe("GCloud native-image adapter", () => {
     }
   });
 
+  it("publishes only allowlisted seal diagnostics while retaining the private log", async () => {
+    const buildInput = await input();
+    const effects = new GcloudImageBuildEffects(async () => {
+      const failure = new Error("command contained --secret=raw") as Error & { stderr: string };
+      failure.stderr = "token=private\nPI_ORB_SEAL_GUARD_FAILED=google_manager_before_ssh\n";
+      throw failure;
+    });
+    const result = await effects.run("seal", "seal", buildInput, new AbortController().signal);
+    expect(result.isErr() && result.error).toMatchObject({
+      reason: "seal_guard_failed",
+      message: "seal guard failed: google_manager_before_ssh",
+    });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(await readFile(`${buildInput.outputDir}/001-seal-gcloud.log`, "utf8")).toContain(
+      "token=private",
+    );
+  });
+
+  it("publishes bounded unexpected seal diagnostics", async () => {
+    const buildInput = await input();
+    const effects = new GcloudImageBuildEffects(async () => {
+      const failure = new Error("sensitive command") as Error & { stderr: string };
+      failure.stderr = "secret=value\nPI_ORB_SEAL_FAILED=phase=seal,line=73,status=2\n";
+      throw failure;
+    });
+    const result = await effects.run("seal", "seal", buildInput, new AbortController().signal);
+    expect(result.isErr() && result.error.message).toBe(
+      "seal failed: phase seal, line 73, status 2",
+    );
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
+  it.each([
+    "PI_ORB_SEAL_GUARD_FAILED=not_allowed\nsecret=value",
+    "PI_ORB_SEAL_GUARD_FAILED=google_manager_before_ssh extra\nsecret=value",
+  ])("fails closed for an unknown seal marker", async (stderr) => {
+    const buildInput = await input();
+    const effects = new GcloudImageBuildEffects(async () => {
+      const failure = new Error("sensitive command") as Error & { stderr: string };
+      failure.stderr = stderr;
+      throw failure;
+    });
+    const result = await effects.run("seal", "seal", buildInput, new AbortController().signal);
+    expect(result.isErr() && result.error.message).toBe("seal failed; inspect private command log");
+  });
+
   it("records one validator host-key fingerprint from readiness through acceptance", async () => {
     const buildInput = await input();
     const commands: string[] = [];
