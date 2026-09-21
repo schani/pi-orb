@@ -1485,11 +1485,10 @@ function OrbConversation({
         {orb?.state === "running" && connected && state.subagents.length > 0 && (
           <SubagentRail agents={state.subagents} />
         )}
+        {uploads.progress}
       </div>
       <div className="orb-transcript-scroll" ref={scrollRef}>
         <div className="orb-transcript-content" ref={scrollContentRef}>
-          {uploads.progress}
-
           {orb?.stateDetail?.type === "discarding_failed_compute" && (
             <OrbNotice>
               Discarding failed compute while preserving the workspace…

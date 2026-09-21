@@ -133,6 +133,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-21-workspace-upload-remote-only.md](docs/postmortems/2026-09-21-workspace-upload-remote-only.md) — six upload chunks completed; the later UI had no local file ownership, but the browser cause remains unproved
 - [docs/postmortems/2026-09-20-composer-typing-stalls.md](docs/postmortems/2026-09-20-composer-typing-stalls.md) — browser-parent cycle collection and independent unchanged-transcript rerenders stalled composer input
 - [docs/postmortems/2026-09-18-image-preview-validation.md](docs/postmortems/2026-09-18-image-preview-validation.md) — mutable-source qualification, subpixel geometry inference, and undrained browser-route teardown failures
 - [docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md](docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md) — hosted blank-shell cause remains unresolved; browser assertions now own their fixture-response readiness

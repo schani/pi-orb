@@ -2325,6 +2325,86 @@ describe("frontend-only browser behavior", () => {
     await page.close();
   });
 
+  it.each([
+    { name: "desktop", viewport: { width: 1280, height: 900 }, phone: false },
+    { name: "phone", viewport: { width: 390, height: 844 }, phone: true },
+  ])(
+    "keeps pending upload progress visible above a scrolled long transcript on $name",
+    async ({ viewport, phone }) => {
+      const page = await browser.newPage({ viewport, isMobile: phone, hasTouch: phone });
+      let releaseChunk = () => {};
+      let chunkArrived = () => {};
+      let transferId = "";
+      const chunkGate = new Promise<void>((resolve) => {
+        releaseChunk = resolve;
+      });
+      const sending = new Promise<void>((resolve) => {
+        chunkArrived = resolve;
+      });
+      await page.route("**/api/v1/orbs/frontend-long-history/uploads", async (route) => {
+        if (route.request().method() === "POST") {
+          const body = route.request().postDataJSON() as { files: { id: string }[] };
+          transferId = body.files[0]?.id ?? "";
+        }
+        await route.continue();
+      });
+      await page.route("**/uploads/*/chunk?*", async (route) => {
+        chunkArrived();
+        await chunkGate;
+        await route.continue();
+      });
+      try {
+        const transfers = page.getByRole("region", { name: "File transfers" });
+        await gotoFrontendHistory(
+          page,
+          `${origin}/#/orbs/frontend-long-history`,
+          "frontend-long-history",
+          phone ? page.getByRole("button", { name: "Write message" }) : undefined,
+        );
+        const scroller = page.locator(".orb-transcript-scroll");
+        if (phone) {
+          await scroller.evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+          });
+          await page.getByRole("button", { name: "Orb actions" }).click();
+        } else {
+          await page.locator("body").evaluate((body) => {
+            const view = body.ownerDocument.defaultView;
+            view?.scrollTo(0, body.ownerDocument.documentElement.scrollHeight);
+          });
+        }
+        const choosing = page.waitForEvent("filechooser");
+        await page.getByRole("button", { name: "Upload files", exact: true }).click();
+        await (await choosing).setFiles({
+          name: `${phone ? "phone" : "desktop"}-pending.bin`,
+          mimeType: "application/octet-stream",
+          buffer: Buffer.from("held pending"),
+        });
+        await sending;
+        await expectPage(transfers).toContainText("pending.bin");
+        expectPage(
+          await transfers.evaluate((element) =>
+            element.parentElement?.classList.contains("orb-header-stack"),
+          ),
+        ).toBe(true);
+        const box = await transfers.boundingBox();
+        expectPage(box).not.toBeNull();
+        expectPage(box?.y).toBeGreaterThanOrEqual(0);
+        expectPage((box?.y ?? viewport.height) + (box?.height ?? 0)).toBeLessThanOrEqual(
+          viewport.height,
+        );
+      } finally {
+        if (transferId !== "") {
+          await page.request.delete(
+            `${origin}/api/v1/orbs/frontend-long-history/uploads/${transferId}/cancel`,
+          );
+        }
+        releaseChunk();
+        await page.close();
+      }
+    },
+  );
+
   it("sends one message for a multi-file selection, including after one file needs retry", async () => {
     const page = await browser.newPage();
     let batchId = "";
