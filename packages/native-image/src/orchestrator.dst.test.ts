@@ -140,6 +140,9 @@ class SimEffects implements ImageBuildEffects {
   verifyValidationWorkspaceImage(): ResultAsync<void, ImageBuildError> {
     return okAsync(undefined);
   }
+  readValidationHostKeyFingerprint(): ResultAsync<string, ImageBuildError> {
+    return okAsync("SHA256:validator=");
+  }
   readPackageInventory(): ResultAsync<string, ImageBuildError> {
     return okAsync("inventory");
   }

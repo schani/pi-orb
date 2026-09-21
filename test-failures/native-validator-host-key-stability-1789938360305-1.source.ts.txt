@@ -1,0 +1,115 @@
+import { readFile } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
+import { runDst } from "../../../apps/control-plane/src/testkit/sim.ts";
+
+const sealPath = new URL("../../../infra/native-vm/seal.sh", import.meta.url);
+const barrierPath = new URL("../../../infra/native-vm/wait-google-host-keys.sh", import.meta.url);
+
+interface BootContract {
+  readonly customProducer: boolean;
+  readonly googleProducer: boolean;
+  readonly googleCompletionBarrier: boolean;
+}
+
+async function productionContract(): Promise<BootContract> {
+  const seal = await readFile(sealPath, "utf8");
+  const barrier = await readFile(barrierPath, "utf8");
+  return {
+    customProducer: /ssh-keygen\s+-A/.test(seal),
+    googleProducer: /google-guest-agent-manager/.test(seal),
+    googleCompletionBarrier:
+      /pi-orb-host-key-ready\.service/.test(seal) &&
+      /google-guest-agent-manager\.service/.test(seal) &&
+      /google_instance_id/.test(barrier) &&
+      ["ecdsa-sha2-nistp256", "ssh-ed25519", "ssh-rsa"].every((algorithm) =>
+        barrier.includes(algorithm),
+      ),
+  };
+}
+
+describe("native validator first-boot SSH identity (DST)", () => {
+  it("keeps Google's late-published, presented, and readiness-pinned keys equal", async () => {
+    const contract = await productionContract();
+
+    await runDst({ name: "native-validator-host-key-stability", iterations: 50 }, async (sim) => {
+      const currentInstanceId = "validator-instance";
+      let recordedInstanceId = "builder-instance";
+      let earlyReady = false;
+      let customDone = !contract.customProducer;
+      let keyFile: string | undefined;
+      let keypairConsistent = false;
+      let published: string | undefined;
+      let presented: string | undefined;
+      let pinned: string | undefined;
+
+      const result = await sim.runTasks([
+        {
+          name: "manager-early-ready",
+          f: async (task) => {
+            await task.checkpoint("google", "manager-early-initialization");
+            earlyReady = true;
+          },
+        },
+        {
+          name: "google-late-first-boot",
+          f: async (task) => {
+            while (!earlyReady) await task.checkpoint("google", "wait-early-ready");
+            recordedInstanceId = currentInstanceId;
+            await task.checkpoint("google", "late-write-instance-id-before-platform-setup");
+            if (contract.googleProducer) {
+              keyFile = "google-key";
+              keypairConsistent = true;
+            }
+            await task.checkpoint("google", "late-publish-all-host-key-attributes");
+            if (contract.googleProducer) published = keyFile;
+          },
+        },
+        {
+          name: "oslogin-ssh-restart",
+          f: async (task) => {
+            while (!earlyReady) await task.checkpoint("oslogin", "wait-early-ready");
+            await task.checkpoint("oslogin", "reload-or-restart-ssh");
+            if (presented !== undefined) presented = keyFile;
+          },
+        },
+        ...(contract.customProducer
+          ? [
+              {
+                name: "custom-host-key-generator",
+                f: async (task: { checkpoint(...labels: string[]): Promise<void> }) => {
+                  await task.checkpoint("custom", "generate-host-key");
+                  keyFile ??= "custom-key";
+                  keypairConsistent = true;
+                  customDone = true;
+                },
+              },
+            ]
+          : []),
+        {
+          name: "readiness-and-probe",
+          f: async (task) => {
+            while (!earlyReady || !customDone)
+              await task.checkpoint("validator", "wait-systemd-before-ssh");
+            while (
+              contract.googleCompletionBarrier &&
+              (recordedInstanceId !== currentInstanceId ||
+                !keypairConsistent ||
+                published === undefined ||
+                published !== keyFile)
+            )
+              await task.checkpoint("validator", "wait-google-host-key-effects");
+            await task.checkpoint("validator", "ssh-ready");
+            presented = keyFile;
+            pinned = published ?? presented;
+            await task.checkpoint("validator", "acceptance-probe");
+          },
+        },
+      ]);
+      if (result.isErr()) throw result.error;
+      expect(presented).toBeDefined();
+      expect(published).toBe(presented);
+      expect(pinned).toBe(presented);
+      expect(keyFile).toBe(presented);
+    });
+  });
+});

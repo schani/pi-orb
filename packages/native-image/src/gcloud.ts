@@ -156,6 +156,7 @@ export interface CleanupTiming {
 export class GcloudImageBuildEffects implements ImageBuildEffects {
   private commandNumber = 0;
   private readonly sshDirectoriesOwned = new Set<string>();
+  private readonly validationHostKeyFingerprints = new Map<string, string>();
   private readonly commandRunner: CommandRunner;
   private readonly cleanupTiming: CleanupTiming;
   private readonly commandLogWriter: CommandLogWriter;
@@ -238,10 +239,22 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             stdout: failure.stdout ?? "",
             stderr: failure.stderr ?? "",
           };
+          const hostKeyMismatch =
+            output.stderr.includes("REMOTE HOST IDENTIFICATION HAS CHANGED") ||
+            failure.message.includes("REMOTE HOST IDENTIFICATION HAS CHANGED");
+          const baseline = this.validationHostKeyFingerprints.get(input.operationId);
+          const offered = output.stderr.match(
+            /fingerprint for the [^\r\n]+ key sent by the remote host is\s+(SHA256:[A-Za-z0-9+/]+={0,2})/i,
+          )?.[1];
           outcome = err({
             type: signal.aborted ? "cancelled" : "image_build_failed",
             stage,
-            message: failure.message,
+            message: hostKeyMismatch
+              ? baseline === undefined
+                ? "SSH host-key mismatch before a readiness fingerprint was recorded"
+                : `SSH host key changed after readiness (ready ${baseline}${offered === undefined ? "" : `, offered ${offered}`})`
+              : failure.message,
+            ...(hostKeyMismatch ? { reason: "ssh_host_key_mismatch" as const } : {}),
           });
         }
         const recorded = await this.commandLogWriter(
@@ -598,19 +611,70 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
           .map(() => undefined);
       }
       case "validate:ready":
-        return this.ssh(input, stage, validator, "true", signal)
-          .map(() => undefined)
-          .mapErr((failure) => ({ ...failure, retryable: true as const }));
+        return this.ssh(
+          input,
+          stage,
+          validator,
+          "printf 'PI_ORB_HOST_KEY_FINGERPRINT='; ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}'",
+          signal,
+        )
+          .andThen((result) => {
+            const fingerprint = result.stdout.match(
+              /(?:^|\n)PI_ORB_HOST_KEY_FINGERPRINT=(SHA256:[A-Za-z0-9+/]+={0,2})(?:\n|$)/,
+            )?.[1];
+            if (fingerprint === undefined)
+              return errAsync<void, ImageBuildError>({
+                type: "image_build_failed",
+                stage,
+                message: "validator did not report its ED25519 host-key fingerprint",
+              });
+            this.validationHostKeyFingerprints.set(input.operationId, fingerprint);
+            return okAsync<void, ImageBuildError>(undefined);
+          })
+          .mapErr((failure) =>
+            failure.reason === "ssh_host_key_mismatch"
+              ? failure
+              : { ...failure, retryable: true as const },
+          );
       case "validate:probe":
         return this.ssh(
           input,
           stage,
           validator,
-          `set -eu; test "$(cat /opt/pi-orb/image-version)" = '${input.version}'; test ! -e /run/pi-orb-validation-broker-unrecognized; sudo /opt/pi-orb/acceptance.sh; test ! -e /run/pi-orb-validation-broker-unrecognized`,
+          `set -eu; test "$(cat /opt/pi-orb/image-version)" = '${input.version}'; test ! -e /run/pi-orb-validation-broker-unrecognized; sudo /opt/pi-orb/acceptance.sh; test ! -e /run/pi-orb-validation-broker-unrecognized; printf 'PI_ORB_HOST_KEY_FINGERPRINT='; ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}'`,
           signal,
         )
-          .map(() => undefined)
-          .mapErr((failure) => ({ ...failure, retryable: true as const }));
+          .andThen((result) => {
+            const fingerprint = result.stdout.match(
+              /(?:^|\n)PI_ORB_HOST_KEY_FINGERPRINT=(SHA256:[A-Za-z0-9+/]+={0,2})(?:\n|$)/,
+            )?.[1];
+            const readyFingerprint = this.validationHostKeyFingerprints.get(input.operationId);
+            if (fingerprint === undefined)
+              return errAsync<void, ImageBuildError>({
+                type: "image_build_failed",
+                stage,
+                message: "validator did not report its ED25519 host-key fingerprint",
+              });
+            if (readyFingerprint === undefined)
+              return errAsync<void, ImageBuildError>({
+                type: "image_build_failed",
+                stage,
+                message: "readiness host-key fingerprint is unavailable",
+              });
+            return fingerprint === readyFingerprint
+              ? okAsync<void, ImageBuildError>(undefined)
+              : errAsync<void, ImageBuildError>({
+                  type: "image_build_failed",
+                  stage,
+                  message: `validator ED25519 host key changed after SSH readiness (ready ${readyFingerprint}, observed ${fingerprint})`,
+                  reason: "ssh_host_key_mismatch",
+                });
+          })
+          .mapErr((failure) =>
+            failure.reason === "ssh_host_key_mismatch"
+              ? failure
+              : { ...failure, retryable: true as const },
+          );
       case "validate:cloud-log":
         return this.gcloud(
           input,
@@ -1290,6 +1354,20 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             message: "validation workspace-image identity changed",
           }),
     );
+  }
+
+  readValidationHostKeyFingerprint(
+    input: ImageBuildInput,
+    _signal: AbortSignal,
+  ): ResultAsync<string, ImageBuildError> {
+    const fingerprint = this.validationHostKeyFingerprints.get(input.operationId);
+    return fingerprint === undefined
+      ? errAsync({
+          type: "image_build_failed",
+          stage: "validate",
+          message: "readiness host-key fingerprint is unavailable",
+        })
+      : okAsync(fingerprint);
   }
 
   readPackageInventory(

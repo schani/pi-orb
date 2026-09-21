@@ -112,7 +112,13 @@ describe("GCloud native-image adapter", () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {
       calls.push(args);
-      return { stdout: "", stderr: "" };
+      return {
+        stdout:
+          args.includes("compute") && args.includes("ssh")
+            ? "PI_ORB_HOST_KEY_FINGERPRINT=SHA256:readyKey=\n"
+            : "",
+        stderr: "",
+      };
     });
     const signal = new AbortController().signal;
     for (const [stage, action] of [
@@ -131,6 +137,82 @@ describe("GCloud native-image adapter", () => {
       expect(args[scp ? 3 : 2]).toMatch(/^pi-orb-build@pi-orb-(builder|validator)-/);
       expect(args).toContain(scp ? "--scp-flag=-oBatchMode=yes" : "--ssh-flag=-oBatchMode=yes");
     }
+  });
+
+  it("records one validator host-key fingerprint from readiness through acceptance", async () => {
+    const buildInput = await input();
+    const commands: string[] = [];
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      commands.push(args.find((arg) => arg.startsWith("--command=")) ?? "");
+      return { stdout: "PI_ORB_HOST_KEY_FINGERPRINT=SHA256:stableKey=\n", stderr: "" };
+    });
+    const signal = new AbortController().signal;
+    expect((await effects.run("validate", "ready", buildInput, signal)).isOk()).toBe(true);
+    expect((await effects.run("validate", "probe", buildInput, signal)).isOk()).toBe(true);
+    expect(commands[0]).toContain("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub");
+    expect(commands[1]).toContain("/opt/pi-orb/acceptance.sh");
+    expect(commands[1]).toContain("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub");
+  });
+
+  it("fails a confirmed validator host-key mismatch without retrying", async () => {
+    const buildInput = await input();
+    let calls = 0;
+    const effects = new GcloudImageBuildEffects(async () => {
+      calls++;
+      if (calls === 1)
+        return { stdout: "PI_ORB_HOST_KEY_FINGERPRINT=SHA256:firstKey=\n", stderr: "" };
+      const failure = new Error("ssh failed") as Error & { stderr: string };
+      failure.stderr =
+        "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\n" +
+        "The fingerprint for the ED25519 key sent by the remote host is\n" +
+        "SHA256:offeredKey=.";
+      throw failure;
+    });
+    const signal = new AbortController().signal;
+    expect((await effects.run("validate", "ready", buildInput, signal)).isOk()).toBe(true);
+    const mismatch = await effects.run("validate", "probe", buildInput, signal);
+    expect(mismatch.isErr() && mismatch.error).toEqual({
+      type: "image_build_failed",
+      stage: "validate",
+      message:
+        "SSH host key changed after readiness (ready SHA256:firstKey=, offered SHA256:offeredKey=)",
+      reason: "ssh_host_key_mismatch",
+    });
+  });
+
+  it("rejects a changed on-guest fingerprint after acceptance", async () => {
+    const buildInput = await input();
+    let calls = 0;
+    const effects = new GcloudImageBuildEffects(async () => ({
+      stdout: `PI_ORB_HOST_KEY_FINGERPRINT=SHA256:${++calls === 1 ? "firstKey" : "secondKey"}=\n`,
+      stderr: "",
+    }));
+    const signal = new AbortController().signal;
+    expect((await effects.run("validate", "ready", buildInput, signal)).isOk()).toBe(true);
+    const mismatch = await effects.run("validate", "probe", buildInput, signal);
+    expect(mismatch.isErr() && mismatch.error).toMatchObject({
+      reason: "ssh_host_key_mismatch",
+      message:
+        "validator ED25519 host key changed after SSH readiness (ready SHA256:firstKey=, observed SHA256:secondKey=)",
+    });
+  });
+
+  it("classifies a missing readiness baseline as an internal validation error", async () => {
+    const effects = new GcloudImageBuildEffects(async () => ({
+      stdout: "PI_ORB_HOST_KEY_FINGERPRINT=SHA256:observedKey=\n",
+      stderr: "",
+    }));
+    const result = await effects.run(
+      "validate",
+      "probe",
+      await input(),
+      new AbortController().signal,
+    );
+    expect(result.isErr() && result.error).toMatchObject({
+      message: "readiness host-key fingerprint is unavailable",
+      retryable: true,
+    });
+    expect(result.isErr() && result.error).not.toHaveProperty("reason");
   });
 
   it("captures the exact image identity from the Compute response", async () => {

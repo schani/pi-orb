@@ -15,9 +15,10 @@ import { describe, expect, it } from "vitest";
 const commit = `6${"a".repeat(39)}`;
 const shortCommit = commit.slice(0, 7);
 const accepted = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   status: "accepted",
   validation: true,
+  validationHostKeyFingerprint: "SHA256:validatorKey=",
   sourceDirty: false,
   project: "test-project",
   sourceCommit: commit,
@@ -54,9 +55,11 @@ describe("native image release manifest", () => {
   it.each([
     { status: "failed" },
     { validation: false },
+    { validationHostKeyFingerprint: undefined },
+    { validationHostKeyFingerprint: "validatorKey" },
     { sourceDirty: true },
     { sourceDirty: undefined },
-    { schemaVersion: 2 },
+    { schemaVersion: 1 },
     { sourceCommit: "b".repeat(40) },
     { project: "other-project" },
     { imageResource: "projects/test-project/global/images/family/pi-orb" },

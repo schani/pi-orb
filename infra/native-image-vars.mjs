@@ -5,9 +5,11 @@ try {
   const [path, commit, project] = process.argv.slice(2);
   const manifest = JSON.parse(readFileSync(path, "utf8"));
   if (
-    manifest.schemaVersion !== 1 ||
+    manifest.schemaVersion !== 2 ||
     manifest.status !== "accepted" ||
     manifest.validation !== true ||
+    typeof manifest.validationHostKeyFingerprint !== "string" ||
+    !/^SHA256:[A-Za-z0-9+/]+={0,2}$/.test(manifest.validationHostKeyFingerprint) ||
     manifest.sourceDirty !== false ||
     manifest.sourceCommit !== commit ||
     !/^[a-f0-9]{40}$/.test(commit) ||

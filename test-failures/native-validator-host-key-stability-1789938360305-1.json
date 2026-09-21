@@ -1,0 +1,61 @@
+{
+  "name": "native-validator-host-key-stability",
+  "iteration": 1,
+  "error": "expected 'google-key' to be 'custom-key' // Object.is equality",
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of manager-early-ready, google-late-first-boot, oslogin-ssh-restart, custom-host-key-generator, readiness-and-probe",
+      "value": 0.6100235744740861
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of manager-early-ready, google-late-first-boot, oslogin-ssh-restart, custom-host-key-generator, readiness-and-probe",
+      "value": 0.7272791230451828
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of manager-early-ready, google-late-first-boot, oslogin-ssh-restart, readiness-and-probe",
+      "value": 0.17632234615861753
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of manager-early-ready, google-late-first-boot, oslogin-ssh-restart, readiness-and-probe",
+      "value": 0.1345115552586691
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of google-late-first-boot, oslogin-ssh-restart, readiness-and-probe",
+      "value": 0.9631190270936196
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of google-late-first-boot, oslogin-ssh-restart, readiness-and-probe",
+      "value": 0.819921615081788
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of google-late-first-boot, oslogin-ssh-restart, readiness-and-probe",
+      "value": 0.9486874145034947
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of google-late-first-boot, oslogin-ssh-restart",
+      "value": 0.4387735516796215
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of google-late-first-boot, oslogin-ssh-restart",
+      "value": 0.6790753823478897
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of google-late-first-boot, oslogin-ssh-restart",
+      "value": 0.5427066494779121
+    }
+  ]
+}

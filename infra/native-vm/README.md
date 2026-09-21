@@ -75,7 +75,7 @@ external command has a numbered log. The accepted `manifest.json` records:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "accepted",
   "validation": true,
   "sourceCommit": "FULL_40_CHARACTER_GIT_SHA",
@@ -86,12 +86,15 @@ external command has a numbered log. The accepted `manifest.json` records:
   "imageResource": "projects/PROJECT/global/images/NAME",
   "imageId": "NUMERIC_GCE_ID",
   "workspaceImageResource": "projects/PROJECT/global/images/NAME",
-  "workspaceImageId": "NUMERIC_GCE_ID"
+  "workspaceImageId": "NUMERIC_GCE_ID",
+  "validationHostKeyFingerprint": "SHA256:BASE64"
 }
 ```
 
 Standalone builds may accept a dirty source snapshot because its exact contents
-remain recorded. Releases reject `sourceDirty: true`.
+remain recorded. Releases reject `sourceDirty: true`. The sanitized validator
+fingerprint is also printed in the build summary retained by GitHub Actions; raw
+SSH output remains only in private command logs.
 
 On failure or interruption, `failure.json`, the source archive, command logs,
 and available serial/journal evidence remain locally. Cleanup checks the unique

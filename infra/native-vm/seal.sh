@@ -7,6 +7,36 @@ systemctl stop docker.service docker.socket containerd.service tailscaled.servic
 test "$(id -u pi-orb-build)" != 2000
 test "$(getent passwd pi-orb-build | cut -d: -f6)" = /home/pi-orb-build
 usermod --lock pi-orb-build
+# Pin Google's host-key owner to the inspected package and effective unit.
+# The readiness barrier independently verifies the resulting keys.
+/app/infra/native-vm/verify-google-host-key-owner.sh
+
+install -m755 /app/infra/native-vm/wait-google-host-keys.sh /usr/local/sbin/pi-orb-wait-google-host-keys
+cat >/etc/systemd/system/pi-orb-host-key-ready.service <<'EOF'
+[Unit]
+Description=Wait for Google-owned SSH host keys
+Requires=google-guest-agent-manager.service
+After=google-guest-agent-manager.service
+Before=ssh.service sshd.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pi-orb-wait-google-host-keys
+TimeoutStartSec=2min
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl enable pi-orb-host-key-ready.service
+mkdir -p /etc/systemd/system/ssh.service.d
+printf '[Unit]\nRequires=pi-orb-host-key-ready.service\nAfter=pi-orb-host-key-ready.service\n' >/etc/systemd/system/ssh.service.d/host-keys.conf
+systemctl daemon-reload
+if ! boot_graph=$(LC_ALL=C systemd-analyze --man=no verify pi-orb-host-key-ready.service ssh.service 2>&1); then
+  printf '%s\n' "$boot_graph" >&2
+  exit 1
+fi
+printf '%s\n' "$boot_graph"
+! grep -q 'ordering cycle' <<<"$boot_graph"
+
 # Fence guest-account reconciliation before deleting authorized keys. Otherwise
 # the builder's still-present instance metadata can repopulate them at capture.
 # Units stay enabled and restart against the new instance's metadata at boot.
@@ -15,19 +45,6 @@ for unit in google-guest-agent.service google-guest-agent-manager.service google
     systemctl stop "$unit"
   fi
 done
-cat >/etc/systemd/system/pi-orb-host-keys.service <<'EOF'
-[Unit]
-Description=Create this instance's SSH host keys
-Before=ssh.service
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/ssh-keygen -A
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl enable pi-orb-host-keys.service
-mkdir -p /etc/systemd/system/ssh.service.d
-printf '[Unit]\nRequires=pi-orb-host-keys.service\nAfter=pi-orb-host-keys.service\n' >/etc/systemd/system/ssh.service.d/host-keys.conf
 rm -rf /root/.ssh /root/.config /root/.cache /root/.npm /root/.docker /root/.gsutil /var/lib/tailscale/*
 rm -f /root/.npmrc /root/.bash_history
 for user_dir in /home/*; do

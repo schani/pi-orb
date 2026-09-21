@@ -103,6 +103,9 @@ async function main(): Promise<void> {
     process.exitCode = result.error.type === "cancelled" ? 130 : 1;
     return;
   }
+  process.stderr.write(
+    `validate: host-key fingerprint ${result.value.validationHostKeyFingerprint}\n`,
+  );
   process.stdout.write(`${result.value.imageResource}\nmanifest: ${outputDir}/manifest.json\n`);
 }
 

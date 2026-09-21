@@ -15,6 +15,7 @@ export interface ImageBuildError {
   readonly stage: ImageBuildStage;
   readonly message: string;
   readonly retryable?: true;
+  readonly reason?: "ssh_host_key_mismatch";
 }
 
 export interface ImageBuildProgress {
@@ -48,7 +49,7 @@ export interface CapturedImage {
 }
 
 export interface ImageBuildManifest {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly status: "accepted";
   readonly operationId: string;
   readonly version: string;
@@ -64,6 +65,7 @@ export interface ImageBuildManifest {
   readonly workspaceImageResource: string;
   readonly workspaceImageId: string;
   readonly validation: true;
+  readonly validationHostKeyFingerprint: string;
   readonly inputInventory: Readonly<Record<string, string>>;
   readonly toolingInputInventory: Readonly<Record<string, string>>;
   readonly packageInventory: string;
@@ -101,6 +103,10 @@ export interface ImageBuildEffects {
     expectedWorkspaceImageId: string,
     signal: AbortSignal,
   ): ResultAsync<void, ImageBuildError>;
+  readValidationHostKeyFingerprint(
+    input: ImageBuildInput,
+    signal: AbortSignal,
+  ): ResultAsync<string, ImageBuildError>;
   wait(
     input: ImageBuildInput,
     stage: ImageBuildStage,
@@ -307,7 +313,7 @@ export async function buildNativeImage(
     );
     if (image !== undefined) {
       manifest = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         status: "accepted",
         operationId: input.operationId,
         version: input.version,
@@ -323,6 +329,7 @@ export async function buildNativeImage(
         workspaceImageResource: (workspaceImage as CapturedImage).resource,
         workspaceImageId: (workspaceImage as CapturedImage).id,
         validation: true,
+        validationHostKeyFingerprint: "",
         inputInventory: input.inputInventory,
         toolingInputInventory: input.toolingInputInventory,
         packageInventory,
@@ -342,6 +349,13 @@ export async function buildNativeImage(
     primaryFailure ??= cancelled("validate");
   if (primaryFailure === undefined && !(await poll("validate", "probe", 60)))
     primaryFailure ??= cancelled("validate");
+  if (primaryFailure === undefined && manifest !== undefined) {
+    const fingerprint = await tracked("validate", "record-host-key", () =>
+      effects.readValidationHostKeyFingerprint(input, signal),
+    );
+    if (fingerprint !== undefined)
+      manifest = { ...manifest, validationHostKeyFingerprint: fingerprint };
+  }
   if (primaryFailure === undefined && !(await poll("validate", "cloud-log", 60)))
     primaryFailure ??= cancelled("validate");
   if (primaryFailure === undefined && signal.aborted) primaryFailure = cancelled("validate");

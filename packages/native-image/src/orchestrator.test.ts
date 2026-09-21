@@ -86,6 +86,9 @@ class FakeEffects implements ImageBuildEffects {
     this.actions.push("validate:verify-workspace-image");
     return okAsync(undefined);
   }
+  readValidationHostKeyFingerprint(): ResultAsync<string, ImageBuildError> {
+    return okAsync("SHA256:validator=");
+  }
   wait(): ResultAsync<void, ImageBuildError> {
     return okAsync(undefined);
   }
@@ -133,6 +136,7 @@ describe("native image build orchestration", () => {
     expect(effects.manifest).toMatchObject({
       status: "accepted",
       validation: true,
+      validationHostKeyFingerprint: "SHA256:validator=",
       baseImageId: "9876",
       imageId: "1234",
       imageResource: "projects/project-a/global/images/runtime-image-a",

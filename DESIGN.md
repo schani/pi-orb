@@ -202,6 +202,7 @@ Reference material:
 - [docs/postmortems/2026-09-09-credential-probe-role-reset.md](docs/postmortems/2026-09-09-credential-probe-role-reset.md) — ambient SQL role targeted the production password; restoration and explicit-target safeguards
 - [docs/postmortems/2026-09-14-idle-stop-admission-race.md](docs/postmortems/2026-09-14-idle-stop-admission-race.md) — forced late child admission exposed a missing runtime fence before idle-stop drain
 - [docs/postmortems/2026-09-16-webkit-cache-readiness.md](docs/postmortems/2026-09-16-webkit-cache-readiness.md) — cold-history readiness assertions require protocol synchronization, not navigation timing
+- [docs/postmortems/2026-09-20-validator-host-key-change.md](docs/postmortems/2026-09-20-validator-host-key-change.md) — two first-boot key owners preceded a same-instance SSH identity rejection
 - [docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md](docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md) — missing Docker parent snapshot blocked four full-slice qualification scenarios; later builds do not clear the failure
 - [docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md](docs/postmortems/2026-09-14-webkit-compositor-validation-crash.md) — native WebKit compositor fault during local qualification; passing isolated probes do not clear it
 - [docs/postmortems/2026-09-09-local-e2e-docker-startup.md](docs/postmortems/2026-09-09-local-e2e-docker-startup.md) — wrong containerd store and interrupted local validation; preserve evidence and owned fixtures
