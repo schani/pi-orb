@@ -12,8 +12,8 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 
 ## Embedding decisions
 
-- Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`. Pi packages use [0.85.1](https://github.com/earendil-works/pi/releases/tag/v0.85.1) for GPT-6 Astra support (decided 2026-09-05).
-- Pi SDK upgrades are routine and may be made whenever needed (user decision 2026-09-08). The pinned version makes validation reproducible; it is not a constraint on new integration designs.
+- Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`. Pi packages use [0.87.1](https://github.com/earendil-works/pi/releases/tag/v0.87.1) for GPT-6 Sol support (upgraded 2026-09-23).
+- Pi SDK upgrades are routine and may be made whenever needed (user decision 2026-09-08). The pinned version makes validation reproducible; it is not a constraint on new integration designs. Its verified `openai-codex` catalog supplies image-capable `gpt-6-luna`; shared naming/summary inference pins that exact catalog model and preserves only the runtime transport override rather than relabeling the active conversation model. Pi 0.87.1 passes providers a normalized transcript context; the subagent qualification stream reconstructs active tools from its system messages rather than reading the former top-level `tools` field. It also starts an extension-queued wake after the current run's `agent_settled`; the adapter samples aggregate readiness in the following microtask, after Pi starts any deferred continuation, avoiding a false idle edge without retaining claimed child outcomes or using a timer.
 - **Production transport evidence (2026-09-16):** persisted `WebSocket closed 1006` errors sampled in two active orbs came from Pi's OpenAI Codex response-stream leg after streaming began, not the browser live socket; each first retry began about two seconds later and continued successfully. The UI preserves both failed and later successful assistant records. Measured rates, exact UTC evidence, transport-policy history, and limits are in `docs/postmortems/2026-09-16-codex-websocket-closures.md`.
 - The orb runtime is a Node.js service that owns the Pi SDK session and exposes a harness-agnostic HTTP/WebSocket protocol.
 - The Pi adapter translates Pi-native persisted session entries into the shared history schema.
@@ -95,7 +95,7 @@ Rejected alternatives:
 
 ## User shell API and persistence
 
-The pinned Pi SDK 0.85.1 exposes the required public API:
+The pinned Pi SDK 0.87.1 exposes the required public API:
 
 ```ts
 session.executeBash(command, onChunk, { excludeFromContext }): Promise<BashResult>;

@@ -1089,14 +1089,16 @@ export class PiOrbAgent {
 
     switch (event.type) {
       case "agent_start": {
-        if (this.idleStopPrepared) {
+        if (this.idleStopPrepared || this.operationOutcome === "aborted") {
           const session = this.session;
           if (session !== null)
             void ResultAsync.fromThrowable(
               () => session.abort(),
               (cause) => ({ message: String(cause) }),
             )().mapErr((error) => {
-              this.health = this.failed("idle_stop_fence_failed", error.message, true);
+              if (this.idleStopPrepared)
+                this.health = this.failed("idle_stop_fence_failed", error.message, true);
+              else this.subagentAdapterFailed(error.message);
               return error;
             });
           break;
@@ -1195,7 +1197,9 @@ export class PiOrbAgent {
       }
       case "agent_settled": {
         if (this.operationKind !== "agent") break;
-        this.maybeFinishAgentOperation();
+        // Pi runs extension settled handlers before notifying subscribers, then
+        // starts any continuation they deferred after this event returns.
+        queueMicrotask(() => this.maybeFinishAgentOperation());
         break;
       }
       default:

@@ -26,14 +26,14 @@ const userMessage = { role: "user" as const, content: "do the thing", timestamp:
 const assistant = (
   content:
     | { type: "text"; text: string }[]
-    | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }[],
+    | { type: "toolCall"; id: string; name: string; arguments: Record<string, string> }[],
   stopReason: "stop" | "toolUse",
 ) => ({
   role: "assistant" as const,
   content,
   api: "openai-responses",
   provider: "openai-codex",
-  model: "gpt-5.6-sol",
+  model: "gpt-6-sol",
   usage: {
     input: 1,
     output: 1,
@@ -83,7 +83,7 @@ describe("Pi session interrupted-turn contract", () => {
   it("a fresh session never resumes", () => {
     const manager = SessionManager.create(dir, sessionDir);
     // What createAgentSession writes for a session it just created.
-    manager.appendModelChange("openai-codex", "gpt-5.6-sol");
+    manager.appendModelChange("openai-codex", "gpt-6-sol");
     manager.appendThinkingLevelChange("high");
 
     expect(detectInterruptedTurn(manager.buildContextEntries())).toEqual({

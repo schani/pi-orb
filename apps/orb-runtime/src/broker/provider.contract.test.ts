@@ -135,10 +135,19 @@ describe("Pi SDK broker provider contract (pinned SDK version)", () => {
     expect(model?.input).toContain("image");
     expect(eligibleCodexModels(catalog).map(({ id }) => id)).toEqual([
       "gpt-6-astra",
-      "gpt-5.6-sol",
+      "gpt-6-sol",
       "gpt-5.6-terra",
-      "gpt-5.6-luna",
+      "gpt-6-luna",
     ]);
+    const luna = runtime.getModel(PROVIDER, "gpt-6-luna");
+    expect(luna).toMatchObject({
+      id: "gpt-6-luna",
+      name: "GPT-6 Luna",
+      provider: PROVIDER,
+      api: "openai-codex-responses",
+    });
+    expect(luna?.input).toContain("image");
+    expect(runtime.getModel(PROVIDER, "gpt-6-terra")).toBeUndefined();
   });
 
   it("login drives the broker and persists only the synthetic refresh marker", async () => {

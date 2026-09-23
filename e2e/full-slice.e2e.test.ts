@@ -1565,7 +1565,7 @@ describe("full slice E2E", () => {
     expect(initialSettings).toBeDefined();
     let earlierSettingsId = "";
     for (const action of [
-      { type: "set_model", model: { provider: "openai-codex", id: "gpt-5.6-sol" } },
+      { type: "set_model", model: { provider: "openai-codex", id: "gpt-6-sol" } },
       { type: "set_thinking", thinkingLevel: "high" },
       { type: "set_thinking", thinkingLevel: "low" },
     ]) {
@@ -1582,7 +1582,7 @@ describe("full slice E2E", () => {
         .filter((frame) => frame.type === "runtime.event" && frame.event.type === "agent_settings")
         .at(-1),
     ).toMatchObject({
-      event: { settings: { model: { id: "gpt-5.6-sol" }, thinkingLevel: "low" }, writable: true },
+      event: { settings: { model: { id: "gpt-6-sol" }, thinkingLevel: "low" }, writable: true },
     });
 
     const replayStart = frames.length;
@@ -1764,7 +1764,7 @@ describe("full slice E2E", () => {
             !JSON.stringify(call.body).includes("PROJECT_E2E_NEXT_BOOT") &&
             JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
             !JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") &&
-            call.body?.model === "gpt-5.6-sol" &&
+            call.body?.model === "gpt-6-sol" &&
             call.body?.reasoning?.effort === "low",
         ),
     ).toBe(true);
@@ -1877,7 +1877,7 @@ describe("full slice E2E", () => {
               JSON.stringify(call.body).includes("PROJECT_E2E_NEXT_BOOT") === (index === 0) &&
               !JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
               JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") === (index === 0) &&
-              call.body?.model === "gpt-5.6-sol" &&
+              call.body?.model === "gpt-6-sol" &&
               call.body?.reasoning?.effort === "low" &&
               call.body?.input?.some(
                 (message: { role?: string; content?: unknown }) =>

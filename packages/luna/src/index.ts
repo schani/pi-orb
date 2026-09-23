@@ -10,7 +10,7 @@ import { complete } from "@earendil-works/pi-ai/compat";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { err, ok, ResultAsync } from "neverthrow";
 
-export const LUNA_MODEL_ID = "gpt-5.6-luna";
+export const LUNA_MODEL_ID = "gpt-6-luna";
 
 export interface LunaCompletionError {
   readonly type: "luna_completion_error";
@@ -24,7 +24,7 @@ export interface LunaCompletionRequest {
   readonly maxTokens: number;
   readonly sessionPrefix: string;
   readonly signal: AbortSignal;
-  /** Runtime callers pass their composed provider model; control-plane callers use the catalog. */
+  /** Runtime callers pass a composed provider model whose transport override must be retained. */
   readonly modelTemplate?: Model<Api>;
   readonly auth: {
     readonly apiKey?: string;
@@ -53,28 +53,33 @@ export function lunaRequestOptions(
   };
 }
 
+export function resolveLunaModel(modelTemplate?: Model<Api>): Model<Api> | undefined {
+  const catalogModel = openaiCodexProvider()
+    .getModels()
+    .find((candidate) => candidate.id === LUNA_MODEL_ID);
+  if (catalogModel === undefined) return undefined;
+  return {
+    ...catalogModel,
+    ...(modelTemplate?.baseUrl !== undefined ? { baseUrl: modelTemplate.baseUrl } : {}),
+  };
+}
+
 export function completeLuna(
   request: LunaCompletionRequest,
 ): ResultAsync<string, LunaCompletionError> {
-  const catalogModel =
-    request.modelTemplate ??
-    openaiCodexProvider()
-      .getModels()
-      .find((candidate) => candidate.id === LUNA_MODEL_ID);
-  if (catalogModel === undefined) {
+  const model = resolveLunaModel(request.modelTemplate);
+  if (model === undefined) {
     return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
       err(failure(`${LUNA_MODEL_ID} is unavailable`)),
     );
   }
-  const model = {
-    ...catalogModel,
-    id: LUNA_MODEL_ID,
-    name: "Luna",
+  const configuredModel = {
+    ...model,
     ...(request.auth.baseUrl !== undefined ? { baseUrl: request.auth.baseUrl } : {}),
   };
   return ResultAsync.fromPromise(
     complete(
-      model,
+      configuredModel,
       {
         systemPrompt: request.systemPrompt,
         messages: [{ role: "user", content: request.prompt, timestamp: request.timestamp }],

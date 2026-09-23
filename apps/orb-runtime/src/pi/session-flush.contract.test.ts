@@ -20,7 +20,7 @@ const assistantMessage = {
   content: [{ type: "text" as const, text: "hi!" }],
   api: "openai-responses",
   provider: "openai-codex",
-  model: "gpt-5.6-sol",
+  model: "gpt-6-sol",
   usage: {
     input: 1,
     output: 1,
@@ -53,7 +53,7 @@ describe("Pi session lazy-flush contract", () => {
 
   it("persists nothing before the first assistant message", () => {
     const manager = SessionManager.create(dir, sessionDir);
-    manager.appendModelChange("openai-codex", "gpt-5.6-sol");
+    manager.appendModelChange("openai-codex", "gpt-6-sol");
     manager.appendThinkingLevelChange("high");
     manager.appendMessage(userMessage);
 
@@ -66,7 +66,7 @@ describe("Pi session lazy-flush contract", () => {
 
   it("the first assistant message flushes the entire session to disk", () => {
     const manager = SessionManager.create(dir, sessionDir);
-    manager.appendModelChange("openai-codex", "gpt-5.6-sol");
+    manager.appendModelChange("openai-codex", "gpt-6-sol");
     manager.appendMessage(userMessage);
     manager.appendMessage(assistantMessage);
 
@@ -102,7 +102,7 @@ describe("Pi session lazy-flush contract", () => {
 
   it("a reopened session preserves entry ids (cursor continuity)", () => {
     const manager = SessionManager.create(dir, sessionDir);
-    manager.appendModelChange("openai-codex", "gpt-5.6-sol");
+    manager.appendModelChange("openai-codex", "gpt-6-sol");
     manager.appendMessage(userMessage);
     manager.appendMessage(assistantMessage);
     const idsBefore = manager.getEntries().map((entry) => entry.id);

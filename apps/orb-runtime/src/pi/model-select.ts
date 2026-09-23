@@ -10,9 +10,9 @@ export const PINNED_CODEX_MODEL_ID = "gpt-6-astra";
 
 export const SELECTABLE_CODEX_MODELS = [
   { id: "gpt-6-astra", name: "Astra" },
-  { id: "gpt-5.6-sol", name: "Sol" },
+  { id: "gpt-6-sol", name: "Sol" },
   { id: "gpt-5.6-terra", name: "Terra" },
-  { id: "gpt-5.6-luna", name: "Luna" },
+  { id: "gpt-6-luna", name: "Luna" },
 ] as const;
 
 export function eligibleCodexModels<Model extends { id: string; input: string[] }>(

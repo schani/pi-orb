@@ -208,13 +208,10 @@ for (const event of ["created", "started", "completed", "failed", "resumed"]) {
         parentIdle: session.isIdle,
         hasRunning: service.hasRunning(),
         persisted: terminalRecordExists(data.id),
+        error: service.getRecord(data.id)?.error,
       };
       terminalRows.push(row);
       note("child:terminal-callback", row);
-      // Candidate bridge uses only public APIs. Retain the child's activity
-      // until the synchronous terminal callback has finished persistence and
-      // notification scheduling. This is a pinned ordering assumption to test,
-      // not a proposed generic protocol or a timing grace period.
       queueMicrotask(() => {
         liveChildren.delete(data.id);
         checkBridge();
@@ -250,6 +247,15 @@ function output(model, content, stopReason) {
 }
 const text = (value) => [{ type: "text", text: value }];
 const call = (name, args) => [{ type: "toolCall", id: `call-${name}`, name, arguments: args }];
+function transcriptToolNames(messages) {
+  const names = new Set();
+  for (const message of messages) {
+    if (message.role !== "system") continue;
+    for (const tool of message.toolsAdded ?? []) names.add(tool.name);
+    for (const tool of message.toolsRemoved ?? []) names.delete(tool.name);
+  }
+  return [...names];
+}
 function scriptedStream(model, context, options) {
   const stream = createAssistantMessageEventStream();
   const allText = JSON.stringify(context.messages);
@@ -265,12 +271,11 @@ function scriptedStream(model, context, options) {
   const run = async () => {
     let message;
     if (child !== null) {
-      const names = context.tools.map((tool) => tool.name);
+      const names = transcriptToolNames(context.messages);
       assert.ok(names.includes(useMcpTool ? "mcp_call" : "probe_gate"));
       if (scenario === "mcp-profile") assert.equal(names.includes("mcp_call"), false);
       for (const rootOnly of [
         "launch_children",
-        "resume_child",
         "subagent",
         "get_subagent_result",
         "steer_subagent",
@@ -299,7 +304,16 @@ function scriptedStream(model, context, options) {
       await inboxGate.promise;
       message = output(model, text("parent handled inbox"), "stop");
     } else if (resumePhase) {
-      message = output(model, call("resume_child", {}), "toolUse");
+      message = output(
+        model,
+        call("subagent", {
+          prompt: "CONTINUE_CHILD",
+          description: "resume one",
+          subagent_type: "probe",
+          resume: ids.get("one"),
+        }),
+        "toolUse",
+      );
     } else if (allText.includes("task-notification")) {
       note("model:followup-entered");
       await followupGate.promise;
@@ -436,18 +450,8 @@ manager = SessionManager.create(root, join(root, "sessions"));
     settingsManager,
     sessionManager: manager,
     resourceLoader: loader,
-    tools: ["launch_children", "resume_child"],
+    tools: ["launch_children", "subagent"],
     customTools: [
-      {
-        name: "resume_child",
-        label: "Resume controlled child",
-        description: "Test fixture",
-        parameters: { type: "object", properties: {} },
-        async execute() {
-          await checked(service.resume(ids.get("one"), "CONTINUE_CHILD"));
-          return { content: text("Resume returned"), details: {} };
-        },
-      },
       {
         name: "launch_children",
         label: "Launch controlled children",
@@ -519,9 +523,11 @@ session.subscribe((event) => {
     checkBridge();
     note("parent:start", { parentStarts });
   } else if (event.type === "agent_settled") {
-    parentSettles++;
-    checkBridge();
-    note("parent:settled", { parentSettles, parentIdle: session.isIdle, bridgeBusy });
+    const settled = ++parentSettles;
+    queueMicrotask(() => {
+      checkBridge();
+      note("parent:settled", { parentSettles: settled, parentIdle: session.isIdle, bridgeBusy });
+    });
   }
 });
 

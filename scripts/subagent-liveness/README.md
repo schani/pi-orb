@@ -1,6 +1,6 @@
 # Subagent package / Pi runtime contracts
 
-Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Pi is pinned to 0.85.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.4.tgz` fork.
+Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Pi is pinned to 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.4.tgz` fork.
 
 ```bash
 npm ci

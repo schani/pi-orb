@@ -46,6 +46,12 @@ export function createSubagentsExtension(
       const stopped = Result.fromThrowable(() => getSubagentsService()?.abort(id), toError)();
       if (stopped.isErr()) host.subagentAdapterFailed(stopped.error.message);
     };
+    const release = (run: SubagentRun): void => {
+      terminal.delete(run);
+      if (runs.get(run.childId) === run) runs.delete(run.childId);
+      host.releaseSubagent(run);
+      if (runs.size === 0) drained?.();
+    };
     for (const event of ["created", "started", "resuming", "completed", "failed", "resumed"]) {
       unsubscribers.push(
         pi.events.on(`subagents:${event}`, (data: unknown) => {
@@ -81,14 +87,13 @@ export function createSubagentsExtension(
           const run = runs.get(id);
           if (run === undefined || terminal.has(run)) return;
           terminal.add(run);
-          // The real-package contract pins synchronous append + wake scheduling
-          // after this callback. Retain ownership through that exact handoff.
+          // The package persists carrier state after this callback. Release in
+          // a microtask regardless of whether a foreground tool claims the
+          // outcome, a background wake is sent, or queued delivery is skipped.
           queueMicrotask(() => {
+            if (runs.get(id) !== run) return;
             record("terminal", run);
-            terminal.delete(run);
-            if (runs.get(id) === run) runs.delete(id);
-            host.releaseSubagent(run);
-            if (runs.size === 0) drained?.();
+            release(run);
           });
         }),
       );

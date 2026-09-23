@@ -16,6 +16,8 @@ function fixture(promptResult?: Promise<void>) {
   const records: { customType: string; data: unknown }[] = [];
   const deliveries: ("turn" | "steer")[] = [];
   let failHistoryRead = false;
+  let abortCalls = 0;
+  let failAbortCall: number | undefined;
   const session: PiSession = {
     get isIdle() {
       return idle;
@@ -36,6 +38,8 @@ function fixture(promptResult?: Promise<void>) {
       emit("agent_start");
     },
     abort: async () => {
+      abortCalls++;
+      if (abortCalls === failAbortCall) throw new Error("injected SDK abort failure");
       idle = true;
       emit("agent_settled");
     },
@@ -83,6 +87,10 @@ function fixture(promptResult?: Promise<void>) {
     events,
     records,
     deliveries,
+    abortCalls: () => abortCalls,
+    failAbortAt: (call: number) => {
+      failAbortCall = call;
+    },
     failHistoryRead: (fail: boolean) => {
       failHistoryRead = fail;
     },
@@ -94,9 +102,10 @@ function fixture(promptResult?: Promise<void>) {
       idle = false;
       emit("agent_start");
     },
-    settledWithContinuation: () => {
-      idle = false;
+    settleThenContinue: () => {
+      idle = true;
       emit("agent_settled");
+      idle = false;
     },
   };
 }
@@ -328,6 +337,7 @@ it("keeps health, snapshot and operation busy through a leaf-only interval and r
           h.agent.releaseSubagent(child);
           expect(h.agent.getHealth()).toMatchObject({ activity: "busy", operationId: "op" });
           h.settle();
+          await Promise.resolve();
           expect(h.agent.getHealth()).toMatchObject({ activity: "idle" });
           expect(h.events.filter((e) => e.type === "operation_started")).toHaveLength(1);
           expect(h.events.filter((e) => e.type === "operation_finished")).toEqual([
@@ -370,13 +380,49 @@ it("retains the aborted outcome when the SDK prompt rejects during child cleanup
   ]);
 });
 
-it("samples SDK readiness rather than clearing a continuation at an old settled event", async () => {
+it("samples SDK readiness after settled handlers can defer a continuation", async () => {
   const h = fixture();
   await h.agent.submitMessage([], "op");
-  h.settledWithContinuation();
+  h.settleThenContinue();
+  await Promise.resolve();
   expect(h.agent.getHealth()).toMatchObject({ activity: "busy" });
   h.settle();
+  await Promise.resolve();
   expect(h.agent.getHealth()).toMatchObject({ activity: "idle" });
+});
+
+it("aborts a continuation admitted after the operation cancellation fence", async () => {
+  const h = fixture();
+  await h.agent.submitMessage([], "op");
+  const child = h.agent.admitSubagent("child")._unsafeUnwrap();
+  await h.agent.abortOperation();
+  h.wake();
+  await Promise.resolve();
+  expect(h.abortCalls()).toBe(2);
+  expect(h.agent.getHealth()).toMatchObject({ activity: "busy", operationId: "op" });
+  h.agent.releaseSubagent(child);
+  await Promise.resolve();
+  expect(h.events).toContainEqual({
+    type: "operation_finished",
+    operationId: "op",
+    outcome: "aborted",
+  });
+});
+
+it("reports a failed cancellation-fence abort as a subagent adapter failure", async () => {
+  const h = fixture();
+  await h.agent.submitMessage([], "op");
+  const child = h.agent.admitSubagent("child")._unsafeUnwrap();
+  await h.agent.abortOperation();
+  h.failAbortAt(2);
+  h.wake();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(h.agent.getHealth()).toMatchObject({
+    status: "failed",
+    error: { code: "subagent_adapter_failed" },
+  });
+  h.agent.releaseSubagent(child);
 });
 
 it("turns child-only input into a root turn without changing the operation, then fences abort until drain", async () => {
