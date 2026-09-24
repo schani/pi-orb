@@ -7,7 +7,12 @@ export type TurnNotificationResult =
   | { readonly type: "shown" }
   | {
       readonly type: "skipped";
-      readonly reason: "unsupported" | "permission_default" | "permission_denied" | "duplicate";
+      readonly reason:
+        | "unsupported"
+        | "permission_default"
+        | "permission_denied"
+        | "duplicate"
+        | "foreground";
     }
   | { readonly type: "failed"; readonly message: string };
 
@@ -30,11 +35,13 @@ export function requestNotificationPermission(): Promise<BrowserNotificationPerm
 export function notificationDecision(
   permission: BrowserNotificationPermission,
   alreadyDisplayed: boolean,
+  foreground: boolean,
 ): TurnNotificationResult | null {
   if (permission === "unsupported") return { type: "skipped", reason: "unsupported" };
   if (permission === "default") return { type: "skipped", reason: "permission_default" };
   if (permission === "denied") return { type: "skipped", reason: "permission_denied" };
   if (alreadyDisplayed) return { type: "skipped", reason: "duplicate" };
+  if (foreground) return { type: "skipped", reason: "foreground" };
   return null;
 }
 
@@ -52,7 +59,11 @@ export function showTurnNotification(options: {
 }): TurnNotificationResult {
   const permission = notificationPermission();
   const key = `${options.orbId}:${options.operationId}`;
-  const decision = notificationDecision(permission, displayed.has(key));
+  const decision = notificationDecision(
+    permission,
+    displayed.has(key),
+    document.visibilityState === "visible" && document.hasFocus(),
+  );
   if (decision !== null) return decision;
   displayed.add(key);
 
