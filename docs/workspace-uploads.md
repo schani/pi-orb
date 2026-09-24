@@ -20,6 +20,10 @@ A one-file batch retains the singular `The user uploaded a file to …` wording.
 
 Upload notification enqueue uses `wake: false`, under the existing inbox transaction's orb row lock. If Stop wins, the queued content survives but neither enqueue nor subsequent upload recovery requests startup. A separate running-state precheck followed by ordinary wake-capable enqueue was rejected because Stop could race the two operations. The normal dispatcher delivers the message after explicit startup. The batch UUID is the inbox message UUID (the browser uses the selection's first transfer UUID). Paths are ordered by transfer UUID, so the notification body is immutable across concurrency, retries, and recovery. Already-notified members remain part of that same body after a crash during per-file marker updates; existing inbox deduplication prevents another message. A finalized file with an unaccepted notification stays `stored`, with a visible notification-pending outcome.
 
+## Drag-and-drop entry point (implemented 2026-09-24)
+
+Transcript file drops enter the same immediate upload flow as a native picker selection: one drop forms one batch, preserves the draft, and uses existing transfer feedback and durable receipts. A non-running orb rejects the drop visibly and never starts compute. Composer drops are separate: images become unsent message attachments, while non-images receive guidance to upload as files to the orb. Mixed composer drops attach images and visibly reject the other files. `docs/web-ui.md` records the selected Fine inset treatment. Browser-local rejection adds no upload record; admitted transfers use the existing durable upload outcomes.
+
 ## Streaming and persistence
 
 ```text

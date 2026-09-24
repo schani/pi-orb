@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orb drag and drop · five treatments</title>
+<style>
+:root{font:13px/20px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#000;background:#fff}*{box-sizing:border-box}body{margin:0}button,select,textarea{font:inherit;color:inherit}button,select{border:1px solid #999;background:#fff;border-radius:0;cursor:pointer}button:hover,button[aria-pressed=true],#preview{background:#000;color:#fff;border-color:#000}button:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #1a7e37;outline-offset:2px}h1,h2,p{margin:0}h1{font-size:25px;line-height:32px;letter-spacing:-1px}h2{font-size:13px;line-height:20px}.study-head{padding:26px 32px 22px;border-bottom:1px solid #000;display:flex;align-items:end;justify-content:space-between;gap:24px}.eyebrow,.muted{color:#555}.eyebrow{letter-spacing:.13em;margin-bottom:8px}.intro{max-width:410px;color:#555}.toolbar{padding:15px 32px;border-bottom:1px solid #999;display:flex;flex-wrap:wrap;align-items:end;gap:12px 18px}.control{display:grid;gap:4px;color:#555}.control select{height:34px;padding:4px 25px 4px 8px;min-width:120px;color:#000}.toolbar button{height:34px;padding:5px 12px}.toolbar .actions{display:flex;gap:6px}.note{margin-left:auto;color:#555;max-width:320px}.tabs{display:flex;gap:0;overflow-x:auto;border-bottom:1px solid #000;padding:0 32px}.tabs button{border:0;border-right:1px solid #999;padding:10px 15px;white-space:nowrap;text-align:left;min-height:44px}.tabs button:first-child{border-left:1px solid #999}.tabs button small{color:inherit;opacity:.65;margin-right:8px}.gallery{padding:26px 32px 50px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:26px}.candidate{min-width:0}.candidate:last-child{grid-column:1/-1}.candidate-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-top:2px solid #000;padding:10px 0 12px;min-height:65px}.candidate-head p{color:#555;text-align:right;max-width:58%}.app{height:410px;border:1px solid #000;display:grid;grid-template-columns:176px minmax(0,1fr);overflow:hidden;background:#fff}.fleet{border-right:1px solid #000;min-width:0}.brand{padding:8px 10px;border-bottom:1px solid #000;font-weight:bold}.fleet-label{padding:14px 10px 6px;color:#555}.fleet-row{padding:7px 10px;border-bottom:1px solid #ddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fleet-row.active{background:#000;color:#fff}.fleet-row small{display:block;color:#999;margin-left:17px}.signal{display:inline-block;width:8px;height:8px;background:#1a7e37;margin-right:9px}.fleet-row.active .signal{background:#75cb8e}.orb{display:flex;flex-direction:column;min-width:0;min-height:0}.orb-head{display:flex;align-items:center;gap:9px;border-bottom:1px solid #000;padding:7px 12px;min-height:40px;white-space:nowrap}.orb-head strong{overflow:hidden;text-overflow:ellipsis}.orb-head .spacer{flex:1}.orb-head .status{color:#1a7e37}.candidate.stopped .status{color:#b42318}.upload{border:0;border-left:1px solid #999;padding:0 0 0 9px;text-decoration:underline}.transcript{position:relative;flex:1;min-height:0;overflow:hidden;background:#fff}.user-turn{background:#000;color:#fff;padding:15px 17px}.orb-turn{padding:18px 17px;max-width:620px}.orb-turn p+p{margin-top:12px}.activity{border-top:1px solid #999;border-bottom:1px solid #999;margin-top:15px;padding:5px 0;color:#555}.activity span{float:right}.composer{position:relative;border-top:1px solid #000;min-height:111px;padding:10px 14px;background:#fff;display:flex;flex-direction:column}.attachments{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:3px}.attachments:empty{display:none}.attachment{display:inline-flex;align-items:center;gap:5px;border:1px solid #999;padding:2px 5px;max-width:100%;overflow-wrap:anywhere}.thumb{background:#f2f2f2;border:1px solid #999;width:18px;height:18px;flex:none;display:inline-grid;place-items:center;font-size:10px}.input{display:flex;gap:8px;flex:1}.prefix{font-weight:bold}.composer textarea{resize:none;outline:0;border:0;background:transparent;flex:1;min-width:0;height:65px;padding:0}.send{align-self:end;color:#555}.feedback{min-height:29px;border-top:1px solid #999;padding:5px 12px;color:#1a7e37;overflow-wrap:anywhere}.feedback.reject{color:#b42318}.feedback:empty{display:none}.drop-treatment{display:none;pointer-events:none;z-index:2;position:absolute;overflow:hidden}.candidate[data-active-target="transcript"] .transcript .drop-treatment,.candidate[data-active-target="composer"] .composer .drop-treatment{display:flex}.candidate[data-active-target="transcript"] .transcript,.candidate[data-active-target="composer"] .composer{isolation:isolate}.drop-treatment .label{display:flex;flex-direction:column;gap:3px}.drop-treatment strong{font-weight:600}.drop-treatment .detail{color:#555}.stopped .drop-treatment .detail{color:#b42318}.stopped .drop-treatment strong{color:#b42318}
+/* 01: quiet inset line, centered label */
+[data-design="1"] .drop-treatment{inset:8px;border:1px dashed #000;background:#ffffffbf;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:8px;gap:2px}[data-design="1"] .drop-treatment .label{background:#fff;padding:4px 8px}
+/* 02: destination cards occupy separate app regions, with strong selectable blocks */
+[data-design="2"] .drop-treatment{inset:0;background:#f2f2f2;border:5px solid #fff;outline:1px solid #999;outline-offset:-6px;align-items:center;justify-content:center;flex-direction:column;padding:9px;text-align:center}[data-design="2"][data-active-target]:not([data-active-target=""]) .drop-treatment{display:flex}[data-design="2"] .drop-treatment[data-selected="true"]{background:#000;color:#fff;outline:2px solid #000;outline-offset:-5px}[data-design="2"] .drop-treatment[data-selected="true"] .detail{color:#ddd}[data-design="2"] .drop-treatment[data-selected="false"]{color:#555}[data-design="2"] .drop-treatment strong{font-size:16px;line-height:22px}[data-design="2"].stopped .drop-treatment[data-selected="true"]{background:#b42318}[data-design="2"].stopped .drop-treatment[data-selected="true"] strong,[data-design="2"].stopped .drop-treatment[data-selected="true"] .detail{color:#fff}
+/* 03: perimeter rails and a small corner caption preserve legibility */
+[data-design="3"] .drop-treatment{inset:0;border:4px solid #1a7e37;align-items:flex-start;justify-content:flex-start}.stopped[data-design="3"] .drop-treatment{border-color:#b42318}[data-design="3"] .drop-treatment .label{background:#fff;border-right:1px solid #000;border-bottom:1px solid #000;padding:3px 8px;max-width:calc(100% - 8px)}[data-design="3"] .drop-treatment .detail{display:block}
+/* 04: in-flow-looking shelf pinned to the boundary of each zone */
+[data-design="4"] .drop-treatment{left:0;right:0;bottom:0;min-height:48px;background:#f2f2f2;border-top:2px solid #000;align-items:center;justify-content:space-between;gap:8px;padding:7px 12px}[data-design="4"] .composer .drop-treatment{top:0;bottom:auto;border-top:0;border-bottom:2px solid #000}[data-design="4"] .drop-treatment .detail{text-align:right}
+/* 05: local opaque placard deliberately obscures only the receiving zone */
+[data-design="5"] .drop-treatment{inset:0;background:#000;color:#fff;align-items:center;justify-content:center;flex-direction:column;gap:7px;text-align:center;padding:12px}[data-design="5"] .drop-treatment .detail,[data-design="5"].stopped .drop-treatment strong,[data-design="5"].stopped .drop-treatment .detail{color:#fff}[data-design="5"].stopped .drop-treatment{background:#b42318}
+.gallery.focus{display:block;max-width:1200px;margin:auto}.gallery.focus .candidate{display:none}.gallery.focus .candidate.selected{display:block}.gallery.focus .app{height:540px;grid-template-columns:236px minmax(0,1fr)}.gallery.focus .transcript{min-height:0}[hidden]{display:none!important}
+@media(max-width:900px){.gallery{grid-template-columns:1fr}.candidate:last-child{grid-column:auto}.note{margin-left:0}.study-head{padding:20px}.toolbar{padding:14px 20px}.tabs{padding:0 20px}.gallery{padding:20px}.app{grid-template-columns:150px minmax(0,1fr)}}
+@media(max-width:600px){.study-head{display:block}.intro{margin-top:8px}.toolbar{gap:10px}.control{flex:1 1 125px}.control select{width:100%;min-width:0}.toolbar .actions{width:100%}.toolbar .actions button{flex:1}.note{max-width:none}.tabs{padding:0 12px}.gallery{padding:18px 12px;gap:23px}.candidate-head{display:block;min-height:0}.candidate-head p{max-width:none;text-align:left}.app,.gallery.focus .app{height:435px;grid-template-columns:minmax(0,1fr)}.fleet{display:none}.orb-head{gap:5px;padding:7px 8px}.orb-head .model{display:none}.orb-turn,.user-turn{padding:12px}.gallery.focus{padding:18px 12px}}
+</style>
+</head>
+<body>
+<header class="study-head"><div><div class="eyebrow">PI-ORB / INTERACTION STUDY 05</div><h1>Where does a drop land?</h1></div><p class="intro">Five visual treatments for two destinations. Drag a local file onto any mock orb, or simulate a drop below. Nothing uploads.</p></header>
+<div class="toolbar" aria-label="Scenario controls">
+<label class="control">Target<select id="target"><option value="transcript">Transcript → workspace</option><option value="composer">Composer → message</option></select></label>
+<label class="control">Files<select id="kind"><option value="files">Non-images</option><option value="images">Images</option><option value="mixed">Mixed</option></select></label>
+<label class="control">Orb<select id="orb-state"><option value="running">Running</option><option value="stopped">Stopped</option></select></label>
+<div class="actions"><button id="preview">Simulate drop</button><button id="reset">Reset</button></div>
+<p class="note">Mixed composer drops attach images only; other files are rejected. Proposed behavior.</p>
+</div>
+<nav class="tabs" aria-label="View proposals"><button id="compare" aria-pressed="true">Compare all</button><button data-focus="1" aria-pressed="false"><small>01</small>Inset</button><button data-focus="2" aria-pressed="false"><small>02</small>Split</button><button data-focus="3" aria-pressed="false"><small>03</small>Frame</button><button data-focus="4" aria-pressed="false"><small>04</small>Shelf</button><button data-focus="5" aria-pressed="false"><small>05</small>Placard</button></nav>
+<div class="gallery" id="gallery"></div>
+<script>
+const proposals=[
+  ['Fine inset','A quiet target line; maximum resemblance to the idle view.'],
+  ['Split destinations','Two distinct receiving surfaces: conversation or message.'],
+  ['Perimeter frame','A strong boundary and corner caption leave the transcript readable.'],
+  ['Boundary shelf','A slim strip at the edge of the receiving surface.'],
+  ['Local placard','An unmistakable opaque takeover confined to the target.']
+];
+const gallery=document.querySelector('#gallery');
+const markup=(n,title,caption)=>`<section class="candidate" data-design="${n}" data-active-target="transcript"><div class="candidate-head"><h2>0${n} / ${title}</h2><p>${caption}</p></div><div class="app"><aside class="fleet"><div class="brand">π &nbsp;PI-ORB</div><div class="fleet-label">FLEET / TODAY</div><div class="fleet-row active"><span class="signal"></span>Import latency<small>running · 2m</small></div><div class="fleet-row"><span class="signal"></span>Runtime reconnects<small>18m</small></div><div class="fleet-row"><span class="signal"></span>Table rendering<small>stopped</small></div></aside><div class="orb"><header class="orb-head"><strong>Import latency</strong><span class="spacer"></span><span class="status">● running</span><span class="model muted">claude-sonnet-4</span><button class="upload" type="button" title="Upload files (mock)">upload</button></header><div class="transcript"><div class="user-turn">Find out why the import job slows down on large datasets.</div><div class="orb-turn"><p>The parser buffers the whole input before processing it. A sample export and a trace would help verify the bottleneck.</p><div class="activity">▸ read · src/import.ts <span>1 file</span></div></div><div class="drop-treatment"><div class="label"><strong></strong><span class="detail"></span></div></div></div><div class="composer"><div class="attachments" aria-label="Message image attachments"></div><div class="input"><span class="prefix">&gt;</span><textarea aria-label="Message the orb"></textarea><span class="send">↵</span></div><div class="drop-treatment"><div class="label"><strong></strong><span class="detail"></span></div></div></div><div class="feedback" role="status" aria-live="polite"></div></div></div></section>`;
+gallery.innerHTML=proposals.map(([title,caption],i)=>markup(i+1,title,caption)).join('');
+const cards=[...document.querySelectorAll('.candidate')];
+const target=document.querySelector('#target'),kind=document.querySelector('#kind'),state=document.querySelector('#orb-state');
+function words(destination, fileKind, stopped){
+  if(stopped)return ['Uploads need a running orb.',''];
+  if(destination==='transcript')return ['Upload to workspace',fileKind==='images'?'Images become files in the orb.':''];
+  if(fileKind==='files')return ['Non-images can only be uploaded as files to the orb.',''];
+  if(fileKind==='unknown')return ['Attach images to message','Other files go to the workspace.'];
+  return ['Attach images to message',fileKind==='mixed'?'Non-images can only be uploaded as files to the orb.':''];
+}
+function render(destination,fileKind=kind.value,onlyCard=null){
+  for(const card of onlyCard?[onlyCard]:cards){
+    card.dataset.activeTarget=destination;
+    card.classList.toggle('stopped',state.value==='stopped');
+    card.querySelector('.status').textContent=state.value==='stopped'?'● stopped':'● running';
+    for(const zone of ['transcript','composer']){
+      const treatment=card.querySelector('.'+zone+' .drop-treatment');
+      const [heading,detail]=words(zone,fileKind,state.value==='stopped');
+      treatment.querySelector('strong').textContent=heading;
+      treatment.querySelector('.detail').textContent=detail;
+      treatment.dataset.selected=String(zone===destination);
+    }
+  }
+}
+function clear(card){card.dataset.activeTarget='';}
+function fileKind(transfer){
+  const items=[...transfer.items].filter(item=>item.kind==='file');
+  if(!items.length||items.some(item=>!item.type))return 'unknown';
+  const images=items.filter(item=>item.type.startsWith('image/')).length;
+  return images===items.length?'images':images?'mixed':'files';
+}
+function announce(card,text,reject=false){const el=card.querySelector('.feedback');el.textContent=text;el.classList.toggle('reject',reject);}
+function processDrop(card,destination,files){
+  if(!files.length)return;
+  if(state.value==='stopped'){announce(card,'Uploads need a running orb.',true);return;}
+  if(destination==='transcript'){announce(card,`Simulated workspace upload · ${files.length} file${files.length===1?'':'s'}: ${files.map(f=>f.name).join(', ')}`);return;}
+  const images=files.filter(f=>f.type.startsWith('image/'));
+  const rejected=files.length-images.length;
+  const attachments=card.querySelector('.attachments');
+  for(const file of images){
+    const chip=document.createElement('span');chip.className='attachment';
+    const thumb=document.createElement('span');thumb.className='thumb';thumb.textContent='▧';
+    const name=document.createElement('span');name.textContent=file.name;
+    chip.append(thumb,name);attachments.append(chip);
+  }
+  const accepted=images.length?`Simulated image attached to message: ${images.map(f=>f.name).join(', ')}.`:'';
+  const refused=rejected?'Non-images can only be uploaded as files to the orb.':'';
+  announce(card,[accepted,refused].filter(Boolean).join(' '),Boolean(rejected));
+}
+for(const card of cards){
+  for(const destination of ['transcript','composer']){
+    const zone=card.querySelector('.'+destination);
+    zone.addEventListener('dragenter',e=>{if(e.dataTransfer?.types.includes('Files')){e.preventDefault();render(destination,fileKind(e.dataTransfer),card);}});
+    zone.addEventListener('dragover',e=>{
+      if(!e.dataTransfer?.types.includes('Files'))return;
+      e.preventDefault();
+      const type=fileKind(e.dataTransfer);
+      e.dataTransfer.dropEffect=state.value==='stopped'||destination==='composer'&&type==='files'?'none':'copy';
+      render(destination,type,card);
+    });
+    zone.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();clear(card);processDrop(card,destination,[...e.dataTransfer.files]);});
+  }
+  card.querySelector('.app').addEventListener('dragleave',e=>{if(!card.querySelector('.app').contains(e.relatedTarget))clear(card);});
+}
+// Prevent file navigation even when the drop misses a simulated destination.
+document.addEventListener('dragover',e=>{if(e.dataTransfer?.types.includes('Files'))e.preventDefault();});
+document.addEventListener('drop',e=>e.preventDefault());
+for(const control of [target,kind,state])control.addEventListener('change',()=>render(target.value));
+document.querySelector('#preview').addEventListener('click',()=>{
+  const samples=kind.value==='images'?[{name:'sample.png',type:'image/png'}]:kind.value==='mixed'?[{name:'sample.png',type:'image/png'},{name:'notes.txt',type:'text/plain'}]:[{name:'sample.txt',type:'text/plain'}];
+  for(const card of cards){clear(card);processDrop(card,target.value,samples);}
+});
+document.querySelector('#reset').addEventListener('click',()=>{for(const card of cards){clear(card);announce(card,'');card.querySelector('.attachments').replaceChildren();}});
+document.querySelector('#compare').addEventListener('click',()=>focus(0));
+for(const button of document.querySelectorAll('[data-focus]'))button.addEventListener('click',()=>focus(Number(button.dataset.focus)));
+function focus(n){gallery.classList.toggle('focus',Boolean(n));cards.forEach((card,i)=>card.classList.toggle('selected',i+1===n));for(const button of document.querySelectorAll('.tabs button'))button.setAttribute('aria-pressed',String(n?button.dataset.focus===String(n):button.id==='compare'));}
+render(target.value);
+</script>
+</body>
+</html>

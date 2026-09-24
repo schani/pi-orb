@@ -30,6 +30,14 @@ import { OrbFailureBanner } from "../components/OrbFailureBanner.tsx";
 import { OrbIndex } from "../components/OrbIndex.tsx";
 import { OrbNotice } from "../components/OrbNotice.tsx";
 import { OrbTerminal } from "../components/OrbTerminal.tsx";
+import {
+  type DropZone,
+  dropHint,
+  isFileDrag,
+  preventFileNavigation,
+  splitComposerFiles,
+  transcriptDropBounds,
+} from "../components/orb-file-drop.ts";
 import { StateTile } from "../components/StateTile.tsx";
 import { SubagentRail } from "../components/SubagentRail.tsx";
 import { TextFieldFrame } from "../components/TextFieldFrame.tsx";
@@ -734,6 +742,82 @@ function OrbConversation({
     initial.orb.isOk() ? initial.orb.value : null,
   );
   const uploads = useWorkspaceUploads(orbId, orb?.state === "running");
+  const mainRef = useRef<HTMLElement>(null);
+  const [dropZone, setDropZone] = useState<DropZone | null>(null);
+  const [dropLabel, setDropLabel] = useState("");
+  const [dropFeedback, setDropFeedback] = useState<string | null>(null);
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => {
+      if (!preventFileNavigation(event)) return;
+      if (!mainRef.current?.contains(event.target as Node)) setDropZone(null);
+    };
+    const clearDrag = () => setDropZone(null);
+    const onDragLeave = (event: DragEvent) => {
+      if (event.target === document.documentElement && event.relatedTarget === null) clearDrag();
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clearDrag();
+    };
+    const onDrop = (event: DragEvent) => {
+      if (preventFileNavigation(event)) {
+        if (
+          orb?.state !== "running" &&
+          event.target instanceof Element &&
+          event.target.closest(".orb-page")
+        )
+          setDropFeedback("Uploads need a running orb.");
+      }
+      setDropZone(null);
+    };
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    document.addEventListener("dragleave", onDragLeave);
+    document.addEventListener("dragend", clearDrag);
+    window.addEventListener("blur", clearDrag);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+      document.removeEventListener("dragleave", onDragLeave);
+      document.removeEventListener("dragend", clearDrag);
+      window.removeEventListener("blur", clearDrag);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [orb?.state]);
+  const targetZone = (target: EventTarget | null): DropZone | null => {
+    if (!(target instanceof Element) || !mainRef.current?.contains(target)) return null;
+    if (target.closest(".composer")) return "composer";
+    if (target.closest(".orb-transcript-scroll") || target === mainRef.current) return "transcript";
+    return null;
+  };
+  const onFileDragOver = (event: React.DragEvent<HTMLElement>) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    const zone = targetZone(event.target);
+    setDropZone(zone);
+    if (zone) setDropLabel(dropHint(zone, event.dataTransfer, orb?.state === "running"));
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const onFileDrop = (event: React.DragEvent<HTMLElement>) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    setDropZone(null);
+    const zone = targetZone(event.target);
+    if (orb?.state !== "running") {
+      setDropFeedback("Uploads need a running orb.");
+      return;
+    }
+    if (!zone) return;
+    const files = Array.from(event.dataTransfer.files);
+    if (!files.length) return;
+    setDropFeedback(null);
+    if (zone === "transcript") uploads.addFiles(files);
+    else {
+      const { images, rejected } = splitComposerFiles(files);
+      if (images.length) composerRef.current?.attachFiles(images);
+      if (rejected) setDropFeedback("Non-images can only be uploaded as files to the orb.");
+    }
+  };
   const [ageNow, setAgeNow] = useState(() => Date.now());
   const [orbError, setOrbError] = useState<ApiError | null>(() =>
     initial.orb.isErr() ? initial.orb.error : null,
@@ -1337,7 +1421,27 @@ function OrbConversation({
       : formatTimeRemaining(orb.actionRequired.expiresAt, ageNow);
 
   return (
-    <main className="orb-main" inert={pending} aria-busy={pending}>
+    <main
+      className="orb-main"
+      ref={mainRef}
+      inert={pending}
+      aria-busy={pending}
+      onDragOver={onFileDragOver}
+      onDrop={onFileDrop}
+      onDragLeave={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (
+          event.clientX >= bounds.left &&
+          event.clientX < bounds.right &&
+          event.clientY >= bounds.top &&
+          event.clientY < bounds.bottom
+        )
+          return;
+        setDropZone(null);
+      }}
+    >
       <div className="orb-header-stack">
         <header className="orb-header" data-phone-actions={phoneActions}>
           <a className="orb-phone-home" href="#/" aria-label="Dashboard" title="dashboard">
@@ -1486,8 +1590,35 @@ function OrbConversation({
           <SubagentRail agents={state.subagents} />
         )}
         {uploads.progress}
+        {dropFeedback && (
+          <div className="orb-drop-feedback" role="status">
+            {dropFeedback}
+          </div>
+        )}
       </div>
       <div className="orb-transcript-scroll" ref={scrollRef}>
+        {dropZone === "transcript" && (
+          <div
+            className="orb-drop-inset orb-drop-transcript"
+            aria-hidden="true"
+            style={(() => {
+              const main = mainRef.current;
+              const scroll = scrollRef.current;
+              const header = main?.querySelector(".orb-header-stack");
+              if (!main || !scroll || !header) return undefined;
+              return transcriptDropBounds(
+                main.getBoundingClientRect(),
+                header.getBoundingClientRect(),
+                main.querySelector(".composer")?.getBoundingClientRect() ?? null,
+                scroll.getBoundingClientRect(),
+                phone,
+                window.innerHeight,
+              );
+            })()}
+          >
+            <span>{dropLabel}</span>
+          </div>
+        )}
         <div className="orb-transcript-content" ref={scrollContentRef}>
           {orb?.stateDetail?.type === "discarding_failed_compute" && (
             <OrbNotice>
@@ -1643,6 +1774,8 @@ function OrbConversation({
           onValueChange={(text, mode) => dispatch({ type: "composer_changed", text, mode })}
           images={state.composerImages}
           onImageAdd={addImage}
+          onAttachmentError={(message) => setDropFeedback(message)}
+          dropLabel={dropZone === "composer" ? dropLabel : null}
           onImageRemove={(id) => dispatch({ type: "image_removed", id })}
           canSend={canSend}
           onSend={sendComposer}

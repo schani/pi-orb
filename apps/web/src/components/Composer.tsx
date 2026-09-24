@@ -1,4 +1,5 @@
 import type { AgentSettingsEvent, SettingsAction } from "@pi-orb/protocol";
+import { Result } from "neverthrow";
 import {
   type ClipboardEvent,
   type KeyboardEvent,
@@ -35,6 +36,7 @@ export interface ComposerImage {
 
 export interface ComposerHandle {
   focus: () => void;
+  attachFiles: (files: File[]) => void;
 }
 
 interface ComposerProps {
@@ -46,6 +48,8 @@ interface ComposerProps {
   images: ComposerImage[];
   onImageAdd: (mediaType: string, data: string) => void;
   onImageRemove: (id: string) => void;
+  onAttachmentError?: (message: string) => void;
+  dropLabel?: string | null;
   /** Connected, idle, and no request in flight. */
   canSend: boolean;
   onSend: () => void;
@@ -70,6 +74,8 @@ export function Composer({
   images,
   onImageAdd,
   onImageRemove,
+  onAttachmentError,
+  dropLabel = null,
   canSend,
   onSend,
   canAbort,
@@ -100,16 +106,30 @@ export function Composer({
   const padRef = useRef<HTMLButtonElement>(null);
   const awaitingClear = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  useImperativeHandle(
-    ref,
-    () => ({
-      focus: () => {
-        if (phone) setExpanded(true);
-        inputRef.current?.focus({ preventScroll: true });
-      },
-    }),
-    [phone],
-  );
+  const attachFiles = (files: File[]) => {
+    for (const file of files) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === "string" ? reader.result : "";
+        const comma = dataUrl.indexOf(",");
+        if (comma !== -1) onImageAdd(file.type, dataUrl.slice(comma + 1));
+        else onAttachmentError?.("Could not read image attachment.");
+      };
+      reader.onerror = () => onAttachmentError?.("Could not read image attachment.");
+      const read = Result.fromThrowable(
+        () => reader.readAsDataURL(file),
+        () => "Could not read image attachment.",
+      )();
+      if (read.isErr()) onAttachmentError?.(read.error);
+    }
+  };
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      if (phone) setExpanded(true);
+      inputRef.current?.focus({ preventScroll: true });
+    },
+    attachFiles,
+  }));
   const commandPickerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!isCommand || (phone && !expanded)) return;
@@ -215,19 +235,16 @@ export function Composer({
       .filter((file): file is File => file !== null);
     if (files.length === 0) return;
     event.preventDefault();
-    for (const file of files) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = typeof reader.result === "string" ? reader.result : "";
-        const comma = dataUrl.indexOf(",");
-        if (comma !== -1) onImageAdd(file.type, dataUrl.slice(comma + 1));
-      };
-      reader.readAsDataURL(file);
-    }
+    attachFiles(files);
   };
 
   return (
     <div className="composer" data-expanded={expanded} data-settings-pending={settingsPending}>
+      {dropLabel !== null && (
+        <div className="orb-drop-inset" aria-hidden="true">
+          <span>{dropLabel}</span>
+        </div>
+      )}
       {(feedback || shellBlockedByAttachment) && (
         <div className="composer-phone-feedback" role="status">
           {feedback || "Remove image attachments before running a shell command."}

@@ -2179,6 +2179,40 @@ button.modal-close:focus-visible {
   user-select: all;
 }
 
+.orb-drop-feedback {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--k);
+  color: #b42318;
+}
+
+.orb-transcript-scroll {
+  position: relative;
+}
+
+.orb-drop-inset {
+  position: absolute;
+  z-index: 30;
+  inset: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 1px dashed var(--k);
+  background: #ffffffbf;
+  text-align: center;
+  pointer-events: none;
+}
+
+.orb-drop-transcript {
+  position: fixed;
+  inset: auto;
+}
+
+.orb-drop-inset span {
+  padding: 4px 8px;
+  background: var(--w);
+}
+
 /* ---------- composer ---------- */
 
 /* Pinned to the viewport bottom, above the transcript scrolling behind it. */

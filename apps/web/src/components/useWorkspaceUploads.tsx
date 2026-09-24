@@ -169,6 +169,36 @@ export function useWorkspaceUploads(orbId: string, running: boolean) {
   const localIds = new Set(files.map((item) => item.id));
   const visibleLocal = files.filter((item) => !finished(item.progress));
   const visibleRemote = remote.filter((row) => !localIds.has(row.id) && !finished(row));
+  const addFiles = (selected: File[]) => {
+    if (!running || selected.length === 0) return;
+    const added: LocalFile[] = [];
+    const batch: UploadBatch = { id: "", files: [] };
+    for (const file of selected) {
+      const id = Result.fromThrowable(generateUuid, () => ({
+        type: "browser_crypto" as const,
+        message: "Cannot create upload identity",
+      }))();
+      if (id.isErr()) {
+        setError(id.error.message);
+        return;
+      }
+      added.push({
+        id: id.value,
+        batch,
+        file,
+        name: file.name,
+        size: file.size,
+        progress: null,
+        error: null,
+        active: true,
+      });
+    }
+    batch.id = added[0]?.id ?? "";
+    batch.files = added.map(({ id, name, size }) => ({ id, name, size }));
+    setError(null);
+    setFiles((old) => [...old, ...added]);
+    for (const item of added) void start(item);
+  };
   const button = running ? (
     <>
       <button
@@ -187,36 +217,8 @@ export function useWorkspaceUploads(orbId: string, running: boolean) {
         multiple
         hidden
         onChange={(event) => {
-          const added: LocalFile[] = [];
-          const batch: UploadBatch = { id: "", files: [] };
-          for (const file of Array.from(event.target.files ?? [])) {
-            const id = Result.fromThrowable(generateUuid, () => ({
-              type: "browser_crypto" as const,
-              message: "Cannot create upload identity",
-            }))();
-            if (id.isErr()) {
-              setError(id.error.message);
-              event.target.value = "";
-              return;
-            }
-            added.push({
-              id: id.value,
-              batch,
-              file,
-              name: file.name,
-              size: file.size,
-              progress: null,
-              error: null,
-              active: true,
-            });
-          }
+          addFiles(Array.from(event.target.files ?? []));
           event.target.value = "";
-          if (!added.length) return;
-          batch.id = added[0]?.id ?? "";
-          batch.files = added.map(({ id, name, size }) => ({ id, name, size }));
-          setError(null);
-          setFiles((old) => [...old, ...added]);
-          for (const item of added) void start(item);
         }}
       />
     </>
@@ -299,5 +301,5 @@ export function useWorkspaceUploads(orbId: string, running: boolean) {
         )}
       </section>
     ) : null;
-  return { button, progress };
+  return { button, progress, addFiles };
 }

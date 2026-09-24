@@ -57,6 +57,28 @@ describe("Composer shell presentation", () => {
     expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
   });
 
+  it("shows an inset drop hint even when sending is unavailable", () => {
+    const html = renderToStaticMarkup(
+      <Composer
+        text="draft"
+        mode="message"
+        onValueChange={noop}
+        images={[]}
+        onImageAdd={noop}
+        onImageRemove={noop}
+        canSend={false}
+        onSend={noop}
+        canAbort={false}
+        onAbort={noop}
+        onShellAttachmentBlocked={noop}
+        dropLabel="Uploads need a running orb."
+      />,
+    );
+    expect(html).toContain('class="orb-drop-inset"');
+    expect(html).toContain("Uploads need a running orb.");
+    expect(html).toContain('rows="4">draft</textarea>');
+  });
+
   it("keeps the textarea editable while sending is unavailable so the next message can be drafted", () => {
     const html = render("message", false, false);
     expect(html).not.toMatch(/<textarea[^>]*disabled=""/);

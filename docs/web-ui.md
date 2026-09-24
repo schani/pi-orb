@@ -1,5 +1,24 @@
 # Web UI
 
+## File drag-and-drop (Fine inset selected and implemented 2026-09-24)
+
+**Selected: Fine inset.** A dashed 1px boundary sits 8px inside the receiving surface, with a translucent white wash and a centered, white-backed caption. It appears only during file drag-over and clears on exit or drop. Feedback remains local to the destination; rejection is visibly announced.
+
+Required routing:
+
+- A non-running orb rejects all file drops with a visible message that uploads need a running orb; dropping never starts compute.
+- Transcript drops use the existing workspace-file upload flow, including batch notification and transfer feedback (`docs/workspace-uploads.md`). The message draft is untouched.
+- Composer image drops add draft attachments, as pasting does; they do not send the message.
+- Composer non-image drops show “Non-images can only be uploaded as files to the orb.” They never silently upload elsewhere.
+
+Mixed composer drops attach images and visibly reject the other files. Image admission uses the same validation and draft-attachment path as paste. Native text/link dragging is unaffected. Files dropped outside either destination must not navigate the browser; non-running admission still applies throughout the orb view.
+
+[`design-prototypes/orb-drag-drop.html`](../design-prototypes/orb-drag-drop.html) and the [hosted comparison](https://files---pi-orb-1077475695242.us-central1.run.app/s/79a7a6dd-328d-444d-a382-9c97ff78b104/studies/orb-drag-drop/index.html) retain the five-way study. Split destinations, Perimeter frame, Boundary shelf, and Local placard remain unselected alternatives. The study simulates uploads; production workspace transfers retain their existing persisted outcomes and batch receipts. Local hover and attachment rejection need visible feedback, not new runtime telemetry.
+
+The transcript inset is fixed and out of flow: desktop bounds use the main column between the pinned header and composer; phone bounds use the scroll pane. The desktop transcript wrapper is `display: contents`, so measuring that wrapper alone incorrectly includes the sidebar. Geometry regressions cover both layouts and scrolled content. Desktop blank transcript space hit-tests as the main column, which also receives transcript drops; header and sidebar remain outside that destination. File-drag cancellation clears the inset without intercepting ordinary text/link drags.
+
+Validation: 341 web unit tests, repository typecheck/lint, and seven targeted Chromium browser cases pass, including native blank-space hit-testing, 320/390px geometry, workspace batching, draft preservation, image attachments, mixed rejection, and stopped drops. Lint retains existing warnings. The live frontend fixture was checked separately; no production deployment or runtime protocol change.
+
 ## Thinking activity alignment (implemented 2026-09-20)
 
 The bit-register activity marker uses the orb turn's 12px transcript inset both while waiting for first output and after text, reasoning, or tools arrive. Streaming phase changes must not shift the marker horizontally.
