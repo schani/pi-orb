@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { prepareSourceSnapshot } from "./snapshot.ts";
+import { prepareSourceSnapshot, UPLOADED_SOURCE_PATHS } from "./snapshot.ts";
 
 const execFileAsync = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -19,23 +19,40 @@ async function repository(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "pi-orb-source-repository-"));
   temporaryDirectories.push(root);
   await mkdir(`${root}/guest/node_modules`, { recursive: true });
+  await mkdir(`${root}/patches`, { recursive: true });
   await mkdir(`${root}/tooling`, { recursive: true });
   await writeFile(`${root}/package.json`, "{}\n");
   await writeFile(`${root}/guest/used.txt`, "uploaded\n");
   await writeFile(`${root}/guest/.env.local`, "ignored secret\n");
   await writeFile(`${root}/guest/node_modules/dependency.js`, "ignored\n");
+  await writeFile(`${root}/patches/dependency+1.0.0.patch`, "patch\n");
   await writeFile(`${root}/tooling/builder.ts`, "export {};\n");
   await writeFile(`${root}/.gitignore`, ".env*\nnode_modules/\n");
   await execFileAsync("git", ["init", "--quiet"], { cwd: root });
   await execFileAsync(
     "git",
-    ["add", ".gitignore", "package.json", "guest/used.txt", "tooling/builder.ts"],
+    [
+      "add",
+      ".gitignore",
+      "package.json",
+      "guest/used.txt",
+      "patches/dependency+1.0.0.patch",
+      "tooling/builder.ts",
+    ],
     { cwd: root },
   );
   return root;
 }
 
 describe("native image source snapshot", () => {
+  it("packages dependency patches in the default source snapshot", async () => {
+    expect(UPLOADED_SOURCE_PATHS).toContain("patches");
+    const root = await repository();
+    const snapshot = await prepareSourceSnapshot(`${root}/output`, { repositoryRoot: root });
+    if (snapshot.isErr()) throw new Error(snapshot.error.message);
+    expect(snapshot.value.inputInventory).toHaveProperty("patches/dependency+1.0.0.patch");
+  });
+
   it("uses one Git file list for the archive and hashes", async () => {
     const root = await repository();
     const output = `${root}/output`;

@@ -16,11 +16,13 @@ RUN npm run build --workspace @pi-orb/web
 FROM node:24-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY patches patches
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/control-plane/package.json apps/control-plane/
-RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts
+RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts \
+  && npx --no-install patch-package
 COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src
 COPY packages/luna/src packages/luna/src

@@ -193,7 +193,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     };
     const input = { cwd: repoDir, agentDir, previewHost: null, skillsDir: null, mcp };
     const loaded = (await createOrbResourceLoader(input))._unsafeUnwrap();
-    // Inbox sendCustomMessage bypasses before_agent_start: inventory belongs in the loader.
+    // In-run custom messages get no second before_agent_start: inventory belongs in the loader.
     expect(loaded.getAppendSystemPrompt().join("\n")).toContain(
       "Available MCP servers:\n- posthog: Analytics",
     );

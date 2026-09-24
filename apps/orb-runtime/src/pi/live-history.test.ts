@@ -52,6 +52,54 @@ describe("LiveHistoryPublisher", () => {
     });
   });
 
+  it("publishes system-state identity without prompt or tool payload", () => {
+    const entries: unknown[] = [];
+    const published: HistoryRecord[] = [];
+    const publisher = new LiveHistoryPublisher({ getEntries: () => entries }, (record) =>
+      published.push(record),
+    );
+    entries.push({
+      id: "system-1",
+      parentId: null,
+      type: "message",
+      timestamp: "time-system-1",
+      message: {
+        role: "system",
+        content: "LIVE_SYSTEM_CONTENT_SENTINEL",
+        sections: { project_context: "LIVE_SYSTEM_SECTION_SENTINEL" },
+        toolsAdded: [
+          {
+            name: "live_sentinel_tool",
+            description: "LIVE_SYSTEM_TOOL_SENTINEL",
+            parameters: { type: "object" },
+          },
+        ],
+        timestamp: 1,
+      },
+    });
+
+    expect(publisher.flushPersisted().isOk()).toBe(true);
+
+    expect(published).toMatchObject([
+      {
+        id: "system-1",
+        parentId: null,
+        type: "event",
+        eventType: "pi.message.system",
+        overflow: {
+          native: {
+            id: "system-1",
+            parentId: null,
+            type: "message",
+            timestamp: "time-system-1",
+            message: { role: "system", timestamp: 1 },
+          },
+        },
+      },
+    ]);
+    expect(JSON.stringify(published)).not.toContain("LIVE_SYSTEM_");
+  });
+
   it("publishes a directly appended bash execution on an explicit flush", () => {
     const entries: unknown[] = [];
     const published: HistoryRecord[] = [];

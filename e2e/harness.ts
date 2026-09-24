@@ -115,6 +115,65 @@ export async function fakeControl(
   return (await response.json()) as Record<string, unknown>;
 }
 
+type OpenAIResponseInput = { readonly role?: unknown; readonly content?: unknown };
+
+type OpenAIResponseBody = {
+  readonly instructions?: unknown;
+  readonly input?: unknown;
+};
+
+const SYSTEM_SECTION = /<([a-z][a-z0-9_-]*)>\n[\s\S]*?\n<\/\1>/g;
+const SYSTEM_UPDATE =
+  /(?:^|\n\n)(Updated system prompt section "([a-z][a-z0-9_-]*)":\n\n|Removed system prompt section "([a-z][a-z0-9_-]*)"\.)/g;
+
+/** Replays Pi's framed mid-conversation system deltas in an OpenAI Responses payload. */
+export function effectiveOpenAIResponseInstructions(body: unknown): string {
+  if (typeof body !== "object" || body === null) return "";
+  const response = body as OpenAIResponseBody;
+  const initial = typeof response.instructions === "string" ? response.instructions : "";
+  const sections = new Map<string, string>();
+  const opaque = [
+    initial.replace(SYSTEM_SECTION, (value, name: string) => {
+      sections.set(name, value);
+      return "";
+    }),
+  ];
+
+  const messages = Array.isArray(response.input) ? (response.input as OpenAIResponseInput[]) : [];
+  for (const message of messages) {
+    if (
+      (message.role !== "developer" && message.role !== "system") ||
+      typeof message.content !== "string"
+    )
+      continue;
+    const text = message.content;
+    const matches = [...text.matchAll(SYSTEM_UPDATE)];
+    if (matches.length === 0) {
+      opaque.push(text);
+      continue;
+    }
+    for (let index = 0; index < matches.length; index += 1) {
+      const match = matches[index];
+      if (match === undefined) continue;
+      const updated = match[2];
+      const removed = match[3];
+      if (removed !== undefined) {
+        sections.delete(removed);
+        continue;
+      }
+      if (updated === undefined) continue;
+      const start = (match.index ?? 0) + match[0].length;
+      const end = matches[index + 1]?.index ?? text.length;
+      sections.set(updated, text.slice(start, end).trimEnd());
+    }
+  }
+
+  return [...opaque, ...sections.values()]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export interface RecordedFakeRequest {
   readonly id: number;
   readonly surface?: unknown;

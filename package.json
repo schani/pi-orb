@@ -12,7 +12,7 @@
     "apps/web"
   ],
   "scripts": {
-    "postinstall": "node scripts/fix-node-pty-prebuild-permissions.mjs",
+    "postinstall": "patch-package && node scripts/fix-node-pty-prebuild-permissions.mjs",
     "test": "vitest run && npm run test:infra",
     "test:infra": "node --test infra/foundation/state_split.test.mjs infra/foundation/adopt.test.mjs infra/foundation/iam_contract.test.mjs infra/smoke-timeout.contract.test.mjs infra/smoke-cleanup.test.mjs && python3 -m unittest infra/smoke_preview_test.py infra/artifact_guard_test.py infra/release_state_test.py infra/release_retire_test.py infra/release_report_test.py infra/release_preflight_test.py && infra/native-vm/test.sh",
     "dev:frontend": "npm run dev:frontend --workspace @pi-orb/web",
@@ -29,6 +29,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.4",
     "@playwright/test": "1.63.0",
+    "patch-package": "8.0.1",
     "typescript": "7.0.2",
     "vitest": "^3.0.0"
   },

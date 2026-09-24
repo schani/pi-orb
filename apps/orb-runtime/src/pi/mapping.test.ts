@@ -5,7 +5,7 @@ import { mapPiEntry, mapPiSessionHeader } from "./mapping.ts";
 
 const base = { id: "e2", parentId: "e1", timestamp: "2026-07-20T10:00:00.000Z" };
 
-function expectMapped(entry: unknown) {
+function expectMapped(entry: unknown, exactNative = true) {
   const result = mapPiEntry(entry);
   expect(result.isOk(), `mapping failed: ${JSON.stringify(result)}`).toBe(true);
   if (!result.isOk()) throw new Error("unreachable");
@@ -14,7 +14,7 @@ function expectMapped(entry: unknown) {
   expect(record.id).toBe(base.id);
   expect(record.parentId).toBe(base.parentId);
   expect(record.timestamp).toBe(base.timestamp);
-  expect(record.overflow["native"]).toEqual(entry);
+  if (exactNative) expect(record.overflow["native"]).toEqual(entry);
   return record;
 }
 
@@ -268,6 +268,54 @@ describe("Pi entry mapping", () => {
     expect(block.patch).toBeUndefined();
   });
 
+  it("retains system-message identity without replicating prompt or tool state", () => {
+    const record = expectMapped(
+      {
+        ...base,
+        type: "message",
+        message: {
+          role: "system",
+          content: "SYSTEM_CONTENT_SENTINEL",
+          sections: { project_context: "SYSTEM_SECTION_SENTINEL" },
+          toolsAdded: [
+            {
+              name: "system_sentinel_tool",
+              description: "SYSTEM_TOOL_SENTINEL",
+              parameters: { type: "object", properties: { secretPath: { type: "string" } } },
+            },
+          ],
+          toolsRemoved: [{ name: "SYSTEM_REMOVED_TOOL_SENTINEL" }],
+          replace: true,
+          timestamp: 5,
+        },
+      },
+      false,
+    );
+    expect(record).toMatchObject({
+      type: "event",
+      eventType: "pi.message.system",
+      id: base.id,
+      parentId: base.parentId,
+      timestamp: base.timestamp,
+      overflow: {
+        native: {
+          ...base,
+          type: "message",
+          message: { role: "system", timestamp: 5 },
+        },
+      },
+    });
+    const serialized = JSON.stringify(record);
+    for (const sentinel of [
+      "SYSTEM_CONTENT_SENTINEL",
+      "SYSTEM_SECTION_SENTINEL",
+      "SYSTEM_TOOL_SENTINEL",
+      "SYSTEM_REMOVED_TOOL_SENTINEL",
+      "secretPath",
+    ])
+      expect(serialized).not.toContain(sentinel);
+  });
+
   it("maps an unknown message role to a generic event", () => {
     const record = expectMapped({
       ...base,
@@ -289,6 +337,55 @@ describe("Pi entry mapping", () => {
     expect(record.type).toBe("compaction");
     if (record.type !== "compaction") return;
     expect(record.summary).toEqual([{ type: "text", text: "we discussed things" }]);
+  });
+
+  it("retains compaction data without replicating its system checkpoint", () => {
+    const record = expectMapped(
+      {
+        ...base,
+        type: "compaction",
+        summary: "ordinary conversation summary",
+        firstKeptEntryId: "e1",
+        tokensBefore: 5000,
+        details: { preserved: "ordinary native detail" },
+        systemMessage: {
+          role: "system",
+          content: "COMPACTION_CONTENT_SENTINEL",
+          sections: { project_context: "COMPACTION_SECTION_SENTINEL" },
+          toolsAdded: [
+            {
+              name: "compaction_sentinel_tool",
+              description: "COMPACTION_TOOL_SENTINEL",
+              parameters: { type: "object" },
+            },
+          ],
+          timestamp: 6,
+        },
+      },
+      false,
+    );
+    expect(record).toMatchObject({
+      type: "compaction",
+      summary: [{ type: "text", text: "ordinary conversation summary" }],
+      overflow: {
+        native: {
+          ...base,
+          type: "compaction",
+          firstKeptEntryId: "e1",
+          tokensBefore: 5000,
+          details: { preserved: "ordinary native detail" },
+          systemMessage: { role: "system", timestamp: 6 },
+        },
+      },
+    });
+    const serialized = JSON.stringify(record);
+    expect(serialized).toContain("ordinary native detail");
+    for (const sentinel of [
+      "COMPACTION_CONTENT_SENTINEL",
+      "COMPACTION_SECTION_SENTINEL",
+      "COMPACTION_TOOL_SENTINEL",
+    ])
+      expect(serialized).not.toContain(sentinel);
   });
 
   it("maps lifecycle entries to typed events", () => {

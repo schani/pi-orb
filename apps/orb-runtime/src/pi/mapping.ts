@@ -12,8 +12,8 @@ import { err, ok, type Result } from "neverthrow";
 /**
  * Lossless Pi-entry → normalized-record mapping (docs/pi-adapter.md). Every
  * persisted entry maps one-to-one; a failure here fails the whole pull rather
- * than silently omitting an entry. The complete native entry always lands in
- * `overflow.native`.
+ * than silently omitting an entry. Native conversation entries land complete
+ * in `overflow.native`; Pi system prompt/tool state is identity-only.
  */
 
 export interface MappingError {
@@ -33,6 +33,30 @@ function asJson(value: unknown): JsonValue {
   // Entries come from Pi's JSONL session file, so they are JSON-safe by
   // construction; this normalizes undefined away for exactness.
   return JSON.parse(JSON.stringify(value)) as JsonValue;
+}
+
+function systemMessageIdentity(message: Record<string, unknown>): JsonObject {
+  return {
+    role: "system",
+    ...(typeof message["timestamp"] === "number" ? { timestamp: message["timestamp"] } : {}),
+  };
+}
+
+/** Keep Pi's model configuration local while retaining its history identity. */
+function nativeForHistory(entry: Record<string, unknown>): JsonObject {
+  const native = asJson(entry) as JsonObject;
+  if (entry["type"] === "message") {
+    const message = entry["message"];
+    if (isRecordObject(message) && message["role"] === "system") {
+      native["message"] = systemMessageIdentity(message);
+    }
+  } else if (entry["type"] === "compaction") {
+    const systemMessage = entry["systemMessage"];
+    if (isRecordObject(systemMessage)) {
+      native["systemMessage"] = systemMessageIdentity(systemMessage);
+    }
+  }
+  return native;
 }
 
 interface EntryIdentity {
@@ -57,7 +81,7 @@ function identityOf(entry: Record<string, unknown>): Result<EntryIdentity, Mappi
     id,
     parentId: parentId ?? null,
     timestamp,
-    overflow: { native: asJson(entry) },
+    overflow: { native: nativeForHistory(entry) },
   });
 }
 

@@ -24,7 +24,7 @@ The harness-agnostic history model, the pull-only replication pipeline, and the 
 ### Principles
 
 - Statically type semantics common to Pi, Claude Code, and Codex.
-- Preserve the complete native harness record losslessly.
+- Preserve native conversation records losslessly. Harness system prompt/tool state is local execution configuration: preserve its record identity and ancestry, but never its contents, in product history.
 - Use stable record IDs and parent IDs to support a future tree.
 - Do not put conversation-order sequence numbers in the public history model.
 - Model mixed message content as typed blocks because a single assistant message can interleave text, reasoning, images, and tool calls.
@@ -49,9 +49,9 @@ interface HistoryRecordBase {
   timestamp: string;
 
   /**
-   * Contains the complete original harness record and any data not
-   * represented by normalized fields. This intentionally duplicates
-   * some normalized data to guarantee losslessness.
+   * Contains the original harness record and any data not represented by
+   * normalized fields. System prompt/tool state is reduced to identity before
+   * leaving the harness host; other records remain lossless.
    */
   overflow: Record<string, JsonValue>;
 }
@@ -229,7 +229,7 @@ Required endpoint semantics:
 
 - At the start of each request, the runtime synchronously captures one immutable view of the harness's persisted entries. Records appended afterward belong to the next request.
 - Only complete, durably persisted harness records may be returned. Partial assistant output that the LLM is still streaming is absent from Pi's `SessionManager.getEntries()` and must not be synthesized into this endpoint.
-- Every persisted harness entry after `after`, including hidden custom entries, maps one-to-one to a `HistoryRecord`; the adapter must not skip entries that would break cursor continuity.
+- Every persisted harness entry after `after`, including hidden custom and system-state entries, maps one-to-one to a `HistoryRecord`; the adapter must not skip entries that would break cursor continuity. Pi system messages and compaction system checkpoints retain only identity in their mapped native overflow, so full prompt/tool configuration never enters either this pull response or live history frames. The authoritative local Pi JSONL remains unchanged (`docs/postmortems/2026-09-23-pi-system-history-replication.md`).
 - Records are returned in harness append order, which is necessarily parent-before-child order. A child arriving before its parent is therefore impossible from a correct adapter; the deferred foreign key makes any violation fail the commit transaction as a replication-integrity error rather than something to reorder around.
 - If at least one complete record exists after `after`, return between one and `limit` records.
 - `cursor` is the ID of the final returned record, or exactly the requested `after` when the response is empty.
@@ -274,7 +274,7 @@ In cloud deployment, at least one Cloud Run instance remains provisioned with CP
 
 ### Database-first history loading and content-agnostic live handoff
 
-**In-orb transcript inspection (decided and implemented 2026-08-27).** A running orb may read another orb's same consistent database snapshot through the bearer-authenticated `GET /runtime/v1/orbs/:orbId/transcript` route and `pi-orb transcript <orb-id>` (`docs/control-plane-api.md`). This is replica-only: it never starts or contacts the target runtime. The command therefore sees a sealed complete archive, but for an active target it may lag by the ordinary pull interval and omits partial streaming output. Default text rendering removes only the duplicated lossless native overflow; `--json` preserves the complete `OrbHistoryView`-equivalent snapshot. No second transcript representation or persistence path is introduced.
+**In-orb transcript inspection (decided and implemented 2026-08-27).** A running orb may read another orb's same consistent database snapshot through the bearer-authenticated `GET /runtime/v1/orbs/:orbId/transcript` route and `pi-orb transcript <orb-id>` (`docs/control-plane-api.md`). This is replica-only: it never starts or contacts the target runtime. The command therefore sees a sealed complete archive, but for an active target it may lag by the ordinary pull interval and omits partial streaming output. Default text rendering removes native overflow; `--json` preserves the complete replica snapshot, including native conversation data but not local-only system prompt/tool state. No second transcript representation or persistence path is introduced.
 
 **Browser cache exception (decided and implemented locally 2026-09-15):** `docs/transcript-cache.md` adds a bounded tab-local cache of complete parsed records plus session/cursor/head. A running-orb cache hit checks fresh orb metadata and resumes the existing live connection from the cached last-applied cursor, without repeating the full replica read. A miss still uses the database-first flow below. Non-running hits show cached history and revalidate through the unchanged full-snapshot endpoint; no delta API, replication change, persistent browser store or runtime wire change is introduced. A lagging replica cannot erase a newer cached live suffix, and a session change/full sync cannot merge unrelated cached records. The CLI's replica-only full snapshot is unchanged.
 
@@ -414,7 +414,7 @@ Orb naming reuses the `orbs` row rather than adding a job table (`docs/control-p
 
 The single feature migration, `009_orb_messages.sql`, adds `orb_messages`, keyed by `(orb_id, message_id)`, with validated JSON content, a database-assigned insertion ordinal, `queued | delivering | delivered | failed` status, optional observed delivery mode/operation ID, sanitized error, timestamps, durable batch identity, and message-driven wake metadata. The `auto_start` wake bit distinguishes send-after-stop from stop-after-send without adding lifecycle state; it is set by admission whenever the orb cannot take delivery right now (`stopping`, `stopped`, `failed`) and cleared only by delivery, terminal failure, or an explicit stop — never by the wake it causes, so the backstop's start needs no follow-up write that could be stranded (`docs/lifecycle.md`). `wake_state_version` is the orb `state_version` the intent was admitted against: a `stopped` orb wakes for any outstanding intent, while a `failed` orb wakes only for an intent naming its current version, so a new send retries a failed boot exactly once and the version bump the wake performs retires the privilege without a second write. Admission itself performs no lifecycle transition (2026-08-11) — the reconciler's terminal backstop owns the single message-driven transition. `delivery_batch_id` lets claiming the head atomically assign every currently queued row to one batch while later arrivals wait for the next one. The replicated native record carries all constituent message IDs as the durable delivery identity; its replication transaction marks all of those rows delivered, and outstanding/status reads remain reload-safe.
 
-`history_records.record` stores the complete normalized `HistoryRecord`, including its lossless native `overflow`. The few duplicated columns exist only for keys and tree traversal. There is deliberately no database conversation sequence number: linear order is reconstructed by following `parent_id` from `replicated_head_id`, and future branching uses the same graph.
+`history_records.record` stores the complete normalized `HistoryRecord`, including lossless native conversation overflow and identity-only Pi system-state overflow. The few duplicated columns exist only for keys and tree traversal. There is deliberately no database conversation sequence number: linear order is reconstructed by following `parent_id` from `replicated_head_id`, and future branching uses the same graph.
 
 `replicated_head_id` means the latest active head whose record is present in the replica. A runtime pull may report a source head beyond a partial batch; do not expose/store that as the replicated head until the referenced record has been committed. `replication_cursor` always references the final committed record in append order and is independent of tree order.
 

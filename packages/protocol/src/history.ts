@@ -114,15 +114,16 @@ const recordBase = {
   parentId: Type.Union([Type.String(), Type.Null()]),
   timestamp: Type.String(),
   /**
-   * Contains the complete original harness record and any data not
-   * represented by normalized fields (lossless by construction).
+   * Contains the original harness record and any data not represented by
+   * normalized fields. Harness system prompt/tool state is identity-only.
    */
   overflow: JsonObjectSchema,
 };
 
 /**
  * Normalized fields the harness adapter derives once so clients never parse
- * harness-native JSON (docs/pi-adapter.md). `overflow` stays lossless.
+ * harness-native JSON (docs/pi-adapter.md). `overflow` stays lossless except
+ * for the documented system-state confidentiality projection.
  */
 const ShellExecutionSchema = Type.Object(
   {

@@ -33,6 +33,7 @@ chmod 755 /usr/local/bin/rustup
 for proxy in cargo rustc rustdoc rustfmt cargo-clippy cargo-fmt clippy-driver; do ln -s rustup "/usr/local/bin/$proxy"; done
 cd /app
 npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts
+npx --no-install patch-package
 rm -rf node_modules/node-pty/prebuilds
 npm rebuild node-pty
 chmod 755 node_modules/agent-browser/bin/agent-browser-linux-x64

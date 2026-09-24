@@ -31,6 +31,7 @@ import {
   deleteFakeSession,
   docker,
   dockerOutcome,
+  effectiveOpenAIResponseInstructions,
   type FakeSession,
   FatalProbeError,
   fakeControl,
@@ -1869,21 +1870,23 @@ describe("full slice E2E", () => {
       const calls: unknown = await fakeControl(fake.sessionKey, "/requests");
       expect(
         Array.isArray(calls) &&
-          calls.some(
-            (call) =>
+          calls.some((call) => {
+            const effectiveInstructions = effectiveOpenAIResponseInstructions(call.body);
+            return (
               call.status === 200 &&
               call.matchedRuleIndex === index + 3 &&
-              !JSON.stringify(call.body).includes("PROJECT_E2E_FIRST_BOOT") &&
-              JSON.stringify(call.body).includes("PROJECT_E2E_NEXT_BOOT") === (index === 0) &&
-              !JSON.stringify(call.body).includes("PERSONAL_E2E_FIRST_BOOT") &&
-              JSON.stringify(call.body).includes("PERSONAL_E2E_NEXT_BOOT") === (index === 0) &&
+              !effectiveInstructions.includes("PROJECT_E2E_FIRST_BOOT") &&
+              effectiveInstructions.includes("PROJECT_E2E_NEXT_BOOT") === (index === 0) &&
+              !effectiveInstructions.includes("PERSONAL_E2E_FIRST_BOOT") &&
+              effectiveInstructions.includes("PERSONAL_E2E_NEXT_BOOT") === (index === 0) &&
               call.body?.model === "gpt-6-sol" &&
               call.body?.reasoning?.effort === "low" &&
               call.body?.input?.some(
                 (message: { role?: string; content?: unknown }) =>
                   message.role === "user" && JSON.stringify(message.content).includes(warning),
-              ),
-          ),
+              )
+            );
+          }),
       ).toBe(true);
       expect((await api(base, "POST", `/api/v1/orbs/${orbId}/stop`)).status).toBe(202);
       await waitFor(

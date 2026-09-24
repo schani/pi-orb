@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   attachControlledClock,
   controlledClockSpawn,
+  effectiveOpenAIResponseInstructions,
   FAKE_ORIGIN,
   fakeRequest,
   newModelRequestsById,
@@ -85,6 +86,39 @@ describe("controlled control-plane clock", () => {
     expect(child.listenerCount("message")).toBe(before);
     expect((await clock.advanceTo(Date.now()))._unsafeUnwrapErr().type).toBe("clock_closed");
     child.kill("SIGTERM");
+  });
+});
+
+describe("effective OpenAI response instructions", () => {
+  it("folds framed section updates over historical leading instructions", () => {
+    const effective = effectiveOpenAIResponseInstructions({
+      instructions:
+        "base\n\n<project_context>\nPROJECT_FIRST\n</project_context>\n\n<cwd>\n/old\n</cwd>",
+      input: [
+        {
+          role: "developer",
+          content:
+            'Updated system prompt section "project_context":\n\n<project_context>\nPROJECT_NEXT\n</project_context>\n\nUpdated system prompt section "cwd":\n\n<cwd>\n/new\n</cwd>',
+        },
+      ],
+    });
+
+    expect(effective).toContain("PROJECT_NEXT");
+    expect(effective).toContain("/new");
+    expect(effective).not.toContain("PROJECT_FIRST");
+    expect(effective).not.toContain("/old");
+  });
+
+  it("folds removals without treating conversation input as instructions", () => {
+    const effective = effectiveOpenAIResponseInstructions({
+      instructions: "base\n\n<addendum>\nREMOVE_ME\n</addendum>",
+      input: [
+        { role: "developer", content: 'Removed system prompt section "addendum".' },
+        { role: "user", content: [{ type: "input_text", text: "NOT_AN_INSTRUCTION" }] },
+      ],
+    });
+
+    expect(effective).toBe("base");
   });
 });
 
