@@ -102,6 +102,9 @@ export function Composer({
   const hasInput = isShell ? text.trim() !== "" : text.trim() !== "" || images.length > 0;
   const sendEnabled = !isCommand && canSend && hasInput && !shellBlockedByAttachment;
   const phone = usePhoneLayout();
+  const touchCapable =
+    typeof window !== "undefined" &&
+    (navigator.maxTouchPoints > 0 || window.matchMedia("(any-pointer: coarse)").matches);
   const [expanded, setExpanded] = useState(false);
   const padRef = useRef<HTMLButtonElement>(null);
   const awaitingClear = useRef(false);
@@ -189,7 +192,7 @@ export function Composer({
   };
 
   useEffect(() => {
-    if (phone) return;
+    if (phone || touchCapable) return;
     const focus = () => {
       if (
         document.visibilityState === "visible" &&
@@ -200,7 +203,7 @@ export function Composer({
     focus();
     document.addEventListener("visibilitychange", focus);
     return () => document.removeEventListener("visibilitychange", focus);
-  }, [phone]);
+  }, [phone, touchCapable]);
 
   useLayoutEffect(() => {
     if (phone && expanded) inputRef.current?.focus({ preventScroll: true });
@@ -225,7 +228,7 @@ export function Composer({
   const submit = () => {
     awaitingClear.current = true;
     onSend();
-    if (!phone) inputRef.current?.focus();
+    if (!phone) inputRef.current?.focus({ preventScroll: true });
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -239,7 +242,12 @@ export function Composer({
   };
 
   return (
-    <div className="composer" data-expanded={expanded} data-settings-pending={settingsPending}>
+    <div
+      className="composer"
+      data-expanded={expanded}
+      data-settings-pending={settingsPending}
+      data-touch-capable={touchCapable}
+    >
       {dropLabel !== null && (
         <div className="orb-drop-inset" aria-hidden="true">
           <span>{dropLabel}</span>

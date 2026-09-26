@@ -46,6 +46,42 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     await vite?.close();
   });
 
+  it("leaves tablet-width touch focus and document position alone on tab return", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 820, height: 900 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    try {
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+      await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb", composer);
+      await expectPage(composer).not.toBeFocused();
+      await expectPage(composer).toHaveCSS("font-size", "16px");
+      const rename = page.getByRole("button", { name: "Rename orb", exact: true });
+      await rename.focus();
+      await page.evaluate(() => {
+        const pageDocument = Reflect.get(globalThis, "document");
+        Object.defineProperty(pageDocument, "visibilityState", {
+          configurable: true,
+          value: "visible",
+        });
+        pageDocument.dispatchEvent(new Event("visibilitychange"));
+      });
+      await expectPage(rename).toBeFocused();
+      const geometry = await page.evaluate(() => ({
+        width: Reflect.get(globalThis, "document").documentElement.scrollWidth,
+        viewport: Reflect.get(globalThis, "document").documentElement.clientWidth,
+        x: Reflect.get(globalThis, "window").scrollX,
+      }));
+      expectPage(geometry.width).toBeLessThanOrEqual(geometry.viewport);
+      expectPage(geometry.x).toBe(0);
+      await composer.focus();
+      await expectPage(composer).toBeFocused();
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each([320, 390, 600])(
     "uses the phone side rail at %ipx without changing desktop composition",
     async (width) => {
