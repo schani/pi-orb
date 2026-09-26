@@ -107,7 +107,7 @@ export function runMigrations(
           );
           if (configured.isErr()) return err(configured.error);
         }
-        if (migration.name === "026_google_identities.sql") {
+        if (migration.name === "027_google_identities.sql") {
           const configured = await query(
             "SELECT set_config('pi_orb.google_identity_mappings', $1, true)",
             [JSON.stringify(options.googleIdentityMappings ?? [])],

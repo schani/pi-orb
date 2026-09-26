@@ -118,8 +118,8 @@ it("passes verified Google mappings only to the migration job and logs counts, n
       {
         migrate: (options) => {
           expect(options?.googleIdentityMappings).toEqual(googleIdentityMappings);
-          options?.observe?.("026_google_identities.sql", "applied");
-          return okAsync(["026_google_identities.sql"]);
+          options?.observe?.("027_google_identities.sql", "applied");
+          return okAsync(["027_google_identities.sql"]);
         },
         close: () => okAsync(undefined),
       },

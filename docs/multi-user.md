@@ -33,9 +33,9 @@ type Principal =
 
 Composition selects the auth service; HTTP guards map typed results, while provider/store adapters contain third-party exceptions. Browser handlers do not call identity storage or Google verification directly. Source: `apps/control-plane/src/{identity-composition.ts,domain/application-auth.ts,http/browser-identity.ts}`.
 
-### Google identity migration 026
+### Google identity migration 027
 
-The migration job alone reads nonsecret `PI_ORB_GOOGLE_IDENTITY_MAPPINGS`, a JSON array of `{userId, oldIssuer, oldSubject, googleSubject}`. Supply independently verified exact identities; `oldIssuer` must be `https://cloud.google.com/iap`. `026_google_identities.sql` locks users and atomically changes matched issuer/subject pairs to `https://accounts.google.com` and the supplied Google subject. UUIDs, emails, timestamps, ownership and dependent records remain unchanged. It rejects missing IAP coverage, unexpected tuples, malformed/duplicate mappings and occupied destinations. Fresh databases need no input; subsequent jobs need none after committed migration. Runtime startup does not read this variable.
+The migration job alone reads nonsecret `PI_ORB_GOOGLE_IDENTITY_MAPPINGS`, a JSON array of `{userId, oldIssuer, oldSubject, googleSubject}`. Supply independently verified exact identities; `oldIssuer` must be `https://cloud.google.com/iap`. `027_google_identities.sql` locks users and atomically changes matched issuer/subject pairs to `https://accounts.google.com` and the supplied Google subject. UUIDs, emails, timestamps, ownership and dependent records remain unchanged. It rejects missing IAP coverage, unexpected tuples, malformed/duplicate mappings and occupied destinations. Fresh databases need no input; subsequent jobs need none after committed migration. Runtime startup does not read this variable.
 
 Retire old identity-serving processes before migration: a table lock cannot stop one returning later. Migration logs record filename, outcome and mapped count, never identity values; `schema_migrations` records completion. There is no email linking, replacement user or compatibility phase. Cutover: `docs/control-plane-consolidation.md`.
 
