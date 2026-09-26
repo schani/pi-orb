@@ -46,6 +46,75 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     await vite?.close();
   });
 
+  it.each([320, 390])(
+    "wraps assistant failure text inside the phone transcript at %ipx",
+    async (width) => {
+      const page = await browser.newPage({
+        viewport: { width, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      const long = "*".repeat(155);
+      await page.route("**/api/v1/orbs/frontend-long-history", async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({ response, json: { ...(await response.json()), state: "stopped" } });
+      });
+      await page.route("**/api/v1/orbs/frontend-long-history/history", async (route) => {
+        const response = await route.fetch();
+        const history = await response.json();
+        const records = history.records;
+        records.push({
+          id: "long-assistant-failure",
+          parentId: records.at(-1).id,
+          timestamp: records.at(-1).timestamp,
+          type: "message",
+          role: "assistant",
+          finishReason: "error",
+          failure: { message: `Incorrect API key provided: sk-example${long}.`, diagnostics: [] },
+          content: [],
+          overflow: {},
+        });
+        await route.fulfill({
+          response,
+          json: {
+            ...history,
+            records,
+            cursor: "long-assistant-failure",
+            headId: "long-assistant-failure",
+          },
+        });
+      });
+      try {
+        await gotoFrontendHistory(
+          page,
+          `${origin}/#/orbs/frontend-long-history`,
+          "frontend-long-history",
+          page.locator(".history"),
+        );
+        const failure = page.locator('.rec-orb .error-text[role="alert"]');
+        await expectPage(failure).toContainText("Incorrect API key provided:");
+        const widths = await page.locator(".orb-transcript-scroll").evaluate((pane) => {
+          const history = pane.querySelector(".history");
+          if (history === null) return null;
+          return {
+            pane: pane.clientWidth,
+            paneScroll: pane.scrollWidth,
+            history: history.getBoundingClientRect().width,
+            document: pane.ownerDocument.documentElement.scrollWidth,
+            viewport: pane.ownerDocument.documentElement.clientWidth,
+          };
+        });
+        expectPage(widths).not.toBeNull();
+        if (widths === null) throw new Error("Transcript geometry unavailable");
+        expectPage(widths.history).toBeLessThanOrEqual(widths.pane);
+        expectPage(widths.paneScroll).toBeLessThanOrEqual(widths.pane);
+        expectPage(widths.document).toBeLessThanOrEqual(widths.viewport);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
   it("leaves tablet-width touch focus and document position alone on tab return", async () => {
     const page = await browser.newPage({
       viewport: { width: 820, height: 900 },

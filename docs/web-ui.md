@@ -1,5 +1,9 @@
 # Web UI
 
+## Phone transcript width (corrected 2026-09-26)
+
+The transcript pane must not scroll sideways. In the affected Compiler Worker orb, a 271-character masked API-key error in assistant failure record `41322686` was rendered as unwrapped plain text. Replaying its 2,229 records at 390px produced a 1,299px pane scroll width in Chromium and WebKit; it contained no Markdown images. Wrap assistant error text at arbitrary character boundaries without hiding the failure or clipping the pane. Browser regressions at 320/390px cover the failure and pane/document widths.
+
 ## File drag-and-drop (Fine inset selected and implemented 2026-09-24)
 
 **Selected: Fine inset.** A dashed 1px boundary sits 8px inside the receiving surface, with a translucent white wash and a centered, white-backed caption. It appears only during file drag-over and clears on exit or drop. Feedback remains local to the destination; rejection is visibly announced.

@@ -277,6 +277,10 @@ h3 {
   color: var(--bad);
 }
 
+.rec-orb .error-text {
+  overflow-wrap: anywhere;
+}
+
 .trunc {
   overflow: hidden;
   text-overflow: ellipsis;
