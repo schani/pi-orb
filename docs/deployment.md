@@ -468,6 +468,8 @@ it is separate from the Node version selected for application builds. Artifact
 paths, retention, hidden-file exclusion and default ZIP packaging remain unchanged.
 The shared Chromium/WebKit installation is already merged to `main` (`7fdbc9b`).
 
+**Diagnostics release validated (2026-09-26):** [GitHub run 36246258567](https://github.com/schani/pi-orb/actions/runs/36246258567) deployed exact commit `3c5e7bc99494907933f7883fd81fe742f7ec2eb0` as release `r-1790430438-cbab5c3a-43a4-4fcb-8a0d-64cf4411de27`. The release artifact records `validated`, exit 0 and every gate passed; migration 026 ran. Independent serving verification found browser, ops, runtime and issuer on digest `sha256:f8c032542eb5219d4314b0c6fe807347e381a4d98cffc4f7fc793621b95ab972`, generation `1790432946` (issuer has no generation). Native image ID `4610591126911085428`; workspace image ID `5860208004801653688`. All four fixtures were deleted, native cleanup succeeded, and the release lock was absent. The Codex and MCP diagnostics change evidence, not recovery or provider-auth root-cause conclusions (`docs/postmortems/2026-09-26-provider-auth-failures.md`). The earlier unit-gate incident remains historical (`docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md`).
+
 **Mobile release validated through explicit recovery (2026-09-13):** full run
 [34730567562](https://github.com/schani/pi-orb/actions/runs/34730567562) deployed
 `7fdbc9b` after passing checks including both mobile browser engines, build,
