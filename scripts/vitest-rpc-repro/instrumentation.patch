@@ -1,0 +1,60 @@
+--- index.B521nVV-.js
++++ index.B521nVV-.js
+@@ -1,3 +1,8 @@
++import { appendFileSync } from 'node:fs';
++const diag = (event, data = {}) => {
++  const root = process.env.VITEST_RPC_REPRO;
++  if (root) appendFileSync(`${root}/events.jsonl`, JSON.stringify({ event, pid: process.pid, mono: Number(process.hrtime.bigint()) / 1e6, ...data }) + '\n');
++};
+ const TYPE_REQUEST = "q";
+ const TYPE_RESPONSE = "s";
+ const DEFAULT_TIMEOUT = 6e4;
+@@ -56,6 +61,7 @@
+           if (timeout >= 0) {
+             timeoutId = setTimeout(() => {
+               try {
++                if (method === 'onTaskUpdate') diag('rpc-timeout-fired', { id });
+                 const handleResult = options.onTimeoutError?.(method, args);
+                 if (handleResult !== true)
+                   throw new Error(`[birpc] timeout on calling "${method}"`);
+@@ -68,6 +74,7 @@
+               timeoutId = timeoutId.unref?.();
+           }
+           rpcPromiseMap.set(id, { resolve, reject, timeoutId, method });
++          if (method === 'onTaskUpdate') diag('rpc-request-send', { id, packIds: args[0].map((p) => p[0]) });
+           post(serialize({ m: method, a: args, i: id, t: "q" }));
+         });
+       };
+@@ -114,6 +121,7 @@
+         }
+         if (!error) {
+           try {
++            if (method === 'onTaskUpdate') diag('rpc-response-send', { id: msg.i });
+             post(serialize({ t: TYPE_RESPONSE, i: msg.i, r: result }), ...extra);
+             return;
+           } catch (e) {
+@@ -132,6 +140,7 @@
+     } else {
+       const { i: ack, r: result, e: error } = msg;
+       const promise = rpcPromiseMap.get(ack);
++      if (promise?.method === 'onTaskUpdate') diag('rpc-response-received', { id: ack });
+       if (promise) {
+         clearTimeout(promise.timeoutId);
+         if (error)
+--- coverage.DfSpMS-b.js
++++ coverage.DfSpMS-b.js
+@@ -2501,6 +2501,14 @@
+ 			return ctx._testRun.annotate(testId, annotation);
+ 		},
+ 		async onTaskUpdate(packs, events) {
++			const repro = process.env.VITEST_RPC_REPRO;
++			if (repro && !existsSync(`${repro}/coordinator-first`)) {
++				writeFileSync(`${repro}/coordinator-first`, '1');
++				const stamp = (event) => fs.appendFileSync(`${repro}/events.jsonl`, JSON.stringify({ event, pid: process.pid, mono: Number(process.hrtime.bigint()) / 1e6 }) + '\n');
++				stamp('coordinator-received-first-update');
++				while (!existsSync(`${repro}/entered-0`)) await new Promise((resolve) => setTimeout(resolve, 5));
++				stamp('coordinator-worker-entered-confirmed');
++			}
+ 			if (options.collect) ctx.state.updateTasks(packs);
+ 			else await ctx._testRun.updated(packs, events);
+ 		},

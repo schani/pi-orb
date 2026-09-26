@@ -1,0 +1,71 @@
+{
+  "case": "baseline",
+  "workerBoundary": "microtask-only",
+  "vitest": "3.2.7",
+  "vitestExit": 1,
+  "testPassed": true,
+  "rpcTimeoutMs": 60000,
+  "testTimeoutMs": 90000,
+  "targetEvents": [
+    {
+      "event": "rpc-request-send",
+      "elapsedMs": 0.0
+    },
+    {
+      "event": "coordinator-received-first-update",
+      "elapsedMs": 0.535
+    },
+    {
+      "event": "worker-entered-block",
+      "elapsedMs": 1.603,
+      "iteration": 0
+    },
+    {
+      "event": "coordinator-worker-entered-confirmed",
+      "elapsedMs": 5.816
+    },
+    {
+      "event": "rpc-response-send",
+      "elapsedMs": 6.252
+    },
+    {
+      "event": "worker-left-block",
+      "elapsedMs": 15518.242,
+      "iteration": 0
+    },
+    {
+      "event": "worker-entered-block",
+      "elapsedMs": 15518.365,
+      "iteration": 1
+    },
+    {
+      "event": "worker-left-block",
+      "elapsedMs": 31038.654,
+      "iteration": 1
+    },
+    {
+      "event": "worker-entered-block",
+      "elapsedMs": 31038.754,
+      "iteration": 2
+    },
+    {
+      "event": "worker-left-block",
+      "elapsedMs": 46553.529,
+      "iteration": 2
+    },
+    {
+      "event": "worker-entered-block",
+      "elapsedMs": 46553.626,
+      "iteration": 3
+    },
+    {
+      "event": "worker-left-block",
+      "elapsedMs": 62074.203,
+      "iteration": 3
+    },
+    {
+      "event": "rpc-timeout-fired",
+      "elapsedMs": 62078.897
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setImmediate } from "node:timers/promises";
 import {
   type EntropySource,
   type Logger,
@@ -188,6 +189,7 @@ export async function runDst(
         { cause: error },
       );
     }
+    if (i + 1 < iterations) await setImmediate();
   }
 }
 
