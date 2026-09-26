@@ -19,12 +19,6 @@ variable "foundation_state_bucket" {
   default     = "pi-orb-tfstate-playground-dev-6ae7"
 }
 
-variable "iap_domain" {
-  description = "Google Workspace domain allowed through IAP (hardcoded decision, docs/deployment.md)."
-  type        = string
-  default     = "heyglide.com"
-}
-
 variable "github_client_id" {
   description = "GitHub App client id for the gh/user-token flow (docs/credentials.md); empty disables the integration. Public by nature — it travels in every device-flow request; the client secret lives only in Secret Manager."
   type        = string

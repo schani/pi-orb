@@ -22,6 +22,82 @@ afterEach(async () => {
 });
 
 describe("live proxy", () => {
+  it.each([
+    ["live", RUNTIME_SUBPROTOCOL],
+    ["terminal", TERMINAL_SUBPROTOCOL],
+  ])("fences expired %s sessions while runtime routing is held", async (path, protocol) => {
+    const harness = makeHarness();
+    const orbId = "orb-session-expiry";
+    harness.store.seedOrb(makeOrbRow(orbId, "project-a", "running", { hostRef: "host-a" }));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let observed: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      observed = resolve;
+    });
+    let expire: (() => void) | undefined;
+    let now = 100;
+    const task = new NoSimulationTask("expiry routing", false);
+    task.wallNow = () => now;
+    const app = Fastify({ logger: false });
+    openServers.push({ close: () => app.close() });
+    app.addHook("onRequest", async (request) => {
+      request.authExpiresAt = 200;
+    });
+    await registerLiveProxy(
+      app,
+      task,
+      {
+        ...harness.deps,
+        hostProvider: {
+          ...harness.deps.hostProvider,
+          observe: (_task, ref) => {
+            observed();
+            return ResultAsync.fromSafePromise(gate).map(() => ({
+              ref,
+              orbId,
+              incarnation: 0,
+              specFingerprint: null,
+              state: "running" as const,
+              runtimeAddress: { baseUrl: "http://127.0.0.1:1" },
+            }));
+          },
+        },
+      },
+      (_delay, callback) => {
+        expire = callback;
+        return () => undefined;
+      },
+    );
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address() as AddressInfo;
+    const browser = new WebSocket(
+      `ws://127.0.0.1:${address.port}/api/v1/orbs/${orbId}/${path}`,
+      protocol,
+    );
+    openServers.push({
+      close: async () => {
+        release();
+        browser.terminate();
+      },
+    });
+    await once(browser, "open");
+    await started;
+    try {
+      expect(expire).toBeTypeOf("function");
+      const closed = once(browser, "close");
+      now = 200;
+      expire?.();
+      const [code, reason] = await closed;
+      expect(code).toBe(1008);
+      expect(reason.toString()).toBe("session expired");
+    } finally {
+      release();
+    }
+  });
+
   it("rejects a connection covered by a concurrent stopping marker", async () => {
     const harness = makeHarness();
     const orbId = "orb-concurrent-stop";

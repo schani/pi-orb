@@ -86,7 +86,7 @@ class PreflightTest(unittest.TestCase):
 
     def test_browser_depends_on_callback_protection(self):
         script = Path("infra/run.tf").read_text()
-        browser = script.split('resource "google_cloud_run_v2_service" "browser" {')[1].split('\nresource ')[0]
+        browser = script.split('resource "google_cloud_run_v2_service" "issuer" {')[1].split('\nresource ')[0]
         dependencies = browser.split("depends_on = [")[1].split("]")[0]
         for resource in ["google_logging_project_exclusion.mcp_oauth_callback",
                          "google_secret_manager_secret_iam_member.cp_mcp_oauth_accessor",

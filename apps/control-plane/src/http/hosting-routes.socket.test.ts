@@ -117,7 +117,11 @@ describe("hosting routes over a real HTTP socket", () => {
     );
     registerHostingAccessGuard(
       app,
-      createHostingAccessPolicy({ filesOrigin: "https://files.example.test" })._unsafeUnwrap(),
+      createHostingAccessPolicy({
+        trustedLocal: true,
+        appOrigin: "https://app.example.test",
+        filesOrigin: "https://files.example.test",
+      })._unsafeUnwrap(),
       "https://app.example.test",
     );
     await registerRuntimeHostingRoutes(app, task, {

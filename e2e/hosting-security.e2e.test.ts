@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { createServer } from "node:net";
 import { HOSTING_FILES_PATH } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage } from "@playwright/test";
 import { NoSimulationTask } from "determined";
@@ -8,6 +7,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createHostingAccessPolicy,
+  type HostingAccessPolicy,
   registerHostingAccessGuard,
 } from "../apps/control-plane/src/http/hosting-access.ts";
 import {
@@ -21,22 +21,6 @@ const TOKEN = "hosting-security-runtime-token";
 const task = new NoSimulationTask("hosting browser isolation", false);
 const digest = (body: string) => createHash("sha256").update(body).digest("hex");
 
-async function unusedLoopbackPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (address === null || typeof address === "string") {
-        server.close();
-        reject(new Error("loopback server did not receive a TCP port"));
-        return;
-      }
-      server.close((error) => (error === undefined ? resolve(address.port) : reject(error)));
-    });
-  });
-}
-
 describe("hosted-file browser origin isolation", () => {
   let browser: Browser;
   let app: ReturnType<typeof Fastify>;
@@ -47,9 +31,6 @@ describe("hosted-file browser origin isolation", () => {
   let socketHandlers = 0;
 
   beforeAll(async () => {
-    const port = await unusedLoopbackPort();
-    appOrigin = `http://127.0.0.1:${port}`;
-    filesOrigin = `http://files.localhost:${port}`;
     const harness = makeHarness({ hostingOrbId: ORB });
     harness.store.seedOrb(
       makeOrbRow(ORB, "project", "running", {
@@ -58,13 +39,21 @@ describe("hosted-file browser origin isolation", () => {
       }),
     );
     app = Fastify();
-    const policy = createHostingAccessPolicy({ filesOrigin });
-    expect(policy.isOk()).toBe(true);
-    if (policy.isErr()) return;
-    registerHostingAccessGuard(app, policy.value, appOrigin);
+    let policy: HostingAccessPolicy | undefined;
+    registerHostingAccessGuard(
+      app,
+      {
+        decide: (request) => policy?.decide(request) ?? { kind: "reject", reason: "unknown_host" },
+      },
+      "/",
+    );
     const deps = {
-      appOrigin,
-      filesOrigin,
+      get appOrigin() {
+        return appOrigin;
+      },
+      get filesOrigin() {
+        return filesOrigin;
+      },
       hosting: harness.hosting.deps,
       store: harness.store,
     };
@@ -88,6 +77,18 @@ describe("hosted-file browser origin isolation", () => {
       socketHandlers++;
       return { connected: true };
     });
+
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (address === null || typeof address === "string") throw new Error("Missing listener");
+    const port = address.port;
+    appOrigin = `http://127.0.0.1:${port}`;
+    filesOrigin = `http://files.localhost:${port}`;
+    policy = createHostingAccessPolicy({
+      appOrigin,
+      filesOrigin,
+      trustedLocal: true,
+    })._unsafeUnwrap();
 
     const publish = async (path: string, body: string, mediaType: string) => {
       const response = await app.inject({
@@ -118,7 +119,6 @@ describe("hosted-file browser origin isolation", () => {
       </script>`,
       "text/html; charset=utf-8",
     );
-    await app.listen({ host: "127.0.0.1", port });
 
     const configuredExecutable = process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"];
     const systemExecutable = existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined;

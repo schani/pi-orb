@@ -15,6 +15,12 @@ function message(id: string): OrbMessageView {
 }
 
 describe("DevConsoleDebug", () => {
+  it("clears principal-bound metadata", () => {
+    const debug = new DevConsoleDebug();
+    debug.record({ event: "navigation", orbId: "alice-orb" });
+    debug.clear();
+    expect(debug.dump()).toMatchObject({ trace: [], traceDropped: 0, current: null });
+  });
   it("installs an idempotent read-only public API", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     try {

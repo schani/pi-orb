@@ -58,7 +58,13 @@ export function ComposerCaret({
       composing = false;
       update();
     };
-    const events = ["input", "select", "keyup", "click", "focus", "blur", "scroll"] as const;
+    // Measure after React's root listener restores the normalized controlled value.
+    // A target-listener microtask can run before that listener in WebKit.
+    const afterInput = (event: Event) => {
+      if (event.target === input) update();
+    };
+    const events = ["select", "keyup", "click", "focus", "blur", "scroll"] as const;
+    document.addEventListener("input", afterInput);
     for (const event of events) input.addEventListener(event, update);
     input.addEventListener("compositionstart", compositionStart);
     input.addEventListener("compositionend", compositionEnd);
@@ -67,6 +73,7 @@ export function ComposerCaret({
     resize.observe(input);
     update();
     return () => {
+      document.removeEventListener("input", afterInput);
       for (const event of events) input.removeEventListener(event, update);
       input.removeEventListener("compositionstart", compositionStart);
       input.removeEventListener("compositionend", compositionEnd);

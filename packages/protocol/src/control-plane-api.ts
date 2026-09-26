@@ -10,6 +10,7 @@ const closed = { additionalProperties: false } as const;
 export const SessionProbeSchema = Type.Object(
   {
     status: Type.Literal("ok"),
+    logoutAvailable: Type.Optional(Type.Literal(true)),
     principal: Type.Union([
       Type.Object(
         {

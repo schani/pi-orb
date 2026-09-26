@@ -15,7 +15,7 @@
 # Required environment:
 #   PI_ORB_GCP_PROJECT, PI_ORB_GCE_ZONE   where orb VMs live
 # Optional:
-#   PI_ORB_OPS_URL, PI_ORB_ISSUER_URL     default to the tofu outputs
+#   PI_ORB_APP_ORIGIN, PI_ORB_ISSUER_URL     default to the tofu outputs
 #   PI_ORB_SMOKE_PROJECT_ID               reuse a fixed pi-orb project (the one
 #                                         a project-scoped WIF grant names).
 #                                         Creation is idempotent for identical
@@ -31,7 +31,7 @@
 #   PI_ORB_SMOKE_WIF_STS_AUDIENCE  //iam.googleapis.com/projects/.../providers/...
 #   PI_ORB_SMOKE_WIF_TEST_SA       read-only service account to impersonate
 #
-# Talks to the ops service through api.sh (pi-orb-debug impersonation) and to
+# Talks to the application through api.sh (pi-orb-debug impersonation) and to
 # GCE through gcloud, so it needs the same valid credentials as any other
 # tooling here. No JWT, bearer, or access token is ever printed: tokens travel
 # through pipes and mode-0600 files in a mode-0700 directory removed on exit.
@@ -122,13 +122,13 @@ done
 # `set -e` makes a failing command substitution abort the script *silently* at
 # the assignment, before the diagnostic that explains it can run — so every
 # assignment whose failure the operator must understand uses the `if !` form.
-if [ -z "${PI_ORB_OPS_URL:-}" ]; then
-  if ! PI_ORB_OPS_URL=$(cd "$DIR" && tofu output -raw ops_url); then
-    fail "preflight" "no ops URL (set PI_ORB_OPS_URL, or make 'tofu output -raw ops_url' readable)"
+if [ -z "${PI_ORB_APP_ORIGIN:-}" ]; then
+  if ! PI_ORB_APP_ORIGIN=$(cd "$DIR" && tofu output -raw app_url); then
+    fail "preflight" "no app URL (set PI_ORB_APP_ORIGIN, or make 'tofu output -raw app_url' readable)"
   fi
 fi
-export PI_ORB_OPS_URL
-[ -n "$PI_ORB_OPS_URL" ] || fail "preflight" "the ops URL is empty"
+export PI_ORB_APP_ORIGIN
+[ -n "$PI_ORB_APP_ORIGIN" ] || fail "preflight" "the app URL is empty"
 
 ISSUER_URL=${PI_ORB_ISSUER_URL:-}
 if [ -z "$ISSUER_URL" ]; then
@@ -483,7 +483,7 @@ fi
 MINT_ORB=$(uuidgen | tr '[:upper:]' '[:lower:]')
 STOPPED_ORB=$(uuidgen | tr '[:upper:]' '[:lower:]')
 
-say "workload-identity smoke against $PI_ORB_OPS_URL"
+say "workload-identity smoke against $PI_ORB_APP_ORIGIN"
 say "issuer $ISSUER_URL, audience $AUDIENCE"
 say "project $PROJECT_ID (disposable=$PROJECT_IS_DISPOSABLE)"
 if [ "$FEDERATE" != true ]; then

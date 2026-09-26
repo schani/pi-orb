@@ -19,12 +19,14 @@ class Pages:
     def __init__(self, pages):
         self.pages = iter(pages)
         self.calls = []
+        self.json_calls = []
 
     def http(self, method, url):
         self.calls.append((method, url))
         return next(self.pages)
 
     def json(self, args):
+        self.json_calls.append(args)
         if args[0] == "compute": return Result([])
         return Result([{"metadata": {"name": "pi-orb-old"}}])
 
@@ -43,6 +45,23 @@ class RetirementTest(unittest.TestCase):
             self.assertIsNone(result.error)
             self.assertEqual(result.value["zeroes"], {})
         self.assertEqual(set(evidence(self.pending_record(), zeroes(), "2026-09-09T12:02:00Z").value["zeroes"]), {"pi-orb-old"})
+
+    def test_inventory_includes_former_browser_and_all_identity_writers(self):
+        cloud = Pages([Result({})])
+        self.assertIsNone(inventory(cloud, self.pending_record(), wall=lambda: "2026-09-09T12:02:00Z").error)
+        services = [call[4] for call in cloud.json_calls if call[0] == "run"]
+        self.assertEqual(services, ["pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer"])
+
+    def test_former_browser_remains_live_after_new_issuer_is_serving(self):
+        clock = [0]
+        value = self.pending_record()
+        cloud = Pages([Result({"timeSeries": [series("pi-orb-old", "active", "1")]}), Result({"timeSeries": zeroes()})])
+        result = wait_for_retirement(cloud, value, wall=lambda: "2026-09-09T12:02:00Z", monotonic=lambda: clock[0],
+                                     sleep=lambda duration: clock.__setitem__(0, clock[0] + duration), limit=15)
+        self.assertIsNone(result.error)
+        self.assertEqual(clock[0], 15)
+        self.assertEqual(value["serving"][0]["service"], "pi-orb-issuer")
+        self.assertIn("pi-orb-old", result.value["retirement"]["zeroes"])
 
     def test_rejects_future_and_non_integer_points(self):
         for point in (series("pi-orb-old", "active", "0", "2026-09-10T12:00:00Z"), series("pi-orb-old", "active", ""), series("pi-orb-old", "active", None)):

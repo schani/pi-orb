@@ -96,10 +96,8 @@ The application VPC, subnets, and private-services connection are foundation
 resources because IAM Conditions do not expose names for Compute networks,
 subnets, or addresses. The recurring deployer receives `networkUser` on the
 three exact subnets. Firewall administration is conditioned to the two
-application firewall resources. IAP administration is conditioned to web
-services, excluding IAP tunnels; IAM does not expose a supported resource-name
-attribute for narrowing it to one Cloud Run service.
-Neither grant can mutate the foundation image-build VPC or firewall. These
+application firewall resources. This grant cannot mutate the foundation image-build
+VPC or firewall. These
 grants pass local provider validation; a bootstrap using only the WIF deployer must still
 prove the complete permission set before production use.
 
@@ -149,8 +147,8 @@ This read-only permission test runs in every full release before checks, builds,
 migrations and apply, with missing permission names and the foundation remedy
 in the workflow log. It does not create a probe exclusion or blindly retry a
 denial. The preflight verdict is recorded in the existing durable release gate.
-The browser service also depends on the actual exclusion and OAuth secret IAM,
-so an unsuccessful first creation cannot publish a new browser revision ahead
+The application service also depends on the actual exclusion and OAuth secret IAM,
+so an unsuccessful first creation cannot publish a new application revision ahead
 of those protections. Additional logging sinks still require qualification.
 Live adoption applied exactly the custom role and additive member binding under
 the generation-matched release lock: two creates, no changes or deletes. An
@@ -173,7 +171,7 @@ authenticated orb cannot grant new identities authority.
 The control-plane account can read exactly
 `static-plane/releases/active.json` in the state bucket. It cannot list or read
 Terraform state through that conditional grant. This token-free generation
-record is the startup barrier for autonomous browser loops; only the release
+record is the startup barrier for autonomous application loops; only the release
 controller may publish it after independently establishing old-process retirement.
 
 The bootstrap `Deploy` workflow initially verifies keyless access only. It must

@@ -1,6 +1,7 @@
 import { ok, Result } from "neverthrow";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
+import { readSessionPrincipal } from "./session.ts";
 
 const ComposerDraftSchema = Type.Object(
   {
@@ -28,7 +29,8 @@ export interface ComposerDraftStorageError {
   readonly message: string;
 }
 
-const storageKey = (orbId: string) => `pi-orb:composer-draft:${orbId}`;
+const storageKey = (orbId: string, principal = readSessionPrincipal()) =>
+  `pi-orb:composer-draft:${encodeURIComponent(principal ?? "")}:${orbId}`;
 const storageFailure = (): ComposerDraftStorageError => ({
   type: "composer_draft_storage_error",
   message: "The browser could not preserve this draft across sign-in.",
@@ -54,14 +56,15 @@ export function loadComposerDraft(
 export function saveComposerDraft(
   orbId: string,
   draft: ComposerDraft,
+  principal = readSessionPrincipal(),
 ): Result<void, ComposerDraftStorageError> {
   if (typeof window === "undefined") return ok(undefined);
   return Result.fromThrowable(() => {
     const storage = window.sessionStorage;
     if (draft.text === "" && draft.images.length === 0 && draft.mode === "message") {
-      storage.removeItem(storageKey(orbId));
+      storage.removeItem(storageKey(orbId, principal));
     } else {
-      storage.setItem(storageKey(orbId), JSON.stringify(draft));
+      storage.setItem(storageKey(orbId, principal), JSON.stringify(draft));
     }
   }, storageFailure)();
 }

@@ -679,6 +679,7 @@ async function handleApi(
   if (method === "GET" && path === "/api/v1/session") {
     sendJson(response, 200, {
       status: "ok",
+      logoutAvailable: true,
       principal: {
         kind: "user",
         user: { id: "00000000-0000-4000-8000-000000000001", email: "developer@local" },
@@ -2108,16 +2109,23 @@ export function mockBackendPlugin(): Plugin {
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
         const path = new URL(request.url ?? "/", "http://fixture.local").pathname;
-        if (
-          sessionExpired &&
-          request.method === "GET" &&
-          path === "/" &&
-          request.headers.accept?.includes("text/html") === true
-        ) {
-          // A production top-level reload enters IAP and returns after Google
-          // login. Frontend-only mode skips the external page but models the
-          // same successful same-tab round trip.
+        if (request.method === "GET" && path === "/auth/login") {
+          const target =
+            new URL(request.url ?? "/", "http://fixture.local").searchParams.get("returnTo") ?? "/";
           sessionExpired = false;
+          response.statusCode = 302;
+          response.setHeader(
+            "location",
+            target.startsWith("/") && !target.startsWith("//") ? target : "/",
+          );
+          response.end();
+          return;
+        }
+        if (request.method === "POST" && path === "/auth/logout") {
+          sessionExpired = true;
+          response.statusCode = 204;
+          response.end();
+          return;
         }
         if (request.method === "POST" && path === "/__pi_orb_fixture/session/expire") {
           sessionExpired = true;
@@ -2133,8 +2141,7 @@ export function mockBackendPlugin(): Plugin {
           return;
         }
         if (sessionExpired && path.startsWith("/api/")) {
-          // Deliberately use an HTML body, as IAP owns this response rather
-          // than the control-plane JSON error contract.
+          // Also exercise non-JSON authentication failures.
           response.statusCode = 401;
           response.setHeader("content-type", "text/html; charset=utf-8");
           response.end("<!doctype html><title>Sign in required</title>");
