@@ -68,7 +68,7 @@ export async function migrateDatabase(
       log(`lifecycle: migration-${stage} name=${JSON.stringify(name)}`);
       if (name === "023_owned_projects_and_personal_instructions.sql" && stage === "applied")
         log(`lifecycle: migration-owner-mapping configured=${owner.originalOwner !== undefined}`);
-      if (name === "026_google_identities.sql" && stage === "applied")
+      if (name === "027_google_identities.sql" && stage === "applied")
         log(
           `lifecycle: migration-google-identities mapped=${owner.googleIdentityMappings?.length ?? 0}`,
         );
