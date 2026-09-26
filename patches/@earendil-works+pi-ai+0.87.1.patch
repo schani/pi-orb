@@ -1,0 +1,201 @@
+diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
+index dfdb6ec..4e563f9 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
++++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
+@@ -30,6 +30,38 @@ const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]
+ const WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE = 1009;
+ const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
+ const PREVIOUS_RESPONSE_NOT_FOUND_CODE = "previous_response_not_found";
++const SAFE_CODEX_CODES = new Set(["invalid_api_key", "invalid_grant", "unauthorized", "authentication_error", "invalid_token", "rate_limit_exceeded", "usage_limit_reached", "insufficient_quota", "websocket_connection_limit_reached", "previous_response_not_found"]);
++function safeCodexCode(value) {
++    return typeof value === "string" && SAFE_CODEX_CODES.has(value) ? value : undefined;
++}
++function safeCodexRequestId(value) {
++    return typeof value === "string" && (/^req_[a-zA-Z0-9]{8,64}$/.test(value) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)) ? value : undefined;
++}
++function safeDiagnosticValue(read) {
++    try {
++        return read();
++    }
++    catch {
++        return undefined;
++    }
++}
++function failureFacts(error, transport, phase, attempt, http, broker) {
++    const generation = safeDiagnosticValue(() => broker?.brokerGeneration);
++    const expiresAt = safeDiagnosticValue(() => broker?.tokenExpiresAt);
++    const status = safeDiagnosticValue(() => http?.status);
++    const code = safeCodexCode(safeDiagnosticValue(() => http?.code ?? error?.code));
++    const requestId = safeCodexRequestId(safeDiagnosticValue(() => http?.requestId));
++    const wsCloseCode = safeDiagnosticValue(() => error instanceof WebSocketCloseError ? error.code : undefined);
++    return {
++        type: "codex_failure", timestamp: Date.now(), transport, phase, attempt,
++        ...(Number.isSafeInteger(generation) && generation >= 0 ? { brokerGeneration: generation } : {}),
++        ...(Number.isSafeInteger(expiresAt) && expiresAt >= 0 && expiresAt <= 8_640_000_000_000_000 ? { tokenExpiresAt: expiresAt } : {}),
++        ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { status } : {}),
++        ...(code ? { code } : {}),
++        ...(requestId ? { requestId } : {}),
++        ...(Number.isInteger(wsCloseCode) && wsCloseCode >= 1000 && wsCloseCode <= 4999 ? { wsCloseCode } : {}),
++    };
++}
+ const CODEX_RESPONSE_STATUSES = new Set([
+     "completed",
+     "incomplete",
+@@ -161,6 +193,12 @@ export const stream = (model, context, options) => {
+             stopReason: "pending",
+             timestamp: Date.now(),
+         };
++        let httpFailure;
++        let websocketFailure;
++        let failureTransport;
++        let failureAttempt;
++        let startEmitted = false;
++        let sseStarted = false;
+         try {
+             const apiKey = options?.apiKey;
+             if (!apiKey) {
+@@ -182,7 +220,6 @@ export const stream = (model, context, options) => {
+             const httpTimeoutMs = normalizeTimeoutMs(options?.timeoutMs);
+             const websocketConnectTimeoutMs = normalizeTimeoutMs(options?.websocketConnectTimeoutMs);
+             const transport = options?.transport || "auto";
+-            let startEmitted = false;
+             const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(cacheSessionId);
+             if (websocketDisabledForSession) {
+                 recordWebSocketSseFallback(cacheSessionId);
+@@ -191,10 +228,17 @@ export const stream = (model, context, options) => {
+                 let websocketStarted = false;
+                 let retriedWebSocketConnectionLimit = false;
+                 let retriedMissingWebSocketContinuation = false;
++                let websocketAttempt = 0;
+                 while (true) {
++                    websocketAttempt++;
+                     websocketStarted = false;
++                    failureTransport = undefined;
++                    failureAttempt = undefined;
+                     try {
+-                        await processWebSocketStream(resolveCodexWebSocketUrl(model.baseUrl), body, websocketHeaders, output, stream, model, () => {
++                        const websocketUrl = resolveCodexWebSocketUrl(model.baseUrl);
++                        failureTransport = "websocket";
++                        failureAttempt = websocketAttempt;
++                        await processWebSocketStream(websocketUrl, body, websocketHeaders, output, stream, model, () => {
+                             websocketStarted = true;
+                             if (!startEmitted) {
+                                 startEmitted = true;
+@@ -214,6 +258,7 @@ export const stream = (model, context, options) => {
+                         return;
+                     }
+                     catch (error) {
++                        websocketFailure = failureTransport === "websocket" ? { error, attempt: websocketAttempt, phase: websocketStarted ? "after_message_stream_start" : "before_message_stream_start" } : undefined;
+                         const aborted = options?.signal?.aborted;
+                         const connectionLimitBeforeStart = !websocketStarted && isWebSocketConnectionLimitReachedError(error);
+                         const previousResponseNotFound = isPreviousResponseNotFoundError(error);
+@@ -240,6 +285,8 @@ export const stream = (model, context, options) => {
+                             throw error;
+                         }
+                         recordWebSocketSseFallback(cacheSessionId);
++                        failureTransport = undefined;
++                        failureAttempt = undefined;
+                         break;
+                     }
+                 }
+@@ -257,6 +304,9 @@ export const stream = (model, context, options) => {
+             let lastError;
+             const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
+             for (let attempt = 0; attempt <= maxRetries; attempt++) {
++                failureAttempt = undefined;
++                failureTransport = undefined;
++                httpFailure = undefined;
+                 if (options?.signal?.aborted) {
+                     throw new Error("Request was aborted");
+                 }
+@@ -264,7 +314,10 @@ export const stream = (model, context, options) => {
+                     const headerTimeoutSignal = httpTimeoutMs !== undefined && httpTimeoutMs > 0 ? AbortSignal.timeout(httpTimeoutMs) : undefined;
+                     const combinedSignal = combineAbortSignals([options?.signal, headerTimeoutSignal]);
+                     try {
+-                        response = await (options?.fetch ?? globalThis.fetch)(resolveCodexUrl(model.baseUrl), {
++                        const requestUrl = resolveCodexUrl(model.baseUrl);
++                        failureTransport = "sse";
++                        failureAttempt = attempt + 1;
++                        response = await (options?.fetch ?? globalThis.fetch)(requestUrl, {
+                             method: "POST",
+                             headers: sseHeaders,
+                             body: sseBody,
+@@ -281,6 +334,7 @@ export const stream = (model, context, options) => {
+                         combinedSignal.cleanup();
+                     }
+                     await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
++                    httpFailure = { status: safeDiagnosticValue(() => response.status), requestId: safeDiagnosticValue(() => response.headers.get("x-request-id")) };
+                     if (response.ok) {
+                         break;
+                     }
+@@ -299,6 +353,7 @@ export const stream = (model, context, options) => {
+                         statusText: response.statusText,
+                     });
+                     const info = await parseErrorResponse(fakeResponse);
++                    httpFailure = { status: safeDiagnosticValue(() => response.status), code: info.code, requestId: safeDiagnosticValue(() => response.headers.get("x-request-id")) };
+                     throw new Error(info.friendlyMessage || info.message);
+                 }
+                 catch (error) {
+@@ -325,6 +380,7 @@ export const stream = (model, context, options) => {
+             if (!response.body) {
+                 throw new Error("No response body");
+             }
++            sseStarted = true;
+             if (!startEmitted) {
+                 startEmitted = true;
+                 stream.push({ type: "start", partial: output });
+@@ -344,6 +400,10 @@ export const stream = (model, context, options) => {
+                 delete block.customInput;
+             }
+             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
++            if (output.stopReason === "error") {
++                if (websocketFailure && failureTransport !== "websocket") appendAssistantMessageDiagnostic(output, failureFacts(websocketFailure.error, "websocket", websocketFailure.phase, websocketFailure.attempt, undefined, options?.codexBrokerDiagnostics));
++                if (failureTransport) appendAssistantMessageDiagnostic(output, failureFacts(error, failureTransport, (failureTransport === "sse" ? sseStarted : startEmitted) ? "after_message_stream_start" : "before_message_stream_start", failureAttempt, httpFailure, options?.codexBrokerDiagnostics));
++            }
+             output.errorMessage = formatProviderError(normalizeProviderError(error));
+             stream.push({ type: "error", reason: output.stopReason, error: output });
+             stream.end();
+@@ -365,6 +425,7 @@ export const streamSimple = (model, context, options) => {
+     return stream(model, context, {
+         ...base,
+         reasoningEffort,
++        codexBrokerDiagnostics: options?.codexBrokerDiagnostics,
+     });
+ };
+ // ============================================================================
+@@ -1225,11 +1286,12 @@ async function parseErrorResponse(response) {
+     const raw = await response.text();
+     let message = raw || response.statusText || "Request failed";
+     let friendlyMessage;
++    let code;
+     try {
+         const parsed = JSON.parse(raw);
+         const err = parsed?.error;
+         if (err) {
+-            const code = err.code || err.type || "";
++            code = err.code || err.type || "";
+             if (/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code) || response.status === 429) {
+                 const plan = err.plan_type ? ` (${err.plan_type.toLowerCase()} plan)` : "";
+                 const mins = err.resets_at
+@@ -1242,7 +1304,7 @@ async function parseErrorResponse(response) {
+         }
+     }
+     catch { }
+-    return { message, friendlyMessage };
++    return { message, friendlyMessage, code };
+ }
+ // ============================================================================
+ // Auth & Headers
+diff --git a/node_modules/@earendil-works/pi-ai/dist/types.d.ts b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
+index 5915ca6..1726c51 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/types.d.ts
++++ b/node_modules/@earendil-works/pi-ai/dist/types.d.ts
+@@ -109,6 +109,8 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
+     maxRetryDelayMs?: number;
+ }
+ export interface StreamOptions extends ProviderRequestOptions<Model<Api>> {
++    /** Safe broker metadata bound to the resolved request bearer; never sent to the provider. */
++    codexBrokerDiagnostics?: { brokerGeneration?: number; tokenExpiresAt: number };
+     /**
+      * Optional callback invoked after an HTTP response is received and before
+      * its body stream is consumed.

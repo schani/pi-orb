@@ -242,3 +242,42 @@ index b8c238f..19befd8 100644
                      const message = err instanceof Error ? err.message : String(err);
                      const stack = err instanceof Error ? err.stack : undefined;
                      this.emitError({
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js b/node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js
+index 81bf752..6d84f8f 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/model-runtime.js
+@@ -438,12 +438,21 @@ export class ModelRuntime {
+         const env = resolution.env || providerOptions.env
+             ? { ...(resolution.env ?? {}), ...(providerOptions.env ?? {}) }
+             : undefined;
++        const apiKey = providerOptions.apiKey ?? resolution.auth.apiKey;
++        let requestDiagnostics;
++        try {
++            requestDiagnostics = this.extensionProviders.get(model.provider)?.getRequestDiagnostics?.(apiKey);
++        }
++        catch {
++            // Diagnostic metadata must never block the provider request.
++        }
+         return {
+             provider,
+             model: resolution.auth.baseUrl ? { ...model, baseUrl: resolution.auth.baseUrl } : model,
+             options: {
+                 ...providerOptions,
+-                apiKey: providerOptions.apiKey ?? resolution.auth.apiKey,
++                apiKey,
++                ...(requestDiagnostics ? { codexBrokerDiagnostics: requestDiagnostics } : {}),
+                 headers,
+                 env,
+             },
+diff --git a/node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts b/node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts
+index a7b3301..8eb17fc 100644
+--- a/node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts
++++ b/node_modules/@earendil-works/pi-coding-agent/dist/core/provider-composer.d.ts
+@@ -21,6 +21,7 @@ export interface ProviderConfigInput {
+     streamSimple?: (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => AssistantMessageEventStream;
+     headers?: Record<string, string>;
+     authHeader?: boolean;
++    getRequestDiagnostics?(apiKey: string): { brokerGeneration?: number; tokenExpiresAt: number } | undefined;
+     oauth?: ExtensionOAuthConfig;
+     models?: Array<{
+         id: string;

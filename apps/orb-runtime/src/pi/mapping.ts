@@ -49,6 +49,24 @@ function nativeForHistory(entry: Record<string, unknown>): JsonObject {
     const message = entry["message"];
     if (isRecordObject(message) && message["role"] === "system") {
       native["message"] = systemMessageIdentity(message);
+    } else if (isRecordObject(message) && message["role"] === "assistant") {
+      const clean = native["message"] as JsonObject;
+      const diagnostics = message["diagnostics"];
+      if (Array.isArray(diagnostics)) {
+        clean["diagnostics"] = diagnostics.map((diagnostic) => {
+          if (!isRecordObject(diagnostic) || diagnostic["type"] !== "codex_failure")
+            return diagnostic;
+          const context = codexFailureContext([diagnostic]);
+          const timestamp = diagnostic["timestamp"];
+          return {
+            type: "codex_failure",
+            ...(typeof timestamp === "number" && Number.isSafeInteger(timestamp) && timestamp >= 0
+              ? { timestamp }
+              : {}),
+            ...context,
+          };
+        }) as JsonValue;
+      }
     }
   } else if (entry["type"] === "compaction") {
     const systemMessage = entry["systemMessage"];
@@ -199,6 +217,58 @@ function mapAssistantContent(content: unknown): ContentBlock[] {
   return blocks;
 }
 
+const CODEX_ERROR_CODES = new Set([
+  "invalid_api_key",
+  "invalid_grant",
+  "unauthorized",
+  "authentication_error",
+  "invalid_token",
+  "rate_limit_exceeded",
+  "usage_limit_reached",
+  "insufficient_quota",
+  "websocket_connection_limit_reached",
+  "previous_response_not_found",
+]);
+
+function codexFailureContext(
+  diagnostics: unknown,
+): NonNullable<MessageRecord["failure"]>["context"] {
+  if (!Array.isArray(diagnostics)) return undefined;
+  const diagnostic = diagnostics
+    .filter(isRecordObject)
+    .findLast((entry) => entry["type"] === "codex_failure");
+  if (diagnostic === undefined) return undefined;
+  const context: NonNullable<NonNullable<MessageRecord["failure"]>["context"]> = {};
+  if (diagnostic["transport"] === "sse" || diagnostic["transport"] === "websocket")
+    context.transport = diagnostic["transport"];
+  if (
+    diagnostic["phase"] === "before_message_stream_start" ||
+    diagnostic["phase"] === "after_message_stream_start"
+  )
+    context.phase = diagnostic["phase"];
+  const boundedInteger = (value: unknown, min: number, max: number): value is number =>
+    typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+  if (boundedInteger(diagnostic["brokerGeneration"], 0, Number.MAX_SAFE_INTEGER))
+    context.brokerGeneration = diagnostic["brokerGeneration"];
+  if (boundedInteger(diagnostic["tokenExpiresAt"], 0, 8_640_000_000_000_000))
+    context.tokenExpiresAt = diagnostic["tokenExpiresAt"];
+  if (boundedInteger(diagnostic["attempt"], 1, 20)) context.attempt = diagnostic["attempt"];
+  if (boundedInteger(diagnostic["status"], 100, 599)) context.status = diagnostic["status"];
+  if (boundedInteger(diagnostic["wsCloseCode"], 1000, 4999))
+    context.wsCloseCode = diagnostic["wsCloseCode"];
+  if (typeof diagnostic["code"] === "string" && CODEX_ERROR_CODES.has(diagnostic["code"]))
+    context.code = diagnostic["code"];
+  if (
+    typeof diagnostic["requestId"] === "string" &&
+    (/^req_[a-zA-Z0-9]{8,64}$/.test(diagnostic["requestId"]) ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        diagnostic["requestId"],
+      ))
+  )
+    context.requestId = diagnostic["requestId"];
+  return Object.keys(context).length ? context : undefined;
+}
+
 function mapMessageEntry(
   identity: EntryIdentity,
   message: Record<string, unknown>,
@@ -225,6 +295,8 @@ function mapMessageEntry(
       const costUsd = usageNumber(cost?.["total"]);
       const errorMessage = stringOf(message, "errorMessage");
       const diagnostics = message["diagnostics"];
+      const context =
+        message["provider"] === "openai-codex" ? codexFailureContext(diagnostics) : undefined;
       const failure =
         message["stopReason"] === "error" &&
         errorMessage !== undefined &&
@@ -235,6 +307,7 @@ function mapMessageEntry(
                 .filter(isRecordObject)
                 .map((diagnostic) => diagnostic["type"])
                 .filter((type): type is string => typeof type === "string"),
+              ...(context ? { context } : {}),
             }
           : null;
       const record: MessageRecord = {

@@ -140,11 +140,22 @@ export interface PointerConflict {
 }
 
 /** Upstream OAuth refresh outcome that is not a new credential. */
+export type OAuthRefreshDiagnostic =
+  | "invalid_grant"
+  | "invalid_client"
+  | "missing_refresh_token"
+  | "unusable_refresh_response";
+
 export type UpstreamRefreshError =
   /** The refresh token was rejected: terminal, forces re-login. */
-  | { readonly type: "invalid_grant"; readonly message: string }
+  | {
+      readonly type: "invalid_grant";
+      readonly message: string;
+      readonly diagnostic?: OAuthRefreshDiagnostic;
+    }
   | {
       readonly type: "upstream_transient";
+      readonly diagnostic?: OAuthRefreshDiagnostic;
       readonly message: string;
       readonly retryAfterMs?: number;
     };

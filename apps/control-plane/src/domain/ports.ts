@@ -750,6 +750,7 @@ export interface CredentialPointerStore {
     provider: string,
     expectedRowVersion: number | null,
     next: CredentialPointerWrite,
+    diagnostic?: import("./errors.ts").OAuthRefreshDiagnostic,
   ): ResultAsync<CredentialPointerRow, StoreError | PointerConflict>;
 }
 

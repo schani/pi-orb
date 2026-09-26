@@ -114,11 +114,20 @@ export class SdkMcpOAuth implements McpOAuthProtocol {
       tokens.token_type.toLowerCase() !== "bearer"
     )
       return null;
+    const clientExpiry = (prior.oauth as unknown as Context).client.client_secret_expires_at;
     return {
       ...prior,
       access: tokens.access_token,
       refresh: tokens.refresh_token ?? prior.refresh,
       expiresAt: task.wallNow() + tokens.expires_in * 1000,
+      diagnostic: {
+        accessLifetimeSeconds: Math.min(Math.floor(tokens.expires_in), 86400 * 365),
+        refreshPresent: Boolean(tokens.refresh_token ?? prior.refresh),
+        refreshReplaced: Boolean(tokens.refresh_token && tokens.refresh_token !== prior.refresh),
+        ...(typeof clientExpiry === "number" && Number.isFinite(clientExpiry)
+          ? { clientExpiry: Math.min(Math.max(0, Math.floor(clientExpiry)), 253402300799) }
+          : {}),
+      },
     };
   }
   async prepare(task: SimulationTask, binding: McpOAuthBinding, state: string) {
@@ -226,8 +235,9 @@ export class SdkMcpOAuth implements McpOAuthProtocol {
         : err(oauthError("auth_required"));
   }
   readonly refresher: McpOAuthProtocol["refresher"] = {
-    refresh: (task, credential, operation) =>
-      ResultAsync.fromPromise(
+    refresh: (task, credential, operation) => {
+      let successfulResponse = false;
+      return ResultAsync.fromPromise(
         (async () => {
           const secret = credential as StoredMcpOAuth;
           if (!secret.refresh) return null;
@@ -237,7 +247,11 @@ export class SdkMcpOAuth implements McpOAuthProtocol {
             clientInformation: context.client,
             refreshToken: secret.refresh,
             resource: new URL(context.resource),
-            fetchFn: (input, init) => this.fetcher(input, { ...init, signal: operation.signal }),
+            fetchFn: async (input, init) => {
+              const response = await this.fetcher(input, { ...init, signal: operation.signal });
+              successfulResponse = response.status === 200;
+              return response;
+            },
           });
           return this.credential(task, secret, tokens);
         })(),
@@ -245,13 +259,28 @@ export class SdkMcpOAuth implements McpOAuthProtocol {
           const code =
             typeof error === "object" && error !== null && "code" in error ? error.code : "";
           return code === "invalid_grant" || code === "invalid_client"
-            ? { type: "invalid_grant" as const, message: "MCP reauthorization required" }
-            : { type: "upstream_transient" as const, message: "MCP OAuth refresh unavailable" };
+            ? {
+                type: "invalid_grant" as const,
+                message: "MCP reauthorization required",
+                diagnostic: code as "invalid_grant" | "invalid_client",
+              }
+            : {
+                type: "upstream_transient" as const,
+                message: "MCP OAuth refresh unavailable",
+                ...(successfulResponse ? { diagnostic: "unusable_refresh_response" as const } : {}),
+              };
         },
       ).andThen((value) =>
         value
           ? ok(value)
-          : err({ type: "invalid_grant" as const, message: "MCP reauthorization required" }),
-      ),
+          : err({
+              type: "invalid_grant" as const,
+              message: "MCP reauthorization required",
+              diagnostic: credential.refresh
+                ? ("unusable_refresh_response" as const)
+                : ("missing_refresh_token" as const),
+            }),
+      );
+    },
   };
 }

@@ -22,6 +22,9 @@ interface OAuthCredentialsShape {
 export interface BrokerProviderConfig {
   readonly name: string;
   readonly baseUrl?: string;
+  getRequestDiagnostics(
+    apiKey: string,
+  ): { brokerGeneration?: number; tokenExpiresAt: number } | undefined;
   readonly oauth: {
     readonly name: string;
     login(callbacks?: unknown): Promise<OAuthCredentialsShape>;
@@ -35,6 +38,7 @@ function toPiCredentials(grant: BrokerTokenGrant): OAuthCredentialsShape {
     access: grant.accessToken,
     refresh: BROKER_REFRESH_MARKER,
     expires: grant.expiresAt,
+    brokerGeneration: grant.generation,
   };
 }
 
@@ -43,6 +47,30 @@ export function brokerProviderConfig(
   client: BrokerTokenClient,
   options: { readonly inferenceBaseUrl?: string },
 ): BrokerProviderConfig {
+  const grants = new Map<string, { brokerGeneration?: number; tokenExpiresAt: number } | null>();
+  const bind = (credentials: OAuthCredentialsShape): void => {
+    const { access, expires } = credentials;
+    if (!Number.isSafeInteger(expires) || expires < 0) return;
+    const generation = credentials["brokerGeneration"];
+    const context = {
+      tokenExpiresAt: expires,
+      ...(typeof generation === "number" && Number.isSafeInteger(generation) && generation >= 0
+        ? { brokerGeneration: generation }
+        : {}),
+    };
+    const previous = grants.get(access);
+    if (previous === null) return;
+    if (
+      previous &&
+      (previous.brokerGeneration !== context.brokerGeneration ||
+        previous.tokenExpiresAt !== context.tokenExpiresAt)
+    ) {
+      grants.set(access, null);
+      return;
+    }
+    grants.set(access, context);
+    if (grants.size > 32) grants.delete(grants.keys().next().value as string);
+  };
   const fetchCredentials = async (
     reason: "startup" | "expiring",
   ): Promise<OAuthCredentialsShape> => {
@@ -50,16 +78,22 @@ export function brokerProviderConfig(
     if (outcome.isErr()) {
       return Promise.reject(new Error(`broker token fetch failed: ${outcome.error.type}`));
     }
-    return toPiCredentials(outcome.value);
+    const credentials = toPiCredentials(outcome.value);
+    bind(credentials);
+    return credentials;
   };
   return {
     name: "OpenAI Codex (pi-orb broker)",
+    getRequestDiagnostics: (apiKey) => grants.get(apiKey) ?? undefined,
     ...(options.inferenceBaseUrl !== undefined ? { baseUrl: options.inferenceBaseUrl } : {}),
     oauth: {
       name: "pi-orb broker",
       login: () => fetchCredentials("startup"),
       refreshToken: () => fetchCredentials("expiring"),
-      getApiKey: (credentials) => credentials.access,
+      getApiKey: (credentials) => {
+        bind(credentials);
+        return credentials.access;
+      },
     },
   };
 }

@@ -42,6 +42,29 @@ describe("computePullHistory", () => {
     expect(result.value.orbId).toBe("orb-a");
   });
 
+  it("carries failed Codex context through pull history without token material", () => {
+    const input = snapshot(2);
+    const record = input.records[1];
+    if (record?.type !== "message") throw new Error("missing message");
+    record.failure = {
+      message: "WebSocket closed 1011",
+      diagnostics: ["codex_failure"],
+      context: {
+        brokerGeneration: 8,
+        tokenExpiresAt: 1800000000000,
+        transport: "websocket",
+        phase: "after_message_stream_start",
+        wsCloseCode: 1011,
+        attempt: 1,
+      },
+    };
+    const result = computePullHistory(input, { after: null, limit: 10 });
+    if (result.isErr()) throw new Error("history unavailable");
+    const copied = result.value.records[1];
+    expect(copied?.type === "message" && copied.failure?.context).toEqual(record.failure.context);
+    expect(JSON.stringify(result.value)).not.toContain("Bearer ");
+  });
+
   it("returns records strictly after the cursor", () => {
     const result = computePullHistory(snapshot(5), { after: "rec-2", limit: 100 });
     expect(result.isOk()).toBe(true);

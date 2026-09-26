@@ -23,7 +23,9 @@ function harness() {
   let lostExchange = false;
   let refreshBarrier: ((task: SimulationTask) => Promise<void>) | null = null;
   let invalidRefresh = false;
+  let malformedRefresh = false;
   const edges: string[] = [];
+  const events: { edge: string; submittedGeneration?: number; diagnostic?: string }[] = [];
   const store: McpOAuthStore = {
     read: async (task, b) => {
       await task.checkpoint("mcp:read");
@@ -34,7 +36,7 @@ function harness() {
         ? ok(row)
         : err(oauthError("not_found"));
     },
-    cas: async (task, b, expected, next, edge) => {
+    cas: async (task, b, expected, next, edge, detail) => {
       await task.checkpoint("mcp:before-cas");
       if (
         !active ||
@@ -45,7 +47,15 @@ function harness() {
         return err(oauthError("not_found"));
       if ((row?.rowVersion ?? null) !== expected) return err(oauthError("conflict"));
       row = { ...next, provider: b.id, rowVersion: (expected ?? 0) + 1 };
-      if (edge && (edge !== "refresh_failed" || edges.at(-1) !== edge)) edges.push(edge);
+      if (
+        edge &&
+        (edge !== "refresh_failed" ||
+          edges.at(-1) !== edge ||
+          events.at(-1)?.diagnostic !== detail?.diagnostic)
+      ) {
+        edges.push(edge);
+        events.push({ edge, ...detail });
+      }
       const committed = row;
       await task.checkpoint("mcp:after-cas");
       if (lostAck && edge === "connected") {
@@ -86,7 +96,17 @@ function harness() {
               await task.checkpoint("mcp:refresh-accepted");
               if (refreshBarrier) await refreshBarrier(task);
               if (invalidRefresh)
-                return err({ type: "invalid_grant" as const, message: "revoked" });
+                return err({
+                  type: "invalid_grant" as const,
+                  message: "revoked",
+                  diagnostic: "invalid_client" as const,
+                });
+              if (malformedRefresh)
+                return err({
+                  type: "upstream_transient" as const,
+                  message: "unavailable",
+                  diagnostic: "unusable_refresh_response" as const,
+                });
               return ok({
                 ...old,
                 access: `access-${refreshes}`,
@@ -99,6 +119,7 @@ function harness() {
   return {
     make,
     edges,
+    events,
     secrets,
     pauseExchange: (barrier: (task: SimulationTask) => Promise<void>) => {
       exchangeBarrier = barrier;
@@ -111,6 +132,9 @@ function harness() {
     },
     invalidateRefresh: () => {
       invalidRefresh = true;
+    },
+    malformedRefresh: () => {
+      malformedRefresh = true;
     },
     state: () => row,
     exchanges: () => exchanges,
@@ -125,6 +149,70 @@ function harness() {
 }
 
 describe("MCP OAuth composed DST", () => {
+  it("records transient malformed response without clearing usable grant", async () => {
+    await runDst({ name: "mcp-oauth-transient-diagnosis", iterations: 5 }, async (sim) => {
+      const h = harness();
+      h.malformedRefresh();
+      const run = await sim.runTasks([
+        {
+          name: "malformed-refresh",
+          f: async (task) => {
+            expect((await h.make().start(task, binding, "login", "browser")).isOk()).toBe(true);
+            expect(
+              (await h.make().complete(task, binding, "login", "browser", "code")).isOk(),
+            ).toBe(true);
+            const submitted = h.state()?.generation ?? 0;
+            expect(
+              (
+                await h
+                  .make()
+                  .token(task, binding, { reason: "expiring", staleGeneration: submitted })
+              )._unsafeUnwrap().generation,
+            ).toBe(submitted);
+            expect(h.events.at(-1)).toEqual({
+              edge: "refresh_failed",
+              diagnostic: "unusable_refresh_response",
+              submittedGeneration: submitted,
+            });
+            expect(h.state()?.secretVersion).not.toBeNull();
+          },
+        },
+      ]);
+      expect(run.isOk(), run.isErr() ? run.error.message : "").toBe(true);
+    });
+  });
+  it("fences terminal diagnosis to the submitted generation", async () => {
+    await runDst({ name: "mcp-oauth-terminal-diagnosis", iterations: 5 }, async (sim) => {
+      const h = harness();
+      h.invalidateRefresh();
+      const run = await sim.runTasks([
+        {
+          name: "terminal-refresh",
+          f: async (task) => {
+            expect((await h.make().start(task, binding, "login", "browser")).isOk()).toBe(true);
+            expect(
+              (await h.make().complete(task, binding, "login", "browser", "code")).isOk(),
+            ).toBe(true);
+            const submitted = h.state()?.generation ?? 0;
+            expect(
+              (
+                await h
+                  .make()
+                  .token(task, binding, { reason: "rejected", staleGeneration: submitted })
+              )._unsafeUnwrapErr().code,
+            ).toBe("auth_required");
+            expect(h.events.at(-1)).toEqual({
+              edge: "invalidated",
+              diagnostic: "invalid_client",
+              submittedGeneration: submitted,
+            });
+            expect(h.state()?.generation).toBe(submitted + 1);
+          },
+        },
+      ]);
+      expect(run.isOk(), run.isErr() ? run.error.message : "").toBe(true);
+    });
+  });
   it("a late invalid-grant response cannot clear a newer browser grant", async () => {
     await runDst(
       { name: "mcp-oauth-refresh-versus-login", iterations: 60, lateTimerProbability: 0 },
@@ -177,6 +265,9 @@ describe("MCP OAuth composed DST", () => {
         expect(run.isOk(), run.isErr() ? run.error.message : "").toBe(true);
         expect(h.state()?.secretVersion).not.toBeNull();
         expect(h.edges.slice(h.edges.lastIndexOf("connected") + 1)).not.toContain("invalidated");
+        expect(
+          h.events.some((e) => e.edge === "invalidated" && e.diagnostic === "invalid_client"),
+        ).toBe(false);
       },
     );
   });

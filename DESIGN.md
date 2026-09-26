@@ -133,6 +133,8 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md](docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md) — diagnostic qualification blocked by an unhandled Vitest worker RPC timeout; cause unresolved
+- [docs/postmortems/2026-09-26-provider-auth-failures.md](docs/postmortems/2026-09-26-provider-auth-failures.md) — Codex failure after wake and Datadog grant invalidation; causes unproved, production Datadog refresh observed
 - [docs/postmortems/2026-09-23-pi-system-history-replication.md](docs/postmortems/2026-09-23-pi-system-history-replication.md) — Pi 0.87.1 persisted prompt/tool state; the history adapter now retains its identity without replicating execution configuration
 - [docs/postmortems/2026-09-21-workspace-upload-remote-only.md](docs/postmortems/2026-09-21-workspace-upload-remote-only.md) — six upload chunks completed; the later UI had no local file ownership, but the browser cause remains unproved
 - [docs/postmortems/2026-09-20-composer-typing-stalls.md](docs/postmortems/2026-09-20-composer-typing-stalls.md) — browser-parent cycle collection and independent unchanged-transcript rerenders stalled composer input

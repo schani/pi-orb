@@ -2,7 +2,7 @@ import type { TokenName } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
 import { sleepResult, withDeadline } from "./dst.ts";
-import type { StoreError, TokenError } from "./errors.ts";
+import type { OAuthRefreshDiagnostic, StoreError, TokenError } from "./errors.ts";
 import type {
   BrokerDeps,
   CredentialPointerRow,
@@ -94,13 +94,20 @@ async function releaseLease(
   deps: BrokerDeps,
   provider: string,
   leased: CredentialPointerRow,
+  diagnostic?: OAuthRefreshDiagnostic,
 ): Promise<void> {
-  await deps.pointers.casWritePointer(task, provider, leased.rowVersion, {
-    generation: leased.generation,
-    secretVersion: leased.secretVersion,
-    refreshLeaseUntil: 0,
-    lastRefreshAt: leased.lastRefreshAt,
-  });
+  await deps.pointers.casWritePointer(
+    task,
+    provider,
+    leased.rowVersion,
+    {
+      generation: leased.generation,
+      secretVersion: leased.secretVersion,
+      refreshLeaseUntil: 0,
+      lastRefreshAt: leased.lastRefreshAt,
+    },
+    diagnostic,
+  );
 }
 
 export async function getToken(
@@ -259,12 +266,18 @@ export async function getToken(
 
     if (refreshResult.error.type === "invalid_grant") {
       // Fenced clear: only the generation we actually submitted upstream.
-      const clear = await deps.pointers.casWritePointer(task, provider, leased.rowVersion, {
-        generation: pointer.generation + 1,
-        secretVersion: null,
-        refreshLeaseUntil: 0,
-        lastRefreshAt: now,
-      });
+      const clear = await deps.pointers.casWritePointer(
+        task,
+        provider,
+        leased.rowVersion,
+        {
+          generation: pointer.generation + 1,
+          secretVersion: null,
+          refreshLeaseUntil: 0,
+          lastRefreshAt: now,
+        },
+        refreshResult.error.diagnostic,
+      );
       if (clear.isOk()) return err(AUTH_REQUIRED);
       if (clear.error.type === "pointer_conflict") {
         // A newer credential appeared while we were refreshing; serve it.
@@ -274,7 +287,7 @@ export async function getToken(
     }
 
     // Transient upstream failure.
-    await releaseLease(task, deps, provider, leased);
+    await releaseLease(task, deps, provider, leased, refreshResult.error.diagnostic);
     if (!expired && !rejected) return ok(grantOf(credential, pointer.generation));
     await pause(refreshResult.error.retryAfterMs ?? 2 * constants.waiterPollMs);
   }

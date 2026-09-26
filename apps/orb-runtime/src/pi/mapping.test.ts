@@ -191,6 +191,173 @@ describe("Pi entry mapping", () => {
     });
   });
 
+  it("preserves custom diagnostic names and payloads", () => {
+    const diagnostic = { type: "custom-type", timestamp: 1, details: { reason: "original" } };
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "failure",
+        diagnostics: [diagnostic],
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.failure?.diagnostics).toEqual(["custom-type"]);
+    expect(record.overflow.native).toMatchObject({ message: { diagnostics: [diagnostic] } });
+  });
+
+  it("keeps existing native diagnostics intact while sanitizing each new Codex failure", () => {
+    const old = {
+      type: "provider_transport_failure",
+      timestamp: 1,
+      error: {
+        name: "WebSocketCloseError",
+        message: "WebSocket closed 1011",
+        stack: "existing stack",
+      },
+      details: { phase: "after_message_stream_start", requestBytes: 42 },
+    };
+    const first = {
+      type: "codex_failure",
+      transport: "websocket",
+      phase: "before_message_stream_start",
+      attempt: 1,
+      wsCloseCode: 1011,
+      brokerGeneration: 7,
+      tokenExpiresAt: 1800000000000,
+      reason: "raw-secret",
+      headers: { authorization: "raw-secret" },
+    };
+    const last = {
+      type: "codex_failure",
+      transport: "sse",
+      phase: "before_message_stream_start",
+      attempt: 2,
+      status: 401,
+      code: "invalid_api_key",
+      requestId: "req_12345678",
+      payload: "raw-secret",
+    };
+    const record = expectMapped(
+      {
+        ...base,
+        type: "message",
+        message: {
+          role: "assistant",
+          provider: "openai-codex",
+          content: [],
+          stopReason: "error",
+          errorMessage: "failure",
+          diagnostics: [old, first, last],
+        },
+      },
+      false,
+    );
+    if (record.type !== "message") throw new Error("expected message");
+    const native = record.overflow["native"] as { message: { diagnostics: unknown[] } };
+    expect(native.message.diagnostics[0]).toEqual(old);
+    expect(native.message.diagnostics[1]).toEqual({
+      type: "codex_failure",
+      transport: "websocket",
+      phase: "before_message_stream_start",
+      attempt: 1,
+      wsCloseCode: 1011,
+      brokerGeneration: 7,
+      tokenExpiresAt: 1800000000000,
+    });
+    expect(native.message.diagnostics[2]).toEqual({
+      type: "codex_failure",
+      transport: "sse",
+      phase: "before_message_stream_start",
+      attempt: 2,
+      status: 401,
+      code: "invalid_api_key",
+      requestId: "req_12345678",
+    });
+    expect(record.failure?.context).toEqual({
+      transport: "sse",
+      phase: "before_message_stream_start",
+      attempt: 2,
+      status: 401,
+      code: "invalid_api_key",
+      requestId: "req_12345678",
+    });
+    expect(JSON.stringify(native.message.diagnostics.slice(1))).not.toContain("raw-secret");
+  });
+
+  it("persists only allowlisted bounded Codex failure facts", () => {
+    const record = expectMapped(
+      {
+        ...base,
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [],
+          provider: "openai-codex",
+          model: "gpt-6-astra",
+          stopReason: "error",
+          errorMessage: "failure",
+          diagnostics: [
+            {
+              type: "codex_failure",
+              transport: "sse",
+              phase: "before_message_stream_start",
+              attempt: 2,
+              status: 401,
+              code: "invalid_api_key",
+              requestId: "req_12345678",
+              brokerGeneration: 7,
+              tokenExpiresAt: 1800000000000,
+              accessToken: "secret",
+              headers: { authorization: "secret" },
+              payload: "secret",
+              reason: "secret",
+            },
+          ],
+        },
+      },
+      false,
+    );
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.failure?.context).toEqual({
+      transport: "sse",
+      phase: "before_message_stream_start",
+      attempt: 2,
+      status: 401,
+      code: "invalid_api_key",
+      requestId: "req_12345678",
+      brokerGeneration: 7,
+      tokenExpiresAt: 1800000000000,
+    });
+    expect(JSON.stringify(record)).not.toContain("secret");
+  });
+
+  it("rejects token-like identifiers and unknown provider codes", () => {
+    const record = expectMapped(
+      {
+        ...base,
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [],
+          provider: "openai-codex",
+          stopReason: "error",
+          errorMessage: "Codex request failed",
+          diagnostics: [
+            { type: "codex_failure", code: "sk_secret", requestId: "req_sk_token", status: 401 },
+          ],
+        },
+      },
+      false,
+    );
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.failure?.context).toEqual({ status: 401 });
+    expect(JSON.stringify(record)).not.toContain("sk_secret");
+  });
+
   it("maps a failed assistant message without diagnostics to an empty diagnostic list", () => {
     const record = expectMapped({
       ...base,

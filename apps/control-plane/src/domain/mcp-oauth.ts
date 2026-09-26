@@ -2,6 +2,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { getToken, type TokenGrant, type TokenRequest } from "./broker.ts";
 import { DEFAULT_BROKER_CONSTANTS } from "./constants.ts";
+import type { OAuthRefreshDiagnostic } from "./errors.ts";
 import type {
   CredentialPointerRow,
   CredentialPointerWrite,
@@ -37,6 +38,14 @@ export interface McpOAuthRow extends CredentialPointerRow {
   attempt: McpOAuthAttempt | null;
 }
 export type McpOAuthNext = Omit<McpOAuthRow, "provider" | "rowVersion">;
+export interface McpOAuthDetail {
+  readonly diagnostic?: OAuthRefreshDiagnostic;
+  readonly submittedGeneration?: number;
+  readonly accessLifetimeSeconds?: number;
+  readonly refreshPresent?: boolean;
+  readonly refreshReplaced?: boolean;
+  readonly clientExpiry?: number;
+}
 /** Every read/write checks the active project and exact configured ID/URL binding. */
 export interface McpOAuthStore {
   read(
@@ -49,6 +58,7 @@ export interface McpOAuthStore {
     expected: number | null,
     next: McpOAuthNext,
     edge: string | null,
+    detail?: McpOAuthDetail,
   ): Promise<Result<McpOAuthRow, McpOAuthError>>;
 }
 /** Opaque SDK state is secret-store-only, never part of the domain's database row. */
@@ -56,6 +66,7 @@ export interface StoredMcpOAuth extends StoredCredential {
   projectId: string;
   connectionId: string;
   oauth: Record<string, unknown>;
+  diagnostic?: McpOAuthDetail;
 }
 export interface McpOAuthProtocol {
   prepare(
@@ -113,8 +124,9 @@ export class McpOAuth {
     row: McpOAuthRow,
     next: McpOAuthNext,
     edge: string,
+    detail?: McpOAuthDetail,
   ) {
-    const committed = await this.store.cas(task, binding, row.rowVersion, next, edge);
+    const committed = await this.store.cas(task, binding, row.rowVersion, next, edge, detail);
     if (committed.isOk() || committed.error.code !== "unavailable") return committed;
     const read = await this.store.read(task, binding);
     if (
@@ -280,6 +292,7 @@ export class McpOAuth {
       claimed.value,
       { ...empty, generation: row.generation + 1, secretVersion: version },
       "connected",
+      exchanged.value.diagnostic,
     );
     if (committed.isOk()) await this.retire(task, row);
     return committed.isErr() ? err(committed.error) : ok(undefined);
@@ -357,12 +370,21 @@ export class McpOAuth {
       listSecretVersions: (t) => this.secrets.listSecretVersions(t, MCP_OAUTH_SECRETS),
       destroySecret: (t, _p, version) => this.secrets.destroySecret(t, MCP_OAUTH_SECRETS, version),
     };
+    let refreshDetail: McpOAuthDetail | undefined;
     const result = await getToken(
       task,
       {
         constants: DEFAULT_BROKER_CONSTANTS,
         secrets: scopedSecrets,
-        upstreams: { [binding.id]: this.protocol.refresher },
+        upstreams: {
+          [binding.id]: {
+            refresh: (t, credential, operation) =>
+              this.protocol.refresher.refresh(t, credential, operation).map((fresh) => {
+                refreshDetail = (fresh as StoredMcpOAuth).diagnostic;
+                return fresh;
+              }),
+          },
+        },
         pointers: {
           readPointer: (t) =>
             ResultAsync.fromSafePromise(this.store.read(t, binding)).andThen((r) =>
@@ -372,7 +394,7 @@ export class McpOAuth {
                   : err(storeError())
                 : ok(r.value),
             ),
-          casWritePointer: (t, _p, expected, next: CredentialPointerWrite) =>
+          casWritePointer: (t, _p, expected, next: CredentialPointerWrite, diagnostic) =>
             ResultAsync.fromSafePromise(
               (async () => {
                 const read = await this.store.read(t, binding);
@@ -391,6 +413,17 @@ export class McpOAuth {
                       : previous.refreshLeaseUntil > 0 && next.refreshLeaseUntil === 0
                         ? "refresh_failed"
                         : null,
+                  next.secretVersion === null ||
+                    (previous.refreshLeaseUntil > 0 &&
+                      next.refreshLeaseUntil === 0 &&
+                      next.generation === previous.generation)
+                    ? {
+                        ...(diagnostic ? { diagnostic } : {}),
+                        submittedGeneration: previous.generation,
+                      }
+                    : next.generation > previous.generation
+                      ? refreshDetail
+                      : undefined,
                 );
                 return written.mapErr((e) =>
                   e.code === "unavailable" ? storeError() : { type: "pointer_conflict" as const },

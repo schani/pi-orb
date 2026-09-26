@@ -194,7 +194,36 @@ export const MessageRecordSchema = Type.Object(
     inboxMessageIds: Type.Optional(Type.Array(Type.String())),
     /** Present on an assistant record whose `finishReason` is `error`. */
     failure: Type.Optional(
-      Type.Object({ message: Type.String(), diagnostics: Type.Array(Type.String()) }, closed),
+      Type.Object(
+        {
+          message: Type.String(),
+          diagnostics: Type.Array(Type.String()),
+          context: Type.Optional(
+            Type.Object(
+              {
+                brokerGeneration: Type.Optional(Type.Integer({ minimum: 0 })),
+                tokenExpiresAt: Type.Optional(Type.Integer({ minimum: 0 })),
+                transport: Type.Optional(
+                  Type.Union([Type.Literal("sse"), Type.Literal("websocket")]),
+                ),
+                phase: Type.Optional(
+                  Type.Union([
+                    Type.Literal("before_message_stream_start"),
+                    Type.Literal("after_message_stream_start"),
+                  ]),
+                ),
+                attempt: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+                status: Type.Optional(Type.Integer({ minimum: 100, maximum: 599 })),
+                wsCloseCode: Type.Optional(Type.Integer({ minimum: 1000, maximum: 4999 })),
+                code: Type.Optional(Type.String({ maxLength: 40 })),
+                requestId: Type.Optional(Type.String({ maxLength: 80 })),
+              },
+              closed,
+            ),
+          ),
+        },
+        closed,
+      ),
     ),
   },
   closed,

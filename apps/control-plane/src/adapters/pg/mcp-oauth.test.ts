@@ -77,6 +77,63 @@ it("atomic CAS publishes one grant and one edge, and preserves outage classifica
   } as unknown as PostgreSQLClient);
   expect((await broken.read(task, binding))._unsafeUnwrapErr().code).toBe("unavailable");
 });
+it("commits safe diagnosis with fenced invalidation and submitted generation", async () => {
+  const connected = (await store.cas(task, binding, null, next, "connected"))._unsafeUnwrap();
+  const detail = {
+    diagnostic: "invalid_client" as const,
+    submittedGeneration: 1,
+    providerBody: "SENSITIVE_PROVIDER_BODY",
+  };
+  const cleared = (
+    await store.cas(
+      task,
+      binding,
+      connected.rowVersion,
+      { ...next, generation: 2, secretVersion: null },
+      "invalidated",
+      detail,
+    )
+  )._unsafeUnwrap();
+  expect(cleared.generation).toBe(2);
+  expect(
+    (await store.cas(task, binding, connected.rowVersion, next, "invalidated", detail)).isErr(),
+  ).toBe(true);
+  const rows = (
+    await db.query(
+      "SELECT edge, generation, detail FROM mcp_oauth_events WHERE edge = 'invalidated'",
+    )
+  )._unsafeUnwrap().rows;
+  expect(rows).toEqual([
+    {
+      edge: "invalidated",
+      generation: 2,
+      detail: { diagnostic: "invalid_client", submittedGeneration: 1 },
+    },
+  ]);
+  expect(JSON.stringify(rows)).not.toContain("SENSITIVE_PROVIDER_BODY");
+});
+it("coalesces retryable malformed-response diagnosis without invalidating", async () => {
+  const row = (await store.cas(task, binding, null, next, "connected"))._unsafeUnwrap();
+  const detail = { diagnostic: "unusable_refresh_response" as const, submittedGeneration: 1 };
+  const released = (
+    await store.cas(task, binding, row.rowVersion, next, "refresh_failed", detail)
+  )._unsafeUnwrap();
+  const repeated = (
+    await store.cas(task, binding, released.rowVersion, next, "refresh_failed", detail)
+  )._unsafeUnwrap();
+  const changed = { diagnostic: "invalid_client" as const, submittedGeneration: 1 };
+  (
+    await store.cas(task, binding, repeated.rowVersion, next, "refresh_failed", changed)
+  )._unsafeUnwrap();
+  expect((await store.read(task, binding))._unsafeUnwrap()?.secretVersion).toBe("v1");
+  expect(
+    (
+      await db.query(
+        "SELECT detail FROM mcp_oauth_events WHERE edge = 'refresh_failed' ORDER BY id",
+      )
+    )._unsafeUnwrap().rows,
+  ).toEqual([{ detail }, { detail: changed }]);
+});
 it("removal fences stale refresh and re-adding the same ID cannot resurrect its grant", async () => {
   const row = (await store.cas(task, binding, null, next, "connected"))._unsafeUnwrap();
   (await catalog.replace(task, binding.projectId, { revision: 1, servers: [] }))._unsafeUnwrap();

@@ -1,5 +1,9 @@
 # Testing strategy
 
+## Diagnostic qualification limit (2026-09-26)
+
+Clean installation, typecheck, lint, process E2E and standalone infrastructure passed, but full `npm test` exited 1 on an unhandled Vitest worker RPC timeout despite no failed assertions. This is not a green unit gate; no deployment occurred. The first failure, overlapping runs and unresolved cause are recorded in `docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md`; controlled investigation is tracked in `TODO.md`. Live Datadog dedicated-grant qualification remains pending (`docs/mcp.md`).
+
 ## Project-instructions focus readiness (2026-09-20)
 
 Browser assertions for focus-dependent styles await both enabled and focused state; native focus on a disabled field is a no-op, and later enabling does not restore focus. The form-spacing regression owns and releases a held instructions read while proving both states. All 97 frontend E2Es and 323 web unit tests pass; typecheck and lint pass with three existing warnings and one informational diagnostic. Cause and controlled reproduction: `docs/postmortems/2026-09-18-hosted-frontend-bootstrap-readiness.md`.

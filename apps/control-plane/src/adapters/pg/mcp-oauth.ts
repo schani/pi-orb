@@ -2,12 +2,44 @@ import type { SimulationTask } from "determined";
 import { err, ok } from "neverthrow";
 import {
   type McpOAuthBinding,
+  type McpOAuthDetail,
   type McpOAuthNext,
   type McpOAuthRow,
   type McpOAuthStore,
   oauthError,
 } from "../../domain/mcp-oauth.ts";
 import { jsonParam, type PostgreSQLClient } from "./client.ts";
+
+function safeDetail(detail?: McpOAuthDetail): McpOAuthDetail | null {
+  if (!detail) return null;
+  const categories = [
+    "invalid_grant",
+    "invalid_client",
+    "missing_refresh_token",
+    "unusable_refresh_response",
+  ];
+  const bounded = (value: number | undefined, max: number) =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max
+      ? Math.floor(value)
+      : undefined;
+  const submittedGeneration = bounded(detail.submittedGeneration, Number.MAX_SAFE_INTEGER);
+  const accessLifetimeSeconds = bounded(detail.accessLifetimeSeconds, 86400 * 365);
+  const clientExpiry = bounded(detail.clientExpiry, 253402300799);
+  return {
+    ...(detail.diagnostic && categories.includes(detail.diagnostic)
+      ? { diagnostic: detail.diagnostic }
+      : {}),
+    ...(submittedGeneration !== undefined ? { submittedGeneration } : {}),
+    ...(accessLifetimeSeconds !== undefined ? { accessLifetimeSeconds } : {}),
+    ...(typeof detail.refreshPresent === "boolean"
+      ? { refreshPresent: detail.refreshPresent }
+      : {}),
+    ...(typeof detail.refreshReplaced === "boolean"
+      ? { refreshReplaced: detail.refreshReplaced }
+      : {}),
+    ...(clientExpiry !== undefined ? { clientExpiry } : {}),
+  };
+}
 
 export class PostgreSQLMcpOAuthStore implements McpOAuthStore {
   private readonly db: PostgreSQLClient;
@@ -94,6 +126,7 @@ export class PostgreSQLMcpOAuthStore implements McpOAuthStore {
     expected: number | null,
     next: McpOAuthNext,
     edge: string | null,
+    detail?: McpOAuthDetail,
   ) {
     return (
       await this.db.transaction(async (query) => {
@@ -108,10 +141,18 @@ export class PostgreSQLMcpOAuthStore implements McpOAuthStore {
         if (written.isErr()) return err(oauthError("unavailable"));
         if (edge) {
           const event = await query(
-            `INSERT INTO mcp_oauth_events(project_id,connection_id,row_version,generation,edge)
-             SELECT $1,$2,$3,$4,$5 WHERE $5 <> 'refresh_failed' OR
-             (SELECT edge FROM mcp_oauth_events WHERE connection_id = $2 ORDER BY id DESC LIMIT 1) IS DISTINCT FROM 'refresh_failed'`,
-            [b.projectId, b.id, row.rowVersion, row.generation, edge],
+            `INSERT INTO mcp_oauth_events(project_id,connection_id,row_version,generation,edge,detail)
+             SELECT $1,$2,$3,$4,$5,$6 WHERE $5 <> 'refresh_failed' OR
+             (SELECT edge FROM mcp_oauth_events WHERE connection_id = $2 ORDER BY id DESC LIMIT 1) IS DISTINCT FROM 'refresh_failed' OR
+             (SELECT detail FROM mcp_oauth_events WHERE connection_id = $2 ORDER BY id DESC LIMIT 1) IS DISTINCT FROM $6::jsonb`,
+            [
+              b.projectId,
+              b.id,
+              row.rowVersion,
+              row.generation,
+              edge,
+              detail ? jsonParam(safeDetail(detail)) : null,
+            ],
           );
           if (event.isErr()) return err(oauthError("unavailable"));
         }
