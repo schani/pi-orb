@@ -16,9 +16,6 @@ function imageActivity(page: Page, text: string) {
 }
 
 async function seedUnavailableImages(page: Page, origin: string): Promise<void> {
-  await page.route(`${origin}/fixture-broken-image.png`, (route) =>
-    route.fulfill({ status: 404, body: "missing" }),
-  );
   await page.route(`**/api/v1/orbs/${ORB_ID}/history`, async (route) => {
     const response = await route.fetch();
     const body = await response.json();
@@ -249,16 +246,60 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
 
   it("shows distinct unavailable and failed-to-load image states", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await page.clock.install();
     await seedUnavailableImages(page, origin);
+    // This test owns HTTP-only synthetic history; a live socket cannot know its fabricated head.
+    let refreshed = false;
+    await page.route(`**/api/v1/orbs/${ORB_ID}`, async (route) => {
+      const afterInitialLoad = refreshed;
+      const response = await route.fetch();
+      const body = await response.json();
+      body.state = "stopped";
+      body.activity = "idle";
+      if (afterInitialLoad) body.name = "Image fixture refreshed";
+      await route.fulfill({ response, json: body });
+    });
+    let releaseImage!: () => void;
+    const heldImage = new Promise<void>((resolve) => {
+      releaseImage = resolve;
+    });
+    const imageRequested = page.waitForRequest(`${origin}/fixture-broken-image.png`);
+    let liveSockets = 0;
+    page.on("websocket", (socket) => {
+      if (socket.url().endsWith(`/orbs/${ORB_ID}/live`)) liveSockets++;
+    });
+    await page.route(`${origin}/fixture-broken-image.png`, async (route) => {
+      await heldImage;
+      await route.fulfill({ status: 404, body: "missing" });
+    });
     try {
       await gotoFrontendHistory(page, url, ORB_ID);
       const missing = imageActivity(page, "missing_source");
       const broken = imageActivity(page, "broken_source");
       await expectPage(missing.getByText("image unavailable", { exact: true })).toBeVisible();
+      await imageRequested;
+      await expectPage(broken.locator("img.tool-image-thumbnail")).toHaveCount(1);
+      refreshed = true;
+      const pollResponse = page.waitForResponse(
+        async (response) =>
+          new URL(response.url()).pathname === `/api/v1/orbs/${ORB_ID}` &&
+          response.request().method() === "GET" &&
+          (await response.json()).name === "Image fixture refreshed",
+      );
+      await page.clock.runFor(2100);
+      await pollResponse;
+      await expectPage(page.locator(".orb-name")).toHaveText("Image fixture refreshed");
+      expectPage(liveSockets).toBe(0);
+      await expectPage(missing.getByText("image unavailable", { exact: true })).toBeVisible();
+      await expectPage(broken.locator("img.tool-image-thumbnail")).toHaveCount(1);
+      const response = page.waitForResponse(`${origin}/fixture-broken-image.png`);
+      releaseImage();
+      expectPage((await response).status()).toBe(404);
       await expectPage(broken.getByText("image failed to load", { exact: true })).toBeVisible();
       await expectPage(missing.getByRole("img")).toHaveCount(0);
       await expectPage(broken.getByRole("img")).toHaveCount(0);
     } finally {
+      releaseImage();
       await page.close();
     }
   });
