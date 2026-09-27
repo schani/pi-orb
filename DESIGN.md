@@ -145,6 +145,7 @@ Tracking:
 - [docs/postmortems/2026-09-29-native-mcp-validation-install-race.md](docs/postmortems/2026-09-29-native-mcp-validation-install-race.md) — concurrent install and unguarded `npx` fetched Vitest 5 instead of pinned 3.2.7; local gate invalid
 - [docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md](docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md) — incomplete mock SSE response; termination cause erased by mock diagnostics
 - [docs/postmortems/2026-09-27-history-response-size.md](docs/postmortems/2026-09-27-history-response-size.md) — unbounded history response rejected by Cloud Run; browser history has no pagination
+- [docs/postmortems/2026-09-27-sandbox-qualification-harness.md](docs/postmortems/2026-09-27-sandbox-qualification-harness.md) — sandbox artifact, retirement, credential and presence evidence boundaries
 - [docs/postmortems/2026-09-27-webkit-image-fixture-sync.md](docs/postmortems/2026-09-27-webkit-image-fixture-sync.md) — HTTP-only image records raced a running orb's full live sync
 - [docs/postmortems/2026-09-27-restart-notice-e2e-rule.md](docs/postmortems/2026-09-27-restart-notice-e2e-rule.md) — Docker release blocked by a scripted model matcher predating the host notice wording
 - [docs/postmortems/2026-09-27-composer-caret-ordering.md](docs/postmortems/2026-09-27-composer-caret-ordering.md) — caret measurement preceded mode normalization; gated browser regression and document-bubble measurement fix
