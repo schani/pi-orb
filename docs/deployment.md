@@ -298,6 +298,8 @@ positive samples refute it. Pending pi-orb instance/disk/image operations also
 block activation. The 75-minute operational cap permits natural Cloud Run
 retirement without a UI pause (the observed incident took roughly 44 minutes);
 time passing is never the proof. Failure leaves new loops gated and HTTP available.
+The per-service Monitoring filter correction and sandbox API evidence are in
+`docs/postmortems/2026-09-27-monitoring-retirement-filter.md`.
 
 A one-task, no-retry Cloud Run job runs migrations from the accepted image before
 any new service consumes schema. Production application startup does not migrate;

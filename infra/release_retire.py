@@ -18,27 +18,30 @@ def epoch(value):
 
 
 def metrics(cloud, project, region, start, end):
-    query = {
-        "filter": f'metric.type="run.googleapis.com/container/instance_count" AND resource.type="cloud_run_revision" AND (resource.labels.service_name="pi-orb" OR resource.labels.service_name="pi-orb-ops" OR resource.labels.service_name="pi-orb-runtime-api" OR resource.labels.service_name="pi-orb-issuer") AND resource.labels.location="{region}"',
-        "interval.startTime": start, "interval.endTime": end, "view": "FULL", "pageSize": "10000",
-    }
-    result, seen = [], set()
-    while True:
-        page = cloud.http("GET", f"https://monitoring.googleapis.com/v3/projects/{project}/timeSeries?{urllib.parse.urlencode(query)}")
-        if page.error:
-            return page
-        if not isinstance(page.value, dict) or not isinstance(page.value.get("timeSeries", []), list):
-            return fail("invalid", "malformed Monitoring page")
-        result.extend(page.value.get("timeSeries", []))
-        token = page.value.get("nextPageToken", "")
-        if not isinstance(token, str):
-            return fail("invalid", "invalid Monitoring page token")
-        if token == "":
-            return Result(result)
-        if token in seen:
-            return fail("invalid", "repeated or invalid Monitoring page token")
-        seen.add(token)
-        query["pageToken"] = token
+    result = []
+    for service in ("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer"):
+        query = {
+            "filter": f'metric.type="run.googleapis.com/container/instance_count" AND resource.type="cloud_run_revision" AND resource.labels.service_name="{service}" AND resource.labels.location="{region}"',
+            "interval.startTime": start, "interval.endTime": end, "view": "FULL", "pageSize": "10000",
+        }
+        seen = set()
+        while True:
+            page = cloud.http("GET", f"https://monitoring.googleapis.com/v3/projects/{project}/timeSeries?{urllib.parse.urlencode(query)}")
+            if page.error:
+                return page
+            if not isinstance(page.value, dict) or not isinstance(page.value.get("timeSeries", []), list):
+                return fail("invalid", "malformed Monitoring page")
+            result.extend(page.value.get("timeSeries", []))
+            token = page.value.get("nextPageToken", "")
+            if not isinstance(token, str):
+                return fail("invalid", "invalid Monitoring page token")
+            if token == "":
+                break
+            if token in seen:
+                return fail("invalid", "repeated or invalid Monitoring page token")
+            seen.add(token)
+            query["pageToken"] = token
+    return Result(result)
 
 
 def samples(series, region, end):

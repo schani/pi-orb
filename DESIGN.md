@@ -161,6 +161,8 @@ Tracking:
 - [docs/postmortems/2026-09-23-pi-system-history-replication.md](docs/postmortems/2026-09-23-pi-system-history-replication.md) — Pi 0.87.1 persisted prompt/tool state; the history adapter now retains its identity without replicating execution configuration
 - [docs/postmortems/2026-09-21-workspace-upload-remote-only.md](docs/postmortems/2026-09-21-workspace-upload-remote-only.md) — six upload chunks completed; the later UI had no local file ownership, but the browser cause remains unproved
 - [docs/postmortems/2026-09-20-composer-typing-stalls.md](docs/postmortems/2026-09-20-composer-typing-stalls.md) — browser-parent cycle collection and independent unchanged-transcript rerenders stalled composer input
+- [docs/postmortems/2026-09-27-monitoring-retirement-filter.md](docs/postmortems/2026-09-27-monitoring-retirement-filter.md) — exact per-service Monitoring queries with fail-closed pagination and retirement proof
+- [docs/postmortems/2026-09-27-vitest4-e2e-ordering.md](docs/postmortems/2026-09-27-vitest4-e2e-ordering.md) — preserve E2E resource ownership across the security-driven runner upgrade
 - [docs/postmortems/2026-09-19-composer-caret-ordering.md](docs/postmortems/2026-09-19-composer-caret-ordering.md) — native caret measurement before React normalization; deterministic selection gate and document-bubble ordering
 - [docs/postmortems/2026-09-19-consolidation-docker-broker-host.md](docs/postmortems/2026-09-19-consolidation-docker-broker-host.md) — Docker callback authority omitted by the consolidated HTTP host guard; runtime-only broker authority and provider-specific E2E
 
