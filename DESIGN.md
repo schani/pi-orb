@@ -152,6 +152,7 @@ Tracking:
 - [docs/postmortems/2026-10-02-inbox-poll-payload.md](docs/postmortems/2026-10-02-inbox-poll-payload.md) — repeated delivered inbox/image transfers; insertion deltas with explicit provisional tracking
 - [docs/postmortems/2026-10-02-initial-history-latency.md](docs/postmortems/2026-10-02-initial-history-latency.md) — compact history still reads full source records; ops timing and pruning-query caveats
 - [docs/postmortems/2026-09-27-history-response-size.md](docs/postmortems/2026-09-27-history-response-size.md) — unbounded history response rejected by Cloud Run; browser history has no pagination
+- [docs/postmortems/2026-09-27-sandbox-qualification-harness.md](docs/postmortems/2026-09-27-sandbox-qualification-harness.md) — sandbox artifact, retirement, credential and presence evidence boundaries
 - [docs/postmortems/2026-09-27-webkit-image-fixture-sync.md](docs/postmortems/2026-09-27-webkit-image-fixture-sync.md) — HTTP-only image records raced a running orb's full live sync
 - [docs/postmortems/2026-09-27-restart-notice-e2e-rule.md](docs/postmortems/2026-09-27-restart-notice-e2e-rule.md) — Docker release blocked by a scripted model matcher predating the host notice wording
 - [docs/postmortems/2026-09-27-composer-caret-ordering.md](docs/postmortems/2026-09-27-composer-caret-ordering.md) — caret measurement preceded mode normalization; gated browser regression and document-bubble measurement fix
