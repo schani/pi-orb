@@ -115,6 +115,10 @@ Rebase validation passed: clean `npm ci` with all three Pi patches, typecheck, l
 
 The qualification and cloud receipts below describe the original `6f6de57` candidate, not the rebased tree. The user reported the sandbox working after Tailscale enrollment; no specific additional port/lifecycle coverage is inferred. No deployed image or database was changed during rebase. Remaining release qualification is tracked in `TODO.md`.
 
+### Integration status, 2026-09-27
+
+The `592fc8b` tree passed its own 236-case process E2E gate, but its frozen source is not the CI merge tree. CI tested merge `d23c197` (parents `2c486a3` and `592fc8b`): main's changed host-restart notice no longer matched the full-slice scripted model rule, so the restart acknowledgement fell through. The corrected matcher and planner-generated regression landed on main at `5dcb415`, along with the gated caret-ordering fix at `d512030`. This branch now integrates that pinned main source and retains migration 027, MCP audit portability, dependency fixes and sandbox work. Neither the old process pass nor the main fix qualifies this new combined tree; Docker-backed full E2E, unit/infra, types and lint must run against one final frozen source before rebuilding any artifact or seeking deployment approval. The retained `592fc8b` artifacts were not rolled out; sandbox generation 2 still serves the old `6f6de57` image. Production migration 027 has not run. CI failure analysis: `docs/postmortems/2026-09-27-restart-notice-e2e-rule.md`.
+
 ### Local qualification completed, 2026-09-20
 
 Frozen-source validation passed: typecheck, lint, **2,200 unit tests** (nine conditional skips), infrastructure suites and the full Docker-backed **215-test E2E suite** across 26 files. Separate identity-migration checks passed against PostgreSQL. Source hashes and first-failure evidence are retained in `.context/consolidation/`; `docs/testing.md` records scope and results.
