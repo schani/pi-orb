@@ -43,8 +43,9 @@ describe("boot notification decision", () => {
     const plan = notice(settled);
     expect(plan.triggerTurn).toBe(true);
     expect(plan.marker.customType).toBe("pi-orb.host-restarted");
-    expect(plan.marker.content).toContain("All processes running before the restart were killed");
-    expect(plan.marker.content).toContain("Do not repeat completed work");
+    expect(plan.marker.content).toBe(
+      "The host was restarted involuntarily. Continue whatever you were doing, but note: All processes running before the restart were killed, including servers, background jobs, and shell sessions.",
+    );
     expect(plan.marker.details).toMatchObject({
       ...boot,
       reason: "host_restarted",
@@ -112,6 +113,7 @@ describe("boot notification decision", () => {
     expect(plan.marker.customType).toBe("pi-orb.turn-resume");
     expect(plan.marker.content).toContain("All processes");
     expect(plan.marker.content).toContain("Continue from where you left off");
+    expect(plan.marker.content).not.toContain("Continue whatever you were doing");
   });
   it("does not auto-resume a notification that crashed before producing an assistant message", () => {
     const marker = persisted(notice(settled));
@@ -119,6 +121,7 @@ describe("boot notification decision", () => {
     expect(plan.triggerTurn).toBe(false);
     expect(plan.marker.details.reason).toBe("declined_already_resumed");
     expect(plan.marker.content).toContain("will not be resumed automatically");
+    expect(plan.marker.content).not.toContain("Continue whatever you were doing");
   });
   it("compaction cannot erase the notification crash-loop budget", () => {
     const marker = persisted(notice(settled));
@@ -157,14 +160,15 @@ describe("boot notification decision", () => {
         .triggerTurn,
     ).toBe(true);
   });
-  it("delivers context after abort without instructing continuation of aborted work", () => {
+  it("uses the exact normal restart notice after a settled aborted tail", () => {
     const plan = notice([
       initialBoot,
       user,
       { ...finished, message: { role: "assistant", stopReason: "aborted", content: [] } },
     ]);
     expect(plan.marker.customType).toBe("pi-orb.host-restarted");
-    expect(plan.marker.content).toContain("Do not resume aborted work");
-    expect(plan.marker.content).not.toContain("Continue from where you left off");
+    expect(plan.marker.content).toBe(
+      "The host was restarted involuntarily. Continue whatever you were doing, but note: All processes running before the restart were killed, including servers, background jobs, and shell sessions.",
+    );
   });
 });

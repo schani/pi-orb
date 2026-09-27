@@ -1898,7 +1898,7 @@ export class PiOrbAgent {
     this.broadcastEvent({ type: "status", activity: "idle" });
   }
 
-  abortOperation(): ResultAsync<void, { message: string }> {
+  abortOperation(source: "user" | "shutdown" = "user"): ResultAsync<void, { message: string }> {
     const session = this.session;
     if (session === null) {
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
@@ -1914,7 +1914,8 @@ export class PiOrbAgent {
     if (
       this.operationId !== null &&
       this.operationOutcome !== "aborted" &&
-      this.subagentWork.busy
+      this.subagentWork.busy &&
+      source === "user"
     ) {
       const saved = Result.fromThrowable(
         () =>

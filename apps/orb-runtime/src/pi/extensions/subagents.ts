@@ -7,7 +7,7 @@ import type { SubagentError, SubagentRun } from "../../domain/subagent-work.ts";
 export interface SubagentHost {
   admitSubagent(childId: string, description?: string): Result<SubagentRun, SubagentError>;
   startSubagent(run: SubagentRun): void;
-  abortOperation(): PromiseLike<Result<void, { message: string }>>;
+  abortOperation(source: "shutdown"): PromiseLike<Result<void, { message: string }>>;
   releaseSubagent(run: SubagentRun): void;
   mayWakeSubagent(childId: string): boolean;
   bindSubagentAbort(abort: () => Result<void, SubagentError>): void;
@@ -102,7 +102,7 @@ export function createSubagentsExtension(
     // observers. Its dispose awaits extension hooks, not active tool cleanup.
     pi.on("session_shutdown", () => {
       shutdown ??= (async () => {
-        const cancelled = await host.abortOperation();
+        const cancelled = await host.abortOperation("shutdown");
         if (cancelled.isErr()) host.subagentAdapterFailed(cancelled.error.message);
         if (runs.size > 0)
           await new Promise<void>((resolve) => {

@@ -14,6 +14,7 @@ function fixture(promptResult?: Promise<void>) {
   const events: RuntimeEvent[] = [];
   const entries: unknown[] = [];
   const records: { customType: string; data: unknown }[] = [];
+  const messages: { customType: string; content: unknown }[] = [];
   const deliveries: ("turn" | "steer")[] = [];
   let failHistoryRead = false;
   let abortCalls = 0;
@@ -69,7 +70,10 @@ function fixture(promptResult?: Promise<void>) {
       records.push({ customType, data });
       return "baseline";
     },
-    appendCustomMessageEntry: () => "message",
+    appendCustomMessageEntry: (customType, content) => {
+      messages.push({ customType, content });
+      return "message";
+    },
   };
   const agent = new PiOrbAgent({
     orbId: "test",
@@ -86,6 +90,7 @@ function fixture(promptResult?: Promise<void>) {
     agent,
     events,
     records,
+    messages,
     deliveries,
     abortCalls: () => abortCalls,
     failAbortAt: (call: number) => {
@@ -347,6 +352,38 @@ it("keeps health, snapshot and operation busy through a leaf-only interval and r
       },
     ]);
     if (run.isErr()) throw run.error;
+  });
+});
+
+it("records explicit user cancellation while fencing child work", async () => {
+  const h = fixture();
+  await h.agent.submitMessage([], "op");
+  const child = h.agent.admitSubagent("child")._unsafeUnwrap();
+  expect((await h.agent.abortOperation()).isOk()).toBe(true);
+  expect(h.messages).toEqual([
+    { customType: "pi-orb.subagents-cancelling", content: "Cancelling delegated work." },
+  ]);
+  expect(h.agent.mayWakeSubagent("child")).toBe(false);
+  h.agent.releaseSubagent(child);
+  expect(h.events).toContainEqual({
+    type: "operation_finished",
+    operationId: "op",
+    outcome: "aborted",
+  });
+});
+
+it("shutdown cancels child work without writing a conversational cancellation notice", async () => {
+  const h = fixture();
+  await h.agent.submitMessage([], "op");
+  const child = h.agent.admitSubagent("child")._unsafeUnwrap();
+  expect((await h.agent.abortOperation("shutdown")).isOk()).toBe(true);
+  expect(h.messages).toEqual([]);
+  expect(h.agent.mayWakeSubagent("child")).toBe(false);
+  h.agent.releaseSubagent(child);
+  expect(h.events).toContainEqual({
+    type: "operation_finished",
+    operationId: "op",
+    outcome: "aborted",
   });
 });
 

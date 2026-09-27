@@ -21,11 +21,15 @@ function fixture() {
   const lifecycleHandlers = new Map<string, ((event?: unknown, context?: unknown) => unknown)[]>();
   const entries: { customType: string; data: unknown }[] = [];
   const released: string[] = [];
+  const abortSources: (string | undefined)[] = [];
   let wakeAllowed = true;
   const host: SubagentHost = {
     admitSubagent: (childId) => ok({ childId, operationId: "op" }),
     startSubagent: () => undefined,
-    abortOperation: () => Promise.resolve(ok(undefined)),
+    abortOperation: (source) => {
+      abortSources.push(source);
+      return Promise.resolve(ok(undefined));
+    },
     releaseSubagent: (run) => released.push(run.childId),
     mayWakeSubagent: () => wakeAllowed,
     bindSubagentAbort: () => undefined,
@@ -57,6 +61,10 @@ function fixture() {
     emit,
     entries,
     released,
+    abortSources,
+    shutdown: async () => {
+      for (const handler of lifecycleHandlers.get("session_shutdown") ?? []) await handler();
+    },
     terminalCount,
     shouldWake: (id: string) => upstream.options?.shouldWake({ id }),
     setWakeAllowed: (allowed: boolean) => {
@@ -70,6 +78,26 @@ beforeEach(() => {
 });
 
 describe("subagent terminal ownership", () => {
+  it("passes shutdown provenance to abort and waits for child cleanup", async () => {
+    const h = fixture();
+    h.emit("created", { id: "child" });
+    let finished = false;
+    const shutdown = h.shutdown().then(() => {
+      finished = true;
+    });
+    expect(h.abortSources).toEqual(["shutdown"]);
+    // Checkpoint through the resolved abort and both shutdown hooks before
+    // releasing the child; without a drain wait, the observer has run by then.
+    for (let step = 0; step < 5; step++) await Promise.resolve();
+    expect(finished).toBe(false);
+    expect(h.released).toEqual([]);
+    h.emit("completed", { id: "child" });
+    await shutdown;
+    expect(finished).toBe(true);
+    expect(h.released).toEqual(["child"]);
+    expect(h.terminalCount()).toBe(1);
+  });
+
   it("releases foreground and claimed outcomes even when no automatic wake is considered", async () => {
     const h = fixture();
     h.emit("created", { id: "child" });

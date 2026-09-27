@@ -19,6 +19,8 @@ export const HOST_RESTARTED_TYPE = "pi-orb.host-restarted";
 export const SLEEP_WAKE_TYPE = "pi-orb.sleep-wake";
 export const HOST_RESTART_CONTEXT =
   "The host was restarted. All processes running before the restart were killed, including servers, background jobs, and shell sessions.";
+const HOST_RESTART_NOTICE =
+  "The host was restarted involuntarily. Continue whatever you were doing, but note: All processes running before the restart were killed, including servers, background jobs, and shell sessions.";
 export const RUNTIME_RESTART_CONTEXT =
   "The agent runtime was restarted. Other processes may still be running; verify their state rather than assuming they survived or died.";
 const SETTLED_INSTRUCTION =
@@ -134,6 +136,16 @@ export function planBootNotification(
   const declined =
     !resume.resume && resume.reason === "already_resumed" && resume.suppressed !== null;
   const head = object(context[context.length - 1]);
+  const content =
+    !resume.resume && !declined && hostRestarted
+      ? HOST_RESTART_NOTICE
+      : `${restartContext} ${
+          resume.resume
+            ? "The previous turn was interrupted — resuming it now. Continue from where you left off."
+            : declined
+              ? TURN_RESUME_DECLINED_CONTENT
+              : SETTLED_INSTRUCTION
+        }`;
   return {
     kind: "message",
     triggerTurn: !declined,
@@ -146,13 +158,7 @@ export function planBootNotification(
             : declined
               ? TURN_RESUME_DECLINED_CUSTOM_TYPE
               : HOST_RESTARTED_TYPE,
-      content: `${restartContext} ${
-        resume.resume
-          ? "The previous turn was interrupted — resuming it now. Continue from where you left off."
-          : declined
-            ? TURN_RESUME_DECLINED_CONTENT
-            : SETTLED_INSTRUCTION
-      }${
+      content: `${content}${
         sleepWake === null
           ? ""
           : ` ${sleepWake.content
