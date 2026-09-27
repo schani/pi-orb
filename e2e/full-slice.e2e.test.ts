@@ -44,6 +44,7 @@ import {
   waitFor,
   waitForPostgres,
 } from "./harness.ts";
+import { restartNoticePattern } from "./testkit/restart-notice-rule.ts";
 
 /**
  * The full docs/testing.md slice against the real Pi SDK and fake OpenAI
@@ -93,7 +94,7 @@ const SCENARIO = {
         ],
       },
       ...["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].map((reply) => ({
-        match: { userMessage: { regex: "^The (host|agent runtime) was restarted\\." } },
+        match: { userMessage: { regex: restartNoticePattern } },
         steps: [
           { type: "text", content: reply },
           { type: "stop", status: "completed" },
