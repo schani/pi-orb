@@ -182,6 +182,8 @@ Frontend pages await the fixture response that enables their assertions. Boot fa
 
 A definitive orb-history 404 is monotonic for the mounted route: an older successful metadata poll cannot restore the resource or its live socket. Browser regressions must observe the held history request before changing fixture lifecycle, snapshot mutable response state when a request enters its route, and await exact browser responses before asserting their effects. The controlled stale-poll schedule, first failure, correction, and unrelated GitHub-run failures are recorded in `docs/postmortems/2026-09-18-webkit-missing-resource-race.md`.
 
+Raw SQL assertions must select an explicit representation when PostgreSQL and PGlite decode a type differently. The MCP audit test selects `generation::text` and checks `"2"`; its typed store-CAS result must still be numeric `2`. First-failure and both-driver verification: `docs/postmortems/2026-09-27-mcp-audit-generation-driver.md`.
+
 ## E2E resource ownership and concurrency (2026-09-18)
 
 The E2E suite has two ordered Vitest projects. Frontend runs first in one thread (`sequence.groupOrder: 1`); lifecycle follows in one fork (`groupOrder: 2`), each capped by project `maxWorkers: 1`. This prevents proven Docker network-change cancellation from overlapping frontend browsers or process-backed lifecycle browser files. The actual-config probe holds setup and frontend on separate file barriers and verifies that setup does not overlap frontend tests, frontend completes before lifecycle begins, and lifecycle peak file concurrency is one. Its generated config imports `e2e/vitest.config.ts` and substitutes only synthetic includes and a setup recorder, so it exercises the shipped pools, ordering, and project options.
