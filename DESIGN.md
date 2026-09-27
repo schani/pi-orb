@@ -133,6 +133,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-27-composer-caret-ordering.md](docs/postmortems/2026-09-27-composer-caret-ordering.md) — caret measurement preceded mode normalization; gated browser regression and document-bubble measurement fix
 - [docs/postmortems/2026-09-27-preemption-delegated-cancellation.md](docs/postmortems/2026-09-27-preemption-delegated-cancellation.md) — graceful Spot preemption persisted delegated cancellation through the shared shutdown/user-abort path; initiator remains unproved
 - [docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md](docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md) — diagnostic qualification blocked by an unhandled Vitest worker RPC timeout; cause unresolved
 - [docs/postmortems/2026-09-26-provider-auth-failures.md](docs/postmortems/2026-09-26-provider-auth-failures.md) — Codex failure after wake and Datadog grant invalidation; causes unproved, production Datadog refresh observed

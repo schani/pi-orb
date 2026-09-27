@@ -51,7 +51,7 @@ The frontend fixture includes nested read, generic-tool, multi-image, and failed
 
 ## Composer spacing and modal close controls (implemented, 2026-09-18)
 
-The composer keeps its functional `>` / `!` / `!!` / `/` mode prefix in a reserved `2ch` column with a `1ch` gap. This is compact without letting `!!` move or resize the editor; desktop, expanded phone, and collapsed phone use the same geometry. Attachments remain unindented, and the command picker aligns with the editor while preserving the right margin. Submission, mode transitions, block-caret measurement, and phone controls are unchanged.
+The composer keeps its functional `>` / `!` / `!!` / `/` mode prefix in a reserved `2ch` column with a `1ch` gap. This is compact without letting `!!` move or resize the editor; desktop, expanded phone, and collapsed phone use the same geometry. Attachments remain unindented, and the command picker aligns with the editor while preserving the right margin. Submission, mode transitions, and phone controls are unchanged. The desktop block caret measures normalized input after React's root handler, without depending on a later selection event; the gated Chromium/WebKit regression and evidence are in `docs/postmortems/2026-09-27-composer-caret-ordering.md`.
 
 Project Config and Personal Instructions share an X close control flush with the dialog's inner top-right corner: 32px square on desktop, 44px on phone, with an 18px icon. Header text retains its left inset and reserves the close width; the control is independent of Config's optional description line. App Search has no close button and remains Escape-dismissed. Non-modal X controls are unchanged. This browser-local geometry needs no telemetry.
 

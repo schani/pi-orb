@@ -559,6 +559,18 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         expectPage(messageGeometry.gap).toBeLessThanOrEqual(9);
         expectPage(messageGeometry.prefixTextRight).toBeLessThanOrEqual(messageGeometry.editorLeft);
 
+        // Suppress native selection notifications: normalization must update the
+        // caret without depending on a later browser selection-event schedule.
+        const selectionGate = await input.evaluateHandle((element) => {
+          const gate = new AbortController();
+          const hold = (event: Event) => event.stopImmediatePropagation();
+          for (const type of ["select", "selectionchange"])
+            element.ownerDocument.addEventListener(type, hold, {
+              capture: true,
+              signal: gate.signal,
+            });
+          return gate;
+        });
         await input.fill("!");
         await expectPage(input).toHaveAttribute("aria-label", "Run a shell command");
         const shellGeometry = await measureComposer("!");
@@ -620,6 +632,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         );
         await input.press("Escape");
         expectStableEditor(await measureComposer(">"), messageGeometry);
+        await selectionGate.evaluate((gate) => gate.abort());
+        await selectionGate.dispose();
 
         const sent = `composer geometry ${width} ${randomUUID()}`;
         const submitted = page.waitForRequest(
