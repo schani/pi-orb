@@ -100,13 +100,13 @@ it("commits safe diagnosis with fenced invalidation and submitted generation", a
   ).toBe(true);
   const rows = (
     await db.query(
-      "SELECT edge, generation, detail FROM mcp_oauth_events WHERE edge = 'invalidated'",
+      "SELECT edge, generation::text AS generation, detail FROM mcp_oauth_events WHERE edge = 'invalidated'",
     )
   )._unsafeUnwrap().rows;
   expect(rows).toEqual([
     {
       edge: "invalidated",
-      generation: 2,
+      generation: "2",
       detail: { diagnostic: "invalid_client", submittedGeneration: 1 },
     },
   ]);
