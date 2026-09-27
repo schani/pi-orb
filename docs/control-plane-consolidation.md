@@ -121,6 +121,12 @@ Frozen-source validation passed: typecheck, lint, **2,200 unit tests** (nine con
 
 Qualification found and causally corrected the Docker broker-host rejection and a WebKit caret event-ordering race, without relaxing assertions or timeouts. Forensics: `docs/postmortems/2026-09-19-consolidation-docker-broker-host.md` and `docs/postmortems/2026-09-19-composer-caret-ordering.md`. Live Google, cloud control-plane/GCE integration, tagged-host routing, STS and isolated cutover/recovery remain unqualified. Sandbox native-image acceptance is recorded below; no production deployment occurred.
 
+### Preparation repairs, 2026-09-27
+
+The branch now includes main `7d7cfc2`. Focused compatible dependency updates plus the separately reviewed Vitest 4.1.11 migration reduce npm's known audit findings from four high/five moderate to zero. Clean installation applies all three Pi patches; typecheck and focused contracts pass. The runner migration preserves worker ownership and relative project ordering; its first failures and fixes are recorded in `docs/postmortems/2026-09-27-vitest4-e2e-ordering.md`. Full qualification and new immutable artifacts remain separate from these focused checks.
+
+Read-only permission probes found no recovery-project creation or billing-attachment permission. Production backup restore is blocked on an independently isolated destination/authority, not waived by synthetic migration tests; no production-derived data was copied into the active sandbox. Evidence: `.context/consolidation/preparation-20260927/recovery/feasibility/`.
+
 ## Reversible preparation (authorized 2026-09-20)
 
 **Expanded preparation authorization, 2026-09-27:** complete as much release preparation as possible without final production deployment: integration fixes, dependency remediation, qualification, sandbox artifact updates and isolated migration/restore/recovery rehearsals. Do not merge into a deployment-triggering branch or change production services, schema, traffic, IAM, callbacks, trust or activation. Production-derived restores require an isolation review before any controller can start; missing human identity verification and production OAuth setup remain explicit human gates.
@@ -163,7 +169,7 @@ Orb `7648d160-8358-49a6-a2c6-f9468b5098b7` was started once. Compute replacement
 
 Application source remains `6f6de577a64b54868286ddbdd8ff490e02d5a692`; no code changed or tests reran. No production GCP writes occurred; the only production credential access was the authorized Tailscale read/copy into sandbox Secret Manager. No production application database or workspace data was copied.
 
-The shared `infra/release_retire.py` Monitoring filter returned HTTP 400 for mixed resource-label AND/OR clauses. The private sandbox Cloud adapter narrowed the query to sole service `pi-orb-issuer` AND region, preserving pagination, explicit-zero requirements and retirement invariants. The tracked helper is unchanged; its production gate is in `TODO.md`. This sandbox evidence does not qualify the shared filter.
+The original shared Monitoring filter returned HTTP 400 for mixed resource-label AND/OR clauses. On 2026-09-27 the shared helper was repaired tests-first to query each exact service with an AND region filter, preserving pagination, failure propagation and explicit-zero retirement requirements. All four filters returned HTTP 200 through the shared adapter against sandbox Monitoring; issuer samples included active count 1. Empty legacy-service series prove query acceptance, not retirement. The 65 infrastructure Python tests passed. Cause and evidence: `docs/postmortems/2026-09-27-monitoring-retirement-filter.md`.
 
 ## Observability and acceptance
 
