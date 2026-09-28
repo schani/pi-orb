@@ -308,7 +308,7 @@ const DEFAULT_DESIRED_SPEC = "spec-a";
 const RESUME_MARKER_CUSTOM_TYPE = "pi-orb.turn-resume";
 
 /**
- * The record the loop guard appends instead of resuming a second time: a
+ * The record the loop guard appends after three claimed attempts: a
  * declined resume must be as visible as a performed one (docs/lifecycle.md).
  */
 // Mirrors TURN_RESUME_DECLINED_CUSTOM_TYPE in the same runtime module.
@@ -1071,13 +1071,10 @@ export class FakeWorld {
    * The contract, cause-agnostically (preemption, unreachable restart, user
    * stop/start and idle auto-stop are indistinguishable on disk):
    *
-   * - flushed tail is a dangling turn and no resume marker follows the last
-   *   real user message → append the marker record and come up `busy`, the
-   *   turn continues;
-   * - flushed tail is a dangling turn *under* a marker → the guard declines:
-   *   come up `idle`, and announce the decline with its own record, at most
-   *   one per interruption. A turn that crashes its host again after resuming
-   *   is not resumed a second time, and never silently;
+   * - a dangling turn with fewer than three markers after the last real user
+   *   message → append a marker and come up `busy`;
+   * - after three markers the guard declines: come up `idle`, announcing
+   *   the decline once per interruption; never silently;
    * - anything else → come up `idle` and report nothing.
    *
    * Either notable decision is reported in this incarnation's health, as the
@@ -1100,7 +1097,7 @@ export class FakeWorld {
     // The world flushes no partial assistant output, so the dangling tail it
     // models is always the turn's user message with no reply at all.
     const shape = "unanswered_user_message" as const;
-    if (!this.hasMarkerAfterLastUserMessage(fs, isResumeMarker)) {
+    if (this.markersAfterLastUserMessage(fs, isResumeMarker) < 3) {
       this.flushMarkerRecord(host.orbId, fs, "resume");
       runtime.activity = "busy";
       runtime.turnResume = {
@@ -1117,7 +1114,7 @@ export class FakeWorld {
       shape,
       ...(headRecordId !== undefined ? { headRecordId } : {}),
     };
-    if (this.hasMarkerAfterLastUserMessage(fs, isDeclineMarker)) return;
+    if (this.markersAfterLastUserMessage(fs, isDeclineMarker) > 0) return;
     this.flushMarkerRecord(host.orbId, fs, "decline");
   }
 
@@ -1142,16 +1139,16 @@ export class FakeWorld {
     }));
   }
 
-  /** The loop guard's key: does such a record follow the last user message? */
-  private hasMarkerAfterLastUserMessage(
+  /** Count durable claims after the last human message. */
+  private markersAfterLastUserMessage(
     fs: FakeFilesystem,
     isMarker: (record: HistoryRecord) => boolean,
-  ): boolean {
+  ): number {
     let lastUserMessage = -1;
     fs.entries.forEach((record, index) => {
       if (record.type === "message" && record.role === "user") lastUserMessage = index;
     });
-    return fs.entries.some((record, index) => index > lastUserMessage && isMarker(record));
+    return fs.entries.filter((record, index) => index > lastUserMessage && isMarker(record)).length;
   }
 
   /** Apply an elapsed preemption soft-off window: the instance is now down. */

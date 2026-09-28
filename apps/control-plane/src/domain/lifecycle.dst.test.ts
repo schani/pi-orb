@@ -2991,16 +2991,12 @@ describe("orb lifecycle (DST)", () => {
     );
   });
 
-  // The loop guard of the same design: at most one auto-resume per
-  // interruption. A turn that dies with its host again after resuming sees
-  // marker-then-dangling-tail on the next boot and stays idle — so the orb is
-  // genuinely idle and the reaper collects it, which is the designed outcome
-  // rather than a regression: resuming forever would burn tokens and VM hours
-  // on a turn that kills its host every time.
-  it("a turn interrupted again after resuming resumes only once and then idle-stops", async () => {
+  // Three persisted claims survive successive restarts; the fourth boot
+  // declines and becomes idle. Human input opens a fresh budget.
+  it("resumes three times, declines the fourth, and resets on human input", async () => {
     const capture = new LogCapture();
     await runDst(
-      { name: "resume-guard-single-shot", iterations: 12, logCapture: capture },
+      { name: "resume-guard-three-attempts", iterations: 12, logCapture: capture },
       async (sim) => {
         const harness = makeHarness();
         const stop = new AbortController();
@@ -3022,35 +3018,36 @@ describe("orb lifecycle (DST)", () => {
               );
               harness.deps.control.unregisterBrowserConnection(ORB, "setup-tab", task.wallNow());
               const stopsBefore = harness.world.hostStopCountOf(ORB);
+              let previousInstance = harness.world.runtimeInstanceIdOf(ORB);
+              for (let attempt = 1; attempt <= 4; attempt++) {
+                harness.world.preemptHost(task, ORB);
+                await waitUntil(
+                  task,
+                  `orb running after host death ${attempt}`,
+                  () =>
+                    harness.store.orbSnapshot(ORB)?.state === "running" &&
+                    harness.world.isRuntimeServing(task, ORB) &&
+                    harness.world.runtimeInstanceIdOf(ORB) !== previousInstance,
+                  { timeoutMs: 20 * 60_000 },
+                );
+                previousInstance = harness.world.runtimeInstanceIdOf(ORB);
+                expect(harness.world.resumeMarkersOf(ORB)).toHaveLength(Math.min(attempt, 3));
+              }
+              expect(harness.world.declineMarkersOf(ORB)).toHaveLength(1);
+              // A new human message, unlike a system marker, resets the budget.
+              harness.world.beginTurn(ORB);
               harness.world.preemptHost(task, ORB);
               await waitUntil(
                 task,
-                "orb running on the resumed runtime",
-                () =>
-                  harness.store.orbSnapshot(ORB)?.state === "running" &&
-                  harness.world.isRuntimeServing(task, ORB),
+                "new human turn resumed",
+                () => harness.world.resumeMarkersOf(ORB).length === 4,
                 { timeoutMs: 20 * 60_000 },
               );
-              expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
-              const resumedInstance = harness.world.runtimeInstanceIdOf(ORB);
-              // The resumed turn kills its host a second time.
-              harness.world.preemptHost(task, ORB);
+              harness.world.finishTurn(ORB);
+              // Once settled, the ordinary idle reaper still collects it.
               await waitUntil(
                 task,
-                "orb running again after the second host death",
-                () =>
-                  harness.store.orbSnapshot(ORB)?.state === "running" &&
-                  harness.world.isRuntimeServing(task, ORB) &&
-                  harness.world.runtimeInstanceIdOf(ORB) !== resumedInstance,
-                { timeoutMs: 20 * 60_000 },
-              );
-              // No second resume: the marker in the tail is the guard.
-              expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
-              // The orb is now genuinely idle, and the idle auto-stop collects
-              // it on the ordinary default window — the designed ending.
-              await waitUntil(
-                task,
-                "the un-resumed orb idle-stops",
+                "the settled orb idle-stops",
                 () => harness.store.orbSnapshot(ORB)?.state === "stopped",
                 { timeoutMs: 20 * 60_000 },
               );
@@ -3064,10 +3061,8 @@ describe("orb lifecycle (DST)", () => {
         expect(orb?.state).toBe("stopped");
         expect(orb?.stopReason).toBe("idle");
         expect(orb?.lastError).toBeNull();
-        // Exactly one marker, on the filesystem and in the replica: the drain
-        // barrier carried it across the stop.
-        expect(harness.world.resumeMarkersOf(ORB).length).toBe(1);
-        expect(harness.store.replicaRecords(ORB).filter(isResumeMarker).length).toBe(1);
+        expect(harness.world.resumeMarkersOf(ORB)).toHaveLength(4);
+        expect(harness.store.replicaRecords(ORB).filter(isResumeMarker)).toHaveLength(4);
         // The guard declined out loud, exactly once for the one interruption
         // it suppressed — and that record replicated like any other, so the
         // user finds it in the history the UI shows them.
@@ -3076,16 +3071,13 @@ describe("orb lifecycle (DST)", () => {
         expect(
           capture.matching("turn-resume outcome=declined_already_resumed").length,
         ).toBeGreaterThanOrEqual(1);
-        // Two recoveries plus the final idle stop, and nothing beyond that: a
-        // turn that keeps dying does not become a restart storm.
-        expect(stopsDuringScenario).toBeLessThanOrEqual(2 * MAX_STOPS_PER_RECOVERY);
+        // Five recoveries plus idle stop; no restart storm.
+        expect(stopsDuringScenario).toBeLessThanOrEqual(5 * MAX_STOPS_PER_RECOVERY);
         assertReplicaComplete(harness.world, harness.store, ORB);
         assertAtMostOneHost(harness.world, ORB);
-        // Both host deaths recovered through `starting`, and the ending names
-        // itself: one idle decision with its stop_reason.
         expect(
           capture.matching("transition from=running to=starting").length,
-        ).toBeGreaterThanOrEqual(2);
+        ).toBeGreaterThanOrEqual(5);
         expect(capture.matching("to=stopping reason=idle_for_").length).toBe(1);
         expect(capture.matching("stop_reason=idle").length).toBe(1);
       },

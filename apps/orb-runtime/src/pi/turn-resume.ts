@@ -12,7 +12,7 @@ import { ResultAsync } from "neverthrow";
  *
  * Detection is a pure function of the session entries; issuing the resume is
  * a single `sendCustomMessage` whose entry is simultaneously the visible
- * marker, the turn trigger, and the durable once-per-interruption guard. When
+ * marker, the turn trigger, and one durable claim against the three-attempt guard. When
  * that guard suppresses a resume it says so in history too: a declined resume
  * must be as visible as a performed one, or the guard reproduces the very
  * symptom it exists to prevent ("the orb silently stopped mid-work").
@@ -30,7 +30,7 @@ export const TURN_RESUME_CONTENT =
 
 /** Decline text. Addressed to the user: nothing will happen without them. */
 export const TURN_RESUME_DECLINED_CONTENT =
-  "The previous turn was interrupted again after it had already been resumed once, so it will not be resumed automatically a second time. Send a message to continue.";
+  "The previous turn was interrupted again after three automatic attempts, so it will not be resumed automatically. Send a message to continue.";
 
 export type InterruptedTurnShape =
   /** A tool result landed, but the assistant never spoke again. */
@@ -45,7 +45,7 @@ export type NoResumeReason =
   | "empty_session"
   /** The tail is a finished turn (or an aborted one, or a shell op). */
   | "settled_tail"
-  /** A resume marker already follows the last real user message. */
+  /** Earlier automatic boot turns; dangling tails exhaust the guard at three. */
   | "already_resumed";
 
 /** The interrupted tail a decision is about: its shape and its head entry. */
@@ -238,7 +238,7 @@ function interruptedTail(tail: readonly TailEntry[]): InterruptedTail | null {
 /**
  * Decide, from the session's active branch (root→leaf, e.g.
  * `SessionManager.buildContextEntries()`), whether a turn was interrupted and
- * has not already been auto-resumed once.
+ * has fewer than three turn-triggering boot records after the last real user.
  */
 export function detectInterruptedTurn(entries: readonly unknown[]): TurnResumeDecision {
   const tail: TailEntry[] = [];
@@ -252,27 +252,23 @@ export function detectInterruptedTurn(entries: readonly unknown[]): TurnResumeDe
     (entry) => entry.kind !== "resume_marker" && entry.kind !== "decline_marker",
   );
 
-  // Loop guard: at most one auto-resume per interruption. A marker after the
-  // last real user message means this interruption was already resumed once
-  // — a turn that keeps crashing its host resumes once, then stays idle.
+  // Every triggering boot record claims one attempt before inference starts.
+  // Count the full session, not compacted model context or a settled suffix.
   const lastUserIndex = tail.findLastIndex((entry) => entry.kind === "user");
-  const markerIndex = tail.findLastIndex(
-    (entry) => entry.kind === "resume_marker" || entry.kind === "boot_marker",
-  );
-  if (markerIndex > lastUserIndex) {
-    const dangling = interruptedTail(conversational);
-    if (dangling === null) return { resume: false, reason: "already_resumed", suppressed: null };
-    const declineIndex = tail.findLastIndex((entry) => entry.kind === "decline_marker");
-    return {
-      resume: false,
-      reason: "already_resumed",
-      suppressed: { ...dangling, announced: declineIndex > lastUserIndex },
-    };
-  }
-
+  const claims = tail
+    .slice(lastUserIndex + 1)
+    .filter((entry) => entry.kind === "resume_marker" || entry.kind === "boot_marker").length;
   const dangling = interruptedTail(conversational);
+  if (claims > 0 && dangling === null)
+    return { resume: false, reason: "already_resumed", suppressed: null };
   if (dangling === null) return { resume: false, reason: "settled_tail" };
-  return { resume: true, ...dangling };
+  if (claims < 3) return { resume: true, ...dangling };
+  const declineIndex = tail.findLastIndex((entry) => entry.kind === "decline_marker");
+  return {
+    resume: false,
+    reason: "already_resumed",
+    suppressed: { ...dangling, announced: declineIndex > lastUserIndex },
+  };
 }
 
 function optionalDetail(headRecordId: string | null): { headRecordId?: string } {

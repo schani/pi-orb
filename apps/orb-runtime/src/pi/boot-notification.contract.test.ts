@@ -154,7 +154,7 @@ it("puts combined sleep and restart context in the first real-SDK inference reco
   });
 });
 
-it("real SessionManager reopen preserves the sleep marker and declines a second automatic turn", () => {
+it("real SessionManager reopen counts the sleep marker toward three attempts", () => {
   const { agent, manager, root } = fixture();
   const firstSession = {
     isIdle: true,
@@ -207,15 +207,14 @@ it("real SessionManager reopen preserves the sleep marker and declines a second 
     reopened,
     { summarize: () => okAsync("") },
   );
-  expect(triggered).toBe(0);
+  expect(triggered).toBe(1);
   expect(reopened.getEntries().at(-1)).toMatchObject({
     type: "custom_message",
-    customType: "pi-orb.turn-resume-declined",
+    customType: "pi-orb.turn-resume",
   });
   expect(next.getHealth()).toMatchObject({
     status: "ready",
-    activity: "idle",
-    turnResume: { outcome: "declined_already_resumed" },
+    turnResume: { outcome: "resumed" },
   });
 });
 
@@ -373,8 +372,8 @@ it.each([false, true])(
     );
     expect(interruptedSubagents(reopened.getEntries())).toEqual([]);
     // A failed append leaves the ordinary root restart notification unclaimed;
-    // a committed notice must not trigger that root turn again after ack loss.
-    expect(turns).toBe(committed ? 0 : 1);
+    // A committed notice claims one of three attempts; a failed append claims none.
+    expect(turns).toBe(1);
     const acknowledgements = reopened
       .getEntries()
       .filter(

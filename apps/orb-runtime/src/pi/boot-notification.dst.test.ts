@@ -118,7 +118,46 @@ it("generic and sleep boot crash windows preserve context and bound automatic tu
                 if (plan.triggerTurn) automaticTurns++;
                 await task.checkpoint("boot.after-trigger");
               }
-              expect(automaticTurns).toBeLessThanOrEqual(1);
+              const claims = () =>
+                entries.filter((entry) => {
+                  const type = (entry as { customType?: string }).customType;
+                  return (
+                    type === "pi-orb.host-restarted" ||
+                    type === "pi-orb.sleep-wake" ||
+                    type === "pi-orb.turn-resume"
+                  );
+                }).length;
+              expect(automaticTurns).toBeLessThanOrEqual(3);
+              expect(claims()).toBeLessThanOrEqual(3);
+              // An append claims a slot even if the crash preceded inference.
+              // Complete any remaining claims without failpoints, then prove
+              // the next boot declines and its own append triggers no turn.
+              for (let next = 9; claims() < 3; next++) {
+                const identity = {
+                  runtimeInstanceId: `r${next}`,
+                  executionId: `e${next}`,
+                  incarnation: "0",
+                };
+                const plan = planBootNotification(entries, entries, identity);
+                expect(plan.kind).toBe("message");
+                if (plan.kind !== "message") throw new Error("expected claim");
+                expect(plan.triggerTurn).toBe(true);
+                entries.push({ type: "custom_message", id: `claim-${next}`, ...plan.marker });
+              }
+              expect(claims()).toBe(3);
+              const exhaustedIdentity = {
+                runtimeInstanceId: "exhausted",
+                executionId: "exhausted",
+                incarnation: "0",
+              };
+              const exhausted = planBootNotification(entries, entries, exhaustedIdentity);
+              expect(exhausted.kind).toBe("message");
+              if (exhausted.kind !== "message") throw new Error("expected decline");
+              expect(exhausted.triggerTurn).toBe(false);
+              expect(exhausted.marker.details.reason).toBe("declined_already_resumed");
+              entries.push({ type: "custom_message", id: "declined", ...exhausted.marker });
+              expect(planBootNotification(entries, entries, exhaustedIdentity).kind).toBe("none");
+              expect(claims()).toBe(3);
               if (withSleep) {
                 expect(
                   entries.filter(

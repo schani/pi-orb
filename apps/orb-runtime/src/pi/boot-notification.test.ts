@@ -115,9 +115,19 @@ describe("boot notification decision", () => {
     expect(plan.marker.content).toContain("Continue from where you left off");
     expect(plan.marker.content).not.toContain("Continue whatever you were doing");
   });
-  it("does not auto-resume a notification that crashed before producing an assistant message", () => {
+  it("claims three attempts even when a notification crashes before inference", () => {
     const marker = persisted(notice(settled));
-    const plan = notice([...settled, marker], { ...boot, runtimeInstanceId: "runtime-3" });
+    const second = notice([...settled, marker], { ...boot, runtimeInstanceId: "runtime-3" });
+    expect(second.triggerTurn).toBe(true);
+    const third = notice([...settled, marker, persisted(second)], {
+      ...boot,
+      runtimeInstanceId: "runtime-4",
+    });
+    expect(third.triggerTurn).toBe(true);
+    const plan = notice([...settled, marker, persisted(second), persisted(third)], {
+      ...boot,
+      runtimeInstanceId: "runtime-5",
+    });
     expect(plan.triggerTurn).toBe(false);
     expect(plan.marker.details.reason).toBe("declined_already_resumed");
     expect(plan.marker.content).toContain("will not be resumed automatically");
@@ -131,15 +141,19 @@ describe("boot notification decision", () => {
       retainedTail: [],
       summary: "earlier work",
     };
-    const plan = planBootNotification([...settled, marker, dangling, compacted], [compacted], {
-      ...boot,
-      runtimeInstanceId: "runtime-3",
-    });
+    const plan = planBootNotification(
+      [...settled, marker, marker, marker, dangling, compacted],
+      [compacted],
+      {
+        ...boot,
+        runtimeInstanceId: "runtime-3",
+      },
+    );
     expect(plan.kind === "message" && plan.triggerTurn).toBe(false);
   });
   it("does not grant a notification-generated tool turn an extra retry", () => {
     const marker = persisted(notice(settled));
-    const plan = notice([...settled, marker, dangling], {
+    const plan = notice([...settled, marker, marker, marker, dangling], {
       ...boot,
       runtimeInstanceId: "runtime-3",
     });
@@ -150,6 +164,20 @@ describe("boot notification decision", () => {
     expect(
       notice([...settled, marker, finished], { ...boot, runtimeInstanceId: "runtime-3" })
         .triggerTurn,
+    ).toBe(true);
+  });
+  it("keeps completed restart notices triggering beyond three claims", () => {
+    let records: unknown[] = settled;
+    for (const runtimeInstanceId of ["runtime-2", "runtime-3", "runtime-4"]) {
+      const plan = notice(records, { ...boot, runtimeInstanceId });
+      expect(plan.triggerTurn).toBe(true);
+      records = [...records, persisted(plan), finished];
+    }
+    const fourth = notice(records, { ...boot, runtimeInstanceId: "runtime-5" });
+    expect(fourth.triggerTurn).toBe(true);
+    expect(fourth.marker.customType).toBe("pi-orb.host-restarted");
+    expect(
+      notice([...records, user], { ...boot, runtimeInstanceId: "runtime-5" }).triggerTurn,
     ).toBe(true);
   });
   it("a durable inbox user message resets the loop guard", () => {

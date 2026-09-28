@@ -241,12 +241,61 @@ describe("detectInterruptedTurn", () => {
     });
   });
 
-  it("does not resume twice for one interruption", () => {
+  it("allows three claimed resumes after the last human message, then declines", () => {
+    const head = assistantToolCalls("call-1");
+    const records = [user(), head];
+    for (let count = 0; count < 3; count++) {
+      expect(detectInterruptedTurn(records)).toEqual({
+        resume: true,
+        shape: "dangling_tool_calls",
+        headRecordId: idOf(head),
+      });
+      records.push(resumeMarker()); // Persisted before inference, even if inference never starts.
+    }
+    expect(detectInterruptedTurn(records)).toEqual({
+      resume: false,
+      reason: "already_resumed",
+      suppressed: { shape: "dangling_tool_calls", headRecordId: idOf(head), announced: false },
+    });
+    records.push(declineMarker());
+    expect(detectInterruptedTurn(records)).toMatchObject({
+      resume: false,
+      suppressed: { announced: true },
+    });
+    const next = assistantToolCalls("next");
+    expect(detectInterruptedTurn([...records, user("new human turn"), next])).toEqual({
+      resume: true,
+      shape: "dangling_tool_calls",
+      headRecordId: idOf(next),
+    });
+  });
+
+  it("counts boot notices against the same budget, including after a settled notice", () => {
+    const head = assistantToolCalls("call-1");
+    const boot = () => entry("custom_message", { customType: "pi-orb.host-restarted" });
+    const records = [user(), assistantText(), boot(), assistantText(), boot(), head];
+    expect(detectInterruptedTurn(records).resume).toBe(true);
+    records.push(resumeMarker());
+    expect(detectInterruptedTurn(records)).toMatchObject({
+      resume: false,
+      reason: "already_resumed",
+      suppressed: { announced: false },
+    });
+  });
+
+  it("does not resume a fourth time for one interruption", () => {
     // The marker was flushed, the resumed turn crashed its host again: the
     // guard is suppressing a tail that is still dangling, and nothing has told
     // the user so yet.
     const head = assistantToolCalls("c");
-    const entries = [user(), assistantToolCalls("call-1"), resumeMarker(), head];
+    const entries = [
+      user(),
+      assistantToolCalls("call-1"),
+      resumeMarker(),
+      resumeMarker(),
+      resumeMarker(),
+      head,
+    ];
     expect(detectInterruptedTurn(entries)).toEqual({
       resume: false,
       reason: "already_resumed",
@@ -258,11 +307,11 @@ describe("detectInterruptedTurn", () => {
     });
   });
 
-  it("does not resume when the crash left the marker itself as the tail", () => {
+  it("does not resume when the crash left the third marker itself as the tail", () => {
     // Nothing of the resumed turn reached the disk, so the head the guard is
     // holding back is still the pre-marker assistant message.
     const head = assistantToolCalls("call-1");
-    const entries = [user(), head, resumeMarker()];
+    const entries = [user(), head, resumeMarker(), resumeMarker(), resumeMarker()];
     expect(detectInterruptedTurn(entries)).toEqual({
       resume: false,
       reason: "already_resumed",
@@ -293,7 +342,7 @@ describe("detectInterruptedTurn", () => {
 
   it("reports an already-announced suppression once the decline record exists", () => {
     const head = assistantToolCalls("call-1");
-    const entries = [user(), head, resumeMarker(), declineMarker()];
+    const entries = [user(), head, resumeMarker(), resumeMarker(), resumeMarker(), declineMarker()];
     expect(detectInterruptedTurn(entries)).toEqual({
       resume: false,
       reason: "already_resumed",
@@ -309,7 +358,15 @@ describe("detectInterruptedTurn", () => {
     // The decline record is pi-orb bookkeeping: a boot after it must reach the
     // same verdict about the same head, or the guard would flip-flop.
     const head = toolResult("call-1");
-    const entries = [user(), assistantToolCalls("call-1"), head, resumeMarker(), declineMarker()];
+    const entries = [
+      user(),
+      assistantToolCalls("call-1"),
+      head,
+      resumeMarker(),
+      resumeMarker(),
+      resumeMarker(),
+      declineMarker(),
+    ];
     expect(detectInterruptedTurn(entries)).toEqual({
       resume: false,
       reason: "already_resumed",
@@ -323,7 +380,9 @@ describe("detectInterruptedTurn", () => {
 
   it("classifies a combined sleep wake as a boot marker", () => {
     const marker = sleepWakeMarker();
-    expect(detectInterruptedTurn([user(), assistantText(), marker])).toEqual({
+    expect(
+      detectInterruptedTurn([user(), assistantText(), marker, resumeMarker(), resumeMarker()]),
+    ).toEqual({
       resume: false,
       reason: "already_resumed",
       suppressed: {
@@ -336,7 +395,16 @@ describe("detectInterruptedTurn", () => {
 
   it("does not let an ordinary system inbox notice reset the human resume budget", () => {
     const head = assistantToolCalls("call-2");
-    expect(detectInterruptedTurn([user(), resumeMarker(), systemInboxNotice(), head])).toEqual({
+    expect(
+      detectInterruptedTurn([
+        user(),
+        resumeMarker(),
+        resumeMarker(),
+        systemInboxNotice(),
+        resumeMarker(),
+        head,
+      ]),
+    ).toEqual({
       resume: false,
       reason: "already_resumed",
       suppressed: {
@@ -499,7 +567,10 @@ describe("startInterruptedTurnResume", () => {
   it("announces a declined resume with a visible record that triggers no turn", async () => {
     const { calls, session } = recordingSession(() => Promise.resolve());
     const head = assistantToolCalls("call-1");
-    const attempt = startInterruptedTurnResume([user(), head, resumeMarker()], session);
+    const attempt = startInterruptedTurnResume(
+      [user(), head, resumeMarker(), resumeMarker(), resumeMarker()],
+      session,
+    );
 
     expect(attempt.decision).toEqual({
       resume: false,
@@ -534,7 +605,7 @@ describe("startInterruptedTurnResume", () => {
     const { calls, session } = recordingSession(() => Promise.resolve());
     const head = assistantToolCalls("call-1");
     const attempt = startInterruptedTurnResume(
-      [user(), head, resumeMarker(), declineMarker()],
+      [user(), head, resumeMarker(), resumeMarker(), resumeMarker(), declineMarker()],
       session,
     );
 

@@ -16,7 +16,7 @@ import {
  * the entries a real SessionManager writes and reloads, and the resume marker
  * `sendCustomMessage` appends — `appendCustomMessageEntry` here, the same call
  * AgentSession makes for a `role: "custom"` message — is the durable
- * once-per-interruption guard. If an SDK upgrade changes either shape, these
+ * three-claim guard. If an SDK upgrade changes either shape, these
  * fail loudly rather than the runtime silently never resuming (or resuming
  * forever).
  */
@@ -136,17 +136,18 @@ describe("Pi session interrupted-turn contract", () => {
     });
   });
 
-  it("the persisted resume marker blocks a second resume", () => {
+  it("three persisted resume markers block a fourth resume", () => {
     const manager = SessionManager.create(dir, sessionDir);
     manager.appendMessage(userMessage);
     // `appendMessage` returns the persisted entry ID: the interrupted head.
     const head = manager.appendMessage(toolCallMessage);
-    manager.appendCustomMessageEntry(
-      TURN_RESUME_CUSTOM_TYPE,
-      "the previous turn was interrupted by a host restart — resuming it now",
-      true,
-      { shape: "dangling_tool_calls" },
-    );
+    for (let i = 0; i < 3; i++)
+      manager.appendCustomMessageEntry(
+        TURN_RESUME_CUSTOM_TYPE,
+        "the previous turn was interrupted by a host restart — resuming it now",
+        true,
+        { shape: "dangling_tool_calls" },
+      );
 
     const reloaded = reopen(manager);
     expect(detectInterruptedTurn(reloaded.buildContextEntries())).toEqual({
@@ -169,9 +170,10 @@ describe("Pi session interrupted-turn contract", () => {
     manager.appendMessage(userMessage);
     // `appendMessage` returns the persisted entry ID: the interrupted head.
     const head = manager.appendMessage(toolCallMessage);
-    manager.appendCustomMessageEntry(TURN_RESUME_CUSTOM_TYPE, "resuming", true, {
-      shape: "dangling_tool_calls",
-    });
+    for (let i = 0; i < 3; i++)
+      manager.appendCustomMessageEntry(TURN_RESUME_CUSTOM_TYPE, "resuming", true, {
+        shape: "dangling_tool_calls",
+      });
 
     // Boot 1 after the resumed turn died with its host: the guard declines and
     // says so, through the same call AgentSession makes for a custom message.
