@@ -4,19 +4,28 @@ import { portExposurePrompt } from "./prompt.ts";
 const host = "pi-orb-abc123.tail1234.ts.net";
 
 describe("portExposurePrompt", () => {
-  it("names the preview host and the URL shape the user opens", () => {
+  it("gives one full HTTP URL and tells the agent to substitute the actual port", () => {
     const prompt = portExposurePrompt(host);
-    expect(prompt).toContain(`\`${host}\``);
-    expect(prompt).toContain(`http://${host}:<port>`);
+    expect(prompt.match(new RegExp(host.replaceAll(".", "\\."), "g"))).toHaveLength(1);
     expect(prompt).toContain(`http://${host}:5173`);
+    expect(prompt).toMatch(/(?:replace|substitute|use).*actual port/i);
+    expect(prompt).toMatch(/always.*(?:share|tell).*full.*URL/i);
+    expect(prompt).toMatch(/starting.*service.*user.*open/i);
   });
 
-  it("tells the agent that binding to localhost is enough", () => {
-    expect(portExposurePrompt(host)).toContain("localhost or 127.0.0.1 is sufficient");
+  it("explains private tailnet forwarding without requiring special binding", () => {
+    const prompt = portExposurePrompt(host);
+    expect(prompt).toMatch(/user's private.*tailnet/i);
+    expect(prompt).toMatch(/exposes every TCP listening port to the user/i);
+    expect(prompt).toMatch(/tailscaled.*userspace/i);
+    expect(prompt).toMatch(/inbound.*same localhost port/i);
+    expect(prompt).toMatch(
+      /(?:bind.*localhost.*127\.0\.0\.1).*no special binding or extra configuration/i,
+    );
   });
 
   it("warns that the URLs are plain http", () => {
-    expect(portExposurePrompt(host)).toContain("no TLS");
+    expect(portExposurePrompt(host)).toMatch(/HTTP only.*no TLS/i);
   });
 
   it("starts with its own heading so it appends cleanly", () => {

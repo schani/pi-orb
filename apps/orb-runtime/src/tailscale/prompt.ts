@@ -4,17 +4,9 @@
  * derivable from the preview host. It is appended to the system prompt.
  */
 export function portExposurePrompt(previewHost: string): string {
-  return [
-    "## Port exposure",
-    "",
-    `This machine is connected to the user's private Tailscale network (tailnet) as \`${previewHost}\`.`,
-    "Every TCP port a server listens on in this machine is directly reachable by the user at",
-    `\`http://${previewHost}:<port>\` — implemented by tailscaled running in userspace-networking`,
-    "mode, which forwards inbound tailnet connections to the same port on localhost. Binding to",
-    "localhost or 127.0.0.1 is sufficient; no special host binding or extra configuration is",
-    "needed. Plain `http://` only — there is no TLS on these URLs.",
-    "",
-    "When you start a dev server or any service the user should open, always tell them the full",
-    `URL, for example \`http://${previewHost}:5173\`.`,
-  ].join("\n");
+  return `## Port exposure
+
+The user's private Tailscale tailnet exposes every TCP listening port to the user: \`http://${previewHost}:5173\` (substitute the actual port). tailscaled (userspace networking) forwards inbound traffic to the same localhost port. Bind to localhost or 127.0.0.1; no special binding or extra configuration needed. HTTP only; no TLS.
+
+Always share the full URL when starting a dev server or service the user should open.`;
 }

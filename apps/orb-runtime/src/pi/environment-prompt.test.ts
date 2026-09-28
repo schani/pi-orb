@@ -2,13 +2,20 @@ import { describe, expect, it } from "vitest";
 import { environmentPrompt } from "./environment-prompt.ts";
 
 describe("runtime environment prompt", () => {
+  it("introduces pi-orb before the runtime tools", () => {
+    expect(
+      environmentPrompt.startsWith(
+        "## pi-orb\n\nYou're running on a VM in the cloud via pi-orb: https://github.com/schani/pi-orb\n\n## Runtime tools",
+      ),
+    ).toBe(true);
+  });
+
   it("documents Python and the persistent rustup setup", () => {
-    expect(environmentPrompt).toContain("Python 3");
-    expect(environmentPrompt).toContain("rustup");
-    expect(environmentPrompt).toContain("No Rust toolchain is installed by default");
-    expect(environmentPrompt).toContain("rust-toolchain.toml");
-    expect(environmentPrompt).toContain("install one explicitly");
-    expect(environmentPrompt).toContain("persist");
+    expect(environmentPrompt).toMatch(/Python 3.*python.*python3.*virtual environments/);
+    expect(environmentPrompt).toMatch(/rustup.*no (?:default|preinstalled) Rust toolchain/i);
+    expect(environmentPrompt).toMatch(/select via.*rust-toolchain\.toml/i);
+    expect(environmentPrompt).toMatch(/install with rustup/);
+    expect(environmentPrompt).toMatch(/toolchains.*Cargo.*persist.*\$HOME/i);
   });
 
   it("documents the installed browser automation tool", () => {
@@ -16,40 +23,50 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("Chromium");
     expect(environmentPrompt).toContain("agent-browser open <url>");
     expect(environmentPrompt).toContain("agent-browser snapshot");
+    expect(environmentPrompt).toContain("@e1");
+    expect(environmentPrompt).toMatch(/inspect.*interact/i);
   });
 
   it("documents sibling-orb discovery and replicated transcripts", () => {
     expect(environmentPrompt).toContain("pi-orb orbs [query]");
-    expect(environmentPrompt).toContain("pi-orb archive");
-    expect(environmentPrompt).toContain("only when the user requested that you archive this orb");
     expect(environmentPrompt).toContain("pi-orb transcript <orb-id>");
-    expect(environmentPrompt).toContain("Beware: orb transcripts can be very long!");
-    expect(environmentPrompt).toContain("replicated snapshot");
-    expect(environmentPrompt).toContain("briefly lag");
+    expect(environmentPrompt).toMatch(/transcripts? .*very long/i);
+    expect(environmentPrompt).toContain("--json");
+    expect(environmentPrompt).toMatch(/--json.*lossless.*structured/);
+    expect(environmentPrompt).toMatch(/active.*replicated snapshot.*lag.*live/i);
   });
 
-  it("limits permanent self-deletion to explicit requests and warns of interruption", () => {
-    expect(environmentPrompt).toContain(
-      "Use `pi-orb delete` only when the user explicitly requests deletion of this orb.",
+  it("distinguishes independent spawned orbs from local subagents", () => {
+    expect(environmentPrompt).toContain('pi-orb spawn --prompt "task"');
+    expect(environmentPrompt).toMatch(/independent.*same-project.*fresh default-branch checkout/);
+    expect(environmentPrompt).toMatch(
+      /own conversation.*(?:no shared checkout|doesn't share.*checkout)/,
     );
-    expect(environmentPrompt).toContain(
-      "It permanently deletes the workspace, conversation, and hosted files; push or export anything needed first.",
+    expect(environmentPrompt).toMatch(/keeps running.*(?:this orb|parent) stops/);
+  });
+
+  it("requires user intent and preserves the distinct irreversible outcomes", () => {
+    expect(environmentPrompt).toMatch(/pi-orb archive.*only.*user asks.*archive this orb/i);
+    expect(environmentPrompt).toMatch(/archive.*retain.*conversation.*permanent.*workspace/i);
+    expect(environmentPrompt).toMatch(
+      /pi-orb delete.*only.*explicit user request.*delete this orb/i,
     );
-    expect(environmentPrompt).toContain(
-      "It may interrupt the current turn before acknowledgement.",
-    );
+    expect(environmentPrompt).toMatch(/delete.*permanent.*workspace.*conversation.*hosted files/i);
+    expect(environmentPrompt).toMatch(/push\/export.*before archive\/delete/i);
+    expect(environmentPrompt).toMatch(/interrupt.*(?:turn|acknowledgement)/i);
   });
 
   it("documents scheduled self-sleep", () => {
     expect(environmentPrompt).toContain("pi-orb sleep 1h");
-    expect(environmentPrompt).toContain("stops this orb after admitted work finishes");
-    expect(environmentPrompt).toContain("absolute wake deadline");
+    expect(environmentPrompt).toMatch(/absolute wake deadline.*stop.*admitted work/i);
+    expect(environmentPrompt).toMatch(/returns.*durably accepted/i);
   });
 
   it("explains browser-owned MCP setup even without configured servers", () => {
-    expect(environmentPrompt).toContain(
-      "To add an MCP server, ask the user to open the project's config gear and use MCPs (OAuth Connect) or Secrets (static keys); catalog changes apply on next start, but OAuth reauthorization needs no restart.",
-    );
+    expect(environmentPrompt).toMatch(/MCP servers.*ask.*user.*project.*config gear/i);
+    expect(environmentPrompt).toMatch(/MCPs.*OAuth Connect.*Secrets.*static keys/);
+    expect(environmentPrompt).toMatch(/catalog changes.*next start/i);
+    expect(environmentPrompt).toMatch(/OAuth reauthorization.*no restart/);
     expect(environmentPrompt).not.toContain("pi-orb mcp add");
   });
 
@@ -62,9 +79,12 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toContain("once per compute incarnation");
     expect(environmentPrompt).toContain("every start");
     // The identity split is the rule a hook author gets wrong first.
-    expect(environmentPrompt).toContain("without the orb's identity");
-    expect(environmentPrompt).toContain("idempotent");
-    expect(environmentPrompt).toContain("executable");
-    expect(environmentPrompt).toContain("$HOME/.cache/pi-orb/logs");
+    expect(environmentPrompt).toMatch(/executable.*root hooks/i);
+    expect(environmentPrompt).toMatch(
+      /setup.*once per compute incarnation.*before.*agent.*without.*identity/,
+    );
+    expect(environmentPrompt).toMatch(/setup.*install toolchains/i);
+    expect(environmentPrompt).toMatch(/resume.*every start.*identity.*credentials/i);
+    expect(environmentPrompt).toMatch(/both.*idempotent.*\$HOME\/\.cache\/pi-orb\/logs/i);
   });
 });

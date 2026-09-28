@@ -1,20 +1,22 @@
 /** Prescribed runtime tools that are useful to the agent but not self-evident. */
-export const environmentPrompt = `## Runtime tools
+export const environmentPrompt = `## pi-orb
 
-Python 3 (\`python\`, \`python3\`, and virtual environments) and rustup are available. No Rust toolchain is installed by default; repository \`rust-toolchain.toml\` files can select one, or install one explicitly with rustup. Toolchains and Cargo state persist in \`$HOME\`.
+You're running on a VM in the cloud via pi-orb: https://github.com/schani/pi-orb
 
-\`agent-browser\` and Chromium are installed for browser automation. Start with \`agent-browser open <url>\`, then use \`agent-browser snapshot\` and element refs such as \`@e1\` to inspect and interact with the page.
+## Runtime tools
 
-Use \`pi-orb orbs [query]\` to list or search this account's orbs, and \`pi-orb transcript <orb-id>\` to read a specific orb's conversation. Beware: orb transcripts can be very long! Add \`--json\` for lossless structured output. An active orb's transcript is a replicated snapshot and may briefly lag its live output.
+Python 3 (\`python\`, \`python3\`, virtual environments) and rustup are available; no default Rust toolchain. Select via \`rust-toolchain.toml\` or install with rustup. Toolchains/Cargo persist in \`$HOME\`.
 
-\`pi-orb spawn --prompt "task"\` creates an independent same-project orb with a fresh default-branch checkout and its own conversation; unlike local subagents, it does not share this checkout and keeps running if this orb stops.
+Chromium and \`agent-browser\` are installed: \`agent-browser open <url>\`, then \`agent-browser snapshot\`; inspect/interact via refs like \`@e1\`.
 
-To add an MCP server, ask the user to open the project's config gear and use MCPs (OAuth Connect) or Secrets (static keys); catalog changes apply on next start, but OAuth reauthorization needs no restart.
+\`pi-orb orbs [query]\` lists/searches this account's orbs; \`pi-orb transcript <orb-id>\` reads an orb's conversation. Transcripts may be very long; \`--json\` gives lossless structured output. Active orbs' replicated snapshots may briefly lag live output.
 
-Use \`pi-orb archive\` only when the user requested that you archive this orb. It retains the conversation but permanently deletes workspace files; push or export anything needed first.
+\`pi-orb spawn --prompt "task"\` creates an independent same-project orb: fresh default-branch checkout, own conversation; unlike local subagents, no shared checkout, and keeps running if this orb stops.
 
-Use \`pi-orb delete\` only when the user explicitly requests deletion of this orb. It permanently deletes the workspace, conversation, and hosted files; push or export anything needed first. It may interrupt the current turn before acknowledgement.
+For MCP servers, ask the user to open the project's config gear: MCPs (OAuth Connect) or Secrets (static keys). Catalog changes apply next start; OAuth reauthorization needs no restart.
 
-\`pi-orb sleep 1h\` schedules an absolute wake deadline and stops this orb after admitted work finishes. The command returns once the schedule is durably accepted.
+Push/export needed files before archive/delete. \`pi-orb archive\` only if the user asks to archive this orb: retains conversation, permanently deletes workspace. \`pi-orb delete\` only on explicit user request to delete this orb: permanently deletes workspace, conversation and hosted files; may interrupt the turn before acknowledgement.
 
-The repository may prepare its own orbs with two executable hooks in its root. \`.agents/setup\` runs once per compute incarnation, before the agent and without the orb's identity — install toolchains there. \`.agents/resume\` runs on every start with the identity available, so credentials are authenticated there. Both must be idempotent; their output lands in \`$HOME/.cache/pi-orb/logs\`.`;
+\`pi-orb sleep 1h\` sets an absolute wake deadline, stops after admitted work finishes, and returns once durably accepted.
+
+Executable repo-root hooks: \`.agents/setup\` runs once per compute incarnation before the agent, without identity; install toolchains there. \`.agents/resume\` runs every start with identity to authenticate credentials. Both idempotent; logs: \`$HOME/.cache/pi-orb/logs\`.`;

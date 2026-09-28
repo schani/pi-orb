@@ -25,7 +25,7 @@ import { createOrbResourceLoader } from "./resource-loader.ts";
  *
  * Pinned contract:
  *  1. `appendSystemPromptOverride` is invoked during `reload()`, and the
- *     port-exposure section — preview host, `http://<host>:<port>` shape —
+ *     port-exposure section — preview host, full example URL —
  *     lands verbatim in `getAppendSystemPrompt()`.
  *  2. Our loader is a strict superset of the implicit loader
  *     `createAgentSession` builds when it gets no `resourceLoader`: the SDK's
@@ -220,9 +220,9 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(section).toBeDefined();
     expect(section).toContain("## Port exposure");
     expect(section).toContain(PREVIEW_HOST);
-    // The two shapes the agent needs: the generic rule and a concrete URL.
-    expect(section).toContain(`http://${PREVIEW_HOST}:<port>`);
     expect(section).toContain(`http://${PREVIEW_HOST}:5173`);
+    expect(section).toMatch(/substitute the actual port/i);
+    expect(section.match(new RegExp(PREVIEW_HOST.replaceAll(".", "\\."), "g"))).toHaveLength(1);
   });
 
   it("keeps the project-scoped APPEND_SYSTEM.md the SDK discovers", async () => {
