@@ -7,7 +7,7 @@ To reproduce the pi-orb fault **without changing the normal E2E**:
 ```sh
 git apply scripts/mcp-stream-investigation/instrument-e2e.patch
 PI_ORB_E2E_BACKEND=process PI_ORB_MCP_TRACE=1 PI_ORB_MCP_CUT_ISOLATION=1 npm run test:e2e -- e2e/mcp.e2e.test.ts
-# The injected failure is expected; preserve the log and temporary fixture path.
+# The injected failure is expected; preserve the sanitized .context/mcp-failures artifact.
 git apply -R scripts/mcp-stream-investigation/instrument-e2e.patch
 ```
 

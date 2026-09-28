@@ -1,14 +1,14 @@
 --- a/e2e/mcp.e2e.test.ts
 +++ b/e2e/mcp.e2e.test.ts
-@@ -17,6 +17,7 @@
+@@ -18,6 +18,7 @@
    startControlPlane,
    waitFor,
  } from "./harness.ts";
 +import { startInferenceTrace } from "../scripts/mcp-stream-investigation/inference-trace.ts";
+ import { finishMcpFixture } from "./mcp-artifacts.ts";
  import { mcpFailureHistory, mcpFailureRequests } from "./mcp-diagnostics.ts";
  
- it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-project orbs reuse configuration", async () => {
-@@ -227,6 +228,12 @@
+@@ -229,6 +230,12 @@
        ],
      },
    });
@@ -21,7 +21,7 @@
    // Naming is an independent consumer; sharing the ordered model script races its cursor.
    const nameFake = await createFakeSession(`mcp-names-${randomUUID()}`, {
      model: {
-@@ -250,7 +257,7 @@
+@@ -252,7 +259,7 @@
    process.env["NODE_EXTRA_CA_CERTS"] = cert;
    const cp = await startControlPlane({
      port: 7169,
@@ -30,51 +30,23 @@
      nameFake,
      pglitePath: join(root, "db"),
      processStateDirectory: join(root, "hosts"),
-@@ -280,6 +287,7 @@
+@@ -525,7 +532,7 @@
+             (value) => mcpFailureHistory(value.body),
+             () => "unavailable",
+           );
+-        return { requests, history };
++        return { requests, history, transport: trace?.records ?? [] };
        },
-       { timeoutMs: 300_000 },
-     );
-+  let failed = false;
-   try {
-     for (const id of [project, other])
-       expect(
-@@ -502,6 +510,7 @@
-       ).status,
-     ).toBe(409);
-   } catch (error) {
-+    failed = true;
-     console.error(cp.logs.join(""));
-     console.error("MCP requests", JSON.stringify(calls));
-     const recorded = (await fakeControl(
-@@ -509,6 +518,7 @@
-       "/requests",
-     )) as unknown as RecordedFakeRequest[];
-     console.error("Inference requests", JSON.stringify(mcpFailureRequests(recorded)));
-+    if (trace !== null) console.error("Inference transport", JSON.stringify(trace.records));
-     for (const id of [first, second, isolated]) {
-       const history = await api(cp.baseUrl, "GET", `/api/v1/orbs/${id}/history`);
-       console.error(
-@@ -522,14 +532,20 @@
-         console.error("Browser", await page.locator("body").innerText());
-     throw error;
-   } finally {
-+    if (trace !== null && !failed)
-+      console.error("Inference transport", JSON.stringify(trace.records));
-     await browser.close();
--    await api(cp.baseUrl, "DELETE", `/api/v1/projects/${project}`);
--    await api(cp.baseUrl, "DELETE", `/api/v1/projects/${other}`);
-+    if (!failed || trace === null) {
-+      await api(cp.baseUrl, "DELETE", `/api/v1/projects/${project}`);
-+      await api(cp.baseUrl, "DELETE", `/api/v1/projects/${other}`);
-+    }
-     await cp.stop();
-+    await trace?.close();
-     remote.closeAllConnections();
-     await new Promise<void>((resolve) => remote.close(() => resolve()));
-     await deleteFakeSession(fake.sessionKey);
-     await deleteFakeSession(nameFake.sessionKey);
--    rmSync(root, { recursive: true, force: true });
-+    if (failed && trace !== null) console.error("Retained MCP fixture", root);
-+    else rmSync(root, { recursive: true, force: true });
-   }
- });
+       close: () => browser.close(),
+       removeProjects: async () => {
+@@ -538,6 +545,10 @@
+       },
+       stop: () => cp.stop(),
+       shutdownRemote: async () => {
++        if (trace !== null) {
++          if (!failed) console.error("Inference transport", JSON.stringify(trace.records));
++          await trace.close();
++        }
+         remote.closeAllConnections();
+         await new Promise<void>((resolve) => remote.close(() => resolve()));
+       },
