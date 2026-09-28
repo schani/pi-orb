@@ -232,7 +232,18 @@ describe("orb workspace layout contract", () => {
     );
     expect(railSummary).toContain("grid-template-columns: 2ch minmax(0, 1fr) auto");
     expect(railSummary).toContain("min-height: var(--row)");
-    expect(rule(".activity-rail-row")).toContain("border: 1px solid var(--g2)");
+    expect(rule(".rec-orb > .rec-bd > .activity-rail-row")).toContain("border: 0");
+    expect(rule(".rec-orb > .rec-bd > .activity-rail-row::before")).toContain(
+      "background: var(--g2)",
+    );
+    expect(
+      rule(".rec-orb > .rec-bd > .activity-rail-row > summary .activity-rail-marker"),
+    ).toContain("background: var(--w)");
+    expect(
+      rule(
+        ".rec-orb > .rec-bd > .activity-rail-row > .reasoning-body,\n.rec-orb > .rec-bd > .activity-rail-row > .tool-activity-calls",
+      ),
+    ).toContain("border-top: 0");
     expect(rule(".activity-rail-marker::before")).toContain('content: "\\25b8"');
     expect(rule(".activity-rail-row[open] > summary .activity-rail-marker::before")).toContain(
       'content: "\\25be"',

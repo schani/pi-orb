@@ -287,42 +287,6 @@ export function Composer({
           </button>
         )}
       </div>
-      {isCommand && (!phone || expanded) && (
-        <div
-          ref={commandPickerRef}
-          className="command-picker"
-          role="listbox"
-          aria-label="Commands"
-          id="command-choices"
-        >
-          {choices.map((choice, index) => (
-            <button
-              type="button"
-              role="option"
-              id={`command-choice-${index}`}
-              aria-selected={index === selectedCommand}
-              key={choice.label}
-              className={index === selectedCommand ? "selected" : ""}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => chooseCommand(choice)}
-              disabled={choice.action !== undefined && settingsDisabled}
-            >
-              <span>{choice.label}</span>
-              <span aria-hidden="true">{choice.current ? "✓" : choice.text ? "→" : ""}</span>
-            </button>
-          ))}
-          {choices.length === 0 && (
-            <div className="command-empty">
-              {settings === null
-                ? "Settings unavailable — connect to a running orb."
-                : "No matching command or value."}
-            </div>
-          )}
-          {settings !== null && settingsDisabled && (
-            <div className="command-empty">Wait for the current operation to finish.</div>
-          )}
-        </div>
-      )}
       {mentionOffset !== null && (
         <OrbLinkPicker onSelect={closePicker} onClose={() => closePicker()} />
       )}
@@ -344,6 +308,42 @@ export function Composer({
         </div>
       )}
       <div className="composer-line">
+        {isCommand && (!phone || expanded) && (
+          <div
+            ref={commandPickerRef}
+            className="command-picker"
+            role="listbox"
+            aria-label="Commands"
+            id="command-choices"
+          >
+            {choices.map((choice, index) => (
+              <button
+                type="button"
+                role="option"
+                id={`command-choice-${index}`}
+                aria-selected={index === selectedCommand}
+                key={choice.label}
+                className={index === selectedCommand ? "selected" : ""}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseCommand(choice)}
+                disabled={choice.action !== undefined && settingsDisabled}
+              >
+                <span>{choice.label}</span>
+                <span aria-hidden="true">{choice.current ? "✓" : choice.text ? "→" : ""}</span>
+              </button>
+            ))}
+            {choices.length === 0 && (
+              <div className="command-empty">
+                {settings === null
+                  ? "Settings unavailable — connect to a running orb."
+                  : "No matching command or value."}
+              </div>
+            )}
+            {settings !== null && settingsDisabled && (
+              <div className="command-empty">Wait for the current operation to finish.</div>
+            )}
+          </div>
+        )}
         <span className="composer-prefix">{composerModeGlyph(mode)}</span>
         <TextFieldFrame className="composer-editor">
           <textarea

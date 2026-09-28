@@ -405,7 +405,7 @@ export function ToolActivity({ persisted = [], live = [] }: ToolActivityProps) {
   ];
   if (calls.length === 0) return null;
   return (
-    <div className="tool-activity">
+    <>
       {displayCategories(calls).map((category) => {
         const state = categoryState(category);
         const imageCall =
@@ -443,6 +443,6 @@ export function ToolActivity({ persisted = [], live = [] }: ToolActivityProps) {
           </ActivityRailRow>
         );
       })}
-    </div>
+    </>
   );
 }

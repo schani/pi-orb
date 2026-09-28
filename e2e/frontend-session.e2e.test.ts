@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -1123,6 +1124,345 @@ describe("frontend-only browser behavior", () => {
       }
     },
   );
+
+  it("keeps expanded image galleries and output clear of the transcript rail", async () => {
+    for (const width of [1280, 390, 320]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      try {
+        await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb");
+        for (const tool of ["read", "browser_snapshot", "visual_diff"]) {
+          const row = page
+            .locator(".rec-orb > .rec-bd > .tool-image-activity")
+            .filter({
+              has: page.getByRole("img", {
+                name: `Image returned by ${tool}`,
+                exact: true,
+              }),
+            })
+            .first();
+          await expectPage(row).toHaveAttribute("open", "");
+          const geometry = await row.evaluate((element) => {
+            const view = element.ownerDocument.defaultView;
+            const summary = element.querySelector("summary .activity-rail-summary");
+            const gallery = element.querySelector(":scope > .tool-image-previews");
+            const image = gallery?.querySelector(".tool-image-trigger");
+            const output = element.querySelector(":scope > .tool-activity-calls");
+            if (!view || !summary || !gallery || !image || !output) return null;
+            const rail = view.getComputedStyle(element, "::before");
+            return {
+              textLeft: summary.getBoundingClientRect().left,
+              railLeft: element.getBoundingClientRect().left + Number.parseFloat(rail.left),
+              galleryLeft: gallery.getBoundingClientRect().left,
+              imageLeft: image.getBoundingClientRect().left,
+              outputLeft: output.firstElementChild?.getBoundingClientRect().left ?? 0,
+              galleryBorder: view.getComputedStyle(gallery).borderTopWidth,
+              gallerySideBorder: view.getComputedStyle(gallery).borderLeftWidth,
+              imageBorder: view.getComputedStyle(image).borderLeftWidth,
+              bodyRight: output.getBoundingClientRect().right,
+              rowRight: element.getBoundingClientRect().right,
+            };
+          });
+          assert.ok(geometry, "Missing image gallery geometry");
+          expectPage(geometry.galleryLeft).toBeGreaterThan(geometry.railLeft);
+          expectPage(geometry.imageLeft).toBeGreaterThanOrEqual(geometry.textLeft);
+          expectPage(geometry.outputLeft).toBeGreaterThanOrEqual(geometry.textLeft);
+          expectPage(geometry.bodyRight).toBe(geometry.rowRight);
+          expectPage(geometry.galleryBorder).toBe("0px");
+          expectPage(geometry.gallerySideBorder).toBe("0px");
+          expectPage(geometry.imageBorder).toBe("1px");
+        }
+        const thumbnail = page
+          .getByRole("button", {
+            name: "Enlarge image returned by browser_snapshot",
+          })
+          .first();
+        await thumbnail.click();
+        await expectPage(
+          page.getByRole("dialog", {
+            name: "Image returned by browser_snapshot",
+          }),
+        ).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expectPage(
+          page.getByRole("dialog", {
+            name: "Image returned by browser_snapshot",
+          }),
+        ).toBeHidden();
+      } finally {
+        await page.close();
+      }
+    }
+  });
+
+  it("aligns run glyphs with file dots and keeps collapsed chevrons on a visible rail", async () => {
+    for (const width of [1280, 390, 320]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      try {
+        await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb");
+        const rows = page.locator(".rec-orb > .rec-bd > .activity-rail-row");
+        const collapsed = await rows.first().evaluate((element) => {
+          const summary = element.querySelector("summary");
+          const marker = element.querySelector(".activity-rail-marker");
+          const line = element.ownerDocument.defaultView?.getComputedStyle(element, "::before");
+          if (!summary || !marker || !line) return null;
+          const box = marker.getBoundingClientRect();
+          return {
+            summaryHeight: summary.getBoundingClientRect().height,
+            markerHeight: box.height,
+            markerCenter: box.top + box.height / 2,
+            summaryCenter:
+              summary.getBoundingClientRect().top + summary.getBoundingClientRect().height / 2,
+            railLeft: element.getBoundingClientRect().left + Number.parseFloat(line.left),
+            markerCenterX: box.left + box.width / 2,
+          };
+        });
+        const edit = page
+          .locator(".tool-activity-category")
+          .filter({
+            has: page.locator(".activity-rail-label", { hasText: /^edit$/ }),
+          })
+          .first();
+        const commands = page
+          .locator(".tool-activity-category")
+          .filter({
+            has: page.locator(".activity-rail-label", { hasText: /^commands$/ }),
+          })
+          .first();
+        await edit.locator(":scope > summary").click();
+        await commands.locator(":scope > summary").click();
+        const dotLeft = await edit
+          .locator(".tool-call-marker")
+          .first()
+          .evaluate((element) => {
+            const range = element.ownerDocument.createRange();
+            range.selectNodeContents(element);
+            return range.getBoundingClientRect().left;
+          });
+        const summaryLeft = await edit
+          .locator(":scope > summary .activity-rail-summary")
+          .evaluate((element) => element.getBoundingClientRect().left);
+        const command = await commands
+          .locator(".tool-command")
+          .first()
+          .evaluate((element) => {
+            const run = element.querySelector(".tool-command-line .rec-px");
+            const output = element.querySelector(".tool-command-output");
+            const commandText = element.querySelector(".tool-command-text");
+            if (!run || !output || !commandText) return null;
+            const range = element.ownerDocument.createRange();
+            range.selectNodeContents(run);
+            return {
+              runGlyphLeft: range.getBoundingClientRect().left,
+              commandTextLeft: commandText.getBoundingClientRect().left,
+              bodyLeft: element.getBoundingClientRect().left,
+              outputLeft: output.getBoundingClientRect().left,
+              outputIndent: Number.parseFloat(
+                element.ownerDocument.defaultView?.getComputedStyle(output).paddingLeft ?? "",
+              ),
+            };
+          });
+        assert.ok(command, "Missing command geometry");
+        expectPage(dotLeft).toBeCloseTo(summaryLeft, 0);
+        expectPage(command.runGlyphLeft).toBeCloseTo(dotLeft, 0);
+        expectPage(command.commandTextLeft - command.bodyLeft).toBeCloseTo(command.outputIndent, 0);
+        expectPage(command.outputLeft).toBe(command.bodyLeft);
+        expectPage(command.outputIndent).toBeGreaterThan(30);
+        expectPage(command.outputIndent).toBeLessThan(45);
+        assert.ok(collapsed, "Missing collapsed rail geometry");
+        expectPage(collapsed.summaryHeight).toBe(20);
+        expectPage(collapsed.markerHeight).toBeLessThanOrEqual(14);
+        expectPage(collapsed.markerCenter).toBeCloseTo(collapsed.summaryCenter, 1);
+        expectPage(collapsed.railLeft).toBeCloseTo(collapsed.markerCenterX, 0);
+      } finally {
+        await page.close();
+      }
+    }
+  });
+
+  it("joins activity rail through disclosures but stops at prose", async () => {
+    const page = await browser.newPage();
+    const id = "frontend-auth-copy-test";
+    await page.route(`**/api/v1/orbs/${id}`, async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        json: {
+          ...(await response.json()),
+          state: "stopped",
+          activity: "idle",
+        },
+      });
+    });
+    await page.route(`**/api/v1/orbs/${id}/history`, async (route) => {
+      const response = await route.fetch();
+      const records = [
+        {
+          id: "activity",
+          parentId: null,
+          timestamp: "2026-09-28T00:00:00Z",
+          type: "message",
+          role: "assistant",
+          overflow: {},
+          content: [
+            { type: "reasoning", text: "Plan" },
+            {
+              type: "tool_call",
+              callId: "read-1",
+              name: "read",
+              arguments: { path: "a.ts" },
+            },
+            {
+              type: "tool_call",
+              callId: "read-2",
+              name: "read",
+              arguments: { path: "b.ts" },
+            },
+            {
+              type: "tool_call",
+              callId: "edit-1",
+              name: "edit",
+              arguments: { path: "c.ts" },
+            },
+          ],
+        },
+        {
+          id: "results",
+          parentId: "activity",
+          timestamp: "2026-09-28T00:00:01Z",
+          type: "message",
+          role: "tool",
+          overflow: {},
+          content: [
+            {
+              type: "tool_result",
+              callId: "read-1",
+              content: [{ type: "text", text: "first output" }],
+            },
+            {
+              type: "tool_result",
+              callId: "read-2",
+              content: [{ type: "text", text: "second output" }],
+            },
+            {
+              type: "tool_result",
+              callId: "edit-1",
+              content: [{ type: "text", text: "edited" }],
+              patch: "-old\n+new",
+            },
+          ],
+        },
+        {
+          id: "prose",
+          parentId: "results",
+          timestamp: "2026-09-28T00:00:02Z",
+          type: "message",
+          role: "assistant",
+          overflow: {},
+          content: [
+            { type: "text", text: "Explanation between runs" },
+            { type: "reasoning", text: "Next plan" },
+            {
+              type: "tool_call",
+              callId: "read-3",
+              name: "read",
+              arguments: { path: "d.ts" },
+            },
+          ],
+        },
+      ];
+      await route.fulfill({
+        json: { ...(await response.json()), records, headId: "prose" },
+      });
+    });
+    try {
+      await page.goto(`${origin}/#/orbs/${id}`);
+      const rows = page.locator(".rec-orb .activity-rail-row");
+      await expectPage(rows).toHaveCount(5);
+      const geometry = await rows.evaluateAll((elements) =>
+        elements.map((element) => {
+          const box = element.getBoundingClientRect();
+          const marker = element.querySelector(".activity-rail-marker")?.getBoundingClientRect();
+          const metric = element.querySelector(".activity-rail-metric")?.getBoundingClientRect();
+          const summary = element.querySelector("summary")?.getBoundingClientRect();
+          const line = element.ownerDocument.defaultView?.getComputedStyle(element, "::before");
+          return {
+            left: box.left,
+            right: box.right,
+            top: box.top,
+            bottom: box.bottom,
+            markerCenter: marker === undefined ? 0 : marker.left + marker.width / 2,
+            metricRight: metric?.right,
+            summaryRight: summary?.right,
+            lineLeft: Number.parseFloat(line?.left ?? ""),
+            lineTop: Number.parseFloat(line?.top ?? ""),
+            lineBottom: Number.parseFloat(line?.bottom ?? ""),
+            lineColor: line?.backgroundColor,
+            border: element.ownerDocument.defaultView?.getComputedStyle(element).borderTopWidth,
+            adjacent: element.nextElementSibling?.classList.contains("activity-rail-row") ?? false,
+          };
+        }),
+      );
+      expectPage(geometry.map((row) => row.adjacent)).toEqual([true, true, false, true, false]);
+      expectPage(geometry.map((row) => row.border)).toEqual(Array(5).fill("0px"));
+      for (const row of geometry) {
+        expectPage(row.lineColor).toBe("rgb(153, 153, 153)");
+        expectPage(row.left + row.lineLeft).toBeCloseTo(row.markerCenter, 0);
+        if (row.metricRight !== undefined)
+          expectPage((row.summaryRight ?? 0) - row.metricRight).toBeLessThan(12);
+      }
+      for (const index of [0, 1, 3]) expectPage(geometry[index]?.lineBottom).toBe(-4);
+      expectPage(geometry[0]?.lineTop).toBe(12);
+      expectPage(geometry[3]?.lineTop).toBe(12);
+      expectPage(geometry[2]?.lineBottom).toBeGreaterThan(0);
+      expectPage(geometry[4]?.lineBottom).toBeGreaterThan(0);
+      await expectPage(rows.nth(1).locator(".activity-rail-metric")).toHaveText("2 files");
+      await expectPage(rows.nth(2).locator(".activity-rail-metric")).toHaveText("+1 −1");
+      const read = rows.nth(1);
+      await read.locator(":scope > summary").click();
+      await read.locator(".tool-activity-call > summary").first().click();
+      const output = read.locator(".tool-call-output").first();
+      await expectPage(output).toBeVisible();
+      const expanded = await read.evaluate((element) => ({
+        right: element.getBoundingClientRect().right,
+        bodyRight: element.querySelector(".tool-activity-calls")?.getBoundingClientRect().right,
+        topRule: element.ownerDocument.defaultView?.getComputedStyle(
+          element.querySelector(".tool-activity-calls") ?? element,
+        ).borderTopWidth,
+        innerRule: element.ownerDocument.defaultView?.getComputedStyle(
+          element.querySelector(".tool-call-output") ?? element,
+        ).borderTopWidth,
+      }));
+      expectPage(expanded.bodyRight).toBe(expanded.right);
+      expectPage(expanded.topRule).toBe("0px");
+      expectPage(expanded.innerRule).toBe("1px");
+      const joined = await read.evaluate((element) => ({
+        bottom: element.getBoundingClientRect().bottom,
+        nextTop: element.nextElementSibling?.getBoundingClientRect().top,
+        lineBottom: element.ownerDocument.defaultView?.getComputedStyle(element, "::before").bottom,
+      }));
+      expectPage(joined.lineBottom).toBe("-4px");
+      expectPage(joined.nextTop).toBe(joined.bottom + 4);
+      await rows.first().locator(":scope > summary").click();
+      await expectPage(rows.first().locator(".reasoning-body")).toBeVisible();
+      const reasoning = await rows
+        .first()
+        .locator(".reasoning-body")
+        .evaluate((element) => ({
+          border: element.ownerDocument.defaultView?.getComputedStyle(element).borderTopWidth,
+          contentLeft:
+            element.getBoundingClientRect().left +
+            Number.parseFloat(
+              element.ownerDocument.defaultView?.getComputedStyle(element).paddingLeft ?? "0",
+            ),
+          textLeft: element.parentElement
+            ?.querySelector("summary .activity-rail-summary")
+            ?.getBoundingClientRect().left,
+        }));
+      expectPage(reasoning.border).toBe("0px");
+      expectPage(reasoning.contentLeft).toBeGreaterThanOrEqual(reasoning.textLeft ?? Infinity);
+    } finally {
+      await page.close();
+    }
+  });
 
   it("reveals generic tool inputs and outputs with a single disclosure", async () => {
     const page = await browser.newPage();

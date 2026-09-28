@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Browser, chromium, expect as expectPage, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
@@ -9,6 +9,9 @@ import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fix
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_HASH = "#/orbs/frontend-fixture-orb";
+const DEJAVU_MONO = readFileSync(
+  join(import.meta.dirname, "fixtures/fonts/DejaVuSansMono.ttf"),
+).toString("base64");
 
 // Each engine owns its fixture, so accepted messages cannot leak between engines.
 describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) => {
@@ -492,6 +495,18 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
 
         const composer = page.locator(".composer");
         await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb", composer);
+        await page.addStyleTag({
+          content: `@font-face { font-family: "Composer test DejaVu"; src: url(data:font/ttf;base64,${DEJAVU_MONO}); }
+            .composer { font-family: "Composer test DejaVu" !important; }`,
+        });
+        await composer.evaluate((element) =>
+          element.ownerDocument.fonts.load('13px "Composer test DejaVu"'),
+        );
+        expectPage(
+          await composer.evaluate((element) =>
+            element.ownerDocument.fonts.check('13px "Composer test DejaVu"'),
+          ),
+        ).toBe(true);
         const input = composer.getByRole("textbox");
         if (phone) await composer.getByRole("button", { name: "Write message" }).tap();
         const measureComposer = async (glyph: ">" | "!" | "!!" | "/") => {

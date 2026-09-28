@@ -18,6 +18,34 @@ function message(id: string, role: "user" | "assistant", text: string): MessageR
 }
 
 describe("HistoryView turn structure", () => {
+  it("keeps adjacent reasoning and tool categories as sibling rail rows, splitting at prose", () => {
+    const record: MessageRecord = {
+      ...message("activity", "assistant", ""),
+      content: [
+        { type: "reasoning", text: "Plan" },
+        { type: "tool_call", callId: "read-1", name: "read", arguments: { path: "a.ts" } },
+        { type: "tool_call", callId: "edit-1", name: "edit", arguments: { path: "a.ts" } },
+        { type: "text", text: "Explanation between runs" },
+        { type: "reasoning", text: "Next plan" },
+        { type: "tool_call", callId: "read-2", name: "read", arguments: { path: "b.ts" } },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).toMatch(
+      /class="activity-rail-row[^"]*reasoning[^"]*"[\s\S]*?<\/details><details class="activity-rail-row[^"]*tool-activity-category/,
+    );
+    expect(html).toMatch(
+      /class="activity-rail-row[^"]*tool-activity-category[^"]*"[\s\S]*?<\/details><details class="activity-rail-row[^"]*tool-activity-category/,
+    );
+    expect(html).toMatch(
+      /Explanation between runs[\s\S]*?<\/div><details class="activity-rail-row[^"]*reasoning/,
+    );
+    expect(html).toMatch(
+      /Next plan[\s\S]*?<\/details><details class="activity-rail-row[^"]*tool-activity-category/,
+    );
+  });
   it.each([
     [
       "subagent-notification",
