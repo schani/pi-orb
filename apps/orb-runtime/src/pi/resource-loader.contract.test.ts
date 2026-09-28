@@ -222,7 +222,7 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(section).toContain(PREVIEW_HOST);
     expect(section).toContain(`http://${PREVIEW_HOST}:5173`);
     expect(section).toMatch(/substitute the actual port/i);
-    expect(section.match(new RegExp(PREVIEW_HOST.replaceAll(".", "\\."), "g"))).toHaveLength(1);
+    expect(section?.match(new RegExp(PREVIEW_HOST.replaceAll(".", "\\."), "g"))).toHaveLength(1);
   });
 
   it("keeps the project-scoped APPEND_SYSTEM.md the SDK discovers", async () => {
