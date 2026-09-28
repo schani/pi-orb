@@ -1104,7 +1104,7 @@ describe("runtime broker routes", () => {
         timestamp: "2026-08-27T00:00:00.000Z",
         type: "message" as const,
         role: "user" as const,
-        content: [{ type: "text" as const, text: "Fix parsing" }],
+        content: [{ type: "text" as const, text: "x".repeat(33 * 1024 * 1024) }],
         overflow: { native: { preserved: true } },
       };
       const committed = await store.commitPullBatch(task, {
@@ -1120,6 +1120,9 @@ describe("runtime broker routes", () => {
       const response = await inspect(orbTranscriptPath(OTHER_ORB));
       expect(response.statusCode).toBe(200);
       expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.headers["content-length"]).toBeUndefined();
+      expect(response.headers["transfer-encoding"]).toBe("chunked");
+      expect(Buffer.byteLength(response.body)).toBeGreaterThan(32 * 1024 * 1024);
       expect(Check(OrbTranscriptSchema, response.json())).toBe(true);
       expect(response.json()).toMatchObject({
         v: 1,

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,12 +10,16 @@ import { expect, it } from "vitest";
 import {
   api,
   createFakeSession,
-  deleteFakeSession,
+  FAKE_ORIGIN,
   FatalProbeError,
   fakeControl,
+  fakeRequest,
+  type RecordedFakeRequest,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
+import { finishMcpFixture } from "./mcp-artifacts.ts";
+import { mcpFailureHistory, mcpFailureRequests } from "./mcp-diagnostics.ts";
 
 it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-project orbs reuse configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-mcp-e2e-"));
@@ -265,6 +269,9 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
   });
   const project = randomUUID();
   const other = randomUUID();
+  const first = randomUUID();
+  const second = randomUUID();
+  const isolated = randomUUID();
   const waitRunning = async (id: string) =>
     waitFor(
       "MCP orb running",
@@ -275,6 +282,7 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       },
       { timeoutMs: 300_000 },
     );
+  let failed = false;
   try {
     for (const id of [project, other])
       expect(
@@ -319,7 +327,6 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       revision: 0,
       servers: [],
     });
-    const first = randomUUID();
     expect(
       (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: first })).status,
     ).toBe(202);
@@ -389,7 +396,6 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
         })
       ).status,
     ).toBe(200);
-    const second = randomUUID();
     expect(
       (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: second })).status,
     ).toBe(202);
@@ -425,7 +431,6 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       },
       { timeoutMs: 60_000 },
     );
-    const isolated = randomUUID();
     expect(
       (await api(cp.baseUrl, "POST", `/api/v1/projects/${other}/orbs`, { id: isolated })).status,
     ).toBe(202);
@@ -500,25 +505,48 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       ).status,
     ).toBe(409);
   } catch (error) {
-    console.error(cp.logs.join(""));
-    console.error("MCP requests", JSON.stringify(calls));
-    console.error(
-      "Inference requests",
-      JSON.stringify(await fakeControl(fake.sessionKey, "/requests")),
-    );
-    for (const context of browser.contexts())
-      for (const page of context.pages())
-        console.error("Browser", await page.locator("body").innerText());
+    failed = true;
     throw error;
   } finally {
-    await browser.close();
-    await api(cp.baseUrl, "DELETE", `/api/v1/projects/${project}`);
-    await api(cp.baseUrl, "DELETE", `/api/v1/projects/${other}`);
-    await cp.stop();
-    remote.closeAllConnections();
-    await new Promise<void>((resolve) => remote.close(() => resolve()));
-    await deleteFakeSession(fake.sessionKey);
-    await deleteFakeSession(nameFake.sessionKey);
-    rmSync(root, { recursive: true, force: true });
+    await finishMcpFixture({
+      failed,
+      root,
+      artifactDirectory: join(import.meta.dirname, "../.context/mcp-failures"),
+      sessions: [fake.sessionKey, nameFake.sessionKey],
+      mockOrigin: FAKE_ORIGIN,
+      capture: async () => {
+        const requests = await fakeControl(fake.sessionKey, "/requests").then(
+          (value) => mcpFailureRequests(value as unknown as RecordedFakeRequest[]),
+          () => "unavailable",
+        );
+        const history: Record<string, unknown> = {};
+        for (const id of [first, second, isolated])
+          history[id] = await api(cp.baseUrl, "GET", `/api/v1/orbs/${id}/history`).then(
+            (value) => mcpFailureHistory(value.body),
+            () => "unavailable",
+          );
+        return { requests, history };
+      },
+      close: () => browser.close(),
+      removeProjects: async () => {
+        const results = await Promise.allSettled([
+          api(cp.baseUrl, "DELETE", `/api/v1/projects/${project}`),
+          api(cp.baseUrl, "DELETE", `/api/v1/projects/${other}`),
+        ]);
+        if (results.some((result) => result.status === "rejected" || result.value.status !== 202))
+          throw new Error("project cleanup failed");
+      },
+      stop: () => cp.stop(),
+      shutdownRemote: async () => {
+        remote.closeAllConnections();
+        await new Promise<void>((resolve) => remote.close(() => resolve()));
+      },
+      deleteSession: async (session) => {
+        const response = await fakeRequest("DELETE", `/api/__mock__/sessions/${session}`, {
+          retryTransport: false,
+        });
+        if (!response.ok) throw new Error("mock session deletion failed");
+      },
+    });
   }
 });

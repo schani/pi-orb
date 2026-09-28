@@ -1,4 +1,6 @@
+import { Readable } from "node:stream";
 import { NoSimulationTask } from "determined";
+import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrokerEnv } from "../broker/endpoint.ts";
 import { HttpOrbInspectionEndpoint, INSPECTION_REQUEST_TIMEOUT_MS } from "./endpoint.ts";
@@ -32,6 +34,60 @@ describe("orb inspection HTTP endpoint", () => {
       "https://runtime.example/runtime/v1/orbs",
       expect.objectContaining({ method: "GET" }),
     );
+  });
+
+  it("consumes a large chunked transcript through real HTTP before the existing deadline", async () => {
+    const app = Fastify({ logger: false });
+    const text = "x".repeat(33 * 1024 * 1024);
+    const metadata = {
+      v: 1,
+      orb: {
+        id: "orb-b",
+        name: null,
+        state: "stopped",
+        updatedAt: "2026-08-27T00:00:00.000Z",
+        project: { id: "project", name: "Project", repositoryUrl: "https://example.com" },
+      },
+      session: null,
+      cursor: "record",
+      headId: "record",
+    };
+    app.get("/runtime/v1/orbs/orb-b/transcript", (_request, reply) => {
+      reply.header("content-type", "application/json");
+      return reply.send(
+        Readable.from([
+          `${JSON.stringify(metadata).slice(0, -1)},"records":[`,
+          JSON.stringify({
+            id: "record",
+            parentId: null,
+            timestamp: "2026-08-27T00:00:00.000Z",
+            type: "message",
+            role: "user",
+            overflow: {},
+            content: [{ type: "text", text }],
+          }),
+          "]}",
+        ]),
+      );
+    });
+    try {
+      await app.listen({ port: 0, host: "127.0.0.1" });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("missing test listener");
+      const result = await new HttpOrbInspectionEndpoint({
+        ...env,
+        controlPlaneUrl: `http://127.0.0.1:${address.port}`,
+      }).transcript(task, "orb-b");
+      expect(result.kind).toBe("transcript");
+      if (result.kind === "transcript") {
+        const record = result.value.records[0];
+        expect(record?.type).toBe("message");
+        if (record?.type === "message") expect(record.content).toEqual([{ type: "text", text }]);
+        expect(Buffer.byteLength(JSON.stringify(result.value))).toBeGreaterThan(32 * 1024 * 1024);
+      }
+    } finally {
+      await app.close();
+    }
   });
 
   it("encodes a transcript orb id as one path segment", async () => {

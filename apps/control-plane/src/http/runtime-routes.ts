@@ -64,6 +64,7 @@ import type {
 import type { ProjectInstructionsStore } from "../domain/project-instructions.ts";
 import { getProjectSecretSnapshot } from "../domain/project-secrets.ts";
 import { mintIdToken } from "../domain/workload-identity.ts";
+import { sendHistoryStream } from "./history-stream.ts";
 import { oauthBinding, sendOAuthError } from "./mcp-oauth-routes.ts";
 import { sendMcpError } from "./mcp-routes.ts";
 import { sendProjectInstructionsError } from "./project-instructions.ts";
@@ -705,15 +706,23 @@ export function registerRuntimeRoutes(
       const snapshot = await deps.store.readHistorySnapshot(task, orb.value.id);
       if (snapshot.isErr()) return sendInspectionStoreError(reply, snapshot.error);
       reply.header("cache-control", "no-store");
-      return reply.send({
-        v: 1,
-        orb: inspectionItem(orb.value, {
-          id: project.value.id,
-          name: project.value.name,
-          repositoryUrl: project.value.repositoryUrl,
-        }),
-        ...snapshot.value,
-      });
+      return sendHistoryStream(
+        reply,
+        task,
+        orb.value.id,
+        {
+          v: 1,
+          orb: inspectionItem(orb.value, {
+            id: project.value.id,
+            name: project.value.name,
+            repositoryUrl: project.value.repositoryUrl,
+          }),
+          session: snapshot.value.session,
+          cursor: snapshot.value.cursor,
+          headId: snapshot.value.headId,
+        },
+        snapshot.value.records,
+      );
     },
   );
 

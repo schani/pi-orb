@@ -45,6 +45,7 @@ import {
   type RotationError,
 } from "../domain/signing-keys.ts";
 import { requirePrincipal } from "./browser-identity.ts";
+import { sendHistoryStream } from "./history-stream.ts";
 import { registerProjectInstructionsRoutes } from "./project-instructions.ts";
 import { orbView, projectView, type ViewConfig } from "./views.ts";
 
@@ -758,6 +759,17 @@ export function registerRoutes(
     if (snapshot.isErr()) {
       return sendStoreError(reply, snapshot.error);
     }
-    return reply.send({ orbId: request.params.orbId, ...snapshot.value });
+    return sendHistoryStream(
+      reply,
+      task,
+      request.params.orbId,
+      {
+        orbId: request.params.orbId,
+        session: snapshot.value.session,
+        cursor: snapshot.value.cursor,
+        headId: snapshot.value.headId,
+      },
+      snapshot.value.records,
+    );
   });
 }
