@@ -241,7 +241,7 @@ describe("orb workspace layout contract", () => {
     ).toContain("background: var(--w)");
     expect(
       rule(
-        ".rec-orb > .rec-bd > .activity-rail-row > .reasoning-body,\n.rec-orb > .rec-bd > .activity-rail-row > .tool-activity-calls",
+        ".rec-orb > .rec-bd > .activity-rail-row > .reasoning-body,\n.rec-orb > .rec-bd > .activity-rail-row > .tool-activity-calls,\n.rec-orb > .rec-bd > .activity-rail-row > .subagent-notice-body",
       ),
     ).toContain("border-top: 0");
     expect(rule(".activity-rail-marker::before")).toContain('content: "\\25b8"');
@@ -260,6 +260,26 @@ describe("orb workspace layout contract", () => {
       ),
     ).toContain("color: var(--ok)");
     expect(rule(".reasoning-body,\n.tool-activity-calls")).toContain("background: var(--g1)");
+  });
+
+  it("balances isolated activity rows with prose without separating adjacent rail rows", () => {
+    expect(rule(".activity-rail-row")).toContain("margin-bottom: 4px");
+    expect(rule(".rec-orb > .rec-bd > .response-markdown + .activity-rail-row")).toContain(
+      "margin-top: 4px",
+    );
+    expect(rule(".chat-markdown > :last-child")).toContain("margin-bottom: 0");
+  });
+
+  it("indents expanded subagent receipts, including errors, past the rail on desktop and phones", () => {
+    const receipt = /(?:^|\n)\.subagent-notice-body\s*\{([^}]*)\}/.exec(css)?.[1];
+    expect(receipt).toBeDefined();
+    expect(receipt).toContain("overflow-wrap: anywhere");
+    expect(receipt).toContain("background: var(--g1)");
+    const railBodies = rule(
+      ".rec-orb > .rec-bd > .activity-rail-row > .reasoning-body,\n.rec-orb > .rec-bd > .activity-rail-row > .tool-activity-calls,\n.rec-orb > .rec-bd > .activity-rail-row > .subagent-notice-body",
+    );
+    expect(railBodies).toContain("padding-left: calc(2ch + 16px)");
+    expect(railBodies).toContain("border-top: 0");
   });
 
   it("contains inline tool images without cropping and keeps the viewer monochrome", () => {

@@ -29,7 +29,7 @@ export function SubagentNotice({ record }: { record: EventRecord }) {
         ? text(notice.notice)
         : (text(notice.error) ?? text(notice.resultPreview));
   const duration = notice.durationMs;
-  const id = text(notice.id);
+  const showDuration = duration !== undefined && Number.isFinite(duration) && duration >= 0;
   return (
     <ActivityRailRow
       label={description}
@@ -39,15 +39,7 @@ export function SubagentNotice({ record }: { record: EventRecord }) {
     >
       <div className={`subagent-notice-body${failed ? " tool-call-output-error" : ""}`}>
         <PlainChatText>{body ?? "Notification details unavailable."}</PlainChatText>
-        {(id !== null || duration !== undefined) && (
-          <div className="subagent-identity">
-            {id}
-            {id !== null && duration !== undefined ? " · " : ""}
-            {duration !== undefined && Number.isFinite(duration) && duration >= 0
-              ? `${(duration / 1000).toFixed(1)}s`
-              : ""}
-          </div>
-        )}
+        {showDuration && <div className="subagent-duration">{(duration / 1000).toFixed(1)}s</div>}
       </div>
     </ActivityRailRow>
   );

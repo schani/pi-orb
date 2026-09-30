@@ -1757,6 +1757,10 @@ button.modal-close:focus-visible {
   border: 0;
 }
 
+.rec-orb > .rec-bd > .response-markdown + .activity-rail-row {
+  margin-top: 4px;
+}
+
 .rec-orb > .rec-bd > .activity-rail-row::before {
   position: absolute;
   z-index: 1;
@@ -1830,7 +1834,8 @@ button.modal-close:focus-visible {
 }
 
 .rec-orb > .rec-bd > .activity-rail-row > .reasoning-body,
-.rec-orb > .rec-bd > .activity-rail-row > .tool-activity-calls {
+.rec-orb > .rec-bd > .activity-rail-row > .tool-activity-calls,
+.rec-orb > .rec-bd > .activity-rail-row > .subagent-notice-body {
   padding-left: calc(2ch + 16px);
   border-top: 0;
 }
@@ -2042,10 +2047,9 @@ button.modal-close:focus-visible {
   background: var(--g1);
   border-top: 1px solid var(--g2);
 }
-.subagent-identity {
-  padding: 4px 0;
+.subagent-duration {
+  margin-top: 4px;
   color: var(--g3);
-  overflow-wrap: anywhere;
 }
 .subagent-live-rail.activity-rail-row {
   margin: 0;

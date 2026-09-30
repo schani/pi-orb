@@ -140,6 +140,12 @@ function initialState(): MockState {
   const firstReadResultId = randomUUID();
   const secondReadResultId = randomUUID();
   const activityAnswerId = randomUUID();
+  const receiptProseId = randomUUID();
+  const firstReceiptId = randomUUID();
+  const receiptMiddleId = randomUUID();
+  const failedReceiptId = randomUUID();
+  const finalReceiptId = randomUUID();
+  const receiptAfterId = randomUUID();
   const imageRequestId = randomUUID();
   const imageCallsId = randomUUID();
   const imageReadResultId = randomUUID();
@@ -324,8 +330,87 @@ function initialState(): MockState {
       overflow: {},
     },
     {
-      id: imageRequestId,
+      id: receiptProseId,
       parentId: activityAnswerId,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "Before receipt." }],
+      overflow: {},
+    },
+    {
+      id: firstReceiptId,
+      parentId: receiptProseId,
+      timestamp: createdAt,
+      type: "event",
+      eventType: "pi.custom_message",
+      content: [],
+      custom: { customType: "subagent-notification", display: true },
+      subagent: {
+        id: "private-child-one",
+        description: "Check deployment",
+        kind: "notification",
+        status: "completed",
+        resultPreview: "Done.",
+        durationMs: 1250,
+      },
+      overflow: {},
+    },
+    {
+      id: receiptMiddleId,
+      parentId: firstReceiptId,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "Between receipts." }],
+      overflow: {},
+    },
+    {
+      id: failedReceiptId,
+      parentId: receiptMiddleId,
+      timestamp: createdAt,
+      type: "event",
+      eventType: "pi.custom_message",
+      content: [],
+      custom: { customType: "subagent-notification", display: true },
+      subagent: {
+        id: "private-child-two",
+        description: "Check deployment",
+        kind: "notification",
+        status: "error",
+        error: "Failed.",
+      },
+      overflow: {},
+    },
+    {
+      id: finalReceiptId,
+      parentId: failedReceiptId,
+      timestamp: createdAt,
+      type: "event",
+      eventType: "pi.custom_message",
+      content: [],
+      custom: { customType: "subagent-notification", display: true },
+      subagent: {
+        id: "private-child-three",
+        description: "Check deployment",
+        kind: "notification",
+        status: "completed",
+        resultPreview: "Done.",
+      },
+      overflow: {},
+    },
+    {
+      id: receiptAfterId,
+      parentId: finalReceiptId,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "After receipts." }],
+      overflow: {},
+    },
+    {
+      id: imageRequestId,
+      parentId: receiptAfterId,
       timestamp: createdAt,
       type: "message",
       role: "user",

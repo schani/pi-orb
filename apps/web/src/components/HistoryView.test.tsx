@@ -96,8 +96,45 @@ describe("HistoryView turn structure", () => {
     expect(html.match(/<details/g)).toHaveLength(1);
     expect(html).toContain("Check deployment");
     expect(html).toContain(text);
+    expect(html).toContain(
+      `class="subagent-notice-body${"status" in subagent && subagent.status === "error" ? " tool-call-output-error" : ""}"`,
+    );
     expect(html).not.toContain("machine instructions");
   });
+
+  it.each([undefined, 0, 1250, -1, Number.NaN])(
+    "hides the internal subagent ID and shows only a valid duration (%s)",
+    (durationMs) => {
+      const record: HistoryRecord = {
+        id: "notice",
+        parentId: null,
+        timestamp: "time-notice",
+        type: "event",
+        eventType: "pi.custom_message",
+        content: [],
+        custom: { customType: "subagent-notification", display: true },
+        subagent: {
+          id: "private-child-identifier",
+          description: "Check deployment",
+          kind: "notification",
+          status: "completed",
+          resultPreview: "Done.",
+          ...(durationMs === undefined ? {} : { durationMs }),
+        },
+        overflow: {},
+      };
+      const html = renderToStaticMarkup(
+        <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+      );
+      expect(html).not.toContain("private-child-identifier");
+      expect(html).not.toContain("subagent-identity");
+      if (durationMs !== undefined && Number.isFinite(durationMs) && durationMs >= 0) {
+        expect(html).toContain(`class="subagent-duration">${(durationMs / 1000).toFixed(1)}s`);
+      } else {
+        expect(html).not.toContain("subagent-duration");
+      }
+    },
+  );
 
   it("ignores a subagent receipt that exists only in native overflow", () => {
     const record: HistoryRecord = {
