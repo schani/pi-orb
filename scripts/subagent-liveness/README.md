@@ -1,6 +1,6 @@
 # Subagent package / Pi runtime contracts
 
-Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Pi is pinned to 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.4.tgz` fork.
+Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Pi is pinned to 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.5.tgz` fork.
 
 ```bash
 npm ci
@@ -43,17 +43,16 @@ Promises and explicit model/tool/lifecycle checkpoints establish ordering; the 6
 
 ## Fork reproduction
 
-The upstream base is `b3b6159399f541fd0623f65818557dd3e707a34f` (21.7.0). The fork repository owns the five source commits; pi-orb does not duplicate them as patch files. After the two locked installs above, fetch the pinned source and build:
+The upstream base is `b3b6159399f541fd0623f65818557dd3e707a34f` (21.7.0). The fork owns the source commits; pi-orb keeps the installed artifact rather than duplicate patches. The source pin is [`1658ccb15a1c6cc8e88c9d16181910b111001964`](https://github.com/schani/pi-packages/commit/1658ccb15a1c6cc8e88c9d16181910b111001964), published on `pi-orb-integration`. From a fresh pi-orb checkout:
 
 ```bash
-git clone https://github.com/schani/pi-packages.git /path/to/pi-packages
-git -C /path/to/pi-packages checkout --detach 6d333b00670d778812b79bce2dd2e1db3f5f9692
-scripts/subagent-liveness/build-fork.sh /path/to/pi-packages
+npm ci
+git clone https://github.com/schani/pi-packages.git .context/pi-packages-fork
+git -C .context/pi-packages-fork checkout --detach 1658ccb15a1c6cc8e88c9d16181910b111001964
+scripts/subagent-liveness/build-fork.sh .context/pi-packages-fork
 ```
 
-The source HEAD must be `6d333b00670d778812b79bce2dd2e1db3f5f9692`; the recipe refuses another commit.
-
-The script packages source/license/provenance and bundles public extension/service entry points with esbuild 0.28.1; dependencies remain external. The TypeBox import maps to the SDK's `typebox` package. This avoids Node's prohibition on stripping dependency TypeScript without changing runtime loading policy. The root lockfile records the artifact integrity. The fork is published at https://github.com/schani/pi-packages/tree/pi-orb-integration, pinned to `6d333b00670d778812b79bce2dd2e1db3f5f9692` (2026-09-14). The user created it manually after the orb integration received HTTP 403 on fork creation. The checked-in artifact supplies local installation without needing the fork checkout. A source rebuild uses the pinned fork commit above.
+The recipe requires source HEAD `1658ccb15a1c6cc8e88c9d16181910b111001964` and a clean package tree. It copies the installed declaration from root `node_modules`, packages source/license/provenance, and bundles public extension/service entry points with esbuild 0.28.1; dependencies remain external. The TypeBox import maps to the SDK's `typebox` package. The root lockfile records artifact integrity. The vendored artifact installs without a fork checkout.
 
 ## Evidence limits
 

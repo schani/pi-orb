@@ -45,6 +45,15 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toMatch(/keeps running.*(?:this orb|parent) stops/);
   });
 
+  it("keeps user-interactive process starts out of subagents", () => {
+    const spawn = environmentPrompt.indexOf('pi-orb spawn --prompt "task"');
+    const guidance = environmentPrompt.indexOf(
+      "Do not use subagents to start processes that the user interacts with, because it's too finicky.",
+    );
+    expect(guidance).toBeGreaterThan(spawn);
+    expect(guidance).toBeLessThan(environmentPrompt.indexOf("For MCP servers"));
+  });
+
   it("requires user intent and preserves the distinct irreversible outcomes", () => {
     expect(environmentPrompt).toMatch(/pi-orb archive.*only.*user asks.*archive this orb/i);
     expect(environmentPrompt).toMatch(/archive.*retain.*conversation.*permanent.*workspace/i);

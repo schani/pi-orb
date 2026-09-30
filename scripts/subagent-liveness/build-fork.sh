@@ -3,7 +3,7 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 fork=${1:?usage: build-fork.sh /path/to/pi-packages}
-expected=6d333b00670d778812b79bce2dd2e1db3f5f9692
+expected=1658ccb15a1c6cc8e88c9d16181910b111001964
 [[ $(git -C "$fork" rev-parse HEAD) == "$expected" ]]
 git -C "$fork" diff --exit-code HEAD -- packages/pi-subagents
 stage=$(mktemp -d)
@@ -12,7 +12,7 @@ mkdir -p "$stage/package/dist" "$repo/vendor"
 git -C "$fork" archive HEAD packages/pi-subagents | tar -x -C "$stage"
 cp -R "$stage/packages/pi-subagents/src" "$stage/package/"
 cp "$stage/packages/pi-subagents/"{package.json,README.md,LICENSE} "$stage/package/"
-cp "$repo/scripts/subagent-liveness/node_modules/@gotgenes/pi-subagents/dist/public.d.ts" "$stage/package/dist/"
+cp "$repo/node_modules/@gotgenes/pi-subagents/dist/public.d.ts" "$stage/package/dist/"
 "$repo/node_modules/.bin/esbuild" "$fork/packages/pi-subagents/src/index.ts" \
   --bundle --platform=node --format=esm --packages=external \
   --alias:@sinclair/typebox=typebox --outfile="$stage/package/dist/extension.js"
@@ -22,7 +22,7 @@ cp "$repo/scripts/subagent-liveness/node_modules/@gotgenes/pi-subagents/dist/pub
 python3 - "$stage/package" "$expected" <<'PY'
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); x=json.loads((p/'package.json').read_text())
-x['version']='21.7.0-orb.4'
+x['version']='21.7.0-orb.5'
 x['exports']['.']['default']='./dist/service.js'
 x['exports']['./extension']={'types':'./dist/extension.d.ts','default':'./dist/extension.js'}
 x['pi']['extensions']=['./dist/extension.js']
