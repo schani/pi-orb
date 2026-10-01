@@ -50,20 +50,45 @@ describe("transcript cache", () => {
     expect(owner.publish({ ...snapshot, headId: "absent" })).toBe("invalid");
   });
 
-  it("evicts by read recency and has no retained stale owners after release", () => {
-    const cache = new TranscriptCache({ maxEntries: 2 });
-    for (const id of ["a", "b"]) {
+  it("retains more than three conversations under the byte budget without stale owners", () => {
+    const cache = new TranscriptCache();
+    for (const id of ["a", "b", "c", "d", "e"]) {
       const owner = cache.acquire(id, "p");
-      owner.publish(snapshotFromHistory(history(id)));
+      expect(owner.publish(snapshotFromHistory(history(id)))).toBe("stored");
       owner.release();
     }
-    cache.get("a");
-    const owner = cache.acquire("c", "p");
-    owner.publish(snapshotFromHistory(history("c")));
-    owner.release();
-    expect(cache.get("b")).toBeUndefined();
-    expect(cache.stats.entries).toBe(2);
+    for (const id of ["a", "b", "c", "d", "e"]) expect(cache.get(id)).toBeDefined();
+    expect(cache.stats.entries).toBe(5);
     expect(cache.stats.owners).toBe(0);
+  });
+
+  it("defaults to a 256 MiB byte budget", () => {
+    const cache = new TranscriptCache();
+    const view = history();
+    const first = view.records[0] ?? expect.fail("fixture record missing");
+    first.overflow = { native: "x".repeat(65 * 1024 * 1024) };
+    expect(cache.acquire("a", "p").publish(snapshotFromHistory(view))).toBe("stored");
+    expect(cache.stats.bytes).toBeGreaterThan(128 * 1024 * 1024);
+    expect(cache.stats.bytes).toBeLessThan(256 * 1024 * 1024);
+    const oversized = history();
+    const oversizedFirst = oversized.records[0] ?? expect.fail("fixture record missing");
+    oversizedFirst.overflow = { native: "x".repeat(128 * 1024 * 1024) };
+    expect(cache.acquire("a", "p").publish(snapshotFromHistory(oversized))).toBe("oversized");
+    expect(cache.stats.bytes).toBe(0);
+  });
+
+  it("evicts least-recently-used conversations when accounted bytes exceed the budget", () => {
+    const sample = new TranscriptCache();
+    sample.acquire("a", "p").publish(snapshotFromHistory(history()));
+    const cache = new TranscriptCache({ maxBytes: sample.stats.bytes * 2 });
+    for (const id of ["a", "b"]) {
+      expect(cache.acquire(id, "p").publish(snapshotFromHistory(history()))).toBe("stored");
+    }
+    cache.get("a");
+    expect(cache.acquire("c", "p").publish(snapshotFromHistory(history()))).toBe("stored");
+    expect(cache.get("a")).toBeDefined();
+    expect(cache.get("b")).toBeUndefined();
+    expect(cache.get("c")).toBeDefined();
   });
 
   it("bounds accounted bytes including native payloads; oversized replacement removes old entry", () => {

@@ -157,7 +157,7 @@ it.each(["chromium", "webkit"] as const)(
         page.getByRole("button", { name: "Change thinking", exact: true, includeHidden: true }),
       ).toBeEnabled();
       check(historyReads).toBeGreaterThan(beforeReload);
-      // Three other conversations evict A. A new cold read must still work normally.
+      // Three other small conversations do not evict A under the byte budget.
       for (const [id, name] of [
         [b, "Frontend Playground"],
         ["frontend-editor-shortcuts", "Editor shortcuts"],
@@ -168,16 +168,18 @@ it.each(["chromium", "webkit"] as const)(
         }, id);
         await check(page.locator(".orb-name")).toHaveText(name ?? "");
       }
-      const beforeEvictionReturn = historyReads;
-      const evictedSettings = nextSettings();
+      const beforeReturn = historyReads;
+      forbidHistory = true;
+      const cachedReturnSettings = nextSettings();
       await page.locator("body").evaluate((node, orbId) => {
         node.ownerDocument.location.hash = `/orbs/${orbId}`;
       }, a);
-      await evictedSettings;
+      await cachedReturnSettings;
       await check(
         page.getByRole("button", { name: "Change thinking", exact: true, includeHidden: true }),
       ).toBeEnabled();
-      check(historyReads).toBeGreaterThan(beforeEvictionReturn);
+      check(historyReads).toBe(beforeReturn);
+      check(unexpectedHistory).toBe(0);
     } finally {
       await page.close();
       await browser.close();

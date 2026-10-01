@@ -52,12 +52,10 @@ export class TranscriptCache {
   get invalidationEpoch(): number {
     return this.invalidationSerial;
   }
-  private readonly maxEntries: number;
   private readonly maxBytes: number;
 
-  constructor(limits: { maxEntries?: number; maxBytes?: number } = {}) {
-    this.maxEntries = limits.maxEntries ?? 3;
-    this.maxBytes = limits.maxBytes ?? 128 * 1024 * 1024;
+  constructor(limits: { maxBytes?: number } = {}) {
+    this.maxBytes = limits.maxBytes ?? 256 * 1024 * 1024;
   }
 
   get stats() {
@@ -126,7 +124,7 @@ export class TranscriptCache {
           return "invalid";
         }
         this.remove(orbId);
-        if (bytes > this.maxBytes || this.maxEntries < 1) return "oversized";
+        if (bytes > this.maxBytes) return "oversized";
         this.entries.set(orbId, {
           projectId,
           snapshot: {
@@ -138,7 +136,7 @@ export class TranscriptCache {
           bytes,
         });
         this.bytes += bytes;
-        while (this.entries.size > this.maxEntries || this.bytes > this.maxBytes) {
+        while (this.bytes > this.maxBytes) {
           const first = this.entries.keys().next().value;
           if (first === undefined) break;
           this.remove(first);
