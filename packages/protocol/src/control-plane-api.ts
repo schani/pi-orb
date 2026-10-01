@@ -251,6 +251,17 @@ export const OrbActionRequiredSchema = Type.Union([
 ]);
 export type OrbActionRequired = Static<typeof OrbActionRequiredSchema>;
 
+export const AckOrbAlertRequestSchema = Type.Object(
+  { recordId: Type.String({ minLength: 1 }) },
+  closed,
+);
+export type AckOrbAlertRequest = Static<typeof AckOrbAlertRequestSchema>;
+export const AckOrbAlertResponseSchema = Type.Object(
+  { unreadAlertId: Type.Union([Type.String(), Type.Null()]) },
+  closed,
+);
+export type AckOrbAlertResponse = Static<typeof AckOrbAlertResponseSchema>;
+
 export const OrbViewSchema = Type.Object(
   {
     id: Type.String(),
@@ -270,6 +281,8 @@ export const OrbViewSchema = Type.Object(
     stopReason: Type.Optional(StopReasonSchema),
     stateChangedAt: Type.String(),
     archivedAt: Type.Optional(Type.String()),
+    /** Latest replicated alert not yet acknowledged by explicit orb selection. */
+    unreadAlertId: Type.Optional(Type.String()),
     /**
      * MagicDNS host every port inside the orb is reachable at (docs/ports.md).
      * Derived from the orb id and the configured tailnet, never stored;

@@ -159,6 +159,7 @@ export function orbView(
     ...(liveness !== null ? { activity: liveness.activity } : {}),
     ...(orb.checkoutCommit !== null ? { checkoutCommit: orb.checkoutCommit } : {}),
     ...(orb.lastError !== null ? { lastError: orb.lastError } : {}),
+    ...(orb.unreadAlertId !== null ? { unreadAlertId: orb.unreadAlertId } : {}),
     ...(stateDetail !== undefined ? { stateDetail } : {}),
     ...(orb.sleepUntil !== null ? { sleepUntil: iso(orb.sleepUntil) } : {}),
     ...(orb.stopReason !== null ? { stopReason: orb.stopReason } : {}),

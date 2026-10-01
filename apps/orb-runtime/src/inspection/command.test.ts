@@ -1,6 +1,12 @@
 import type { OrbInspectionItem, OrbTranscript } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
-import { filterOrbs, formatOrbList, formatTranscript, parseInspectionArgs } from "./command.ts";
+import {
+  filterOrbs,
+  formatOrbList,
+  formatTranscript,
+  INSPECTION_USAGE,
+  parseInspectionArgs,
+} from "./command.ts";
 
 const items: OrbInspectionItem[] = [
   {
@@ -28,6 +34,10 @@ const items: OrbInspectionItem[] = [
 ];
 
 describe("orb inspection CLI arguments", () => {
+  it("lists alert in generic CLI usage", () => {
+    expect(INSPECTION_USAGE).toContain('pi-orb alert "message"');
+  });
+
   it("parses list/search and transcript commands without a CLI framework", () => {
     expect(parseInspectionArgs(["orbs"])).toEqual({
       value: { type: "orbs", query: null, json: false },
@@ -69,6 +79,39 @@ describe("orb inspection presentation", () => {
     expect(output).toContain("CURRENT\tORB ID\tNAME\tSTATE\tPROJECT");
     expect(output).toContain("*\torb-current\tRuntime auth\trunning\tpi-orb");
     expect(output).toContain("\torb-sibling\tRésumé parser\tarchived\tClient App");
+  });
+
+  it("renders alert text literally once without native overflow", () => {
+    const orb = items[0];
+    expect(orb).toBeDefined();
+    if (orb === undefined) return;
+    const message = "First line\n<strong>literal HTML</strong>";
+    const transcript: OrbTranscript = {
+      v: 1,
+      orb,
+      session: { id: "session-alert", overflow: { native: { duplicate: message } } },
+      cursor: "record-alert",
+      headId: "record-alert",
+      records: [
+        {
+          id: "record-alert",
+          parentId: null,
+          timestamp: "2026-08-27T00:00:01.000Z",
+          type: "event",
+          eventType: "pi.custom",
+          alert: { message, requestId: "request-alert" },
+          overflow: { native: { duplicate: message } },
+        },
+      ],
+    };
+
+    expect(formatTranscript(transcript)).toBe(
+      "# Runtime auth (orb-current)\n\n" +
+        "Project: pi-orb (project-platform)\n" +
+        "Repository: https://github.com/schani/pi-orb\n" +
+        "State: running\n\n" +
+        "## alert\n\nFirst line\n<strong>literal HTML</strong>\n",
+    );
   });
 
   it("renders normalized transcript content without native overflow", () => {

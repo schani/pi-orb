@@ -65,6 +65,12 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toMatch(/interrupt.*(?:turn|acknowledgement)/i);
   });
 
+  it("explains transcript alerts without requiring explicit permission", () => {
+    expect(environmentPrompt).toContain('pi-orb alert "message"');
+    expect(environmentPrompt).toMatch(/alert.*transcript.*flags.*orb.*until.*user opens it/i);
+    expect(environmentPrompt).not.toMatch(/(?:permission|consent).*alert/i);
+  });
+
   it("documents scheduled self-sleep", () => {
     expect(environmentPrompt).toContain("pi-orb sleep 1h");
     expect(environmentPrompt).toMatch(/absolute wake deadline.*stop.*admitted work/i);

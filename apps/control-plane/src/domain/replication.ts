@@ -76,8 +76,9 @@ export async function failOrbForIntegrity(
   deps: ControlPlaneDeps,
   orbId: string,
   error: ReplicationIntegrityError,
-): Promise<void> {
-  for (;;) {
+  maxAttempts = Infinity,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const orbResult = await deps.store.getOrb(task, orbId);
     if (orbResult.isErr()) {
       await sleepResult(task, deps.constants.retryBackoffBaseMs, "integrity fail: store retry");
@@ -92,7 +93,7 @@ export async function failOrbForIntegrity(
       orb.state === "archiving" ||
       orb.state === "archived"
     )
-      return;
+      return true;
     const cas = await deps.store.failOrbAndRequestComputeDiscard(task, {
       orbId,
       expectedStateVersion: orb.stateVersion,
@@ -122,8 +123,9 @@ export async function failOrbForIntegrity(
       failure_code: "replication_integrity",
     });
     deps.control.clearOrb(orbId);
-    return;
+    return true;
   }
+  return false;
 }
 
 /**
@@ -131,6 +133,7 @@ export async function failOrbForIntegrity(
  * complete records (docs/history-replication.md/docs/history-replication.md). Non-empty commits loop immediately;
  * cursor conflicts re-read and continue (another poller won); retryable
  * failures return to the ordinary polling cadence with the cursor unchanged.
+ * A bounded caller gets `retryable`, not `caught_up`, if its attempt limit ends first.
  */
 async function reconcileOrbName(
   task: SimulationTask,
@@ -170,9 +173,10 @@ export async function pollOrbUntilCaughtUp(
   task: SimulationTask,
   deps: ControlPlaneDeps,
   orbId: string,
+  maxAttempts = Infinity,
 ): Promise<PollOutcome> {
   let committedRecords = 0;
-  for (;;) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const orbResult = await deps.store.getOrb(task, orbId);
     if (orbResult.isErr()) return retryableStore(orbResult.error);
     const orb = orbResult.value;
@@ -225,7 +229,8 @@ export async function pollOrbUntilCaughtUp(
           reason: "cursor_not_found",
           message: error.message,
         };
-        await failOrbForIntegrity(task, deps, orbId, integrity);
+        if (!(await failOrbForIntegrity(task, deps, orbId, integrity, maxAttempts)))
+          return { type: "retryable", message: "integrity failure could not be persisted" };
         return { type: "integrity", reason: "cursor_not_found" };
       }
       if (error.code === "invalid_response") {
@@ -234,7 +239,8 @@ export async function pollOrbUntilCaughtUp(
           reason: "mapping_failure",
           message: error.message,
         };
-        await failOrbForIntegrity(task, deps, orbId, integrity);
+        if (!(await failOrbForIntegrity(task, deps, orbId, integrity, maxAttempts)))
+          return { type: "retryable", message: "integrity failure could not be persisted" };
         return { type: "integrity", reason: "mapping_failure" };
       }
       return { type: "retryable", message: error.message };
@@ -243,7 +249,8 @@ export async function pollOrbUntilCaughtUp(
 
     const invalid = validatePullResponse(orbId, orb.replicationCursor, response);
     if (invalid !== null) {
-      await failOrbForIntegrity(task, deps, orbId, invalid);
+      if (!(await failOrbForIntegrity(task, deps, orbId, invalid, maxAttempts)))
+        return { type: "retryable", message: "integrity failure could not be persisted" };
       return { type: "integrity", reason: invalid.reason };
     }
 
@@ -283,7 +290,8 @@ export async function pollOrbUntilCaughtUp(
       if (verified.isErr()) {
         const error = verified.error;
         if (error.type === "replication_integrity") {
-          await failOrbForIntegrity(task, deps, orbId, error);
+          if (!(await failOrbForIntegrity(task, deps, orbId, error, maxAttempts)))
+            return { type: "retryable", message: "integrity failure could not be persisted" };
           return { type: "integrity", reason: error.reason };
         }
         return retryableStore(error);
@@ -310,7 +318,8 @@ export async function pollOrbUntilCaughtUp(
         continue;
       }
       if (error.type === "replication_integrity") {
-        await failOrbForIntegrity(task, deps, orbId, error);
+        if (!(await failOrbForIntegrity(task, deps, orbId, error, maxAttempts)))
+          return { type: "retryable", message: "integrity failure could not be persisted" };
         return { type: "integrity", reason: error.reason };
       }
       return retryableStore(error);
@@ -319,4 +328,5 @@ export async function pollOrbUntilCaughtUp(
     await task.checkpoint("committed pull batch");
     // Non-empty response: pull again immediately to reduce lag.
   }
+  return { type: "retryable", message: "pull attempt limit reached" };
 }

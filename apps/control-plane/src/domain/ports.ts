@@ -455,6 +455,16 @@ export interface ControlPlaneStore {
     params: CommitPullBatchParams,
   ): ResultAsync<OrbRow, CommitPullError>;
 
+  /** Validate the replicated alert and atomically clear only its matching pointer. */
+  ackOrbAlert(
+    task: SimulationTask,
+    orbId: string,
+    recordId: string,
+  ): ResultAsync<
+    string | null,
+    StoreError | { type: "alert_not_replicated" } | { type: "orb_not_found" }
+  >;
+
   /** Verify or initialize session metadata without advancing the cursor. */
   initOrVerifySession(
     task: SimulationTask,

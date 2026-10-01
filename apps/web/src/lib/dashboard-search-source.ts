@@ -48,7 +48,7 @@ function orbItem(
 ): AppSearchItem {
   const name = orb.name ?? "untitled orb";
   const age = formatProjectOrbAge(orb.updatedAt, now);
-  const glyph = projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil);
+  const glyph = projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil, orb.unreadAlertId);
   const context = [project.name, ...(archived ? ["archive"] : []), ...(age === null ? [] : [age])];
   return {
     key: `dashboard:orb:${orb.id}`,

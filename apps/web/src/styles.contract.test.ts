@@ -10,6 +10,20 @@ function rule(selector: string): string {
   return match?.[1] ?? "";
 }
 
+describe("orb alerts", () => {
+  it("keeps long plain text inside a phone-width reverse band without coloring the orb row", () => {
+    const band = rule(".alert-band");
+    expect(css).toMatch(/(?:^|\n)\.rec-alert \{\s*padding: 4px 0;/);
+    expect(band).toContain("padding: 10px 12px");
+    expect(band).toContain("background: #b21f2d");
+    expect(band).toContain("color: #fff");
+    expect(band).toContain("white-space: pre-wrap");
+    expect(band).toContain("overflow-wrap: anywhere");
+    expect(rule(".orb-entry-alert")).not.toContain("background");
+    expect(rule(".rec-bd")).toContain("min-width: 0");
+  });
+});
+
 describe("subagent roster", () => {
   it("has no nested disclosure-marker or identity-only styles", () => {
     expect(css).not.toMatch(/\.subagent-roster[^{}]*::before/);
@@ -124,7 +138,7 @@ describe("dashboard layout contract", () => {
 
 describe("orb workspace layout contract", () => {
   it("uses gutter-free inverted user paper and plain white orb paper", () => {
-    expect(rule(".rec-you,\n.rec-orb")).toContain("display: block");
+    expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     const user = rule(".rec-you");
     expect(user).toContain("background: var(--k)");
     expect(user).toContain("color: var(--w)");
@@ -190,7 +204,7 @@ describe("orb workspace layout contract", () => {
 
   it("retains the type gutter only for shell records and keeps queue state visible", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
-    expect(rule(".rec-you,\n.rec-orb")).toContain("display: block");
+    expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     expect(rule(".busy-indicator")).toContain("padding: 0 12px");
     expect(rule(".rec-q")).toContain("border-left: 2px dotted var(--w)");
     expect(rule(".rec-status")).toContain("border: 1px solid currentcolor");

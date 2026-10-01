@@ -301,6 +301,7 @@ export function makeOrbRow(
     runtimeTokenHash: null,
     replicationCursor: null,
     replicatedHeadId: null,
+    unreadAlertId: null,
     lastBusyAt: null,
     uploadActiveUntil: null,
     stopReason: null,

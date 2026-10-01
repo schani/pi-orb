@@ -10,6 +10,10 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 
 **Additional project instructions (implemented locally, 2026-09-15).** The same boot path reads the caller's project-scoped snapshot, failing readiness visibly if unavailable. The loader captures both scopes by value: virtual personal source, untouched native sources, then virtual `pi-orb:project/AGENTS.md` when nonempty. `pi/instructions-adoption.ts` shares the edge-only revision/SHA-256 decision for the separate personal/project custom entry types, flushed before readiness. Default local children already inherit the parent's effective prompt; real subagent E2E pins that a child launched after a save retains the parent's boot snapshot without a fork or new loader hook. Custom replacement/portable prompt modes retain normal extension semantics. Full contract: `docs/project-instructions.md`.
 
+## Orb alerts (2026-09-30)
+
+`pi-orb alert "message"` uses an authenticated runtime mutation to append a `pi-orb.alert` custom entry with `{message, requestId}`. The synchronous SDK append and session-file fsync precede live publication and CLI success, without waiting for the active tool turn. The mapping exposes typed `EventRecord.alert`, and retries recover the existing native ID. Custom entries remain outside model context: a real-SDK reopen test rejected custom messages because Pi converts those to model input regardless of display visibility. Admission closes with runtime shutdown/idle-stop fencing. Full contract: `docs/orb-alerts.md`.
+
 ## Embedding decisions
 
 - Pi will be embedded through `@earendil-works/pi-coding-agent` rather than launched through `pi --mode rpc`. Pi packages use [0.87.1](https://github.com/earendil-works/pi/releases/tag/v0.87.1) for GPT-6 Sol support (upgraded 2026-09-23).

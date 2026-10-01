@@ -18,6 +18,26 @@ function message(id: string, role: "user" | "assistant", text: string): MessageR
 }
 
 describe("HistoryView turn structure", () => {
+  it("renders historical alerts as literal reverse bands, even after acknowledgement", () => {
+    const record = {
+      id: "alert-1",
+      parentId: null,
+      timestamp: "now",
+      overflow: {},
+      type: "event" as const,
+      eventType: "pi.custom",
+      alert: { message: "<script>\nlongword", requestId: "request-1" },
+      content: [],
+    } as HistoryRecord;
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html).toContain('class="rec rec-alert"');
+    expect(html).toContain('class="alert-band"');
+    expect(html).toContain("&lt;script&gt;\nlongword");
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain('role="alert"');
+  });
   it("keeps adjacent reasoning and tool categories as sibling rail rows, splitting at prose", () => {
     const record: MessageRecord = {
       ...message("activity", "assistant", ""),

@@ -1,12 +1,14 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type ApiError, createOrb, describeApiError, listOrbs, listProjects } from "../lib/api.ts";
+import type { AppSearchItem } from "../lib/app-search.ts";
 import { createOrbRequest } from "../lib/create-orb-request.ts";
 import {
   buildDashboardSearchSource,
   type DashboardOrbListSnapshot,
 } from "../lib/dashboard-search-source.ts";
 import { FAVICON_HREFS } from "../lib/favicon.ts";
+import { shouldAcknowledgeSelection } from "../lib/orb-alert.ts";
 import { projectDeletionProgressText } from "../lib/project-deletion.ts";
 import { formatProjectOrbAge, projectOrbGlyph, splitProjectOrbs } from "../lib/project-orbs.ts";
 import { useAddressedProject } from "../lib/use-addressed-project.ts";
@@ -40,13 +42,15 @@ function IndexRow({
   orbId,
   pending,
   now,
+  onSelect,
 }: {
   orb: OrbView;
   orbId: string;
   pending: boolean;
   now: number;
+  onSelect: () => void;
 }) {
-  const glyph = projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil);
+  const glyph = projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil, orb.unreadAlertId);
   const current = orb.id === orbId;
   const name = orb.name ?? "untitled orb";
   return (
@@ -54,6 +58,13 @@ function IndexRow({
       className={`ix-row ix-row-${glyph.state}${current ? " ix-row-current" : ""}`}
       href={`#/orbs/${orb.id}`}
       title={name}
+      onClick={(event) => {
+        if (
+          !event.defaultPrevented &&
+          shouldAcknowledgeSelection(orbId, orb.id, event, document.visibilityState === "visible")
+        )
+          onSelect();
+      }}
       {...(current ? { "aria-current": "page" as const } : {})}
     >
       <StateTile glyph={glyph} />
@@ -73,6 +84,7 @@ export function IndexProject({
   now,
   onChanged,
   onCreated,
+  onSelect,
 }: {
   project: ProjectView;
   list: OrbList | undefined;
@@ -81,6 +93,7 @@ export function IndexProject({
   now: number;
   onChanged: (project: ProjectView) => void;
   onCreated: (orb: OrbView) => void;
+  onSelect: () => void;
 }) {
   const [creation, setCreation] = useState<
     { id: string; type: "pending" } | { id: string; type: "failed"; error: ApiError } | null
@@ -127,7 +140,14 @@ export function IndexProject({
   }, [currentArchived]);
   const rows = (orbs: OrbView[]) =>
     orbs.map((orb) => (
-      <IndexRow key={orb.id} orb={orb} orbId={orbId} pending={pending} now={now} />
+      <IndexRow
+        key={orb.id}
+        orb={orb}
+        orbId={orbId}
+        pending={pending}
+        now={now}
+        onSelect={onSelect}
+      />
     ));
   return (
     <section className="ix-project" aria-label={project.name}>
@@ -210,11 +230,13 @@ export function OrbIndex({
   orbId,
   pending,
   onProjectChange,
+  onSelect,
 }: {
   projectId: string | null;
   orbId: string;
   pending: boolean;
   onProjectChange: (project: { id: string; name: string } | null) => void;
+  onSelect: () => void;
 }) {
   const [projects, setProjects] = useState<ProjectView[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -271,8 +293,15 @@ export function OrbIndex({
         now,
       }),
       id: `orb-index:${orbId}`,
+      onActivate: (item: AppSearchItem) => {
+        if (
+          item.href === `#/orbs/${encodeURIComponent(orbId)}` &&
+          document.visibilityState === "visible"
+        )
+          onSelect();
+      },
     }),
-    [error, now, orbId, projects, visibleLists, visibleProjects],
+    [error, now, orbId, onSelect, projects, visibleLists, visibleProjects],
   );
   useAppSearchSource(searchSource);
   useEffect(() => {
@@ -364,6 +393,7 @@ export function OrbIndex({
           orbId={orbId}
           pending={pending}
           now={now}
+          onSelect={onSelect}
           onCreated={(created) => {
             revision.current += 1;
             setLists((previous) => ({

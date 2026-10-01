@@ -13,7 +13,7 @@ Pi is the first agent harness, embedded through the Pi SDK. The host lifecycle, 
 The first target is deliberately narrow:
 
 - Run locally using Docker; container-restricted trusted test environments may use the unsandboxed process-host + embedded PGlite composition.
-- Drive lifecycle and conversation input through the web UI; a local checkout is not required. The in-orb `pi-orb` CLI may read sibling-orb metadata and replicated transcripts, launch independent same-project orbs with prompts, and request self-archival or self-deletion when the user asks.
+- Drive lifecycle and conversation input through the web UI; a local checkout is not required. The in-orb `pi-orb` CLI may read sibling-orb metadata and replicated transcripts, launch independent same-project orbs with prompts, issue transcript alerts (`docs/orb-alerts.md`), and request self-archival or self-deletion when the user asks.
 - Let users register a project with a name and public Git repository URL.
 - Clone the repository into a fresh orb without caching or synchronization optimizations.
 - Use a fixed orb runtime image and prescribed base environment; projects may add write-only environment secrets fetched by each orb runtime at boot (`docs/credentials.md`).
@@ -32,7 +32,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 
 ## Product and interaction decisions
 
-- The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, and archive or delete themselves on user request (`docs/orb-archival.md`, `docs/orb-deletion.md`).
+- The user-facing interface is web-based. The runtime image also provides a narrow `pi-orb` CLI for agents to discover sibling orbs, inspect replicated transcripts, launch independent same-project work (`docs/orb-spawning.md`), mint workload-identity tokens, alert the user (`docs/orb-alerts.md`), and archive or delete themselves on user request (`docs/orb-archival.md`, `docs/orb-deletion.md`).
 - The browser communicates only with the control plane, never directly with an orb runtime.
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
 - Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Stage 3 per-user credentials is on `main`, qualified, and undeployed; coworker onboarding remains unauthorized. Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
@@ -102,6 +102,7 @@ Subsystem designs:
 - [docs/compute-replacement.md](docs/compute-replacement.md) — immutable-compute plan: dispose failed incarnations, replace stale host specifications on next Start, and retain the workspace throughout
 - [docs/lifecycle.md](docs/lifecycle.md) — orb states, reconciliation rules, idle auto-stop, the orphan-host sweep
 - [docs/orb-sleep.md](docs/orb-sleep.md) — approved, DST-first implementation contract for CLI-requested graceful stop/start and combined first-wake notice
+- [docs/orb-alerts.md](docs/orb-alerts.md) — CLI-issued transcript alerts, unread flag icon, guarded acknowledgement, visual study, and qualification
 - [docs/orb-deletion.md](docs/orb-deletion.md) — permanent orb deletion, resource inventory, cleanup protocol, and verification plan
 - [docs/project-deletion.md](docs/project-deletion.md) — permanent project deletion by atomic fan-out through deletion-grade cleanup for every child orb
 - [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup

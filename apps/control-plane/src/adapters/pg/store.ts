@@ -9,6 +9,7 @@ import type {
   StoreError,
 } from "../../domain/errors.ts";
 import { jsonEqual } from "../../domain/json-equal.ts";
+import { logOrbEvent } from "../../domain/log.ts";
 import type { OrbDeletionRow, OrbMessageRow, OrbRow, ProjectRow } from "../../domain/orb.ts";
 import type {
   CasTransitionParams,
@@ -83,6 +84,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     replicationCursor:
       row["replication_cursor"] === null ? null : String(row["replication_cursor"]),
     replicatedHeadId: row["replicated_head_id"] === null ? null : String(row["replicated_head_id"]),
+    unreadAlertId: row["unread_alert_id"] == null ? null : String(row["unread_alert_id"]),
     lastBusyAt: row["last_busy_at"] == null ? null : toMs(row["last_busy_at"]),
     uploadActiveUntil: row["upload_active_until"] == null ? null : toMs(row["upload_active_until"]),
     stopReason: row["stop_reason"] == null ? null : (String(row["stop_reason"]) as StopReason),
@@ -1677,113 +1679,181 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     );
   }
 
+  ackOrbAlert(
+    task: SimulationTask,
+    orbId: string,
+    recordId: string,
+  ): ResultAsync<
+    string | null,
+    StoreError | { type: "alert_not_replicated" } | { type: "orb_not_found" }
+  > {
+    return this.db
+      .transaction<
+        { pointer: string | null; cleared: boolean },
+        StoreError | { type: "alert_not_replicated" } | { type: "orb_not_found" }
+      >(async (query) => {
+        const locked = await query("SELECT unread_alert_id FROM orbs WHERE id = $1 FOR UPDATE", [
+          orbId,
+        ]);
+        if (locked.isErr()) return err(locked.error);
+        const row = locked.value.rows[0];
+        if (row === undefined) return err({ type: "orb_not_found" as const });
+        const found = await query(
+          "SELECT 1 FROM history_records WHERE orb_id = $1 AND record_id = $2 AND record->'alert' IS NOT NULL AND record->>'type' = 'event'",
+          [orbId, recordId],
+        );
+        if (found.isErr()) return err(found.error);
+        if (found.value.rows.length === 0) return err({ type: "alert_not_replicated" as const });
+        const current = row["unread_alert_id"] == null ? null : String(row["unread_alert_id"]);
+        if (current !== recordId) return ok({ pointer: current, cleared: false });
+        const cleared = await query("UPDATE orbs SET unread_alert_id = NULL WHERE id = $1", [
+          orbId,
+        ]);
+        if (cleared.isErr()) return err(cleared.error);
+        return ok({ pointer: null, cleared: true });
+      })
+      .map(({ pointer, cleared }) => {
+        if (cleared) logOrbEvent(task, orbId, "alert-acknowledged", { recordId });
+        return pointer;
+      });
+  }
+
   commitPullBatch(
-    _task: SimulationTask,
+    task: SimulationTask,
     params: CommitPullBatchParams,
   ): ResultAsync<OrbRow, CommitPullError> {
     return this.db
-      .transaction<OrbRow, CommitPullError>(async (query) => {
-        // Serialize competing committers on the row; the cursor check below
-        // still implements the optimistic CAS semantics.
-        const orbResult = await query(
-          "SELECT harness_session_id, harness_session_header, replication_cursor FROM orbs WHERE id = $1 FOR UPDATE",
-          [params.orbId],
-        );
-        if (orbResult.isErr()) return err(orbResult.error);
-        const orbRow = orbResult.value.rows[0];
-        if (orbRow === undefined) {
-          return err<OrbRow, ReplicationIntegrityError>({
-            type: "replication_integrity",
-            reason: "mapping_failure",
-            message: `orb ${params.orbId} does not exist`,
-          });
-        }
-        const currentCursor =
-          orbRow["replication_cursor"] === null ? null : String(orbRow["replication_cursor"]);
-        if (currentCursor !== params.expectedCursor) {
-          return err<OrbRow, CommitPullError>({ type: "cursor_conflict" });
-        }
-        const storedSessionId =
-          orbRow["harness_session_id"] === null ? null : String(orbRow["harness_session_id"]);
-        let initializeSession = false;
-        if (storedSessionId === null) {
-          initializeSession = true;
-        } else if (
-          storedSessionId !== params.session.id ||
-          !jsonEqual(orbRow["harness_session_header"], params.session)
-        ) {
-          if (currentCursor === null) {
-            // An empty replica pins nothing (docs/history-replication.md): with no
-            // committed cursor a changed session identity is legitimate
-            // rotation — a runtime that never flushed starts a fresh session
-            // on reboot. Re-initialize instead of failing the orb.
-            initializeSession = true;
-          } else {
-            return err<OrbRow, ReplicationIntegrityError>({
-              type: "replication_integrity",
-              reason: "session_mismatch",
-              message: `stored session ${storedSessionId}, pulled session ${params.session.id}`,
+      .transaction<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>(
+        async (query) => {
+          // Serialize competing committers on the row; the cursor check below
+          // still implements the optimistic CAS semantics.
+          const orbResult = await query(
+            "SELECT harness_session_id, harness_session_header, replication_cursor FROM orbs WHERE id = $1 FOR UPDATE",
+            [params.orbId],
+          );
+          if (orbResult.isErr()) return err(orbResult.error);
+          const orbRow = orbResult.value.rows[0];
+          if (orbRow === undefined) {
+            return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>(
+              {
+                type: "replication_integrity",
+                reason: "mapping_failure",
+                message: `orb ${params.orbId} does not exist`,
+              },
+            );
+          }
+          const currentCursor =
+            orbRow["replication_cursor"] === null ? null : String(orbRow["replication_cursor"]);
+          if (currentCursor !== params.expectedCursor) {
+            return err<{ row: OrbRow; publishedAlertId: string | null }, CommitPullError>({
+              type: "cursor_conflict",
             });
           }
-        }
-        for (const record of params.records) {
-          const inserted = await query(
-            `INSERT INTO history_records (orb_id, record_id, parent_id, record)
-             VALUES ($1, $2, $3, $4::jsonb)
-             ON CONFLICT (orb_id, record_id) DO NOTHING
-             RETURNING record_id`,
-            [params.orbId, record.id, record.parentId, jsonParam(record)],
-          );
-          if (inserted.isErr()) return err(inserted.error);
-          if (inserted.value.rowCount === 0) {
-            // Existing row: identical content is an idempotent repeat,
-            // different content is an integrity error (docs/history-replication.md).
-            const existing = await query(
-              "SELECT record FROM history_records WHERE orb_id = $1 AND record_id = $2",
-              [params.orbId, record.id],
-            );
-            if (existing.isErr()) return err(existing.error);
-            const stored = existing.value.rows[0]?.["record"];
-            if (!jsonEqual(stored, JSON.parse(JSON.stringify(record)))) {
-              return err<OrbRow, ReplicationIntegrityError>({
+          const storedSessionId =
+            orbRow["harness_session_id"] === null ? null : String(orbRow["harness_session_id"]);
+          let initializeSession = false;
+          if (storedSessionId === null) {
+            initializeSession = true;
+          } else if (
+            storedSessionId !== params.session.id ||
+            !jsonEqual(orbRow["harness_session_header"], params.session)
+          ) {
+            if (currentCursor === null) {
+              // An empty replica pins nothing (docs/history-replication.md): with no
+              // committed cursor a changed session identity is legitimate
+              // rotation — a runtime that never flushed starts a fresh session
+              // on reboot. Re-initialize instead of failing the orb.
+              initializeSession = true;
+            } else {
+              return err<
+                { row: OrbRow; publishedAlertId: string | null },
+                ReplicationIntegrityError
+              >({
                 type: "replication_integrity",
-                reason: "record_conflict",
-                message: `record ${record.id} already exists with different content`,
+                reason: "session_mismatch",
+                message: `stored session ${storedSessionId}, pulled session ${params.session.id}`,
               });
             }
           }
-        }
-        const deliveredMessageIds = params.records.flatMap(inboxMessageIds);
-        for (const messageId of deliveredMessageIds) {
-          const delivered = await query(
-            `UPDATE orb_messages SET status = 'delivered', auto_start = false,
+          let newestAlertId: string | null = null;
+          for (const record of params.records) {
+            const inserted = await query(
+              `INSERT INTO history_records (orb_id, record_id, parent_id, record)
+             VALUES ($1, $2, $3, $4::jsonb)
+             ON CONFLICT (orb_id, record_id) DO NOTHING
+             RETURNING record_id`,
+              [params.orbId, record.id, record.parentId, jsonParam(record)],
+            );
+            if (inserted.isErr()) return err(inserted.error);
+            if (
+              inserted.value.rowCount > 0 &&
+              record.type === "event" &&
+              record.alert !== undefined
+            ) {
+              newestAlertId = record.id;
+            }
+            if (inserted.value.rowCount === 0) {
+              // Existing row: identical content is an idempotent repeat,
+              // different content is an integrity error (docs/history-replication.md).
+              const existing = await query(
+                "SELECT record FROM history_records WHERE orb_id = $1 AND record_id = $2",
+                [params.orbId, record.id],
+              );
+              if (existing.isErr()) return err(existing.error);
+              const stored = existing.value.rows[0]?.["record"];
+              if (!jsonEqual(stored, JSON.parse(JSON.stringify(record)))) {
+                return err<
+                  { row: OrbRow; publishedAlertId: string | null },
+                  ReplicationIntegrityError
+                >({
+                  type: "replication_integrity",
+                  reason: "record_conflict",
+                  message: `record ${record.id} already exists with different content`,
+                });
+              }
+            }
+          }
+          const deliveredMessageIds = params.records.flatMap(inboxMessageIds);
+          for (const messageId of deliveredMessageIds) {
+            const delivered = await query(
+              `UPDATE orb_messages SET status = 'delivered', auto_start = false,
                last_error = NULL, updated_at = now()
              WHERE orb_id = $1 AND message_id = $2`,
-            [params.orbId, messageId],
-          );
-          if (delivered.isErr()) return err(delivered.error);
-        }
-        const sessionSets = initializeSession
-          ? ", harness_session_id = $4, harness_session_header = $5::jsonb"
-          : "";
-        const values: unknown[] = [params.orbId, params.nextCursor, params.nextHeadId];
-        if (initializeSession) values.push(params.session.id, jsonParam(params.session));
-        const updated = await query(
-          `UPDATE orbs SET replication_cursor = $2, replicated_head_id = $3,
+              [params.orbId, messageId],
+            );
+            if (delivered.isErr()) return err(delivered.error);
+          }
+          const sessionSets = initializeSession
+            ? ", harness_session_id = $4, harness_session_header = $5::jsonb"
+            : "";
+          const values: unknown[] = [params.orbId, params.nextCursor, params.nextHeadId];
+          if (initializeSession) values.push(params.session.id, jsonParam(params.session));
+          values.push(newestAlertId);
+          const updated = await query(
+            `UPDATE orbs SET replication_cursor = $2, replicated_head_id = $3,
+             unread_alert_id = COALESCE($${initializeSession ? 6 : 4}, unread_alert_id),
              updated_at = now()${sessionSets}
            WHERE id = $1 RETURNING *`,
-          values,
-        );
-        if (updated.isErr()) return err(updated.error);
-        const row = updated.value.rows[0];
-        if (row === undefined) {
-          return err<OrbRow, ReplicationIntegrityError>({
-            type: "replication_integrity",
-            reason: "mapping_failure",
-            message: "orb row disappeared during commit",
-          });
-        }
-        return ok(mapOrbRow(row));
+            values,
+          );
+          if (updated.isErr()) return err(updated.error);
+          const row = updated.value.rows[0];
+          if (row === undefined) {
+            return err<{ row: OrbRow; publishedAlertId: string | null }, ReplicationIntegrityError>(
+              {
+                type: "replication_integrity",
+                reason: "mapping_failure",
+                message: "orb row disappeared during commit",
+              },
+            );
+          }
+          return ok({ row: mapOrbRow(row), publishedAlertId: newestAlertId });
+        },
+      )
+      .map(({ row, publishedAlertId }) => {
+        if (publishedAlertId !== null)
+          logOrbEvent(task, params.orbId, "alert-published", { recordId: publishedAlertId });
+        return row;
       })
       .mapErr((error): CommitPullError => {
         // A deferred FK/check violation at COMMIT means the batch referenced

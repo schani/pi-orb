@@ -662,6 +662,22 @@ describe("Pi entry mapping", () => {
     expect(record.inboxMessageIds).toBeUndefined();
   });
 
+  it("projects a non-model-context alert with typed message and stable request identity", () => {
+    const mapped = mapPiEntry({
+      type: "custom",
+      id: "alert-id",
+      parentId: null,
+      timestamp: "2026-01-01T00:00:00Z",
+      customType: "pi-orb.alert",
+      data: { message: "<script>\nsecond line", requestId: "req-id" },
+    });
+    expect(mapped._unsafeUnwrap()).toMatchObject({
+      type: "event",
+      eventType: "pi.custom",
+      alert: { message: "<script>\nsecond line", requestId: "req-id" },
+    });
+  });
+
   it("maps displayed and hidden custom messages to typed custom fields", () => {
     const shown = expectMapped({
       ...base,

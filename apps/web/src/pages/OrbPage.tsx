@@ -44,6 +44,7 @@ import { TextFieldFrame } from "../components/TextFieldFrame.tsx";
 import { useWorkspaceUploads } from "../components/useWorkspaceUploads.tsx";
 import {
   type ApiError,
+  acknowledgeOrbAlert,
   archiveOrb,
   deleteOrb,
   describeApiError,
@@ -62,6 +63,12 @@ import { devConsoleDebug } from "../lib/dev-console-debug.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { canRepairFromReplica, mergeReplicatedHistory } from "../lib/history-refresh.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
+import {
+  acceptAlertMetadata,
+  beginAlertEntry,
+  latestEntryAlertId,
+  resolveAlertAck,
+} from "../lib/orb-alert.ts";
 import { isMissing, type OrbLoad, startOrbLoad } from "../lib/orb-load.ts";
 import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
 import { formatTimeRemaining, projectOrbGlyph } from "../lib/project-orbs.ts";
@@ -645,6 +652,7 @@ function CopyCodeButton({ code }: { code: string }) {
 
 export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCache }) {
   const pageRef = useRef<HTMLDivElement>(null);
+  const selectCurrentOrb = useRef<() => void>(() => {});
   usePhoneViewport(pageRef);
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
   const [loaded, setLoaded] = useState<OrbLoad | null>(null);
@@ -680,6 +688,9 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
         projectId={loaded?.orb.isOk() ? loaded.orb.value.projectId : null}
         orbId={orbId}
         pending={pending}
+        onSelect={() => {
+          if (!pending) selectCurrentOrb.current();
+        }}
       />
       {loaded === null ? (
         <div className="orb-main" aria-busy="true" />
@@ -688,6 +699,7 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
           key={loaded.orbId}
           initial={loaded}
           cache={cache}
+          onSelectionReady={selectCurrentOrb}
           pending={pending}
           projectName={
             loaded.orb.isOk() && project?.id === loaded.orb.value.projectId ? project.name : null
@@ -703,11 +715,13 @@ function OrbConversation({
   cache,
   pending,
   projectName,
+  onSelectionReady,
 }: {
   initial: OrbLoad;
   cache: TranscriptCache;
   pending: boolean;
   projectName: string | null;
+  onSelectionReady: { current: () => void };
 }) {
   const orbId = initial.orbId;
   const composerRef = useRef<ComposerHandle>(null);
@@ -741,6 +755,71 @@ function OrbConversation({
   const [orb, setOrb] = useState<OrbView | null>(() =>
     initial.orb.isOk() ? initial.orb.value : null,
   );
+  const orbRef = useRef(orb);
+  orbRef.current = orb;
+  const setObservedOrb = useCallback((next: OrbView | null) => {
+    orbRef.current = next;
+    setOrb(next);
+  }, []);
+  const [alertAckError, setAlertAckError] = useState<string | null>(null);
+  const alertEntry = useRef<string | null>(null);
+  const alertAttempt = useRef(0);
+  const metadataRevision = useRef(0);
+  const latestVisibleAlert = useCallback(
+    () =>
+      latestEntryAlertId(
+        [...transcriptRef.current.records.values()],
+        orbRef.current?.unreadAlertId,
+      ),
+    [],
+  );
+  const acknowledgeEntry = useCallback(
+    (recordId: string | null) => {
+      alertEntry.current = recordId;
+      const attempt = ++alertAttempt.current;
+      setAlertAckError(null);
+      if (recordId === null) return;
+      ++metadataRevision.current;
+      const entry = beginAlertEntry(recordId, null);
+      void acknowledgeOrbAlert(orbId, recordId).then((result) => {
+        if (alertAttempt.current !== attempt) return;
+        ++metadataRevision.current;
+        if (result.isErr()) {
+          setAlertAckError(describeApiError(result.error));
+          return;
+        }
+        const current = orbRef.current;
+        if (current === null) return;
+        const resolved = resolveAlertAck(
+          entry,
+          current.unreadAlertId ?? null,
+          result.value.unreadAlertId,
+        );
+        setObservedOrb(
+          resolved.unreadAlertId === null
+            ? (({ unreadAlertId: _, ...rest }) => rest)(current)
+            : { ...current, unreadAlertId: resolved.unreadAlertId },
+        );
+        setAlertAckError(null);
+      });
+    },
+    [orbId, setObservedOrb],
+  );
+  useEffect(() => {
+    if (document.visibilityState === "visible") {
+      const observed = beginAlertEntry(orbRef.current?.unreadAlertId, latestVisibleAlert());
+      acknowledgeEntry(observed.recordId);
+    }
+    onSelectionReady.current = () => {
+      acknowledgeEntry(
+        beginAlertEntry(orbRef.current?.unreadAlertId, latestVisibleAlert()).recordId,
+      );
+    };
+    return () => {
+      ++alertAttempt.current;
+      onSelectionReady.current = () => {};
+    };
+  }, [acknowledgeEntry, latestVisibleAlert, onSelectionReady]);
   const uploads = useWorkspaceUploads(orbId, orb?.state === "running");
   const mainRef = useRef<HTMLElement>(null);
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
@@ -1007,6 +1086,7 @@ function OrbConversation({
     state.connection,
     state.activity,
     orb?.sleepUntil,
+    orb?.unreadAlertId,
   );
   useEffect(() => setOrbFavicon(faviconStatus), [faviconStatus]);
   useEffect(() => () => setOrbFavicon("neutral"), []);
@@ -1026,10 +1106,11 @@ function OrbConversation({
     if (orbNotFound) return;
     let cancelled = false;
     const poll = async () => {
+      const revision = metadataRevision.current;
       const result = await getOrb(orbId);
-      if (cancelled) return;
+      if (cancelled || !acceptAlertMetadata(revision, metadataRevision.current)) return;
       if (result.isOk()) {
-        setOrb(result.value);
+        setObservedOrb(result.value);
         setOrbError(null);
         observeOrbResource("found");
       } else {
@@ -1048,7 +1129,7 @@ function OrbConversation({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [orbId, orbNotFound]);
+  }, [orbId, orbNotFound, setObservedOrb]);
 
   useEffect(() => {
     if (orbNotFound) return;
@@ -1199,11 +1280,12 @@ function OrbConversation({
           const event = frame.event;
           // Auto-naming runs concurrently with the first turn. Refresh once at notification time
           // so a just-committed display name wins even if the ordinary 2s orb poll has not seen it.
+          const revision = metadataRevision.current;
           void getOrb(orbId).then((latest) => {
             if (!active) return;
             const orbName = latest.isOk() ? (latest.value.name ?? null) : orbNameRef.current;
-            if (latest.isOk()) {
-              setOrb(latest.value);
+            if (latest.isOk() && acceptAlertMetadata(revision, metadataRevision.current)) {
+              setObservedOrb(latest.value);
               orbNameRef.current = orbName;
             }
             const result = showTurnNotification({
@@ -1231,7 +1313,7 @@ function OrbConversation({
       liveRef.current = null;
       connection.dispose();
     };
-  }, [orbId, shouldConnect]);
+  }, [orbId, shouldConnect, setObservedOrb]);
 
   const maxPromptBytes = state.welcome?.maxPromptBytes ?? FALLBACK_MAX_PROMPT_BYTES;
 
@@ -1412,7 +1494,10 @@ function OrbConversation({
 
   if (orbNotFound) return <NotFoundPage resourceName="Orb" />;
 
-  const glyph = orb === null ? null : projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil);
+  const glyph =
+    orb === null
+      ? null
+      : projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil, orb.unreadAlertId);
   const lifecycleWord = orb === null ? null : orbLifecycleStatus(orb, ageNow);
   const busyLocked = orb?.state === "deleting" || orb?.state === "archiving";
   const expiresIn =
@@ -1491,7 +1576,7 @@ function OrbConversation({
           </div>
           {glyph !== null && lifecycleWord !== null && (
             <span className="orb-life">
-              <StateTile glyph={glyph} decorative />
+              <StateTile glyph={glyph} decorative={glyph.state !== "alert"} />
               <span className="orb-life-word">{lifecycleWord}</span>
             </span>
           )}
@@ -1732,6 +1817,14 @@ function OrbConversation({
             )}
             {state.notice !== null && <OrbNotice>{state.notice}</OrbNotice>}
           </div>
+          {alertAckError !== null && (
+            <p className="error-text" role="alert">
+              Alert acknowledgement failed: {alertAckError}{" "}
+              <button type="button" onClick={() => acknowledgeEntry(alertEntry.current)}>
+                retry
+              </button>
+            </p>
+          )}
           {state.historyError !== null && (
             <OrbNotice error>
               history unavailable: {describeApiError(state.historyError)}{" "}

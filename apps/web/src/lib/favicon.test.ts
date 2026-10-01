@@ -36,6 +36,24 @@ describe("deriveOrbFaviconStatus", () => {
 });
 
 describe("setOrbFavicon", () => {
+  it("gives an unread alert precedence over every favicon lifecycle and restores current state", () => {
+    for (const state of [
+      "running",
+      "creating",
+      "starting",
+      "stopping",
+      "stopped",
+      "failed",
+      "archiving",
+      "archived",
+      "deleting",
+    ] as const) {
+      expect(deriveOrbFaviconStatus(state, "open", "busy", undefined, "rec-1")).toBe("alert");
+    }
+    expect(deriveOrbFaviconStatus("stopped", "closed", null, "tomorrow", "rec-1")).toBe("alert");
+    expect(deriveOrbFaviconStatus("stopped", "closed", null, "tomorrow", null)).toBe("sleeping");
+  });
+
   it("replaces the href on the one favicon link", () => {
     const attributes = new Map<string, string>();
     const target = {

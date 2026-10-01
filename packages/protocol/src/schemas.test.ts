@@ -1,6 +1,8 @@
 import { Check } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import {
+  AckOrbAlertRequestSchema,
+  AckOrbAlertResponseSchema,
   ClientFrameSchema,
   ControlPlaneHttpErrorSchema,
   CreateOrbRequestSchema,
@@ -70,6 +72,22 @@ const sessionMetadata = {
 };
 
 describe("history schemas", () => {
+  it("accepts typed alert records and acknowledgement contracts", () => {
+    expect(
+      Check(HistoryRecordSchema, {
+        ...eventRecord,
+        eventType: "pi.custom",
+        alert: { message: "<b>\nhello", requestId: "req" },
+      }),
+    ).toBe(true);
+    expect(
+      Check(HistoryRecordSchema, { ...eventRecord, alert: { message: 4, requestId: "req" } }),
+    ).toBe(false);
+    expect(Check(AckOrbAlertRequestSchema, { recordId: "rec-4" })).toBe(true);
+    expect(Check(AckOrbAlertResponseSchema, { unreadAlertId: null })).toBe(true);
+    expect(Check(AckOrbAlertResponseSchema, { unreadAlertId: "rec-4" })).toBe(true);
+  });
+
   it("accepts all record variants", () => {
     expect(Check(HistoryRecordSchema, messageRecord)).toBe(true);
     expect(Check(HistoryRecordSchema, compactionRecord)).toBe(true);

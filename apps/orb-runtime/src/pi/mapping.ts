@@ -442,7 +442,18 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
           eventType: "agent.settings_fallback",
           content: [textBlock(data["message"])],
         });
-      return ok({ ...identity, type: "event", eventType: "pi.custom" });
+      const alert =
+        entry["customType"] === "pi-orb.alert" &&
+        typeof data?.["message"] === "string" &&
+        typeof data["requestId"] === "string"
+          ? { message: data["message"], requestId: data["requestId"] }
+          : null;
+      return ok({
+        ...identity,
+        type: "event",
+        eventType: "pi.custom",
+        ...(alert === null ? {} : { alert }),
+      });
     }
     case "custom_message": {
       const customType = stringOf(entry, "customType") ?? "";

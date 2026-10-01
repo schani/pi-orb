@@ -11,7 +11,8 @@ export type OrbFaviconStatus =
   | "failed"
   | "archived"
   | "archiving"
-  | "deleting";
+  | "deleting"
+  | "alert";
 
 export const FAVICON_HREFS: Record<OrbFaviconStatus, string> = {
   neutral: "/favicons/neutral.svg",
@@ -24,6 +25,7 @@ export const FAVICON_HREFS: Record<OrbFaviconStatus, string> = {
   archived: "/favicons/archived.svg",
   archiving: "/favicons/archiving.svg",
   deleting: "/favicons/deleting.svg",
+  alert: "/favicons/alert.svg",
 };
 
 export function isOrbSleeping(orbState: OrbState | null, sleepUntil: string | undefined): boolean {
@@ -36,7 +38,9 @@ export function deriveOrbFaviconStatus(
   connection: LiveConnectionStatus,
   activity: "idle" | "busy" | null,
   sleepUntil?: string,
+  unreadAlertId?: string | null,
 ): OrbFaviconStatus {
+  if (unreadAlertId) return "alert";
   if (orbState === null) return "neutral";
   if (orbState === "failed") return "failed";
   if (isOrbSleeping(orbState, sleepUntil)) return "sleeping";

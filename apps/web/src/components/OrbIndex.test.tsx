@@ -28,6 +28,7 @@ const props = {
   now: Date.parse(project.createdAt),
   onChanged: () => {},
   onCreated: () => {},
+  onSelect: () => {},
 };
 
 describe("stacked project index", () => {
@@ -87,6 +88,17 @@ describe("stacked project index", () => {
     expect(html).toContain('src="/favicons/sleeping.svg"');
     expect(html).toContain('title="Orb sleeping"');
     expect(html).toContain('aria-current="page"');
+  });
+
+  it("flags even a selected archived row without changing its shelf", () => {
+    const flagged = { ...orb, state: "archived" as const, unreadAlertId: "rec-1" };
+    const html = renderToStaticMarkup(
+      <IndexProject {...props} list={{ items: [flagged], error: null }} />,
+    );
+    expect(html).toContain("ix-row-alert ix-row-current");
+    expect(html).toContain('src="/favicons/alert.svg"');
+    expect(html).toContain('alt="Unread alert"');
+    expect(html).toContain('class="project-archive"');
   });
 
   it("retains stale rows and reports partial load errors locally", () => {

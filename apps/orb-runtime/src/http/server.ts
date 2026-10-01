@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import websocketPlugin from "@fastify/websocket";
 import {
   CAPABILITY_ABORT,
@@ -9,7 +9,9 @@ import {
   HISTORY_PULL_DEFAULT_LIMIT,
   PrepareIdleStopRequestSchema,
   type RequestResultFrame,
+  RUNTIME_ALERT_PATH,
   RUNTIME_SUBPROTOCOL,
+  RuntimeAlertRequestSchema,
   type RuntimeHttpError,
   type ServerFrame,
   TERMINAL_SUBPROTOCOL,
@@ -47,11 +49,40 @@ function runtimeError(
 export function buildRuntimeServer(
   agent: PiOrbAgent,
   terminalManager: TerminalManager,
+  alertToken: string | undefined = process.env.PI_ORB_RUNTIME_TOKEN,
 ): FastifyInstance {
   const app = Fastify({ logger: false });
   const registry = new RequestRegistry();
 
   app.get("/v1/health", async (_request, reply) => reply.status(200).send(agent.getHealth()));
+
+  // JSON.stringify may escape each permitted UTF-16 code unit as six bytes.
+  app.post(RUNTIME_ALERT_PATH, { bodyLimit: 32 * 1024 }, async (request, reply) => {
+    const authorization = request.headers.authorization;
+    const expected = alertToken === undefined ? null : Buffer.from(`Bearer ${alertToken}`);
+    const received = typeof authorization === "string" ? Buffer.from(authorization) : null;
+    if (
+      expected === null ||
+      received === null ||
+      expected.length !== received.length ||
+      !timingSafeEqual(expected, received)
+    )
+      return reply.status(401).send(runtimeError("invalid_request", "unauthorized alert", false));
+    if (!Check(RuntimeAlertRequestSchema, request.body) || request.body.message.trim().length === 0)
+      return reply.status(400).send(runtimeError("invalid_request", "invalid alert", false));
+    const outcome = agent.appendAlert(request.body);
+    if (outcome.isErr())
+      return reply
+        .status(outcome.error.code === "conflict" ? 409 : 503)
+        .send(
+          runtimeError(
+            outcome.error.code === "conflict" ? "invalid_request" : "alert_unavailable",
+            outcome.error.message,
+            outcome.error.code !== "conflict",
+          ),
+        );
+    return reply.status(200).send(outcome.value);
+  });
 
   app.post("/v1/prepare-idle-stop", async (request, reply) => {
     if (!Check(PrepareIdleStopRequestSchema, request.body))

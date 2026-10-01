@@ -92,6 +92,22 @@ describe("dashboard search source", () => {
     });
   });
 
+  it("shows an unread flag in Find without replacing search metadata", () => {
+    const flagged = { ...orb("flagged", "Important", "deleting"), unreadAlertId: "rec-1" };
+    const source = buildDashboardSearchSource({
+      projects: [project("project-1", "Atlas", "https://github.com/acme/atlas")],
+      projectsLoading: false,
+      projectsFailed: false,
+      now,
+      orbLists: { "project-1": { type: "loaded", items: [flagged] } },
+    });
+    expect(source.items.find((item) => item.title === "Important")?.glyph).toEqual({
+      state: "alert",
+      iconHref: "/favicons/alert.svg",
+      label: "Unread alert",
+    });
+  });
+
   it("does not make ids or lifecycle state implicitly searchable", () => {
     const source = buildDashboardSearchSource({
       projects: [project("secret-project-id", "Atlas", "https://github.com/acme/atlas")],

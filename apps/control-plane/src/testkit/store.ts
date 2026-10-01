@@ -14,6 +14,7 @@ import type {
   StoreError,
 } from "../domain/errors.ts";
 import { jsonEqual } from "../domain/json-equal.ts";
+import { logOrbEvent } from "../domain/log.ts";
 import type { OrbDeletionRow, OrbMessageRow, OrbRow, ProjectRow } from "../domain/orb.ts";
 import type {
   CasTransitionParams,
@@ -1876,6 +1877,39 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return null;
   }
 
+  ackOrbAlert(
+    task: SimulationTask,
+    orbId: string,
+    recordId: string,
+  ): ResultAsync<
+    string | null,
+    StoreError | { type: "alert_not_replicated" } | { type: "orb_not_found" }
+  > {
+    const run = async () => {
+      await task.sleep(
+        1 + task.random("store latency: ack alert") * this.maxLatencyMs,
+        "ack alert",
+      );
+      await task.failpoint(FAILPOINTS.storeAckBefore, orbId);
+      const orb = this.orbs.get(orbId);
+      if (orb === undefined) return { type: "orb_not_found" as const };
+      const record = this.replicaOf(orbId).records.get(recordId);
+      if (record?.type !== "event" || record.alert === undefined)
+        return { type: "alert_not_replicated" as const };
+      const pointer = orb.unreadAlertId;
+      if (pointer === recordId) {
+        this.orbs.set(orbId, { ...orb, unreadAlertId: null });
+        logOrbEvent(task, orbId, "alert-acknowledged", { recordId });
+      }
+      await task.failpoint(FAILPOINTS.storeAckAfter, orbId);
+      return { pointer: pointer === recordId ? null : pointer };
+    };
+    return ResultAsync.fromPromise(run(), (error) => {
+      if (error instanceof ApplicationFailure) return unavailable(`ack alert: ${error.message}`);
+      return task.abortSimulation(error);
+    }).andThen((outcome) => ("pointer" in outcome ? okAsync(outcome.pointer) : errAsync(outcome)));
+  }
+
   commitPullBatch(
     task: SimulationTask,
     params: CommitPullBatchParams,
@@ -1984,8 +2018,12 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           ),
         );
       }
+      const newestAlert = staged.findLast(
+        (record) => record.type === "event" && record.alert !== undefined,
+      );
       const updated: OrbRow = {
         ...orb,
+        ...(newestAlert !== undefined ? { unreadAlertId: newestAlert.id } : {}),
         replicationCursor: params.nextCursor,
         replicatedHeadId: params.nextHeadId,
         ...(sessionCheck !== null
@@ -1993,6 +2031,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           : {}),
       };
       this.orbs.set(orb.id, updated);
+      if (newestAlert !== undefined)
+        logOrbEvent(task, orb.id, "alert-published", { recordId: newestAlert.id });
       return { kind: "committed", row: updated };
     };
 

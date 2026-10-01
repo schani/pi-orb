@@ -29,6 +29,10 @@ case "${1:-}" in
     shift
     exec node "$app_root/apps/orb-runtime/src/sleep/cli.ts" "$@"
     ;;
+  alert)
+    shift
+    exec node "$app_root/apps/orb-runtime/src/alert/cli.ts" "$@"
+    ;;
   host)
     shift
     exec node "$app_root/apps/orb-runtime/src/hosting/cli.ts" "$@"
@@ -42,6 +46,7 @@ case "${1:-}" in
     echo "  pi-orb archive" >&2
     echo "  pi-orb delete" >&2
     echo "  pi-orb sleep <positive integer><s|m|h|d>" >&2
+    echo '  pi-orb alert "message" [--request-id <id>]' >&2
     echo "  pi-orb host <file> [path] [--request-id <uuid>]" >&2
     echo "  pi-orb host ls" >&2
     echo "  pi-orb host rm <path>" >&2

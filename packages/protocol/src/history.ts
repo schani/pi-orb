@@ -252,6 +252,8 @@ export const EventRecordSchema = Type.Object(
     custom: Type.Optional(CustomMessageSchema),
     /** Present iff the custom message is a subagent receipt. */
     subagent: Type.Optional(SubagentNoticeSchema),
+    /** Non-model-context orb alert rendered by clients. The record id identifies acknowledgement. */
+    alert: Type.Optional(Type.Object({ message: Type.String(), requestId: Type.String() }, closed)),
     /** Durable inbox identities delivered by this event, in order. */
     inboxMessageIds: Type.Optional(Type.Array(Type.String())),
   },

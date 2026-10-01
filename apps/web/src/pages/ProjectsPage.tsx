@@ -62,7 +62,7 @@ interface OrbEntryProps {
 
 function OrbEntry({ orb, now, archivingOrb, deletingOrb, onArchive, onDelete }: OrbEntryProps) {
   const actions = projectOrbActions(orb.state);
-  const glyph = projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil);
+  const glyph = projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil, orb.unreadAlertId);
   const name = orb.name ?? "untitled orb";
   const age = formatProjectOrbAge(orb.updatedAt, now);
   const blocker =

@@ -669,6 +669,10 @@ a.project-new-orb-icon:focus-visible {
   border-left-color: var(--st-archng);
 }
 
+.orb-entry-alert {
+  border-color: #b21f2d;
+}
+
 .orb-entry-del {
   border-left-color: var(--st-del);
   border-left-style: dotted;
@@ -1471,8 +1475,21 @@ button.modal-close:focus-visible {
 }
 
 .rec-you,
-.rec-orb {
+.rec-orb,
+.rec-alert {
   display: block;
+}
+
+.rec-alert {
+  padding: 4px 0;
+}
+
+.alert-band {
+  padding: 10px 12px;
+  background: #b21f2d;
+  color: #fff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .rec-px {

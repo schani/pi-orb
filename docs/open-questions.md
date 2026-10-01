@@ -139,3 +139,7 @@ Genuinely undecided design questions. Numbering is frozen and append-only — re
 ## Orb self-deletion
 
 70. **Resolved (2026-09-19):** the user approved plain `pi-orb delete`, self-only and explicit-user-request-only, reusing immediate permanent deletion rather than waiting for the requesting turn, and requested review of the agent prompt change. The invocation, authorization fences, observability, and test/DST plan are in `docs/orb-deletion.md`. Implementation is authorized; deployment is not.
+
+## Orb alerts
+
+71. **Resolved (2026-09-30):** the user selected the flag silhouette without `!` and the red reverse-band transcript treatment, accepted that new alerts while already open remain flagged until reselection/re-entry and that fleet badges follow normal replication latency, and authorized the simplest implementation, DST/tests first. `pi-orb alert "message"` persists a transcript alert and sets a shared unread flag independent of lifecycle state; selection clears only the observed alert. Contract, retained alternatives, and local implementation/qualification (2026-10-01): `docs/orb-alerts.md`. Deployment is not authorized.

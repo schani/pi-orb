@@ -235,7 +235,11 @@ export function AppSearchDialog({
                     if (onSelect !== undefined) {
                       event.preventDefault();
                       onSelect(item);
-                    } else onResultClick(event);
+                    } else {
+                      if (shouldCloseAppSearchForActivation(event) && !event.defaultPrevented)
+                        source.onActivate?.(item);
+                      onResultClick(event);
+                    }
                   }}
                 >
                   {item.glyph === undefined ? (

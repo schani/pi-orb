@@ -9,6 +9,7 @@ import { err, ok, type Result } from "neverthrow";
 export const INSPECTION_USAGE = `usage:
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
+  pi-orb alert "message" [--request-id <id>]
   pi-orb id-token --audience <audience> [--ttl-seconds <60..3600>]
   pi-orb archive
   pi-orb delete`;
@@ -114,6 +115,9 @@ function renderRecord(record: HistoryRecord): string {
   }
   if (record.type === "compaction") {
     return `## compaction\n\n${renderBlocks(record.summary)}`;
+  }
+  if (record.alert !== undefined) {
+    return `## alert\n\n${record.alert.message}`;
   }
   return `## event: ${record.eventType}${
     record.content === undefined ? "" : `\n\n${renderBlocks(record.content)}`

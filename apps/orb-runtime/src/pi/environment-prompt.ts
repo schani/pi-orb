@@ -17,6 +17,8 @@ For MCP servers, ask the user to open the project's config gear: MCPs (OAuth Con
 
 Push/export needed files before archive/delete. \`pi-orb archive\` only if the user asks to archive this orb: retains conversation, permanently deletes workspace. \`pi-orb delete\` only on explicit user request to delete this orb: permanently deletes workspace, conversation and hosted files; may interrupt the turn before acknowledgement.
 
+\`pi-orb alert "message"\` adds a transcript alert and flags the orb until the user opens it.
+
 \`pi-orb sleep 1h\` sets an absolute wake deadline, stops after admitted work finishes, and returns once durably accepted.
 
 Executable repo-root hooks: \`.agents/setup\` runs once per compute incarnation before the agent, without identity; install toolchains there. \`.agents/resume\` runs every start with identity to authenticate credentials. Both idempotent; logs: \`$HOME/.cache/pi-orb/logs\`.`;

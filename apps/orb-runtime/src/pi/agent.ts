@@ -22,6 +22,8 @@ import {
   type OrbBootContext,
   type OrbBootContextResponse,
   type OrbMessageSystem,
+  type RuntimeAlertRequest,
+  type RuntimeAlertResponse,
   type RuntimeEvent,
   type RuntimeHealth,
   type RuntimeHooks,
@@ -210,6 +212,7 @@ export class PiOrbAgent {
   private executionId: string | null = null;
   private supervisorId: string | null = null;
   private idleStopPrepared = false;
+  private shuttingDown = false;
   private readonly idleStopFence: IdleStopFence;
   private activity: "idle" | "busy" = "idle";
   /** This boot's interrupted-turn decision, when notable (docs/lifecycle.md). */
@@ -315,6 +318,7 @@ export class PiOrbAgent {
 
   /** Terminates a resume hook that outlived its blocking window. */
   shutdownHooks(): void {
+    this.shuttingDown = true;
     this.hooks?.shutdown();
   }
 
@@ -1542,6 +1546,103 @@ export class PiOrbAgent {
     }
     this.liveHistory?.observe("message_end");
     return ok(true);
+  }
+
+  /** Direct SDK append does not wait for an agent/tool turn; the session file is fsynced before publication. */
+  appendAlert(
+    request: RuntimeAlertRequest,
+  ): Result<RuntimeAlertResponse, { code: "unavailable" | "conflict"; message: string }> {
+    const manager = this.sessionManager;
+    if (
+      this.health.status !== "ready" ||
+      manager === null ||
+      this.idleStopPrepared ||
+      this.shuttingDown
+    )
+      return err({ code: "unavailable", message: "Runtime is not accepting alerts." });
+    const entries = Result.fromThrowable(
+      () => manager.getEntries(),
+      () => ({ code: "unavailable" as const, message: "Cannot read alert history." }),
+    )();
+    if (entries.isErr()) return err(entries.error);
+    const existing = entries.value.find(
+      (entry) =>
+        entry.type === "custom" &&
+        entry.customType === "pi-orb.alert" &&
+        entry.data &&
+        typeof entry.data === "object" &&
+        "requestId" in entry.data &&
+        entry.data.requestId === request.requestId,
+    );
+    if (existing !== undefined) {
+      if (
+        existing.type !== "custom" ||
+        !existing.data ||
+        typeof existing.data !== "object" ||
+        !("message" in existing.data) ||
+        existing.data.message !== request.message
+      )
+        return err({ code: "conflict", message: "Request id was used for a different alert." });
+      const durableDuplicate = Result.fromThrowable(
+        () => manager.getSessionFile(),
+        () => ({ code: "unavailable" as const, message: "Cannot read alert session file." }),
+      )();
+      if (
+        durableDuplicate.isErr() ||
+        !durableDuplicate.value ||
+        syncSessionFile(durableDuplicate.value).isErr()
+      )
+        return err({
+          code: "unavailable",
+          message: "Cannot confirm alert persistence; retry with the same request id.",
+        });
+      return ok({ v: 1, id: existing.id, duplicate: true });
+    }
+    const sessionFile = Result.fromThrowable(
+      () => manager.getSessionFile(),
+      () => ({ code: "unavailable" as const, message: "Cannot read alert session file." }),
+    )();
+    if (sessionFile.isErr()) return err(sessionFile.error);
+    const file = sessionFile.value;
+    if (!file) return err({ code: "unavailable", message: "Persistent session is unavailable." });
+    const saved = Result.fromThrowable(
+      () => {
+        return manager.appendCustomEntry("pi-orb.alert", {
+          message: request.message,
+          requestId: request.requestId,
+        });
+      },
+      () => ({ code: "unavailable" as const, message: "Cannot append alert." }),
+    )();
+    if (saved.isErr() || saved.value === null) {
+      this.health = this.failed(
+        "alert_persistence_failed",
+        "Alert persistence is uncertain; restart required.",
+        true,
+      );
+      return err({
+        code: "unavailable",
+        message: "Alert persistence is uncertain; retry with the same request id after restart.",
+      });
+    }
+    const durable = syncSessionFile(file);
+    if (durable.isErr()) {
+      this.health = this.failed("alert_persistence_failed", durable.error.message, true);
+      return err({
+        code: "unavailable",
+        message: "Alert persistence is uncertain; retry with the same request id after restart.",
+      });
+    }
+    const published = this.liveHistory?.flushPersisted();
+    if (published?.isErr()) {
+      this.health = this.failed("alert_publication_failed", published.error.message, true);
+      return err({
+        code: "unavailable",
+        message:
+          "Alert persisted but publication failed; retry with the same request id after restart.",
+      });
+    }
+    return ok({ v: 1, id: saved.value, duplicate: false });
   }
 
   gateView(): AgentGateView {

@@ -47,7 +47,8 @@ export type OrbGlyphState =
   | "fail"
   | "arch"
   | "archng"
-  | "del";
+  | "del"
+  | "alert";
 
 export interface OrbGlyph {
   /** Selects the hue for the glyph and the entry's left border. */
@@ -67,6 +68,7 @@ const GLYPHS: Record<OrbGlyphState, string> = {
   arch: FAVICON_HREFS.archived,
   archng: FAVICON_HREFS.archiving,
   del: FAVICON_HREFS.deleting,
+  alert: FAVICON_HREFS.alert,
 };
 
 /** Shared favicon/UI tile, refined by the latest activity observation. */
@@ -74,7 +76,9 @@ export function projectOrbGlyph(
   state: OrbState,
   activity?: OrbView["activity"],
   sleepUntil?: OrbView["sleepUntil"],
+  unreadAlertId?: string | null,
 ): OrbGlyph {
+  if (unreadAlertId) return { state: "alert", iconHref: GLYPHS.alert, label: "Unread alert" };
   const busy = state === "running" && activity === "busy";
   const sleeping = isOrbSleeping(state, sleepUntil);
   const glyphState: OrbGlyphState = busy

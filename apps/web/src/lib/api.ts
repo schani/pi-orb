@@ -1,4 +1,5 @@
 import {
+  AckOrbAlertResponseSchema,
   ControlPlaneHttpErrorSchema,
   type CreateOrbRequest,
   type CreateProjectRequest,
@@ -373,6 +374,18 @@ export function deleteOrb(orbId: string): Promise<Result<OrbView, ApiError>> {
   return apiFetch(OrbViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}`, {
     method: "DELETE",
   });
+}
+
+export function acknowledgeOrbAlert(orbId: string, recordId: string) {
+  return apiFetch(
+    AckOrbAlertResponseSchema,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/alerts/ack`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ recordId }),
+    },
+  );
 }
 
 export function getOrb(orbId: string): Promise<Result<OrbView, ApiError>> {

@@ -145,6 +145,10 @@ The explicit transcript route remains trusted-company cross-user access. It retu
 
 This is intentionally not implemented by calling `/api/v1/*`: the cloud runtime role hard-registers only `/runtime/v1/*`. It adds no table, migration, search cache, pagination, or mutable operation. Because these reads make no autonomous decision and write no state, durable lifecycle events would be noise; typed CLI errors are the user-visible observability, and route logging must never include transcript content. Conventional boundary tests cover protocol validation, CLI stdout/stderr and exit classes, bearer authorization, sanitized retryable/non-retryable store failures, and missing/deleting targets; the full-slice E2E covers one real sibling reading another. DST was rejected for this read path: it has no retry loop, lease, CAS, durable mutation, or concurrent state machine whose interleavings define correctness. If a stronger cross-row snapshot contract is later required during concurrent project/orb deletion, define that transaction boundary first and test it at the store/route concurrency boundary rather than adding schedule permutations to the current sequential reads.
 
+### Orb alerts (2026-09-30)
+
+`OrbView.unreadAlertId` is present while an alert is unread. Browser `POST /api/v1/orbs/:orbId/alerts/ack` accepts `{recordId}` and returns `{unreadAlertId: string | null}`. It clears only the observed alert, preserving a newer pointer. Missing orbs return 404; an unreplicated/non-alert identity returns 409; unavailable persistence/replication returns 503. The response is non-cacheable. Resource GETs never acknowledge alerts. Creation uses an authenticated local runtime endpoint, not a control-plane transcript write. `docs/orb-alerts.md` specifies persistence, entry semantics, and observability.
+
 ### In-orb spawning (decided and implemented 2026-09-08)
 
 `PUT /runtime/v1/orbs/:orbId/spawn` accepts `{ prompt, name? }` from a running orb's per-incarnation bearer. It derives the project from the caller and atomically commits an independent orb, its initial inbox message, and immutable acceptance/provenance. It returns non-cacheable `202 { orbId, projectId, url, messageId }` without waiting for boot or completion; `url` uses configured `PI_ORB_APP_ORIGIN`, not the runtime service origin. The new orb ID also identifies the initial message and retries. Same caller/body retries do not duplicate work; altered requests, retired identity, and lifecycle fences fail explicitly. CLI usage, transaction/authority boundaries, error classes, and project-owned deletion-safe retry tombstones: `docs/orb-spawning.md`.
@@ -208,6 +212,7 @@ interface OrbView {
     | "archiving" | "archived";
   stateVersion: number;
   activity?: "idle" | "busy";
+  unreadAlertId?: string;
   checkoutCommit?: string;
   lastError?: string;
   stateDetail?:

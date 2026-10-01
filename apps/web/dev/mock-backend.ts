@@ -772,6 +772,71 @@ async function handleApi(
     return true;
   }
 
+  const alertRoute = /^\/api\/v1\/orbs\/([^/]+)\/(fixture-alert|alerts\/ack)$/.exec(path);
+  if (method === "POST" && alertRoute !== null) {
+    const orbId = decodeURIComponent(alertRoute[1] ?? "");
+    const orb = state.orbs.get(orbId);
+    if (orb === undefined) {
+      notFound(response);
+      return true;
+    }
+    const body = await readJson(request);
+    if (body === null || typeof body !== "object") {
+      sendJson(response, 400, {
+        error: { code: "invalid_request", message: "invalid alert", retryable: false },
+      });
+      return true;
+    }
+    if (alertRoute[2] === "alerts/ack") {
+      const recordId = "recordId" in body ? body.recordId : undefined;
+      if (typeof recordId !== "string") {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "invalid record id", retryable: false },
+        });
+        return true;
+      }
+      if (orb.unreadAlertId === recordId) {
+        const { unreadAlertId: _, ...cleared } = orb;
+        state.orbs.set(orbId, cleared);
+      }
+      sendJson(response, 200, { unreadAlertId: state.orbs.get(orbId)?.unreadAlertId ?? null });
+      return true;
+    }
+    const message = "message" in body ? body.message : undefined;
+    const requestId = "requestId" in body ? body.requestId : undefined;
+    if (typeof message !== "string" || typeof requestId !== "string") {
+      sendJson(response, 400, {
+        error: { code: "invalid_request", message: "invalid alert", retryable: false },
+      });
+      return true;
+    }
+    const records = state.histories.get(orbId) ?? [];
+    const record: HistoryRecord = {
+      id: randomUUID(),
+      parentId: records.at(-1)?.id ?? null,
+      timestamp: now(),
+      type: "event",
+      eventType: "pi.custom",
+      alert: { message, requestId },
+      overflow: {},
+    };
+    records.push(record);
+    state.histories.set(orbId, records);
+    state.orbs.set(orbId, { ...orb, unreadAlertId: record.id });
+    for (const session of state.liveSessions.get(orbId) ?? []) {
+      send(session.socket, {
+        v: 1,
+        type: "history.record",
+        at: now(),
+        record,
+        headId: record.id,
+        retiredBlockIds: [],
+      });
+    }
+    sendJson(response, 201, { recordId: record.id });
+    return true;
+  }
+
   const instructionsRoute = /^\/api\/v1\/projects\/([^/]+)\/instructions$/.exec(path);
   if (instructionsRoute && (method === "GET" || method === "PUT")) {
     response.setHeader("cache-control", "no-store");

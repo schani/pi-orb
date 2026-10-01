@@ -56,6 +56,7 @@ const orb: OrbRow = {
   runtimeTokenHash: null,
   replicationCursor: null,
   replicatedHeadId: null,
+  unreadAlertId: null,
   lastBusyAt: null,
   uploadActiveUntil: null,
   stopReason: null,
@@ -140,6 +141,49 @@ export function storeSemanticsContractTests(
         second.isErr() && second.error.type === "project_conflict" && second.error.reason,
       ).toBe("concurrent_change");
       expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.userTimeZone).toBe("Asia/Tokyo");
+    });
+
+    it("publishes only inserted alerts and compare-clears without erasing a newer alert", async () => {
+      await seed();
+      const alert = (id: string, parentId: string | null): HistoryRecord => ({
+        id,
+        parentId,
+        timestamp: "2026-08-07T00:00:00.000Z",
+        type: "event",
+        eventType: "pi.custom",
+        content: [{ type: "text", text: id }],
+        alert: { message: id, requestId: id },
+        overflow: {},
+      });
+      const a = alert("alert-a", null);
+      const b = alert("alert-b", a.id);
+      const commit = (cursor: string | null, records: HistoryRecord[]) =>
+        store.commitPullBatch(task, {
+          orbId: orb.id,
+          expectedCursor: cursor,
+          session,
+          records,
+          nextCursor: records[records.length - 1]?.id ?? "",
+          nextHeadId: records[records.length - 1]?.id ?? "",
+        });
+      expect((await commit(null, [a]))._unsafeUnwrap().unreadAlertId).toBe(a.id);
+      expect((await store.ackOrbAlert(task, orb.id, a.id))._unsafeUnwrap()).toBeNull();
+      expect((await commit(a.id, [a, b]))._unsafeUnwrap().unreadAlertId).toBe(b.id);
+      expect((await store.ackOrbAlert(task, orb.id, a.id))._unsafeUnwrap()).toBe(b.id);
+      expect((await store.ackOrbAlert(task, orb.id, b.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.ackOrbAlert(task, orb.id, b.id))._unsafeUnwrap()).toBeNull();
+      expect((await store.ackOrbAlert(task, orb.id, "unreplicated"))._unsafeUnwrapErr().type).toBe(
+        "alert_not_replicated",
+      );
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.unreadAlertId).toBeNull();
+      const c = alert("alert-c", b.id);
+      const d = alert("alert-d", c.id);
+      expect((await commit(b.id, [c, d]))._unsafeUnwrap().unreadAlertId).toBe(d.id);
+      expect((await store.ackOrbAlert(task, orb.id, c.id))._unsafeUnwrap()).toBe(d.id);
+      expect((await store.ackOrbAlert(task, orb.id, d.id))._unsafeUnwrap()).toBeNull();
+      const message: HistoryRecord = { ...first, id: "following", parentId: d.id };
+      expect((await commit(d.id, [d, message]))._unsafeUnwrap().unreadAlertId).toBeNull();
+      expect((await store.ackOrbAlert(task, orb.id, d.id))._unsafeUnwrap()).toBeNull();
     });
 
     it("atomically accepts and resolves scheduled sleep with singleton system provenance", async () => {

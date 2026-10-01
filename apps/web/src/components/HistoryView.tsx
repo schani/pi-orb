@@ -167,6 +167,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 type Turn =
   | { kind: "user"; record: MessageRecord }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
+  | { kind: "alert"; record: EventRecord; message: string }
   | { kind: "shell"; record: EventRecord; shell: NonNullable<EventRecord["shell"]> }
   | { kind: "compaction"; record: CompactionRecord };
 
@@ -299,7 +300,9 @@ function groupTurns(records: readonly HistoryRecord[]): Turn[] {
         turns.push({ kind: "compaction", record });
         break;
       case "event":
-        if (record.shell !== undefined) {
+        if (record.alert !== undefined) {
+          turns.push({ kind: "alert", record, message: record.alert.message });
+        } else if (record.shell !== undefined) {
           turns.push({ kind: "shell", record, shell: record.shell });
         } else if (isDisplayedCustomMessage(record)) {
           appendAgentPart(record);
@@ -348,6 +351,14 @@ function renderTurn(turn: Turn, live?: LiveAgentContent, busy = false): ReactNod
           <div className="rec-bd">
             {renderAgentRecords(turn.records)}
             {live !== undefined && renderLiveAgentContent(live, busy)}
+          </div>
+        </article>
+      );
+    case "alert":
+      return (
+        <article className="rec rec-alert" key={turn.record.id} aria-label="Orb alert">
+          <div className="rec-bd">
+            <div className="alert-band">{turn.message}</div>
           </div>
         </article>
       );

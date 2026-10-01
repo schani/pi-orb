@@ -52,6 +52,7 @@ export interface OrbRow {
   readonly runtimeTokenHash: string | null;
   readonly replicationCursor: string | null;
   readonly replicatedHeadId: string | null;
+  readonly unreadAlertId: string | null;
   /**
    * Restart-stable activity timestamp for idle auto-stop (docs/lifecycle.md).
    * Advisory and monotone: written outside the state_version CAS.

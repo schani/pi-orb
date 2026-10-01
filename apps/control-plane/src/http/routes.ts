@@ -1,4 +1,5 @@
 import {
+  AckOrbAlertRequestSchema,
   type ControlPlaneHttpError,
   CreateOrbRequestSchema,
   CreateProjectRequestSchema,
@@ -28,6 +29,7 @@ import {
   requestOrbStop,
 } from "../domain/lifecycle.ts";
 import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
+import { ackOrbAlert } from "../domain/orb-alerts.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import {
   readPersonalInstructions,
@@ -650,6 +652,45 @@ export function registerRoutes(
     }
     return reply.send(viewOrb(request, orb.value));
   });
+
+  app.post<{ Params: { orbId: string } }>(
+    "/api/v1/orbs/:orbId/alerts/ack",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!Check(AckOrbAlertRequestSchema, request.body))
+        return reply
+          .status(400)
+          .send(httpError("invalid_request", "invalid alert acknowledgement", false));
+      const acknowledged = await ackOrbAlert(
+        task,
+        deps,
+        request.params.orbId,
+        request.body.recordId,
+      );
+      if (acknowledged.isErr()) {
+        const status =
+          acknowledged.error.type === "orb_not_found"
+            ? 404
+            : acknowledged.error.type === "alert_not_replicated"
+              ? 409
+              : 503;
+        return reply
+          .status(status)
+          .send(
+            httpError(
+              status === 404 ? "not_found" : status === 409 ? "conflict" : "unavailable",
+              status === 404
+                ? "orb not found"
+                : status === 409
+                  ? "alert not yet replicated"
+                  : "alert acknowledgement unavailable",
+              status === 503,
+            ),
+          );
+      }
+      return reply.send(acknowledged.value);
+    },
+  );
 
   app.patch<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId", async (request, reply) => {
     if (!Check(UpdateOrbRequestSchema, request.body)) {

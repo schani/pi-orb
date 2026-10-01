@@ -19,6 +19,10 @@ The harness-agnostic history model, the pull-only replication pipeline, and the 
 - Default Docker development uses a PostgreSQL server. Container-restricted trusted testing uses embedded, filesystem-backed PGlite via `npm run dev:local`; it runs the same migrations and store SQL but does not validate PostgreSQL networking or multi-connection concurrency (`docs/stack.md`).
 - Database access must be behind an interface so tests can use an in-memory/fake implementation where appropriate and local/cloud deployments can select different adapters.
 
+## Orb alerts (2026-09-30)
+
+A non-model-context `pi-orb.alert` session entry maps to an event with typed `alert: {message, requestId}`. Live history and pull replication carry the same record. Only newly inserted alerts set `orbs.unread_alert_id`, atomically with the pull commit; duplicate pulls cannot re-arm a cleared alert. Acknowledgement verifies a replicated alert and compare-clears its ID without modifying history, lifecycle state, or replication cursor. Contract and tests: `docs/orb-alerts.md`.
+
 ## Harness-agnostic history model
 
 ### Principles
@@ -138,6 +142,9 @@ interface EventRecord extends HistoryRecordBase {
   content?: ContentBlock[];
   /** System inbox identities acknowledged atomically with replication. */
   inboxMessageIds?: string[];
+
+  /** User-facing alert; request identity deduplicates CLI retries. */
+  alert?: { message: string; requestId: string };
 
   /** Present iff `eventType` is `"pi.bash_execution"`. */
   shell?: {

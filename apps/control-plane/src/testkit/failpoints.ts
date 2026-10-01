@@ -9,6 +9,8 @@ export const FAILPOINTS = {
   storeCommitBefore: "store.commit.before",
   /** Fails after the transaction applied: commit landed, caller sees an error. */
   storeCommitAfter: "store.commit.after",
+  storeAckBefore: "store.alert.ack.before",
+  storeAckAfter: "store.alert.ack.after",
   /** The one write that clears a queued message's wake intent. */
   storeClearMessageAutoStart: "store.message.clear_auto_start",
   storeDiscardStatus: "compute-replacement.store.discard-status",

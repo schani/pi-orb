@@ -190,6 +190,7 @@ export const RuntimeHttpErrorSchema = Type.Object(
           Type.Literal("cursor_not_found"),
           Type.Literal("history_unavailable"),
           Type.Literal("message_unavailable"),
+          Type.Literal("alert_unavailable"),
           Type.Literal("idle_stop_unavailable"),
         ]),
         message: Type.String(),

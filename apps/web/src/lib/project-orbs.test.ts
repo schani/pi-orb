@@ -100,6 +100,30 @@ describe("project orb presentation", () => {
     });
   });
 
+  it("overrides every state with the shared alert flag and restores the current state", () => {
+    for (const state of [
+      "running",
+      "creating",
+      "starting",
+      "stopping",
+      "stopped",
+      "failed",
+      "archiving",
+      "archived",
+      "deleting",
+    ] as const) {
+      const activity = state === "running" ? "busy" : undefined;
+      expect(projectOrbGlyph(state, activity, undefined, "alert-id")).toEqual({
+        state: "alert",
+        iconHref: "/favicons/alert.svg",
+        label: "Unread alert",
+      });
+      expect(projectOrbGlyph(state, activity, undefined, null).state).not.toBe("alert");
+    }
+    expect(projectOrbGlyph("stopped", undefined, "tomorrow", "alert-id").state).toBe("alert");
+    expect(projectOrbGlyph("stopped", undefined, "tomorrow", null).state).toBe("sleep");
+  });
+
   it("uses sleeping only for stopped orbs with a deadline", () => {
     const sleepUntil = "2026-09-18T00:00:00.000Z";
     expect(projectOrbGlyph("stopped", undefined, sleepUntil)).toEqual({

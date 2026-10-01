@@ -465,6 +465,20 @@ export class FakeWorld {
     );
   }
 
+  appendAlert(orbId: string, message: string): HistoryRecord {
+    const state = this.orbState(orbId);
+    return this.flushRecord(orbId, state.filesystem, (seq, parentId) => ({
+      id: `${orbId}-rec-${seq}`,
+      parentId,
+      timestamp: `t${seq}`,
+      type: "event",
+      eventType: "pi.custom",
+      content: [{ type: "text", text: message }],
+      alert: { message, requestId: `request-${seq}` },
+      overflow: {},
+    }));
+  }
+
   /** The persisted inbox record of `batchId`, or undefined while none exists. */
   private findInboxRecord(fs: FakeFilesystem, batchId: string): HistoryRecord | undefined {
     return fs.entries.find(

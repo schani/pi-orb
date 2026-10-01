@@ -34,6 +34,8 @@ export interface AppSearchSource {
   label: string;
   items: readonly AppSearchItem[];
   status: AppSearchStatus;
+  /** Called only for foreground link activation; navigation remains link-native. */
+  onActivate?(item: AppSearchItem): void;
 }
 
 export const APP_SEARCH_RESULT_LIMIT = 50;
