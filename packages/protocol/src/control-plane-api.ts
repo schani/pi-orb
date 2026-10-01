@@ -95,6 +95,7 @@ export const CreateOrbRequestSchema = Type.Object(
     // could make one orb's exact-match cleanup reach another's resources.
     id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,63}$" }),
     name: Type.Optional(Type.String({ maxLength: ORB_NAME_MAX_CHARS })),
+    userTimeZone: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
   },
   closed,
 );

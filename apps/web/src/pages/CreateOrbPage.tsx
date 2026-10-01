@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { type ApiError, createOrb, describeApiError } from "../lib/api.ts";
+import { createOrbRequest } from "../lib/create-orb-request.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -12,14 +13,14 @@ type CreationState =
   | { type: "failed"; attempt: number; error: ApiError };
 
 export function CreateOrbPage({ projectId }: CreateOrbPageProps) {
-  const [orbId] = useState(generateUuid);
+  const [request] = useState(() => createOrbRequest(generateUuid()));
   const [state, setState] = useState<CreationState>({ type: "creating", attempt: 0 });
 
   useEffect(() => {
     if (state.type !== "creating") return;
     let active = true;
 
-    void createOrb(projectId, { id: orbId }).then((result) => {
+    void createOrb(projectId, request).then((result) => {
       if (!active) return;
       if (result.isErr()) {
         setState({ type: "failed", attempt: state.attempt, error: result.error });
@@ -31,7 +32,7 @@ export function CreateOrbPage({ projectId }: CreateOrbPageProps) {
     return () => {
       active = false;
     };
-  }, [orbId, projectId, state]);
+  }, [projectId, request, state]);
 
   if (state.type === "failed" && state.error.type === "http" && state.error.status === 404) {
     return <NotFoundPage resourceName="Project" />;

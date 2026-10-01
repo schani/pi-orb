@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ClientFrameSchema,
   ControlPlaneHttpErrorSchema,
+  CreateOrbRequestSchema,
   HarnessSessionMetadataSchema,
   HistoryRecordSchema,
   OrbHistoryViewSchema,
@@ -16,6 +17,16 @@ import {
   ServerFrameSchema,
   ServerWelcomeSchema,
 } from "./index.ts";
+
+describe("orb creation request", () => {
+  it("accepts an optional zone and rejects non-string zones", () => {
+    expect(Check(CreateOrbRequestSchema, { id: "orb" })).toBe(true);
+    expect(Check(CreateOrbRequestSchema, { id: "orb", userTimeZone: "America/New_York" })).toBe(
+      true,
+    );
+    expect(Check(CreateOrbRequestSchema, { id: "orb", userTimeZone: null })).toBe(false);
+  });
+});
 
 const messageRecord = {
   id: "rec-2",

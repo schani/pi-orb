@@ -1,7 +1,7 @@
 import type { OrbRow } from "./orb.ts";
 
 export function newOrbRow(
-  params: { orbId: string; projectId: string; name?: string },
+  params: { orbId: string; projectId: string; name?: string; userTimeZone?: string },
   hostKind: string,
   now: number,
 ): OrbRow {
@@ -9,6 +9,7 @@ export function newOrbRow(
     id: params.orbId,
     projectId: params.projectId,
     name: params.name ?? null,
+    userTimeZone: params.userTimeZone ?? null,
     autoNameLeaseUntil: null,
     autoNameAttempts: 0,
     autoNameNextAttemptAt: null,

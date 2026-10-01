@@ -37,6 +37,23 @@ describe("orbResourceLoaderOptions", () => {
     ]);
   });
 
+  it("appends the boot time zone verbatim and omits it when null or absent", () => {
+    const prompt =
+      "User’s time zone: America/Los_Angeles. Present dates and times in this time zone unless they request another.";
+    expect(
+      orbResourceLoaderOptions({
+        ...base,
+        userTimeZone: "America/Los_Angeles",
+      }).appendSystemPromptOverride?.([]),
+    ).toEqual([environmentPrompt, portExposurePrompt(host), prompt]);
+    for (const input of [{ ...base, userTimeZone: null }, base]) {
+      expect(orbResourceLoaderOptions(input).appendSystemPromptOverride?.([])).toEqual([
+        environmentPrompt,
+        portExposurePrompt(host),
+      ]);
+    }
+  });
+
   it("appends runtime tools without a preview host", () => {
     const override = orbResourceLoaderOptions({
       ...base,

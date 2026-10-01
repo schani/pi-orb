@@ -1,6 +1,7 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type ApiError, createOrb, describeApiError, listOrbs, listProjects } from "../lib/api.ts";
+import { createOrbRequest } from "../lib/create-orb-request.ts";
 import {
   buildDashboardSearchSource,
   type DashboardOrbListSnapshot,
@@ -104,7 +105,7 @@ export function IndexProject({
     const intent = navigation.current;
     const sourceHash = window.location.hash;
     setCreation({ id, type: "pending" });
-    const result = await createOrb(project.id, { id });
+    const result = await createOrb(project.id, createOrbRequest(id));
     creating.current = false;
     if (!active.current) return;
     if (result.isErr()) {

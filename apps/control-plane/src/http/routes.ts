@@ -14,6 +14,7 @@ import {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { Result } from "neverthrow";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { ProjectConflict, ProjectSecretError, StoreError } from "../domain/errors.ts";
@@ -608,6 +609,19 @@ export function registerRoutes(
       if (!Check(CreateOrbRequestSchema, body)) {
         return reply.status(400).send(httpError("invalid_request", "invalid orb body", false));
       }
+      const userTimeZone =
+        body.userTimeZone === undefined
+          ? null
+          : Result.fromThrowable(
+              () =>
+                new Intl.DateTimeFormat("en", { timeZone: body.userTimeZone }).resolvedOptions()
+                  .timeZone,
+              () => ({ type: "invalid_time_zone" as const }),
+            )();
+      if (userTimeZone?.isErr() || (userTimeZone?.isOk() && /^[+-]/.test(userTimeZone.value)))
+        return reply
+          .status(400)
+          .send(httpError("invalid_request", "invalid user time zone", false));
       const normalizedName = body.name === undefined ? null : normalizeOrbName(body.name);
       if (normalizedName?.isErr()) {
         return reply
@@ -618,6 +632,7 @@ export function registerRoutes(
         orbId: body.id,
         projectId: request.params.projectId,
         ...(normalizedName?.isOk() ? { name: normalizedName.value } : {}),
+        ...(userTimeZone?.isOk() ? { userTimeZone: userTimeZone.value } : {}),
       });
       if (created.isErr()) return sendCommandError(reply, created.error);
       // Creation also requests the initial start; reconciliation picks it up.

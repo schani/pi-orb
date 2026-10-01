@@ -631,6 +631,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       const project = this.projects.get(orb.projectId);
       if (project === undefined) return { conflict: "not_found" as const };
       if (project.state !== "active") return { conflict: "deleting" as const };
+      if (this.orbs.has(orb.id)) return { conflict: "concurrent_change" as const };
       this.orbs.set(orb.id, orb);
       return { conflict: null, orb };
     }).andThen((outcome) =>
@@ -670,7 +671,11 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
         return { duplicate: true };
       }
       if (child !== undefined) return { reason: "conflict" as const };
-      this.orbs.set(params.orb.id, { ...params.orb, lastBusyAt: params.orb.createdAt });
+      this.orbs.set(params.orb.id, {
+        ...params.orb,
+        userTimeZone: caller.userTimeZone,
+        lastBusyAt: params.orb.createdAt,
+      });
       this.messages.set(params.orb.id, [
         {
           orbId: params.orb.id,

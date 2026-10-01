@@ -1,0 +1,143 @@
+{
+  "name": "zone-create-America-New_York-Asia-Tokyo",
+  "iteration": 0,
+  "error": "expected 2 to be 1 // Object.is equality",
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of create-0, create-1",
+      "value": 0.28563649720053697
+    },
+    {
+      "type": "entropy",
+      "name": "create-0 random number: store latency: get project",
+      "value": 0.7179588264929533
+    },
+    {
+      "type": "timer-create",
+      "id": 1,
+      "reason": "create-0 sleep: get project",
+      "deadline": 4.589794132464767
+    },
+    {
+      "type": "entropy",
+      "name": "create-1 random number: store latency: get project",
+      "value": 0.8758396054111444
+    },
+    {
+      "type": "timer-create",
+      "id": 2,
+      "reason": "create-1 sleep: get project",
+      "deadline": 5.379198027055722
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.43396880891600464
+    },
+    {
+      "type": "timer-fire",
+      "id": 1,
+      "reason": "create-0 sleep: get project",
+      "virtualTime": 4.589794132464767
+    },
+    {
+      "type": "entropy",
+      "name": "create-0 random number: store latency: get orb",
+      "value": 0.8095711769708149
+    },
+    {
+      "type": "timer-create",
+      "id": 3,
+      "reason": "create-0 sleep: get orb",
+      "deadline": 9.63765001731884
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.6634132906578926
+    },
+    {
+      "type": "timer-fire",
+      "id": 2,
+      "reason": "create-1 sleep: get project",
+      "virtualTime": 5.379198027055722
+    },
+    {
+      "type": "entropy",
+      "name": "create-1 random number: store latency: get orb",
+      "value": 0.3834074757536994
+    },
+    {
+      "type": "timer-create",
+      "id": 4,
+      "reason": "create-1 sleep: get orb",
+      "deadline": 8.29623540582422
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.2082028383140938
+    },
+    {
+      "type": "timer-fire",
+      "id": 4,
+      "reason": "create-1 sleep: get orb",
+      "virtualTime": 8.29623540582422
+    },
+    {
+      "type": "entropy",
+      "name": "create-1 random number: store latency: insert orb",
+      "value": 0.4726299269028975
+    },
+    {
+      "type": "timer-create",
+      "id": 5,
+      "reason": "create-1 sleep: insert orb",
+      "deadline": 11.659385040338707
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.21505421155493964
+    },
+    {
+      "type": "timer-fire",
+      "id": 3,
+      "reason": "create-0 sleep: get orb",
+      "virtualTime": 9.63765001731884
+    },
+    {
+      "type": "entropy",
+      "name": "create-0 random number: store latency: insert orb",
+      "value": 0.27353263365074054
+    },
+    {
+      "type": "timer-create",
+      "id": 6,
+      "reason": "create-0 sleep: insert orb",
+      "deadline": 12.005313185572543
+    },
+    {
+      "type": "entropy",
+      "name": "timer pick: explore late firing",
+      "value": 0.7258825045294222
+    },
+    {
+      "type": "timer-fire",
+      "id": 5,
+      "reason": "create-1 sleep: insert orb",
+      "virtualTime": 11.659385040338707
+    },
+    {
+      "type": "timer-fire",
+      "id": 6,
+      "reason": "create-0 sleep: insert orb",
+      "virtualTime": 12.005313185572543
+    }
+  ]
+}

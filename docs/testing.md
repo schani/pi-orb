@@ -1,5 +1,11 @@
 # Testing strategy
 
+## User time zone qualification (2026-10-01)
+
+Tests preceded implementation. Concurrent same-ID creation DST exposed in-memory overwrite versus PostgreSQL unique-collision behavior; the failing trace was retained and replayed before atomic insert collision handling was fixed at the existing store boundary. Coverage includes null/known creation snapshots across restarts, transactional spawn inheritance, migration leaving preexisting rows `NULL`, native boot broker schema, exact prompt text and null omission, SDK reload, both browser creation paths, and a fixed captured request across retry.
+
+Final `npm test`: 2,301 passed, eight conditional skips, plus all infrastructure suites (36 Node, 50 Python, 24 native). Typecheck and lint pass (four warnings, one info). The initial full process E2E had 153 passed, 12 failed, five skipped: 11 tests plus one `beforeAll` lacked Playwright Chromium; the other failed assertion used a second orb without a zone as the spawn caller, so its child correctly had `NULL`. After installing Chromium and correcting that fixture to use a known-zone caller—without product, assertion or timeout changes—all 12 affected files passed (28 tests). Cumulative coverage: 168 passed, two platform skips (Docker interruption and network PostgreSQL). PGlite store and migration contracts passed. Logs: `.context/user-time-zone/{final-test,final-e2e,e2e-repaired}.log`; [retained validation bundle](https://files---pi-orb-1077475695242.us-central1.run.app/s/0ebed1ef-53ba-43af-b7c7-9af4759d7518/validation/user-time-zone.tar.gz). Creation-race traces are retained as `test-failures/zone-create-*.json`. No deployment.
+
 ## Streamed-history release qualification (2026-09-28)
 
 The original stopped orb's 34,493,218-byte history passed a real Cloud Run ops GET and `pi-orb transcript --json`; both returned the same 4,675 records and cursor. Direct browser IAP was not probed. Release [36375754356](https://github.com/schani/pi-orb/actions/runs/36375754356) validated all 12 gates; independent [CI](https://github.com/schani/pi-orb/actions/runs/36375733475) passed 2,270 unit tests and [E2E](https://github.com/schani/pi-orb/actions/runs/36375733487) passed 227 cases. Details: `docs/postmortems/2026-09-27-history-response-size.md`.

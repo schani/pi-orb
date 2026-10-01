@@ -20,6 +20,7 @@ import {
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
   type OrbBootContext,
+  type OrbBootContextResponse,
   type OrbMessageSystem,
   type RuntimeEvent,
   type RuntimeHealth,
@@ -109,7 +110,7 @@ export interface PiOrbAgentOptions {
   /** Test seam; production reads mandatory context through the HTTP adapter. */
   readonly bootContextReader?: (
     broker: BrokerEnv,
-  ) => ResultAsync<{ readonly v: 1; readonly context: OrbBootContext | null }, BootContextError>;
+  ) => ResultAsync<OrbBootContextResponse, BootContextError>;
 }
 
 export interface SnapshotError {
@@ -617,6 +618,7 @@ export class PiOrbAgent {
       agentDir,
       settingsManager,
       previewHost: this.options.previewHost ?? null,
+      userTimeZone: bootContext.value.userTimeZone,
       hooks: this.hooks.report(),
       hookEnv,
       skillsDir: this.options.skillsDir,

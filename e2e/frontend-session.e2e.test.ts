@@ -3508,6 +3508,93 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it.each([
+    { path: "index", timeZone: "Pacific/Auckland" },
+    { path: "dedicated", timeZone: "America/Los_Angeles" },
+  ])("sends the browser time zone through $path orb creation", async ({ path, timeZone }) => {
+    const context = await browser.newContext({ timezoneId: timeZone });
+    const page = await context.newPage();
+    let createdId: string | undefined;
+    let posted: Record<string, unknown> | undefined;
+    try {
+      await page.route("**/api/v1/projects/frontend-scratchpad-project/orbs", async (route) => {
+        if (route.request().method() === "POST") {
+          posted = route.request().postDataJSON() as Record<string, unknown>;
+          createdId = posted["id"] as string;
+        }
+        await route.continue();
+      });
+      if (path === "index") {
+        await page.goto(`${origin}/${ORB_HASH}`);
+        await page
+          .getByRole("navigation", { name: "All project orbs" })
+          .getByRole("link", { name: "New orb in scratchpad", exact: true })
+          .click();
+      } else {
+        await page.goto(`${origin}/#/projects/frontend-scratchpad-project/orbs/new`);
+      }
+      await expectPage(page).toHaveURL(/#\/orbs\/[0-9a-f-]+$/);
+      expectPage(posted?.["userTimeZone"]).toBe(timeZone);
+    } finally {
+      if (createdId !== undefined) await removeFixtureOrb(page, createdId);
+      await page.unrouteAll({ behavior: "wait" });
+      await context.close();
+    }
+  });
+
+  it("retries dedicated orb creation with the original id and browser time zone", async () => {
+    const context = await browser.newContext({ timezoneId: "Pacific/Auckland" });
+    const page = await context.newPage();
+    const posts: Record<string, unknown>[] = [];
+    let firstArrived = () => {};
+    let releaseFirst = () => {};
+    let secondArrived = () => {};
+    let retryArrived = () => {};
+    const firstRequested = new Promise<void>((resolve) => {
+      firstArrived = resolve;
+    });
+    const firstReply = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondRequested = new Promise<void>((resolve) => {
+      secondArrived = resolve;
+    });
+    const retryRequested = new Promise<void>((resolve) => {
+      retryArrived = resolve;
+    });
+    try {
+      await page.route("**/api/v1/projects/frontend-scratchpad-project/orbs", async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        posts.push(route.request().postDataJSON() as Record<string, unknown>);
+        if (posts.length === 1) firstArrived();
+        if (posts.length === 2) secondArrived();
+        if (posts.length <= 2) await firstReply;
+        else retryArrived();
+        await route.fulfill({ status: 503, json: { error: "temporary failure" } });
+      });
+      await page.goto(`${origin}/#/projects/frontend-scratchpad-project/orbs/new`);
+      await firstRequested;
+      await secondRequested;
+      expectPage(posts[0]?.["userTimeZone"]).toBe("Pacific/Auckland");
+      expectPage(posts[1]).toEqual(posts[0]);
+      await page.evaluate(() => {
+        const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
+        Intl.DateTimeFormat.prototype.resolvedOptions = function () {
+          return { ...resolvedOptions.call(this), timeZone: "America/Los_Angeles" };
+        };
+      });
+      releaseFirst();
+      await page.getByRole("button", { name: "retry" }).click();
+      await retryRequested;
+      expectPage(posts).toHaveLength(3);
+      expectPage(posts[2]).toEqual(posts[0]);
+    } finally {
+      releaseFirst();
+      await page.unrouteAll({ behavior: "wait" });
+      await context.close();
+    }
+  });
+
   it("creates from + without unmounting the workspace or clearing the draft", async () => {
     const page = await browser.newPage();
     await page.clock.install();

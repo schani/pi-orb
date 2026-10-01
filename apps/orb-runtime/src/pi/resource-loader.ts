@@ -22,6 +22,7 @@ export interface OrbResourceLoaderInput {
   /** Shared with `createAgentSession`; omitted where the SDK default is used. */
   readonly settingsManager?: SettingsManager | undefined;
   readonly previewHost?: string | null;
+  readonly userTimeZone?: string | null;
   /** Latest boot-hook outcomes; only failures reach the prompt. */
   readonly hooks?: RuntimeHooks;
   /** What the hooks' env file turned into; only its problems reach the prompt. */
@@ -48,6 +49,7 @@ export interface OrbResourceLoaderInput {
  */
 export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderOptions {
   const previewHost = input.previewHost ?? null;
+  const userTimeZone = input.userTimeZone ?? null;
   // Capture the boot value: an SDK reload must not adopt a later account edit.
   const personalContent = input.personalInstructions?.content ?? "";
   const projectContent = input.projectInstructions?.content ?? "";
@@ -78,6 +80,11 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
       ...base,
       environmentPrompt,
       ...(previewHost !== null ? [portExposurePrompt(previewHost)] : []),
+      ...(userTimeZone !== null
+        ? [
+            `User’s time zone: ${userTimeZone}. Present dates and times in this time zone unless they request another.`,
+          ]
+        : []),
       ...(hookPrompt !== null ? [hookPrompt] : []),
       ...(mcpPrompt !== null ? [mcpPrompt] : []),
     ],

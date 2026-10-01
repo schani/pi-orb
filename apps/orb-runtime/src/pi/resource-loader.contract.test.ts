@@ -225,6 +225,28 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect(section?.match(new RegExp(PREVIEW_HOST.replaceAll(".", "\\."), "g"))).toHaveLength(1);
   });
 
+  it("keeps the boot time zone in the SDK append prompt across reload", async () => {
+    writeFileSync(join(repoDir, PROJECT_CONFIG_DIR, "APPEND_SYSTEM.md"), PROJECT_APPEND);
+    const input = {
+      cwd: repoDir,
+      agentDir,
+      skillsDir: null,
+      userTimeZone: "Asia/Tokyo",
+    };
+    const loaded = (await createOrbResourceLoader(input))._unsafeUnwrap();
+    const expected =
+      "User’s time zone: Asia/Tokyo. Present dates and times in this time zone unless they request another.";
+    expect(loaded.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt, expected]);
+    input.userTimeZone = "Europe/Paris";
+    await loaded.reload();
+    expect(loaded.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt, expected]);
+    expect(composedAppendSection(loaded)).toContain(expected);
+    expect((await orbLoader(null)).getAppendSystemPrompt()).toEqual([
+      PROJECT_APPEND,
+      environmentPrompt,
+    ]);
+  });
+
   it("keeps the project-scoped APPEND_SYSTEM.md the SDK discovers", async () => {
     writeFileSync(join(repoDir, PROJECT_CONFIG_DIR, "APPEND_SYSTEM.md"), PROJECT_APPEND);
 

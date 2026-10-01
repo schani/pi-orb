@@ -402,7 +402,7 @@ export function registerRuntimeRoutes(
           retryable: context.error.retryable,
         },
       });
-    return reply.send({ v: 1, context: context.value });
+    return reply.send({ v: 1, context: context.value, userTimeZone: auth.orb.userTimeZone });
   });
 
   app.post(ORB_SELF_ARCHIVE_PATH, async (request, reply) => {

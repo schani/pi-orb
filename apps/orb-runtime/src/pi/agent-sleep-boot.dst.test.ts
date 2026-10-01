@@ -22,6 +22,7 @@ const controls = vi.hoisted(() => ({
   sessionCreationStarted: false,
   awaitSessionCreation: undefined as undefined | (() => Promise<void>),
   executedFiles: [] as string[],
+  loaderTimeZone: undefined as string | null | undefined,
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -54,7 +55,12 @@ vi.mock("../mcp/boot.ts", async (importOriginal) => {
   const original = await importOriginal<typeof import("../mcp/boot.ts")>();
   return { ...original, fetchMcpCatalog: () => okAsync({ revision: 1, servers: [] }) };
 });
-vi.mock("./resource-loader.ts", () => ({ createOrbResourceLoader: () => okAsync({}) }));
+vi.mock("./resource-loader.ts", () => ({
+  createOrbResourceLoader: (input: { userTimeZone?: string | null }) => {
+    controls.loaderTimeZone = input.userTimeZone;
+    return okAsync({});
+  },
+}));
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
   const original = await importOriginal<typeof import("@earendil-works/pi-coding-agent")>();
   const model = {
@@ -158,6 +164,7 @@ afterEach(() => {
   controls.sessionCreationStarted = false;
   controls.awaitSessionCreation = undefined;
   controls.executedFiles.length = 0;
+  controls.loaderTimeZone = undefined;
   for (const [name, value] of Object.entries(originalEnvironment)) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
@@ -225,7 +232,11 @@ it("actual boot holds readiness through context and turn-start barriers, then de
     const root = mkdtempSync(join(tmpdir(), "pi-orb-sleep-boot-"));
     roots.push(root);
     mkdirSync(join(root, "repo"), { recursive: true });
-    const context = deferred<{ v: 1; context: OrbBootContext | null }>();
+    const context = deferred<{
+      v: 1;
+      context: OrbBootContext | null;
+      userTimeZone: string | null;
+    }>();
     const sessionCreation = deferred<void>();
     controls.awaitSessionCreation = () => sessionCreation.promise;
     const agent = new PiOrbAgent({
@@ -256,9 +267,10 @@ it("actual boot holds readiness through context and turn-start barriers, then de
               await agent.deliverInboxMessage("sleep-1", ["sleep-1"], wake.content, wake.system)
             ).isErr(),
           ).toBe(true);
-          context.resolve({ v: 1, context: wake });
+          context.resolve({ v: 1, context: wake, userTimeZone: "Asia/Tokyo" });
           while (!controls.sessionCreationStarted)
             await task.checkpoint("wait for context-dependent session creation");
+          expect(controls.loaderTimeZone).toBe("Asia/Tokyo");
           expect(agent.getHealth().status).toBe("initializing");
           expect(
             (

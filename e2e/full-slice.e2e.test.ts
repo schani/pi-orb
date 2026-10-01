@@ -1373,9 +1373,32 @@ describe("full slice E2E", () => {
         })
       ).status,
     ).toBe(200);
-    orbId = randomUUID();
-    const orb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, { id: orbId });
-    expect(orb.status, JSON.stringify(orb.body)).toBe(202);
+    const creationExecutable =
+      process.env["PLAYWRIGHT_CHROMIUM_EXECUTABLE"] ??
+      (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined);
+    const creationBrowser = await chromium.launch({
+      ...(creationExecutable === undefined ? {} : { executablePath: creationExecutable }),
+      args: ["--no-sandbox"],
+    });
+    try {
+      const context = await creationBrowser.newContext({ timezoneId: "Pacific/Auckland" });
+      const page = await context.newPage();
+      let postedTimeZone: string | undefined;
+      await page.route(`**/api/v1/projects/${projectId}/orbs`, async (route) => {
+        if (route.request().method() === "POST") {
+          const body = route.request().postDataJSON() as { id: string; userTimeZone?: string };
+          orbId = body.id;
+          postedTimeZone = body.userTimeZone;
+        }
+        await route.continue();
+      });
+      await page.goto(`${base}/#/projects/${projectId}/orbs/new`);
+      await expectPage(page).toHaveURL(/#\/orbs\/[0-9a-f-]+$/);
+      expect(page.url()).toBe(`${base}/#/orbs/${orbId}`);
+      expect(postedTimeZone).toBe("Pacific/Auckland");
+    } finally {
+      await creationBrowser.close();
+    }
 
     // Device login: the test plays the human via the fake's control API.
     const challenge = await waitFor(
@@ -1757,6 +1780,16 @@ describe("full slice E2E", () => {
     const requests = await fakeControl(fake.sessionKey, "/requests");
     const inferenceCalls = JSON.stringify(requests);
     expect(inferenceCalls).toContain("E2E_TOOL_OK");
+    const timezoneLine =
+      "User’s time zone: Pacific/Auckland. Present dates and times in this time zone unless they request another.";
+    expect(
+      Array.isArray(requests) &&
+        requests.some(
+          (call) =>
+            call.matchedRuleIndex === 0 &&
+            effectiveOpenAIResponseInstructions(call.body).includes(timezoneLine),
+        ),
+    ).toBe(true);
     expect(
       Array.isArray(requests) &&
         requests.some(
@@ -1907,6 +1940,7 @@ describe("full slice E2E", () => {
     additionalOrbIds.push(secondOrbId);
     const secondOrb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
       id: secondOrbId,
+      userTimeZone: "Pacific/Auckland",
     });
     expect(secondOrb.status, JSON.stringify(secondOrb.body)).toBe(202);
     await waitFor(
@@ -1949,6 +1983,22 @@ describe("full slice E2E", () => {
       "SPAWN_DONE",
     );
     expect(spawned).toContain(`"orbId":"${spawnedOrbId}"`);
+    await waitFor(
+      "spawned first model request carries inherited time zone",
+      async () => {
+        const calls: unknown = await fakeControl(fake.sessionKey, "/requests");
+        return Array.isArray(calls) &&
+          calls.some(
+            (call) =>
+              call.matchedRuleIndex === 5 &&
+              call.status === 200 &&
+              effectiveOpenAIResponseInstructions(call.body).includes(timezoneLine),
+          )
+          ? true
+          : null;
+      },
+      { timeoutMs: 60_000, intervalMs: 200 },
+    );
     expect(spawned).toContain(`"url":"${base}/#/orbs/${spawnedOrbId}"`);
     // No browser/live socket is opened for the child: inbox delivery must start it.
     await waitFor(

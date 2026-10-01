@@ -56,11 +56,12 @@ Before session attachment, readiness, or inference, the runtime calls authentica
     messageIds: string[],
     content: MessageInputBlock[],
     system: { kind: "sleep_wake", sleepUntil: string }
-  }
+  },
+  userTimeZone: string | null
 }
 ```
 
-The control plane selects and freezes only a FIFO-head `sleep_wake`. A human head returns `context:null`; ordinary delivery preserves it first. Each prerequisite request retains a 10-second timeout. Retryable transport or typed service failures use 1/2/4-second capped backoff; no attempt starts at or after the 180-second retry deadline, while an admitted attempt retains its full timeout. Permanent authorization, malformed JSON/schema failures, and exhaustion fail readiness closed and remain visible rather than starting context-free inference.
+The control plane selects and freezes only a FIFO-head `sleep_wake`. A human head returns `context:null`; ordinary delivery preserves it first. The stored per-orb `userTimeZone` is returned independently, even when `context` is null; existing orbs without a zone return null. Each prerequisite request retains a 10-second timeout. Retryable transport or typed service failures use 1/2/4-second capped backoff; no attempt starts at or after the 180-second retry deadline, while an admitted attempt retains its full timeout. Permanent authorization, malformed JSON/schema failures, and exhaustion fail readiness closed and remain visible rather than starting context-free inference.
 
 For the normal wake, the boot planner combines existing restart/interruption wording with sleep context in one visible `pi-orb.sleep-wake` custom record. It retains boot identity, trigger/guard classification, and the notice message IDs. The record is a system event, never a human user message, and cannot renew or reset crash-loop/resume authority. Its identity participates in boot and turn-resume classification. If the crash guard declines inference, the persisted visible non-triggering outcome remains authoritative.
 

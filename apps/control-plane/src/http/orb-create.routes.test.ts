@@ -44,6 +44,45 @@ describe("orb creation ID validation", () => {
     }
   });
 
+  it("stores an optional IANA time zone once and rejects invalid zones", async () => {
+    const url = "/api/v1/projects/project-ids/orbs";
+    expect(
+      (await app.inject({ method: "POST", url, payload: { id: "unknown-zone" } })).statusCode,
+    ).toBe(202);
+    expect(harness.store.orbSnapshot("unknown-zone")?.userTimeZone).toBeNull();
+    for (const userTimeZone of ["Not/A_Zone", "GMT+25", "+01:00", ""]) {
+      expect(
+        (await app.inject({ method: "POST", url, payload: { id: "invalid-zone", userTimeZone } }))
+          .statusCode,
+      ).toBe(400);
+      expect(harness.store.orbSnapshot("invalid-zone")).toBeNull();
+    }
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          payload: { id: "zoned", userTimeZone: "America/New_York" },
+        })
+      ).statusCode,
+    ).toBe(202);
+    expect(harness.store.orbSnapshot("zoned")?.userTimeZone).toBe("America/New_York");
+    expect((await app.inject({ method: "POST", url, payload: { id: "zoned" } })).statusCode).toBe(
+      202,
+    );
+    expect(harness.store.orbSnapshot("zoned")?.userTimeZone).toBe("America/New_York");
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          payload: { id: "zoned", userTimeZone: "Asia/Tokyo" },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(harness.store.orbSnapshot("zoned")?.userTimeZone).toBe("America/New_York");
+  });
+
   it("shapes an existing orb without a second project lookup", async () => {
     harness.store.seedOrb(makeOrbRow("orb-existing", "project-ids", "starting"));
     const getProject = vi.spyOn(harness.store, "getProject");

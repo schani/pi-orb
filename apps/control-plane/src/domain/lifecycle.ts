@@ -2265,7 +2265,7 @@ function mapCasError(error: StoreError | StateConflict): CommandError {
 export function createOrb(
   task: SimulationTask,
   deps: ControlPlaneDeps,
-  params: { orbId: string; projectId: string; name?: string },
+  params: { orbId: string; projectId: string; name?: string; userTimeZone?: string },
 ): ResultAsync<OrbRow, CommandError> {
   const run = async (): Promise<Result<OrbRow, CommandError>> => {
     const projectResult = await deps.store.getProject(task, params.projectId);
@@ -2278,24 +2278,34 @@ export function createOrb(
     if (projectResult.value.state === "deleting") {
       return err(commandError("conflict", "project is being permanently deleted", false));
     }
+    const acceptExisting = (orb: OrbRow): Result<OrbRow, CommandError> => {
+      if (orb.state === "deleting")
+        return err(commandError("conflict", "orb is being permanently deleted", false));
+      if (
+        orb.projectId !== params.projectId ||
+        (params.name !== undefined && orb.name !== params.name) ||
+        (params.userTimeZone !== undefined && orb.userTimeZone !== params.userTimeZone)
+      )
+        return err(commandError("conflict", "orb id exists with different content", false));
+      return ok(orb);
+    };
     const existing = await deps.store.getOrb(task, params.orbId);
     if (existing.isErr()) return err(mapStoreError(existing.error));
-    if (existing.value !== null) {
-      if (existing.value.state === "deleting") {
-        return err(commandError("conflict", "orb is being permanently deleted", false));
-      }
-      if (
-        existing.value.projectId !== params.projectId ||
-        (params.name !== undefined && existing.value.name !== params.name)
-      ) {
-        return err(commandError("conflict", "orb id exists with different content", false));
-      }
-      return ok(existing.value);
-    }
+    if (existing.value !== null) return acceptExisting(existing.value);
     const now = task.wallNow();
     const row = newOrbRow(params, deps.hostProvider.kind, now);
     const inserted = await deps.store.insertOrb(task, row);
     if (inserted.isErr()) {
+      if (
+        inserted.error.type === "project_conflict" &&
+        inserted.error.reason === "concurrent_change"
+      ) {
+        const winner = await deps.store.getOrb(task, params.orbId);
+        if (winner.isErr()) return err(mapStoreError(winner.error));
+        return winner.value === null
+          ? err(commandError("conflict", "orb creation raced with deletion", true))
+          : acceptExisting(winner.value);
+      }
       if (inserted.error.type === "project_conflict") {
         return inserted.error.reason === "not_found"
           ? err(commandError("not_found", `project ${params.projectId} not found`, false))

@@ -437,8 +437,25 @@ describe("runtime broker routes", () => {
       },
     );
 
-    it("returns only a FIFO-head sleep wake and does not acknowledge it", async () => {
+    it("exposes an unknown time zone even without wake context", async () => {
       store.seedOrb(makeOrbRow(ORB, PROJECT, "starting", { runtimeTokenHash: sha256(TOKEN) }));
+      const response = await app.inject({
+        method: "POST",
+        url: "/runtime/v1/orb/boot-context",
+        headers: { authorization: `Bearer ${TOKEN}` },
+        payload: { v: 1 },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ v: 1, context: null, userTimeZone: null });
+    });
+
+    it("returns only a FIFO-head sleep wake and does not acknowledge it", async () => {
+      store.seedOrb(
+        makeOrbRow(ORB, PROJECT, "starting", {
+          runtimeTokenHash: sha256(TOKEN),
+          userTimeZone: "Asia/Tokyo",
+        }),
+      );
       store.seedSystemMessage(
         ORB,
         "00000000-0000-4000-8000-000000000021",
@@ -458,6 +475,7 @@ describe("runtime broker routes", () => {
       expect((await request()).json().context.messageId).toBe(
         "00000000-0000-4000-8000-000000000021",
       );
+      expect((await request()).json().userTimeZone).toBe("Asia/Tokyo");
       expect(store.messageSnapshots(ORB)[0]?.status).toBe("delivering");
     });
   });

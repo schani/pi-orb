@@ -175,6 +175,7 @@ interface UpdateProjectRequest {
 interface CreateOrbRequest {
   id: string;
   name?: string;
+  userTimeZone?: string;
 }
 
 interface UpdateOrbRequest {
@@ -182,7 +183,7 @@ interface UpdateOrbRequest {
 }
 ```
 
-This makes a retried create naturally idempotent without an idempotency table: the same ID, owner and identical body returns the existing resource, while a different owner or content returns `409 conflict`. Creating an orb inherits the project's owner, requests its initial start and returns it in `creating` state.
+This makes a retried create naturally idempotent without an idempotency table: the same ID, owner and identical body returns the existing resource, while a different owner or content returns `409 conflict`. Creating an orb inherits the project's owner, requests its initial start and returns it in `creating` state. `userTimeZone`, when supplied, must be a valid IANA time zone; invalid values return 400. It is a per-orb creation snapshot, not a user preference or live setting. A retry with a different supplied zone returns 409; omitting it preserves the accepted zone. Concurrent same-ID creates preserve the first accepted snapshot. Migration `027_orb_user_time_zone.sql` adds nullable `orbs.user_time_zone TEXT` without backfill; the stored value is durable diagnostic evidence.
 
 ```ts
 interface ProjectView {
@@ -270,7 +271,7 @@ OAuth (implemented locally 2026-09-10) adds `oauth: {id}` to a catalog entry. St
 
 ### Scheduled self-sleep (decided 2026-09-17; implementation in progress)
 
-The current running incarnation may call `POST /runtime/v1/orb/sleep` with `{v:1,durationSeconds}`. A `202` returns `{v:1,sleepId,sleepUntil}` after the two-field intent and acceptance-time deadline are durable; active sleep conflicts. `POST /runtime/v1/orb/boot-context` returns only a frozen FIFO-head `sleep_wake` context or `null`, never skips an older human message, and never acknowledges delivery. `OrbView` exposes optional `sleepUntil`; inbox views expose optional validated system provenance. Browser clients cannot forge system messages. Lifecycle cancellation, expiry, source-aware delivery, failures, and exact schemas: `docs/orb-sleep.md`.
+The current running incarnation may call `POST /runtime/v1/orb/sleep` with `{v:1,durationSeconds}`. A `202` returns `{v:1,sleepId,sleepUntil}` after the two-field intent and acceptance-time deadline are durable; active sleep conflicts. `POST /runtime/v1/orb/boot-context` returns `userTimeZone: string | null` independently of the frozen FIFO-head `sleep_wake` context or `null`; it never skips an older human message or acknowledges delivery. `OrbView` exposes optional `sleepUntil`; inbox views expose optional validated system provenance. Browser clients cannot forge system messages. Lifecycle cancellation, expiry, source-aware delivery, failures, and exact schemas: `docs/orb-sleep.md`.
 
 ### Send-anytime messages (decided and implemented 2026-08-10)
 

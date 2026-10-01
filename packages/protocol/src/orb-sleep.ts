@@ -45,7 +45,11 @@ export const OrbBootContextSchema = Type.Object(
 export type OrbBootContext = Static<typeof OrbBootContextSchema>;
 
 export const OrbBootContextResponseSchema = Type.Object(
-  { v: Type.Literal(1), context: Type.Union([OrbBootContextSchema, Type.Null()]) },
+  {
+    v: Type.Literal(1),
+    context: Type.Union([OrbBootContextSchema, Type.Null()]),
+    userTimeZone: Type.Union([Type.String(), Type.Null()]),
+  },
   closed,
 );
 export type OrbBootContextResponse = Static<typeof OrbBootContextResponseSchema>;

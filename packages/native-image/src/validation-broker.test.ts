@@ -87,7 +87,7 @@ describe("validation broker", () => {
     expect(bootContext.status).toBe(200);
     const context = await bootContext.json();
     expect(Check(OrbBootContextResponseSchema, context)).toBe(true);
-    expect(context).toEqual({ v: 1, context: null });
+    expect(context).toEqual({ v: 1, context: null, userTimeZone: null });
     expect(await readdir(directory)).not.toContain("unrecognized");
 
     const grant = await request("/runtime/v1/tokens/model", {

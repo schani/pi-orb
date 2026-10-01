@@ -13,6 +13,7 @@ const projectId = "spawn-project";
 const caller = makeOrbRow("caller", projectId, "running", {
   runtimeTokenHash: "token",
   hostIncarnation: 1,
+  userTimeZone: "Europe/Berlin",
 });
 const params = {
   callerOrbId: caller.id,
@@ -57,7 +58,10 @@ describe("orb spawning (DST)", () => {
           })),
         );
         expect(result.isOk(), result.isErr() ? result.error.message : "").toBe(true);
-        expect(harness.store.orbSnapshot(params.orb.id)?.state).toBe("creating");
+        expect(harness.store.orbSnapshot(params.orb.id)).toMatchObject({
+          state: "creating",
+          userTimeZone: "Europe/Berlin",
+        });
         expect(harness.store.messageSnapshots(params.orb.id)).toMatchObject([
           { messageId: params.orb.id, content: [{ type: "text", text: params.prompt }] },
         ]);

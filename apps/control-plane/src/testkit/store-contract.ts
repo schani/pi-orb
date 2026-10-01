@@ -33,6 +33,7 @@ const orb: OrbRow = {
   id: "00000000-0000-4000-8000-000000000002",
   projectId: project.id,
   name: null,
+  userTimeZone: null,
   autoNameLeaseUntil: null,
   autoNameAttempts: 0,
   autoNameNextAttemptAt: null,
@@ -129,6 +130,17 @@ export function storeSemanticsContractTests(
       expect((await store.insertProject(task, project)).isOk()).toBe(true);
       expect((await store.insertOrb(task, orb)).isOk()).toBe(true);
     }
+
+    it("keeps the first orb time zone when an ID collides at insertion", async () => {
+      expect((await store.insertProject(task, project)).isOk()).toBe(true);
+      const first = { ...orb, userTimeZone: "Asia/Tokyo" };
+      expect((await store.insertOrb(task, first)).isOk()).toBe(true);
+      const second = await store.insertOrb(task, { ...orb, userTimeZone: null });
+      expect(
+        second.isErr() && second.error.type === "project_conflict" && second.error.reason,
+      ).toBe("concurrent_change");
+      expect((await store.getOrb(task, orb.id))._unsafeUnwrap()?.userTimeZone).toBe("Asia/Tokyo");
+    });
 
     it("atomically accepts and resolves scheduled sleep with singleton system provenance", async () => {
       const running = {
@@ -336,6 +348,7 @@ export function storeSemanticsContractTests(
         state: "running" as const,
         runtimeTokenHash: "caller-token",
         hostIncarnation: 1,
+        userTimeZone: "America/New_York",
       };
       expect((await store.insertOrb(task, caller)).isOk()).toBe(true);
       const child = { ...orb, id: "00000000-0000-4000-8000-000000000003" };
@@ -348,7 +361,10 @@ export function storeSemanticsContractTests(
       };
       const accepted = await store.spawnOrb(task, params);
       expect(accepted.isOk() && accepted.value.duplicate).toBe(false);
-      expect((await store.getOrb(task, child.id))._unsafeUnwrap()?.state).toBe("creating");
+      expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toMatchObject({
+        state: "creating",
+        userTimeZone: "America/New_York",
+      });
       expect((await store.listOrbMessages(task, child.id))._unsafeUnwrap()).toMatchObject([
         { messageId: child.id, content: [{ type: "text", text: "Do the work" }], status: "queued" },
       ]);
@@ -361,6 +377,9 @@ export function storeSemanticsContractTests(
       await store.claimNextOrbMessageBatch(task, { orbId: child.id, now: 2000 });
       const retry = await store.spawnOrb(task, params);
       expect(retry.isOk() && retry.value.duplicate).toBe(true);
+      expect((await store.getOrb(task, child.id))._unsafeUnwrap()?.userTimeZone).toBe(
+        "America/New_York",
+      );
       const conflict = await store.spawnOrb(task, {
         ...params,
         requestHash: "different-request",

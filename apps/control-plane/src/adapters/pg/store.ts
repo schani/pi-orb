@@ -47,6 +47,7 @@ function mapOrbRow(row: PgRow): OrbRow {
     id: String(row["id"]),
     projectId: String(row["project_id"]),
     name: row["name"] === null ? null : String(row["name"]),
+    userTimeZone: row["user_time_zone"] == null ? null : String(row["user_time_zone"]),
     autoNameLeaseUntil:
       row["auto_name_lease_until"] == null ? null : toMs(row["auto_name_lease_until"]),
     autoNameAttempts: Number(row["auto_name_attempts"]),
@@ -492,9 +493,9 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
            checkout_commit, harness_session_id, harness_session_header, last_error,
            runtime_token_hash, replication_cursor, replicated_head_id, last_busy_at,
            stop_reason, sleep_id, sleep_until, last_mint_at,
-           state_changed_at, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)
-         RETURNING *`,
+           state_changed_at, created_at, updated_at, user_time_zone)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)
+         ON CONFLICT (id) DO NOTHING RETURNING *`,
         [
           orb.id,
           orb.projectId,
@@ -529,9 +530,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
           new Date(orb.stateChangedAt),
           new Date(orb.createdAt),
           new Date(orb.updatedAt),
+          orb.userTimeZone,
         ],
       );
       if (inserted.isErr()) return err(inserted.error);
+      if (inserted.value.rows.length === 0)
+        return err({ type: "project_conflict" as const, reason: "concurrent_change" as const });
       return ok(mapOrbRow(inserted.value.rows[0] ?? {}));
     });
   }
@@ -586,9 +590,16 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         }
         const now = new Date(params.orb.createdAt);
         const inserted = await query(
-          `INSERT INTO orbs (id, project_id, name, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at)
-        VALUES ($1,$2,$3,'creating',$4,$5,$5,$5,$5) ON CONFLICT (id) DO NOTHING RETURNING id`,
-          [params.orb.id, params.orb.projectId, params.orb.name, params.orb.hostKind, now],
+          `INSERT INTO orbs (id, project_id, name, user_time_zone, state, host_kind, last_busy_at, state_changed_at, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,'creating',$5,$6,$6,$6,$6) ON CONFLICT (id) DO NOTHING RETURNING id`,
+          [
+            params.orb.id,
+            params.orb.projectId,
+            params.orb.name,
+            source["user_time_zone"],
+            params.orb.hostKind,
+            now,
+          ],
         );
         if (inserted.isErr()) return err(inserted.error);
         if (inserted.value.rows.length === 0)

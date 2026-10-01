@@ -278,6 +278,7 @@ export function makeOrbRow(
     id,
     projectId,
     name: null,
+    userTimeZone: null,
     autoNameLeaseUntil: null,
     autoNameAttempts: 0,
     autoNameNextAttemptAt: null,

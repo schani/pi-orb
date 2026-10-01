@@ -17,7 +17,7 @@ const server = createServer((request, response) => {
     if (request.method === "POST" && request.url === "/runtime/v1/orb/boot-context") {
       let parsed;
       try { parsed = JSON.parse(body); } catch { parsed = null; }
-      if (parsed && typeof parsed === "object" && parsed.v === 1 && Object.keys(parsed).length === 1) return json(response, 200, { v: 1, context: null });
+      if (parsed && typeof parsed === "object" && parsed.v === 1 && Object.keys(parsed).length === 1) return json(response, 200, { v: 1, context: null, userTimeZone: null });
     }
     if (request.method === "POST" && request.url === "/runtime/v1/tokens/model") {
       let parsed;
