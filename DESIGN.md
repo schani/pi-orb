@@ -134,6 +134,8 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-09-30-preemption-boot-context.md](docs/postmortems/2026-09-30-preemption-boot-context.md) — confirmed GCE preemption followed by failed boot-context fetch; underlying transport cause unproved
+
 - [docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md](docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md) — incomplete mock SSE response; termination cause erased by mock diagnostics
 - [docs/postmortems/2026-09-27-history-response-size.md](docs/postmortems/2026-09-27-history-response-size.md) — unbounded history response rejected by Cloud Run; browser history has no pagination
 - [docs/postmortems/2026-09-27-webkit-image-fixture-sync.md](docs/postmortems/2026-09-27-webkit-image-fixture-sync.md) — HTTP-only image records raced a running orb's full live sync
