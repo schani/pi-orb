@@ -2743,6 +2743,82 @@ describe("frontend-only browser behavior", () => {
     { name: "desktop", viewport: { width: 1280, height: 900 }, phone: false },
     { name: "phone", viewport: { width: 390, height: 844 }, phone: true },
   ])(
+    "keeps a lifecycle failure below the header while scrolling on $name",
+    async ({ viewport, phone }) => {
+      const page = await browser.newPage({
+        viewport: { width: 1280, height: 900 },
+        isMobile: phone,
+        hasTouch: phone,
+      });
+      const error = `Lifecycle failed: ${"unbroken-diagnostic".repeat(35)}`;
+      await page.route("**/api/v1/orbs/frontend-long-history", async (route) => {
+        const response = await route.fetch();
+        const orb = await response.json();
+        await route.fulfill({ response, json: { ...orb, lastError: error } });
+      });
+      try {
+        await gotoFrontendHistory(
+          page,
+          `${origin}/#/orbs/frontend-long-history`,
+          "frontend-long-history",
+        );
+        const banner = page.locator(".notice-error", { hasText: error });
+        await expectPage(banner).toHaveCount(1);
+        await page.getByRole("button", { name: "expire session" }).click();
+        await expectPage(page.locator(".session-ribbon")).toBeVisible();
+        if (phone) {
+          await page.setViewportSize(viewport);
+          await page.locator(".orb-transcript-scroll").evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+          });
+        } else {
+          await page.locator("body").evaluate((body) => {
+            const view = body.ownerDocument.defaultView;
+            view?.scrollTo(0, body.ownerDocument.documentElement.scrollHeight);
+          });
+        }
+        const geometry = await page.locator("body").evaluate((body) => {
+          const document = body.ownerDocument;
+          const view = document.defaultView;
+          const rect = (selector: string) =>
+            document.querySelector(selector)?.getBoundingClientRect();
+          const banner = rect(".orb-header-stack .notice-error");
+          const header = rect(".orb-header");
+          const ribbon = rect(".session-ribbon");
+          const scroller = document.querySelector(".orb-transcript-scroll");
+          return {
+            banner: banner && { top: banner.top, bottom: banner.bottom },
+            headerBottom: header?.bottom,
+            ribbonBottom: ribbon?.bottom,
+            scroll: scroller?.scrollTop,
+            windowScroll: view?.scrollY,
+            overflow: document.documentElement.scrollWidth > (view?.innerWidth ?? 0),
+          };
+        });
+        expectPage(phone ? geometry.scroll : geometry.windowScroll).toBeGreaterThan(200);
+        expectPage(geometry.banner).not.toBeNull();
+        expectPage(geometry.banner?.top).toBeGreaterThanOrEqual(geometry.headerBottom ?? Infinity);
+        expectPage(geometry.headerBottom).toBeGreaterThanOrEqual(geometry.ribbonBottom ?? Infinity);
+        expectPage(geometry.banner?.bottom).toBeLessThan(viewport.height);
+        expectPage(geometry.overflow).toBe(false);
+        if (!phone) {
+          await page.getByRole("button", { name: "Open terminal", exact: true }).click();
+          const terminal = page.locator(".orb-terminal-window:not(.orb-terminal-hidden)");
+          await expectPage(terminal).toBeVisible();
+          const panel = await terminal.boundingBox();
+          expectPage(panel?.y).toBeGreaterThanOrEqual(geometry.banner?.bottom ?? Infinity);
+          await expectPage(banner).toBeVisible();
+        }
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  it.each([
+    { name: "desktop", viewport: { width: 1280, height: 900 }, phone: false },
+    { name: "phone", viewport: { width: 390, height: 844 }, phone: true },
+  ])(
     "keeps pending upload progress visible above a scrolled long transcript on $name",
     async ({ viewport, phone }) => {
       const page = await browser.newPage({ viewport, isMobile: phone, hasTouch: phone });

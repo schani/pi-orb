@@ -1675,6 +1675,7 @@ function OrbConversation({
           <SubagentRail agents={state.subagents} />
         )}
         {uploads.progress}
+        <OrbFailureBanner message={orb?.lastError} />
         {dropFeedback && (
           <div className="orb-drop-feedback" role="status">
             {dropFeedback}
@@ -1801,7 +1802,6 @@ function OrbConversation({
               )}
             </OrbNotice>
           )}
-          <OrbFailureBanner message={orb?.lastError} />
           <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {orbError !== null && <OrbNotice error>{describeApiError(orbError)}</OrbNotice>}
           <div className="orb-composer-feedback-original">

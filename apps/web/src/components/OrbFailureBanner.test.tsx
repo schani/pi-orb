@@ -9,7 +9,9 @@ describe("OrbFailureBanner", () => {
     );
 
     expect(html).toContain("notice notice-error");
-    expect(html).toContain('class="rec-px">···<');
+    expect(html).toContain('class="rec rec-sys orb-failure-banner"');
+    expect(html).not.toContain('class="rec-px"');
+    expect(html).not.toContain("···");
     expect(html).toContain("runtime_failed: clone_failed: access denied &lt;token&gt;");
     expect(html).not.toContain("access denied <token>");
   });

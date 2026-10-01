@@ -2244,6 +2244,15 @@ button.modal-close:focus-visible {
   border-color: var(--bad);
 }
 
+.orb-failure-banner {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.orb-header-stack > .rec-sys .notice {
+  overflow-wrap: anywhere;
+}
+
 .user-code {
   margin: 0 2px;
   padding: 0 8px;
