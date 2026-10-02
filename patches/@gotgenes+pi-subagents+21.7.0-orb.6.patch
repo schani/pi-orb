@@ -1,8 +1,8 @@
 diff --git a/node_modules/@gotgenes/pi-subagents/dist/extension.js b/node_modules/@gotgenes/pi-subagents/dist/extension.js
-index 33a647d..e2077ed 100644
+index bb66bf8..011ff1d 100644
 --- a/node_modules/@gotgenes/pi-subagents/dist/extension.js
 +++ b/node_modules/@gotgenes/pi-subagents/dist/extension.js
-@@ -81,12 +81,12 @@
+@@ -81,12 +81,12 @@ var AgentTypeRegistry = class {
    /**
     * Get the capability tool names for a type (case-insensitive).
     *
@@ -17,7 +17,7 @@ index 33a647d..e2077ed 100644
    }
    /** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
    resolveAgentConfig(type) {
-@@ -951,7 +951,7 @@
+@@ -957,7 +957,7 @@ async function createSubagentSession(params, deps) {
      settingsManager: sessionSettings,
      modelRegistry: snapshot.modelRegistry,
      model: cfg.model,
@@ -26,7 +26,7 @@ index 33a647d..e2077ed 100644
      customTools: childTools,
      excludeTools: EXCLUDED_TOOL_NAMES,
      resourceLoader: loader,
-@@ -5636,9 +5636,13 @@
+@@ -5662,9 +5662,13 @@ function index_default(pi, host = {}) {
        // other option type-check against the SDK signature.
        createSession: async ({ sessionManager, resourceLoader, modelRegistry, ...rest }) => {
          if (host.childExtensions !== void 0) {
@@ -43,7 +43,7 @@ index 33a647d..e2077ed 100644
            }
          }
          const childRuntime = await ModelRuntime.create({
-@@ -5654,12 +5658,17 @@
+@@ -5680,12 +5684,17 @@ function index_default(pi, host = {}) {
              childRegistry.registerProvider(id, config);
            }
          });
@@ -66,7 +66,7 @@ diff --git a/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts b/nod
 index e6cb8df..930e763 100644
 --- a/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts
 +++ b/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts
-@@ -16,7 +16,7 @@
+@@ -16,7 +16,7 @@ import type { AgentConfig } from "#src/types";
   */
  export interface AgentConfigLookup {
    resolveAgentConfig(type: string): AgentConfig;
@@ -75,7 +75,7 @@ index e6cb8df..930e763 100644
  }
  
  // ── AgentTypeRegistry class ──────────────────────────────────────────────────
-@@ -93,12 +93,12 @@
+@@ -93,12 +93,12 @@ export class AgentTypeRegistry implements AgentConfigLookup {
    /**
     * Get the capability tool names for a type (case-insensitive).
     *
@@ -92,10 +92,10 @@ index e6cb8df..930e763 100644
  
    /** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
 diff --git a/node_modules/@gotgenes/pi-subagents/src/index.ts b/node_modules/@gotgenes/pi-subagents/src/index.ts
-index 8a7f8fd..9b630a0 100644
+index 96edef1..6816f49 100644
 --- a/node_modules/@gotgenes/pi-subagents/src/index.ts
 +++ b/node_modules/@gotgenes/pi-subagents/src/index.ts
-@@ -154,9 +154,17 @@
+@@ -156,9 +156,17 @@ export default function (pi: ExtensionAPI, host: SubagentsHostOptions = {}) {
          // Explicit host capabilities must not silently replace/drop a discovered
          // extension on collision. Preserve upstream's default loading policy.
          if (host.childExtensions !== undefined) {
@@ -116,7 +116,7 @@ index 8a7f8fd..9b630a0 100644
            }
          }
          // Pi builds the child a fresh ModelRuntime whenever it is not given
-@@ -179,12 +187,19 @@
+@@ -181,12 +189,19 @@ export default function (pi: ExtensionAPI, host: SubagentsHostOptions = {}) {
              childRegistry.registerProvider(id, config);
            },
          });
@@ -138,10 +138,10 @@ index 8a7f8fd..9b630a0 100644
        assemblerIO: {
          buildAgentPrompt,
 diff --git a/node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts b/node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts
-index 2e0dad4..556d205 100644
+index c23f38a..561f9c5 100644
 --- a/node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts
 +++ b/node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts
-@@ -269,7 +269,7 @@
+@@ -271,7 +271,7 @@ export async function createSubagentSession(
      settingsManager: sessionSettings,
      modelRegistry: snapshot.modelRegistry,
      model: cfg.model,
@@ -151,10 +151,10 @@ index 2e0dad4..556d205 100644
      excludeTools: EXCLUDED_TOOL_NAMES,
      resourceLoader: loader,
 diff --git a/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts b/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
-index a575eca..cb17724 100644
+index bcd2d66..6cc0a96 100644
 --- a/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
 +++ b/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
-@@ -90,8 +90,8 @@
+@@ -90,8 +90,8 @@ export interface SessionConfig {
    effectiveCwd: string;
    /** Fully-assembled system prompt string (ready for `systemPromptOverride`). */
    systemPrompt: string;

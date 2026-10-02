@@ -907,7 +907,9 @@ if (scenario === "resume-cancel") {
   );
   assert.deepEqual(activityEdges, ["busy", "idle", "busy", "idle"]);
   assert.equal(service.getRecord(ids.get("one")).status, "stopped");
-  const records = SessionManager.open(manager.getSessionFile()).getEntries().filter((entry) => entry.type === "custom" && entry.customType === "subagents:record");
+  const records = SessionManager.open(manager.getSessionFile())
+    .getEntries()
+    .filter((entry) => entry.type === "custom" && entry.customType === "subagents:record");
   assert.equal(records.at(-1)?.data.requestedModel, undefined);
   assert.deepEqual(records.at(-1)?.data.resolvedModel, { provider: "liveness-probe", id: "probe" });
   note("assert:explicit-resume-owns-fresh-cancellation-and-operation");
