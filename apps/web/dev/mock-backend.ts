@@ -1740,7 +1740,7 @@ function settingsFor(
   if (!view) {
     view = {
       type: "agent_settings",
-      settings: { model: { provider: "openai-codex", id: "gpt-6-astra" }, thinkingLevel: "high" },
+      settings: { model: { provider: "openai-codex", id: "gpt-6.1-sol" }, thinkingLevel: "high" },
       models: (
         [
           ["gpt-6-astra", "Astra"],
