@@ -135,7 +135,7 @@ describe("Pi SDK broker provider contract (pinned SDK version)", () => {
     const runtime = await createRuntime(new FakeBrokerEndpoint([]));
     const catalog = runtime.getModels(PROVIDER);
     const model = pickCodexModel(catalog);
-    expect(model?.id).toBe("gpt-6-astra");
+    expect(model?.id).toBe("gpt-6.1-sol");
     expect(model?.input).toContain("image");
     expect(eligibleCodexModels(catalog).map(({ id }) => id)).toEqual([
       "gpt-6-astra",
