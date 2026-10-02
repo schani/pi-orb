@@ -15,7 +15,7 @@ index bb66bf8..011ff1d 100644
 -    return this.resolveAgentConfig(type).toolNames ?? [...BUILTIN_TOOL_NAMES];
 +    return this.resolveAgentConfig(type).toolNames;
    }
-   /** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
+   /** Resolve a registered agent profile; reject unknown names. */
    resolveAgentConfig(type) {
 @@ -957,7 +957,7 @@ async function createSubagentSession(params, deps) {
      settingsManager: sessionSettings,
@@ -90,7 +90,7 @@ index e6cb8df..930e763 100644
 +    return this.resolveAgentConfig(type).toolNames;
    }
  
-   /** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
+   /** Resolve a registered agent profile; reject unknown names. */
 diff --git a/node_modules/@gotgenes/pi-subagents/src/index.ts b/node_modules/@gotgenes/pi-subagents/src/index.ts
 index 96edef1..6816f49 100644
 --- a/node_modules/@gotgenes/pi-subagents/src/index.ts

@@ -526,3 +526,152 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     if (!failed) rmSync(root, { recursive: true, force: true });
   }
 }, 480_000);
+
+it("rejects unknown profiles and models without child inference, and dispatches model sol explicitly", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-orb-unknown-types-e2e-"));
+  const stop = { type: "stop", status: "completed" };
+  const cases = [
+    { type: "sol", model: undefined, error: 'Unknown agent type "sol"' },
+    { type: "no-such-profile", model: undefined, error: 'Unknown agent type "no-such-profile"' },
+    { type: "general-purpose", model: "sol", error: undefined },
+    { type: "general-purpose", model: "no-such-model", error: "Model not found" },
+  ];
+  const rules = cases.flatMap((item, i) => [
+    {
+      match: { userMessage: { regex: `^PROFILE_CASE_${i}$` } },
+      steps: [
+        {
+          type: "toolCall",
+          name: "subagent",
+          arguments: {
+            subagent_type: item.type,
+            ...(item.model === undefined ? {} : { model: item.model }),
+            prompt: `PROFILE_CHILD_${i}`,
+            description: `Profile case ${i}`,
+          },
+        },
+        stop,
+      ],
+    },
+    {
+      match: { userMessage: { regex: `^PROFILE_CHILD_${i}$` } },
+      steps: [{ type: "text", content: `PROFILE_CHILD_DONE_${i}` }, stop],
+    },
+    {
+      match: { toolResultContains: { regex: "." } },
+      steps: [{ type: "text", content: `PROFILE_SETTLED_${i}` }, stop],
+    },
+  ]);
+  const fake = await createFakeSession(`unknown-types-${randomUUID()}`, {
+    auth: { accountId: "unknown-types-test", device: { manualApprove: true } },
+    model: { rules },
+  });
+  const names = await createFakeSession(`unknown-types-names-${randomUUID()}`, {
+    model: {
+      rules: [{ match: { default: true }, steps: [{ type: "text", content: "Profiles" }, stop] }],
+    },
+  });
+  const cp = await startControlPlane({
+    port: 7183,
+    fake,
+    nameFake: names,
+    pglitePath: join(root, "db"),
+    processStateDirectory: join(root, "hosts"),
+  });
+  const project = randomUUID(),
+    orb = randomUUID();
+  let failed = false;
+  const history = () => api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`);
+  const rootEntries = (): { customType?: string; data?: Record<string, unknown> }[] => {
+    const directory = join(root, "hosts", orb, "workspace", "pi-sessions");
+    const file = readdirSync(directory).find((name) => name.endsWith(".jsonl"));
+    if (file === undefined) throw new FatalProbeError("root session file is missing");
+    return readFileSync(join(directory, file), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+  };
+  try {
+    expect(
+      (
+        await api(cp.baseUrl, "POST", "/api/v1/projects", {
+          id: project,
+          name: "Profiles",
+          repositoryUrl: "https://github.com/schani/pi-orb",
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: orb })).status,
+    ).toBe(202);
+    const code = await waitFor("profile fixture login", async () => {
+      const view = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`);
+      const action = view.body["actionRequired"] as
+        | { userCode?: string; verificationUri?: string }
+        | undefined;
+      return action?.userCode && action.verificationUri ? action.userCode : null;
+    });
+    await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: code });
+    await waitFor(
+      "profile fixture runtime",
+      async () => {
+        const view = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`);
+        if (view.body["state"] === "failed") throw new FatalProbeError(JSON.stringify(view.body));
+        return view.body["state"] === "running" ? true : null;
+      },
+      { timeoutMs: 300_000 },
+    );
+    for (const [i, item] of cases.entries()) {
+      expect(
+        (
+          await api(cp.baseUrl, "PUT", `/api/v1/orbs/${orb}/messages/${randomUUID()}`, {
+            content: [{ type: "text", text: `PROFILE_CASE_${i}` }],
+          })
+        ).status,
+      ).toBe(202);
+      const serialized = await waitFor(`profile case ${i} settled`, async () => {
+        const text = JSON.stringify((await history()).body);
+        return text.includes(`PROFILE_SETTLED_${i}`) ? text : null;
+      });
+      const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
+        surface: string;
+        matchedRuleIndex: number | null;
+        body?: { model?: string };
+      }[];
+      const childCalls = requests.filter(
+        (call) => call.surface === "model" && call.matchedRuleIndex === i * 3 + 1,
+      );
+      if (item.error !== undefined) {
+        expect(serialized).toContain(item.error.replaceAll('"', '\\"'));
+        if (i < 2) {
+          expect(serialized).toContain("Available types:");
+          expect(serialized).toContain("model");
+        }
+        expect(childCalls).toEqual([]);
+      } else {
+        expect(childCalls).toHaveLength(1);
+        expect(childCalls[0]?.body?.model).toBe("gpt-6.1-sol");
+      }
+      const admitted = rootEntries().filter(
+        (entry) =>
+          entry.customType === "pi-orb.subagent-run" && entry.data?.["phase"] === "admitted",
+      );
+      expect(admitted).toHaveLength(i < 2 ? 0 : 1);
+    }
+  } catch (error) {
+    failed = true;
+    await writeFile(join(root, "control-plane.log"), cp.logs.join(""));
+    await writeFile(
+      join(root, "requests.json"),
+      JSON.stringify(await fakeControl(fake.sessionKey, "/requests")),
+    );
+    await writeFile(join(root, "history.json"), JSON.stringify((await history()).body));
+    console.error(`Preserved unknown-profile fixture: ${root}`);
+    throw error;
+  } finally {
+    await cp.stop();
+    await deleteFakeSession(fake.sessionKey);
+    await deleteFakeSession(names.sessionKey);
+    if (!failed) rmSync(root, { recursive: true, force: true });
+  }
+}, 480_000);

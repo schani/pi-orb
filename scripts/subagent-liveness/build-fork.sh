@@ -3,7 +3,7 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 fork=${1:?usage: build-fork.sh /path/to/pi-packages}
-expected=fc7134ba0694674e8b3546dd7b967815610f8f70
+expected=29e2b3b44ae6cc7aa365b64f47b363c685b7d396
 [[ $("$repo/node_modules/.bin/esbuild" --version) == 0.28.2 ]]
 [[ $(git -C "$fork" rev-parse HEAD) == "$expected" ]]
 git -C "$fork" diff --exit-code HEAD -- packages/pi-subagents
@@ -23,7 +23,7 @@ cp "$repo/node_modules/@gotgenes/pi-subagents/dist/public.d.ts" "$stage/package/
 python3 - "$stage/package" "$expected" <<'PY'
 import json,pathlib,sys
 p=pathlib.Path(sys.argv[1]); x=json.loads((p/'package.json').read_text())
-x['version']='21.7.0-orb.7'
+x['version']='21.7.0-orb.8'
 x['exports']['.']['default']='./dist/service.js'
 x['exports']['./extension']={'types':'./dist/extension.d.ts','default':'./dist/extension.js'}
 x['pi']['extensions']=['./dist/extension.js']
