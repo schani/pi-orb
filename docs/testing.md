@@ -279,6 +279,18 @@ The main push preserves agent settings, personal instructions, fleet Find and he
 
 Qualification findings retained rather than dismissed as rerun noise: changing utility hit areas from 20 to 28px broke the existing terminal geometry contract (restored 20px within 28px cells); the first responsive test exposed model-cell overflow (bounded/shrunk); lazy pre-assistant metadata is now persisted, so replacement history is no longer empty. SDK initialization also appends unchanged bindings on every message-free attachment, proven in the real-SDK contract. The replacement test synchronizes initial replication and checks preserved record identity plus only unchanged bindings/silent boot metadata, rather than racing an empty snapshot or forbidding native SDK entries. Failed-run logs and DST entropy traces were retained; qualification uses fresh processes after source changes, not HMR as release evidence. The full-slice scenarios share the login authorized by the first scenario: filtering only the replacement case deterministically leaves it at `openai_codex_device_login`, not a product readiness failure. Qualify the complete file/suite rather than treating that filtered invocation as an independent fixture.
 
+## Deletion DST fixture isolation (2026-10-02)
+
+Final validation exposed `delete-retries-after-restart` requiring a sibling to remain running while retry scheduling crossed the fixture's 30-second idle-stop threshold (CAS at 32,444.67 ms). The scenario runs no poller, and control-plane restart discards liveness observations; setting runtime activity busy therefore did not fix it. This deletion-only scenario now explicitly excludes idle auto-stop with `idleStopAfterMs: Number.POSITIVE_INFINITY`. The constant is used in idle comparisons, not timers; assertions, deadlines and production code are unchanged.
+
+Preserved trace `test-failures/delete-retries-after-restart-1790950767453-27.json` reproduces the original failure and passes unchanged after isolation:
+
+```bash
+DST_REPLAY=test-failures/delete-retries-after-restart-1790950767453-27.json npx vitest run apps/control-plane/src/domain/orb-deletion.dst.test.ts -t 'recovers busy self-deletion'
+```
+
+Evidence: `/workspace/rebase-backup/corrected-deletion-targeted-replay.log` (original failure), `corrected-deletion-fixed-replay.log` (ineffective runtime-busy proposal), `corrected-deletion-isolated-replay.log` (fixed pass), and `corrected-deletion-isolated-suite.log` (all 11 cases pass). Final sequential typecheck/lint and `npm test` pass **2,423 unit/DST tests plus 110 infrastructure tests** (`corrected-isolated-*.log`). Model-selection coverage and E2E limits are in `docs/subagents.md`.
+
 ## Decisions
 
 - **Qualification artifact placement (2026-09-14):** keep executable regressions, concise ledgers and postmortems in Git; retain bulky generated logs and scheduler traces as downloadable, checksum-indexed artifacts with source revision and replay instructions. Preservation does not require including every trace in the source diff. The subagent corpus is indexed by `scripts/subagent-liveness/evidence/README.md`; its original failures remain intact, and moving artifacts does not clear a release blocker.

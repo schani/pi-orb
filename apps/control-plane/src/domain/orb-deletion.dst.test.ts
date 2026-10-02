@@ -303,7 +303,7 @@ describe("orb deletion (DST)", () => {
       },
       async (sim) => {
         let harness = makeHarness({
-          constants: { deletionQuarantineMs: 2_000 },
+          constants: { deletionQuarantineMs: 2_000, idleStopAfterMs: Number.POSITIVE_INFINITY },
           hostingOrbId: ORB,
         });
         harness.hosting.seedCompletedUpload();
