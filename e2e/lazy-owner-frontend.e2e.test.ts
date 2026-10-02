@@ -70,7 +70,7 @@ it.each(["chromium", "webkit"] as const)(
         await route.fulfill({ response, body });
       });
       try {
-        await gotoFrontendHistory(page, `${origin}/#/orbs/${ORB}`, ORB);
+        await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
         const image = page
           .locator("details.tool-image-activity")
           .filter({ hasText: "artifacts/dashboard-preview.svg" });

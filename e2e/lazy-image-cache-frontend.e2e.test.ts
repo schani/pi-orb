@@ -69,7 +69,7 @@ it.each(["chromium", "webkit"] as const)(
         });
       });
       try {
-        await gotoFrontendHistory(page, `${origin}/#/orbs/${ORB}`, ORB);
+        await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
         const image = page
           .locator("details.tool-image-activity")
           .filter({ hasText: "artifacts/dashboard-preview.svg" });
@@ -135,10 +135,10 @@ it.each(["chromium", "webkit"] as const)(
           requests.filter((path) => path === target),
           "reopening a drawer must reuse cached image bytes",
         ).toHaveLength(1);
-        await page.locator('.orb-index a[href="#/orbs/frontend-lazy-details"]').click();
+        await page.locator('.orb-index a[href="/orbs/frontend-lazy-details"]').click();
         await expect(page.locator(".orb-name")).not.toHaveText("Frontend Playground");
         await expect.poll(() => revoked(firstUrl)).toBe(true);
-        await page.locator(`.orb-index a[href="#/orbs/${ORB}"]`).click();
+        await page.locator(`.orb-index a[href="/orbs/${ORB}"]`).click();
         await expect(thumbnail).toBeVisible();
         await expect
           .poll(() => thumbnail.evaluate((node) => Reflect.get(node, "naturalWidth") as number))
@@ -178,7 +178,7 @@ it.each(["chromium", "webkit"] as const)(
           });
         });
         try {
-          await gotoFrontendHistory(pendingPage, `${origin}/#/orbs/${ORB}`, ORB);
+          await gotoFrontendHistory(pendingPage, `${origin}/orbs/${ORB}`, ORB);
           const pendingImage = pendingPage
             .locator("details.tool-image-activity")
             .filter({ hasText: "artifacts/dashboard-preview.svg" });
@@ -219,7 +219,7 @@ it.each(["chromium", "webkit"] as const)(
           expect(await created(), "abandoned image response cannot create an object URL").toBe(
             beforeRelease,
           );
-          await pendingPage.locator(`.orb-entry-link[href="#/orbs/${ORB}"]`).click();
+          await pendingPage.locator(`.orb-entry-link[href="/orbs/${ORB}"]`).click();
           await expect(pendingImage.locator("img.tool-image-thumbnail").first()).toBeVisible();
           await expect
             .poll(() => pendingRequests.filter((path) => path === pendingTarget).length)
@@ -242,7 +242,7 @@ it.each(["chromium", "webkit"] as const)(
           };
         });
         try {
-          await gotoFrontendHistory(retryPage, `${origin}/#/orbs/${ORB}`, ORB);
+          await gotoFrontendHistory(retryPage, `${origin}/orbs/${ORB}`, ORB);
           const failed = retryPage.getByRole("alert").filter({ hasText: "image failed to load" });
           await expect(failed).toHaveCount(1);
           await failed.getByRole("button", { name: "Retry" }).click();
@@ -329,7 +329,7 @@ it.each(["chromium", "webkit"] as const)(
         });
       });
       try {
-        await gotoFrontendHistory(page, `${origin}/#/orbs/${ORB}`, ORB);
+        await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
         const image = page
           .locator("details.tool-image-activity")
           .filter({ hasText: "artifacts/dashboard-preview.svg" });

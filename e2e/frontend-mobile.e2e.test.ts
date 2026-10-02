@@ -700,7 +700,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const firstDetail = page.waitForRequest((request) =>
         new URL(request.url()).pathname.startsWith("/api/v1/orbs/frontend-fixture-orb/details/"),
       );
-      await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb");
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
       await firstDetail;
       const scroller = page.locator(".orb-transcript-scroll");
       const distanceFromTail = () =>

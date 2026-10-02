@@ -93,7 +93,7 @@ it("fetches the full bash command only when its call opens", async () => {
       });
     });
     try {
-      await gotoFrontendHistory(page, `${origin}/#/orbs/${orbId}`, orbId);
+      await gotoFrontendHistory(page, `${origin}/orbs/${orbId}`, orbId);
       const commands = page
         .locator("details.tool-activity-category")
         .filter({ has: page.locator(":scope > summary", { hasText: "commands" }) });

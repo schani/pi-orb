@@ -201,7 +201,7 @@ it.each(["chromium", "webkit"] as const)(
         return route.continue();
       });
       try {
-        await gotoFrontendHistory(page, `${origin}/#/orbs/${ORB}`, ORB);
+        await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
         await expect.poll(() => syncs).toBeGreaterThanOrEqual(1);
         const history = page.locator(".history");
         const read = history.locator("details.tool-activity-category").filter({
@@ -248,11 +248,11 @@ it.each(["chromium", "webkit"] as const)(
         );
         expect(heldReads).toBe(1);
         // A cache return preserves the immutable detail without a second transfer.
-        await page.locator(`.orb-index a[href="#/orbs/frontend-fixture-orb"]`).click();
+        await page.locator(`.orb-index a[href="/orbs/frontend-fixture-orb"]`).click();
         await expect(page.locator(".orb-name")).toHaveText("Frontend Playground");
         const previousReads = historyCalls;
         const previousSyncs = syncs;
-        await page.locator(`.orb-index a[href="#/orbs/${ORB}"]`).click();
+        await page.locator(`.orb-index a[href="/orbs/${ORB}"]`).click();
         await expect.poll(() => syncs).toBeGreaterThan(previousSyncs);
         await expect(read).toHaveCount(1);
         expect(historyCalls).toBe(previousReads);

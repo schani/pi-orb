@@ -83,7 +83,7 @@ it.each(["chromium", "webkit"] as const)(
         await route.fulfill({ response, body });
       });
       try {
-        await gotoFrontendHistory(page, `${origin}/#/orbs/${ORB}`, ORB);
+        await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
         await expect.poll(() => syncs).toBeGreaterThanOrEqual(1);
         const composer = page.getByRole("textbox", {
           name: "Message the orb",

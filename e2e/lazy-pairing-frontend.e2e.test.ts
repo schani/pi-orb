@@ -53,7 +53,7 @@ it.each(["chromium", "webkit"] as const)(
         }
       });
       try {
-        await gotoFrontendHistory(page, `${origin}/#/orbs/${ORB}`, ORB);
+        await gotoFrontendHistory(page, `${origin}/orbs/${ORB}`, ORB);
         const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
         await composer.fill("LAZY_TOOL_PAIR_HOLD");
         await composer.press("Control+Enter");
