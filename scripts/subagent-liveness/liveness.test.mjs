@@ -23,6 +23,7 @@ const scenarios = [
         "mcp",
         "mcp-shutdown",
         "mcp-profile",
+        "mcp-cancel-starting",
         "idle-stop",
         "mcp-load-failure",
       ]

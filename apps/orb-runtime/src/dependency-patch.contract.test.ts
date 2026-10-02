@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -17,7 +18,7 @@ const json = (
     devDependencies?: Record<string, string>;
   };
 
-const piVersion = "0.87.1";
+const piVersion = "0.99.1";
 const patchPackageVersion = "8.0.1";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
@@ -26,10 +27,21 @@ describe("Pi dependency patch installation", () => {
     expect(json("package.json").devDependencies?.["patch-package"]).toBe(patchPackageVersion);
     for (const manifest of ["apps/orb-runtime/package.json", "apps/control-plane/package.json"]) {
       expect(json(manifest).dependencies).toMatchObject({
-        "@earendil-works/pi-coding-agent": piVersion,
+        "@earendil-works/pi-coding-agent":
+          "file:../../vendor/pi-coding-agent-0.99.1-brace-5.0.12.tgz",
         "patch-package": patchPackageVersion,
       });
     }
+  });
+
+  it("installs the patched brace expansion despite Pi's bundled shrinkwrap", () => {
+    const fromPi = createRequire(
+      join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"),
+    );
+    const installed = JSON.parse(
+      readFileSync(fromPi.resolve("brace-expansion/package.json"), "utf8"),
+    ) as { version: string };
+    expect(installed.version).toBe("5.0.12");
   });
 
   it("carries the exact versioned patch", () => {
@@ -53,6 +65,8 @@ describe("Pi dependency patch installation", () => {
       expect(install).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY patches patches")).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY patches patches")).toBeLessThan(install);
+      expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
+      expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(install);
       expect(dockerfile.indexOf("npx --no-install patch-package", install)).toBeGreaterThan(
         install,
       );

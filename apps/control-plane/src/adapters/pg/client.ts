@@ -167,9 +167,22 @@ export function withPreparedParams(
 
 export class PgClient implements PostgreSQLClient {
   private readonly pool: pg.Pool;
+  private readonly readOnly: boolean;
 
-  constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString, max: 10 });
+  constructor(connectionString: string, readOnly = false) {
+    this.readOnly = readOnly;
+    this.pool = new pg.Pool({
+      connectionString,
+      max: readOnly ? 1 : 10,
+      ...(readOnly
+        ? {
+            options: "-c default_transaction_read_only=on -c statement_timeout=5000",
+            connectionTimeoutMillis: 5000,
+            query_timeout: 5000,
+            idleTimeoutMillis: 1000,
+          }
+        : {}),
+    });
     // A pool error (idle client dropped) must not crash the process.
     this.pool.on("error", () => undefined);
   }
@@ -208,7 +221,7 @@ export class PgClient implements PostgreSQLClient {
             rowCount: result.rowCount ?? 0,
           })),
         );
-      const begin = await clientQuery("BEGIN");
+      const begin = await clientQuery(this.readOnly ? "BEGIN READ ONLY" : "BEGIN");
       if (begin.isErr()) {
         client.release();
         return err(begin.error);

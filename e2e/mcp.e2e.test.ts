@@ -21,7 +21,7 @@ import {
 import { finishMcpFixture } from "./mcp-artifacts.ts";
 import { mcpFailureHistory, mcpFailureRequests } from "./mcp-diagnostics.ts";
 
-it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-project orbs reuse configuration", async () => {
+it("MCP traverses root, restricted and default general-purpose delegates → authenticated HTTPS; same-project orbs reuse configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-orb-mcp-e2e-"));
   const key = join(root, "key.pem");
   const cert = join(root, "cert.pem");
@@ -50,6 +50,10 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
   const remote = createServer(
     { key: readFileSync(key), cert: readFileSync(cert) },
     async (req, res) => {
+      if (req.url === "/unavailable") {
+        res.writeHead(503).end();
+        return;
+      }
       if (req.method !== "POST") {
         res.writeHead(405).end();
         return;
@@ -65,7 +69,7 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       const results: Record<string, unknown> = {
         initialize: {
           protocolVersion: message.params?.protocolVersion,
-          capabilities: { tools: {}, prompts: {}, resources: {} },
+          capabilities: { tools: {}, resources: {} },
           serverInfo: { name: "fixture", version: "1", description: "MCP E2E inventory" },
         },
         "tools/list": {
@@ -81,15 +85,14 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
             },
           ],
         },
-        "prompts/list": { prompts: [{ name: "external" }] },
-        "resources/list": { resources: [{ name: "readme", uri: "test://readme" }] },
+        "resources/list": {
+          resources: [{ name: "readme", uri: "test://readme" }],
+          nextCursor: undefined,
+        },
         "resources/templates/list": {
           resourceTemplates: [{ name: "item", uriTemplate: "test://{id}" }],
         },
         "tools/call": { content: [{ type: "text", text: "MCP_CALL_OK" }] },
-        "prompts/get": {
-          messages: [{ role: "user", content: { type: "text", text: "MCP_EXTERNAL_PROMPT_DATA" } }],
-        },
         "resources/read": { contents: [{ uri: "test://readme", text: "MCP_RESOURCE_OK" }] },
       };
       res.writeHead(200, { "content-type": "application/json" }).end(
@@ -121,7 +124,7 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
                       name: "bash",
                       arguments: {
                         command:
-                          "mkdir -p .pi/agents && printf '%s\\n' '---' 'name: mcp-worker' 'description: Approved MCP worker' 'tools: mcp_search,mcp_call,mcp_read' '---' 'Use the approved MCP tools.' > .pi/agents/mcp-worker.md && echo MCP_PROFILE_READY",
+                          "mkdir -p .pi/agents && printf '%s\\n' '---' 'name: mcp-worker' 'description: Approved MCP worker' 'tools: codemode,mcp__fixture__echo,list_mcp_resources,list_mcp_resource_templates,read_mcp_resource' '---' 'Use codemode for the approved MCP tools.' > .pi/agents/mcp-worker.md && echo MCP_PROFILE_READY",
                       },
                     },
                     { type: "stop", status: "completed" },
@@ -149,32 +152,18 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
           {
             match: { userMessage: { regex: index === 1 ? "MCP_CHILD_CHECK" : "^MCP check$" } },
             steps: [
-              { type: "toolCall", name: "mcp_search", arguments: { server: "fixture", limit: 4 } },
               {
                 type: "toolCall",
-                name: "mcp_read",
-                arguments: { server: "fixture", kind: "prompt", name: "external" },
-              },
-              {
-                type: "toolCall",
-                name: "mcp_read",
-                arguments: { server: "fixture", kind: "resource", uri: "test://readme" },
-              },
-              {
-                type: "toolCall",
-                name: "mcp_read",
-                arguments: { server: "fixture", kind: "template", name: "item" },
-              },
-              {
-                type: "toolCall",
-                name: "mcp_call",
-                arguments: { server: "fixture", tool: "echo", args: { value: "hello" } },
+                name: "codemode",
+                arguments: {
+                  code: "const resources = await tools.list_mcp_resources({server:'fixture'}); const templates = await tools.list_mcp_resource_templates({server:'fixture'}); const read = await tools.read_mcp_resource({server:'fixture',uri:'test://readme'}); const echo = await tools.mcp__fixture__echo({value:'hello'}); text(JSON.stringify({resources,templates,read,echo}));",
+                },
               },
               { type: "stop", status: "completed" },
             ],
           },
           {
-            match: { toolResultContains: { regex: "MCP_CALL_OK" } },
+            match: { userMessage: { regex: index === 1 ? "MCP_CHILD_CHECK" : "^MCP check$" } },
             steps: [
               { type: "text", content: index === 1 ? "MCP_CHILD_COMPLETE" : "MCP_CHECK_COMPLETE" },
               { type: "stop", status: "completed" },
@@ -183,7 +172,7 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
           ...(index === 1
             ? [
                 {
-                  match: { toolResultContains: { regex: "MCP_CHILD_COMPLETE" } },
+                  match: { userMessage: { regex: "^MCP check$" } },
                   steps: [
                     { type: "text", content: "MCP_CHECK_COMPLETE" },
                     { type: "stop", status: "completed" },
@@ -202,18 +191,71 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
           },
         ]),
         {
-          match: { userMessage: { regex: "^MCP isolation$" } },
+          match: { userMessage: { regex: "^MCP default delegation$" } },
           steps: [
             {
               type: "toolCall",
-              name: "bash",
-              arguments: { command: 'test -z "$MCP_KEY" && echo MCP_ISOLATION_EMPTY' },
+              name: "subagent",
+              arguments: {
+                subagent_type: "general-purpose",
+                prompt: "MCP_DEFAULT_CHILD_CHECK",
+                description: "Check default MCP capabilities",
+                run_in_background: false,
+                inherit_context: false,
+              },
             },
             { type: "stop", status: "completed" },
           ],
         },
         {
-          match: { toolResultContains: { regex: "MCP_ISOLATION_EMPTY" } },
+          match: { userMessage: { regex: "MCP_DEFAULT_CHILD_CHECK" } },
+          steps: [
+            {
+              type: "toolCall",
+              name: "codemode",
+              arguments: {
+                code: "const echo = await tools.mcp__fixture__echo({value:'default-child'}); text(JSON.stringify(echo));",
+              },
+            },
+            { type: "stop", status: "completed" },
+          ],
+        },
+        {
+          match: { userMessage: { regex: "MCP_DEFAULT_CHILD_CHECK" } },
+          steps: [
+            { type: "text", content: "MCP_DEFAULT_CHILD_COMPLETE" },
+            { type: "stop", status: "completed" },
+          ],
+        },
+        {
+          match: { userMessage: { regex: "^MCP default delegation$" } },
+          steps: [
+            { type: "text", content: "MCP_DEFAULT_COMPLETE" },
+            { type: "stop", status: "completed" },
+          ],
+        },
+        {
+          match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+          steps: [
+            { type: "text", content: "Checked default delegation." },
+            { type: "stop", status: "completed" },
+          ],
+        },
+        {
+          match: { userMessage: { regex: "^MCP isolation$" } },
+          steps: [
+            {
+              type: "toolCall",
+              name: "codemode",
+              arguments: {
+                code: 'text(await tools.bash({command: "test -z \\"$MCP_KEY\\" && echo MCP_ISOLATION_EMPTY"}))',
+              },
+            },
+            { type: "stop", status: "completed" },
+          ],
+        },
+        {
+          match: { userMessage: { regex: "^MCP isolation$" } },
           steps: [
             { type: "text", content: "MCP_ISOLATION_COMPLETE" },
             { type: "stop", status: "completed" },
@@ -223,6 +265,13 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
           match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
           steps: [
             { type: "text", content: "Checked project isolation." },
+            { type: "stop", status: "completed" },
+          ],
+        },
+        {
+          match: { userMessage: { regex: "^MCP unavailable$" } },
+          steps: [
+            { type: "text", content: "MCP_UNAVAILABLE_COMPLETE" },
             { type: "stop", status: "completed" },
           ],
         },
@@ -272,6 +321,7 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
   const first = randomUUID();
   const second = randomUUID();
   const isolated = randomUUID();
+  const unavailable = randomUUID();
   const waitRunning = async (id: string) =>
     waitFor(
       "MCP orb running",
@@ -343,7 +393,10 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
     );
     await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: challenge });
     await waitRunning(first);
-    expect(calls).toEqual([]); // Inventory is rendered without eager MCP discovery.
+    expect(calls.map((call) => call.method)).toEqual(
+      expect.arrayContaining(["initialize", "tools/list", "resources/list"]),
+    );
+    expect(calls.some((call) => call.method === "tools/call")).toBe(false);
     const page = await browser.newPage();
     await page.goto(`${cp.baseUrl}/#/orbs/${first}`);
     // Pin inbox delivery rather than racing the browser's websocket attach.
@@ -367,10 +420,17 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       },
       { timeoutMs: 60_000 },
     );
-    expect(encoded).toContain("MCP_EXTERNAL_PROMPT_DATA");
     expect(encoded).toContain("MCP_RESOURCE_OK");
     expect(encoded).toContain("test://{id}");
+    expect(encoded).toContain("mcp__fixture__echo");
+    expect(encoded).toContain("nestedCalls");
+    const nestedEcho = page.locator(".tool-nested-call").filter({ hasText: "mcp__fixture__echo" });
+    await expectPage(nestedEcho).toHaveCount(1);
+    await nestedEcho.locator("xpath=ancestor::details[1]/summary").click();
+    await expectPage(nestedEcho).toBeVisible();
     expect(encoded).not.toContain("synthetic-first");
+    expect(calls.some((call) => call.method === "resources/read")).toBe(true);
+    expect(calls.some((call) => call.method === "resources/templates/list")).toBe(true);
     expect(calls.filter((c) => c.method === "tools/call")).toHaveLength(1);
     expect(calls.every((c) => c.authorization === "Bearer synthetic-first")).toBe(true);
     await waitFor(
@@ -386,9 +446,21 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       },
       { timeoutMs: 60_000 },
     );
-    expect(JSON.stringify(await fakeControl(fake.sessionKey, "/requests"))).toContain(
-      "Available MCP servers:",
-    );
+    const firstRequests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
+      body?: { tools?: { name: string; description?: string }[]; instructions?: string };
+    }[];
+    expect(
+      firstRequests.some((request) =>
+        request.body?.tools
+          ?.find((tool) => tool.name === "codemode")
+          ?.description?.includes("mcp__fixture__echo"),
+      ),
+    ).toBe(true);
+    expect(
+      firstRequests.some((request) =>
+        request.body?.instructions?.includes("fixture: MCP E2E inventory"),
+      ),
+    ).toBe(true);
     expect(
       (
         await api(cp.baseUrl, "PUT", `/api/v1/projects/${project}/secrets/MCP_KEY`, {
@@ -431,6 +503,33 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
       },
       { timeoutMs: 60_000 },
     );
+    await page
+      .getByRole("textbox", { name: "Message the orb", exact: true })
+      .fill("MCP default delegation");
+    await page
+      .getByRole("textbox", { name: "Message the orb", exact: true })
+      .press("Control+Enter");
+    await expectPage(page.getByText("MCP_DEFAULT_COMPLETE", { exact: true })).toBeVisible({
+      timeout: 60_000,
+    });
+    const defaultHistory = await waitFor(
+      "replicated default delegation MCP call",
+      async () => {
+        const history = JSON.stringify(
+          (await api(cp.baseUrl, "GET", `/api/v1/orbs/${second}/history`)).body,
+        );
+        return history.includes("MCP_DEFAULT_COMPLETE") ? history : null;
+      },
+      { timeoutMs: 60_000 },
+    );
+    expect(defaultHistory).toContain("MCP_DEFAULT_CHILD_COMPLETE");
+    expect(defaultHistory).not.toContain("MCP_CALL_OK");
+    expect(defaultHistory).not.toContain("synthetic-second");
+    expect(calls.filter((c) => c.method === "tools/call").map((c) => c.authorization)).toEqual([
+      "Bearer synthetic-first",
+      "Bearer synthetic-second",
+      "Bearer synthetic-second",
+    ]);
     expect(
       (await api(cp.baseUrl, "POST", `/api/v1/projects/${other}/orbs`, { id: isolated })).status,
     ).toBe(202);
@@ -451,7 +550,7 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
     const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
       matchedRuleIndex: number | null;
       body: {
-        tools?: { name: string }[];
+        tools?: { name: string; description?: string }[];
         instructions?: string;
         input?: { role?: string; content?: { text?: string }[] }[];
       };
@@ -462,18 +561,85 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
           (item) => item.role === "user" && item.content?.some((block) => block.text === prompt),
         ),
       );
+    const defaultChildRequest = requestFor("MCP_DEFAULT_CHILD_CHECK");
+    expect(defaultChildRequest).toBeDefined();
+    expect(defaultChildRequest?.body.tools?.map((tool) => tool.name)).toContain("codemode");
+    expect(
+      defaultChildRequest?.body.tools?.find((tool) => tool.name === "codemode")?.description,
+    ).toContain("mcp__fixture__echo");
+    expect(defaultChildRequest?.body.instructions).toContain("fixture: MCP E2E inventory");
+    expect(defaultChildRequest?.body.tools?.some((tool) => tool.name === "subagent")).toBe(false);
+    expect(defaultChildRequest?.body.tools?.some((tool) => tool.name.startsWith("mcp__"))).toBe(
+      false,
+    );
     const childRequest = requestFor("MCP_CHILD_CHECK");
     expect(childRequest).toBeDefined();
-    expect(childRequest?.body.instructions).toContain("MCP E2E inventory");
-    expect(childRequest?.body.tools?.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(["mcp_search", "mcp_call", "mcp_read"]),
-    );
+    expect(
+      childRequest?.body.tools?.find((tool) => tool.name === "codemode")?.description,
+    ).toContain("mcp__fixture__echo");
+    expect(childRequest?.body.instructions).toContain("fixture: MCP E2E inventory");
+    expect(
+      requests.some(
+        (request) =>
+          JSON.stringify(request.body.input).includes("custom_tool_call_output") &&
+          JSON.stringify(request.body.input).includes("MCP_CALL_OK"),
+      ),
+    ).toBe(true);
+    expect(childRequest?.body.tools?.map((tool) => tool.name)).toContain("codemode");
+    expect(childRequest?.body.tools?.some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
     expect(childRequest?.body.tools?.some((tool) => tool.name === "subagent")).toBe(false);
     const isolatedRequest = requestFor("MCP isolation");
     expect(isolatedRequest).toBeDefined();
-    expect(isolatedRequest?.body.tools?.some((tool) => tool.name.startsWith("mcp_"))).toBe(false);
+    expect(isolatedRequest?.body.tools?.map((tool) => tool.name)).toContain("codemode");
+    expect(isolatedRequest?.body.tools?.some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
+    expect(
+      isolatedRequest?.body.tools?.find((tool) => tool.name === "codemode")?.description,
+    ).not.toContain("mcp__fixture__echo");
     expect(isolatedRequest?.body.instructions).not.toContain("MCP E2E inventory");
-    expect(calls.filter((call) => call.method === "tools/call")).toHaveLength(2);
+    expect(
+      requests.some(
+        (request) =>
+          JSON.stringify(request.body.input).includes("custom_tool_call_output") &&
+          JSON.stringify(request.body.input).includes("MCP_ISOLATION_EMPTY"),
+      ),
+    ).toBe(true);
+    expect(calls.filter((call) => call.method === "tools/call")).toHaveLength(3);
+    expect(
+      (
+        await api(cp.baseUrl, "PUT", `/api/v1/projects/${other}/mcp`, {
+          revision: 0,
+          servers: [
+            {
+              name: "unavailable",
+              description: "Unavailable fixture",
+              url: `https://127.0.0.1:${address.port}/unavailable`,
+              headers: {},
+            },
+          ],
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await api(cp.baseUrl, "POST", `/api/v1/projects/${other}/orbs`, { id: unavailable })).status,
+    ).toBe(202);
+    await waitRunning(unavailable);
+    await page.goto(`${cp.baseUrl}/#/orbs/${unavailable}`);
+    await expectPage(
+      page.getByText("MCP unavailable: failed. Check project MCP settings."),
+    ).toBeVisible({ timeout: 60_000 });
+    const failedMcp = await waitFor(
+      "replicated unavailable MCP edge",
+      async () => {
+        const history = JSON.stringify(
+          (await api(cp.baseUrl, "GET", `/api/v1/orbs/${unavailable}/history`)).body,
+        );
+        return history.includes("MCP unavailable: failed. Check project MCP settings.")
+          ? history
+          : null;
+      },
+      { timeoutMs: 60_000 },
+    );
+    expect(failedMcp).not.toContain("synthetic-first");
     expect(
       (
         await api(cp.baseUrl, "PUT", `/api/v1/projects/${project}/mcp`, {
@@ -520,7 +686,7 @@ it("MCP traverses root and delegated Pi sessions → authenticated HTTPS; same-p
           () => "unavailable",
         );
         const history: Record<string, unknown> = {};
-        for (const id of [first, second, isolated])
+        for (const id of [first, second, isolated, unavailable])
           history[id] = await api(cp.baseUrl, "GET", `/api/v1/orbs/${id}/history`).then(
             (value) => mcpFailureHistory(value.body),
             () => "unavailable",

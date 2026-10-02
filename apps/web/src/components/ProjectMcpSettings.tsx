@@ -195,6 +195,10 @@ export function McpEditor({
   );
 }
 
+export function mcpAuthorizationLabel(status: string): string {
+  return status === "connected" ? "grant stored" : status;
+}
+
 function Connection({
   server,
   autoOpen,
@@ -225,7 +229,7 @@ function Connection({
       ? "authorization unavailable"
       : authorization.status === "auth_required"
         ? "authorization required"
-        : authorization.status || "checking authorization…"
+        : mcpAuthorizationLabel(authorization.status) || "checking authorization…"
     : editable
       ? "bearer token"
       : "custom headers";

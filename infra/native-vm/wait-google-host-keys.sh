@@ -40,5 +40,5 @@ while test "$(monotonic_now)" -lt "$deadline"; do
   fi
   $sleep_command 1
 done
-echo 'pi-orb host-key barrier: Google guest-agent host keys did not become ready within 90 seconds' >&2
+echo 'PI_ORB_HOST_KEY_READY_FAILED=google_host_keys_timeout: Google guest-agent host keys did not become ready within 90 seconds' >&2
 exit 1

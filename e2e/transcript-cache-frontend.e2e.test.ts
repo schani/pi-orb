@@ -181,6 +181,7 @@ it.each(["chromium", "webkit"] as const)(
       check(historyReads).toBe(beforeReturn);
       check(unexpectedHistory).toBe(0);
     } finally {
+      await page.unrouteAll({ behavior: "wait" });
       await page.close();
       await browser.close();
       await vite.close();

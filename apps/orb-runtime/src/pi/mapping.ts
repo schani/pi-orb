@@ -347,6 +347,48 @@ function mapMessageEntry(
     case "toolResult": {
       const details = message["details"];
       const patch = isRecordObject(details) ? stringOf(details, "patch") : undefined;
+      const nativeCalls = message["nestedCalls"];
+      const nativeSummary =
+        isRecordObject(nativeCalls) &&
+        typeof nativeCalls["complete"] === "boolean" &&
+        Array.isArray(nativeCalls["calls"])
+          ? { complete: nativeCalls["complete"], calls: nativeCalls["calls"] as unknown[] }
+          : undefined;
+      const calls: NonNullable<
+        Extract<ContentBlock, { type: "tool_result" }>["nestedCalls"]
+      >["calls"] = nativeSummary
+        ? nativeSummary.calls.filter(isRecordObject).flatMap((call) =>
+            typeof call["id"] === "string" &&
+            typeof call["name"] === "string" &&
+            (call["status"] === "ok" ||
+              call["status"] === "error" ||
+              call["status"] === "unfinished")
+              ? [
+                  {
+                    id: call["id"],
+                    name: call["name"],
+                    status: call["status"],
+                    ...(call["arguments"] !== undefined
+                      ? { arguments: asJson(call["arguments"]) }
+                      : {}),
+                    ...(typeof call["argumentsBytes"] === "number"
+                      ? { argumentsBytes: call["argumentsBytes"] }
+                      : {}),
+                    ...(typeof call["durationMs"] === "number"
+                      ? { durationMs: call["durationMs"] }
+                      : {}),
+                    ...(typeof call["error"] === "string" ? { error: call["error"] } : {}),
+                  },
+                ]
+              : [],
+          )
+        : [];
+      const nestedCalls = nativeSummary
+        ? {
+            calls,
+            complete: nativeSummary.complete && calls.length === nativeSummary.calls.length,
+          }
+        : undefined;
       return ok({
         ...identity,
         type: "message",
@@ -360,6 +402,7 @@ function mapMessageEntry(
             ),
             isError: message["isError"] === true,
             ...(patch === undefined ? {} : { patch }),
+            ...(nestedCalls === undefined ? {} : { nestedCalls }),
           },
         ],
       });
@@ -432,6 +475,32 @@ export function mapPiEntry(entry: unknown): Result<HistoryRecord, MappingError> 
       });
     case "custom": {
       const data = isRecordObject(entry["data"]) ? entry["data"] : null;
+      if (
+        entry["customType"] === "pi-orb:mcp-status" &&
+        typeof data?.["server"] === "string" &&
+        /^[a-z][a-z0-9_-]{0,63}$/.test(data["server"]) &&
+        (data["state"] === "failed" ||
+          data["state"] === "needs-auth" ||
+          data["state"] === "disconnected" ||
+          data["state"] === "connected")
+      ) {
+        const server = data["server"];
+        const state = data["state"];
+        const label = `MCP ${server}${data["source"] === "child" ? " (child)" : ""}`;
+        return ok({
+          ...identity,
+          type: "event",
+          eventType: "pi.custom",
+          custom: { customType: "pi-orb:mcp-status", display: true },
+          content: [
+            textBlock(
+              state === "connected"
+                ? `${label}: connected.`
+                : `${label}: ${state}. Check project MCP settings.`,
+            ),
+          ],
+        });
+      }
       if (
         entry["customType"] === "pi-orb.settings-fallback" &&
         typeof data?.["message"] === "string"

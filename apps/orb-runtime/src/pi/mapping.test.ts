@@ -121,6 +121,149 @@ describe("Pi entry mapping", () => {
     ]);
   });
 
+  it("projects Pi's bounded native nested-call summary on its codemode result", () => {
+    const nestedCalls = {
+      calls: [
+        {
+          id: "parent/1",
+          name: "mcp__fixture__echo",
+          status: "error",
+          arguments: { value: "marker" },
+          durationMs: 11,
+          error: "MCP request aborted",
+        },
+        {
+          id: "parent/2",
+          name: "read",
+          status: "unfinished",
+          argumentsBytes: 9000,
+        },
+      ],
+      complete: false,
+    };
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "parent",
+        toolName: "codemode",
+        content: [{ type: "text", text: "Script failed" }],
+        isError: true,
+        nestedCalls,
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.content[0]).toEqual({
+      type: "tool_result",
+      callId: "parent",
+      content: [{ type: "text", text: "Script failed" }],
+      isError: true,
+      nestedCalls,
+    });
+  });
+
+  it("marks a native summary incomplete when invalid children cannot be projected", () => {
+    const record = expectMapped({
+      ...base,
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "parent",
+        toolName: "codemode",
+        content: [],
+        nestedCalls: {
+          complete: true,
+          calls: [
+            { id: "parent/1", name: "read", status: "ok" },
+            { id: "parent/2", name: "read", status: "unexpected" },
+          ],
+        },
+      },
+    });
+    if (record.type !== "message") throw new Error("expected message");
+    expect(record.content[0]).toMatchObject({
+      nestedCalls: { complete: false, calls: [{ id: "parent/1", name: "read", status: "ok" }] },
+    });
+  });
+
+  it.each(["failed", "needs-auth", "disconnected", "connected"] as const)(
+    "shows a safe MCP %s status from a native custom entry without making it model context",
+    (state) => {
+      const record = expectMapped({
+        ...base,
+        type: "custom",
+        customType: "pi-orb:mcp-status",
+        data: { server: "posthog", state, message: "untrusted secret bearer" },
+      });
+      expect(record).toMatchObject({
+        type: "event",
+        eventType: "pi.custom",
+        custom: { customType: "pi-orb:mcp-status", display: true },
+        content: [
+          {
+            type: "text",
+            text:
+              state === "connected"
+                ? "MCP posthog: connected."
+                : `MCP posthog: ${state}. Check project MCP settings.`,
+          },
+        ],
+      });
+      if (record.type !== "event") throw new Error("expected event");
+      expect(JSON.stringify(record.content)).not.toContain("untrusted secret");
+    },
+  );
+
+  it("labels child MCP status without trusting its stored message or exposing its session ID in the label", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom",
+      customType: "pi-orb:mcp-status",
+      data: {
+        server: "posthog",
+        state: "needs-auth",
+        source: "child",
+        sessionId: "child-session",
+        message: "RAW_SERVER_SECRET",
+      },
+    });
+    if (record.type !== "event") throw new Error("expected event");
+    expect(record.content).toEqual([
+      { type: "text", text: "MCP posthog (child): needs-auth. Check project MCP settings." },
+    ]);
+    expect(record.overflow.native).toMatchObject({ data: { sessionId: "child-session" } });
+    expect(JSON.stringify(record.content)).not.toContain("child-session");
+    expect(JSON.stringify(record.content)).not.toContain("RAW_SERVER_SECRET");
+  });
+
+  it("keeps malformed MCP status hidden while retaining native identity and overflow", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom",
+      customType: "pi-orb:mcp-status",
+      data: { server: "bad\nsecret", state: "failed", message: "secret" },
+    });
+    expect(record).toMatchObject({ type: "event", eventType: "pi.custom", id: base.id });
+    if (record.type !== "event") throw new Error("expected event");
+    expect(record.custom).toBeUndefined();
+    expect(record.content).toBeUndefined();
+  });
+
+  it("keeps unknown codemode-store entries one-to-one without inventing nested records", () => {
+    const record = expectMapped({
+      ...base,
+      type: "custom",
+      customType: "codemode-store",
+      data: { set: { evidence: { matches: 1 } } },
+    });
+    expect(record).toMatchObject({
+      type: "event",
+      eventType: "pi.custom",
+      id: base.id,
+    });
+  });
+
   it("maps a bash execution message to an event with typed shell fields", () => {
     const record = expectMapped({
       ...base,

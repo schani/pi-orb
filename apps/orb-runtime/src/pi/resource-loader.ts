@@ -4,14 +4,20 @@ import {
   type ResourceLoader,
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { PersonalInstructions, ProjectInstructions, RuntimeHooks } from "@pi-orb/protocol";
+import type {
+  McpConfig,
+  PersonalInstructions,
+  ProjectInstructions,
+  RuntimeHooks,
+} from "@pi-orb/protocol";
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
 import type { HookEnvReport } from "../hooks/env-file.ts";
 import { bootHookPrompt } from "../hooks/prompt.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
+import type { NativeMcpExtensionDeps } from "./extensions/index.ts";
 import { createOrbExtensions } from "./extensions/index.ts";
-import { type McpExtensionDeps, mcpInventoryPrompt } from "./extensions/mcp.ts";
+import { mcpInventoryPrompt } from "./extensions/mcp.ts";
 import type { SubagentHost } from "./extensions/subagents.ts";
 
 type LoaderOptions = ConstructorParameters<typeof DefaultResourceLoader>[0];
@@ -29,7 +35,8 @@ export interface OrbResourceLoaderInput {
   readonly hookEnv?: HookEnvReport | null;
   /** Provider-supplied install directory; tests may use null to disable it. */
   readonly skillsDir: string | null;
-  readonly mcp?: McpExtensionDeps;
+  readonly mcp?: NativeMcpExtensionDeps;
+  readonly mcpConfigs?: readonly McpConfig[];
   readonly subagents?: SubagentHost;
   readonly personalInstructions?: PersonalInstructions;
   readonly projectInstructions?: ProjectInstructions;
@@ -54,7 +61,7 @@ export function orbResourceLoaderOptions(input: OrbResourceLoaderInput): LoaderO
   const personalContent = input.personalInstructions?.content ?? "";
   const projectContent = input.projectInstructions?.content ?? "";
   const hookPrompt = bootHookPrompt(input.hooks ?? {}, input.hookEnv ?? null);
-  const mcpPrompt = mcpInventoryPrompt(input.mcp?.configs ?? []);
+  const mcpPrompt = mcpInventoryPrompt(input.mcpConfigs ?? []);
   return {
     cwd: input.cwd,
     agentDir: input.agentDir,
@@ -120,6 +127,8 @@ export function createOrbResourceLoader(
       const names = new Set<string>();
       for (const extension of loaded.extensions) {
         for (const name of extension.tools.keys()) {
+          if (name.startsWith("mcp__") && !extension.path.startsWith("<inline:pi-orb:"))
+            return err(`Pi extension tool name collision: ${name}`);
           if (names.has(name)) return err(`Pi extension tool name collision: ${name}`);
           names.add(name);
         }

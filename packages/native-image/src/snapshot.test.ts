@@ -53,6 +53,30 @@ describe("native image source snapshot", () => {
     expect(snapshot.value.inputInventory).toHaveProperty("patches/dependency+1.0.0.patch");
   });
 
+  it("captures dirty replacements and untracked patches without deleted tracked files", async () => {
+    const root = await repository();
+    await rm(`${root}/patches/dependency+1.0.0.patch`);
+    await writeFile(`${root}/patches/dependency+2.0.0.patch`, "new patch\n");
+    await writeFile(`${root}/guest/used.txt`, "changed upload\n");
+    const output = `${root}/output`;
+    const snapshot = await prepareSourceSnapshot(output, {
+      repositoryRoot: root,
+      uploadedPaths: ["package.json", "guest", "patches"],
+      toolingPaths: ["tooling"],
+    });
+    if (snapshot.isErr()) throw new Error(snapshot.error.message);
+    expect(snapshot.value.inputInventory["patches/dependency+1.0.0.patch"]).toBeUndefined();
+    expect(snapshot.value.inputInventory["patches/dependency+2.0.0.patch"]).toBe(
+      createHash("sha256").update("new patch\n").digest("hex"),
+    );
+    expect(snapshot.value.inputInventory["guest/used.txt"]).toBe(
+      createHash("sha256").update("changed upload\n").digest("hex"),
+    );
+    const listing = await execFileAsync("tar", ["-tzf", `${output}/source.tar.gz`]);
+    expect(listing.stdout).toContain("patches/dependency+2.0.0.patch");
+    expect(listing.stdout).not.toContain("patches/dependency+1.0.0.patch");
+  });
+
   it("uses one Git file list for the archive and hashes", async () => {
     const root = await repository();
     const output = `${root}/output`;

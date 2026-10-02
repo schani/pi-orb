@@ -1,5 +1,7 @@
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
-import { settingsFallbackMessage } from "./restore-settings.ts";
+import { eligibleCodexModels } from "./model-select.ts";
+import { restoreSessionSettings, settingsFallbackMessage } from "./restore-settings.ts";
 
 const actual = { model: { provider: "openai-codex", id: "astra" }, thinkingLevel: "high" as const };
 it("reports model fallback and restored thinking clamps, never healthy/fresh bindings", () => {
@@ -13,4 +15,24 @@ it("reports model fallback and restored thinking clamps, never healthy/fresh bin
   expect(
     settingsFallbackMessage({ provider: "openai-codex", modelId: "astra" }, "max", actual),
   ).toContain("Saved thinking max adjusted to high for openai-codex/astra.");
+});
+
+it("restores exact Sol 6.1 IDs and reports older Sol as unavailable, without aliases", () => {
+  const catalog = eligibleCodexModels([
+    { provider: "openai-codex", id: "gpt-6-astra", input: ["text", "image"] },
+    { provider: "openai-codex", id: "gpt-6.1-sol", input: ["text", "image"] },
+  ]);
+  const current = SessionManager.inMemory();
+  current.appendModelChange("openai-codex", "gpt-6.1-sol");
+  expect(restoreSessionSettings(current, catalog)?.model.id).toBe("gpt-6.1-sol");
+  const old = SessionManager.inMemory();
+  old.appendModelChange("openai-codex", "gpt-6-sol");
+  const restored = restoreSessionSettings(old, catalog);
+  expect(restored?.model.id).toBe("gpt-6-astra");
+  expect(
+    settingsFallbackMessage({ provider: "openai-codex", modelId: "gpt-6-sol" }, null, {
+      model: { provider: "openai-codex", id: restored?.model.id ?? "" },
+      thinkingLevel: "high",
+    }),
+  ).toContain("Saved model openai-codex/gpt-6-sol is unavailable");
 });

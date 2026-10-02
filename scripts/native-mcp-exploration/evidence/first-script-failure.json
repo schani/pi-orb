@@ -1,0 +1,151 @@
+{
+  "error": "AssertionError [ERR_ASSERTION]: [{\"type\":\"text\",\"text\":\"Script failed\\nWall time 0.2 seconds\\nOutput:\\n\"},{\"type\":\"text\",\"text\":\"Script error:\\nTypeError: not a function\\n    at <anonymous> (codemode.js:1:94)\\n\\nNo tool calls were made.\"}]\n\ntrue !== false\n",
+  "requests": [],
+  "events": [
+    {
+      "type": "agent_start"
+    },
+    {
+      "type": "turn_start"
+    },
+    {
+      "type": "message_start"
+    },
+    {
+      "type": "message_end"
+    },
+    {
+      "type": "message_start"
+    },
+    {
+      "type": "message_end"
+    },
+    {
+      "type": "message_start"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_end"
+    },
+    {
+      "type": "tool_execution_start",
+      "toolName": "codemode"
+    },
+    {
+      "type": "tool_execution_end",
+      "toolName": "codemode"
+    },
+    {
+      "type": "message_start"
+    },
+    {
+      "type": "message_end"
+    },
+    {
+      "type": "turn_end"
+    },
+    {
+      "type": "turn_start"
+    },
+    {
+      "type": "message_start"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_update"
+    },
+    {
+      "type": "message_end"
+    },
+    {
+      "type": "turn_end"
+    },
+    {
+      "type": "agent_end"
+    },
+    {
+      "type": "agent_settled"
+    }
+  ],
+  "entries": [
+    {
+      "type": "model_change"
+    },
+    {
+      "type": "thinking_level_change"
+    },
+    {
+      "type": "message",
+      "role": "system"
+    },
+    {
+      "type": "message",
+      "role": "user"
+    },
+    {
+      "type": "message",
+      "role": "assistant"
+    },
+    {
+      "type": "message",
+      "role": "toolResult",
+      "toolName": "codemode"
+    },
+    {
+      "type": "message",
+      "role": "assistant"
+    }
+  ]
+}

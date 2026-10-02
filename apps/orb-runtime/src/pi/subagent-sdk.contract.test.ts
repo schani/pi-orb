@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
-it("qualifies the installed fork and real Pi runtime adapter through seventeen gated schedules", async () => {
+it("qualifies the installed fork and real Pi runtime adapter through eighteen gated schedules", async () => {
   const script = fileURLToPath(
     new URL("../../../../scripts/subagent-liveness/liveness.test.mjs", import.meta.url),
   );
@@ -39,7 +39,8 @@ it("qualifies the installed fork and real Pi runtime adapter through seventeen g
   expect(output).toContain("assert:shutdown-awaits-child-cleanup");
   expect(output).toContain("assert:one-summary-includes-aggregate-outcomes");
   expect(output).toContain("assert:child-only-inbox-is-one-deduplicated-root-turn");
-  expect(output).toContain("assert:child-mcp-borrows-approved-root-service");
+  expect(output).toContain("assert:root-and-child-own-native-connections");
+  expect(output).toContain("assert:child-codemode-denies-mcp-and-bash");
   expect(output).toContain("assert:idle-stop-fences-sdk-root-and-child-admission");
-  expect(output).toContain("assert:child-resource-collision-fails-before-inference");
+  expect(output).toContain("assert:child-resource-collision-fails-before-native-init-or-inference");
 }, 180_000);

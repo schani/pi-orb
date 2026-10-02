@@ -1,9 +1,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DefaultResourceLoader, type ResourceLoader } from "@earendil-works/pi-coding-agent";
+import {
+  createMcpExtension,
+  DefaultResourceLoader,
+  type ResourceLoader,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { McpTools } from "../mcp/tools.ts";
+import { nativeMcpConfig } from "../mcp/native.ts";
 import { portExposurePrompt } from "../tailscale/prompt.ts";
 import { environmentPrompt } from "./environment-prompt.ts";
 import { createOrbResourceLoader } from "./resource-loader.ts";
@@ -179,35 +183,78 @@ describe("Pi SDK resource loader contract (pinned SDK version)", () => {
     expect((await implicitLoader()).getAgentsFiles().agentsFiles).toEqual(native);
   });
 
-  it("loads first-party MCP alongside discovered extensions and rejects tool-name collisions", async () => {
-    const mcp = {
-      configs: [
-        {
-          name: "posthog",
-          description: "Analytics",
-          url: "https://mcp.posthog.com/mcp",
-          headers: {},
-        },
-      ],
-      tools: new McpTools(new Map()),
-    };
-    const input = { cwd: repoDir, agentDir, previewHost: null, skillsDir: null, mcp };
+  it("loads native MCP, tool search and codemode without a catalog, alongside user extensions", async () => {
+    const input = { cwd: repoDir, agentDir, previewHost: null, skillsDir: null };
     const loaded = (await createOrbResourceLoader(input))._unsafeUnwrap();
-    // In-run custom messages get no second before_agent_start: inventory belongs in the loader.
-    expect(loaded.getAppendSystemPrompt().join("\n")).toContain(
-      "Available MCP servers:\n- posthog: Analytics",
-    );
-    expect(loaded.getExtensions().extensions.flatMap((e) => [...e.tools.keys()])).toEqual([
-      "mcp_search",
-      "mcp_call",
-      "mcp_read",
-    ]);
-    mkdirSync(join(repoDir, PROJECT_CONFIG_DIR, "extensions"), { recursive: true });
+    expect(loaded.getAppendSystemPrompt().join("\n")).not.toContain("Available MCP servers:");
+    const names = loaded.getExtensions().extensions.flatMap((e) => [...e.tools.keys()]);
+    expect(names).toContain("codemode");
+    expect(names).toContain("tool_search");
+    expect(names).not.toContain("mcp_search");
+    expect(names).not.toContain("mcp_call");
+    expect(names).not.toContain("mcp_read");
+    mkdirSync(join(agentDir, "extensions"), { recursive: true });
     writeFileSync(
-      join(repoDir, PROJECT_CONFIG_DIR, "extensions", "collision.ts"),
-      `export default pi => pi.registerTool({name:'mcp_search', label:'collision', description:'collision', parameters: {type:'object'}, execute: async () => ({content:[]})});`,
+      join(agentDir, "extensions", "custom.ts"),
+      `export default pi => pi.registerTool({name:'user_tool', label:'user', description:'user', parameters: {type:'object'}, execute: async () => ({content:[]})});`,
+    );
+    const additive = (await createOrbResourceLoader(input))._unsafeUnwrap();
+    expect(additive.getExtensions().extensions.flatMap((e) => [...e.tools.keys()])).toContain(
+      "user_tool",
+    );
+    writeFileSync(
+      join(agentDir, "extensions", "collision.ts"),
+      `export default pi => pi.registerTool({name:'codemode', label:'collision', description:'collision', parameters: {type:'object'}, execute: async () => ({content:[]})});`,
     );
     expect((await createOrbResourceLoader(input)).isErr()).toBe(true);
+  });
+
+  it("rejects discovered tools in the native MCP namespace before any server connects", async () => {
+    mkdirSync(join(agentDir, "extensions"), { recursive: true });
+    writeFileSync(
+      join(agentDir, "extensions", "collision.ts"),
+      `export default pi => pi.registerTool({name:'mcp__fixture__echo', label:'collision', description:'collision', parameters: {type:'object'}, execute: async () => ({content:[]})});`,
+    );
+    const result = await createOrbResourceLoader({ cwd: repoDir, agentDir, skillsDir: null });
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) expect(result.error).toContain("mcp__fixture__echo");
+  });
+
+  it("appends configured MCP names and descriptions once before native connection, without secrets or legacy tools", async () => {
+    writeFileSync(join(repoDir, PROJECT_CONFIG_DIR, "APPEND_SYSTEM.md"), PROJECT_APPEND);
+    const config = {
+      name: "posthog",
+      description: "Analytics\nEvents",
+      url: "http://127.0.0.1:1/unreachable-secret-url",
+      headers: { Authorization: { literal: "Bearer private-token" } },
+    };
+    const configs = [config];
+    const mcp = createMcpExtension({ loadConfig: () => nativeMcpConfig(configs) });
+    const loaded = (
+      await createOrbResourceLoader({
+        cwd: repoDir,
+        agentDir,
+        skillsDir: null,
+        mcp,
+        mcpConfigs: configs,
+      })
+    )._unsafeUnwrap();
+    expect(loaded.getExtensions().errors).toEqual([]);
+    expect(loaded.getExtensions().extensions.map((extension) => extension.path)).toContain(
+      "<inline:pi-orb:mcp>",
+    );
+    const inventory = "Available MCP servers:\n- posthog: Analytics Events";
+    expect(loaded.getAppendSystemPrompt()).toEqual([PROJECT_APPEND, environmentPrompt, inventory]);
+    config.description = "changed after boot";
+    await loaded.reload();
+    const prompt = composedAppendSection(loaded) ?? "";
+    expect(prompt.split(inventory)).toHaveLength(2);
+    expect(prompt).not.toContain("changed after boot");
+    expect(prompt).not.toContain("unreachable-secret-url");
+    expect(prompt).not.toContain("private-token");
+    expect(
+      loaded.getExtensions().extensions.flatMap((extension) => [...extension.tools.keys()]),
+    ).not.toContain("mcp_call");
   });
 
   it("puts the port-exposure section into the prompt the session reads", async () => {

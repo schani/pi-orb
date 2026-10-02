@@ -338,14 +338,39 @@ function FileCall({
 function OtherCall({ call, single }: { call: ActivityCall; single: boolean }) {
   const input = call.arguments === null ? "" : JSON.stringify(call.arguments, null, 2);
   const output = resultText(call.result);
+  const nested = call.result?.nestedCalls;
   const detail = (
-    <pre
-      className={
-        call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
-      }
-    >
-      {[input, output].filter(Boolean).join("\n\n") || "(no details)"}
-    </pre>
+    <>
+      <pre
+        className={
+          call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
+        }
+      >
+        {[input, output].filter(Boolean).join("\n\n") || "(no details)"}
+      </pre>
+      {nested !== undefined && (
+        <div className="tool-nested-calls">
+          {nested.calls.map((child) => (
+            <div className="tool-nested-call" key={child.id}>
+              <span className={child.status === "error" ? "tool-activity-failed" : undefined}>
+                {child.name} · {child.status}
+                {child.durationMs !== undefined ? ` · ${child.durationMs} ms` : ""}
+              </span>
+              {child.arguments !== undefined && (
+                <pre className="tool-call-output">{JSON.stringify(child.arguments, null, 2)}</pre>
+              )}
+              {child.argumentsBytes !== undefined && child.arguments === undefined && (
+                <span>arguments omitted ({child.argumentsBytes} bytes)</span>
+              )}
+              {child.error !== undefined && (
+                <pre className="tool-call-output tool-call-output-error">{child.error}</pre>
+              )}
+            </div>
+          ))}
+          {!nested.complete && <span className="tool-activity-running">incomplete</span>}
+        </div>
+      )}
+    </>
   );
   if (single) return detail;
   return (

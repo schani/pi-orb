@@ -95,8 +95,10 @@ export class PostgreSQLMcpOAuthStore implements McpOAuthStore {
       })
     ).mapErr((e) => (e.type === "mcp_oauth_error" ? e : oauthError("unavailable")));
   }
-  private async locked(query: PostgreSQLClient["query"], b: McpOAuthBinding) {
-    const p = await query("SELECT state FROM projects WHERE id = $1 FOR UPDATE", [b.projectId]);
+  private async locked(query: PostgreSQLClient["query"], b: McpOAuthBinding, lock = true) {
+    const p = await query(`SELECT state FROM projects WHERE id = $1${lock ? " FOR UPDATE" : ""}`, [
+      b.projectId,
+    ]);
     if (p.isErr()) return err(oauthError("unavailable"));
     if (p.value.rows[0]?.["state"] !== "active") return err(oauthError("not_found"));
     const config = await query(
@@ -114,6 +116,11 @@ export class PostgreSQLMcpOAuthStore implements McpOAuthStore {
     if (row && (row["project_id"] !== b.projectId || row["url"] !== b.url))
       return err(oauthError("conflict"));
     return ok(row ? (row["state"] as McpOAuthRow) : null);
+  }
+  async readReadonly(_task: SimulationTask, b: McpOAuthBinding) {
+    return (await this.db.transaction((query) => this.locked(query, b, false))).mapErr((e) =>
+      e.type === "mcp_oauth_error" ? e : oauthError("unavailable"),
+    );
   }
   async read(_task: SimulationTask, b: McpOAuthBinding) {
     return (await this.db.transaction((query) => this.locked(query, b))).mapErr((e) =>

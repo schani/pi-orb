@@ -443,7 +443,7 @@ export class GcloudImageBuildEffects implements ImageBuildEffects {
             "create",
             builder,
             ...common,
-            "--machine-type=n2d-highmem-4",
+            "--machine-type=e2-standard-4",
             `--subnet=${input.subnetwork}`,
             `--service-account=${input.builderServiceAccount}`,
             "--scopes=https://www.googleapis.com/auth/cloud-platform",

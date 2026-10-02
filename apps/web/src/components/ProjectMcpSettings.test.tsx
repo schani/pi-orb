@@ -1,6 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { McpEditor, ProjectMcpSettings } from "./ProjectMcpSettings.tsx";
+import { McpEditor, mcpAuthorizationLabel, ProjectMcpSettings } from "./ProjectMcpSettings.tsx";
+
+it("labels a stored MCP grant without claiming upstream access", () => {
+  expect(mcpAuthorizationLabel("connected")).toBe("grant stored");
+  expect(mcpAuthorizationLabel("pending")).toBe("pending");
+  expect(mcpAuthorizationLabel("auth_required")).toBe("auth_required");
+});
 
 it("does not render an always-open creation form", () => {
   const html = renderToStaticMarkup(

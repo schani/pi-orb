@@ -1,0 +1,15 @@
+✖ actual runtime resolver drives native SDK transport across cache, expiry, 401 and accepted recovery (5009.16403ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 0
+ℹ cancelled 1
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8086.22891
+
+✖ failing tests:
+
+test at resolver-integration.test.mjs:12:1
+✖ actual runtime resolver drives native SDK transport across cache, expiry, 401 and accepted recovery (5009.16403ms)
+  'test timed out after 5000ms'

@@ -3,7 +3,7 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
-import { type McpError, mcpError } from "./service.ts";
+import { type McpError, mcpError } from "./error.ts";
 
 export interface McpAccessGrant {
   accessToken: string;
@@ -53,7 +53,7 @@ export class McpCredentialResolver {
       return err(mcpError("unavailable", "MCP authorization was rejected; retry explicitly"));
     if (this.blockedGeneration !== undefined && token.value.generation <= this.blockedGeneration)
       return err(
-        mcpError("unavailable", "MCP authorization required; reconnect in project MCP settings"),
+        mcpError("auth_required", "MCP authorization required; reconnect in project MCP settings"),
       );
     if (this.blockedGeneration !== undefined) this.attemptedRecovery = false;
     this.blockedGeneration = undefined;
@@ -107,11 +107,16 @@ export class HttpMcpTokenEndpoint implements McpTokenEndpoint {
     );
     if (response.isErr()) return err(response.error);
     if (Check(McpOAuthErrorSchema, response.value.body))
-      return err(mcpError("unavailable", response.value.body.error.message));
+      return err(
+        mcpError(
+          response.value.body.error.code === "auth_required" ? "auth_required" : "unavailable",
+          response.value.body.error.message,
+        ),
+      );
     if (response.value.status !== 200 || !Check(McpOAuthGrantSchema, response.value.body))
       return err(
         mcpError(
-          "unavailable",
+          response.value.status === 401 ? "auth_required" : "unavailable",
           response.value.status === 401
             ? "MCP authorization required; reconnect in project MCP settings"
             : "MCP token unavailable; check project MCP settings",

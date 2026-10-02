@@ -86,6 +86,31 @@ const LeafBlockSchema = Type.Union([
   OtherBlockSchema,
 ]);
 
+const NestedCallsSchema = Type.Object(
+  {
+    complete: Type.Boolean(),
+    calls: Type.Array(
+      Type.Object(
+        {
+          id: Type.String(),
+          name: Type.String(),
+          status: Type.Union([
+            Type.Literal("ok"),
+            Type.Literal("error"),
+            Type.Literal("unfinished"),
+          ]),
+          arguments: Type.Optional(JsonValueSchema),
+          argumentsBytes: Type.Optional(Type.Number()),
+          durationMs: Type.Optional(Type.Number()),
+          error: Type.Optional(Type.String()),
+        },
+        closed,
+      ),
+    ),
+  },
+  closed,
+);
+
 const ToolResultBlockSchema = Type.Object(
   {
     type: Type.Literal("tool_result"),
@@ -94,6 +119,8 @@ const ToolResultBlockSchema = Type.Object(
     isError: Type.Optional(Type.Boolean()),
     /** Unified diff of an edit, when the tool reported one. */
     patch: Type.Optional(Type.String()),
+    /** Pi's bounded nested-call summary; no child result bodies or extra history records. */
+    nestedCalls: Type.Optional(NestedCallsSchema),
     overflow: Type.Optional(JsonObjectSchema),
   },
   closed,

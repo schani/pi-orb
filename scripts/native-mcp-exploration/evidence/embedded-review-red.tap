@@ -1,0 +1,27 @@
+Sanitized failure trace: /tmp/embedded-pi-history-embedded-pi-history-no179v.json
+✖ scripted session discovers MCP through codemode, stores values and preserves nested calls on reload (328.02532ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1480.838873
+
+✖ failing tests:
+
+test at scripts/native-mcp-exploration/embedded-history.test.mjs:19:1
+✖ scripted session discovers MCP through codemode, stores values and preserves nested calls on reload (328.02532ms)
+  AssertionError [ERR_ASSERTION]: {"set":{"evidence":{"matches":1,"response":{"content":[{"type":"text","text":"fixture-result:marker"}]}}},"delete":[]}
+      at TestContext.<anonymous> (file:///workspace/repo/scripts/native-mcp-exploration/embedded-history.test.mjs:35:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:332:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

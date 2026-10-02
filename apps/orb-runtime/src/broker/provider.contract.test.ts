@@ -139,7 +139,7 @@ describe("Pi SDK broker provider contract (pinned SDK version)", () => {
     expect(model?.input).toContain("image");
     expect(eligibleCodexModels(catalog).map(({ id }) => id)).toEqual([
       "gpt-6-astra",
-      "gpt-6-sol",
+      "gpt-6.1-sol",
       "gpt-5.6-terra",
       "gpt-6-luna",
     ]);

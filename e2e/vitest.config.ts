@@ -14,7 +14,7 @@ const shared = {
 
 export default defineConfig({
   test: {
-    poolOptions: { forks: { minForks: 1, maxForks: 1 } },
+    maxWorkers: 1,
     projects: [
       {
         test: {
@@ -22,7 +22,6 @@ export default defineConfig({
           name: "frontend",
           include: frontendFiles,
           pool: "threads",
-          poolOptions: { threads: { singleThread: true } },
           sequence: { groupOrder: 0 },
         },
       },

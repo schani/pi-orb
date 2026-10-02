@@ -1908,6 +1908,15 @@ button.modal-close:focus-visible {
   border: 1px solid var(--g2);
 }
 
+.tool-nested-calls {
+  margin: 4px 0 4px 2ch;
+}
+
+.tool-nested-call {
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
 .tool-error,
 .tool-call-output-error {
   color: var(--bad);

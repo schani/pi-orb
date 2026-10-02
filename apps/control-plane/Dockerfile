@@ -5,6 +5,7 @@
 FROM node:24-bookworm-slim AS web-build
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY vendor vendor
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/web/package.json apps/web/
 RUN npm ci --workspace @pi-orb/web --include-workspace-root=false --ignore-scripts
@@ -16,6 +17,7 @@ RUN npm run build --workspace @pi-orb/web
 FROM node:24-bookworm-slim
 WORKDIR /app
 COPY package.json package-lock.json ./
+COPY vendor vendor
 COPY patches patches
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/

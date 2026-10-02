@@ -2072,7 +2072,7 @@ describe("frontend-only browser behavior", () => {
       );
       await alpha.getByRole("button", { name: "connect", exact: true }).click();
       await expectPage(page).toHaveURL(/mcp-preview-consent=/);
-      await expectPage(alpha.locator("summary")).toContainText("connected");
+      await expectPage(alpha.locator("summary")).toContainText("grant stored");
       await alpha.locator("summary").click();
       await alpha.getByRole("button", { name: "disconnect", exact: true }).click();
       await expectPage(alpha.locator("summary")).toContainText("authorization required");
@@ -2085,7 +2085,7 @@ describe("frontend-only browser behavior", () => {
       await add.getByLabel("Endpoint", { exact: true }).fill("https://example.net/mcp");
       await add.getByRole("button", { name: "add & connect", exact: true }).click();
       await expectPage(mcp.locator("summary").filter({ hasText: "new-service" })).toContainText(
-        "connected",
+        "grant stored",
       );
       await dialog.getByRole("tab", { name: "Secrets", exact: true }).click();
       const secretRow = dialog

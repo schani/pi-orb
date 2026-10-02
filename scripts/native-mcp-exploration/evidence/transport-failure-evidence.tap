@@ -1,0 +1,4 @@
+Native extension invalid-session 404 contract, first execution with isolated npm ci (Pi coding-agent/pi-mcp 0.99.1):
+✖ SDK native MCP extension accepts boot snapshot and transport seam without credentials or inference
+AssertionError: native 404 recovery failed: {"attempts":1,"initializations":1,"name":"McpSessionExpiredError"}
+Root cause: coding-agent npm shrinkwrap nests @earendil-works/pi-mcp@0.99.1 while injected broker transport imports top-level @earendil-works/pi-mcp@0.99.1. Native runtime uses instanceof against its nested class identity; externally constructed transport throws the top-level class. No secret, port, path or response body retained.

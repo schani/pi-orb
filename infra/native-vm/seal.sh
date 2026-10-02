@@ -13,8 +13,7 @@ usermod --lock pi-orb-build
 # The readiness barrier independently verifies the resulting keys.
 /app/infra/native-vm/verify-google-host-key-owner.sh
 
-# Stop reconciliation before installing the new Requires graph: once installed,
-# stopping the manager can propagate to SSH through the readiness unit.
+# Stop reconciliation before installing the boot graph.
 for unit in google-guest-agent.service google-guest-agent-manager.service google-guest-compat-manager.service; do
   if systemctl cat "$unit" >/dev/null 2>&1; then
     systemctl stop "$unit"
@@ -25,7 +24,7 @@ install -m755 /app/infra/native-vm/wait-google-host-keys.sh /usr/local/sbin/pi-o
 cat >/etc/systemd/system/pi-orb-host-key-ready.service <<'EOF'
 [Unit]
 Description=Wait for Google-owned SSH host keys
-Requires=google-guest-agent-manager.service
+Wants=google-guest-agent-manager.service
 After=google-guest-agent-manager.service
 Before=ssh.service sshd.service
 [Service]

@@ -1,13 +1,13 @@
 # Subagent package / Pi runtime contracts
 
-Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Pi is pinned to 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.5.tgz` fork.
+Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 0.99.1; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.5.tgz` fork plus the narrow `patches/@gotgenes+pi-subagents+21.7.0-orb.5.patch` child-codemode allowlist/reserved-MCP-namespace guard. The vendor artifact is unchanged.
 
 ```bash
 npm ci
 npm ci --prefix scripts/subagent-liveness --ignore-scripts
 # Unmodified-package characterization (seven schedules):
 npm test --prefix scripts/subagent-liveness
-# Installed fork + production PiOrbAgent/extension bridge (seventeen schedules):
+# Installed fork + production PiOrbAgent/extension bridge:
 USE_RUNTIME=1 npm test --prefix scripts/subagent-liveness
 ```
 
@@ -32,10 +32,10 @@ The latter is also required by the ordinary repository suite through `apps/orb-r
 
 - `inbox-child-only` (runtime only): deliver and deduplicate a real inbox message while only the child is working; hold that new root turn while the child completes, then permit the withheld completion wake. Submission acceptance and completion promises are observed separately, retaining one operation and one summary.
 
-- `mcp`, `mcp-shutdown`, `mcp-profile` (runtime only): borrow approved MCP tools without duplicating root hooks or connection ownership; cancel/drain before root cleanup; honor a profile excluding MCP. These use an embedding process cwd different from the checkout.
+- `mcp`, `mcp-shutdown`, `mcp-profile` (runtime only): native root/child MCP sessions use independent clients with the same approved catalog, no duplicated root hooks; cancel/drain before root cleanup; honor a profile excluding MCP, including nested codemode calls. These use an embedding process cwd different from the checkout.
 
 - `idle-stop` (runtime only): preparation rejects late child work and an SDK-originated root prompt before any extra model invocation.
-- `mcp-load-failure` (runtime only): a newly discovered `.ts` extension collides with an approved MCP tool; the child fails visibly before inference or connection acquisition. Supplying host `childExtensions` opts into coherent loading; upstream's default policy remains unchanged without that option.
+- `mcp-load-failure` (runtime only): a newly discovered `.ts` extension collides with an approved native MCP namespace; the child fails visibly before inference or connection acquisition. Supplying host `childExtensions` opts into coherent loading; upstream's default policy remains unchanged without that option.
 
 Runtime scenarios also assert durable start edges, inherited file-discovered tools, absence of root orchestration tools in children, and one invocation of the root-inline lifecycle sentinel.
 
@@ -56,6 +56,6 @@ The recipe requires source HEAD `1658ccb15a1c6cc8e88c9d16181910b111001964` and a
 
 ## Evidence limits
 
-See `docs/subagents.md`, `results.md`, and `evidence/README.md`. Generated logs and full scheduler traces are retained in the authenticated, checksum-indexed archive linked there; only concise ledgers stay in the source tree. Original passing characterization traces do not establish cancellation correctness. The first runtime-labeled run did not forward `USE_RUNTIME`; `runtime-sdk-wired.txt` is the corrected seven-scenario production-bridge evidence. Current contracts add resume, broker refresh/failure, awaited shutdown, child-only inbox/wake arbitration and approved MCP/profile/cwd boundaries, SDK-originated admission after idle preparation, and fail-fast child resource collisions (seventeen installed-SDK schedules). Authenticated foreground child MCP additionally runs in `e2e/mcp.e2e.test.ts`.
+See `docs/subagents.md`, `results.md`, and `evidence/README.md`. Generated logs and full scheduler traces are retained in the authenticated, checksum-indexed archive linked there; only concise ledgers stay in the source tree. Original passing characterization traces do not establish cancellation correctness. The first runtime-labeled run did not forward `USE_RUNTIME`; `runtime-sdk-wired.txt` is the corrected seven-scenario production-bridge evidence. Current contracts add resume, broker refresh/failure, awaited shutdown, child-only inbox/wake arbitration and approved MCP/profile/cwd boundaries, SDK-originated admission after idle preparation, and fail-fast child resource collisions (the historical matrix had seventeen installed-SDK schedules; the native cutover adds child-profile contracts). Authenticated foreground child MCP additionally runs in `e2e/mcp.e2e.test.ts`.
 
 Separate runtime/ledger and composed control-plane `determined` tests explore scheduling. `e2e/subagents.e2e.test.ts` uses the actual process provider, browser, installed fork and broker-backed mock inference with named-pipe gates: shared-file editing, child-only busy, reload, continuation, abort, crash/interruption across two restarts, private-child-text exclusion and archive cleanup with retained history. That E2E first found missing child OAuth credentials: inheriting provider registration without using the same private auth path was insufficient. Native/cloud qualification and the remaining acceptance matrix are not implied by these local tests; outstanding work lives only in `TODO.md`.

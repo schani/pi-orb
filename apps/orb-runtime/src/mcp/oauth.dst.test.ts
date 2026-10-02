@@ -1,8 +1,8 @@
 import { err, ok } from "neverthrow";
 import { expect, it } from "vitest";
 import { runDst } from "../testkit/sim.ts";
+import { mcpError } from "./error.ts";
 import { McpCredentialResolver } from "./oauth.ts";
-import { mcpError } from "./service.ts";
 
 it("cannot regress its cached generation when concurrent token responses arrive out of order", async () => {
   await runDst({ name: "mcp-token-response-order", iterations: 50 }, async (sim) => {

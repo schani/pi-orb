@@ -150,7 +150,7 @@ describe("tool image previews", () => {
             call: {
               type: "tool_call",
               callId: "missing",
-              name: "mcp_call",
+              name: "mcp__fixture__echo",
               arguments: {},
             },
             result: {
@@ -191,8 +191,85 @@ describe("tool image previews", () => {
   });
 });
 
+describe("codemode nested calls", () => {
+  it("shows native child status, bounded arguments and error within the parent disclosure without inventing output", () => {
+    const html = renderToStaticMarkup(
+      <ToolActivity
+        persisted={[
+          {
+            call: {
+              type: "tool_call",
+              callId: "parent",
+              name: "codemode",
+              arguments: { code: "run()" },
+            },
+            result: {
+              type: "tool_result",
+              callId: "parent",
+              content: [{ type: "text", text: "Script failed" }],
+              isError: true,
+              nestedCalls: {
+                complete: false,
+                calls: [
+                  {
+                    id: "parent/1",
+                    name: "mcp__fixture__echo",
+                    status: "error",
+                    arguments: { value: "marker" },
+                    durationMs: 11,
+                    error: "MCP request aborted",
+                  },
+                  {
+                    id: "parent/2",
+                    name: "read",
+                    status: "unfinished",
+                    argumentsBytes: 9000,
+                  },
+                ],
+              },
+            },
+          },
+        ]}
+      />,
+    );
+    expect(html.match(/<details\b/g)).toHaveLength(1);
+    expect(html).toContain("mcp__fixture__echo");
+    expect(html).toContain("MCP request aborted");
+    expect(html).toContain("11 ms");
+    expect(html).toContain("arguments omitted (9000 bytes)");
+    expect(html).toContain("unfinished");
+    expect(html).toContain("incomplete");
+    expect(html).not.toContain("child output");
+  });
+});
+
+describe("generic nested tool summary", () => {
+  it("shows a non-codemode parent's supplied nested calls", () => {
+    const html = renderToStaticMarkup(
+      <ToolActivity
+        persisted={[
+          {
+            call: { type: "tool_call", callId: "parent", name: "delegate", arguments: {} },
+            result: {
+              type: "tool_result",
+              callId: "parent",
+              content: [],
+              nestedCalls: {
+                complete: true,
+                calls: [{ id: "parent/1", name: "read", status: "ok", durationMs: 4 }],
+              },
+            },
+          },
+        ]}
+      />,
+    );
+    expect(html).toContain("read · ok · 4 ms");
+    expect(html.match(/<details\b/g)).toHaveLength(1);
+  });
+});
+
 describe("generic tool disclosure", () => {
-  it.each(["subagent", "get_subagent_result", "mcp_call"])(
+  it.each(["subagent", "get_subagent_result", "mcp__fixture__echo"])(
     "shows %s input and output behind just the category disclosure",
     (name) => {
       const html = renderToStaticMarkup(

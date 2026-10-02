@@ -6,12 +6,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sessionFlushed } from "./session-flush.ts";
 
 /**
- * Pinned-SDK contract (docs/history-replication.md): the SessionManager does NOT write
- * its session file until the first assistant message exists — everything
- * before that lives only in memory. The runtime's snapshot gate
- * (`sessionFlushed`) relies on exactly this behavior; if an SDK upgrade
- * changes the flush rule, these tests must fail loudly so the gate is
- * re-evaluated.
+ * Pinned-SDK contract (docs/history-replication.md): setup entries stay in memory
+ * until the first user or assistant message. The runtime's snapshot gate
+ * (`sessionFlushed`) must serve only entries present on disk.
  */
 
 const userMessage = { role: "user" as const, content: "hello", timestamp: 1 };
@@ -33,7 +30,7 @@ const assistantMessage = {
   timestamp: 2,
 };
 
-describe("Pi session lazy-flush contract", () => {
+describe("Pi session flush contract", () => {
   let dir: string;
   let sessionDir: string;
 
@@ -51,24 +48,20 @@ describe("Pi session lazy-flush contract", () => {
     return readdirSync(sessionDir).filter((name) => name.endsWith(".jsonl"));
   }
 
-  it("persists nothing before the first assistant message", () => {
+  it("keeps setup entries in memory until conversation begins", () => {
     const manager = SessionManager.create(dir, sessionDir);
     manager.appendModelChange("openai-codex", "gpt-6-sol");
     manager.appendThinkingLevelChange("high");
-    manager.appendMessage(userMessage);
 
-    // Entries exist in memory and would be served by an ungated snapshot...
-    expect(manager.getEntries().length).toBe(3);
-    // ...but nothing exists on disk: a restart would lose all of them.
+    expect(manager.getEntries()).toHaveLength(2);
     expect(listSessionFiles()).toEqual([]);
     expect(sessionFlushed(manager)).toBe(false);
   });
 
-  it("the first assistant message flushes the entire session to disk", () => {
+  it("the first user message flushes setup and conversation to disk", () => {
     const manager = SessionManager.create(dir, sessionDir);
     manager.appendModelChange("openai-codex", "gpt-6-sol");
     manager.appendMessage(userMessage);
-    manager.appendMessage(assistantMessage);
 
     expect(sessionFlushed(manager)).toBe(true);
     const files = listSessionFiles();
@@ -86,25 +79,38 @@ describe("Pi session lazy-flush contract", () => {
     expect(fileIds).toEqual(manager.getEntries().map((entry) => entry.id));
   });
 
+  it("an assistant message also starts persistence without a user message", () => {
+    const manager = SessionManager.create(dir, sessionDir);
+    manager.appendThinkingLevelChange("high");
+    manager.appendMessage(assistantMessage);
+
+    expect(sessionFlushed(manager)).toBe(true);
+    const file = manager.getSessionFile();
+    if (typeof file !== "string") throw new Error("no session file after flush");
+    expect(
+      SessionManager.open(file, sessionDir, dir)
+        .getEntries()
+        .map((entry) => entry.id),
+    ).toEqual(manager.getEntries().map((entry) => entry.id));
+  });
+
   it("appends after the flush persist immediately", () => {
     const manager = SessionManager.create(dir, sessionDir);
     manager.appendMessage(userMessage);
-    manager.appendMessage(assistantMessage);
     const file = manager.getSessionFile();
     if (typeof file !== "string") throw new Error("no session file after flush");
     const linesBefore = readFileSync(file, "utf8").trim().split("\n").length;
 
-    manager.appendMessage({ role: "user", content: "and another thing", timestamp: 3 });
+    manager.appendMessage(assistantMessage);
     const linesAfter = readFileSync(file, "utf8").trim().split("\n").length;
     expect(linesAfter).toBe(linesBefore + 1);
     expect(sessionFlushed(manager)).toBe(true);
   });
 
-  it("a reopened session preserves entry ids (cursor continuity)", () => {
+  it("a reopened user-only session preserves entry ids (cursor continuity)", () => {
     const manager = SessionManager.create(dir, sessionDir);
     manager.appendModelChange("openai-codex", "gpt-6-sol");
     manager.appendMessage(userMessage);
-    manager.appendMessage(assistantMessage);
     const idsBefore = manager.getEntries().map((entry) => entry.id);
     const file = manager.getSessionFile();
     if (typeof file !== "string") throw new Error("no session file after flush");

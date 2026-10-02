@@ -378,10 +378,14 @@ normal WebSocket/agent-tool/PTY checks; the agent started Docker explicitly.
 The build experiments also exposed and corrected API response-shape assumptions,
 retry classification for interrupted IAP SSH, and an incomplete validation broker.
 The final broker has real HTTP/schema tests. Source snapshots now use one Git
-file list for archive and hashes, exclude ignored files and macOS metadata, and
-reject symlinks. The disposable control plane's initial migration failed because
+file list for archive and hashes, exclude ignored files, working-tree deletions and
+macOS metadata, and reject symlinks. The deleted-file regression and native MCP
+qualification evidence are recorded in
+`docs/postmortems/2026-09-30-native-mcp-qualification.md`. The disposable control plane's initial migration failed because
 an earlier archive carried AppleDouble SQL sidecars; the corrected archive uses
 `--no-xattrs`, and first-failure evidence remains preserved.
+
+**Builder sizing decision (2026-09-30):** use on-demand `e2-standard-4` for the disposable image builder, matching the validator. Two diagnosed `n2d-highmem-4` stockouts prevented qualification in the permitted zone. This changes neither runtime VM sizing nor IAM; it adds no automatic machine/zone fallback and preserves acceptance checks and deadlines (`docs/postmortems/2026-09-30-native-mcp-qualification.md`).
 
 Guest diagnostics publish exact boot errors to guest attributes and Cloud Logging.
 A real nonblank-disk fault exposed a generic systemd diagnostic overwriting the
@@ -476,3 +480,11 @@ The release checks passed 1,250 tests with one skip, 30 guest tests, real-ext4 a
 The retained fixture replaced incarnation 0 with incarnation 1 using the new runtime image while attaching the same 50 GiB workspace disk, which had no source image. Current-size filesystem validation took 824 ms. Home, workspace and named Docker-volume markers survived; Docker was inactive until manually started, and an immediate terminal passed. Same-spec Stop/Start reused the incarnation-1 VM and preserved every marker, again with Docker off and an immediate terminal.
 
 Both validation drivers exited successfully. Their projects, orbs, VMs and disks were deleted, and the local proxy was stopped.
+
+## Native SSH gate and browser qualification — 2026-10-01
+
+**Boot invariant (decided 2026-10-01):** The Google guest agent manager is the sole SSH host-key producer. The host-key gate starts after and wants the manager, but must not require its initial successful start: a transient producer exit must not cancel the gate and latch SSH off after producer recovery. SSH requires gate success. The gate verifies the real instance ID, Google's ECDSA/Ed25519/RSA key pairs and matching published guest attributes within 90 seconds; mismatch/timeout fails closed with a guest diagnostic. No competing key generator, blind SSH retry or longer timeout. The failed build-2 boot and corrected build-3 validation are documented in `docs/postmortems/2026-10-01-native-ssh-startup-dependency.md`. Build 3's accepted image ID is `2509850247943126983`, workspace image ID `650165164377865784`, source archive SHA-256 `42e11c615e376bb3a4459ee93499cf6e4649e4dd0e9ae0a31198e097b6069109`.
+
+**Separate browser qualification (2026-10-01):** On that exact accepted image, a local Chromium browser completed the stock control-plane/provider/reconciler/runtime-protocol path with fenced IAP SSH forwards. Root and child both used actual `openai-codex/gpt-6.1-sol` in real codemode; the child completed the arithmetic fixture (437), and the browser final marker was verified. The MCP catalog was empty. Evidence: `.context/finish-20261001/native-browser-2/qualification.json`, `history-public.json`, `child-public.json`, and `boot-image.json`. Local hostname resolution mapped the fixture Host to loopback while preserving Host/Origin; local Vite :5173 and control plane :7100 were test controls, not production services. The logical VM name was mapped to an IAM-authorized `pi-orb-validator-` prefix with a test ownership label; IAM and firewall were not widened. A first, separate prod-style VM create was denied 403, then its fixture was archived and its disk absence verified before this qualification (`.context/finish-20261001/native-browser/`). This proves neither production VM naming/IAM nor direct VPC, guest Tailnet preview, or authenticated MCP context. Local Sol preview authority remains unchanged.
+
+Both local qualification projects were deleted through the application API (404 verified); their VMs and disks are absent. The accepted runtime/workspace image IDs were checked before deletion, and both images are absent. The scoped tunnel, connection map, local control plane, Vite and Chromium session are closed. Existing local Sol preview authority remains. Evidence: `.context/finish-20261001/native/images-after.json` and the two `native-browser*/` cleanup records. Resuming the first project's deletion required its original ownership fence: cleanup-only startup permits an already-deleting project with its exact archived/deleting, host-free orb and permits only Compute reads, deletes and operation waits.

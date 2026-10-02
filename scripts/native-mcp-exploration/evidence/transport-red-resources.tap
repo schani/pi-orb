@@ -1,0 +1,40 @@
+✔ broker credentials and approved static headers resolve on each POST and stream GET (71.659105ms)
+✖ native resource pagination, templates and read use broker credentials; unsupported templates are optional only at extension (40.368367ms)
+✔ response loss after accepting tool is not retried (15.818089ms)
+✔ 401 with broker-only transport rejects; next explicit request uses replacement token (16.90827ms)
+✔ raw HTTP body cannot reach caller and redirects cannot carry bearer token (16.877951ms)
+✔ SDK native MCP extension accepts boot snapshot and transport seam without credentials or inference (74.512737ms)
+✔ broker failure is a typed redacted Result, not a remote call (1.061739ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 6
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1171.401806
+
+✖ failing tests:
+
+test at broker-transport.test.mjs:34:1
+✖ native resource pagination, templates and read use broker credentials; unsupported templates are optional only at extension (40.368367ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + []
+  - [
+  -   'proof://one',
+  -   'proof://two'
+  - ]
+  
+      at TestContext.<anonymous> (file:///workspace/repo/scripts/native-mcp-exploration/broker-transport.test.mjs:36:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async Test.run (node:internal/test_runner/test:1088:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:763:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ 'proof://one', 'proof://two' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

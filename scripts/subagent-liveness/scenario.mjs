@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ok, ResultAsync } from "neverthrow";
+import { ResultAsync } from "neverthrow";
 import { assertSubagentActivity } from "../../apps/orb-runtime/src/testkit/subagent-contract.ts";
 
 // Executable characterization test. Assertion exceptions are the test framework
@@ -58,40 +58,16 @@ const { createOrbExtensions } = useRuntime
   : {};
 const loadFailure = scenario === "mcp-load-failure";
 const mcpScenario =
-  scenario === "mcp" || scenario === "mcp-shutdown" || scenario === "mcp-profile" || loadFailure;
+  scenario === "mcp" ||
+  scenario === "mcp-shutdown" ||
+  scenario === "mcp-profile" ||
+  scenario === "mcp-cancel-starting" ||
+  loadFailure;
+const cancelStarting = scenario === "cancel-starting" || scenario === "mcp-cancel-starting";
 const useMcpTool = mcpScenario && scenario !== "mcp-profile";
 const shutdownScenario = scenario === "shutdown-running" || scenario === "mcp-shutdown";
-let mcpClosed = 0;
+let mcpFixture;
 let mcp;
-if (mcpScenario) {
-  const { NoSimulationTask } = await import("determined");
-  const { McpTools } = await import("../../apps/orb-runtime/src/mcp/tools.ts");
-  const { McpConnection } = await import("../../apps/orb-runtime/src/mcp/service.ts");
-  const connection = new McpConnection(new NoSimulationTask("child-mcp-contract", false), {
-    connect: async () =>
-      ok({
-        perform: async (_task, operation, signal) => {
-          assert.equal(operation.method, "tools/call");
-          assert.equal(operation.name, "probe");
-          const aborted = () => note("tool:one:abort-observed");
-          signal.addEventListener("abort", aborted, { once: true });
-          note("tool:one:entered");
-          await childGates.get("one").promise;
-          signal.removeEventListener("abort", aborted);
-          note("tool:one:exited");
-          return ok({ verified: true });
-        },
-        close: async () => {
-          mcpClosed++;
-          return ok(undefined);
-        },
-      }),
-  });
-  mcp = {
-    configs: [{ name: "approved", description: "fixture", url: "https://unused.invalid" }],
-    tools: new McpTools(new Map([["approved", connection]])),
-  };
-}
 const root = process.env.FIXTURE_ROOT;
 // Embedded runtime cwd differs from its checkout. Profile/settings discovery
 // must use the explicitly supplied session cwd, as the browser E2E does.
@@ -105,7 +81,7 @@ writeFileSync(
 );
 writeFileSync(
   join(agentDir, "agents", "probe.md"),
-  `---\nname: probe\ndescription: Deterministic liveness child\ntools: ${useMcpTool ? "mcp_call" : "probe_gate"}\n---\nExecute the test task.\n`,
+  `---\nname: probe\ndescription: Deterministic liveness child\ntools: ${useMcpTool ? "mcp__approved__probe" : "probe_gate"}\n---\nExecute the test task.\n`,
 );
 writeFileSync(
   join(agentDir, "settings.json"),
@@ -134,6 +110,26 @@ const childGates = new Map([
   ["one", gate()],
   ["two", gate()],
 ]);
+if (mcpScenario) {
+  const { createMcpExtension } = await import("@earendil-works/pi-coding-agent");
+  const { startNativeMcpFixture } = await import("./native-mcp-fixture.mjs");
+  // Root and child receive the same approved catalog, but each native extension
+  // constructs and shuts down its own SDK connection.
+  mcpFixture = await startNativeMcpFixture({ gate: childGates.get("one"), note });
+  mcp = createMcpExtension({
+    loadConfig: () => ({
+      errors: [],
+      servers: [
+        {
+          name: "approved",
+          source: "approved-boot",
+          scope: "global",
+          config: { url: mcpFixture.url, exposure: "direct" },
+        },
+      ],
+    }),
+  });
+}
 const parentGate = gate();
 const followupGate = gate();
 const inboxGate = gate();
@@ -272,8 +268,10 @@ function scriptedStream(model, context, options) {
     let message;
     if (child !== null) {
       const names = transcriptToolNames(context.messages);
-      assert.ok(names.includes(useMcpTool ? "mcp_call" : "probe_gate"));
-      if (scenario === "mcp-profile") assert.equal(names.includes("mcp_call"), false);
+      assert.ok(names.includes(useMcpTool ? "mcp__approved__probe" : "probe_gate"));
+      if (useRuntime && !loadFailure)
+        assert.equal(names.includes("codemode"), true, "child profile must retain codemode");
+      if (scenario === "mcp-profile") assert.equal(names.includes("mcp__approved__probe"), false);
       for (const rootOnly of [
         "launch_children",
         "subagent",
@@ -283,16 +281,39 @@ function scriptedStream(model, context, options) {
         assert.equal(names.includes(rootOnly), false);
       if (credentialScenario) assert.equal(options.apiKey === "fake-access-2", true);
       note(`model:child:${child}`);
+      if (scenario === "mcp-profile" && toolResults.length === 1) {
+        const result = JSON.stringify(toolResults[0]);
+        assert.match(
+          result,
+          /denied:2;js:42/,
+          "restricted codemode script did not deny nested tools",
+        );
+        note("assert:child-codemode-denies-mcp-and-bash");
+      }
       message =
-        toolResults.length === 0 || (child === "two" && resumePhase && !resumeToolSent)
+        scenario === "mcp-profile" && toolResults.length === 0
           ? output(
               model,
-              useMcpTool
-                ? call("mcp_call", { server: "approved", tool: "probe" })
-                : call("probe_gate", { label: child }),
+              call("codemode", {
+                code: `let denied = 0;
+for (const [name, args] of [["bash", {command:"echo FORBIDDEN"}], ["mcp__approved__probe", {}]]) {
+  try { await tools[name](args); } catch { denied++; }
+}
+text("denied:" + denied + ";js:" + (6 * 7));`,
+              }),
               "toolUse",
             )
-          : output(model, text(`child ${child} finished`), "stop");
+          : toolResults.length === 0 ||
+              (child === "two" && resumePhase && !resumeToolSent) ||
+              (scenario === "mcp-profile" && toolResults.length === 1)
+            ? output(
+                model,
+                useMcpTool
+                  ? call("mcp__approved__probe", {})
+                  : call("probe_gate", { label: child }),
+                "toolUse",
+              )
+            : output(model, text(`child ${child} finished`), "stop");
       if (resumePhase) resumeToolSent = true;
     } else if (
       scenario === "inbox-child-only" &&
@@ -490,19 +511,14 @@ service = globalThis[Symbol.for("pi-orb:liveness-fixture")].getService();
 assert.ok(service);
 assert.equal(service.hasRunning(), false);
 if (loadFailure) {
-  // The parent is already loaded; a newly discovered child resource collides
-  // with the approved inline MCP capability on the child's fresh reload.
+  // A discovered extension pre-registers a name that native MCP otherwise
+  // registers only at session_start. Reject before binding or child inference.
   writeFileSync(
     join(agentDir, "extensions", "mcp-collision.ts"),
-    `export default pi => pi.registerTool({ name: "mcp_call", label: "collision", description: "collision", parameters: { type: "object", properties: {} }, async execute() { return { content: [{ type: "text", text: "COLLIDING_TOOL_EXECUTED" }], details: {} }; } });`,
+    `export default pi => pi.registerTool({ name: "mcp__approved__probe", label: "collision", description: "collision", parameters: { type: "object", properties: {} }, async execute() { return { content: [{ type: "text", text: "COLLIDING_TOOL_EXECUTED" }], details: {} }; } });`,
   );
 }
-if (
-  scenario === "spawn-failure" ||
-  scenario === "cancel-starting" ||
-  credentialScenario ||
-  loadFailure
-) {
+if (scenario === "spawn-failure" || cancelStarting || credentialScenario || loadFailure) {
   service.registerWorkspaceProvider({
     async prepare() {
       note("workspace:prepare-entered");
@@ -559,15 +575,12 @@ if (useRuntime)
       ),
     true,
   );
-if (mcpScenario && !loadFailure) {
+if (mcpScenario && !loadFailure && !cancelStarting) {
   await until(() => saw("tool:one:entered") || terminalRows.length > 0);
   assert.equal(saw("tool:one:entered"), true, service.getRecord(ids.get("one"))?.error);
 }
 await waitEvent(
-  scenario === "spawn-failure" ||
-    scenario === "cancel-starting" ||
-    credentialScenario ||
-    loadFailure
+  scenario === "spawn-failure" || cancelStarting || credentialScenario || loadFailure
     ? "workspace:prepare-entered"
     : "tool:one:entered",
 );
@@ -616,15 +629,21 @@ if (scenario === "child-first") {
       note("shutdown:returned");
     });
     await waitEvent("tool:one:abort-observed");
-    // The scripted provider and shutdown hooks perform only microtask work.
-    // Yield one event-loop boundary while the explicit cleanup gate stays shut.
+    // An in-process tool must finish cleanup before shutdown. Native HTTP
+    // abort instead terminates the client request while the remote server may
+    // retain its already-accepted work; closing the child cannot close root.
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(returnedBeforeCleanup, false, "shutdown returned before child tool cleanup");
+    if (!mcpScenario)
+      assert.equal(returnedBeforeCleanup, false, "shutdown returned before child tool cleanup");
     if (mcpScenario) {
-      assert.equal(mcpClosed, 0);
+      assert.equal(mcpFixture.calls.filter((call) => call.method === "tools/call").length, 1);
+      assert.equal(
+        mcpFixture.calls.some((call) => call.method === "DELETE" && call.session === "native-1"),
+        false,
+      );
       assert.equal(runtime.mayWakeSubagent(ids.get("one")), false);
     }
-    assert.equal(runtime.getHealth().activity, "busy");
+    assert.equal(runtime.getHealth().activity, mcpScenario ? "idle" : "busy");
   }
   if (scenario === "cancel-running") {
     if (runtime) assert.equal((await runtime.abortOperation()).isOk(), true);
@@ -638,7 +657,7 @@ if (scenario === "child-first") {
     assert.equal(bridgeBusy, true);
     note("assert:snapshot-and-wait-finish-before-cancellation-drains");
   }
-  if (scenario === "cancel-starting") {
+  if (cancelStarting) {
     if (runtime) assert.equal((await runtime.abortOperation()).isOk(), true);
     else assert.equal(service.abort(ids.get("one")), true);
     assert.equal(service.hasRunning(), false);
@@ -690,8 +709,7 @@ if (scenario === "queued") {
   assert.equal(bridgeBusy, true);
   childGates.get("two").resolve();
 }
-const wholeAbort =
-  runtime && (scenario === "cancel-running" || scenario === "cancel-starting" || shutdownScenario);
+const wholeAbort = runtime && (scenario === "cancel-running" || cancelStarting || shutdownScenario);
 if (scenario === "inbox-child-only") {
   await until(() => terminalRows.length === ids.size);
   assert.equal(terminalRows[0].parentIdle, false);
@@ -705,10 +723,11 @@ if (scenario === "cancel-running") note("assert:cancel-completion-wakes-parent")
 if (!wholeAbort) assert.equal(bridgeBusy, true);
 if (loadFailure) {
   assert.equal(service.getRecord(ids.get("one")).status, "error");
-  assert.match(service.getRecord(ids.get("one")).error, /conflicts/);
+  assert.match(service.getRecord(ids.get("one")).error, /mcp__approved__probe|conflict/i);
   assert.equal(saw("model:child:one"), false);
   assert.equal(saw("tool:one:entered"), false);
-  note("assert:child-resource-collision-fails-before-inference");
+  assert.equal(mcpFixture.calls.filter((call) => call.method === "initialize").length, 1);
+  note("assert:child-resource-collision-fails-before-native-init-or-inference");
 }
 if (scenario === "spawn-failure") {
   assert.equal(service.getRecord(ids.get("one")).status, "error");
@@ -830,14 +849,35 @@ if (scenario === "idle-stop") {
 
 // Invoke the public extension runner's shutdown lifecycle before dispose, as
 // Pi's host does. This closes gotgenes's retention interval and child sessions.
-if (mcpScenario && !shuttingDown) assert.equal(mcpClosed, 0);
+if (mcpScenario && !shuttingDown)
+  assert.equal(mcpFixture.calls.filter((call) => call.method === "DELETE").length, 0);
 if (shuttingDown) {
   await shuttingDown;
   note("assert:shutdown-awaits-child-cleanup");
 } else await checked(session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }));
 if (mcpScenario) {
-  assert.equal(mcpClosed, useMcpTool && !loadFailure ? 1 : 0);
-  note("assert:child-mcp-borrows-approved-root-service");
+  const initializations = mcpFixture.calls.filter((call) => call.method === "initialize").length;
+  const closures = mcpFixture.calls.filter((call) => call.method === "DELETE").length;
+  assert.equal(initializations, loadFailure || cancelStarting ? 1 : 2);
+  assert.equal(closures, initializations, "each native session closes its own MCP connection");
+  if (cancelStarting)
+    assert.equal(mcpFixture.calls.filter((call) => call.method === "tools/call").length, 0);
+  if (scenario === "mcp-profile") {
+    assert.equal(mcpFixture.calls.filter((call) => call.method === "tools/call").length, 0);
+    assert.equal(saw("assert:child-codemode-denies-mcp-and-bash"), true);
+  }
+  if (initializations === 2) {
+    const deleted = mcpFixture.calls
+      .filter((call) => call.method === "DELETE")
+      .map((call) => call.session);
+    assert.deepEqual(
+      deleted,
+      ["native-2", "native-1"],
+      "child closes before root, never closing root on child teardown",
+    );
+  }
+  note("assert:root-and-child-own-native-connections", { initializations, closures });
 }
 session.dispose();
+if (mcpFixture) await mcpFixture.close();
 note("PASS", { scenario });

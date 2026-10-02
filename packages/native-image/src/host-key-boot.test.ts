@@ -73,7 +73,13 @@ class HostKeyFixture {
       await writeFile(join(this.root, "published", algorithm), key);
   }
 
-  async writeCurl(options: { delayRounds?: number; expireAfterRsa?: boolean } = {}): Promise<void> {
+  async writeCurl(
+    options: {
+      delayRounds?: number;
+      expireAfterRsa?: boolean;
+      recoverKeysAfterRounds?: number;
+    } = {},
+  ): Promise<void> {
     const script = join(this.root, "curl");
     await writeFile(
       script,
@@ -84,6 +90,11 @@ case "$url" in
     round=$(cat '${this.root}/round')
     round=$((round + 1))
     printf %s "$round" >'${this.root}/round'
+    ${
+      options.recoverKeysAfterRounds === undefined
+        ? ""
+        : `if test "$round" -eq ${options.recoverKeysAfterRounds}; then cp '${this.root}/staged/'* '${this.root}/etc/ssh/'; fi`
+    }
     printf 12345
     ;;
   *)
@@ -132,7 +143,9 @@ cat '${this.root}/clock'
 async function expectClosed(run: Promise<unknown>): Promise<void> {
   await expect(run).rejects.toMatchObject({
     code: 1,
-    stderr: expect.stringContaining("did not become ready within 90 seconds"),
+    stderr: expect.stringMatching(
+      /PI_ORB_HOST_KEY_READY_FAILED=google_host_keys_timeout: .*within 90 seconds/,
+    ),
   });
 }
 
@@ -144,6 +157,16 @@ describe("native image SSH host-key boot contract", () => {
     expect(seal).toContain("verify-google-host-key-owner.sh");
     expect(seal).toContain("pi-orb-host-key-ready.service");
     expect(barrier).toContain("/etc/google_instance_id");
+    const readyUnit = seal
+      .split("cat >/etc/systemd/system/pi-orb-host-key-ready.service <<'EOF'\n")[1]
+      ?.split("\nEOF")[0];
+    expect(readyUnit).toBeDefined();
+    // A failed first manager start must not cancel the key gate's start job:
+    // systemd restarts the manager, and the gate waits for its published keys.
+    expect(readyUnit).toMatch(/^Wants=google-guest-agent-manager\.service$/m);
+    expect(readyUnit).not.toMatch(/^Requires=google-guest-agent-manager\.service$/m);
+    expect(readyUnit).toMatch(/^After=google-guest-agent-manager\.service$/m);
+    expect(readyUnit).toMatch(/^ExecStart=\/usr\/local\/sbin\/pi-orb-wait-google-host-keys$/m);
     expect(seal).toMatch(/Requires=pi-orb-host-key-ready\.service/);
     expect(seal).toMatch(/After=pi-orb-host-key-ready\.service/);
     expect(seal).toContain("boot-graph-verifier.sh pi-orb-host-key-ready.service ssh.service");
@@ -237,6 +260,22 @@ esac
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("waits for Google's keys when absent at first and published after recovery", async () => {
+    await withFixture(async (fixture) => {
+      await mkdir(join(fixture.root, "staged"));
+      for (const type of ["ecdsa", "ed25519", "rsa"])
+        for (const suffix of ["", ".pub"]) {
+          const file = `ssh_host_${type}_key${suffix}`;
+          await cp(join(fixture.root, "etc/ssh", file), join(fixture.root, "staged", file));
+          await rm(join(fixture.root, "etc/ssh", file));
+        }
+      await fixture.writeCurl({ recoverKeysAfterRounds: 3 });
+      const result = await fixture.run();
+      expect(result.stdout).toMatch(/ready fingerprint=SHA256:/);
+      expect(Number(await readFile(join(fixture.root, "round"), "utf8"))).toBeGreaterThanOrEqual(3);
+    });
   });
 
   it("waits past 20 polls and preserves public-key comments", async () => {

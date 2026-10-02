@@ -1,0 +1,13 @@
+{
+  "error": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n\n  assert.ok(fixture.session.getActiveToolNames().includes('codemode'))\n",
+  "requests": [],
+  "events": [],
+  "entries": [
+    {
+      "type": "model_change"
+    },
+    {
+      "type": "thinking_level_change"
+    }
+  ]
+}

@@ -293,6 +293,24 @@ describe("GCloud native-image adapter", () => {
     );
   });
 
+  it("uses the fixed e2-standard-4 disposable builder", async () => {
+    const calls: string[][] = [];
+    const effects = new GcloudImageBuildEffects(async (_command, args) => {
+      calls.push(args);
+      return { stdout: "[]", stderr: "" };
+    });
+    const result = await effects.run(
+      "builder",
+      "create",
+      await input(),
+      new AbortController().signal,
+    );
+    expect(result.isOk()).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("--machine-type=e2-standard-4");
+    expect(calls[0]).not.toContain("--machine-type=n2d-highmem-4");
+  });
+
   it("forces builder SSH keys into instance metadata", async () => {
     const calls: string[][] = [];
     const effects = new GcloudImageBuildEffects(async (_command, args) => {

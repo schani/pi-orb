@@ -122,7 +122,7 @@ Subsystem designs:
 - [docs/dashboard-find.md](docs/dashboard-find.md) — dashboard and orb-view Command-K Find architecture, selected Index card design, and presentation study
 - [docs/terminal.md](docs/terminal.md) — investigation and provider-neutral proposal for an interactive web terminal
 - [docs/credentials.md](docs/credentials.md) — the credential broker, Codex OAuth, GitHub tokens, security requirements
-- [docs/mcp.md](docs/mcp.md) — project-scoped remote MCP configuration, static secret-backed headers, connection-scoped OAuth broker, first-party Pi tools, DST-first direct transport, and provider qualification
+- [docs/mcp.md](docs/mcp.md) — project-scoped remote MCP configuration, static secret-backed headers, connection-scoped OAuth broker, native Pi MCP/tool search/codemode, direct request-time transport, broker ownership, and provider qualification
 - [docs/orb-setup-hook.md](docs/orb-setup-hook.md) — repository-owned `.agents/setup` / `.agents/resume` boot hooks, matched to Amp's convention: triggers per compute incarnation, identity-free setup, user-visible failure
 - [docs/workload-identity.md](docs/workload-identity.md) — requirements for orb-issued OIDC identity and keyless federation with cloud providers and private services
 - [docs/workload-identity-recipes.md](docs/workload-identity-recipes.md) — relying-party integration recipes for that identity: GCP workload identity federation, AWS web-identity roles, and generic OIDC verification
@@ -134,8 +134,11 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-01-mcp-measurement-fixtures.md](docs/postmortems/2026-10-01-mcp-measurement-fixtures.md) — scope bounds, discarded diagnostics and child-profile measurement assumptions
+- [docs/postmortems/2026-10-01-native-ssh-startup-dependency.md](docs/postmortems/2026-10-01-native-ssh-startup-dependency.md) — first Google manager exit canceled the host-key gate and latched SSH off; corrected dependency and accepted fresh validator
 - [docs/postmortems/2026-09-30-preemption-boot-context.md](docs/postmortems/2026-09-30-preemption-boot-context.md) — confirmed GCE preemption followed by failed boot-context fetch; underlying transport cause unproved
-
+- [docs/postmortems/2026-09-30-native-mcp-qualification.md](docs/postmortems/2026-09-30-native-mcp-qualification.md) — dirty-source deletion snapshot regression and diagnosed native-builder capacity failure
+- [docs/postmortems/2026-09-29-native-mcp-validation-install-race.md](docs/postmortems/2026-09-29-native-mcp-validation-install-race.md) — concurrent install and unguarded `npx` fetched Vitest 5 instead of pinned 3.2.7; local gate invalid
 - [docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md](docs/postmortems/2026-09-27-mcp-isolation-stream-abort.md) — incomplete mock SSE response; termination cause erased by mock diagnostics
 - [docs/postmortems/2026-09-27-history-response-size.md](docs/postmortems/2026-09-27-history-response-size.md) — unbounded history response rejected by Cloud Run; browser history has no pagination
 - [docs/postmortems/2026-09-27-webkit-image-fixture-sync.md](docs/postmortems/2026-09-27-webkit-image-fixture-sync.md) — HTTP-only image records raced a running orb's full live sync

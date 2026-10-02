@@ -28,9 +28,14 @@ async function gitFiles(repositoryRoot: string, paths: readonly string[]): Promi
     ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...paths],
     { cwd: repositoryRoot, maxBuffer: 16 * 1024 * 1024 },
   );
+  const deleted = await execFileAsync("git", ["ls-files", "-z", "--deleted", "--", ...paths], {
+    cwd: repositoryRoot,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  const deletedPaths = new Set(deleted.stdout.split("\0"));
   return result.stdout
     .split("\0")
-    .filter((path) => path !== "")
+    .filter((path) => path !== "" && !deletedPaths.has(path))
     .sort();
 }
 

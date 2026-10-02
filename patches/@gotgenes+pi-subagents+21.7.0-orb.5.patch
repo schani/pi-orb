@@ -1,0 +1,167 @@
+diff --git a/node_modules/@gotgenes/pi-subagents/dist/extension.js b/node_modules/@gotgenes/pi-subagents/dist/extension.js
+index 33a647d..e2077ed 100644
+--- a/node_modules/@gotgenes/pi-subagents/dist/extension.js
++++ b/node_modules/@gotgenes/pi-subagents/dist/extension.js
+@@ -81,12 +81,12 @@
+   /**
+    * Get the capability tool names for a type (case-insensitive).
+    *
+-   * An agent that declares no `tools:` key gets the built-ins; one that declares
++   * An agent that declares no `tools:` key gets all available tools; one that declares
+    * `tools: none` gets nothing. Resolution goes through `resolveAgentConfig` so
+    * the two cannot disagree about which config a type names.
+    */
+   getToolNamesForType(type) {
+-    return this.resolveAgentConfig(type).toolNames ?? [...BUILTIN_TOOL_NAMES];
++    return this.resolveAgentConfig(type).toolNames;
+   }
+   /** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
+   resolveAgentConfig(type) {
+@@ -951,7 +951,7 @@
+     settingsManager: sessionSettings,
+     modelRegistry: snapshot.modelRegistry,
+     model: cfg.model,
+-    tools: [...cfg.toolNames, ...childTools.map((tool) => tool.name)],
++    tools: cfg.toolNames?.concat(childTools.map((tool) => tool.name)),
+     customTools: childTools,
+     excludeTools: EXCLUDED_TOOL_NAMES,
+     resourceLoader: loader,
+@@ -5636,9 +5636,13 @@
+       // other option type-check against the SDK signature.
+       createSession: async ({ sessionManager, resourceLoader, modelRegistry, ...rest }) => {
+         if (host.childExtensions !== void 0) {
+-          const errors = resourceLoader.getExtensions().errors;
+-          if (errors.length > 0) {
+-            throw new Error(`Child extension loading failed: ${errors.map(({ path, error }) => `${path}: ${error}`).join("; ")}`);
++          const loaded = resourceLoader.getExtensions();
++          const reserved = host.childExtensions.some(({ name }) => name === "pi-orb:mcp") ? loaded.extensions.flatMap((extension) => extension.path.startsWith("<inline:") ? [] : [...extension.tools.keys()].filter((name) => name.startsWith("mcp__")).map((name) => `${extension.path}: ${name}`)) : [];
++          if (loaded.errors.length > 0 || reserved.length > 0) {
++            throw new Error(`Child extension loading failed: ${[
++              ...loaded.errors.map(({ path, error }) => `${path}: ${error}`),
++              ...reserved.map((name) => `reserved native MCP tool ${name}`)
++            ].join("; ")}`);
+           }
+         }
+         const childRuntime = await ModelRuntime.create({
+@@ -5654,12 +5658,17 @@
+             childRegistry.registerProvider(id, config);
+           }
+         });
+-        return createAgentSession({
++        const created = await createAgentSession({
+           ...rest,
++          ...rest.tools && host.childExtensions?.some(({ name }) => name === "pi-orb:codemode") ? { tools: [.../* @__PURE__ */ new Set([...rest.tools, "codemode"])] } : {},
+           sessionManager,
+           resourceLoader,
+           modelRuntime: childRuntime
+         });
++        if (!rest.tools && host.childExtensions?.some(({ name }) => name === "pi-orb:codemode")) {
++          created.session.setActiveToolsByName([...created.session.getActiveToolNames(), "codemode"]);
++        }
++        return created;
+       },
+       assemblerIO: {
+         buildAgentPrompt
+diff --git a/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts b/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts
+index e6cb8df..930e763 100644
+--- a/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts
++++ b/node_modules/@gotgenes/pi-subagents/src/config/agent-types.ts
+@@ -16,7 +16,7 @@
+  */
+ export interface AgentConfigLookup {
+   resolveAgentConfig(type: string): AgentConfig;
+-  getToolNamesForType(type: string): string[];
++  getToolNamesForType(type: string): string[] | undefined;
+ }
+ 
+ // ── AgentTypeRegistry class ──────────────────────────────────────────────────
+@@ -93,12 +93,12 @@
+   /**
+    * Get the capability tool names for a type (case-insensitive).
+    *
+-   * An agent that declares no `tools:` key gets the built-ins; one that declares
++   * An agent that declares no `tools:` key gets all available tools; one that declares
+    * `tools: none` gets nothing. Resolution goes through `resolveAgentConfig` so
+    * the two cannot disagree about which config a type names.
+    */
+-  getToolNamesForType(type: string): string[] {
+-    return this.resolveAgentConfig(type).toolNames ?? [...BUILTIN_TOOL_NAMES];
++  getToolNamesForType(type: string): string[] | undefined {
++    return this.resolveAgentConfig(type).toolNames;
+   }
+ 
+   /** Resolve agent config with guaranteed non-null return. Falls back: unknown → general-purpose → absolute fallback. */
+diff --git a/node_modules/@gotgenes/pi-subagents/src/index.ts b/node_modules/@gotgenes/pi-subagents/src/index.ts
+index 8a7f8fd..9b630a0 100644
+--- a/node_modules/@gotgenes/pi-subagents/src/index.ts
++++ b/node_modules/@gotgenes/pi-subagents/src/index.ts
+@@ -154,9 +154,17 @@
+         // Explicit host capabilities must not silently replace/drop a discovered
+         // extension on collision. Preserve upstream's default loading policy.
+         if (host.childExtensions !== undefined) {
+-          const errors = (resourceLoader as ResourceLoader).getExtensions().errors;
+-          if (errors.length > 0) {
+-            throw new Error(`Child extension loading failed: ${errors.map(({ path, error }) => `${path}: ${error}`).join("; ")}`);
++          const loaded = (resourceLoader as ResourceLoader).getExtensions();
++          const reserved = host.childExtensions.some(({ name }) => name === "pi-orb:mcp")
++            ? loaded.extensions.flatMap((extension) => extension.path.startsWith("<inline:")
++              ? []
++              : [...extension.tools.keys()].filter((name) => name.startsWith("mcp__")).map((name) => `${extension.path}: ${name}`))
++            : [];
++          if (loaded.errors.length > 0 || reserved.length > 0) {
++            throw new Error(`Child extension loading failed: ${[
++              ...loaded.errors.map(({ path, error }) => `${path}: ${error}`),
++              ...reserved.map((name) => `reserved native MCP tool ${name}`),
++            ].join("; ")}`);
+           }
+         }
+         // Pi builds the child a fresh ModelRuntime whenever it is not given
+@@ -179,12 +187,19 @@
+             childRegistry.registerProvider(id, config);
+           },
+         });
+-        return createAgentSession({
++        const created = await createAgentSession({
+           ...rest,
++          ...(rest.tools && host.childExtensions?.some(({ name }) => name === "pi-orb:codemode")
++            ? { tools: [...new Set([...rest.tools, "codemode"])] }
++            : {}),
+           sessionManager: sessionManager as SessionManager,
+           resourceLoader: resourceLoader as ResourceLoader,
+           modelRuntime: childRuntime,
+         });
++        if (!rest.tools && host.childExtensions?.some(({ name }) => name === "pi-orb:codemode")) {
++          created.session.setActiveToolsByName([...created.session.getActiveToolNames(), "codemode"]);
++        }
++        return created;
+       },
+       assemblerIO: {
+         buildAgentPrompt,
+diff --git a/node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts b/node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts
+index 2e0dad4..556d205 100644
+--- a/node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts
++++ b/node_modules/@gotgenes/pi-subagents/src/lifecycle/create-subagent-session.ts
+@@ -269,7 +269,7 @@
+     settingsManager: sessionSettings,
+     modelRegistry: snapshot.modelRegistry,
+     model: cfg.model,
+-    tools: [...cfg.toolNames, ...childTools.map((tool) => tool.name)],
++    tools: cfg.toolNames?.concat(childTools.map((tool) => tool.name)),
+     customTools: childTools,
+     excludeTools: EXCLUDED_TOOL_NAMES,
+     resourceLoader: loader,
+diff --git a/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts b/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
+index a575eca..cb17724 100644
+--- a/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
++++ b/node_modules/@gotgenes/pi-subagents/src/session/session-config.ts
+@@ -90,8 +90,8 @@
+   effectiveCwd: string;
+   /** Fully-assembled system prompt string (ready for `systemPromptOverride`). */
+   systemPrompt: string;
+-  /** Built-in tool name allowlist for this agent type. */
+-  toolNames: string[];
++  /** Explicit tool allowlist; undefined leaves SDK tools unrestricted. */
++  toolNames: string[] | undefined;
+   /**
+    * Resolved model instance (undefined → use parent model as passed to SDK).
+    * The assembler passes it through without inspection.

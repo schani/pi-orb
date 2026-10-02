@@ -100,6 +100,15 @@ class DeferredPiSession {
   private active = false;
   private readonly listeners: ((event: AgentSessionEvent) => void)[] = [];
   readonly markers: { customType: string; details?: unknown }[] = [];
+  private activeTools = ["read"];
+
+  getActiveToolNames(): string[] {
+    return [...this.activeTools];
+  }
+
+  setActiveToolsByName(names: string[]): void {
+    this.activeTools = names.filter((name) => ["read", "codemode"].includes(name));
+  }
 
   get isIdle(): boolean {
     return !this.active;
@@ -288,6 +297,7 @@ it("actual boot holds readiness through context and turn-start barriers, then de
           const health = agent.getHealth();
           if (health.status === "failed") throw new Error(JSON.stringify(health.error));
           expect(health).toMatchObject({ status: "ready", activity: "busy" });
+          expect(controls.session?.getActiveToolNames()).toEqual(["read", "codemode"]);
           expect(controls.session?.markers).toHaveLength(1);
           expect(controls.session?.markers[0]).toMatchObject({
             customType: "pi-orb.sleep-wake",

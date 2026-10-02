@@ -1,0 +1,13 @@
+{
+  "error": "AssertionError [ERR_ASSERTION]: []",
+  "requests": [],
+  "events": [],
+  "entries": [
+    {
+      "type": "model_change"
+    },
+    {
+      "type": "thinking_level_change"
+    }
+  ]
+}

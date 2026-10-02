@@ -31,7 +31,7 @@
     "@playwright/test": "1.63.0",
     "patch-package": "8.0.1",
     "typescript": "7.0.2",
-    "vitest": "^3.0.0"
+    "vitest": "4.1.11"
   },
   "allowScripts": {
     "node-pty@1.1.0": true

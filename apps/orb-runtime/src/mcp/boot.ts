@@ -7,7 +7,7 @@ import {
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { Check } from "typebox/value";
 import type { BrokerEnv } from "../broker/endpoint.ts";
-import { type McpError, mcpError } from "./service.ts";
+import { type McpError, mcpError } from "./error.ts";
 
 export function resolveMcpHeaders(
   config: McpConfig,

@@ -1744,7 +1744,7 @@ function settingsFor(
       models: (
         [
           ["gpt-6-astra", "Astra"],
-          ["gpt-6-sol", "Sol"],
+          ["gpt-6.1-sol", "Sol"],
           ["gpt-5.6-terra", "Terra"],
           ["gpt-6-luna", "Luna"],
         ] as const

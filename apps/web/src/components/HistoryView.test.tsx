@@ -156,6 +156,24 @@ describe("HistoryView turn structure", () => {
     },
   );
 
+  it("displays a mapped MCP custom status once without showing native payload", () => {
+    const record: HistoryRecord = {
+      id: "status",
+      parentId: null,
+      timestamp: "2026-09-29T00:00:00Z",
+      type: "event",
+      eventType: "pi.custom",
+      content: [{ type: "text", text: "MCP posthog: needs-auth. Check project MCP settings." }],
+      custom: { customType: "pi-orb:mcp-status", display: true },
+      overflow: { native: { data: { message: "sensitive native payload" } } },
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[record]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html.match(/MCP posthog: needs-auth/g)).toHaveLength(1);
+    expect(html).not.toContain("sensitive native payload");
+  });
+
   it("ignores a subagent receipt that exists only in native overflow", () => {
     const record: HistoryRecord = {
       id: "notice",

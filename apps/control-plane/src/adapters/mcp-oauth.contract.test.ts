@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { NoSimulationTask } from "determined";
 import { describe, expect, it } from "vitest";
+import { observeTokenResponses } from "../../../../scripts/native-mcp-exploration/live-qualification/oauth-scope-measurement.mjs";
 import type { StoredMcpOAuth } from "../domain/mcp-oauth.ts";
 import { createMcpOAuthFetch, SdkMcpOAuth } from "./mcp-oauth.ts";
 
@@ -61,6 +62,7 @@ for (const provider of ["cloudflare", "datadog"] as const) {
             });
           return json({
             access_token: "access-1",
+            scope: "mcp_all",
             refresh_token: "refresh-1",
             token_type: "Bearer",
             expires_in: 3600,
@@ -76,7 +78,15 @@ for (const provider of ["cloudflare", "datadog"] as const) {
               expires_in: 86400 * 730,
             });
       };
-      const sdk = new SdkMcpOAuth("https://orb.example/callback", fetcher);
+      const observed: unknown[] = [];
+      const observedFetch = observeTokenResponses(fetcher, {
+        tokenEndpoint: "https://consent.example/token",
+        knownScopes: ["mcp_all"],
+        record: (metric) => {
+          observed.push(metric);
+        },
+      })._unsafeUnwrap();
+      const sdk = new SdkMcpOAuth("https://orb.example/callback", observedFetch);
       const prepared = (
         await sdk.prepare(task, { projectId: "p", id: "c", url: serverUrl }, "opaque-state")
       )._unsafeUnwrap();
@@ -136,6 +146,17 @@ for (const provider of ["cloudflare", "datadog"] as const) {
         "refresh_token",
         "refresh_token",
         "authorization_code",
+      ]);
+      expect(observed).toEqual([
+        {
+          kind: "authorization_code",
+          outcome: "present",
+          knownScopes: ["mcp_all"],
+          unknownCount: 0,
+        },
+        { kind: "refresh_token", outcome: "omitted" },
+        { kind: "refresh_token", outcome: "omitted" },
+        { kind: "authorization_code", outcome: "omitted" },
       ]);
     });
   });

@@ -1,11 +1,20 @@
+import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const upstream = vi.hoisted(() => ({
-  options: undefined as { shouldWake: (record: { id: string }) => boolean } | undefined,
+  options: undefined as
+    | { shouldWake: (record: { id: string }) => boolean; childExtensions: InlineExtension[] }
+    | undefined,
 }));
 
 vi.mock("@gotgenes/pi-subagents/extension", () => ({
-  default: (_pi: unknown, options: { shouldWake: (record: { id: string }) => boolean }) => {
+  default: (
+    _pi: unknown,
+    options: {
+      shouldWake: (record: { id: string }) => boolean;
+      childExtensions: InlineExtension[];
+    },
+  ) => {
     upstream.options = options;
   },
 }));
@@ -16,7 +25,7 @@ import { createSubagentsExtension, type SubagentHost } from "./subagents.ts";
 
 type Handler = (data: unknown) => void;
 
-function fixture() {
+function fixture(childExtensions: InlineExtension[] = []) {
   const eventHandlers = new Map<string, Handler>();
   const lifecycleHandlers = new Map<string, ((event?: unknown, context?: unknown) => unknown)[]>();
   const entries: { customType: string; data: unknown }[] = [];
@@ -49,7 +58,7 @@ function fixture() {
       entries.push({ customType, data });
     },
   };
-  createSubagentsExtension(host, "/test")(pi as never);
+  createSubagentsExtension(host, "/test", childExtensions)(pi as never);
   const emit = (event: string, data: unknown) => eventHandlers.get(`subagents:${event}`)?.(data);
   const terminalCount = () =>
     entries.filter(
@@ -78,6 +87,21 @@ beforeEach(() => {
 });
 
 describe("subagent terminal ownership", () => {
+  it("passes child session factories without inheriting the parent extension or borrowing its owner", () => {
+    const childFactory = vi.fn();
+    const childExtensions: InlineExtension[] = [
+      { name: "pi-orb:mcp", factory: childFactory },
+      { name: "pi-orb:codemode", factory: vi.fn() },
+    ];
+    fixture(childExtensions);
+    expect(upstream.options?.childExtensions).toBe(childExtensions);
+    expect(upstream.options?.childExtensions.map(({ name }) => name)).toEqual([
+      "pi-orb:mcp",
+      "pi-orb:codemode",
+    ]);
+    expect(childFactory).not.toHaveBeenCalled();
+  });
+
   it("passes shutdown provenance to abort and waits for child cleanup", async () => {
     const h = fixture();
     h.emit("created", { id: "child" });

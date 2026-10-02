@@ -151,6 +151,78 @@ it("real SDK: cancellation during custom-turn preparation prevents inference", a
   }
 });
 
+it("real SDK: abort waits for an uncooperative preparation hook before reporting idle", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-orb-custom-turn-drain-"));
+  let entered!: () => void;
+  let release!: () => void;
+  const hookEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const hookRelease = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    const runtime = await ModelRuntime.create({
+      authPath: join(dir, "auth.json"),
+      allowModelNetwork: false,
+    });
+    const faux = fauxProvider({ provider: "custom-turn-drain-contract" });
+    runtime.registerNativeProvider(faux.provider);
+    let requests = 0;
+    faux.setResponses([
+      () => {
+        requests++;
+        return fauxAssistantMessage("unexpected");
+      },
+    ]);
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: dir,
+      agentDir: join(dir, "agent"),
+      extensionFactories: [
+        (pi) => {
+          pi.on("before_agent_start", async () => {
+            entered();
+            await hookRelease;
+          });
+        },
+      ],
+    });
+    await resourceLoader.reload();
+    const manager = SessionManager.inMemory(dir);
+    const { session } = await createAgentSession({
+      cwd: dir,
+      agentDir: join(dir, "agent"),
+      sessionManager: manager,
+      modelRuntime: runtime,
+      settingsManager: SettingsManager.inMemory(),
+      resourceLoader,
+      model: faux.getModel(),
+    });
+    const before = manager.getEntries();
+    const sending = session.sendCustomMessage(
+      { customType: "drain", content: "drain", display: true },
+      { triggerTurn: true },
+    );
+    await hookEntered;
+    const aborting = session.abort();
+    let idle = false;
+    const waiting = session.waitForIdle().then(() => {
+      idle = true;
+    });
+    await Promise.resolve();
+    expect(idle).toBe(false);
+    release();
+    await Promise.all([sending, aborting, waiting]);
+    expect(idle).toBe(true);
+    expect(requests).toBe(0);
+    expect(manager.getEntries()).toEqual(before);
+    session.dispose();
+  } finally {
+    release?.();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 it("real SDK: abort stops auth preparation before hooks or inference", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-orb-custom-turn-auth-cancel-"));
   let authStarted: (() => void) | undefined;
