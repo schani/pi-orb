@@ -405,6 +405,8 @@ export function storeSemanticsContractTests(
       };
       const accepted = await store.spawnOrb(task, params);
       expect(accepted.isOk() && accepted.value.duplicate).toBe(false);
+      expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBe(caller.id);
+      expect((await store.getSpawnCaller(task, caller.id))._unsafeUnwrap()).toBeNull();
       expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toMatchObject({
         state: "creating",
         userTimeZone: "America/New_York",
@@ -2349,6 +2351,7 @@ export function storeContractTests(name: string, open: () => Promise<StoreContra
       expect((await store.spawnOrb(task, params)).isErr()).toBe(true);
       expect((await store.getOrb(task, child.id))._unsafeUnwrap()).toBeNull();
       expect((await client.query("DELETE FROM orbs WHERE id = $1", [orb.id])).isOk()).toBe(true);
+      expect((await store.getSpawnCaller(task, child.id))._unsafeUnwrap()).toBe(orb.id);
       expect((await client.query("SELECT * FROM orb_spawns"))._unsafeUnwrap().rows).toHaveLength(1);
       expect((await client.query("DELETE FROM projects WHERE id = $1", [project.id])).isOk()).toBe(
         true,

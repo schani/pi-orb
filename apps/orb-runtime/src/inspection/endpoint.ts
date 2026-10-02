@@ -1,8 +1,11 @@
 import {
   ORB_INSPECTION_LIST_PATH,
+  ORB_SELF_PATH,
   OrbInspectionErrorSchema,
   type OrbInspectionList,
   OrbInspectionListSchema,
+  type OrbSelf,
+  OrbSelfSchema,
   type OrbTranscript,
   OrbTranscriptSchema,
   orbTranscriptPath,
@@ -19,6 +22,10 @@ export type InspectionEndpointFailure =
   | { readonly kind: "conflict"; readonly message: string }
   | { readonly kind: "unavailable"; readonly message: string }
   | { readonly kind: "internal"; readonly message: string };
+
+export type SelfEndpointResult =
+  | { readonly kind: "self"; readonly value: OrbSelf }
+  | InspectionEndpointFailure;
 
 export type OrbListEndpointResult =
   | { readonly kind: "list"; readonly value: OrbInspectionList }
@@ -43,6 +50,17 @@ export class HttpOrbInspectionEndpoint {
 
   constructor(env: BrokerEnv) {
     this.env = env;
+  }
+
+  async self(_task: SimulationTask): Promise<SelfEndpointResult> {
+    const response = await this.request(ORB_SELF_PATH);
+    if (response.kind !== "response") return response;
+    if (response.value.status === 200) {
+      return Check(OrbSelfSchema, response.value.payload)
+        ? { kind: "self", value: response.value.payload }
+        : { kind: "internal", message: "malformed self response" };
+    }
+    return failureOf(response.value);
   }
 
   async list(_task: SimulationTask): Promise<OrbListEndpointResult> {

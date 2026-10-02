@@ -87,7 +87,7 @@ describe("orb runtime Dockerfile contract", () => {
     const piOrbShim = readFileSync(join(repositoryRoot, "apps/orb-runtime/docker/pi-orb"), "utf8");
     expect(piOrbShim).toContain("apps/orb-runtime/src/id-token/cli.ts");
     expect(piOrbShim).toContain("apps/orb-runtime/src/inspection/cli.ts");
-    expect(piOrbShim).toContain("orbs|transcript");
+    expect(piOrbShim).toContain("self|orbs|transcript");
     expect(piOrbShim).toContain("apps/orb-runtime/src/archive/cli.ts");
     expect(piOrbShim).toContain("apps/orb-runtime/src/delete/cli.ts");
     expect(piOrbShim).toContain("apps/orb-runtime/src/spawn/cli.ts");

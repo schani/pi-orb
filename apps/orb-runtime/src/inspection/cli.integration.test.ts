@@ -52,7 +52,7 @@ function runCli(baseUrl: string, args: readonly string[]): Promise<CommandResult
 describe("pi-orb inspection CLI entry point", () => {
   let server: Server;
   let baseUrl: string;
-  let mode: "ok" | "unauthorized" | "missing";
+  let mode: "ok" | "unauthorized" | "missing" | "unavailable" | "malformed";
 
   beforeEach(async () => {
     mode = "ok";
@@ -70,6 +70,37 @@ describe("pi-orb inspection CLI entry point", () => {
           JSON.stringify({
             v: 1,
             error: { code: "not_found", message: "orb not found", retryable: false },
+          }),
+        );
+        return;
+      }
+      if (request.url === "/runtime/v1/orb/self") {
+        if (mode === "unavailable") {
+          response.statusCode = 503;
+          response.end(
+            JSON.stringify({
+              v: 1,
+              error: { code: "unavailable", message: "self unavailable", retryable: true },
+            }),
+          );
+          return;
+        }
+        if (mode === "malformed") {
+          response.end(JSON.stringify({ v: 1, orb: { id: "orb-current", extra: true } }));
+          return;
+        }
+        response.end(
+          JSON.stringify({
+            v: 1,
+            orb: {
+              id: "orb-current",
+              name: "Current",
+              url: "https://browser.test/#/orbs/orb-current",
+              createdAt: "2026-10-01T00:00:00.000Z",
+            },
+            project: orb.project,
+            spawnedBy: null,
+            previewHost: null,
           }),
         );
         return;
@@ -114,6 +145,32 @@ describe("pi-orb inspection CLI entry point", () => {
 
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("prints self as a summary or structured JSON", async () => {
+    const summary = await runCli(baseUrl, ["self"]);
+    expect(summary).toMatchObject({ code: 0, stderr: "" });
+    expect(summary.stdout).toContain("Dashboard: https://browser.test/#/orbs/orb-current");
+    const json = await runCli(baseUrl, ["self", "--json"]);
+    expect(json).toMatchObject({ code: 0, stderr: "" });
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      orb: { id: "orb-current" },
+      spawnedBy: null,
+      previewHost: null,
+    });
+    mode = "unauthorized";
+    expect(await runCli(baseUrl, ["self"])).toMatchObject({ code: 3, stdout: "" });
+  });
+
+  it("rejects malformed self responses and reports unavailable self without stdout", async () => {
+    mode = "malformed";
+    const malformed = await runCli(baseUrl, ["self", "--json"]);
+    expect(malformed).toMatchObject({ code: 7, stdout: "" });
+    expect(malformed.stderr).toContain("malformed self response");
+    mode = "unavailable";
+    const unavailable = await runCli(baseUrl, ["self"]);
+    expect(unavailable).toMatchObject({ code: 6, stdout: "" });
+    expect(unavailable.stderr).toContain("self unavailable");
   });
 
   it("prints a successful no-match search as an empty table", async () => {

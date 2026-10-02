@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   filterOrbs,
   formatOrbList,
+  formatSelf,
   formatTranscript,
   INSPECTION_USAGE,
   parseInspectionArgs,
@@ -38,6 +39,15 @@ describe("orb inspection CLI arguments", () => {
     expect(INSPECTION_USAGE).toContain('pi-orb alert "message"');
   });
 
+  it("accepts self with optional JSON, not url or operands", () => {
+    expect(parseInspectionArgs(["self"])).toMatchObject({ value: { type: "self", json: false } });
+    expect(parseInspectionArgs(["--json", "self"])).toMatchObject({
+      value: { type: "self", json: true },
+    });
+    for (const args of [["url"], ["self", "extra"], ["self", "--json", "--json"]])
+      expect(parseInspectionArgs(args).isErr()).toBe(true);
+  });
+
   it("parses list/search and transcript commands without a CLI framework", () => {
     expect(parseInspectionArgs(["orbs"])).toEqual({
       value: { type: "orbs", query: null, json: false },
@@ -59,12 +69,38 @@ describe("orb inspection CLI arguments", () => {
     ]) {
       const parsed = parseInspectionArgs(args);
       expect(parsed.isErr(), args.join(" ")).toBe(true);
-      if (parsed.isErr()) expect(parsed.error).toContain("usage:\n  pi-orb orbs");
+      if (parsed.isErr()) expect(parsed.error).toContain("usage:\n  pi-orb self");
     }
   });
 });
 
 describe("orb inspection presentation", () => {
+  it("prints self identity and only available optional fields", () => {
+    const self = {
+      v: 1 as const,
+      orb: {
+        id: "orb-a",
+        name: null,
+        url: "https://browser.test/#/orbs/orb-a",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      },
+      project: { id: "project-a", name: "App", repositoryUrl: "https://github.com/o/r" },
+      spawnedBy: null,
+      previewHost: null,
+    };
+    const output = formatSelf(self);
+    expect(output).toContain("https://browser.test/#/orbs/orb-a");
+    expect(output).toContain("2026-10-01T00:00:00.000Z");
+    expect(output).not.toContain("Preview:");
+    expect(output).not.toContain("Spawned by:");
+    expect(
+      formatSelf({
+        ...self,
+        spawnedBy: { id: "parent", url: "https://browser.test/#/orbs/parent" },
+        previewHost: "orb.tail.ts.net",
+      }),
+    ).toContain("orb.tail.ts.net");
+  });
   it("searches normalized explicit identity fields but not lifecycle state", () => {
     expect(filterOrbs(items, "RÉSUMÉ").map((item) => item.id)).toEqual(["orb-sibling"]);
     expect(filterOrbs(items, "project-platform").map((item) => item.id)).toEqual(["orb-current"]);

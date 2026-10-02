@@ -12,6 +12,7 @@ import {
   ORB_NAME_TRIGGER_PATH,
   ORB_SELF_ARCHIVE_PATH,
   ORB_SELF_DELETE_PATH,
+  ORB_SELF_PATH,
   ORB_SELF_SLEEP_PATH,
   ORB_SPAWN_MAX_BYTES,
   ORB_SPAWN_PATH,
@@ -29,6 +30,7 @@ import {
   PERSONAL_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_INSTRUCTIONS_RUNTIME_PATH,
   PROJECT_SECRETS_RUNTIME_PATH,
+  previewHost,
   RUNTIME_TOKENS_PREFIX,
   type TokenErrorBody,
   type TokenGrantBody,
@@ -71,6 +73,7 @@ import { sendProjectInstructionsError } from "./project-instructions.ts";
 
 export interface RuntimeRouteDeps {
   readonly appOrigin: string;
+  readonly tailnetDnsName?: string;
   readonly spawn: (
     task: SimulationTask,
     caller: OrbRow,
@@ -641,6 +644,37 @@ export function registerRuntimeRoutes(
     }
     reply.header("cache-control", "no-store");
     return reply.send(snapshot.value);
+  });
+
+  app.get(ORB_SELF_PATH, async (request, reply) => {
+    const auth = await authenticate(request.headers.authorization);
+    if (auth.kind === "unavailable") return sendInspectionStoreError(reply, auth.error);
+    if (auth.kind !== "orb") return sendUnauthorized(reply);
+    const project = await deps.store.getProject(task, auth.orb.projectId);
+    if (project.isErr()) return sendInspectionStoreError(reply, project.error);
+    if (project.value === null)
+      return reply.status(500).send(inspectionError("internal", "orb project is missing", false));
+    const caller = await deps.store.getSpawnCaller(task, auth.orb.id);
+    if (caller.isErr()) return sendInspectionStoreError(reply, caller.error);
+    const url = (id: string) => `${deps.appOrigin}/#/orbs/${id}`;
+    reply.header("cache-control", "no-store");
+    return reply.send({
+      v: 1,
+      orb: {
+        id: auth.orb.id,
+        name: auth.orb.name,
+        url: url(auth.orb.id),
+        createdAt: new Date(auth.orb.createdAt).toISOString(),
+      },
+      project: {
+        id: project.value.id,
+        name: project.value.name,
+        repositoryUrl: project.value.repositoryUrl,
+      },
+      spawnedBy: caller.value === null ? null : { id: caller.value, url: url(caller.value) },
+      previewHost:
+        deps.tailnetDnsName === undefined ? null : previewHost(auth.orb.id, deps.tailnetDnsName),
+    });
   });
 
   app.get(ORB_INSPECTION_LIST_PATH, async (request, reply) => {

@@ -646,6 +646,7 @@ export async function main(
     });
     registerRuntimeRoutes(app, httpTask, {
       appOrigin,
+      ...viewConfig,
       spawn: (task, caller, orbId, request) => spawnOrb(task, deps, caller, orbId, request),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
         requestOrbSleep(task, deps, orbId, caller, durationSeconds, sleepId),

@@ -542,6 +542,12 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  getSpawnCaller(_task: SimulationTask, orbId: string): ResultAsync<string | null, StoreError> {
+    return this.db
+      .query("SELECT caller_orb_id FROM orb_spawns WHERE orb_id = $1", [orbId])
+      .map((result) => (result.rows[0]?.["caller_orb_id"] as string | undefined) ?? null);
+  }
+
   spawnOrb(
     _task: SimulationTask,
     params: SpawnOrbParams,

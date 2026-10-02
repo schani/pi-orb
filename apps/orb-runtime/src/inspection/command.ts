@@ -2,11 +2,13 @@ import type {
   ContentBlock,
   HistoryRecord,
   OrbInspectionItem,
+  OrbSelf,
   OrbTranscript,
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 
 export const INSPECTION_USAGE = `usage:
+  pi-orb self [--json]
   pi-orb orbs [query] [--json]
   pi-orb transcript <orb-id> [--json]
   pi-orb alert "message" [--request-id <id>]
@@ -15,6 +17,7 @@ export const INSPECTION_USAGE = `usage:
   pi-orb delete`;
 
 export type InspectionCommand =
+  | { readonly type: "self"; readonly json: boolean }
   | { readonly type: "orbs"; readonly query: string | null; readonly json: boolean }
   | { readonly type: "transcript"; readonly orbId: string; readonly json: boolean };
 
@@ -23,6 +26,8 @@ export function parseInspectionArgs(argv: readonly string[]): Result<InspectionC
   if (jsonCount > 1) return err(`--json given twice\n${INSPECTION_USAGE}`);
   const args = argv.filter((argument) => argument !== "--json");
   const [subcommand, ...operands] = args;
+  if (subcommand === "self" && operands.length === 0)
+    return ok({ type: "self", json: jsonCount === 1 });
   if (subcommand === "orbs" && operands.length <= 1) {
     return ok({ type: "orbs", query: operands[0] ?? null, json: jsonCount === 1 });
   }
@@ -36,6 +41,20 @@ export function parseInspectionArgs(argv: readonly string[]): Result<InspectionC
     return ok({ type: "transcript", orbId: transcriptOrbId, json: jsonCount === 1 });
   }
   return err(`invalid pi-orb command\n${INSPECTION_USAGE}`);
+}
+
+export function formatSelf(self: OrbSelf): string {
+  const lines = [
+    `Orb: ${cell(self.orb.name ?? "untitled orb")} (${cell(self.orb.id)})`,
+    `Dashboard: ${self.orb.url}`,
+    `Created: ${self.orb.createdAt}`,
+    `Project: ${cell(self.project.name)} (${cell(self.project.id)})`,
+    `Repository: ${self.project.repositoryUrl}`,
+  ];
+  if (self.spawnedBy !== null)
+    lines.push(`Spawned by: ${self.spawnedBy.id} (${self.spawnedBy.url})`);
+  if (self.previewHost !== null) lines.push(`Preview: ${self.previewHost}`);
+  return `${lines.join("\n")}\n`;
 }
 
 function normalize(value: string): string {

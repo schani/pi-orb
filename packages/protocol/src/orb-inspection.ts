@@ -5,6 +5,33 @@ import { HarnessSessionMetadataSchema, HistoryRecordSchema } from "./history.ts"
 const closed = { additionalProperties: false } as const;
 
 export const ORB_INSPECTION_LIST_PATH = "/runtime/v1/orbs";
+export const ORB_SELF_PATH = "/runtime/v1/orb/self";
+
+export const OrbSelfSchema = Type.Object(
+  {
+    v: Type.Literal(1),
+    orb: Type.Object(
+      {
+        id: Type.String(),
+        name: Type.Union([Type.String(), Type.Null()]),
+        url: Type.String(),
+        createdAt: Type.String(),
+      },
+      closed,
+    ),
+    project: Type.Object(
+      { id: Type.String(), name: Type.String(), repositoryUrl: Type.String() },
+      closed,
+    ),
+    spawnedBy: Type.Union([
+      Type.Object({ id: Type.String(), url: Type.String() }, closed),
+      Type.Null(),
+    ]),
+    previewHost: Type.Union([Type.String(), Type.Null()]),
+  },
+  closed,
+);
+export type OrbSelf = Static<typeof OrbSelfSchema>;
 
 export function orbTranscriptPath(orbId: string): string {
   return `${ORB_INSPECTION_LIST_PATH}/${encodeURIComponent(orbId)}/transcript`;

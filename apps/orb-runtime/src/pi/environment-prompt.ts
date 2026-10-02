@@ -11,6 +11,8 @@ Chromium and \`agent-browser\` are installed: \`agent-browser open <url>\`, then
 
 \`pi-orb orbs [query]\` lists/searches this account's orbs; \`pi-orb transcript <orb-id>\` reads an orb's conversation. Transcripts may be very long; \`--json\` gives lossless structured output. Active orbs' replicated snapshots may briefly lag live output.
 
+\`pi-orb self [--json]\` returns this orb’s identity, dashboard URL, project/repository, creation time, spawning orb, and preview hostname.
+
 \`pi-orb spawn --prompt "task"\` creates an independent same-project orb: fresh default-branch checkout, own conversation; unlike local subagents, no shared checkout, and keeps running if this orb stops. Do not use subagents to start processes that the user interacts with, because it's too finicky.
 
 For MCP servers, ask the user to open the project's config gear: MCPs (OAuth Connect) or Secrets (static keys). Catalog changes apply next start; OAuth reauthorization needs no restart.

@@ -3,6 +3,7 @@ import { readBrokerEnv } from "../broker/endpoint.ts";
 import {
   filterOrbs,
   formatOrbList,
+  formatSelf,
   formatTranscript,
   INSPECTION_USAGE,
   parseInspectionArgs,
@@ -51,6 +52,17 @@ async function main(): Promise<number> {
 
   const endpoint = new HttpOrbInspectionEndpoint(env);
   const task = new NoSimulationTask("orb-inspection-cli", false);
+  if (parsed.value.type === "self") {
+    const result = await endpoint.self(task);
+    if (result.kind !== "self") {
+      process.stderr.write(`pi-orb: ${describeFailure(result)}\n`);
+      return exitCode(result);
+    }
+    process.stdout.write(
+      parsed.value.json ? `${JSON.stringify(result.value, null, 2)}\n` : formatSelf(result.value),
+    );
+    return 0;
+  }
   if (parsed.value.type === "orbs") {
     const result = await endpoint.list(task);
     if (result.kind !== "list") {

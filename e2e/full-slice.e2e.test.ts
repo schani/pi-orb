@@ -1955,6 +1955,45 @@ describe("full slice E2E", () => {
       { timeoutMs: 300_000, intervalMs: 2_000 },
     );
 
+    // Exercise the CLI dispatcher, runtime bearer, and self route through the
+    // real terminal. The second orb was created directly, not spawned.
+    const secondView = await api(base, "GET", `/api/v1/orbs/${secondOrbId}`);
+    const selfFromSibling = await terminalRun(
+      secondOrbId,
+      String.raw`pi-orb self --json; printf '\123\105\114\106\137\111\116\123\120\105\103\124\137\123\105\114\106\137\104\117\116\105\012'`,
+      "SELF_INSPECT_SELF_DONE",
+    );
+    const selfJson = JSON.parse(
+      selfFromSibling.slice(
+        selfFromSibling.indexOf('{\r\n  "v"'),
+        selfFromSibling.indexOf("SELF_INSPECT_SELF_DONE"),
+      ),
+    ) as Record<string, unknown>;
+    expect(selfJson).toEqual({
+      v: 1,
+      orb: {
+        id: secondOrbId,
+        name: secondView.body["name"],
+        url: `${base}/#/orbs/${secondOrbId}`,
+        createdAt: secondView.body["createdAt"],
+      },
+      project: {
+        id: projectId,
+        name: project.body["name"],
+        repositoryUrl: REPOSITORY_URL,
+      },
+      spawnedBy: null,
+      previewHost: null,
+    });
+    const selfText = await terminalRun(
+      secondOrbId,
+      String.raw`pi-orb self; printf '\123\105\114\106\137\111\116\123\120\105\103\124\137\124\105\130\124\137\104\117\116\105\012'`,
+      "SELF_INSPECT_TEXT_DONE",
+    );
+    expect(selfText).toContain(`Dashboard: ${base}/#/orbs/${secondOrbId}`);
+    expect(selfText).toContain(`Project: ${project.body["name"]} (${projectId})`);
+    expect(selfText).toContain(`Repository: ${REPOSITORY_URL}`);
+
     // A running sibling can discover this stopped orb and read its replicated
     // transcript through the authenticated in-orb CLI. Run through the real
     // terminal so this covers the image/process PATH, shim, runtime-only
@@ -2022,6 +2061,35 @@ describe("full slice E2E", () => {
       },
       { timeoutMs: 30_000, intervalMs: 200 },
     );
+    const spawnedView = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}`);
+    const spawnedSelf = await terminalRun(
+      spawnedOrbId,
+      String.raw`pi-orb self --json; printf '\123\120\101\127\116\105\104\137\123\105\114\106\137\104\117\116\105\012'`,
+      "SPAWNED_SELF_DONE",
+    );
+    expect(
+      JSON.parse(
+        spawnedSelf.slice(
+          spawnedSelf.indexOf('{\r\n  "v"'),
+          spawnedSelf.indexOf("SPAWNED_SELF_DONE"),
+        ),
+      ),
+    ).toEqual({
+      v: 1,
+      orb: {
+        id: spawnedOrbId,
+        name: spawnedView.body["name"],
+        url: `${base}/#/orbs/${spawnedOrbId}`,
+        createdAt: spawnedView.body["createdAt"],
+      },
+      project: {
+        id: projectId,
+        name: project.body["name"],
+        repositoryUrl: REPOSITORY_URL,
+      },
+      spawnedBy: { id: secondOrbId, url: `${base}/#/orbs/${secondOrbId}` },
+      previewHost: null,
+    });
     const retriedSpawn = await terminalRun(
       secondOrbId,
       `${spawnCommand}; printf '\\123\\120\\101\\127\\116\\137\\122\\105\\124\\122\\131\\012'`,

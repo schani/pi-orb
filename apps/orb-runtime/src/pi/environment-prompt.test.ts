@@ -36,6 +36,16 @@ describe("runtime environment prompt", () => {
     expect(environmentPrompt).toMatch(/active.*replicated snapshot.*lag.*live/i);
   });
 
+  it("documents current-orb identity under runtime tools", () => {
+    const line =
+      "`pi-orb self [--json]` returns this orb’s identity, dashboard URL, project/repository, creation time, spawning orb, and preview hostname.";
+    expect(environmentPrompt).toContain(`## Runtime tools\n\n`);
+    expect(environmentPrompt).toContain(line);
+    expect(environmentPrompt.indexOf(line)).toBeGreaterThan(
+      environmentPrompt.indexOf("## Runtime tools"),
+    );
+  });
+
   it("distinguishes independent spawned orbs from local subagents", () => {
     expect(environmentPrompt).toContain('pi-orb spawn --prompt "task"');
     expect(environmentPrompt).toMatch(/independent.*same-project.*fresh default-branch checkout/);

@@ -214,6 +214,7 @@ export interface ControlPlaneStore {
   ): ResultAsync<OrbRow[], StoreError>;
   /** Inserts only while the parent project is active, fencing create-vs-delete. */
   insertOrb(task: SimulationTask, orb: OrbRow): ResultAsync<OrbRow, StoreError | ProjectConflict>;
+  getSpawnCaller(task: SimulationTask, orbId: string): ResultAsync<string | null, StoreError>;
   spawnOrb(
     task: SimulationTask,
     params: SpawnOrbParams,

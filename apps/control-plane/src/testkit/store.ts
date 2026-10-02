@@ -642,6 +642,15 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
+  getSpawnCaller(task: SimulationTask, orbId: string): ResultAsync<string | null, StoreError> {
+    return this.access(
+      task,
+      FAILPOINTS.storeRead,
+      "get spawn caller",
+      () => this.spawns.get(orbId)?.callerOrbId ?? null,
+    );
+  }
+
   spawnOrb(
     task: SimulationTask,
     params: SpawnOrbParams,

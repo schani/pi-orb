@@ -6,8 +6,10 @@ import {
   MCP_RUNTIME_PATH,
   ORB_INSPECTION_LIST_PATH,
   ORB_NAME_TRIGGER_PATH,
+  ORB_SELF_PATH,
   OrbInspectionErrorSchema,
   OrbInspectionListSchema,
+  OrbSelfSchema,
   OrbTranscriptSchema,
   orbTranscriptPath,
   PROJECT_SECRETS_RUNTIME_PATH,
@@ -89,10 +91,12 @@ describe("runtime broker routes", () => {
   async function startApp(
     issuerConstants = TEST_ISSUER_CONSTANTS,
     routeStore: ControlPlaneStore = store,
+    tailnetDnsName: string | null = "tail.test.ts.net",
   ): Promise<void> {
     app = Fastify();
     registerRuntimeRoutes(app, task, {
       appOrigin: "https://browser.test",
+      ...(tailnetDnsName === null ? {} : { tailnetDnsName }),
       spawn: (task, caller, orbId, request) =>
         spawnOrb(task, { ...makeHarness().deps, store: routeStore }, caller, orbId, request),
       sleepSelf: (task, orbId, caller, durationSeconds, sleepId) =>
@@ -279,8 +283,53 @@ describe("runtime broker routes", () => {
       expect(response.headers["cache-control"]).toBe("no-store");
       expect((await spawn()).statusCode).toBe(202);
       expect(store.messageSnapshots(id)).toHaveLength(1);
+      store.seedOrb(
+        makeOrbRow(id, PROJECT, "running", { runtimeTokenHash: sha256("child-token") }),
+      );
+      const self = await app.inject({
+        method: "GET",
+        url: ORB_SELF_PATH,
+        headers: { authorization: "Bearer child-token", host: "untrusted.test" },
+      });
+      expect(self.json().spawnedBy).toEqual({ id: ORB, url: `https://browser.test/#/orbs/${ORB}` });
+      expect(self.json().orb.id).toBe(id);
       expect((await spawn({ prompt: "Different" })).statusCode).toBe(409);
     });
+    it("retains historical parent URL after deletion and rejects its retired bearer", async () => {
+      store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
+      expect((await spawn()).statusCode).toBe(202);
+      store.seedOrb(
+        makeOrbRow(id, PROJECT, "running", { runtimeTokenHash: sha256("child-token") }),
+      );
+      const deleted = await store.requestOrbDeletion(task, {
+        orbId: ORB,
+        expectedStateVersion: 0,
+        now: 100,
+        cleanupAfter: 100,
+      });
+      expect(deleted.isOk()).toBe(true);
+      expect(
+        (await store.finalizeOrbDeletion(task, { orbId: ORB, expectedStateVersion: 1 })).isOk(),
+      ).toBe(true);
+      const child = await app.inject({
+        method: "GET",
+        url: ORB_SELF_PATH,
+        headers: { authorization: "Bearer child-token" },
+      });
+      expect(child.statusCode).toBe(200);
+      expect(child.json().spawnedBy).toEqual({
+        id: ORB,
+        url: `https://browser.test/#/orbs/${ORB}`,
+      });
+      const retired = await app.inject({
+        method: "GET",
+        url: ORB_SELF_PATH,
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      expect(retired.statusCode).toBe(401);
+      expect(retired.json()).toEqual({ error: "unauthorized" });
+    });
+
     it("normalizes retry names and lets only a current replacement bearer recover acceptance", async () => {
       store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
       expect((await spawn({ prompt: "work", name: "  Parser   tests " })).statusCode).toBe(202);
@@ -686,7 +735,7 @@ describe("runtime broker routes", () => {
   });
 
   function storeFailing(
-    operation: "listProjects" | "listProjectsByOwner" | "readHistorySnapshot",
+    operation: "listProjects" | "listProjectsByOwner" | "readHistorySnapshot" | "getSpawnCaller",
     error: StoreError,
   ): ControlPlaneStore {
     return new Proxy(store, {
@@ -1076,6 +1125,50 @@ describe("runtime broker routes", () => {
         ...(token === null ? {} : { headers: { authorization: `Bearer ${token}` } }),
       });
     }
+
+    it("reads only authenticated self metadata, including configured preview and nullable provenance", async () => {
+      const response = await inspect(ORB_SELF_PATH);
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(Check(OrbSelfSchema, response.json())).toBe(true);
+      expect(response.json()).toEqual({
+        v: 1,
+        orb: {
+          id: ORB,
+          name: null,
+          url: `https://browser.test/#/orbs/${ORB}`,
+          createdAt: new Date(0).toISOString(),
+        },
+        project: {
+          id: PROJECT,
+          name: `project-${PROJECT}`,
+          repositoryUrl: "https://github.com/owner/repo",
+        },
+        spawnedBy: null,
+        previewHost: `pi-orb-${ORB}.tail.test.ts.net`,
+      });
+      expect((await inspect(ORB_SELF_PATH, null)).statusCode).toBe(401);
+      expect((await inspect(ORB_SELF_PATH, "wrong")).statusCode).toBe(401);
+    });
+
+    it("reports absent preview configuration and sanitized store errors", async () => {
+      await app.close();
+      await startApp(TEST_ISSUER_CONSTANTS, store, null);
+      expect((await inspect(ORB_SELF_PATH)).json().previewHost).toBeNull();
+      await app.close();
+      await startApp(
+        TEST_ISSUER_CONSTANTS,
+        storeFailing("getSpawnCaller", {
+          type: "store_error",
+          code: "unavailable",
+          message: "raw database host",
+          retryable: true,
+        }),
+      );
+      const response = await inspect(ORB_SELF_PATH);
+      expect(response.statusCode).toBe(503);
+      expect(response.body).not.toContain("raw database host");
+    });
 
     it("lists sibling orbs with project context and identifies the caller", async () => {
       const response = await inspect(ORB_INSPECTION_LIST_PATH);
