@@ -139,6 +139,10 @@ async function runProfiles(
                   .map((tool) => tool.description)
               : [],
           ),
+          inventory: context.messages
+            .filter((message) => message.role === "system")
+            .map((message) => message.sections?.mcp_servers ?? "")
+            .join("\n"),
         });
         const stream = createAssistantMessageEventStream();
         queueMicrotask(() => {
@@ -395,14 +399,11 @@ async function runProfiles(
               child: payload.child,
               activeMcp: payload.tools.filter((name) => name.startsWith("mcp__")).length,
               codemode: payload.tools.includes("codemode"),
-              childInventory: payload.codemode.some(
-                (description) =>
-                  description?.includes("mcp__cloudflare__read_0") &&
-                  description.includes("mcp__datadog__read_0"),
-              ),
-              childNamespace: payload.codemode.some((description) =>
-                description?.includes("mcp__cloudflare__read_0"),
-              ),
+              childInventory:
+                payload.codemode.some((description) => description?.includes("ALL_TOOLS")) &&
+                payload.inventory.includes("mcp__cloudflare (codemode)") &&
+                payload.inventory.includes("mcp__datadog (codemode)"),
+              childNamespace: payload.inventory.includes("mcp__cloudflare__read_0"),
             })),
         };
         results.push(result);
@@ -425,7 +426,7 @@ async function runProfiles(
         assert.ok(childPayload, JSON.stringify(result));
         assert.equal(childPayload.codemode, true);
         if (profile === "root" && childType !== "restricted-general-purpose")
-          assert.equal(childPayload.childInventory, true);
+          assert.equal(childPayload.childInventory, true, JSON.stringify(result));
         if (invokeChild) {
           assert.equal(state.childToolCalled, true);
           assert.equal(toolResults.length, 1, transcript);

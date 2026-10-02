@@ -5,9 +5,9 @@
     "test": "node --import tsx --experimental-import-meta-resolve --test --test-timeout=60000 *.test.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.99.1",
-    "@earendil-works/pi-coding-agent": "file:../../vendor/pi-coding-agent-0.99.1-brace-5.0.12.tgz",
-    "@earendil-works/pi-mcp": "0.99.1",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
+    "@earendil-works/pi-mcp": "1.0.0",
     "neverthrow": "8.2.0",
     "tsx": "4.23.15"
   }

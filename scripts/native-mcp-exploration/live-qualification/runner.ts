@@ -27,7 +27,7 @@ import {
   summarizeReadShape,
 } from "./policy.mjs";
 
-// This file is bundled with the production adapter; all other imports resolve in the guest's isolated 0.99.1 install.
+// This file is bundled with the production adapter; all other imports resolve in the guest's isolated 1.0.0 install.
 const CONFIG_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/attributes/pi-orb-config";
 const EXACT_REVIEWED_CALLS: Record<

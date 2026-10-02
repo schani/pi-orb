@@ -510,10 +510,12 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       body?: { tools?: { name: string; description?: string }[]; instructions?: string };
     }[];
     expect(
-      firstRequests.some((request) =>
-        request.body?.tools
-          ?.find((tool) => tool.name === "codemode")
-          ?.description?.includes("mcp__fixture__echo"),
+      firstRequests.some(
+        (request) =>
+          request.body?.tools
+            ?.find((tool) => tool.name === "codemode")
+            ?.description?.includes("ALL_TOOLS") &&
+          request.body.instructions?.includes("mcp__fixture (codemode)"),
       ),
     ).toBe(true);
     expect(
@@ -626,7 +628,8 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     expect(defaultChildRequest?.body.tools?.map((tool) => tool.name)).toContain("codemode");
     expect(
       defaultChildRequest?.body.tools?.find((tool) => tool.name === "codemode")?.description,
-    ).toContain("mcp__fixture__echo");
+    ).toContain("ALL_TOOLS");
+    expect(defaultChildRequest?.body.instructions).toContain("mcp__fixture (codemode)");
     expect(defaultChildRequest?.body.instructions).toContain("fixture: MCP E2E inventory");
     expect(defaultChildRequest?.body.tools?.some((tool) => tool.name === "subagent")).toBe(false);
     expect(defaultChildRequest?.body.tools?.some((tool) => tool.name.startsWith("mcp__"))).toBe(
@@ -636,7 +639,8 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     expect(childRequest).toBeDefined();
     expect(
       childRequest?.body.tools?.find((tool) => tool.name === "codemode")?.description,
-    ).toContain("mcp__fixture__echo");
+    ).toContain("ALL_TOOLS");
+    expect(childRequest?.body.instructions).toContain("mcp__fixture (codemode)");
     expect(childRequest?.body.instructions).toContain("fixture: MCP E2E inventory");
     expect(
       requests.some(
@@ -652,9 +656,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     expect(isolatedRequest).toBeDefined();
     expect(isolatedRequest?.body.tools?.map((tool) => tool.name)).toContain("codemode");
     expect(isolatedRequest?.body.tools?.some((tool) => tool.name.startsWith("mcp__"))).toBe(false);
-    expect(
-      isolatedRequest?.body.tools?.find((tool) => tool.name === "codemode")?.description,
-    ).not.toContain("mcp__fixture__echo");
+    expect(isolatedRequest?.body.instructions).not.toContain("mcp__fixture (codemode)");
     expect(isolatedRequest?.body.instructions).not.toContain("MCP E2E inventory");
     expect(
       requests.some(

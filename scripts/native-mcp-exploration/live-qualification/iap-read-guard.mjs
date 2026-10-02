@@ -10,7 +10,7 @@ export async function guard(stage) {
   const manifest = JSON.parse(readFileSync(join(stage, "manifest.json")));
   assert.equal(
     manifest.lockSha,
-    "68238c99112321d5ed0106b9df14e830dcd5513b8775ec73dbc0095d930ff37d",
+    "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8",
   );
   for (const [file, hash] of Object.entries(manifest.files))
     assert.equal(sha(join(stage, file)), hash, file);
@@ -38,12 +38,13 @@ export async function guard(stage) {
   const sdk = join(stage, "node_modules/@earendil-works/pi-coding-agent");
   const resolved = realpathSync(join(sdk, "dist/index.js"));
   assert.ok(resolved.startsWith(realpathSync(stage) + sep));
-  assert.equal(JSON.parse(readFileSync(join(sdk, "package.json"))).version, "0.99.1");
+  assert.equal(JSON.parse(readFileSync(join(sdk, "package.json"))).version, "1.0.0");
   assert.equal(
-    JSON.parse(readFileSync(join(sdk, "node_modules/@earendil-works/pi-ai/package.json"))).version,
-    "0.99.1",
+    JSON.parse(readFileSync(join(stage, "node_modules/@earendil-works/pi-ai/package.json")))
+      .version,
+    "1.0.0",
   );
-  for (const file of ["dist/extensions/mcp/index.js", "dist/bundle/chunks/chunk-GUORCHFS.js"]) {
+  for (const file of ["dist/extensions/mcp/index.js"]) {
     const code = readFileSync(join(sdk, file), "utf8");
     assert.match(code, /retryConnectionOnPrompt/);
     assert.match(code, /waitForOpening/);
@@ -51,7 +52,7 @@ export async function guard(stage) {
   const publicSdk = await import(pathToFileURL(resolved).href);
   const unbundled = await import(pathToFileURL(join(sdk, "dist/extensions/mcp/index.js")).href);
   const runtime = await import(pathToFileURL(join(sdk, "dist/extensions/mcp/runtime.js")).href);
-  const mcpPath = realpathSync(join(sdk, "node_modules/@earendil-works/pi-mcp/dist/index.js"));
+  const mcpPath = realpathSync(join(stage, "node_modules/@earendil-works/pi-mcp/dist/index.js"));
   assert.ok(mcpPath.startsWith(realpathSync(stage) + sep));
   const mcp = await import(pathToFileURL(mcpPath).href);
   assert.equal(publicSdk.createMcpExtension, unbundled.createMcpExtension);
@@ -59,7 +60,7 @@ export async function guard(stage) {
   assert.equal(typeof runtime.McpServerConnection.prototype.waitForOpening, "function");
   return {
     status: "pass",
-    sdkVersion: "0.99.1",
-    patchHash: manifest.files["patches/@earendil-works+pi-coding-agent+0.99.1.patch"],
+    sdkVersion: "1.0.0",
+    patchHash: manifest.files["patches/@earendil-works+pi-coding-agent+1.0.0.patch"],
   };
 }

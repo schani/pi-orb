@@ -1,8 +1,11 @@
 {
   "private": true,
   "type": "module",
+  "scripts": {
+    "postinstall": "patch-package --error-on-fail"
+  },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "file:../../../vendor/pi-coding-agent-0.99.1-brace-5.0.12.tgz",
+    "@earendil-works/pi-coding-agent": "file:../../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
     "determined": "0.4.1",
     "neverthrow": "8.2.0",
     "patch-package": "8.0.1",

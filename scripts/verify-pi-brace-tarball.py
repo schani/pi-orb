@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild/verify the Pi 0.99.1 tarball with only the nested brace fix.
+"""Rebuild/verify the Pi 1.0.0 tarball with only the nested brace fix.
 
 Usage: python3 scripts/verify-pi-brace-tarball.py VERSION UPSTREAM_TARBALL
 The upstream archive must be obtained from npm (npm pack @earendil-works/pi-coding-agent@VERSION).
@@ -15,7 +15,7 @@ import tarfile
 from pathlib import Path
 
 VERSIONS = {
-    "0.99.1": "sha512-cWUrTOqA5M73cOYMgsh9PlhDrsBhavd+n5kVY6F7BGbGl1RjqCteVCoeVMVqhngoGACVDyw1tbLjajL8l9jrHg==",
+    "1.0.0": "sha512-/FtbxoSQU/mEv1QnichJjRjqteqaIaMWxmhB4G367+MwZfX7/DI5B9YAg5lqbN7nztFskBEtUSZ+FlmMBECtMw==",
 }
 BRACE = {
     "version": "5.0.12",
@@ -84,7 +84,7 @@ def main(version, upstream_path):
     assert all(repacked[name] == data for name, data in contents.items()), "unexpected file changes"
     js = [name for name in contents if name.endswith((".js", ".mjs", ".cjs"))]
     assert all(repacked[name] == contents[name] for name in js), "SDK JavaScript changed"
-    assert len(js) == 315, "unexpected SDK JavaScript inventory"
+    assert len(js) == 321, "unexpected SDK JavaScript inventory"
     print(f"{version}: upstream {integrity(upstream)}; vendor {integrity(result)}; only {key} brace entry changed; {len(js)} SDK JavaScript files unchanged; Pi AI proxy 9.1.0")
 
 

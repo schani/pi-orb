@@ -12,7 +12,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
-test("released Pi 0.99.1 skips before_agent_start for idle triggered custom messages", {
+test("released Pi 1.0.0 skips before_agent_start for idle triggered custom messages", {
   timeout: 10000,
 }, async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-custom-preflight-"));
@@ -63,7 +63,7 @@ test("released Pi 0.99.1 skips before_agent_start for idle triggered custom mess
       assert.deepEqual(
         observed,
         ["ordinary prompt"],
-        "idle triggered custom turn bypasses preflight in released Pi 0.99.1",
+        "idle triggered custom turn bypasses preflight in released Pi 1.0.0",
       );
       assert.equal(session.isIdle, true);
       assert.equal(settled, 2, "both prompts completed an agent turn");

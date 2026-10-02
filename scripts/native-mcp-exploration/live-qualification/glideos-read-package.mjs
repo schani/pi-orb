@@ -17,10 +17,10 @@ const stage = join(output, "staging");
 await mkdir(join(stage, "patches"), { recursive: true });
 await mkdir(join(stage, "vendor"));
 const patches = [
-  "@earendil-works+pi-coding-agent+0.99.1.patch",
-  "@earendil-works+pi-coding-agent++@earendil-works+pi-ai+0.99.1.patch",
+  "@earendil-works+pi-coding-agent+1.0.0.patch",
+  "@earendil-works+pi-ai+1.0.0.patch",
 ];
-const vendorName = "pi-coding-agent-0.99.1-brace-5.0.12.tgz";
+const vendorName = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
 for (const file of [
   "glideos-read.test.mjs",
   "glideos-read-guard.mjs",

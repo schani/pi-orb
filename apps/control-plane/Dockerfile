@@ -24,7 +24,7 @@ COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/control-plane/package.json apps/control-plane/
 RUN npm ci --workspace @pi-orb/control-plane --include-workspace-root=false --ignore-scripts \
-  && npx --no-install patch-package
+  && npx --no-install patch-package --error-on-fail
 COPY packages/protocol/src packages/protocol/src
 COPY packages/mock-openai/src packages/mock-openai/src
 COPY packages/luna/src packages/luna/src

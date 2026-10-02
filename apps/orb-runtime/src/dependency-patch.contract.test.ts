@@ -18,7 +18,7 @@ const json = (
     devDependencies?: Record<string, string>;
   };
 
-const piVersion = "0.99.1";
+const piVersion = "1.0.0";
 const patchPackageVersion = "8.0.1";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
@@ -28,7 +28,7 @@ describe("Pi dependency patch installation", () => {
     for (const manifest of ["apps/orb-runtime/package.json", "apps/control-plane/package.json"]) {
       expect(json(manifest).dependencies).toMatchObject({
         "@earendil-works/pi-coding-agent":
-          "file:../../vendor/pi-coding-agent-0.99.1-brace-5.0.12.tgz",
+          "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
         "patch-package": patchPackageVersion,
       });
     }
@@ -54,7 +54,7 @@ describe("Pi dependency patch installation", () => {
   });
 
   it("applies the patch during root and both container installs", () => {
-    expect(json("package.json").scripts?.postinstall).toMatch(/^patch-package && /);
+    expect(json("package.json").scripts?.postinstall).toMatch(/^patch-package --error-on-fail && /);
 
     for (const [path, workspace] of [
       ["apps/orb-runtime/Dockerfile", "@pi-orb/orb-runtime"],
@@ -67,9 +67,9 @@ describe("Pi dependency patch installation", () => {
       expect(dockerfile.indexOf("COPY patches patches")).toBeLessThan(install);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(install);
-      expect(dockerfile.indexOf("npx --no-install patch-package", install)).toBeGreaterThan(
-        install,
-      );
+      expect(
+        dockerfile.indexOf("npx --no-install patch-package --error-on-fail", install),
+      ).toBeGreaterThan(install);
     }
   });
 
@@ -78,7 +78,7 @@ describe("Pi dependency patch installation", () => {
       /UPLOADED_SOURCE_PATHS = \[[\s\S]*"patches"/,
     );
     const nativeInstall = read("infra/native-vm/install.sh");
-    expect(nativeInstall.indexOf("npx --no-install patch-package")).toBeGreaterThan(
+    expect(nativeInstall.indexOf("npx --no-install patch-package --error-on-fail")).toBeGreaterThan(
       nativeInstall.indexOf("npm ci"),
     );
   });

@@ -16,11 +16,8 @@ assert.ok(
 await mkdir(output); // Refuse to overwrite evidence.
 const stage = join(output, "staging");
 const lockSha = sha(join(local, "package-lock.json"));
-assert.equal(lockSha, "68238c99112321d5ed0106b9df14e830dcd5513b8775ec73dbc0095d930ff37d");
-const names = [
-  "@earendil-works+pi-coding-agent+0.99.1.patch",
-  "@earendil-works+pi-coding-agent++@earendil-works+pi-ai+0.99.1.patch",
-];
+assert.equal(lockSha, "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8");
+const names = ["@earendil-works+pi-coding-agent+1.0.0.patch", "@earendil-works+pi-ai+1.0.0.patch"];
 function run(command, args, cwd, log, env = {}) {
   const result = spawnSync(command, args, {
     cwd,
@@ -37,13 +34,8 @@ function run(command, args, cwd, log, env = {}) {
 async function install(dir, prefix) {
   run("npm", ["ci", "--ignore-scripts"], dir, `${prefix}-npm-ci.log`);
   const graph = JSON.parse(await readFile(join(dir, "package-lock.json")));
-  const aiPath = "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai";
-  assert.equal(graph.packages[aiPath]?.version, "0.99.1");
-  assert.equal(
-    graph.packages["node_modules/@earendil-works/pi-ai"],
-    undefined,
-    "root pi-ai layout changed",
-  );
+  const aiPath = "node_modules/@earendil-works/pi-ai";
+  assert.equal(graph.packages[aiPath]?.version, "1.0.0");
   run(
     "node",
     [join(dir, "node_modules/patch-package/index.js"), "--error-on-fail"],
@@ -61,6 +53,16 @@ for (const file of [
 ])
   await cp(join(local, file), join(stage, file));
 for (const name of names) await cp(join(root, "patches", name), join(stage, "patches", name));
+const vendor = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
+await mkdir(join(stage, "vendor"));
+await cp(join(root, "vendor", vendor), join(stage, "vendor", vendor));
+for (const file of ["package.json", "package-lock.json"]) {
+  const path = join(stage, file);
+  const source = await readFile(path, "utf8");
+  const original = `file:../../../vendor/${vendor}`;
+  assert.ok(source.includes(original), `missing vendor reference: ${file}`);
+  await writeFile(path, source.replaceAll(original, `file:./vendor/${vendor}`));
+}
 run(
   join(root, "node_modules/.bin/esbuild"),
   [
@@ -86,8 +88,10 @@ const manifest = {
   hostBundleSha: sha(join(stage, "initial-auth.mjs")),
   bundleSha: sha(join(stage, "initial-auth.mjs")),
   bundleMetaSha: sha(join(stage, "bundle-meta.json")),
-  lockSha,
-  piAiPath: "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai",
+  sourceLockSha: lockSha,
+  lockSha: sha(join(stage, "package-lock.json")),
+  vendorSha: sha(join(root, "vendor", vendor)),
+  piAiPath: "node_modules/@earendil-works/pi-ai",
   patches: names.map((name) => ({
     source: `patches/${name}`,
     sourceSha: sha(join(root, "patches", name)),

@@ -146,7 +146,7 @@ test("pinned SDK fixture manually emits hooks for independent root/child active 
   );
   const sdkPath = join(stage, "node_modules/@earendil-works/pi-coding-agent");
   const sdk = await import(pathToFileURL(join(sdkPath, "dist/index.js")).href);
-  assert.equal(JSON.parse(await readFile(join(sdkPath, "package.json"), "utf8")).version, "0.99.1");
+  assert.equal(JSON.parse(await readFile(join(sdkPath, "package.json"), "utf8")).version, "1.0.0");
   const dir = await mkdtemp(join(tmpdir(), "native-mcp-context-"));
   const results = [];
   const sessions = [];

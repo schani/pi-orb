@@ -7,15 +7,15 @@ import { pathToFileURL } from "node:url";
 
 export const sha = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 const sdk = "node_modules/@earendil-works/pi-coding-agent";
-const ai = `${sdk}/node_modules/@earendil-works/pi-ai`;
+const ai = "node_modules/@earendil-works/pi-ai";
 const patches = new Map([
   [
-    "@earendil-works+pi-coding-agent+0.99.1.patch",
-    "6323a51d57777f235b7b370c53e1fa1afa49418b42fb3d744bc65227036e90a2",
+    "@earendil-works+pi-coding-agent+1.0.0.patch",
+    "c684fe6a6a57426521a6fd822ced3636f2004b29eebff3af489e84f59f84c0cf",
   ],
   [
-    "@earendil-works+pi-coding-agent++@earendil-works+pi-ai+0.99.1.patch",
-    "9940265eeb7a26235acb5685442894b7fc761b31e8aca21d3971409dd4029938",
+    "@earendil-works+pi-ai+1.0.0.patch",
+    "343595d54de7fa7eaf0fb47a9172b759dcb5a262763133abbc409993f66f5e57",
   ],
 ]);
 
@@ -55,7 +55,7 @@ export async function guardStage(stage, root, manifest) {
   stage = resolve(stage);
   root = resolve(root);
   assert.equal(
-    manifest.lockSha,
+    manifest.sourceLockSha,
     sha(join(root, "scripts/native-mcp-exploration/live-qualification/package-lock.json")),
   );
   assert.equal(manifest.hostSourceSha, sha(join(root, "apps/orb-runtime/src/mcp/native.ts")));
@@ -68,8 +68,12 @@ export async function guardStage(stage, root, manifest) {
 export async function guardInstalledStage(stage, manifest) {
   stage = resolve(stage);
   assert.equal(
-    manifest.lockSha,
-    "68238c99112321d5ed0106b9df14e830dcd5513b8775ec73dbc0095d930ff37d",
+    manifest.vendorSha,
+    "eb67747b526d862e6bd0c959a330b7897ece86ebed3a21e7cf846730e293e509",
+  );
+  assert.equal(
+    sha(join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz")),
+    manifest.vendorSha,
   );
   assert.equal(manifest.bundleSha, sha(join(stage, "initial-auth.mjs")));
   assert.equal(manifest.hostBundleSha, manifest.bundleSha);
@@ -88,10 +92,10 @@ export async function guardInstalledStage(stage, manifest) {
   }
   const resolved = realpathSync(join(stage, sdk, "dist/index.js"));
   assert.ok(resolved.startsWith(realpathSync(stage) + sep), `SDK escaped stage: ${resolved}`);
-  assert.equal(JSON.parse(readFileSync(join(stage, sdk, "package.json"))).version, "0.99.1");
-  assert.equal(JSON.parse(readFileSync(join(stage, ai, "package.json"))).version, "0.99.1");
+  assert.equal(JSON.parse(readFileSync(join(stage, sdk, "package.json"))).version, "1.0.0");
+  assert.equal(JSON.parse(readFileSync(join(stage, ai, "package.json"))).version, "1.0.0");
   assert.equal(manifest.piAiPath, ai);
-  for (const artifact of ["dist/extensions/mcp/index.js", "dist/bundle/chunks/chunk-GUORCHFS.js"]) {
+  for (const artifact of ["dist/extensions/mcp/index.js"]) {
     const text = readFileSync(join(stage, sdk, artifact), "utf8");
     assert.match(text, /retryConnectionOnPrompt/, `no retry hook: ${artifact}`);
     assert.match(text, /waitForOpening/, `no opening wait: ${artifact}`);
@@ -117,9 +121,7 @@ export async function guardInstalledStage(stage, manifest) {
     "public MCP factory identity changed",
   );
   assert.equal(typeof runtime.McpServerConnection.prototype.waitForOpening, "function");
-  const mcpPath = realpathSync(
-    join(stage, sdk, "node_modules/@earendil-works/pi-mcp/dist/index.js"),
-  );
+  const mcpPath = realpathSync(join(stage, "node_modules/@earendil-works/pi-mcp/dist/index.js"));
   assert.ok(mcpPath.startsWith(realpathSync(stage) + sep), `pi-mcp escaped stage: ${mcpPath}`);
   const mcp = await import(pathToFileURL(mcpPath).href);
   assert.equal(

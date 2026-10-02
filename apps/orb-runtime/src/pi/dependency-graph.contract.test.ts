@@ -12,7 +12,7 @@ const root = join(import.meta.dirname, "../../../..");
 type Entry = { version?: string; dependencies?: Record<string, string> };
 type Lock = { packages: Record<string, Entry> };
 const json = (path: string): Lock => JSON.parse(readFileSync(join(root, path), "utf8")) as Lock;
-const vendor = "vendor/pi-coding-agent-0.99.1-brace-5.0.12.tgz";
+const vendor = "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz";
 const shrinkwrap = JSON.parse(
   execFileSync("tar", ["xOzf", join(root, vendor), "package/npm-shrinkwrap.json"], {
     encoding: "utf8",
@@ -87,11 +87,8 @@ describe("Pi package dependency contracts", () => {
     }
   });
 
-  it("installs a proxy version satisfying nested Pi AI's actual manifest", () => {
-    const piAiPath = join(
-      root,
-      "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai",
-    );
+  it("installs a proxy version satisfying installed Pi AI's actual manifest", () => {
+    const piAiPath = join(root, "node_modules/@earendil-works/pi-ai");
     const fromPiAi = createRequire(join(piAiPath, "package.json"));
     const manifest = JSON.parse(readFileSync(join(piAiPath, "package.json"), "utf8")) as Entry;
     const proxy = JSON.parse(
@@ -103,8 +100,8 @@ describe("Pi package dependency contracts", () => {
     expect(semver.satisfies(version, range)).toBe(true);
   });
 
-  it("matches the nested Pi AI published manifest, not merely shrinkwrap claims", () => {
-    const piAi = "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai";
+  it("matches the installed Pi AI published manifest, not merely shrinkwrap claims", () => {
+    const piAi = "node_modules/@earendil-works/pi-ai";
     const manifest = JSON.parse(readFileSync(join(root, piAi, "package.json"), "utf8")) as Entry;
     const published = shrinkwrap.packages["node_modules/@earendil-works/pi-ai"];
     assert.ok(published);
@@ -114,10 +111,9 @@ describe("Pi package dependency contracts", () => {
     );
   });
 
-  it("rejects a stale nested Pi AI proxy pin even when the top-level Pi AI remains valid", () => {
+  it("rejects a stale installed Pi AI proxy pin even when the top-level Pi AI remains valid", () => {
     const lock = structuredClone(json("package-lock.json"));
-    const location =
-      "node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai";
+    const location = "node_modules/@earendil-works/pi-ai";
     const pin = `${location}/node_modules/http-proxy-agent`;
     lock.packages[pin] = { version: "7.0.2" };
     expect(checkGraph(lock)).toContain(`${location}: http-proxy-agent@9.1.0 resolves to 7.0.2`);

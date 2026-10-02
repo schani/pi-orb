@@ -8,8 +8,8 @@
     "dev": "node src/main.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.99.1",
-    "@earendil-works/pi-coding-agent": "file:../../vendor/pi-coding-agent-0.99.1-brace-5.0.12.tgz",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
     "@electric-sql/pglite": "^0.5.4",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.0.0",

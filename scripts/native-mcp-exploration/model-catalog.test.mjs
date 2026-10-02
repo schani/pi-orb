@@ -10,8 +10,8 @@ const packagePath = join(
   "package.json",
 );
 
-test("Pi AI 0.99.1 bundles OpenAI GPT-6.1 Sol", () => {
-  assert.equal(JSON.parse(readFileSync(packagePath, "utf8")).version, "0.99.1");
+test("Pi AI 1.0.0 bundles OpenAI GPT-6.1 Sol", () => {
+  assert.equal(JSON.parse(readFileSync(packagePath, "utf8")).version, "1.0.0");
   const model = getBuiltinModel("openai", "gpt-6.1-sol");
   assert.equal(model.id, "gpt-6.1-sol");
   assert.equal(model.provider, "openai");

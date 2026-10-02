@@ -92,7 +92,7 @@ test("snapshot projection retains only referenced bindings", () => {
   assert.deepEqual(missing.error, { phase: "binding", code: "secret_unavailable" });
 });
 
-test("actual Pi 0.99.1 session binds production native adapter, discovers, calls and shuts down", {
+test("actual Pi 1.0.0 session binds production native adapter, discovers, calls and shuts down", {
   timeout: 15000,
 }, async () => {
   const methods = [];

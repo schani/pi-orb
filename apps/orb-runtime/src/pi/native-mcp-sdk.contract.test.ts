@@ -22,10 +22,7 @@ afterEach(() => {
 it("exports the same MCP transport constructor used by native connection recovery", async () => {
   const ownMcp = await import(
     pathToFileURL(
-      join(
-        import.meta.dirname,
-        "../../../../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-mcp/dist/index.js",
-      ),
+      join(import.meta.dirname, "../../../../node_modules/@earendil-works/pi-mcp/dist/index.js"),
     ).href
   );
   expect(StreamableHttpTransport).toBe(ownMcp.StreamableHttpTransport);
