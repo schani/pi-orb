@@ -57,6 +57,16 @@ function checkGraph(lock: Lock): string[] {
 }
 
 describe("Pi package dependency contracts", () => {
+  it("leaves MCP tool-schema validation dependencies to the SDK", () => {
+    const manifest = JSON.parse(
+      readFileSync(join(root, "apps/orb-runtime/package.json"), "utf8"),
+    ) as Entry;
+    expect(manifest.dependencies).not.toHaveProperty("ajv");
+    expect(json("package-lock.json").packages["apps/orb-runtime"]?.dependencies).not.toHaveProperty(
+      "ajv",
+    );
+  });
+
   it("resolves every declared SDK shrinkwrap dependency", () => {
     expect(checkGraph(shrinkwrap)).toEqual([]);
   });
