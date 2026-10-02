@@ -22,7 +22,7 @@ export function ProjectNewOrbLink({
   ) : (
     <a
       className={className}
-      href={`#/projects/${projectId}/orbs/new`}
+      href={`/projects/${encodeURIComponent(projectId)}/orbs/new`}
       aria-label={iconLabel}
       title={iconLabel}
       onClick={onClick}

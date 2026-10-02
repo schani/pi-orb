@@ -61,7 +61,7 @@ it.each(["chromium", "webkit"] as const)(
           });
 
           const sleepingImage = 'img[src="/favicons/sleeping.svg"]';
-          await gotoFrontendFixture(page, `http://127.0.0.1:${address.port}/#/`);
+          await gotoFrontendFixture(page, `http://127.0.0.1:${address.port}/`);
           const dashboardEntry = page.locator(".orb-entry", { hasText: "Frontend Playground" });
           await expect(dashboardEntry.locator(sleepingImage)).toHaveAttribute(
             "title",
@@ -71,7 +71,7 @@ it.each(["chromium", "webkit"] as const)(
           await dashboardEntry
             .getByRole("link", { name: "Frontend Playground", exact: true })
             .click();
-          const currentRow = page.locator(`.ix-row[href="#/orbs/${id}"]`);
+          const currentRow = page.locator(`.ix-row[href="/orbs/${id}"]`);
           await expect(currentRow).toHaveClass(/ix-row-sleep/);
           await expect(currentRow.locator(sleepingImage)).toHaveAttribute("title", "Orb sleeping");
           await expect(currentRow).toHaveCSS("background-color", "rgb(0, 0, 0)");

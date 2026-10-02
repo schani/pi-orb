@@ -109,7 +109,7 @@ it("binds consent to the browser and completes after process-local state is repl
     headers: { cookie: cookie.split(";")[0] ?? "" },
   });
   expect(finished.statusCode).toBe(303);
-  expect(finished.headers.location).toBe(`https://app.example/#/projects/${projectId}/mcp`);
+  expect(finished.headers.location).toBe(`https://app.example/projects/${projectId}/mcp`);
   expect(finished.headers["cache-control"]).toBe("no-store");
   expect(finished.headers["referrer-policy"]).toBe("no-referrer");
   expect((await restarted.inject(path)).json()).toEqual({ status: "connected" });
@@ -156,6 +156,9 @@ it("rejects cross-origin mutations, missing resources and malformed callback sta
   expect(denied.headers.location).toBe(
     `https://app.example/mcp/oauth/failed?projectId=${projectId}`,
   );
+  const failure = await app.inject(`/mcp/oauth/failed?projectId=${projectId}`);
+  expect(failure.statusCode).toBe(400);
+  expect(failure.body).toContain(`href='/projects/${projectId}/mcp'`);
   expect((await app.inject(path)).json()).toEqual({ status: "auth_required" });
   expect(exchanges).toBe(0);
 });

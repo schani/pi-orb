@@ -8,7 +8,7 @@ export function NotFoundPage({ resourceName }: NotFoundPageProps) {
   return (
     <main className="page simple-page">
       <h1>{subject} doesn't exist</h1>
-      <a href="#/">Back to dashboard</a>
+      <a href="/">Back to dashboard</a>
     </main>
   );
 }

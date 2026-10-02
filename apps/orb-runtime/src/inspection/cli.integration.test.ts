@@ -95,7 +95,7 @@ describe("pi-orb inspection CLI entry point", () => {
             orb: {
               id: "orb-current",
               name: "Current",
-              url: "https://browser.test/#/orbs/orb-current",
+              url: "https://browser.test/orbs/orb-current",
               createdAt: "2026-10-01T00:00:00.000Z",
             },
             project: orb.project,
@@ -150,7 +150,7 @@ describe("pi-orb inspection CLI entry point", () => {
   it("prints self as a summary or structured JSON", async () => {
     const summary = await runCli(baseUrl, ["self"]);
     expect(summary).toMatchObject({ code: 0, stderr: "" });
-    expect(summary.stdout).toContain("Dashboard: https://browser.test/#/orbs/orb-current");
+    expect(summary.stdout).toContain("Dashboard: https://browser.test/orbs/orb-current");
     const json = await runCli(baseUrl, ["self", "--json"]);
     expect(json).toMatchObject({ code: 0, stderr: "" });
     expect(JSON.parse(json.stdout)).toMatchObject({

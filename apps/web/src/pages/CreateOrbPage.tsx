@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { type ApiError, createOrb, describeApiError } from "../lib/api.ts";
 import { createOrbRequest } from "../lib/create-orb-request.ts";
+import { navigate } from "../lib/navigation.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -26,7 +27,7 @@ export function CreateOrbPage({ projectId }: CreateOrbPageProps) {
         setState({ type: "failed", attempt: state.attempt, error: result.error });
         return;
       }
-      window.location.replace(`#/orbs/${result.value.id}`);
+      navigate(`/orbs/${result.value.id}`, true);
     });
 
     return () => {
@@ -52,7 +53,7 @@ export function CreateOrbPage({ projectId }: CreateOrbPageProps) {
             >
               retry
             </button>
-            <a href="#/">Back to dashboard</a>
+            <a href="/">Back to dashboard</a>
           </div>
         </>
       )}

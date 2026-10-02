@@ -20,7 +20,7 @@ it.each(["chromium", "webkit"] as const)(
     if (!address || typeof address === "string") throw new Error("No owned fixture port");
     const browser = await (engine === "chromium" ? chromium : webkit).launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    const url = `http://127.0.0.1:${address.port}/#/orbs/frontend-fixture-orb`;
+    const url = `http://127.0.0.1:${address.port}/orbs/frontend-fixture-orb`;
     try {
       await gotoFrontendFixture(page, url);
       const thinking = page.getByRole("button", { name: "Change thinking", exact: true });

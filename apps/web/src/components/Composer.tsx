@@ -183,7 +183,7 @@ export function Composer({
     if (mentionOffset === null) return;
     let caret = mentionOffset + 1;
     if (href !== undefined && mode === "message" && text[mentionOffset] === "@") {
-      const url = `${window.location.href.split("#")[0]}${href}`;
+      const url = `${window.location.origin}${href}`;
       onValueChange(text.slice(0, mentionOffset) + url + text.slice(mentionOffset + 1), mode);
       caret = mentionOffset + url.length;
     }

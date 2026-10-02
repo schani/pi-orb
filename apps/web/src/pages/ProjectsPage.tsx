@@ -32,6 +32,7 @@ import {
   listProjects,
 } from "../lib/api.ts";
 import { buildDashboardSearchSource } from "../lib/dashboard-search-source.ts";
+import { navigate } from "../lib/navigation.ts";
 import { projectDeletionProgressText } from "../lib/project-deletion.ts";
 import {
   dashboardTotals,
@@ -76,7 +77,7 @@ function OrbEntry({ orb, now, archivingOrb, deletingOrb, onArchive, onDelete }: 
     <div className={`orb-entry orb-entry-${glyph.state}`}>
       <div className="orb-entry-title">
         <StateTile glyph={glyph} />
-        <a className="orb-entry-link" href={`#/orbs/${orb.id}`}>
+        <a className="orb-entry-link" href={`/orbs/${encodeURIComponent(orb.id)}`}>
           {name}
         </a>
       </div>
@@ -528,7 +529,7 @@ export function ProjectsPage({
             replaceAddressedProject(changed);
           }}
           onClose={() => {
-            window.location.hash = `/projects/${configProject.id}`;
+            navigate(`/projects/${encodeURIComponent(configProject.id)}`);
           }}
         />
       )}

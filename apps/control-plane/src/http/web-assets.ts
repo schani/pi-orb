@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import type { FastifyInstance } from "fastify";
 
@@ -6,10 +8,19 @@ const PAGE_NOT_FOUND =
 
 export async function registerWebAssets(app: FastifyInstance, root: string): Promise<void> {
   await app.register(fastifyStatic, { root, wildcard: false });
+  const shellExists = existsSync(join(root, "index.html"));
   app.setNotFoundHandler((request, reply) => {
     const path = request.url.split("?", 1)[0] ?? request.url;
     if (path === "/api" || path.startsWith("/api/")) {
       return reply.status(404).send({ error: { code: "not_found" } });
+    }
+    if (
+      shellExists &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      !/^\/(?:api|assets|favicons|s|mcp|oauth|runtime|\.well-known)(?:\/|$)/.test(path) &&
+      !/\.[^/]+$/.test(path)
+    ) {
+      return reply.sendFile("index.html");
     }
     if (request.method === "HEAD") {
       return reply.status(404).type("text/html; charset=utf-8").send();

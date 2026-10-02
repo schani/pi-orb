@@ -278,7 +278,7 @@ describe("runtime broker routes", () => {
         orbId: id,
         projectId: PROJECT,
         messageId: id,
-        url: `https://browser.test/#/orbs/${id}`,
+        url: `https://browser.test/orbs/${id}`,
       });
       expect(response.headers["cache-control"]).toBe("no-store");
       expect((await spawn()).statusCode).toBe(202);
@@ -291,7 +291,7 @@ describe("runtime broker routes", () => {
         url: ORB_SELF_PATH,
         headers: { authorization: "Bearer child-token", host: "untrusted.test" },
       });
-      expect(self.json().spawnedBy).toEqual({ id: ORB, url: `https://browser.test/#/orbs/${ORB}` });
+      expect(self.json().spawnedBy).toEqual({ id: ORB, url: `https://browser.test/orbs/${ORB}` });
       expect(self.json().orb.id).toBe(id);
       expect((await spawn({ prompt: "Different" })).statusCode).toBe(409);
     });
@@ -319,7 +319,7 @@ describe("runtime broker routes", () => {
       expect(child.statusCode).toBe(200);
       expect(child.json().spawnedBy).toEqual({
         id: ORB,
-        url: `https://browser.test/#/orbs/${ORB}`,
+        url: `https://browser.test/orbs/${ORB}`,
       });
       const retired = await app.inject({
         method: "GET",
@@ -1136,7 +1136,7 @@ describe("runtime broker routes", () => {
         orb: {
           id: ORB,
           name: null,
-          url: `https://browser.test/#/orbs/${ORB}`,
+          url: `https://browser.test/orbs/${ORB}`,
           createdAt: new Date(0).toISOString(),
         },
         project: {

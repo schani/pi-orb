@@ -137,6 +137,7 @@ Tracking:
 
 - [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set
 - [docs/postmortems/2026-10-02-webkit-lazy-return-gate.md](docs/postmortems/2026-10-02-webkit-lazy-return-gate.md) — captured split-target sidebar click, fixed rail/scroll ownership and diagnostic callback race
+- [docs/postmortems/2026-10-02-expired-metadata-route.md](docs/postmortems/2026-10-02-expired-metadata-route.md) — frontend metadata interception parsed expired-session HTML 401 as JSON; response preservation and owned route drain
 - [docs/postmortems/2026-10-02-nested-mcp-live-rows.md](docs/postmortems/2026-10-02-nested-mcp-live-rows.md) — nested SDK events created phantom live MCP rows; parent codemode disclosure retains bounded child details
 - [docs/postmortems/2026-10-01-mcp-measurement-fixtures.md](docs/postmortems/2026-10-01-mcp-measurement-fixtures.md) — scope bounds, discarded diagnostics and child-profile measurement assumptions
 - [docs/postmortems/2026-10-01-native-ssh-startup-dependency.md](docs/postmortems/2026-10-01-native-ssh-startup-dependency.md) — first Google manager exit canceled the host-key gate and latched SSH off; corrected dependency and accepted fresh validator

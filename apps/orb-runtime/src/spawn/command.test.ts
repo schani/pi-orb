@@ -35,7 +35,7 @@ describe("spawn command", () => {
       orbId: id,
       messageId: id,
       projectId: "project",
-      url: `https://browser.test/#/orbs/${id}`,
+      url: `https://browser.test/orbs/${id}`,
     };
     const fetcher = vi
       .fn()

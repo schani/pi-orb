@@ -238,7 +238,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       ).status,
     ).toBe(200);
     const page = await browser.newPage();
-    await page.goto(`${cp.baseUrl}/#/orbs/${orb}`);
+    await page.goto(`${cp.baseUrl}/orbs/${orb}`);
     const workspace = join(root, "hosts", orb, "workspace");
     const rootEntries = (): {
       type: string;

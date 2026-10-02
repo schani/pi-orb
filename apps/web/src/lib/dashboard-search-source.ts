@@ -36,7 +36,7 @@ function projectItem(project: ProjectView): AppSearchItem {
       alias === null
         ? [project.name, project.repositoryUrl]
         : [project.name, project.repositoryUrl, alias],
-    href: `#/projects/${encodeURIComponent(project.id)}`,
+    href: `/projects/${encodeURIComponent(project.id)}`,
   };
 }
 
@@ -60,7 +60,7 @@ function orbItem(
     chip: project.name,
     ...(age === null ? {} : { age }),
     keywords: [name],
-    href: `#/orbs/${encodeURIComponent(orb.id)}`,
+    href: `/orbs/${encodeURIComponent(orb.id)}`,
   };
 }
 

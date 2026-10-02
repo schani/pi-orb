@@ -47,7 +47,7 @@ it.each(["chromium", "webkit"] as const)(
         }
         return route.fulfill({ response, json: view });
       });
-      await page.goto(`http://127.0.0.1:${address.port}/#/orbs/${a}`);
+      await page.goto(`http://127.0.0.1:${address.port}/orbs/${a}`);
       await check(page.getByRole("button", { name: "Change thinking", exact: true })).toBeEnabled();
       const intermediate = page.waitForResponse(`**/orbs/${a}/history`);
       lifecycle = "stopping";

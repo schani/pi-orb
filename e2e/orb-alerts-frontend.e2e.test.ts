@@ -65,7 +65,7 @@ it("overrides every state surface; explicit selection acknowledges the observed 
   const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
   try {
     const a = await alert(page, "First alert");
-    await gotoFrontendFixture(page, `${origin}/#/`);
+    await gotoFrontendFixture(page, `${origin}/`);
     const dashboard = page.locator(".orb-entry", { hasText: "Frontend Playground" });
     await expect(dashboard.locator(flag)).toHaveCount(1);
     await page.keyboard.press("Meta+k");
@@ -76,7 +76,7 @@ it("overrides every state surface; explicit selection acknowledges the observed 
     await dashboard.getByRole("link", { name: "Frontend Playground", exact: true }).click();
     await expect.poll(() => unread(page)).toBeNull();
     await expect(page.locator(".rec-alert")).toContainText("First alert");
-    await expect(page.locator(`.ix-row[href="#/orbs/${id}"]`).locator(flag)).toHaveCount(0);
+    await expect(page.locator(`.ix-row[href="/orbs/${id}"]`).locator(flag)).toHaveCount(0);
     await expect(page.locator(".orb-life").locator(flag)).toHaveCount(0);
     await expect(page.locator("#pi-orb-favicon")).not.toHaveAttribute(
       "href",
@@ -87,7 +87,7 @@ it("overrides every state surface; explicit selection acknowledges the observed 
     await expect(page.locator(".rec-alert")).toHaveCount(2);
     await expect.poll(() => unread(page)).toBe(b);
     await expect(page.locator(".orb-life").locator(flag)).toHaveCount(1);
-    await expect(page.locator(`.ix-row[href="#/orbs/${id}"]`).locator(flag)).toHaveCount(1);
+    await expect(page.locator(`.ix-row[href="/orbs/${id}"]`).locator(flag)).toHaveCount(1);
     await expect(page.locator("#pi-orb-favicon")).toHaveAttribute("href", "/favicons/alert.svg");
     mkdirSync(screenshots, { recursive: true });
     await page
@@ -100,7 +100,7 @@ it("overrides every state surface; explicit selection acknowledges the observed 
     });
     expect(stale.ok()).toBe(true);
     expect(((await stale.json()) as { unreadAlertId: string | null }).unreadAlertId).toBe(b);
-    await page.locator(`.ix-row[href="#/orbs/${id}"]`).click();
+    await page.locator(`.ix-row[href="/orbs/${id}"]`).click();
     await expect.poll(() => unread(page)).toBeNull();
     await expect(page.locator(".rec-alert")).toHaveCount(2);
     await expect(page.locator(".orb-life").locator(flag)).toHaveCount(0);
@@ -114,7 +114,7 @@ it("retains stopped historical alerts after reload and renders hostile multiline
   try {
     const message = `<img src=x onerror=alert(1)>\n${"unbroken".repeat(35)}`;
     const recordId = await alert(page, message);
-    await gotoFrontendHistory(page, `${origin}/#/orbs/${id}`, id);
+    await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
     await expect.poll(() => unread(page)).toBeNull();
     const band = page.locator(".rec-alert", { hasText: "<img src=x onerror=alert(1)>" });
     await expect(band).toBeVisible();
@@ -154,7 +154,7 @@ for (const engine of ["chromium", "webkit"] as const) {
     const ownedBrowser = engine === "webkit" ? await webkit.launch() : browser;
     const page = await ownedBrowser.newPage();
     try {
-      await gotoFrontendHistory(page, `${origin}/#/orbs/${id}`, id);
+      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
       const recordId = await alert(page, `${engine} Find selection`);
       await expect(page.locator(".rec-alert", { hasText: `${engine} Find selection` })).toHaveCount(
         1,
@@ -167,7 +167,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       await query.fill("Frontend Playground");
       await expect(find.getByRole("link", { name: /^orb:/ })).toHaveAttribute(
         "href",
-        `#/orbs/${id}`,
+        `/orbs/${id}`,
       );
       const selected = find.getByRole("link", { name: /^orb:/ });
       await selected.focus();
@@ -197,7 +197,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       announceFetched = resolve;
     });
     try {
-      await gotoFrontendHistory(page, `${origin}/#/orbs/${id}`, id);
+      await gotoFrontendHistory(page, `${origin}/orbs/${id}`, id);
       const a = await alert(page, `${engine} delayed A`);
       await expect(page.locator(".orb-life").locator(flag)).toHaveCount(1);
       await page.route(
@@ -217,7 +217,7 @@ for (const engine of ["chromium", "webkit"] as const) {
           reply.url().endsWith(`/api/v1/orbs/${id}/alerts/ack`) &&
           reply.request().method() === "POST",
       );
-      await page.locator(`.ix-row[href="#/orbs/${id}"]`).click();
+      await page.locator(`.ix-row[href="/orbs/${id}"]`).click();
       await ackFetched;
       const b = await alert(page, `${engine} newer B`);
       const observedName = `${engine} observed ${b}`;
@@ -240,7 +240,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       await response;
       expect(await unread(page)).toBe(b);
       await expect(page.locator(".orb-life").locator(flag)).toHaveCount(1);
-      await page.locator(`.ix-row[href="#/orbs/${id}"]`).click();
+      await page.locator(`.ix-row[href="/orbs/${id}"]`).click();
       await expect.poll(() => unread(page)).toBeNull();
       await expect(page.locator(".rec-alert", { hasText: `${engine} newer B` })).toHaveCount(1);
     } finally {
@@ -287,9 +287,9 @@ it("red flag overrides running, busy, failed, sleeping, stopped, and archived gl
       { state: "archived", activity: undefined, sleepUntil: undefined },
     ]) {
       ({ state, activity, sleepUntil } = variant);
-      await gotoFrontendFixture(page, `${origin}/#/`);
+      await gotoFrontendFixture(page, `${origin}/`);
       const entry = page.locator(".orb-entry", {
-        has: page.locator(`a[href="#/orbs/${id}"]`),
+        has: page.locator(`a[href="/orbs/${id}"]`),
       });
       await expect(entry.locator(flag)).toHaveCount(1);
       await page.keyboard.press("Meta+k");

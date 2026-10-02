@@ -444,7 +444,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     );
     expect(calls.some((call) => call.method === "tools/call")).toBe(false);
     const page = await browser.newPage();
-    await page.goto(`${cp.baseUrl}/#/orbs/${first}`);
+    await page.goto(`${cp.baseUrl}/orbs/${first}`);
     // Pin inbox delivery rather than racing the browser's websocket attach.
     expect(
       (
@@ -614,9 +614,9 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       ).status,
     ).toBe(202);
     await waitRunning(second);
-    await page.goto(`${cp.baseUrl}/#/orbs/${second}`);
+    await page.goto(`${cp.baseUrl}/orbs/${second}`);
     const index = page.getByRole("navigation", { name: "Project orbs" });
-    await expectPage(index.locator(`a[href="#/orbs/${second}"]`)).toHaveAttribute(
+    await expectPage(index.locator(`a[href="/orbs/${second}"]`)).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -726,8 +726,8 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       ).status,
     ).toBe(202);
     await waitRunning(isolated);
-    await page.goto(`${cp.baseUrl}/#/orbs/${isolated}`);
-    await expectPage(index.locator(`a[href="#/orbs/${isolated}"]`)).toHaveAttribute(
+    await page.goto(`${cp.baseUrl}/orbs/${isolated}`);
+    await expectPage(index.locator(`a[href="/orbs/${isolated}"]`)).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -815,7 +815,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       (await api(cp.baseUrl, "POST", `/api/v1/projects/${other}/orbs`, { id: unavailable })).status,
     ).toBe(202);
     await waitRunning(unavailable);
-    await page.goto(`${cp.baseUrl}/#/orbs/${unavailable}`);
+    await page.goto(`${cp.baseUrl}/orbs/${unavailable}`);
     await expectPage(
       page.getByText("MCP unavailable: failed. Check project MCP settings."),
     ).toBeVisible({ timeout: 60_000 });

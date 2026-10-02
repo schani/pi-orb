@@ -15,7 +15,7 @@ const source: AppSearchSource = {
       title: "Compiler",
       context: "https://github.com/acme/compiler",
       keywords: ["Compiler"],
-      href: "#/projects/project-1",
+      href: "/projects/project-1",
     },
     {
       key: "fixture:orb",
@@ -27,7 +27,7 @@ const source: AppSearchSource = {
       chip: "Atlas",
       age: "2m",
       keywords: ["Compiler repair"],
-      href: "#/orbs/orb-1",
+      href: "/orbs/orb-1",
     },
     {
       key: "fixture:orb-2",
@@ -39,7 +39,7 @@ const source: AppSearchSource = {
       chip: "Atlas",
       age: "3d",
       keywords: ["Compiler redesign"],
-      href: "#/orbs/orb-2",
+      href: "/orbs/orb-2",
     },
   ],
 };
@@ -62,9 +62,9 @@ function render(query: string, activeKey = "fixture:orb"): string {
 describe("AppSearchDialog", () => {
   it("renders every matching result as a native link with exactly one selection", () => {
     const html = render("compiler", "no-longer-present");
-    expect(html).toContain('href="#/orbs/orb-1"');
-    expect(html).toContain('href="#/orbs/orb-2"');
-    expect(html).toContain('href="#/projects/project-1"');
+    expect(html).toContain('href="/orbs/orb-1"');
+    expect(html).toContain('href="/orbs/orb-2"');
+    expect(html).toContain('href="/projects/project-1"');
     expect(html.match(/app-search-result active/g)).toHaveLength(1);
     expect(html).not.toContain('role="link"');
   });
@@ -75,8 +75,8 @@ describe("AppSearchDialog", () => {
     expect(html.indexOf('class="app-search-group">projects')).toBeLessThan(
       html.indexOf('class="app-search-group">orbs'),
     );
-    expect(html.indexOf('href="#/projects/project-1"')).toBeLessThan(
-      html.indexOf('href="#/orbs/orb-1"'),
+    expect(html.indexOf('href="/projects/project-1"')).toBeLessThan(
+      html.indexOf('href="/orbs/orb-1"'),
     );
     // Keyboard order follows the display order: the first row is the default selection.
     expect(html).toContain('id="app-search-result-0" class="app-search-result active"');

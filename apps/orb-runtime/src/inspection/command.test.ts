@@ -81,7 +81,7 @@ describe("orb inspection presentation", () => {
       orb: {
         id: "orb-a",
         name: null,
-        url: "https://browser.test/#/orbs/orb-a",
+        url: "https://browser.test/orbs/orb-a",
         createdAt: "2026-10-01T00:00:00.000Z",
       },
       project: { id: "project-a", name: "App", repositoryUrl: "https://github.com/o/r" },
@@ -89,14 +89,14 @@ describe("orb inspection presentation", () => {
       previewHost: null,
     };
     const output = formatSelf(self);
-    expect(output).toContain("https://browser.test/#/orbs/orb-a");
+    expect(output).toContain("https://browser.test/orbs/orb-a");
     expect(output).toContain("2026-10-01T00:00:00.000Z");
     expect(output).not.toContain("Preview:");
     expect(output).not.toContain("Spawned by:");
     expect(
       formatSelf({
         ...self,
-        spawnedBy: { id: "parent", url: "https://browser.test/#/orbs/parent" },
+        spawnedBy: { id: "parent", url: "https://browser.test/orbs/parent" },
         previewHost: "orb.tail.ts.net",
       }),
     ).toContain("orb.tail.ts.net");

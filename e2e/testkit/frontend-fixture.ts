@@ -11,9 +11,7 @@ function sanitizeUrl(value: string): string {
     url.username = "";
     url.password = "";
     url.search = "";
-    const hash = url.hash;
-    const hashQuery = hash.indexOf("?");
-    url.hash = hash.startsWith("#/") ? hash.slice(0, hashQuery < 0 ? undefined : hashQuery) : "";
+    url.hash = "";
     return url.toString();
   } catch {
     return "<invalid-url>";

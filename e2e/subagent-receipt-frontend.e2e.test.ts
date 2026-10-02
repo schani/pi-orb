@@ -36,7 +36,7 @@ for (const width of [1280, 390, 320]) {
     try {
       await gotoFrontendHistory(
         page,
-        `${origin}/#/orbs/frontend-fixture-orb`,
+        `${origin}/orbs/frontend-fixture-orb`,
         "frontend-fixture-orb",
       );
       const rows = page.locator(".subagent-notice");

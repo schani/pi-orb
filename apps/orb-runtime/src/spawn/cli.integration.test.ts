@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const root = join(import.meta.dirname, "../../../..");
 const id = "00000000-0000-4000-8000-000000000003";
-const url = `https://browser.test/#/orbs/${id}`;
+const url = `https://browser.test/orbs/${id}`;
 function run(base: string, args: string[], input = "") {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(join(root, "apps/orb-runtime/docker/pi-orb"), ["spawn", ...args], {

@@ -259,7 +259,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       body: JSON.stringify({ url: `${origin}/mcp`, projectId: project }),
     });
   };
-  const configUrl = `${cp.baseUrl}/#/projects/${project}/mcp`;
+  const configUrl = `${cp.baseUrl}/projects/${project}/mcp`;
   const consent = async () => {
     await page.goto(configUrl);
     await page.locator(".project-mcp-connection > summary").click();

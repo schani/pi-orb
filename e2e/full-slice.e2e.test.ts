@@ -1457,9 +1457,9 @@ describe("full slice E2E", () => {
         }
         await route.continue();
       });
-      await page.goto(`${base}/#/projects/${projectId}/orbs/new`);
-      await expectPage(page).toHaveURL(/#\/orbs\/[0-9a-f-]+$/);
-      expect(page.url()).toBe(`${base}/#/orbs/${orbId}`);
+      await page.goto(`${base}/projects/${projectId}/orbs/new`);
+      await expectPage(page).toHaveURL(/\/orbs\/[0-9a-f-]+$/);
+      expect(page.url()).toBe(`${base}/orbs/${orbId}`);
       expect(postedTimeZone).toBe("Pacific/Auckland");
     } finally {
       await creationBrowser.close();
@@ -2110,7 +2110,7 @@ describe("full slice E2E", () => {
       orb: {
         id: secondOrbId,
         name: secondView.body["name"],
-        url: `${base}/#/orbs/${secondOrbId}`,
+        url: `${base}/orbs/${secondOrbId}`,
         createdAt: secondView.body["createdAt"],
       },
       project: {
@@ -2126,7 +2126,7 @@ describe("full slice E2E", () => {
       String.raw`pi-orb self; printf '\123\105\114\106\137\111\116\123\120\105\103\124\137\124\105\130\124\137\104\117\116\105\012'`,
       "SELF_INSPECT_TEXT_DONE",
     );
-    expect(selfText).toContain(`Dashboard: ${base}/#/orbs/${secondOrbId}`);
+    expect(selfText).toContain(`Dashboard: ${base}/orbs/${secondOrbId}`);
     expect(selfText).toContain(`Project: ${project.body["name"]} (${projectId})`);
     expect(selfText).toContain(`Repository: ${REPOSITORY_URL}`);
 
@@ -2174,7 +2174,7 @@ describe("full slice E2E", () => {
       },
       { timeoutMs: 60_000, intervalMs: 200 },
     );
-    expect(spawned).toContain(`"url":"${base}/#/orbs/${spawnedOrbId}"`);
+    expect(spawned).toContain(`"url":"${base}/orbs/${spawnedOrbId}"`);
     // No browser/live socket is opened for the child: inbox delivery must start it.
     await waitFor(
       "spawned orb completes unattended",
@@ -2215,7 +2215,7 @@ describe("full slice E2E", () => {
       orb: {
         id: spawnedOrbId,
         name: spawnedView.body["name"],
-        url: `${base}/#/orbs/${spawnedOrbId}`,
+        url: `${base}/orbs/${spawnedOrbId}`,
         createdAt: spawnedView.body["createdAt"],
       },
       project: {
@@ -2223,7 +2223,7 @@ describe("full slice E2E", () => {
         name: project.body["name"],
         repositoryUrl: REPOSITORY_URL,
       },
-      spawnedBy: { id: secondOrbId, url: `${base}/#/orbs/${secondOrbId}` },
+      spawnedBy: { id: secondOrbId, url: `${base}/orbs/${secondOrbId}` },
       previewHost: null,
     });
     const retriedSpawn = await terminalRun(
@@ -2287,18 +2287,18 @@ describe("full slice E2E", () => {
             cachedHellos.push(frame.afterRecordId);
         });
       });
-      await page.goto(`${base}/#/orbs/${spawnedOrbId}`);
+      await page.goto(`${base}/orbs/${spawnedOrbId}`);
       await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
       await expectPage(
         page.getByRole("button", { name: "Change thinking", exact: true }),
       ).toBeEnabled();
-      await page.locator(`.orb-index a[href="#/orbs/${orbId}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${orbId}"]`).click();
       await expectPage(
         page.getByText("The check succeeded: E2E_TOOL_OK.", { exact: true }),
       ).toBeVisible();
       const resumeCursor = appliedCursor;
       blockCachedHistory = true;
-      await page.locator(`.orb-index a[href="#/orbs/${spawnedOrbId}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${spawnedOrbId}"]`).click();
       await expectPage(page.getByText("SPAWNED_TASK_COMPLETE", { exact: true })).toBeVisible();
       await expectPage(
         page.getByRole("button", { name: "Change thinking", exact: true }),

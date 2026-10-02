@@ -10,7 +10,7 @@ import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fix
 import { waitForFixtureMedia } from "./testkit/media-ready.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
-const ORB_HASH = "#/orbs/frontend-fixture-orb";
+const ORB_PATH = "/orbs/frontend-fixture-orb";
 const DEJAVU_MONO = readFileSync(
   join(import.meta.dirname, "fixtures/fonts/DejaVuSansMono.ttf"),
 ).toString("base64");
@@ -93,7 +93,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       try {
         await gotoFrontendHistory(
           page,
-          `${origin}/#/orbs/frontend-long-history`,
+          `${origin}/orbs/frontend-long-history`,
           "frontend-long-history",
           page.locator(".history"),
         );
@@ -129,7 +129,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     });
     try {
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
-      await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb", composer);
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
       await expectPage(composer).not.toBeFocused();
       await expectPage(composer).toHaveCSS("font-size", "16px");
       const rename = page.getByRole("button", { name: "Rename orb", exact: true });
@@ -197,7 +197,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         const renameButton = page.getByRole("button", { name: "Rename orb" });
         await gotoFrontendHistory(
           page,
-          `${origin}/${ORB_HASH}`,
+          `${origin}${ORB_PATH}`,
           "frontend-fixture-orb",
           renameButton,
         );
@@ -497,7 +497,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         await page.keyboard.press("Escape");
 
         const composer = page.locator(".composer");
-        await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb", composer);
+        await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
         await page.addStyleTag({
           content: `@font-face { font-family: "Composer test DejaVu"; src: url(data:font/ttf;base64,${DEJAVU_MONO}); }
             .composer { font-family: "Composer test DejaVu" !important; }`,
@@ -733,7 +733,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     });
     try {
       const write = page.getByRole("button", { name: "Write message" });
-      await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb", write);
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", write);
       await expectPage(write).toBeVisible();
       await waitForFixtureMedia(page);
       await page.clock.runFor(100);
@@ -791,7 +791,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const write = page.getByRole("button", { name: "Write message" });
       await gotoFrontendHistory(
         page,
-        `${origin}/#/orbs/frontend-long-history`,
+        `${origin}/orbs/frontend-long-history`,
         "frontend-long-history",
         write,
       );
@@ -837,7 +837,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const composer = page.locator(".composer");
       await gotoFrontendHistory(
         page,
-        `${origin}/#/orbs/frontend-long-history`,
+        `${origin}/orbs/frontend-long-history`,
         "frontend-long-history",
         composer,
       );
@@ -985,7 +985,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     try {
       await gotoFrontendHistory(
         page,
-        `${origin}/${ORB_HASH}`,
+        `${origin}${ORB_PATH}`,
         "frontend-fixture-orb",
         page.locator(".composer"),
       );

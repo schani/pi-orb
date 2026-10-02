@@ -71,7 +71,7 @@ it.each(["chromium", "webkit"] as const)(
         });
       });
       const initialSettings = nextSettings();
-      await page.goto(`${origin}/#/orbs/${a}`);
+      await page.goto(`${origin}/orbs/${a}`);
       const ready = page.getByRole("button", { name: "Change thinking", exact: true });
       await initialSettings;
       await check(ready).toBeEnabled();
@@ -87,7 +87,7 @@ it.each(["chromium", "webkit"] as const)(
         .toBe(true);
       await check(page.locator(".history .bit-register")).toHaveCount(0);
       await composer.fill("retain cache draft");
-      await page.locator(`.orb-index a[href="#/orbs/${b}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
       await check(ready).toBeEnabled();
       const expectedCursor = lastRecord;
@@ -108,7 +108,7 @@ it.each(["chromium", "webkit"] as const)(
         return route.continue();
       });
       const cachedSettings = nextSettings();
-      await page.locator(`.orb-index a[href="#/orbs/${a}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${a}"]`).click();
       await metadataRequested;
       try {
         await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
@@ -164,7 +164,8 @@ it.each(["chromium", "webkit"] as const)(
         ["frontend-backup-check", "Backup verification"],
       ]) {
         await page.locator("body").evaluate((node, orbId) => {
-          node.ownerDocument.location.hash = `/orbs/${orbId}`;
+          node.ownerDocument.defaultView!.history.pushState(null, "", `/orbs/${orbId}`);
+          node.ownerDocument.defaultView!.dispatchEvent(new Event("pi-orb:navigate"));
         }, id);
         await check(page.locator(".orb-name")).toHaveText(name ?? "");
       }
@@ -172,7 +173,8 @@ it.each(["chromium", "webkit"] as const)(
       forbidHistory = true;
       const cachedReturnSettings = nextSettings();
       await page.locator("body").evaluate((node, orbId) => {
-        node.ownerDocument.location.hash = `/orbs/${orbId}`;
+        node.ownerDocument.defaultView!.history.pushState(null, "", `/orbs/${orbId}`);
+        node.ownerDocument.defaultView!.dispatchEvent(new Event("pi-orb:navigate"));
       }, a);
       await cachedReturnSettings;
       await check(

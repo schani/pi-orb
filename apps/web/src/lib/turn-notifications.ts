@@ -1,3 +1,5 @@
+import { navigate } from "./navigation.ts";
+
 const displayed = new Set<string>();
 let pendingPermissionRequest: Promise<BrowserNotificationPermission> | null = null;
 
@@ -76,7 +78,7 @@ export function showTurnNotification(options: {
     });
     notification.onclick = () => {
       window.focus();
-      window.location.hash = `#/orbs/${encodeURIComponent(options.orbId)}`;
+      navigate(`/orbs/${encodeURIComponent(options.orbId)}`);
       notification.close();
     };
     return { type: "shown" };

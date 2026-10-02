@@ -109,11 +109,11 @@ it.each(["chromium", "webkit"] as const)(
           json: { error: { code: "not_found", message: "Orb doesn't exist", retryable: false } },
         });
       });
-      await gotoFrontendHistory(page, `${origin}/#/orbs/${a}`, a);
+      await gotoFrontendHistory(page, `${origin}/orbs/${a}`, a);
       await check(page.locator(".history")).toContainText("Review 100");
       // A visible row does not prove retained cache state; the return cache hit does.
       await check.poll(() => lastTraceOutcome(page, "cache", a)).toBe("stored");
-      await page.locator(`.orb-index a[href="#/orbs/${b}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
       refresh = true;
       holdReturnMetadata = true;
@@ -128,7 +128,7 @@ it.each(["chromium", "webkit"] as const)(
           (response) => response.url().endsWith(`/api/v1/orbs/${a}`) && response.status() === 200,
         ),
       );
-      await page.locator(`.orb-index a[href="#/orbs/${a}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${a}"]`).click();
       await required(returnMetadataRequested);
       await returnEntry;
       // Flip the next-request gate while the return request is paused in its producer.
@@ -165,7 +165,7 @@ it.each(["chromium", "webkit"] as const)(
       await required(staleMetadataResponse);
       await check(page.getByText("Orb doesn't exist", { exact: true })).toBeVisible();
       await check.poll(() => sockets.size).toBe(0);
-      check(page.url()).toBe(`${origin}/#/orbs/${a}`);
+      check(page.url()).toBe(`${origin}/orbs/${a}`);
     } finally {
       releaseHistory();
       releaseMetadata();

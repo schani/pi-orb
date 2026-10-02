@@ -320,7 +320,7 @@ export function registerRuntimeRoutes(
         orbId,
         projectId: auth.orb.projectId,
         messageId: orbId,
-        url: `${deps.appOrigin}/#/orbs/${orbId}`,
+        url: `${deps.appOrigin}/orbs/${orbId}`,
       });
     },
   );
@@ -539,7 +539,7 @@ export function registerRuntimeRoutes(
             return sendOAuthError(
               reply,
               result.error,
-              `${deps.appOrigin}/#/projects/${binding.value.projectId}/mcp`,
+              `${deps.appOrigin}/projects/${binding.value.projectId}/mcp`,
             );
           const stillAuthorized = await authenticate(request.headers.authorization);
           if (stillAuthorized.kind === "unavailable")
@@ -656,7 +656,7 @@ export function registerRuntimeRoutes(
       return reply.status(500).send(inspectionError("internal", "orb project is missing", false));
     const caller = await deps.store.getSpawnCaller(task, auth.orb.id);
     if (caller.isErr()) return sendInspectionStoreError(reply, caller.error);
-    const url = (id: string) => `${deps.appOrigin}/#/orbs/${id}`;
+    const url = (id: string) => `${deps.appOrigin}/orbs/${id}`;
     reply.header("cache-control", "no-store");
     return reply.send({
       v: 1,

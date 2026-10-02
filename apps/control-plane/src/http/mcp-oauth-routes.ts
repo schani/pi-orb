@@ -58,7 +58,7 @@ export function registerMcpOAuthRoutes(
     const projectId = request.query.projectId;
     const setup =
       typeof projectId === "string" && uuid.test(projectId)
-        ? `<a href='/#/projects/${projectId}/mcp'>MCP settings</a> · `
+        ? `<a href='/projects/${projectId}/mcp'>MCP settings</a> · `
         : "";
     return reply
       .code(400)
@@ -163,7 +163,7 @@ export function registerMcpOAuthRoutes(
       );
       if (completed.isErr())
         return reply.code(303).redirect(`${appOrigin}/mcp/oauth/failed?projectId=${projectId}`);
-      return reply.code(303).redirect(`${appOrigin}/#/projects/${projectId}/mcp`);
+      return reply.code(303).redirect(`${appOrigin}/projects/${projectId}/mcp`);
     },
   );
 }

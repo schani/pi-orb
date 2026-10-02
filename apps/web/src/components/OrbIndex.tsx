@@ -8,6 +8,7 @@ import {
   type DashboardOrbListSnapshot,
 } from "../lib/dashboard-search-source.ts";
 import { FAVICON_HREFS } from "../lib/favicon.ts";
+import { navigate } from "../lib/navigation.ts";
 import { shouldAcknowledgeSelection } from "../lib/orb-alert.ts";
 import { projectDeletionProgressText } from "../lib/project-deletion.ts";
 import { formatProjectOrbAge, projectOrbGlyph, splitProjectOrbs } from "../lib/project-orbs.ts";
@@ -56,7 +57,7 @@ function IndexRow({
   return (
     <a
       className={`ix-row ix-row-${glyph.state}${current ? " ix-row-current" : ""}`}
-      href={`#/orbs/${orb.id}`}
+      href={`/orbs/${encodeURIComponent(orb.id)}`}
       title={name}
       onClick={(event) => {
         if (
@@ -106,17 +107,19 @@ export function IndexProject({
     const changedRoute = () => {
       navigation.current += 1;
     };
-    window.addEventListener("hashchange", changedRoute);
+    window.addEventListener("popstate", changedRoute);
+    window.addEventListener("pi-orb:navigate", changedRoute);
     return () => {
       active.current = false;
-      window.removeEventListener("hashchange", changedRoute);
+      window.removeEventListener("popstate", changedRoute);
+      window.removeEventListener("pi-orb:navigate", changedRoute);
     };
   }, [project.state]);
   const create = async (id: string) => {
     if (creating.current || !active.current) return;
     creating.current = true;
     const intent = navigation.current;
-    const sourceHash = window.location.hash;
+    const sourcePath = window.location.pathname;
     setCreation({ id, type: "pending" });
     const result = await createOrb(project.id, createOrbRequest(id));
     creating.current = false;
@@ -128,8 +131,8 @@ export function IndexProject({
     setCreation(null);
     onCreated(result.value);
     // A later navigation wins over a slow create response, but the new row still appears.
-    if (navigation.current === intent && window.location.hash === sourceHash) {
-      window.location.hash = `#/orbs/${result.value.id}`;
+    if (navigation.current === intent && window.location.pathname === sourcePath) {
+      navigate(`/orbs/${encodeURIComponent(result.value.id)}`);
     }
   };
   const shelves = splitProjectOrbs(list?.items ?? []);
@@ -295,7 +298,7 @@ export function OrbIndex({
       id: `orb-index:${orbId}`,
       onActivate: (item: AppSearchItem) => {
         if (
-          item.href === `#/orbs/${encodeURIComponent(orbId)}` &&
+          item.href === `/orbs/${encodeURIComponent(orbId)}` &&
           document.visibilityState === "visible"
         )
           onSelect();
@@ -365,7 +368,7 @@ export function OrbIndex({
   }, []);
   return (
     <nav className="orb-index" aria-label="All project orbs" aria-busy={pending}>
-      <a className="ix-brand up" href="#/">
+      <a className="ix-brand up" href="/">
         <img src={FAVICON_HREFS.neutral} width={16} height={16} alt="" />
         pi-orb
       </a>
@@ -417,8 +420,7 @@ export function OrbIndex({
                 previous?.map((entry) => (entry.id === changed.id ? changed : entry)) ?? null,
             );
             replaceAddressedProject(changed);
-            if (changed.state === "deleting" && changed.id === projectId)
-              window.location.hash = "#/";
+            if (changed.state === "deleting" && changed.id === projectId) navigate("/");
           }}
         />
       ))}

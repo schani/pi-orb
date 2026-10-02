@@ -62,14 +62,14 @@ it.each(["chromium", "webkit"] as const)(
           });
         });
       });
-      await page.goto(`${origin}/#/orbs/${a}`);
+      await page.goto(`${origin}/orbs/${a}`);
       const ready = page.getByRole("button", { name: "Change thinking", exact: true });
       await check(ready).toBeEnabled();
-      await page.locator(`.orb-index a[href="#/orbs/${b}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
       // This fixture's agent pump is socket-owned (unlike a real runtime). An
       // independent observer supplies that pump while the tested page is on B.
-      await observer.goto(`${origin}/#/orbs/${a}`);
+      await observer.goto(`${origin}/orbs/${a}`);
       await check(
         observer.getByRole("button", { name: "Change thinking", exact: true }),
       ).toBeEnabled();
@@ -105,7 +105,7 @@ it.each(["chromium", "webkit"] as const)(
         .toBe(true);
       await observer.close();
       await page.evaluate(() => Reflect.set(globalThis, "__holdCacheHello", true));
-      await page.locator(`.orb-index a[href="#/orbs/${a}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${a}"]`).click();
       // A provisional delivered turn proves the real inbox poll has applied while
       // client.hello is deliberately held. Count fetch initiation synchronously.
       await check(page.locator(".history")).toContainText("arrived while away");

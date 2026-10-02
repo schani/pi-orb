@@ -52,19 +52,19 @@ describe("dashboard search source", () => {
         kindLabel: "project",
         title: "Atlas",
         context: "https://github.com/acme/atlas.git",
-        href: "#/projects/project%2F1",
+        href: "/projects/project%2F1",
       },
       {
         kindLabel: "orb",
         title: "untitled orb",
         context: "Atlas · 14m",
-        href: "#/orbs/working%2F1",
+        href: "/orbs/working%2F1",
       },
       {
         kindLabel: "archived orb",
         title: "Old plan",
         context: "Atlas · archive · 14m",
-        href: "#/orbs/archived%2F1",
+        href: "/orbs/archived%2F1",
       },
     ]);
     expect(matchAppSearchItems(source.items, "github.com/acme/atlas")[0]?.key).toBe(

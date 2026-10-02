@@ -35,7 +35,7 @@ Authorization: Bearer <existing per-incarnation runtime bearer>
 { "prompt": "...", "name": "optional name" }
 
 202, Cache-Control: no-store
-{ "orbId": "...", "projectId": "...", "url": "https://browser.example/#/orbs/...", "messageId": "..." }
+{ "orbId": "...", "projectId": "...", "url": "https://browser.example/orbs/...", "messageId": "..." }
 ```
 
 Extra body fields are rejected. The caller and project come from the bearer, not caller-selected project/repository fields. New requests and retries require a running caller whose current token hash/incarnation still match and whose discard fence is absent. Authentication is rechecked at the transaction's mutation boundary, fencing stop/archive/deletion and compute replacement.
@@ -48,7 +48,7 @@ Identical retries by the same currently authorized caller return the original ID
 
 Acceptance rows have no caller/target foreign key: deleting either orb must not cascade to the other, erase provenance, or permit silent recreation of deleted work. They remain project-owned retry tombstones until project deletion removes them by cascade. They contain IDs/fingerprint only, not retained conversation content.
 
-The browser URL uses the existing validated `PI_ORB_APP_ORIGIN` configuration plus `/#/orbs/<id>`. It is never derived from the runtime-only service URL or request Host header. Split roles require the configured browser origin; combined local deployments default to the control-plane origin. When using a separate local frontend, configure `PI_ORB_APP_ORIGIN` to that frontend's origin. The full-slice E2E explicitly builds and serves the real frontend to validate the returned URL, rather than assuming an API-only test process serves the app.
+The browser URL uses the existing validated `PI_ORB_APP_ORIGIN` configuration plus `/orbs/<id>`. It is never derived from the runtime-only service URL or request Host header. Split roles require the configured browser origin; combined local deployments default to the control-plane origin. When using a separate local frontend, configure `PI_ORB_APP_ORIGIN` to that frontend's origin. The full-slice E2E explicitly builds and serves the real frontend to validate the returned URL, rather than assuming an API-only test process serves the app.
 
 Expected failures use Result/ResultAsync and the existing sanitized runtime command error envelope. Invalid input is 400, rejected identity 401, lifecycle/body conflict 409, unavailable storage 503/retryable, and invariant/corruption 500/non-retryable. Immediate platform boundaries contain filesystem/fetch exceptions. Prompt/bearer bodies are never diagnostic log fields.
 

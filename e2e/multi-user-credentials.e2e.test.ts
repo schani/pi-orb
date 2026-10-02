@@ -406,14 +406,14 @@ describe("authorized two-user credentials", () => {
         extraHTTPHeaders: { "x-pi-orb-e2e-principal": "alice" },
       });
       const ownerPage = await owner.newPage();
-      await ownerPage.goto(`${control.baseUrl}/#/orbs/${aliceOrb}`);
+      await ownerPage.goto(`${control.baseUrl}/orbs/${aliceOrb}`);
       await expectPage(ownerPage.getByText(codexChallenges.a, { exact: true })).toBeVisible();
       await owner.close();
       const coworker = await browser.newContext({
         extraHTTPHeaders: { "x-pi-orb-e2e-principal": "bob" },
       });
       const page = await coworker.newPage();
-      await page.goto(`${control.baseUrl}/#/orbs/${aliceOrb}`);
+      await page.goto(`${control.baseUrl}/orbs/${aliceOrb}`);
       await expectPage(
         page.getByText("Project owner login required for openai-codex."),
       ).toBeVisible();

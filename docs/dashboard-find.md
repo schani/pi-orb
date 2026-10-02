@@ -26,7 +26,7 @@ timeout or retry policy changed. Evidence:
 
 ## Composer orb-link picker (decided 2026-09-08)
 
-Typing `@` in message mode opens the same search dialog, scoped to orb names across all projects, including archived orbs. The typed character first replaces the textarea selection normally. Picking a result replaces only that `@` with the absolute application URL (`https://<app>/#/orbs/:orbId`), without navigation, then restores composer focus and the caret immediately after the URL. Escape (including from a focused result) or outside dismissal leaves the `@` and restores the caret after it. Shell and excluded-shell input, paste, and IME composition do not trigger the picker.
+Typing `@` in message mode opens the same search dialog, scoped to orb names across all projects, including archived orbs. The typed character first replaces the textarea selection normally. Picking a result replaces only that `@` with the absolute application URL (`https://<app>/orbs/:orbId`), without navigation, then restores composer focus and the caret immediately after the URL. Escape (including from a focused result) or outside dismissal leaves the `@` and restores the caret after it. Shell and excluded-shell input, paste, and IME composition do not trigger the picker.
 
 `OrbLinkPicker` owns a fresh project/orb index for each opening, using the existing typed list APIs and dashboard source adapter with project results removed. Requests are not repeated per keystroke; late responses after dismissal are ignored. The dialog displays the existing loading and partial-failure diagnostics so an incomplete index is never silently presented as complete. Reopening retries loading; no persistent cache or lifecycle events are needed. `AppSearchDialog` accepts an optional selection callback for this insertion use case; dashboard navigation retains native anchor behavior. The picker remains insertion-only; Command-K separately opens fleet navigation from the orb view.
 
@@ -73,7 +73,7 @@ Routes register at most one active source through a small `useAppSearchSource(so
 
 In navigation mode, every item has an `href`, and every result row is a real anchor—never a button with an imperative navigation callback. Ordinary click, Command/Ctrl-click, middle-click, keyboard activation, link preview, copy-link, and the browser context menu therefore behave normally. The dialog closes only for an unmodified same-tab activation; modified activation must leave the current tab untouched.
 
-Orb results use `#/orbs/:orbId`. Project results use the canonical focused-dashboard URL `#/projects/:projectId`. That route renders the ordinary dashboard, scrolls to and focuses the named project once its data loads, and otherwise leaves all dashboard behavior intact. It is a real resource URL: if the project is absent, it stays at that URL and renders “Project doesn't exist” with a link back to `#/`, following the missing-resource rule in `docs/web-ui.md`. This focused route is not a separate project-detail page and requires no new API.
+Orb results use `/orbs/:orbId`. Project results use the canonical focused-dashboard URL `/projects/:projectId`. That route renders the ordinary dashboard, scrolls to and focuses the named project once its data loads, and otherwise leaves all dashboard behavior intact. It is a real resource URL: if the project is absent, it stays at that URL and renders “Project doesn't exist” with a link back to `/`, following the missing-resource rule in `docs/web-ui.md`. This focused route is not a separate project-detail page and requires no new API.
 
 The generic layer is deliberately synchronous and transport-free. A future server-backed search surface owns its request, cancellation, typed errors, and result state in its route adapter, then supplies an ordinary source snapshot. The shell must not grow resource-specific fetching or caching policy.
 
@@ -90,7 +90,7 @@ The generic layer is deliberately synchronous and transport-free. A future serve
 
 The core never invents relevance ranking. It preserves source item order within a group and orders groups by first appearance in the source, so the dashboard adapter's emission order (projects in API order, then each project's working and archive orbs) becomes `PROJECTS` before `ORBS`, and a direct project match precedes any orb match. Display order and keyboard order are the same list. The modal renders the first 50 matches; it does not report a match count.
 
-Activating a project result follows `#/projects/:projectId`, where the dashboard scrolls its panel into view, briefly marks it, and puts focus on the project heading. Activating an orb result follows `#/orbs/:orbId`. Because both rows are anchors, Command/Ctrl-click, middle-click, copy-link, link preview, and context-menu open work without special simulation.
+Activating a project result follows `/projects/:projectId`, where the dashboard scrolls its panel into view, briefly marks it, and puts focus on the project heading. Activating an orb result follows `/orbs/:orbId`. Because both rows are anchors, Command/Ctrl-click, middle-click, copy-link, link preview, and context-menu open work without special simulation.
 
 ## Loading, failures, and mutation
 

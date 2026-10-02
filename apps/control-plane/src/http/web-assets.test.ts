@@ -23,16 +23,49 @@ describe("web assets", () => {
     return server;
   };
 
-  it.each(["/", "/index.html", "/?source=test"])(
-    "serves the hash-router shell at %s",
+  it.each(["/", "/index.html", "/?source=test"])("serves the app shell at %s", async (url) => {
+    const server = await app();
+    const response = await server.inject({ method: "GET", url });
+    await server.close();
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("app shell");
+  });
+
+  it.each(["/orbs/o", "/projects/p", "/projects/p/orbs/new", "/projects/p/mcp", "/unknown"])(
+    "serves the shell on GET and HEAD deep links at %s",
     async (url) => {
       const server = await app();
-      const response = await server.inject({ method: "GET", url });
+      const get = await server.inject({ method: "GET", url });
+      const head = await server.inject({ method: "HEAD", url });
       await server.close();
-      expect(response.statusCode).toBe(200);
-      expect(response.body).toContain("app shell");
+      expect(get.statusCode).toBe(200);
+      expect(get.body).toContain("app shell");
+      expect(head.statusCode).toBe(200);
+      expect(head.body).toBe("");
     },
   );
+
+  it.each([
+    "/assets/missing.js",
+    "/favicons",
+    "/favicons/missing",
+    "/api/v1/missing",
+    "/runtime/v1/missing",
+    "/mcp/oauth/failed",
+    "/s/missing",
+    "/oauth/callback",
+    "/.well-known/missing",
+    "/missing.css",
+  ])("never serves the shell for %s", async (url) => {
+    const server = await app();
+    const get = await server.inject({ method: "GET", url });
+    const head = await server.inject({ method: "HEAD", url });
+    await server.close();
+    expect(get.statusCode).toBe(404);
+    expect(get.body).not.toContain("app shell");
+    expect(head.statusCode).toBe(404);
+    expect(head.body).not.toContain("app shell");
+  });
 
   it("serves known built assets", async () => {
     const server = await app();
@@ -51,7 +84,7 @@ describe("web assets", () => {
     expect(response.body).toContain("Page doesn’t exist");
   });
 
-  it.each(["/docs/host-provider-explainer.html", "/unknown", "/docs%2Fhidden.html"])(
+  it.each(["/docs/host-provider-explainer.html", "/docs%2Fhidden.html"])(
     "keeps missing page URL %s and returns a dashboard link",
     async (url) => {
       const server = await app();

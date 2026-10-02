@@ -21,7 +21,7 @@ it.each(["chromium", "webkit"] as const)(
     const browser = await (engine === "chromium" ? chromium : webkit).launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     const path = "**/api/v1/personal-instructions";
-    const url = `http://127.0.0.1:${address.port}/#/`;
+    const url = `http://127.0.0.1:${address.port}/`;
     try {
       let failRead = true,
         failWrite = true;

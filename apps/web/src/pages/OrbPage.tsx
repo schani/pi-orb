@@ -1623,7 +1623,7 @@ function OrbConversation({
     >
       <div className="orb-header-stack">
         <header className="orb-header" data-phone-actions={phoneActions}>
-          <a className="orb-phone-home" href="#/" aria-label="Dashboard" title="dashboard">
+          <a className="orb-phone-home" href="/" aria-label="Dashboard" title="dashboard">
             <Icon name="back" />
           </a>
           <div className="orb-identity">

@@ -155,9 +155,9 @@ it("persists a real CLI alert while the Pi bash tool is active, replicates and a
     try {
       const page = await browser.newPage();
       try {
-        await page.goto(`${cp.baseUrl}/#/`);
+        await page.goto(`${cp.baseUrl}/`);
         const entry = page.locator(".orb-entry", {
-          has: page.locator(`a[href="#/orbs/${orbId}"]`),
+          has: page.locator(`a[href="/orbs/${orbId}"]`),
         });
         await expectPage(entry.locator('img[src="/favicons/alert.svg"]')).toHaveCount(1);
         await entry.getByRole("link").first().click();

@@ -76,7 +76,7 @@ async function openOrb(viewport?: { width: number; height: number }, errors?: st
   if (errors) page.on("pageerror", (error) => errors.push(error.message));
   await gotoFrontendHistory(
     page,
-    `${origin}/#/orbs/${ORB_ID}`,
+    `${origin}/orbs/${ORB_ID}`,
     ORB_ID,
     viewport ? page.locator(".composer") : page.getByRole("textbox", { name: "Message the orb" }),
   );
@@ -191,7 +191,7 @@ describe("orb native file drop", () => {
       );
       await expectPage(inset).toHaveCount(0);
       await expectPage(page.locator(".history")).toContainText("dropped-document.txt");
-      expectPage(page.url()).toBe(`${origin}/#/orbs/${ORB_ID}`);
+      expectPage(page.url()).toBe(`${origin}/orbs/${ORB_ID}`);
     } finally {
       await page.close();
     }
@@ -227,7 +227,7 @@ describe("orb native file drop", () => {
     try {
       await gotoFrontendHistory(
         page,
-        `${origin}/#/orbs/${ORB_ID}`,
+        `${origin}/orbs/${ORB_ID}`,
         ORB_ID,
         page.getByRole("textbox", { name: "Message the orb" }),
       );
@@ -339,7 +339,7 @@ describe("orb native file drop", () => {
         documentFile.name,
         image.name,
       ]);
-      expectPage(page.url()).toBe(`${origin}/#/orbs/${ORB_ID}`);
+      expectPage(page.url()).toBe(`${origin}/orbs/${ORB_ID}`);
     } finally {
       await page.unrouteAll({ behavior: "wait" });
       await page.close();
@@ -377,7 +377,7 @@ describe("orb native file drop", () => {
       await expectPage(draft).toHaveValue("Unsent draft");
       expectPage(uploads).toHaveLength(0);
       expectPage(messages).toHaveLength(0);
-      expectPage(page.url()).toBe(`${origin}/#/orbs/${ORB_ID}`);
+      expectPage(page.url()).toBe(`${origin}/orbs/${ORB_ID}`);
     } finally {
       await page.close();
     }
@@ -409,7 +409,7 @@ describe("orb native file drop", () => {
       );
       await expectPage(page.locator(".composer-attachment")).toHaveCount(0);
       expectPage(uploads).toHaveLength(0);
-      expectPage(page.url()).toBe(`${origin}/#/orbs/${ORB_ID}`);
+      expectPage(page.url()).toBe(`${origin}/orbs/${ORB_ID}`);
     } finally {
       await page.getByRole("button", { name: "Start orb" }).click();
       await expectPage(page.getByRole("button", { name: "Stop orb" })).toBeVisible();
@@ -487,7 +487,7 @@ describe("orb native file drop", () => {
         await expectPage(composer.locator(".composer-attachment img")).toHaveCount(2);
         await expectPage(composer.locator(".composer-attachment img").last()).toBeVisible();
         expectPage(errors).toEqual([]);
-        expectPage(page.url()).toBe(`${origin}/#/orbs/${ORB_ID}`);
+        expectPage(page.url()).toBe(`${origin}/orbs/${ORB_ID}`);
       } finally {
         await page.close();
       }

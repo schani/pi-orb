@@ -992,7 +992,7 @@ async function handleApi(
       if (request.method === "POST" && mcpRoute[4] === "connect") {
         state.mcpGrants.add(key);
         sendJson(response, 200, {
-          url: `/?mcp-preview-consent=${randomUUID()}#/projects/${encodeURIComponent(projectId)}/mcp`,
+          url: `/projects/${encodeURIComponent(projectId)}/mcp?mcp-preview-consent=${randomUUID()}`,
         });
         return true;
       }
@@ -2576,7 +2576,7 @@ export function mockBackendPlugin(): Plugin {
         if (
           sessionExpired &&
           request.method === "GET" &&
-          path === "/" &&
+          (path === "/" || path.startsWith("/orbs/") || path.startsWith("/projects/")) &&
           request.headers.accept?.includes("text/html") === true
         ) {
           // A production top-level reload enters IAP and returns after Google

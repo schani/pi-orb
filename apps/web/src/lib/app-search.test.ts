@@ -14,7 +14,7 @@ const item = (key: string, keywords: string[], title = key): AppSearchItem => ({
   kindLabel: "fixture",
   title,
   keywords,
-  href: `#/${key}`,
+  href: `/${key}`,
 });
 
 describe("app search core", () => {

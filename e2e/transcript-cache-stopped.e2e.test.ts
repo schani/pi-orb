@@ -69,12 +69,12 @@ it.each(["chromium", "webkit"] as const)(
         view.headId = view.cursor;
         return route.fulfill({ response, json: view });
       });
-      await page.goto(`${origin}/#/orbs/${a}`);
+      await page.goto(`${origin}/orbs/${a}`);
       await check(page.locator(".history")).toContainText("Review 100");
-      await page.locator(`.orb-index a[href="#/orbs/${b}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
       refresh = true;
-      await page.locator(`.orb-index a[href="#/orbs/${a}"]`).click();
+      await page.locator(`.orb-index a[href="/orbs/${a}"]`).click();
       await check(page.locator(".history")).toContainText("Review 100");
       await check(page.locator(".orb-main")).toHaveAttribute("aria-busy", "false");
       release();
@@ -86,7 +86,7 @@ it.each(["chromium", "webkit"] as const)(
       await check(page.getByText(/held refresh failure/)).toHaveCount(0);
       missing = true;
       await check(page.getByText("Orb doesn't exist", { exact: true })).toBeVisible();
-      check(page.url()).toBe(`${origin}/#/orbs/${a}`);
+      check(page.url()).toBe(`${origin}/orbs/${a}`);
       await check(page.locator(".history")).toHaveCount(0);
       await check(page.getByRole("link", { name: "Back to dashboard", exact: true })).toBeVisible();
     } finally {

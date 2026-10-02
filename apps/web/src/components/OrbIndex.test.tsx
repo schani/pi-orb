@@ -47,7 +47,7 @@ describe("stacked project index", () => {
     const html = renderToStaticMarkup(
       <IndexProject {...props} list={{ items: [], error: null }} />,
     );
-    expect(html).toContain('href="#/projects/atlas/orbs/new"');
+    expect(html).toContain('href="/projects/atlas/orbs/new"');
     expect(html).toContain('aria-label="New orb in Atlas"');
     expect(html).toContain('href="#i-plus"');
     expect(html).toContain('class="project-head-actions"');
@@ -67,8 +67,8 @@ describe("stacked project index", () => {
         list={{ items: [orb, archived], error: null }}
       />,
     );
-    expect(html).toContain('href="#/orbs/orb-1"');
-    expect(html).toContain('href="#/orbs/archive"');
+    expect(html).toContain('href="/orbs/orb-1"');
+    expect(html).toContain('href="/orbs/archive"');
     expect(html).toContain('class="project-archive" open=""');
     expect(html).toContain("ix-row-arch ix-row-current");
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
@@ -106,7 +106,7 @@ describe("stacked project index", () => {
     const stale = renderToStaticMarkup(<IndexProject {...props} list={{ items: [orb], error }} />);
     expect(stale).toContain("Orb list is stale");
     expect(stale).toContain('role="alert"');
-    expect(stale).toContain('href="#/orbs/orb-1"');
+    expect(stale).toContain('href="/orbs/orb-1"');
     const failed = renderToStaticMarkup(<IndexProject {...props} list={{ items: null, error }} />);
     expect(failed).toContain("Failed to load orbs");
     const loading = renderToStaticMarkup(<IndexProject {...props} list={undefined} />);
@@ -122,8 +122,8 @@ describe("stacked project index", () => {
       />,
     );
     expect(html.match(/disabled=""/g)).toHaveLength(3);
-    expect(html).not.toContain('href="#/projects/atlas/orbs/new"');
-    expect(html).not.toContain('href="#/orbs/orb-1"');
+    expect(html).not.toContain('href="/projects/atlas/orbs/new"');
+    expect(html).not.toContain('href="/orbs/orb-1"');
     expect(html).toContain("deleting project…");
   });
 });
