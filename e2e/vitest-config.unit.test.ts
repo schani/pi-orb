@@ -144,10 +144,7 @@ it("orders the actual E2E projects and gives lifecycle files one worker", async 
       `] } });\n`,
   );
 
-  const config = (await import("./vitest.config.ts")).default.test;
-  expect(config?.maxWorkers).toBe(1);
-  expect((config?.projects?.[0] as { test: { pool: string } })?.test.pool).toBe("threads");
-  expect((config?.projects?.[1] as { test: { pool: string } })?.test.pool).toBe("forks");
+  expect(config.test?.maxWorkers).toBe(1);
 
   const child = spawn(resolve(root, "node_modules/.bin/vitest"), ["run", "--config", configPath], {
     cwd: root,

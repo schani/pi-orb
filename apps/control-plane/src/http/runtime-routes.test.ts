@@ -201,7 +201,7 @@ describe("runtime broker routes", () => {
 
   it("keeps registered runtime bearers independent of Origin under the hosting guard", async () => {
     await app.close();
-    await startApp(TEST_ISSUER_CONSTANTS, store, true);
+    await startApp(TEST_ISSUER_CONSTANTS, store, "tail.test.ts.net", true);
     store.seedOrb(makeOrbRow(ORB, PROJECT, "running", { runtimeTokenHash: sha256(TOKEN) }));
     for (const origin of ["null", "https://files.test", "https://arbitrary.test"]) {
       for (const [authorization, status] of [
