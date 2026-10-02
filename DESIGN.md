@@ -137,6 +137,8 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md](docs/postmortems/2026-10-02-frontend-session-fixture-isolation.md) — server-owned session fixture leaked across frontend E2E cases; scoped restore and tree-specific qualification
+- [docs/postmortems/2026-10-02-docker-daemon-umask.md](docs/postmortems/2026-10-02-docker-daemon-umask.md) — private harness umask made fresh-store PostgreSQL entrypoint inaccessible after UID drop
 - [docs/postmortems/2026-10-02-nested-mcp-live-rows.md](docs/postmortems/2026-10-02-nested-mcp-live-rows.md) — nested SDK events created phantom live MCP rows; parent codemode disclosure retains bounded child details
 - [docs/postmortems/2026-10-01-mcp-measurement-fixtures.md](docs/postmortems/2026-10-01-mcp-measurement-fixtures.md) — scope bounds, discarded diagnostics and child-profile measurement assumptions
 - [docs/postmortems/2026-10-01-native-ssh-startup-dependency.md](docs/postmortems/2026-10-01-native-ssh-startup-dependency.md) — first Google manager exit canceled the host-key gate and latched SSH off; corrected dependency and accepted fresh validator
