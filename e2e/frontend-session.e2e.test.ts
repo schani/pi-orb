@@ -3096,7 +3096,8 @@ describe("frontend-only browser behavior", () => {
       } finally {
         releaseMetadata();
         await page.unrouteAll({ behavior: "wait" });
-        await page.request.post(`${origin}/__pi_orb_fixture/session/restore`);
+        const restored = await page.request.post(`${origin}/__pi_orb_fixture/session/restore`);
+        expectPage(restored.ok()).toBe(true);
         await page.close();
       }
     },
