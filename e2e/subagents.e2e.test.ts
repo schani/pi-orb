@@ -629,9 +629,9 @@ it("rejects unknown profiles and models without child inference, and dispatches 
           })
         ).status,
       ).toBe(202);
-      const serialized = await waitFor(`profile case ${i} settled`, async () => {
-        const text = JSON.stringify((await history()).body);
-        return text.includes(`PROFILE_SETTLED_${i}`) ? text : null;
+      const settledHistory = await waitFor(`profile case ${i} settled`, async () => {
+        const view = await history();
+        return JSON.stringify(view.body).includes(`PROFILE_SETTLED_${i}`) ? view.body : null;
       });
       const requests = (await fakeControl(fake.sessionKey, "/requests")) as unknown as {
         surface: string;
@@ -642,10 +642,27 @@ it("rejects unknown profiles and models without child inference, and dispatches 
         (call) => call.surface === "model" && call.matchedRuleIndex === i * 3 + 1,
       );
       if (item.error !== undefined) {
-        expect(serialized).toContain(item.error.replaceAll('"', '\\"'));
+        const resultRecord = (
+          settledHistory["records"] as {
+            id: string;
+            content?: { type: string; detailKey?: string }[];
+          }[]
+        ).findLast((record) => record.content?.some((block) => block.type === "tool_result"));
+        const resultKey = resultRecord?.content?.find(
+          (block) => block.type === "tool_result",
+        )?.detailKey;
+        expect(resultKey).toBeDefined();
+        const detail = await api(
+          cp.baseUrl,
+          "GET",
+          `/api/v1/orbs/${orb}/details/${encodeURIComponent(resultRecord?.id ?? "")}/${encodeURIComponent(resultKey ?? "")}?sessionId=${encodeURIComponent((settledHistory["session"] as { id: string }).id)}`,
+        );
+        expect(detail.status).toBe(200);
+        const result = JSON.stringify(detail.body);
+        expect(result).toContain(item.error.replaceAll('"', '\\"'));
         if (i < 2) {
-          expect(serialized).toContain("Available types:");
-          expect(serialized).toContain("model");
+          expect(result).toContain("Available types:");
+          expect(result).toContain("model");
         }
         expect(childCalls).toEqual([]);
       } else {
