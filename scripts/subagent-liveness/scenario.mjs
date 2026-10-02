@@ -280,7 +280,12 @@ function scriptedStream(model, context, options) {
       ])
         assert.equal(names.includes(rootOnly), false);
       if (credentialScenario) assert.equal(options.apiKey === "fake-access-2", true);
-      note(`model:child:${child}`);
+      note(`model:child:${child}`, { model: model.id });
+      if (scenario === "model-selection" || scenario === "model-unavailable")
+        assert.equal(
+          model.id,
+          child === "one" && scenario === "model-selection" ? "gpt-6.1-sol" : "gpt-6-sol",
+        );
       if (scenario === "mcp-profile" && toolResults.length === 1) {
         const result = JSON.stringify(toolResults[0]);
         assert.match(
@@ -332,6 +337,7 @@ text("denied:" + denied + ";js:" + (6 * 7));`,
           description: "resume one",
           subagent_type: "probe",
           resume: ids.get("one"),
+          ...(scenario === "resume-cancel" ? { model: "SoL" } : {}),
         }),
         "toolUse",
       );
@@ -402,6 +408,15 @@ modelRuntime.registerProvider("liveness-probe", {
   api: "liveness-probe",
   streamSimple: scriptedStream,
   models: [
+    ...["gpt-6-sol", "gpt-6.1-sol"].map((id) => ({
+      id,
+      name: id,
+      reasoning: false,
+      input: ["text"],
+      contextWindow: 128000,
+      maxTokens: 1024,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    })),
     {
       id: "probe",
       name: "probe",
@@ -420,6 +435,23 @@ if (credentialScenario)
       notify: () => undefined,
     }),
   );
+modelRuntime.registerProvider("openai-codex", {
+  ...authConfig,
+  baseUrl: "https://must-not-connect.invalid",
+  api: "liveness-probe",
+  streamSimple: scriptedStream,
+  models: (scenario === "model-unavailable" ? ["gpt-6-sol"] : ["gpt-6-sol", "gpt-6.1-sol"]).map(
+    (id) => ({
+      id,
+      name: id,
+      reasoning: false,
+      input: ["text"],
+      contextWindow: 128000,
+      maxTokens: 1024,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    }),
+  ),
+});
 await checked(modelRuntime.refresh({ allowNetwork: false }));
 const model = modelRuntime.getModel("liveness-probe", "probe");
 assert.ok(model);
@@ -480,11 +512,33 @@ manager = SessionManager.create(root, join(root, "sessions"));
         parameters: { type: "object", properties: {} },
         async execute() {
           const labels =
-            scenario === "queued" || scenario === "cancel-queued" ? ["one", "two"] : ["one"];
+            scenario === "queued" || scenario === "cancel-queued" || scenario === "model-selection"
+              ? ["one", "two"]
+              : ["one"];
           for (const label of labels) {
-            const id = service.spawn("probe", `CHILD_${label}`, { description: label });
+            const id = service.spawn("probe", `CHILD_${label}`, {
+              description: label,
+              ...(scenario === "model-selection"
+                ? { model: label === "one" ? "SoL" : "OPENAI-CODEX/GPT-6-SOL" }
+                : scenario === "model-unavailable"
+                  ? { model: "openai-codex/gpt-6-sol" }
+                  : {}),
+            });
             ids.set(label, id);
           }
+          if (scenario === "model-selection" || scenario === "model-unavailable") {
+            if (scenario === "model-unavailable")
+              assert.throws(
+                () => service.spawn("probe", "INVALID_CHILD", { model: "SoL" }),
+                /Model unavailable/,
+              );
+            for (const selector of ["sol-new", "openai-codex/gpt-6.2-sol", "gpt-6-sol"])
+              assert.throws(
+                () => service.spawn("probe", "INVALID_CHILD", { model: selector }),
+                /Model not found/,
+              );
+          }
+          if (scenario === "model-unavailable") assert.equal(service.listAgents().length, 1);
           note("children:admitted", {
             statuses: service.listAgents().map((record) => record.status),
           });
@@ -703,11 +757,32 @@ if (scenario === "child-first") {
   else childGates.get("one").resolve();
 }
 
-if (scenario === "queued") {
+if (scenario === "queued" || scenario === "model-selection") {
   await waitEvent("tool:two:entered");
   assert.equal(service.hasRunning(), true);
   assert.equal(bridgeBusy, true);
   childGates.get("two").resolve();
+}
+if (scenario === "model-unavailable") {
+  assert.equal(
+    trace
+      .filter((row) => row.event.startsWith("model:child:"))
+      .every((row) => row.model === "gpt-6-sol"),
+    true,
+  );
+}
+if (scenario === "model-selection") {
+  await until(() => terminalRows.length === 2);
+  const records = manager
+    .getEntries()
+    .filter((entry) => entry.type === "custom" && entry.customType === "subagents:record");
+  assert.deepEqual(
+    records.map((entry) => [entry.data.requestedModel, entry.data.resolvedModel]),
+    [
+      ["SoL", { provider: "openai-codex", id: "gpt-6.1-sol" }],
+      ["OPENAI-CODEX/GPT-6-SOL", { provider: "openai-codex", id: "gpt-6-sol" }],
+    ],
+  );
 }
 const wholeAbort = runtime && (scenario === "cancel-running" || cancelStarting || shutdownScenario);
 if (scenario === "inbox-child-only") {
@@ -832,6 +907,9 @@ if (scenario === "resume-cancel") {
   );
   assert.deepEqual(activityEdges, ["busy", "idle", "busy", "idle"]);
   assert.equal(service.getRecord(ids.get("one")).status, "stopped");
+  const records = SessionManager.open(manager.getSessionFile()).getEntries().filter((entry) => entry.type === "custom" && entry.customType === "subagents:record");
+  assert.equal(records.at(-1)?.data.requestedModel, undefined);
+  assert.deepEqual(records.at(-1)?.data.resolvedModel, { provider: "liveness-probe", id: "probe" });
   note("assert:explicit-resume-owns-fresh-cancellation-and-operation");
 }
 

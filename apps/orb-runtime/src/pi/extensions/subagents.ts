@@ -3,6 +3,7 @@ import { getSubagentsService } from "@gotgenes/pi-subagents";
 import upstreamSubagents from "@gotgenes/pi-subagents/extension";
 import { Result } from "neverthrow";
 import type { SubagentError, SubagentRun } from "../../domain/subagent-work.ts";
+import { resolveSubagentModel } from "../subagent-model.ts";
 
 export interface SubagentHost {
   admitSubagent(childId: string, description?: string): Result<SubagentRun, SubagentError>;
@@ -115,6 +116,7 @@ export function createSubagentsExtension(
       cwd,
       childExtensions,
       shouldWake: ({ id }) => host.mayWakeSubagent(id),
+      resolveModel: resolveSubagentModel,
     });
     pi.on("session_start", () => {
       const service = getSubagentsService();

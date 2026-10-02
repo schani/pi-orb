@@ -65,6 +65,8 @@ Use namespaced platform extensions and an explicit collision policy: native plat
 
 ## Local subagents: fork-first integration (2026-09-14; under validation)
 
+**Model selection (2026-10-01):** the host's `pi/subagent-model.ts` resolves explicit aliases against the conversation picker's pinned mapping, or exact provider/model IDs against the available SDK registry. The fork invokes it for tool, SDK service and profile selection; root terminal receipts contain the requested selector and actual child provider/id. See `docs/subagents.md`.
+
 The complete design, evidence limits and DST-first acceptance plan are now in `docs/subagents.md`; implementation steps live in `TODO.md`, and resolved product choices in `docs/open-questions.md` (62–64). The local implementation loads a pinned 21.7.0 fork, with runtime-owned activity and cancellation; it is not deployed. The original proposal's no-resume restriction was rejected: normal shared-checkout editing and agent-facing package tools, no user-facing child transcripts or child-file cloud replication, cooperative whole-operation cancellation and interrupted reporting without automatic child replay.
 
 The discussion in orb `b18fc524-632d-42cd-ab90-8b2ac55de80d` favored `@gotgenes/pi-subagents`. Its recorded experiment against gotgenes 21.4.2 / Pi 0.85.1 found public-API aggregate busy reporting feasible, but cancellation during startup could still execute child work, drain APIs could finish before cleanup, and cancelled-child notifications could restart the parent. Those are findings from that pinned experiment, not a fresh audit of upstream. The experiment is now recovered in `scripts/subagent-liveness/`; fresh runtime, fork and browser evidence is recorded in `docs/subagents.md`.

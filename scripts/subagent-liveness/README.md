@@ -1,6 +1,6 @@
 # Subagent package / Pi runtime contracts
 
-Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 0.99.1; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.5.tgz` fork plus the narrow `patches/@gotgenes+pi-subagents+21.7.0-orb.5.patch` child-codemode allowlist/reserved-MCP-namespace guard. The vendor artifact is unchanged.
+Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 1.0.0; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.6.tgz` fork plus `patches/@gotgenes+pi-subagents+21.7.0-orb.6.patch` for child-codemode allowlists and reserved MCP namespaces. The lost local fork commit is identified by the artifact's `FORK.json`; its source was recovered to `/workspace/rebase-backup/fork-orb.6/package/src`, not its Git history.
 
 ```bash
 npm ci

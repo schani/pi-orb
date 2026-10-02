@@ -15,6 +15,8 @@ const scenarios = [
   "spawn-failure",
   ...(process.env.USE_RUNTIME === "1"
     ? [
+        "model-selection",
+        "model-unavailable",
         "resume-cancel",
         "credential-refresh",
         "credential-failure",
