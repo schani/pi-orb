@@ -1,6 +1,6 @@
 # Subagent package / Pi runtime contracts
 
-Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 1.0.0; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz` fork plus `patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch` for child-codemode allowlists and reserved MCP namespaces. Source lives in `/workspace/pi-packages`, with full history in `/workspace/rebase-backup/pi-packages-orb.8.bundle`.
+Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 1.0.0; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.8.tgz` fork plus `patches/@gotgenes+pi-subagents+21.7.0-orb.8.patch` for child-codemode allowlists and reserved MCP namespaces. Source is published at `https://github.com/schani/pi-packages`, branch `modelselection`, with immutable commit pins below.
 
 ```bash
 npm ci
@@ -43,16 +43,16 @@ Promises and explicit model/tool/lifecycle checkpoints establish ordering; the 6
 
 ## Fork reproduction
 
-The upstream base is `b3b6159399f541fd0623f65818557dd3e707a34f` (21.7.0). The fork owns source; pi-orb keeps the artifact, not duplicate source patches. Current `orb.8` pin `29e2b3b44ae6cc7aa365b64f47b363c685b7d396` is local and unpublished. It retains locked-profile SDK selection, model receipts and empty-selector rejection, and rejects unknown profiles before dispatch. Source docs and tests are included. Fork validation passes **82 files / 1,787 tests**, typecheck and changed-file Biome/ESLint; full lint has known baseline failures. Clean root `npm ci` applies the MCP patch with preserved edits and refreshed adjacent comment context; installed registration/packaging contracts pass **3 tests**. Tarball SHA-256: `d9afae712be5304e09a490f28b0493180c8565fe6585efe173b1daaab3e5cf2a`. Rebuild using the preserved bundle:
+The upstream base is `b3b6159399f541fd0623f65818557dd3e707a34f` (21.7.0). The fork owns source; pi-orb keeps the artifact, not duplicate source patches. Current `orb.8` pin `29e2b3b44ae6cc7aa365b64f47b363c685b7d396` is published on `schani/pi-packages:modelselection`. It retains locked-profile SDK selection, model receipts and empty-selector rejection, and rejects unknown profiles before dispatch. Source docs and tests are included. Fork validation passes **82 files / 1,787 tests**, typecheck and changed-file Biome/ESLint; full lint has known baseline failures. Clean root `npm ci` applies the MCP patch with preserved edits and refreshed adjacent comment context; installed registration/packaging contracts pass **3 tests**. Tarball SHA-256: `d9afae712be5304e09a490f28b0493180c8565fe6585efe173b1daaab3e5cf2a`. Rebuild from the public source:
 
 ```bash
 npm ci
-git clone /workspace/rebase-backup/pi-packages-orb.8.bundle .context/pi-packages-fork
+git clone --branch modelselection https://github.com/schani/pi-packages.git .context/pi-packages-fork
 git -C .context/pi-packages-fork checkout --detach 29e2b3b44ae6cc7aa365b64f47b363c685b7d396
 scripts/subagent-liveness/build-fork.sh .context/pi-packages-fork
 ```
 
-The recipe requires pinned HEAD, a clean package tree and esbuild 0.28.2. It copies the installed public declaration from root `node_modules`, packages source/license/provenance, and bundles extension/service entry points with external dependencies. The TypeBox import maps to the SDK's `typebox` package. The lockfile records artifact integrity; vendored installs need no fork checkout. Remote source reproduction remains unavailable until this commit is published to `schani/pi-packages`.
+The recipe requires pinned HEAD, a clean package tree and esbuild 0.28.2. It copies the installed public declaration from root `node_modules`, packages source/license/provenance, and bundles extension/service entry points with external dependencies. The TypeBox import maps to the SDK's `typebox` package. The lockfile records artifact integrity; vendored installs need no fork checkout.
 
 ## Evidence limits
 

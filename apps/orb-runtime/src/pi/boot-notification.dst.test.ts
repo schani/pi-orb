@@ -118,6 +118,25 @@ it("generic and sleep boot crash windows preserve context and bound automatic tu
                 if (plan.triggerTurn) automaticTurns++;
                 await task.checkpoint("boot.after-trigger");
               }
+              if (!replicated && wake !== null) {
+                const identity: BootIdentity = {
+                  runtimeInstanceId: "sr8",
+                  executionId: "e8",
+                  incarnation: "0",
+                };
+                expect(planBootNotification(entries, entries, identity, wake).kind).toBe("none");
+                const combined = entries.findLast(
+                  (entry) =>
+                    (entry as { customType?: string }).customType === "pi-orb.sleep-wake",
+                );
+                expect(combined).toBeDefined();
+                expect(mapPiEntry(combined)._unsafeUnwrap()).toMatchObject({
+                  type: "event",
+                  inboxMessageIds: ["sleep-1"],
+                });
+                replicated = true;
+                expect(planBootNotification(entries, entries, identity, null).kind).toBe("none");
+              }
               const claims = () =>
                 entries.filter((entry) => {
                   const type = (entry as { customType?: string }).customType;
