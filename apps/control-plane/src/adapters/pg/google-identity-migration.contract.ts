@@ -7,7 +7,7 @@ import type { PostgreSQLClient } from "./client.ts";
 import { runMigrations } from "./migrate.ts";
 import { PostgreSQLUserStore } from "./users.ts";
 
-const migration = "027_google_identities.sql";
+const migration = "029_google_identities.sql";
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",
   oldIssuer: "https://cloud.google.com/iap",
@@ -94,11 +94,13 @@ export function googleIdentityMigrationContracts(
         ),
       );
     }
-    it("applies MCP diagnostics before Google identities on a fresh database", async () => {
+    it("applies diagnostics, time zone and alerts before Google identities", async () => {
       const client = await prepare(false, "026");
       expect((await runMigrations(client))._unsafeUnwrap()).toEqual([
         "026_mcp_oauth_diagnostics.sql",
-        "027_google_identities.sql",
+        "027_orb_user_time_zone.sql",
+        "028_orb_alerts.sql",
+        "029_google_identities.sql",
       ]);
       expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(true);
       expect((await runMigrations(client))._unsafeUnwrap()).toEqual([]);
@@ -120,7 +122,9 @@ export function googleIdentityMigrationContracts(
       const before = await snapshot(client);
       expect((await runMigrations(client))._unsafeUnwrap()).toEqual([
         "026_mcp_oauth_diagnostics.sql",
-        "027_google_identities.sql",
+        "027_orb_user_time_zone.sql",
+        "028_orb_alerts.sql",
+        "029_google_identities.sql",
       ]);
       const after = await snapshot(client);
       expect(after.slice(0, 4)).toEqual(before.slice(0, 4));
@@ -128,7 +132,9 @@ export function googleIdentityMigrationContracts(
         [
           ...(before[4] ?? []).map((row) => row["name"]),
           "026_mcp_oauth_diagnostics.sql",
-          "027_google_identities.sql",
+          "027_orb_user_time_zone.sql",
+          "028_orb_alerts.sql",
+          "029_google_identities.sql",
         ].sort(),
       );
       expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(true);

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getCommittedImage,
+  getOrbHistory,
   getSystem,
   listHostedFiles,
   listOrbMessages,
-  probeSession,
   logout,
+  probeSession,
 } from "./api.ts";
 import { readBrowserSession, readSessionPrincipal, resetBrowserSessionForTest } from "./session.ts";
 
@@ -163,6 +164,45 @@ describe("API session handling", () => {
     await logout();
     release({ hostProvider: "process", databaseKind: "pglite", version: "old" });
     expect((await old).isErr()).toBe(true);
+    expect(readBrowserSession().status).toBe("auth_required");
+  });
+
+  it("fences streamed history when logout happens after headers", async () => {
+    let release!: () => void;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"orbId":"old","records":'));
+        release = () => {
+          controller.enqueue(new TextEncoder().encode('[]}'));
+          controller.close();
+        };
+      },
+    });
+    let bodyStarted!: () => void;
+    const parsing = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) =>
+        path === "/auth/logout"
+          ? new Response(null, { status: 204 })
+          : {
+              status: 200,
+              ok: true,
+              json: () => {
+                bodyStarted();
+                return new Response(body).json();
+              },
+            },
+      ),
+    );
+    const history = getOrbHistory("old");
+    await parsing;
+    await logout();
+    release();
+    const result = await history;
+    expect(result.isErr() && result.error.type).toBe("auth_required");
     expect(readBrowserSession().status).toBe("auth_required");
   });
 

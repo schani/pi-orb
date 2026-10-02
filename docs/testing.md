@@ -126,7 +126,6 @@ The 222-pass Docker E2E failed MCP isolation after the fake model emitted only `
 ## Sandbox qualification evidence (decided 2026-09-27)
 
 Pin the actual tested checkout and CI merge tree, not a related branch or an older release artifact. For live WIF proof, use a fresh isolated credential configuration and record JWT→STS→service-account impersonation→authorized API; cached manual credentials and an empty-body API 400 do not prove this path. If idle-stop interrupts a live fixture, retain its first failure and resume only missing legs using bounded ordinary presence/connection, without changing idle policy or increasing timeouts. Distinguish control-flow-derived historical proof from fresh wire proof (`docs/postmortems/2026-09-27-sandbox-qualification-harness.md`).
->>>>>>> 5e71694 (Record sandbox qualification and pinned integration evidence)
 
 ## Image fixture sync ownership (2026-09-27)
 
