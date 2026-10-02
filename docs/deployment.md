@@ -2,6 +2,18 @@
 
 Decisions about where the control plane runs and how infrastructure is managed. The operational workflow (build, apply, deploy, gotchas) lives in `infra/README.md`.
 
+## Native MCP and Sol 6.1 production release (2026-10-02)
+
+[Deploy 36960393737](https://github.com/schani/pi-orb/actions/runs/36960393737) deployed `2db52257237d397a60a8344f6091e8883907a92d`, including the intervening self-identity and transcript-cache changes. The authoritative transaction ran 03:30:29–04:32:21 UTC and finished `validated` with all twelve gates passed: checks, fresh native acceptance, protected plan, migrations, apply, IAP repair, retirement, activation and both production smokes. The monitoring orb restarted during checks; the external workflow continued without redispatch.
+
+All four services serve digest `sha256:e7072cab114e6645098c5f5c12f19a28742341742078f6f7839dfa52e466e0e1`; browser, ops and runtime use generation `1790914594`, while issuer has none. Runtime image `2734879604808520138` and workspace image `840177167547666492` were accepted. Independent reads confirmed serving identities, the active release pointer, absent release lock, native browser IAP, sole `heyglide.com` accessor domain and sole IAP-service-agent browser invoker. Old-controller active/idle zeroes were verified with no pending operations. All four smoke fixtures and temporary native build resources were cleaned up; production images remain retained.
+
+The release includes general-purpose child MCP access without relaxing explicit tool lists. Existing active orbs are not forcibly replaced; they adopt the new image through ordinary stopped-compute replacement. Earlier authenticated provider/context probes retain their own artifact and profile scopes, rather than becoming new production-provider tests by implication.
+
+Durable record: `gs://pi-orb-tfstate-playground-dev-6ae7/static-plane/releases/r-1790911822-2476db9d-8aac-4088-b16f-95140a78c10f.json`; local independent proofs: `.context/actions-release-20261002/verification/`.
+
+## Deployment decisions
+
 - The cloud control plane is expected to run on Cloud Run.
 - At least one Cloud Run instance must remain provisioned so active-orb history polling can run continuously.
 - The polling process must use always-allocated CPU/instance-based billing; a minimum instance with request-only CPU allocation is insufficient for reliable background work.

@@ -1,5 +1,9 @@
 # Testing strategy
 
+## Production qualification (2026-10-02)
+
+[Deploy 36960393737](https://github.com/schani/pi-orb/actions/runs/36960393737) validated rebased source `2db5225`: 2,408 unit/DST tests (eight conditional skips), 248 E2Es (zero skips), fresh native-image acceptance and all twelve release gates. Migrations, rollout, IAP, old-controller retirement, activation, lifecycle and identity smokes passed. Independent serving/authority/IAP checks matched the release record; smoke fixtures and temporary native resources were cleaned up. Deployment identities and retained evidence are in `docs/deployment.md`. This supersedes the earlier local-only deployment status, not the outcomes or scope of historical qualification artifacts.
+
 ## General-purpose MCP policy (2026-10-02)
 
 After four clean installs, the default-child policy change passed typecheck/lint, 2,396 unit/DST tests plus 110 infrastructure checks, 97 live-qualification helper tests, 11 Python preflight tests and 18 installed-runtime liveness scenarios. Actual vendor-child tests cover delayed discovery, successful MCP through codemode, explicit-profile direct/nested denial and empty catalogs. The full browser suite passed **248/248 tests in 28 files**, 00:18–00:50 UTC, including default general-purpose delegation against authenticated HTTPS. No new native-image or live-provider qualification is claimed for this later policy change. No deployment.
