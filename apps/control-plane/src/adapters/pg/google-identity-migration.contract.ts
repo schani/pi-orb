@@ -150,7 +150,9 @@ export function googleIdentityMigrationContracts(
           )
         )._unsafeUnwrap();
       for (const name of ["026_google_identities.sql", "027_google_identities.sql"])
-        (await client.query("INSERT INTO schema_migrations (name) VALUES ($1)", [name]))._unsafeUnwrap();
+        (
+          await client.query("INSERT INTO schema_migrations (name) VALUES ($1)", [name])
+        )._unsafeUnwrap();
       const before = await snapshot(client);
       expect(before[4]).toHaveLength(28);
       expect((before[4] ?? []).map((row) => row["name"])).toEqual(

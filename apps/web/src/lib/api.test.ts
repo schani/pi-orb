@@ -173,7 +173,7 @@ describe("API session handling", () => {
       start(controller) {
         controller.enqueue(new TextEncoder().encode('{"orbId":"old","records":'));
         release = () => {
-          controller.enqueue(new TextEncoder().encode('[]}'));
+          controller.enqueue(new TextEncoder().encode("[]}"));
           controller.close();
         };
       },
