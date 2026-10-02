@@ -36,6 +36,23 @@ const record: HistoryRecord = {
 };
 
 describe("browser display projection", () => {
+  it("keeps a hidden boot baseline as an untyped custom event without native data", () => {
+    const baseline: HistoryRecord = {
+      id: "boot",
+      parentId: null,
+      timestamp: "t",
+      type: "event",
+      eventType: "pi.custom",
+      overflow: { native: { customType: "pi-orb.boot", data: { incarnation: "1" } } },
+    };
+    expect(projectDisplayRecord(baseline)).toEqual({
+      id: "boot",
+      parentId: null,
+      timestamp: "t",
+      type: "event",
+      eventType: "pi.custom",
+    });
+  });
   it("retains ordered identity and every call without undisplayed bodies or native data", () => {
     const projected = projectDisplayRecord(record);
     expect(projected).toMatchObject({

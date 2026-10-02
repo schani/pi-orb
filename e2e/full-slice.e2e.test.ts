@@ -1018,15 +1018,27 @@ describe("full slice E2E", () => {
         expect(historyAfter.status).toBe(200);
         const beforeRecords = historyBefore.body["records"] as DisplayRecord[];
         const afterRecords = historyAfter.body["records"] as DisplayRecord[];
+        const nativeById = new Map(
+          (await readReplicatedHistorySnapshot(controlPlane, replacementOrbId)).records.map(
+            (record) => [record.id, record],
+          ),
+        );
         expect(afterRecords.slice(0, beforeRecords.length)).toEqual(beforeRecords);
         // The SDK re-appends binding settings for message-free sessions (real-SDK contract).
-        // Browser records keep the complete prefix but omit native settings payloads.
+        // Browser records keep the complete prefix but omit native settings payloads
+        // and the hidden boot baseline's custom type.
         for (const record of afterRecords.slice(beforeRecords.length)) {
           expect(record.type).toBe("event");
           if (record.type !== "event") continue;
-          if (record.eventType === "pi.custom")
-            expect(record.custom?.customType).toBe("pi-orb.boot");
-          else expect(["pi.model_change", "pi.thinking_level_change"]).toContain(record.eventType);
+          if (record.eventType === "pi.custom") {
+            expect(record.custom).toBeUndefined();
+            expect(nativeById.get(record.id)).toMatchObject({
+              type: "event",
+              eventType: "pi.custom",
+              overflow: { native: { customType: "pi-orb.boot" } },
+            });
+          } else
+            expect(["pi.model_change", "pi.thinking_level_change"]).toContain(record.eventType);
           expect(JSON.stringify(record)).not.toContain('"native"');
         }
         expect(historyAfter.body["session"]).not.toBeNull();
