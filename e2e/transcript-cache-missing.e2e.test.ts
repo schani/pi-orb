@@ -56,6 +56,14 @@ it.each(["chromium", "webkit"] as const)(
     const returnMetadataGate = new Promise<void>((resolve) => {
       releaseReturnMetadata = resolve;
     });
+    let acknowledgeReturnEntry = () => {};
+    const returnEntry = new Promise<void>((resolve) => {
+      acknowledgeReturnEntry = resolve;
+    });
+    let acknowledgeHeldMetadata = () => {};
+    const heldMetadata = new Promise<void>((resolve) => {
+      acknowledgeHeldMetadata = resolve;
+    });
     const waits: Promise<unknown>[] = [];
     const own = <T>(promise: Promise<T>) => {
       const settled = promise.then(
@@ -79,9 +87,15 @@ it.each(["chromium", "webkit"] as const)(
     try {
       await page.route(`**/api/v1/orbs/${a}`, async (route) => {
         const responseState = state;
+        const waitForReturn = holdReturnMetadata;
+        const waitForPoll = holdMetadata;
+        if (waitForReturn) acknowledgeReturnEntry();
         const response = await route.fetch();
-        if (holdReturnMetadata) await returnMetadataGate;
-        if (holdMetadata) await metadataGate;
+        if (waitForReturn) await returnMetadataGate;
+        if (waitForPoll) {
+          acknowledgeHeldMetadata();
+          await metadataGate;
+        }
         return route.fulfill({
           response,
           json: { ...(await response.json()), state: responseState },
@@ -116,10 +130,15 @@ it.each(["chromium", "webkit"] as const)(
       );
       await page.locator(`.orb-index a[href="#/orbs/${a}"]`).click();
       await required(returnMetadataRequested);
+      await returnEntry;
+      // Flip the next-request gate while the return request is paused in its producer.
+      // That request must retain its entry ownership and complete independently.
+      holdMetadata = true;
       // A held load leaves B painted; history visibility alone cannot end this wait.
       await check(page.locator(".history")).toContainText("Frontend playground");
       releaseReturnMetadata();
       await required(returnedMetadata);
+      holdMetadata = false;
       await check.poll(() => lastTraceOutcome(page, "navigation", a)).toBe("cache_hit");
       await check(page.locator(".history")).toContainText("Review 100");
       await required(historyRequested);
@@ -128,11 +147,8 @@ it.each(["chromium", "webkit"] as const)(
       state = "running";
       await check(page.getByRole("button", { name: "Change thinking", exact: true })).toBeEnabled();
       await check.poll(() => sockets.size).toBe(1);
-      const metadataRequested = own(
-        page.waitForRequest((request) => request.url().endsWith(`/api/v1/orbs/${a}`)),
-      );
       holdMetadata = true;
-      await required(metadataRequested);
+      await heldMetadata;
       const missingResponse = own(
         page.waitForResponse(
           (response) => response.url().endsWith(`/orbs/${a}/history`) && response.status() === 404,

@@ -5,6 +5,7 @@ import { writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CommittedDisplayDetail, DisplayHistoryView } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import { build } from "vite";
 import { expect, it } from "vitest";
@@ -456,41 +457,70 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     // The next model turn is held after reasoning and before completion.
     let encoded: string;
     try {
-      encoded = await waitFor(
+      const parent = await waitFor(
         "replicated parent MCP call",
         async () => {
           const history = await api(cp.baseUrl, "GET", `/api/v1/orbs/${first}/history`);
-          const encoded = JSON.stringify(history.body);
-          return encoded.includes("nestedCalls") && encoded.includes("MCP_CALL_OK")
-            ? encoded
-            : null;
+          const view = history.body as DisplayHistoryView;
+          if (!view.session) return null;
+          const parentCall = view.records
+            .flatMap((record) => ("content" in record ? (record.content ?? []) : []))
+            .find((block) => block.type === "tool_call" && block.name === "codemode");
+          if (parentCall?.type !== "tool_call") return null;
+          for (const record of view.records) {
+            const result = ("content" in record ? record.content : undefined)?.find(
+              (block) => block.type === "tool_result" && block.callId === parentCall.callId,
+            );
+            if (result?.type !== "tool_result") continue;
+            const detail = await api(
+              cp.baseUrl,
+              "GET",
+              `/api/v1/orbs/${first}/details/${encodeURIComponent(record.id)}/${encodeURIComponent(result.detailKey)}?sessionId=${encodeURIComponent(view.session.id)}`,
+            );
+            if (detail.status !== 200) return null;
+            return { summary: JSON.stringify(history.body), detail: JSON.stringify(detail.body) };
+          }
+          return null;
         },
         { timeoutMs: 60_000 },
       );
-      expect(encoded).toContain("MCP_RESOURCE_OK");
-      expect(encoded).toContain("test://{id}");
-      expect(encoded).toContain("mcp__fixture__echo");
-      expect(encoded).toContain("nestedCalls");
-      const nestedEcho = page
-        .locator(".tool-nested-call")
-        .filter({ hasText: "mcp__fixture__echo" });
-      await expectPage(nestedEcho).toHaveCount(1);
-      await nestedEcho.locator("xpath=ancestor::details[1]/summary").click();
-      await expectPage(nestedEcho).toBeVisible();
-      await expectPage(nestedEcho).toContainText("· ok");
-      await expectPage(nestedEcho.locator("pre")).toContainText('"value": "hello"');
+      encoded = parent.summary;
+      expect(encoded).not.toContain("nestedCalls");
+      expect(encoded).not.toContain("MCP_CALL_OK");
+      expect(parent.detail).toContain("MCP_RESOURCE_OK");
+      expect(parent.detail).toContain("test://{id}");
+      expect(parent.detail).toContain("mcp__fixture__echo");
+      expect(parent.detail).toContain("MCP_CALL_OK");
+      const body = JSON.parse(parent.detail).body as {
+        type: string;
+        nestedCalls?: { complete: boolean; calls: { name: string; status: string }[] };
+      };
+      expect(body.type).toBe("tool_result");
+      expect(body.nestedCalls?.complete).toBe(true);
+      expect(body.nestedCalls?.calls).toContainEqual(
+        expect.objectContaining({ name: "mcp__fixture__echo", status: "ok" }),
+      );
       const parentCodemode = page
         .locator(".tool-activity-category")
         .filter({ has: page.locator(".activity-rail-label", { hasText: "codemode" }) });
+      await parentCodemode.locator("summary").first().click();
+      await parentCodemode.locator(".tool-activity-call > summary").click();
+      const nestedEcho = parentCodemode
+        .locator(".tool-nested-call")
+        .filter({ hasText: "mcp__fixture__echo" });
+      await expectPage(nestedEcho).toHaveCount(1);
+      await expectPage(nestedEcho).toBeVisible();
+      await expectPage(nestedEcho).toContainText("· ok");
+      await expectPage(nestedEcho.locator("pre")).toContainText('"value": "hello"');
       await expectPage(
         parentCodemode.locator(".tool-call-output").filter({ hasText: "MCP_CALL_OK" }),
       ).toBeVisible();
       await expectPage(
         page.locator(".activity-rail-label", { hasText: "mcp__fixture__echo" }),
       ).toHaveCount(0);
-      await expectPage(
-        page.locator(".reasoning").filter({ hasText: "Checking the MCP result." }),
-      ).toHaveCount(1);
+      const reasoning = page.locator(".reasoning");
+      await reasoning.locator("summary").click();
+      await expectPage(reasoning.filter({ hasText: "Checking the MCP result." })).toHaveCount(1);
     } finally {
       // The guest holds its FIFO fd before publishing ready; O_RDWR never blocks if it exits.
       await writeFile(thinkingGate, "release\n", { flag: "r+" });
@@ -624,18 +654,64 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     await expectPage(page.getByText("MCP_DEFAULT_COMPLETE", { exact: true })).toBeVisible({
       timeout: 60_000,
     });
-    const defaultHistory = await waitFor(
+    const defaultView = await waitFor(
       "replicated default delegation MCP call",
       async () => {
-        const history = JSON.stringify(
-          (await api(cp.baseUrl, "GET", `/api/v1/orbs/${second}/history`)).body,
-        );
-        return history.includes("MCP_DEFAULT_COMPLETE") ? history : null;
+        const history = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${second}/history`))
+          .body as DisplayHistoryView;
+        return JSON.stringify(history).includes("MCP_DEFAULT_COMPLETE") ? history : null;
       },
       { timeoutMs: 60_000 },
     );
-    expect(defaultHistory).toContain("MCP_DEFAULT_CHILD_COMPLETE");
+    const defaultHistory = JSON.stringify(defaultView);
+    expect(defaultHistory).not.toContain("MCP_DEFAULT_CHILD_COMPLETE");
     expect(defaultHistory).not.toContain("MCP_CALL_OK");
+    expect(defaultView.session).not.toBeNull();
+    if (!defaultView.session) throw new Error("missing default session");
+    const subagentCalls = defaultView.records.flatMap((record) =>
+      ("content" in record ? (record.content ?? []) : []).flatMap((block) =>
+        block.type === "tool_call" && block.name === "subagent"
+          ? [{ callId: block.callId, recordId: record.id, detailKey: block.detailKey }]
+          : [],
+      ),
+    );
+    const defaultCalls = [];
+    for (const call of subagentCalls) {
+      const detail = await api(
+        cp.baseUrl,
+        "GET",
+        `/api/v1/orbs/${second}/details/${encodeURIComponent(call.recordId)}/${encodeURIComponent(call.detailKey)}?sessionId=${encodeURIComponent(defaultView.session.id)}`,
+      );
+      expect(detail.status).toBe(200);
+      const body = (detail.body as CommittedDisplayDetail).body;
+      if (
+        body.type === "tool_call" &&
+        JSON.stringify(body.arguments).includes("MCP_DEFAULT_CHILD_CHECK")
+      )
+        defaultCalls.push(call);
+    }
+    expect(defaultCalls).toHaveLength(1);
+    const subagentCall = defaultCalls[0];
+    if (!subagentCall) throw new Error("missing default subagent call");
+    const subagentResult = defaultView.records.flatMap((record) =>
+      ("content" in record ? (record.content ?? []) : []).flatMap((block) =>
+        block.type === "tool_result" && block.callId === subagentCall.callId
+          ? [{ recordId: record.id, detailKey: block.detailKey }]
+          : [],
+      ),
+    );
+    expect(subagentResult).toHaveLength(1);
+    const result = subagentResult[0];
+    if (!result) throw new Error("missing default subagent result");
+    const subagentDetail = await api(
+      cp.baseUrl,
+      "GET",
+      `/api/v1/orbs/${second}/details/${encodeURIComponent(result.recordId)}/${encodeURIComponent(result.detailKey)}?sessionId=${encodeURIComponent(defaultView.session.id)}`,
+    );
+    expect(subagentDetail.status).toBe(200);
+    const delivered = subagentDetail.body as CommittedDisplayDetail;
+    expect(delivered.body.type).toBe("tool_result");
+    expect(JSON.stringify(delivered.body)).toContain("MCP_DEFAULT_CHILD_COMPLETE");
     expect(defaultHistory).not.toContain("synthetic-second");
     expect(calls.filter((c) => c.method === "tools/call").map((c) => c.authorization)).toEqual([
       "Bearer synthetic-first",
