@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +26,9 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
   const root = mkdtempSync(join(tmpdir(), "pi-orb-mcp-e2e-"));
   const key = join(root, "key.pem");
   const cert = join(root, "cert.pem");
+  const thinkingGate = join(root, "thinking-release");
+  const thinkingReady = join(root, "thinking-ready");
+  execFileSync("mkfifo", [thinkingGate]);
   execFileSync(
     "openssl",
     [
@@ -162,6 +166,24 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
               { type: "stop", status: "completed" },
             ],
           },
+          ...(index === 0
+            ? [
+                {
+                  match: { userMessage: { regex: "^MCP check$" } },
+                  steps: [
+                    { type: "reasoning" as const, text: "Checking the MCP result." },
+                    {
+                      type: "toolCall" as const,
+                      name: "bash",
+                      arguments: {
+                        command: `exec 3<> '${thinkingGate}'; touch '${thinkingReady}'; read -r release <&3; exec 3>&-; echo MCP_GATE_RELEASED`,
+                      },
+                    },
+                    { type: "stop" as const, status: "completed" as const },
+                  ],
+                },
+              ]
+            : []),
           {
             match: { userMessage: { regex: index === 1 ? "MCP_CHILD_CHECK" : "^MCP check$" } },
             steps: [
@@ -407,27 +429,65 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
         })
       ).status,
     ).toBe(202);
+    await waitFor("MCP reasoning gate", async () => existsSync(thinkingReady) || null);
+    // The next model turn is held after reasoning and before completion.
+    let encoded: string;
+    try {
+      encoded = await waitFor(
+        "replicated parent MCP call",
+        async () => {
+          const history = await api(cp.baseUrl, "GET", `/api/v1/orbs/${first}/history`);
+          const encoded = JSON.stringify(history.body);
+          return encoded.includes("nestedCalls") && encoded.includes("MCP_CALL_OK")
+            ? encoded
+            : null;
+        },
+        { timeoutMs: 60_000 },
+      );
+      expect(encoded).toContain("MCP_RESOURCE_OK");
+      expect(encoded).toContain("test://{id}");
+      expect(encoded).toContain("mcp__fixture__echo");
+      expect(encoded).toContain("nestedCalls");
+      const nestedEcho = page
+        .locator(".tool-nested-call")
+        .filter({ hasText: "mcp__fixture__echo" });
+      await expectPage(nestedEcho).toHaveCount(1);
+      await nestedEcho.locator("xpath=ancestor::details[1]/summary").click();
+      await expectPage(nestedEcho).toBeVisible();
+      await expectPage(nestedEcho).toContainText("· ok");
+      await expectPage(nestedEcho.locator("pre")).toContainText('"value": "hello"');
+      const parentCodemode = page
+        .locator(".tool-activity-category")
+        .filter({ has: page.locator(".activity-rail-label", { hasText: "codemode" }) });
+      await expectPage(
+        parentCodemode.locator(".tool-call-output").filter({ hasText: "MCP_CALL_OK" }),
+      ).toBeVisible();
+      await expectPage(
+        page.locator(".activity-rail-label", { hasText: "mcp__fixture__echo" }),
+      ).toHaveCount(0);
+      await expectPage(
+        page.locator(".reasoning").filter({ hasText: "Checking the MCP result." }),
+      ).toHaveCount(1);
+    } finally {
+      // The guest holds its FIFO fd before publishing ready; O_RDWR never blocks if it exits.
+      await writeFile(thinkingGate, "release\n", { flag: "r+" });
+    }
     await expectPage(page.getByText("MCP_CHECK_COMPLETE", { exact: true })).toBeVisible({
       timeout: 60_000,
     });
-    // A streamed completion is not the replication boundary. Wait for its durable marker.
-    const encoded = await waitFor(
+    await waitFor(
       "replicated MCP completion",
       async () => {
-        const history = await api(cp.baseUrl, "GET", `/api/v1/orbs/${first}/history`);
-        const encoded = JSON.stringify(history.body);
-        return encoded.includes("MCP_CHECK_COMPLETE") ? encoded : null;
+        const history = JSON.stringify(
+          (await api(cp.baseUrl, "GET", `/api/v1/orbs/${first}/history`)).body,
+        );
+        return history.includes("MCP_CHECK_COMPLETE") ? true : null;
       },
       { timeoutMs: 60_000 },
     );
-    expect(encoded).toContain("MCP_RESOURCE_OK");
-    expect(encoded).toContain("test://{id}");
-    expect(encoded).toContain("mcp__fixture__echo");
-    expect(encoded).toContain("nestedCalls");
-    const nestedEcho = page.locator(".tool-nested-call").filter({ hasText: "mcp__fixture__echo" });
-    await expectPage(nestedEcho).toHaveCount(1);
-    await nestedEcho.locator("xpath=ancestor::details[1]/summary").click();
-    await expectPage(nestedEcho).toBeVisible();
+    await expectPage(
+      page.locator(".activity-rail-label", { hasText: "mcp__fixture__echo" }),
+    ).toHaveCount(0);
     expect(encoded).not.toContain("synthetic-first");
     expect(calls.some((call) => call.method === "resources/read")).toBe(true);
     expect(calls.some((call) => call.method === "resources/templates/list")).toBe(true);
@@ -440,7 +500,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
           matchedRuleIndex: number | null;
           status: number;
         }[];
-        return requests.some((request) => request.matchedRuleIndex === 2 && request.status === 200)
+        return requests.some((request) => request.matchedRuleIndex === 3 && request.status === 200)
           ? true
           : null;
       },
@@ -497,7 +557,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
           matchedRuleIndex: number | null;
           status: number;
         }[];
-        return requests.some((request) => request.matchedRuleIndex === 8 && request.status === 200)
+        return requests.some((request) => request.matchedRuleIndex === 9 && request.status === 200)
           ? true
           : null;
       },

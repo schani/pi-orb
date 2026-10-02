@@ -1155,7 +1155,7 @@ export class PiOrbAgent {
         break;
       }
       case "tool_execution_start": {
-        if (this.operationId === null) break;
+        if (this.operationId === null || event.parentToolCallId !== undefined) break;
         this.liveTools.set(event.toolCallId, {
           name: event.toolName,
           revision: 1,
@@ -1172,7 +1172,7 @@ export class PiOrbAgent {
         break;
       }
       case "tool_execution_end": {
-        if (this.operationId === null) break;
+        if (this.operationId === null || event.parentToolCallId !== undefined) break;
         const existing = this.liveTools.get(event.toolCallId);
         const revision = (existing?.revision ?? 0) + 1;
         const state = event.isError ? "failed" : "completed";

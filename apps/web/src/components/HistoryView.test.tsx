@@ -18,6 +18,66 @@ function message(id: string, role: "user" | "assistant", text: string): MessageR
 }
 
 describe("HistoryView turn structure", () => {
+  it("shows nested command and read ranges inside the persisted codemode parent", () => {
+    const call: MessageRecord = {
+      ...message("codemode-call", "assistant", ""),
+      content: [
+        { type: "tool_call", callId: "parent", name: "codemode", arguments: { code: "run()" } },
+      ],
+    };
+    const result: MessageRecord = {
+      id: "codemode-result",
+      parentId: call.id,
+      timestamp: "later",
+      type: "message",
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          callId: "parent",
+          content: [{ type: "text", text: "Parent output" }],
+          nestedCalls: {
+            complete: true,
+            calls: [
+              { id: "parent/1", name: "bash", status: "ok", arguments: { command: "pwd" } },
+              { id: "parent/2", name: "read", status: "ok", arguments: { path: "a.ts" } },
+              {
+                id: "parent/3",
+                name: "read",
+                status: "ok",
+                arguments: { path: "b.ts", offset: 10 },
+              },
+              {
+                id: "parent/4",
+                name: "read",
+                status: "ok",
+                arguments: { path: "c.ts", offset: 20, limit: 30 },
+              },
+            ],
+          },
+        },
+      ],
+      overflow: {},
+    };
+    const html = renderToStaticMarkup(
+      <HistoryView records={[call, result]} liveBlocks={[]} tools={[]} busy={false} />,
+    );
+    expect(html.match(/class="activity-rail-row [^"]*tool-activity-category"/g)).toHaveLength(1);
+    expect(html).toContain("Parent output");
+    for (const detail of [
+      "bash · ok",
+      "read · ok",
+      "&quot;command&quot;: &quot;pwd&quot;",
+      "&quot;path&quot;: &quot;a.ts&quot;",
+      "&quot;path&quot;: &quot;b.ts&quot;",
+      "&quot;offset&quot;: 10",
+      "&quot;path&quot;: &quot;c.ts&quot;",
+      "&quot;offset&quot;: 20",
+      "&quot;limit&quot;: 30",
+    ]) {
+      expect(html).toContain(detail);
+    }
+  });
   it("renders historical alerts as literal reverse bands, even after acknowledgement", () => {
     const record = {
       id: "alert-1",
