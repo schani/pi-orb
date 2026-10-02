@@ -18,16 +18,16 @@ LOCAL_LOCK_HELD=false
 REMOTE_LOCK_HELD=false
 REMOTE_LOCK_GENERATION=""
 KEEP_REMOTE_LOCK=false
-APPLY_ATTEMPTED=false
-IAP_REPAIRED=false
+CUTOVER=""
 
 usage() {
-  echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest]'
+  echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest] [--cutover MANIFEST]'
   echo 'Deploy clean, freshly fetched main, or explicitly validate a recorded deployment without rebuilding/reapplying.'
 }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --yes) AUTO_APPROVE=true ;;
+    --cutover) [ "$#" -ge 2 ] || exit 2; CUTOVER=$2; shift ;;
     --validate) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; VALIDATE=$2; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
@@ -72,7 +72,6 @@ if [ -z "$VALIDATE" ]; then
     }
     migration_owner_env+="@PI_ORB_ORIGINAL_USER_ID=${original_owner_values[0]}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=${original_owner_values[1]}@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=${original_owner_values[2]}"
   fi
-  migration_owner_args+=("--set-env-vars=${migration_owner_env}")
 fi
 
 state() { python3 -m infra.release_state "$1" "$RECORD" "${@:2}"; }
@@ -81,6 +80,8 @@ release_run_check() {
     -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD \
     -u PI_ORB_USER_ID -u PI_ORB_ORIGINAL_USER_ID \
     -u PI_ORB_ORIGINAL_IDENTITY_ISSUER -u PI_ORB_ORIGINAL_IDENTITY_SUBJECT \
+    -u PI_ORB_GOOGLE_IDENTITY_MAPPINGS -u PI_ORB_APP_ORIGIN \
+    -u TF_VAR_google_client_secret -u TF_VAR_cookie_secret \
     "$@"
 }
 stage() {
@@ -88,19 +89,10 @@ stage() {
   state stage "$1"
   state publish
 }
-repair_iap_after_attempt() {
-  if [ "$APPLY_ATTEMPTED" = true ] && [ "$IAP_REPAIRED" != true ]; then
-    if "$INFRA/deploy.sh" --iap-only; then IAP_REPAIRED=true; else
-      echo 'release: IAP repair failed; inspect the browser service before proceeding' >&2
-      return 1
-    fi
-  fi
-}
 cleanup() {
   local status=$?
   trap - EXIT HUP INT TERM
   release_stop_children
-  repair_iap_after_attempt || status=1
   if [ -n "$RECORD" ] && [ -f "$RECORD" ]; then
     state finish "$status" || status=1
     state publish || status=1
@@ -188,17 +180,18 @@ chmod 700 "$RESULT_DIR"
 RECORD="$RESULT_DIR/release.json"
 state init "$release_id" "$head_commit" "$PROJECT" "$REGION" "$ZONE" "$workflow_url"
 export PI_ORB_RELEASE_RECORD="$RECORD"
-if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; else state previous; fi
+if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; elif [ -z "$CUTOVER" ]; then state previous; fi
 state publish
 tofu -chdir="$INFRA" init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET" -backend-config=prefix=static-plane
-export PI_ORB_OPS_URL=$(tofu -chdir="$INFRA" output -raw ops_url)
-export PI_ORB_ISSUER_URL=$(tofu -chdir="$INFRA" output -raw issuer_url)
-"$INFRA/api.sh" /api/v1/system | jq -e '.hostProvider == "gce"' >/dev/null
-# This read proves both the beta command dependency and scoped policy access
-# before any build, migration or apply—not after changing serving services.
-gcloud beta iap web get-iam-policy --project="$PROJECT" --resource-type=cloud-run \
-  --service=pi-orb --region="$REGION" --format=json > "$WORK_DIR/iap-preflight.json"
-jq -e 'type == "object" and ((.bindings // []) | type == "array")' "$WORK_DIR/iap-preflight.json" >/dev/null
+export PI_ORB_APP_ORIGIN=$(tofu -chdir="$INFRA" output -raw issuer_url)
+export PI_ORB_ISSUER_URL="$PI_ORB_APP_ORIGIN"
+if [ -z "$CUTOVER" ]; then
+  "$INFRA/api.sh" /api/v1/system | jq -e '.hostProvider == "gce"' >/dev/null
+else
+  [ -z "$VALIDATE" ] && [ -n "${GITHUB_ACTIONS:-}" ] && [ -n "${PI_ORB_GOOGLE_IDENTITY_MAPPINGS:-}" ] || {
+    echo 'release: first cutover requires independent GitHub execution and explicit verified identity mappings' >&2; exit 1;
+  }
+fi
 
 plan_and_guard() {
   local vars=$1 plan=$2
@@ -214,9 +207,11 @@ plan_and_guard() {
 if [ -z "$VALIDATE" ]; then
   python3 -m infra.release_preflight "$PROJECT"
   # Real scoped permission reads, including bucket IAM, precede expensive builds.
-  state preflight-vars "$WORK_DIR/current.tfvars"
-  plan_and_guard "$WORK_DIR/current.tfvars" "$WORK_DIR/preflight.tfplan"
-  python3 -m infra.release_retire inventory "$RECORD"
+  if [ -z "$CUTOVER" ]; then
+    state preflight-vars "$WORK_DIR/current.tfvars"
+    plan_and_guard "$WORK_DIR/current.tfvars" "$WORK_DIR/preflight.tfplan"
+    python3 -m infra.release_retire inventory "$RECORD"
+  fi
   stage checks
   release_run_check npm ci
   release_run_check npm run test:e2e:install
@@ -236,6 +231,17 @@ if [ -z "$VALIDATE" ]; then
     read -r confirmation
     [ "$confirmation" = deploy ] || exit 1
   fi
+  if [ -n "$CUTOVER" ]; then
+    stage maintenance
+    python3 -m infra.release_cutover verify "$RECORD" "$CUTOVER"
+  fi
+  if [ -n "${PI_ORB_GOOGLE_IDENTITY_MAPPINGS:-}" ]; then
+    # JSON may contain commas and @; use a checked gcloud delimiter.
+    [[ "$PI_ORB_GOOGLE_IDENTITY_MAPPINGS" != *"|"* ]] || exit 2
+    jq -e 'type == "array" and length > 0' <<<"$PI_ORB_GOOGLE_IDENTITY_MAPPINGS" >/dev/null
+    migration_owner_env="${migration_owner_env//@/|}|PI_ORB_GOOGLE_IDENTITY_MAPPINGS=$PI_ORB_GOOGLE_IDENTITY_MAPPINGS"
+  fi
+  migration_owner_args=("--set-env-vars=${migration_owner_env}")
   stage schema
   migration_job="pi-orb-migrate-${release_id:0:47}"
   state migration-job "$migration_job"
@@ -257,15 +263,13 @@ if [ -z "$VALIDATE" ]; then
     --max-retries=0 --task-timeout=300s --cpu=1 --memory=512Mi --execute-now --wait --quiet
   KEEP_REMOTE_LOCK=false
   gcloud run jobs delete "$migration_job" --project="$PROJECT" --region="$REGION" --quiet
-  state check-previous
+  if [ -z "$CUTOVER" ]; then state check-previous; fi
   stage apply
-  APPLY_ATTEMPTED=true
   release_run_child tofu -chdir="$INFRA" apply -input=false "$WORK_DIR/release.tfplan"
 fi
 
 stage repair
 "$INFRA/deploy.sh"
-IAP_REPAIRED=true
 if [ -z "$VALIDATE" ]; then state snapshot; else state check; fi
 
 stage retire

@@ -16,14 +16,8 @@ test("recurring firewall authority excludes the foundation build firewall", () =
   assert.doesNotMatch(block, /compute\.googleapis\.com\/(Network|Subnetwork|Address)/);
 });
 
-test("recurring IAP administration cannot administer tunnels", () => {
-  const block = iam.match(
-    /resource "google_project_iam_member" "deployer_application_iap_admin" \{[\s\S]*?\n\}/,
-  )?.[0];
-  assert(block);
-  assert.match(block, /resource\.type == \\"iap\.googleapis\.com\/WebService\\"/);
-  assert.doesNotMatch(block, /resource\.name/);
-  assert.doesNotMatch(block, /iap_tunnel/);
+test("application IAP administration is absent", () => {
+  assert.doesNotMatch(iam, /resource "google_project_iam_member" "deployer_application_iap_admin"/);
 });
 
 test("release SSH authority is limited to port 22 in build and orb subnets", () => {

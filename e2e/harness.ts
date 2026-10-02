@@ -1,6 +1,7 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createPublicKey, createVerify, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { err, ok, type Result } from "neverthrow";
@@ -557,16 +558,24 @@ function waitForChildListenAnnouncement(
   child: ChildProcess,
   logs: string[],
   timeoutMs: number,
-): Promise<void> {
+): Promise<number> {
   return new Promise((resolve, reject) => {
-    let output = "";
+    let output = logs.join("");
     const timeout = setTimeout(
       () => finish(new Error("timed out waiting for control plane child to announce listening")),
       timeoutMs,
     );
+    const check = (): void => {
+      const match =
+        /^.*\bcontrol plane listening on http:\/\/(?:127\.0\.0\.1|0\.0\.0\.0|localhost):([1-9]\d*)\r?\n/mu.exec(
+          output,
+        );
+      const port = Number(match?.[1]);
+      if (Number.isInteger(port) && port > 0 && port <= 65535) finish(undefined, port);
+    };
     const onData = (chunk: Buffer): void => {
       output += chunk.toString();
-      if (output.includes("control plane listening on ")) finish();
+      check();
     };
     const onError = (error: Error): void => finish(error);
     const onExit = (code: number | null, signal: NodeJS.Signals | null): void =>
@@ -575,19 +584,55 @@ function waitForChildListenAnnouncement(
           `control plane child exited before listening (code ${String(code)}, signal ${String(signal)}): ${logs.join("")}`,
         ),
       );
-    const finish = (error?: Error): void => {
+    const finish = (error?: Error, port = 0): void => {
       clearTimeout(timeout);
       child.stdout?.off("data", onData);
       child.stderr?.off("data", onData);
       child.off("error", onError);
       child.off("exit", onExit);
-      if (error === undefined) resolve();
+      if (error === undefined) resolve(port);
       else reject(error);
     };
     child.stdout?.on("data", onData);
     child.stderr?.on("data", onData);
     child.once("error", onError);
     child.once("exit", onExit);
+    if (child.exitCode !== null || child.signalCode !== null)
+      onExit(child.exitCode, child.signalCode);
+    else check();
+  });
+}
+
+/** Node fetch discards Host overrides; ingress tests need the exact configured Host. */
+export function controlPlaneRequest(
+  url: string,
+  options: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      url,
+      { method: options.method, headers: options.headers },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on("error", reject);
+        response.on("end", () => {
+          const headers = new Headers();
+          for (let i = 0; i < response.rawHeaders.length; i += 2)
+            headers.append(response.rawHeaders[i] ?? "", response.rawHeaders[i + 1] ?? "");
+          const status = response.statusCode ?? 500;
+          resolve(
+            new Response([204, 304].includes(status) ? null : Buffer.concat(chunks), {
+              status,
+              headers,
+            }),
+          );
+        });
+      },
+    );
+    request.setTimeout(10_000, () => request.destroy(new Error(`HTTP deadline: ${url}`)));
+    request.on("error", reject);
+    request.end(options.body);
   });
 }
 
@@ -597,8 +642,14 @@ export async function waitForOwnedControlPlane(
   baseUrl: string,
   timeoutMs = 30_000,
   readinessHeaders?: Record<string, string>,
-): Promise<void> {
-  await waitForChildListenAnnouncement(child, logs, timeoutMs);
+  readinessPath = "/api/v1/projects",
+): Promise<string> {
+  const port = await waitForChildListenAnnouncement(child, logs, timeoutMs);
+  const requested = new URL(baseUrl);
+  if (requested.port !== "0" && Number(requested.port) !== port)
+    throw new Error(`control plane child announced unexpected port ${port}`);
+  requested.port = String(port);
+  baseUrl = requested.origin;
 
   let removeStopListeners = (): void => undefined;
   const stopped = new Promise<never>((_resolve, reject) => {
@@ -621,8 +672,8 @@ export async function waitForOwnedControlPlane(
       waitFor(
         "control plane HTTP",
         async () => {
-          const response = await fetch(
-            `${baseUrl}/api/v1/projects`,
+          const response = await controlPlaneRequest(
+            `${baseUrl}${readinessPath}`,
             readinessHeaders === undefined ? {} : { headers: readinessHeaders },
           );
           return response.ok ? true : null;
@@ -634,6 +685,7 @@ export async function waitForOwnedControlPlane(
   } finally {
     removeStopListeners();
   }
+  return baseUrl;
 }
 
 export async function startControlPlane(options: {
@@ -653,9 +705,11 @@ export async function startControlPlane(options: {
   webDist?: string;
   entry?: string;
   readinessHeaders?: Record<string, string>;
+  readinessPath?: string;
   extraEnv?: Readonly<Record<string, string>>;
   controlledClockEpoch?: number;
 }): Promise<ControlPlaneHandle> {
+  const ownedAuthDir = options.authDir === undefined;
   const authDir = options.authDir ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-auth-"));
   const ownedHostingRoot = options.hostingRoot === undefined;
   const hostingRoot = options.hostingRoot ?? mkdtempSync(join(tmpdir(), "pi-orb-e2e-hosting-"));
@@ -680,6 +734,7 @@ export async function startControlPlane(options: {
           }),
       PORT: String(options.port),
       PI_ORB_AUTH_DIR: authDir,
+      PI_ORB_AUTH_MODE: "local",
       PI_ORB_RUNTIME_IMAGE: options.runtimeImage,
       PI_ORB_HOSTING_STORE: "filesystem",
       PI_ORB_HOSTING_ROOT: hostingRoot,
@@ -703,37 +758,51 @@ export async function startControlPlane(options: {
   child.stdout?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
   child.stderr?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
 
-  const baseUrl = `http://127.0.0.1:${options.port}`;
-  if (clock !== undefined) {
-    const ready = await clock.ready;
-    if (ready.isErr()) {
-      child.kill("SIGTERM");
-      throw new Error(`controlled clock initialization failed: ${ready.error.type}`);
+  const stop = (): Promise<void> =>
+    new Promise((resolve) => {
+      const finish = (): void => {
+        clearTimeout(deadline);
+        clock?.dispose();
+        if (ownedHostingRoot) rmSync(hostingRoot, { recursive: true, force: true });
+        resolve();
+      };
+      const deadline = setTimeout(() => child.kill("SIGKILL"), 10_000);
+      deadline.unref();
+      if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) finish();
+      else {
+        child.once("exit", finish);
+        child.kill("SIGTERM");
+      }
+    });
+  let baseUrl = `http://127.0.0.1:${options.port}`;
+  try {
+    if (clock !== undefined) {
+      const ready = await clock.ready;
+      if (ready.isErr())
+        throw new Error(`controlled clock initialization failed: ${ready.error.type}`);
     }
+    baseUrl = await waitForOwnedControlPlane(
+      child,
+      logs,
+      baseUrl,
+      30_000,
+      options.readinessHeaders,
+      options.readinessPath,
+    );
+  } catch (cause) {
+    await stop();
+    if (ownedAuthDir) rmSync(authDir, { recursive: true, force: true });
+    throw new Error(`control plane startup failed: ${String(cause)}\n${logs.join("")}`, { cause });
   }
-  await waitForOwnedControlPlane(child, logs, baseUrl, 30_000, options.readinessHeaders);
   return {
     process: child,
     ...(clock === undefined ? {} : { clock }),
-    port: options.port,
+    port: Number(new URL(baseUrl).port),
     baseUrl,
     authDir,
     logs,
     hostingRoot,
-    stop: () =>
-      new Promise((resolve) => {
-        const finish = () => {
-          clock?.dispose();
-          if (ownedHostingRoot) rmSync(hostingRoot, { recursive: true, force: true });
-          resolve();
-        };
-        child.once("exit", finish);
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          child.kill("SIGKILL");
-          finish();
-        }, 10_000).unref();
-      }),
+    stop,
   };
 }
 

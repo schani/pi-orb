@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadComposerDraft, saveComposerDraft } from "./composer-draft.ts";
+import {
+  beginSessionRequest,
+  reportSessionPrincipal,
+  resetBrowserSessionForTest,
+} from "./session.ts";
 
 function storageFake() {
   const values = new Map<string, string>();
@@ -14,6 +19,8 @@ describe("composer draft storage", () => {
   let storage: Storage;
 
   beforeEach(() => {
+    resetBrowserSessionForTest();
+    reportSessionPrincipal(beginSessionRequest(), "user:alice");
     storage = storageFake();
     vi.stubGlobal("window", { sessionStorage: storage });
   });
@@ -29,6 +36,17 @@ describe("composer draft storage", () => {
     expect(saveComposerDraft("orb-1", draft).isOk()).toBe(true);
     expect(loadComposerDraft("orb-1")._unsafeUnwrap()).toEqual(draft);
     expect(loadComposerDraft("orb-2")._unsafeUnwrap()).toBeNull();
+  });
+
+  it("isolates account drafts and recovers the original account's draft", () => {
+    const draft = { text: "Alice private draft", mode: "message" as const, images: [] };
+    saveComposerDraft("orb-1", draft);
+    reportSessionPrincipal(beginSessionRequest(), "user:bob");
+    expect(loadComposerDraft("orb-1")._unsafeUnwrap()).toBeNull();
+    saveComposerDraft("orb-1", draft, "user:alice");
+    expect(loadComposerDraft("orb-1")._unsafeUnwrap()).toBeNull();
+    reportSessionPrincipal(beginSessionRequest(), "user:alice");
+    expect(loadComposerDraft("orb-1")._unsafeUnwrap()).toEqual(draft);
   });
 
   it("removes an empty message draft", () => {

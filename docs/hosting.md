@@ -1,5 +1,7 @@
 # System-hosted files
 
+**Implemented 2026-09-19; local qualification passed 2026-09-20; not deployed.** The single `pi-orb-issuer` application uses Google login and stateless sealed cookies. `docs/control-plane-consolidation.md` records decisions and cutover gates; `docs/deployment.md` defines the implemented topology/configuration. Dated live evidence below describes earlier releases, not this implementation.
+
 System-owned static files published by an orb under a durable, orb-specific namespace.
 
 ## Requirement and status
@@ -50,7 +52,7 @@ uploads require end-to-end HTTP/2 or a multi-request upload API; an HTTP/2 clien
 change the server's limit. Transfers also have a five-minute application deadline. GCS itself allows
 [objects up to 5 TiB](https://docs.cloud.google.com/storage/quotas).
 Before cloud release, live validation must observe first response bytes before source EOF, reverse backpressure, cancellation,
-and bounded process memory as file size increases. It cannot promise that unmanaged IAP/proxy
+and bounded process memory as file size increases. It cannot promise that unmanaged platform/proxy
 internals or browser DOM consumers never buffer. Cloud Run documents a 32 MiB limit for HTTP/1
 requests even when streamed ([quotas](https://docs.cloud.google.com/run/quotas)); the deployed
 upload transport and the exact boundary must be verified before cloud release because the
@@ -68,13 +70,13 @@ Hosted storage is a control-plane capability, independent of `OrbHostProvider`. 
 through the same control-plane API and existing runtime bearer; it receives no GCS credential, and
 Docker, process, GCE, or future compute providers gain no hosting methods. The current GCP control
 plane can therefore store bytes in GCS for an orb running on any provider, including local Docker
-or process compute. Cloud download IAP is the control-plane deployment's authentication boundary,
+or process compute. Google application login is the control-plane deployment's authentication boundary,
 not a property of the orb's host provider.
 
 A local control plane stores bytes under a separate durable filesystem root configured independently
 from the orb host provider; the PostgreSQL/PGlite catalog and domain protocol remain unchanged. Its
 files use a separate loopback hostname under the same trusted local access boundary as the existing
-application, without claiming cloud IAP locally. A fully non-GCP remote control plane would need a
+application, using explicit `PI_ORB_AUTH_MODE=local`. A fully non-GCP remote control plane would need a
 durable shared object store when multiple control-plane instances serve it: an upload handled by one
 server must be readable by another. This refers to control-plane servers, not the number of orbs;
 one control plane with many orbs needs only its own durable filesystem. GCS already supplies shared
@@ -119,13 +121,9 @@ deletion removes every object `data` file; tests distinguish that byte namespace
 
 ## Serving and access
 
-**Decided 2026-09-07:** use the existing control-plane application and roles, with no new service.
-The runtime role accepts uploads through the existing per-incarnation bearer. The browser role
-serves `GET` and `HEAD` behind exactly the same IAP access policy as pi-orb; downloads are never
-public. The GCS bucket remains private, and no public bucket permission or signed download URL
-bypasses IAP. Private responses use `Cache-Control: private, no-cache` plus the content hash as
-their `ETag`. There is no public-sharing or CDN contract.
+**Implemented 2026-09-19; not deployed:** the single application accepts uploads with runtime incarnation bearers and serves private GET/HEAD using the files origin's own Google login and host-only sealed cookie. Only unauthenticated top-level file navigation initiates login; HEAD, API and asset requests fail with typed errors. The files host exposes hosted GET/HEAD and login/callback, never ordinary APIs or WebSockets. There is no shared-domain cookie, app-token handoff, signed public download or files logout UI; its fixed twelve-hour session expires independently of app logout. Authentication and exact-Origin checks: `docs/credentials.md`.
 
+The GCS bucket remains private. Responses use `Cache-Control: private, no-cache` plus content-hash `ETag`; there is no public-sharing or CDN contract.
 A separate serving service would allow independent scaling and failure isolation with narrower
 IAM, but the intended load does not justify another process. It would not by itself create browser
 origin isolation: hostname choice, not service topology, determines the same-origin boundary.
@@ -135,20 +133,20 @@ streaming it. Reads carry no lease. Concurrent permanent deletion may explicitly
 the response counts and hashes chunks and never reports a clean successful EOF for truncated or
 mixed bytes. Missing paths
 preserve the requested URL and return a file-specific `404` with a dashboard link. Rendering
-origin is a separate hostname mapped to this same monolith, using the same IAP policy and a host
-route allowlist containing no browser API routes. This contains uploaded code by origin without
+origin is a separate hostname mapped to this same monolith, using an origin-bound session and a host
+route allowlist containing no browser API routes. The configured broker authority is accepted only for runtime routes, with bearer authentication unchanged; local Docker uses `host.docker.internal:<port>`. It is not another browser/files alias (`docs/postmortems/2026-09-19-consolidation-docker-broker-host.md`). This contains uploaded code by origin without
 adding a process; normal cross-origin mutation protection still applies. Rejected: the browser
 origin with a response CSP sandbox excluding `allow-same-origin`; its opaque origin can break
 scripts, modules, and external fetches, and sandboxing alone does not replace CSRF/origin
 hardening. See the
 [same-origin policy](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Same-origin_policy).
 
-The cloud configuration assigns the browser service a `files` traffic tag targeting its latest
-revision. Files use `https://files---pi-orb-<project-number>.<region>.run.app`; the untagged
+The cloud configuration assigns `pi-orb-issuer` a `files` traffic tag targeting its latest
+revision. Files use `https://files---pi-orb-issuer-<project-number>.<region>.run.app`; the untagged
 deterministic origin supplies dashboard links. Both addresses are known before deployment, avoiding
 a self-reference in the service's environment configuration. Cloud Run documents
 [tagged deterministic URLs](https://docs.cloud.google.com/run/docs/triggering/https-request#deterministic-url)
-and [IAP protection across ingress paths](https://docs.cloud.google.com/run/docs/securing/identity-aware-proxy-cloud-run).
+for this origin mapping.
 The [Public Suffix List](https://publicsuffix.org/list/public_suffix_list.dat) includes `*.run.app`,
 so these hosts cannot share a parent-domain cookie. Application API and WebSocket origin checks
 still reject requests from hosted scripts.
@@ -289,7 +287,7 @@ injected source/sink. It does not justify refactoring adapter-owned Node streams
 them. Real stream adapter tests use slow pullers/sinks, aborts, and measured buffered bytes against
 the production pipeline; actual GCS adapter tests use a deterministic HTTP transport, plus an
 opt-in small real-bucket contract for resumable-session and exact-generation semantics. The pending
-cloud-release validation in `TODO.md` must verify the separate-host route allowlist through IAP,
+cloud-release validation in `TODO.md` must verify the separate-host route allowlist through Google application login,
 first bytes before source EOF, reverse backpressure/cancellation, and bounded process memory as size
 increases. DST does not claim those platform properties.
 
@@ -298,7 +296,7 @@ denial for `GET`, `HEAD`, and conditional `GET`; the files hostname cannot serve
 routes and the default hostname cannot bypass the files-host policy. A browser security test proves
 uploaded JavaScript cannot read the app API or cause authenticated mutations. Route/browser tests
 also cover relative assets, directory/index redirects, MIME and cache/security headers, traversal
-rejection, and the resource-specific `404` with dashboard link. Authorized and unauthorized IAP
+rejection, and the resource-specific `404` with dashboard link. Authorized and unauthorized Google-session
 principal checks remain part of the pending cloud-release validation. Quota and multi-file cases are
 added only after questions 50 and 51 select those contracts.
 

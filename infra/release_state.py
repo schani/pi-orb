@@ -144,8 +144,8 @@ class Cloud:
         return self.put(bucket, key, body, generation)
 
 
-SERVICES = ("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")
-PHASES = ("preflight", "checks", "build", "plan", "schema", "apply", "repair", "retire", "activate", "lifecycle", "identity", "complete")
+SERVICES = ("pi-orb-issuer",)
+PHASES = ("preflight", "checks", "build", "plan", "maintenance", "schema", "apply", "repair", "retire", "activate", "lifecycle", "identity", "complete")
 OUTCOMES = ("running", "failed-before-apply", "applied-but-unvalidated", "validated")
 FIELDS = {"schemaVersion", "releaseId", "commit", "runnerCommit", "project", "region", "zone", "workflowUrl", "validatesRelease",
           "startedAt", "finishedAt", "phase", "outcome", "exitCode", "applyAttempted", "gates", "artifacts",
@@ -196,11 +196,11 @@ def valid_id(value):
 
 
 def valid_snapshot(value):
-    if not isinstance(value, list) or len(value) != 4 or not all(isinstance(item, dict) and set(item) == SNAPSHOT_FIELDS and isinstance(item["service"], str) for item in value):
+    if not isinstance(value, list) or len(value) != len(SERVICES) or not all(isinstance(item, dict) and set(item) == SNAPSHOT_FIELDS and isinstance(item["service"], str) for item in value):
         return False
     return {item["service"] for item in value} == set(SERVICES) and all(
         valid_id(item["revision"]) and
-        (item["generation"] is None if item["service"] == "pi-orb-issuer" else type(item["generation"]) is int and 0 < item["generation"] <= 9007199254740991) and
+        (type(item["generation"]) is int and 0 < item["generation"] <= 9007199254740991) and
         isinstance(item["image"], str) and re.fullmatch(r"[a-z0-9./:-]+@sha256:[a-f0-9]{64}", item["image"])
         for item in value)
 
@@ -278,16 +278,17 @@ def summarize_service(name, body):
         return fail("invalid", f"{name} is not fully Ready")
     if len(traffic) != 1 or traffic[0].get("percent") != 100 or traffic[0].get("revisionName") != revision:
         return fail("invalid", f"{name} does not serve exactly one revision")
-    if name == "pi-orb" and (traffic[0].get("tag") != "files" or metadata.get("annotations", {}).get("run.googleapis.com/iap-enabled") != "true"):
-        return fail("invalid", "browser files routing or native IAP is not enabled")
+    if name not in SERVICES or traffic[0].get("tag") != "files":
+        return fail("invalid", "application files routing is not enabled")
     if not isinstance(containers, list) or len(containers) != 1 or not isinstance(containers[0], dict) or not isinstance(containers[0].get("env", []), list) or not all(isinstance(item, dict) for item in containers[0].get("env", [])):
         return fail("invalid", "unexpected Cloud Run container inventory")
+    auth_modes = [item.get("value") for item in containers[0].get("env", []) if item.get("name") == "PI_ORB_AUTH_MODE"]
+    if auth_modes != ["google"] or any(item.get("name") == "PI_ORB_ROLE" for item in containers[0].get("env", [])):
+        return fail("invalid", "production Google authentication is required")
     generations = [item.get("value") for item in containers[0].get("env", []) if item.get("name") == "PI_ORB_HOST_SPEC_GENERATION"]
-    if name != "pi-orb-issuer" and (len(generations) != 1 or not isinstance(generations[0], str) or not generations[0].isdigit()):
+    if (len(generations) != 1 or not isinstance(generations[0], str) or not generations[0].isdigit()):
         return fail("invalid", "missing deployment generation")
-    if name == "pi-orb-issuer" and generations:
-        return fail("invalid", "issuer unexpectedly has lifecycle configuration")
-    return Result({"service": name, "revision": revision, "image": containers[0].get("image"), "generation": None if name == "pi-orb-issuer" else int(generations[0])})
+    return Result({"service": name, "revision": revision, "image": containers[0].get("image"), "generation": int(generations[0])})
 
 
 def snapshot(cloud, project, region):
@@ -319,7 +320,7 @@ def activate(cloud, record):
     current = snapshot(cloud, record["project"], record["region"])
     if current.error:
         return current
-    if current.value != record["serving"] or any(item["image"] != record["artifacts"]["control_plane_image"] or item["service"] != "pi-orb-issuer" and item["generation"] != record["artifacts"]["deploy_generation"] for item in current.value):
+    if current.value != record["serving"] or any(item["image"] != record["artifacts"]["control_plane_image"] or item["generation"] != record["artifacts"]["deploy_generation"] for item in current.value):
         return fail("conflict", "serving deployment changed before activation")
     bucket = f"pi-orb-tfstate-{record['project']}"
     key = "static-plane/releases/active.json"
@@ -348,10 +349,10 @@ def write_vars(path, values):
 
 
 def current_vars(cloud, record, path):
-    service = cloud.json(["run", "services", "describe", "pi-orb", "--project", record["project"], "--region", record["region"]])
+    service = cloud.json(["run", "services", "describe", "pi-orb-issuer", "--project", record["project"], "--region", record["region"]])
     if service.error:
         return service
-    checked = summarize_service("pi-orb", service.value)
+    checked = summarize_service("pi-orb-issuer", service.value)
     if checked.error:
         return checked
     container = service.value["spec"]["template"]["spec"]["containers"][0]
@@ -387,7 +388,7 @@ def recover(cloud, record, release_id):
     current = snapshot(cloud, record["project"], record["region"])
     if current.error:
         return current
-    if any(item["image"] != original["artifacts"]["control_plane_image"] or item["service"] != "pi-orb-issuer" and item["generation"] != original["artifacts"]["deploy_generation"] for item in current.value):
+    if any(item["image"] != original["artifacts"]["control_plane_image"] or item["generation"] != original["artifacts"]["deploy_generation"] for item in current.value):
         return fail("conflict", "deployed services do not match the recorded accepted artifacts")
     if original["serving"] is not None and current.value != original["serving"]:
         return fail("conflict", "deployed revisions changed since the recorded release")
@@ -476,7 +477,7 @@ def main(argv):
                 result = recover(cloud, record, args[0])
                 if not result.error:
                     result = save(path, result.value)
-            elif action == "generation" and len(args) == 1 and record["artifacts"] is not None and record["previousServing"] is not None:
+            elif action == "generation" and len(args) == 1 and record["artifacts"] is not None:
                 authority = cloud.object(f"pi-orb-tfstate-{record['project']}", "static-plane/releases/active.json")
                 if authority.error:
                     result = authority
@@ -484,7 +485,7 @@ def main(argv):
                     result = fail("invalid", "invalid existing activation generation")
                 else:
                     active = 0 if authority.value is None else authority.value["body"]["generation"]
-                    previous = next(item["generation"] for item in record["previousServing"] if item["service"] == "pi-orb")
+                    previous = max((item["generation"] for item in record["previousServing"] or []), default=0)
                     record["artifacts"]["deploy_generation"] = max(record["artifacts"]["deploy_generation"], previous + 1, active + 1)
                     result = write_vars(args[0], record["artifacts"])
                     if not result.error:
@@ -494,7 +495,7 @@ def main(argv):
                 if not result.error:
                     if action in ("check", "check-previous") and result.value != record["previousServing" if action == "check-previous" else "serving"]:
                         result = fail("conflict", "serving deployment no longer matches this release")
-                    elif action == "snapshot" and (record["artifacts"] is None or any(item["image"] != record["artifacts"]["control_plane_image"] or (item["service"] != "pi-orb-issuer" and item["generation"] != record["artifacts"]["deploy_generation"]) for item in result.value)):
+                    elif action == "snapshot" and (record["artifacts"] is None or any(item["image"] != record["artifacts"]["control_plane_image"] or (item["generation"] != record["artifacts"]["deploy_generation"]) for item in result.value)):
                         result = fail("conflict", "applied services do not match accepted artifacts")
                     elif action not in ("check", "check-previous"):
                         record["previousServing" if action == "previous" else "serving"] = result.value

@@ -61,7 +61,7 @@ command_orb() {
 }
 
 for command in jq python3 uuidgen; do command -v "$command" >/dev/null || fail "missing $command"; done
-export PI_ORB_OPS_URL=${PI_ORB_OPS_URL:-$(cd "$DIR" && tofu output -raw ops_url)}
+export PI_ORB_APP_ORIGIN=${PI_ORB_APP_ORIGIN:-$(cd "$DIR" && tofu output -raw app_url)}
 PROJECT_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 ORB_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 fixture_record project "$PROJECT_ID" requested

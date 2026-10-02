@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
+import config from "./vitest.config.js";
 
 interface ProbeEvent {
   readonly event:
@@ -13,6 +14,8 @@ interface ProbeEvent {
     | "lifecycle-start"
     | "lifecycle-end";
   readonly fixture?: string;
+  readonly isMainThread?: boolean;
+  readonly inheritedCert?: string;
 }
 
 const deadlineMs = 10_000;
@@ -44,6 +47,28 @@ function readEvents(path: string): ProbeEvent[] {
 }
 
 it("orders the actual E2E projects and gives lifecycle files one worker", async () => {
+  expect(
+    config.test?.projects?.map((project) => {
+      if (
+        typeof project !== "object" ||
+        project === null ||
+        !("test" in project) ||
+        !project.test
+      ) {
+        throw new Error("E2E project must have inline test config");
+      }
+      return {
+        pool: project.test.pool,
+        maxWorkers: project.test.maxWorkers,
+        groupOrder: project.test.sequence?.groupOrder,
+        testTimeout: project.test.testTimeout,
+        hookTimeout: project.test.hookTimeout,
+      };
+    }),
+  ).toEqual([
+    { pool: "threads", maxWorkers: 1, groupOrder: 1, testTimeout: 720_000, hookTimeout: 720_000 },
+    { pool: "forks", maxWorkers: 1, groupOrder: 2, testTimeout: 720_000, hookTimeout: 720_000 },
+  ]);
   const root = resolve(import.meta.dirname, "..");
   const directory = mkdtempSync(join(root, ".vitest-sequence-probe-"));
   const eventsPath = join(directory, "events.jsonl");
@@ -73,20 +98,24 @@ it("orders the actual E2E projects and gives lifecycle files one worker", async 
   writeFileSync(
     frontendPath,
     `import { it } from "vitest";\n` +
+      `import { isMainThread } from "node:worker_threads";\n` +
       `import { barrier, record } from ${JSON.stringify(helperPath)};\n` +
       `it("frontend owner", async () => {\n` +
-      `  record({ event: "frontend-start" });\n` +
+      `  record({ event: "frontend-start", isMainThread });\n` +
       `  await barrier(${JSON.stringify(frontendRelease)});\n` +
       `  record({ event: "frontend-end" });\n` +
       `});\n`,
   );
   const lifecycleSource = (fixture: string) =>
     `import { openSync, closeSync, unlinkSync } from "node:fs";\n` +
+    `import { spawnSync } from "node:child_process";\n` +
+    `import { isMainThread } from "node:worker_threads";\n` +
     `import { it } from "vitest";\n` +
     `import { barrier, record } from ${JSON.stringify(helperPath)};\n` +
     `it("lifecycle owner ${fixture}", async () => {\n` +
     `  const lock = openSync(${JSON.stringify(lockPath)}, "wx");\n` +
-    `  record({ event: "lifecycle-start", fixture: ${JSON.stringify(fixture)} });\n` +
+    `  const inheritedCert = spawnSync(process.execPath, ["-p", "process.env.NODE_EXTRA_CA_CERTS"], { env: { ...process.env, NODE_EXTRA_CA_CERTS: "probe-cert" }, encoding: "utf8" }).stdout.trim();\n` +
+    `  record({ event: "lifecycle-start", fixture: ${JSON.stringify(fixture)}, isMainThread, inheritedCert });\n` +
     `  try { await barrier(${JSON.stringify(releasePath(fixture))}); } finally {\n` +
     `    closeSync(lock); unlinkSync(${JSON.stringify(lockPath)});\n` +
     `  }\n` +
@@ -115,10 +144,7 @@ it("orders the actual E2E projects and gives lifecycle files one worker", async 
       `] } });\n`,
   );
 
-  const config = (await import("./vitest.config.ts")).default.test;
-  expect(config?.maxWorkers).toBe(1);
-  expect((config?.projects?.[0] as { test: { pool: string } })?.test.pool).toBe("threads");
-  expect((config?.projects?.[1] as { test: { pool: string } })?.test.pool).toBe("forks");
+  expect(config.test?.maxWorkers).toBe(1);
 
   const child = spawn(resolve(root, "node_modules/.bin/vitest"), ["run", "--config", configPath], {
     cwd: root,
@@ -189,6 +215,11 @@ it("orders the actual E2E projects and gives lifecycle files one worker", async 
     expect(setupEnd).toBeGreaterThan(setupStart);
     expect(setupEnd < frontendStart || setupStart > frontendEnd).toBe(true);
     expect(firstLifecycle).toBeGreaterThan(frontendEnd);
+    expect(events[frontendStart]?.isMainThread).toBe(false);
+    expect(events.filter((event) => event.event === "lifecycle-start")).toEqual([
+      expect.objectContaining({ isMainThread: true, inheritedCert: "probe-cert" }),
+      expect.objectContaining({ isMainThread: true, inheritedCert: "probe-cert" }),
+    ]);
     let activeLifecycleFiles = 0;
     let peakLifecycleFiles = 0;
     for (const event of events) {
@@ -203,7 +234,9 @@ it("orders the actual E2E projects and gives lifecycle files one worker", async 
   } catch (error) {
     child.kill("SIGKILL");
     await exited;
-    throw new Error(`${String(error)}\nVitest probe output:\n${output}`);
+    throw new Error(
+      `${String(error)}\nProbe events: ${JSON.stringify(readEvents(eventsPath))}\nVitest probe output:\n${output}`,
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

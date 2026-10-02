@@ -40,7 +40,6 @@ locals {
   foundation                = data.terraform_remote_state.foundation.outputs
   control_plane_email       = local.foundation.control_plane_service_account_email
   orb_vm_email              = local.foundation.orb_vm_service_account_email
-  issuer_email              = local.foundation.issuer_service_account_email
   artifact_registry_repo    = local.foundation.artifact_registry_repository
   image_builder_email       = local.foundation.image_builder_service_account_email
   foundation_deployer_email = local.foundation.deployer_service_account_email

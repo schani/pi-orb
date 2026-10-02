@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      cutover_manifest:
+        description: 'First consolidation only: reviewed maintenance manifest JSON; old writers must already be retired'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -81,12 +86,23 @@ jobs:
         id: release
         env:
           VALIDATE_RELEASE: ${{ inputs.validate_release }}
+          CUTOVER_MANIFEST: ${{ inputs.cutover_manifest }}
+          TF_VAR_machine_subject: ${{ vars.PI_ORB_MACHINE_SUBJECT }}
+          TF_VAR_google_client_id: ${{ vars.PI_ORB_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.PI_ORB_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_cookie_secret: ${{ secrets.PI_ORB_COOKIE_SECRET }}
+          PI_ORB_GOOGLE_IDENTITY_MAPPINGS: ${{ secrets.PI_ORB_GOOGLE_IDENTITY_MAPPINGS }}
           PI_ORB_RELEASE_RESULT_DIR: ${{ runner.temp }}/release-result
           PI_ORB_USER_ID: ${{ vars.PI_ORB_USER_ID }}
         run: |
           set -euo pipefail
           args=(--yes)
           if [ -n "$VALIDATE_RELEASE" ]; then args+=(--validate "$VALIDATE_RELEASE"); fi
+          if [ -n "$CUTOVER_MANIFEST" ]; then
+            umask 077
+            printf '%s' "$CUTOVER_MANIFEST" > "$RUNNER_TEMP/cutover.json"
+            args+=(--cutover "$RUNNER_TEMP/cutover.json")
+          fi
           exec ./infra/release.sh "${args[@]}"
       - name: Prepare allowlisted result and job summary
         if: always()

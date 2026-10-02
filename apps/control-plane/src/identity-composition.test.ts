@@ -1,120 +1,216 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import websocket from "@fastify/websocket";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
-import { ok, okAsync } from "neverthrow";
-import { afterEach, describe, expect, it } from "vitest";
-import type { UserStore } from "./domain/identity.ts";
-import { registerAuthenticatedBrowserRoutes, requirePrincipal } from "./http/browser-identity.ts";
+import { errAsync, okAsync } from "neverthrow";
+import { describe, expect, it } from "vitest";
+import { DEFAULT_ISSUER_CONSTANTS } from "./domain/constants.ts";
+import { registerAuthenticatedBrowserRoutes } from "./http/browser-identity.ts";
+import { createHostingAccessPolicy, registerHostingAccessGuard } from "./http/hosting-access.ts";
 import {
-  createRequestPrincipalResolver,
+  JWKS_PATH,
+  OPENID_CONFIGURATION_PATH,
+  registerIssuerRoutes,
+} from "./http/issuer-routes.ts";
+import {
+  createGoogleRequestPrincipalResolver,
   readRequestIdentityConfig,
 } from "./identity-composition.ts";
+import { FakeSigningKeyStore } from "./testkit/workload-identity.ts";
 
-const task = new NoSimulationTask("request identity composition", false);
-const ids = { next: () => ok("00000000-0000-4000-8000-000000000001") };
-
-describe("request identity role composition", () => {
-  const apps: Array<ReturnType<typeof Fastify>> = [];
-  afterEach(async () => {
-    await Promise.all(apps.splice(0).map((app) => app.close()));
-  });
-
-  it("fails browser configuration without a valid direct Cloud Run audience", () => {
-    expect(readRequestIdentityConfig("browser", {}).isErr()).toBe(true);
+const environment = {
+  PI_ORB_AUTH_MODE: "google",
+  PI_ORB_GOOGLE_CLIENT_ID: "client",
+  PI_ORB_GOOGLE_CLIENT_SECRET: "secret",
+  PI_ORB_COOKIE_SECRET: "01234567890123456789012345678901",
+  PI_ORB_MACHINE_SUBJECT: "machine",
+  PI_ORB_APP_ORIGIN: "https://app.test",
+  PI_ORB_HOSTING_ORIGIN: "https://files.test",
+};
+describe("application identity composition", () => {
+  it("fails closed in production and requires all Google configuration", () => {
     expect(
-      readRequestIdentityConfig("browser", {
-        PI_ORB_IAP_AUDIENCE: "https://service.run.app",
-      }).isErr(),
+      readRequestIdentityConfig({ K_SERVICE: "prod", PI_ORB_AUTH_MODE: "local" }).isErr(),
+    ).toBe(true);
+    expect(readRequestIdentityConfig({ PI_ORB_AUTH_MODE: "local" }).isOk()).toBe(true);
+    expect(readRequestIdentityConfig({}).isErr()).toBe(true);
+    expect(readRequestIdentityConfig(environment).isOk()).toBe(true);
+    for (const value of [
+      "http://app.test",
+      "https://app.test/path",
+      "https://files.test:8443",
+      "https://user@app.test",
+      "https://app.test?x",
+    ])
+      expect(readRequestIdentityConfig({ ...environment, PI_ORB_APP_ORIGIN: value }).isErr()).toBe(
+        true,
+      );
+    expect(
+      readRequestIdentityConfig({ ...environment, PI_ORB_COOKIE_SECRET: "short" }).isErr(),
     ).toBe(true);
     expect(
-      readRequestIdentityConfig("browser", {
-        PI_ORB_IAP_AUDIENCE: "/projects/123/locations/us-central1/services/pi-orb",
+      readRequestIdentityConfig({ ...environment, PI_ORB_MACHINE_SUBJECT: "  " }).isErr(),
+    ).toBe(true);
+    for (const key of Object.keys(environment))
+      expect(readRequestIdentityConfig({ ...environment, [key]: "" }).isErr()).toBe(true);
+  });
+  it("separates bearer and cookie authority; unsafe cookies require exact Origin", async () => {
+    const app = Fastify();
+    await app.register(websocket);
+    registerHostingAccessGuard(
+      app,
+      createHostingAccessPolicy({
+        appOrigin: environment.PI_ORB_APP_ORIGIN,
+        filesOrigin: environment.PI_ORB_HOSTING_ORIGIN,
       })._unsafeUnwrap(),
-    ).toEqual({
-      kind: "browser",
-      audience: "/projects/123/locations/us-central1/services/pi-orb",
+      environment.PI_ORB_APP_ORIGIN,
+    );
+    const keys = new FakeSigningKeyStore();
+    keys.seedKey({
+      kid: "key",
+      secretVersion: "secret",
+      publicJwk: { kty: "RSA", kid: "key", n: "modulus", e: "AQAB" },
+      state: "active",
+      createdAt: 0,
+      activatedAt: 0,
+      retiredAt: null,
+      rowVersion: 0,
     });
-  });
-
-  it("uses the fixed local identity and ignores spoofed identity headers", async () => {
-    const seen: unknown[] = [];
-    const users: UserStore = {
-      getUser: () => okAsync(null),
-      resolveUser: (_task, identity, input) => {
-        seen.push(identity);
-        return okAsync({ id: input.id, email: identity.email });
-      },
-    };
-    const config = readRequestIdentityConfig("all", {})._unsafeUnwrap();
-    expect(config.kind).toBe("local");
-    if (config.kind === "none") return;
-    const resolver = createRequestPrincipalResolver(task, config, users, ids)._unsafeUnwrap();
-    const app = Fastify();
-    apps.push(app);
-    registerAuthenticatedBrowserRoutes(app, resolver, (scope) => {
-      scope.get("/session", async (request) => requirePrincipal(request)._unsafeUnwrap());
+    registerIssuerRoutes(app, new NoSimulationTask("identity scopes", false), {
+      keys,
+      constants: DEFAULT_ISSUER_CONSTANTS,
+      issuerUrl: environment.PI_ORB_APP_ORIGIN,
     });
-    await app.ready();
-    const response = await app.inject({
-      url: "/session",
-      headers: { "x-goog-iap-jwt-assertion": "spoof", "x-goog-authenticated-user-email": "spoof" },
-    });
-    expect(response.statusCode).toBe(200);
-    expect(seen).toEqual([{ issuer: "pi-orb:local", subject: "developer", email: null }]);
-  });
-
-  it("requires a fixed ops principal and bypasses the users store", async () => {
-    expect(readRequestIdentityConfig("ops", {}).isErr()).toBe(true);
-    const config = readRequestIdentityConfig("ops", {
-      PI_ORB_OPS_PRINCIPAL: "machine",
-    })._unsafeUnwrap();
-    expect(config.kind).toBe("ops");
-    if (config.kind === "none") return;
-    let storeReads = 0;
-    const resolver = createRequestPrincipalResolver(
-      task,
-      config,
+    app.get("/", async () => "shell");
+    let upgrades = 0;
+    let writes = 0;
+    const resolver = createGoogleRequestPrincipalResolver(
+      { appOrigin: environment.PI_ORB_APP_ORIGIN, filesOrigin: environment.PI_ORB_HOSTING_ORIGIN },
       {
-        getUser: () => okAsync(null),
-        resolveUser: () => {
-          storeReads += 1;
-          return okAsync({ id: "wrong", email: null });
-        },
+        authenticateSession: () =>
+          okAsync({ principal: { kind: "user", user: { id: "u", email: null } }, expiresAt: 1234 }),
+        authenticateMachine: (token) =>
+          token === "valid"
+            ? okAsync({ kind: "ops", id: "machine" })
+            : errAsync({ type: "unauthenticated", message: "secret" }),
       },
-      ids,
-    )._unsafeUnwrap();
-    const app = Fastify();
-    apps.push(app);
+    );
     registerAuthenticatedBrowserRoutes(app, resolver, (scope) => {
-      scope.get("/session", async (request) => requirePrincipal(request)._unsafeUnwrap());
+      scope.get("/api/read", async (request) => ({
+        principal: request.principal,
+        expiry: request.authExpiresAt,
+      }));
+      scope.post("/api/write", async () => {
+        writes++;
+        return {};
+      });
+      for (const path of ["/live", "/terminal"])
+        scope.get(path, { websocket: true }, (socket) => {
+          upgrades++;
+          socket.close();
+        });
     });
-    await app.ready();
-    expect((await app.inject({ url: "/session" })).json()).toEqual({ kind: "ops", id: "machine" });
-    expect(storeReads).toBe(0);
-  });
-
-  it("leaves runtime and issuer outside request identity", () => {
-    expect(readRequestIdentityConfig("runtime", {})._unsafeUnwrap()).toEqual({ kind: "none" });
-    expect(readRequestIdentityConfig("issuer", {})._unsafeUnwrap()).toEqual({ kind: "none" });
-  });
-
-  it("keeps every real browser family inside the authenticated scope", () => {
-    const main = readFileSync(resolve("apps/control-plane/src/main.ts"), "utf8");
-    const scopeStart = main.indexOf("registerAuthenticatedBrowserRoutes(");
-    const scopeEnd = main.indexOf("if (runtimeRole)", scopeStart);
-    expect(scopeStart).toBeGreaterThan(-1);
-    expect(scopeEnd).toBeGreaterThan(scopeStart);
-    const scope = main.slice(scopeStart, scopeEnd);
-    for (const registration of [
-      "registerBrowserHostingRoutes(browser",
-      "registerLiveProxy(browser",
-      "registerRoutes(browser",
-      "registerMcpOAuthRoutes(browser",
-      "registerMcpRoutes(browser",
-      "registerWorkspaceUploadRoutes(browser",
-    ]) {
-      expect(scope).toContain(registration);
+    for (const url of ["/", OPENID_CONFIGURATION_PATH, JWKS_PATH]) {
+      for (const origin of ["null", "https://files.test", "https://arbitrary.test"]) {
+        const response = await app.inject({ url, headers: { host: "app.test", origin } });
+        expect(response.statusCode).toBe(200);
+        expect(response.headers["access-control-allow-credentials"]).toBeUndefined();
+        expect(
+          (await app.inject({ url, headers: { host: "files.test", origin } })).statusCode,
+        ).toBe(404);
+      }
     }
+    expect((await app.inject({ url: "/api/read", headers: { host: "app.test" } })).statusCode).toBe(
+      401,
+    );
+    expect(
+      (
+        await app.inject({
+          url: "/api/read",
+          headers: { host: "files.test", authorization: "Bearer valid" },
+        })
+      ).statusCode,
+    ).toBe(404);
+    const headers = { host: "app.test", cookie: "__Host-pi-orb-session=sealed" };
+    expect((await app.inject({ url: "/api/read", headers })).json().expiry).toBe(1234);
+    for (const origin of [undefined, "null", "https://files.test", "https://evil.test"]) {
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/write",
+            headers: { ...headers, ...(origin ? { origin } : {}) },
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+    expect(writes).toBe(0);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/write",
+          headers: { ...headers, origin: "https://app.test" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/write",
+          headers: { host: "app.test", authorization: "Bearer valid" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    for (const origin of ["null", "https://files.test", "https://arbitrary.test"]) {
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/write",
+            headers: { ...headers, origin, authorization: "Bearer valid" },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: "/api/write",
+            headers: { ...headers, origin, authorization: "Bearer invalid" },
+          })
+        ).statusCode,
+      ).toBe(401);
+    }
+    expect(writes).toBe(5);
+    expect(
+      (
+        await app.inject({
+          url: "/api/read",
+          headers: { ...headers, authorization: "Bearer invalid" },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          url: "/api/read",
+          headers: { ...headers, host: "evil.test", "x-forwarded-host": "app.test" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    for (const path of ["/live", "/terminal"]) {
+      for (const origin of [undefined, "null", "https://files.test"])
+        await expect(
+          app.injectWS(path, { headers: { ...headers, ...(origin ? { origin } : {}) } }),
+        ).rejects.toThrow("403");
+    }
+    expect(upgrades).toBe(0);
+    const socket = await app.injectWS("/live", {
+      headers: { ...headers, origin: "https://app.test" },
+    });
+    socket.close();
+    expect(upgrades).toBe(1);
+    await app.close();
   });
 });

@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 const frontendFiles = [
+  "e2e/application-auth.e2e.test.ts",
   "e2e/*-frontend.e2e.test.ts",
   "e2e/frontend-*.e2e.test.ts",
   "e2e/transcript-cache-*.e2e.test.ts",
@@ -22,7 +23,8 @@ export default defineConfig({
           name: "frontend",
           include: frontendFiles,
           pool: "threads",
-          sequence: { groupOrder: 0 },
+          maxWorkers: 1,
+          sequence: { groupOrder: 1 },
         },
       },
       {
@@ -33,7 +35,8 @@ export default defineConfig({
           globalSetup: ["e2e/global-setup.ts"],
           exclude: frontendFiles,
           pool: "forks",
-          sequence: { groupOrder: 1 },
+          maxWorkers: 1,
+          sequence: { groupOrder: 2 },
         },
       },
     ],

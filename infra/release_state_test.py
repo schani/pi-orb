@@ -16,7 +16,7 @@ def service(name, generation=42):
         "status": {"observedGeneration": 2, "latestReadyRevisionName": name + "-new", "latestCreatedRevisionName": name + "-new",
                    "conditions": [{"type": "Ready", "status": "True"}],
                    "traffic": [{"percent": 100, "revisionName": name + "-new", "tag": "files"}]},
-        "spec": {"template": {"spec": {"containers": [{"image": IMAGE, "env": [] if name == "pi-orb-issuer" else [{"name": "PI_ORB_HOST_SPEC_GENERATION", "value": str(generation)}]}]}}},
+        "spec": {"template": {"spec": {"containers": [{"image": IMAGE, "env": [{"name": "PI_ORB_AUTH_MODE", "value": "google"}, {"name": "PI_ORB_HOST_SPEC_GENERATION", "value": str(generation)}]}]}}},
     }
 
 
@@ -30,7 +30,7 @@ def record():
                       "native_image_resource": "projects/test-project/global/images/native", "native_image_id": "123",
                       "workspace_image_resource": "projects/test-project/global/images/workspace", "workspace_image_id": "456"},
         "previousServing": None,
-        "serving": [{"service": name, "revision": name + "-new", "image": IMAGE, "generation": None if name == "pi-orb-issuer" else 42} for name in SERVICES],
+        "serving": [{"service": name, "revision": name + "-new", "image": IMAGE, "generation": 42} for name in SERVICES],
         "retirement": {"after": STAMP, "operations": [], "revisions": ["pi-orb-old"], "zeroes": {"pi-orb-old": {"active": STAMP, "idle": STAMP}}},
         "fixtures": [], "migrationJob": None, "nativeCleanup": [],
     }
@@ -172,13 +172,19 @@ class ReleaseStateTest(unittest.TestCase):
         cloud.source["serving"][0]["revision"] = "pi-orb-different"
         self.assertIsNotNone(recover(cloud, record(), "release-42").error)
 
-    def test_issuer_is_pinned_by_image_and_revision_not_lifecycle_configuration(self):
+    def test_application_is_pinned_by_image_revision_and_generation(self):
         self.assertIsNone(snapshot(FakeCloud(), "test-project", "us-central1").error)
         invalid = service("pi-orb")
         invalid["metadata"]["annotations"] = {}
         self.assertIsNotNone(summarize_service("pi-orb", invalid).error)
         for body in (None, {}, {"metadata": None}, {"status": []}, {"spec": {"template": None}}):
             self.assertIsNotNone(summarize_service("pi-orb", body).error)
+
+    def test_production_auth_fails_closed(self):
+        for mode in (None, "local", ""):
+            body = service("pi-orb-issuer")
+            body["spec"]["template"]["spec"]["containers"][0]["env"][0]["value"] = mode
+            self.assertIsNotNone(summarize_service("pi-orb-issuer", body).error)
 
     def test_success_cannot_be_recorded_before_complete(self):
         with tempfile.TemporaryDirectory() as directory:

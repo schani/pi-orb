@@ -8,8 +8,7 @@ import { assembleJwks } from "../domain/signing-keys.ts";
  * The public OIDC issuer surface (docs/workload-identity.md, "Issuer and
  * signing requirements"): a discovery document and the key set a relying party
  * verifies minted tokens against. Both are public, cacheable, and contain no
- * secret — which is what lets `PI_ORB_ROLE=issuer` run as the deployment's only
- * unauthenticated service, with no secret-store access and no orb data.
+ * secret. These handlers receive no secret-store or orb-data dependency.
  *
  * Every value served here comes from configuration and from the signing-key
  * rows. Nothing is derived from the request: the issuer URL is part of the
@@ -120,14 +119,11 @@ export function registerIssuerRoutes(
       // it is the right rule where the retrier is ours. Here the caller is an
       // external verifier that cannot act on the distinction at all: 500 only
       // tells it "do not come back", which is exactly wrong for the case this
-      // route actually hits. `PI_ORB_ROLE=issuer` is the one role that never
-      // runs migrations, so a not-yet-migrated `oidc_signing_keys` reaches us
-      // as SQLSTATE 42P01 → `invariant`, and that first-deploy race against the
-      // browser role's migration is genuinely retryable — a 500 would burn the
-      // deployment's first minutes on verifiers that already gave up.
+      // route actually hits: public key availability must recover after a
+      // repaired backing-store failure.
       //
       // The body is a fixed string on purpose: this is the deployment's one
-      // public unauthenticated route, and a raw store message here would hand
+      // public key route, and a raw store message here would hand
       // SQL fragments to the internet (TODO.md tracks the same sanitization
       // for the authenticated routes).
       reply.header("cache-control", "no-store");

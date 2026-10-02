@@ -8,11 +8,14 @@ const task = new NoSimulationTask("session probe routes", false);
 
 describe("browser session probe", () => {
   let app: ReturnType<typeof Fastify>;
+  let cookieSession = false;
 
   beforeEach(async () => {
+    cookieSession = false;
     app = Fastify();
     app.decorateRequest("principal", undefined);
     app.addHook("onRequest", async (request: FastifyRequest) => {
+      if (cookieSession) request.authExpiresAt = Date.now() + 60_000;
       request.principal = {
         kind: "user",
         user: { id: "00000000-0000-4000-8000-000000000001", email: "dev@example.test" },
@@ -23,6 +26,12 @@ describe("browser session probe", () => {
   });
 
   afterEach(async () => app.close());
+
+  it("offers logout only for a selected cookie session", async () => {
+    cookieSession = true;
+    const response = await app.inject({ method: "GET", url: "/api/v1/session" });
+    expect(response.json().logoutAvailable).toBe(true);
+  });
 
   it("returns the request-local principal without caching", async () => {
     const response = await app.inject({ method: "GET", url: "/api/v1/session" });

@@ -18,6 +18,7 @@ export type RequestPrincipal =
   | { readonly kind: "ops"; readonly id: string };
 
 export type IdentityVerificationError =
+  | { readonly type: "forbidden"; readonly message: string }
   | { readonly type: "unauthenticated"; readonly message: string }
   | { readonly type: "identity_unavailable"; readonly message: string };
 

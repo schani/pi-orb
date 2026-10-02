@@ -3,20 +3,20 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("identity deployment contract", () => {
-  it("configures direct-run IAP audience only on browser and fixed debug principal on ops", () => {
+  it("uses Google authentication and immutable machine subject on the surviving issuer", () => {
     const run = readFileSync(resolve("infra/run.tf"), "utf8");
-    expect(run).toContain('name  = "PI_ORB_IAP_AUDIENCE"');
-    expect(run).toContain(
-      'value = "/projects/$' +
-        "{local.foundation.project_number}/locations/$" +
-        "{var.region}/services/$" +
-        '{local.browser_service_name}"',
-    );
-    expect(run).toContain('name  = "PI_ORB_OPS_PRINCIPAL"');
-    expect(run).toContain(
-      'value = "serviceAccount:pi-orb-debug@$' + '{var.project}.iam.gserviceaccount.com"',
-    );
-    expect(run.match(/PI_ORB_IAP_AUDIENCE/gu)).toHaveLength(1);
-    expect(run.match(/PI_ORB_OPS_PRINCIPAL/gu)).toHaveLength(1);
+    expect(
+      [...run.matchAll(/resource "google_cloud_run_v2_service" "([^"]+)"/gu)].map(
+        (match) => match[1],
+      ),
+    ).toEqual(["issuer"]);
+    expect(run).toMatch(/PI_ORB_AUTH_MODE"\s+value = "google"/u);
+    expect(run).toContain("var.machine_subject");
+    expect(run).toContain("local.control_plane_email");
+    expect(run).not.toMatch(/PI_ORB_ROLE|PI_ORB_IAP_AUDIENCE|PI_ORB_OPS_PRINCIPAL/u);
+    const auth = readFileSync(resolve("infra/auth.tf"), "utf8");
+    expect(auth).toContain("length(var.cookie_secret) >= 32");
+    expect(auth).toContain("google_secret_manager_secret_version");
+    expect(run).toContain("google_logging_project_exclusion.google_callback");
   });
 });
