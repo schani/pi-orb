@@ -1,7 +1,16 @@
 diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
-index 40014b3..01b1e7b 100644
+index 40014b3..6d7aad5 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
+@@ -1,7 +1,7 @@
+ import { clampThinkingLevel } from "../models.js";
+ import { registerSessionResourceCleanup } from "../session-resources.js";
+ import { combineAbortSignals } from "../utils/abort-signals.js";
+-import { appendAssistantMessageDiagnostic, createAssistantMessageDiagnostic, formatThrownValue, } from "../utils/diagnostics.js";
++import { appendAssistantMessageDiagnostic, formatThrownValue, } from "../utils/diagnostics.js";
+ import { formatProviderError, normalizeProviderError } from "../utils/error-body.js";
+ import { AssistantMessageEventStream } from "../utils/event-stream.js";
+ import { headersToRecord } from "../utils/headers.js";
 @@ -30,6 +30,38 @@ const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]
  const WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE = 1009;
  const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
@@ -89,7 +98,30 @@ index 40014b3..01b1e7b 100644
                          const aborted = options?.signal?.aborted;
                          const connectionLimitBeforeStart = !websocketStarted && isWebSocketConnectionLimitReachedError(error);
                          const previousResponseNotFound = isPreviousResponseNotFoundError(error);
-@@ -240,6 +285,8 @@ export const stream = (model, context, options) => {
+@@ -228,18 +273,24 @@ export const stream = (model, context, options) => {
+                         if (aborted || (isCodexNonTransportError(error) && !connectionLimitBeforeStart)) {
+                             throw error;
+                         }
+-                        appendAssistantMessageDiagnostic(output, createAssistantMessageDiagnostic("provider_transport_failure", error, {
+-                            configuredTransport: transport,
+-                            ...(websocketStarted ? {} : { fallbackTransport: "sse" }),
+-                            eventsEmitted: websocketStarted,
+-                            phase: websocketStarted ? "after_message_stream_start" : "before_message_stream_start",
+-                            requestBytes: new TextEncoder().encode(bodyJson).byteLength,
+-                        }));
++                        appendAssistantMessageDiagnostic(output, {
++                            ...failureFacts(error, "websocket", websocketStarted ? "after_message_stream_start" : "before_message_stream_start", websocketAttempt, undefined, options?.codexBrokerDiagnostics),
++                            type: "provider_transport_failure",
++                            details: {
++                                configuredTransport: ["auto", "websocket", "sse"].includes(transport) ? transport : "auto",
++                                ...(websocketStarted ? {} : { fallbackTransport: "sse" }),
++                                eventsEmitted: websocketStarted,
++                                phase: websocketStarted ? "after_message_stream_start" : "before_message_stream_start",
++                                requestBytes: new TextEncoder().encode(bodyJson).byteLength,
++                            },
++                        });
+                         recordWebSocketFailure(cacheSessionId, error);
+                         if (websocketStarted) {
                              throw error;
                          }
                          recordWebSocketSseFallback(cacheSessionId);
@@ -98,7 +130,7 @@ index 40014b3..01b1e7b 100644
                          break;
                      }
                  }
-@@ -257,6 +304,9 @@ export const stream = (model, context, options) => {
+@@ -257,6 +308,9 @@ export const stream = (model, context, options) => {
              let lastError;
              const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
              for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -108,7 +140,7 @@ index 40014b3..01b1e7b 100644
                  if (options?.signal?.aborted) {
                      throw new Error("Request was aborted");
                  }
-@@ -264,7 +314,10 @@ export const stream = (model, context, options) => {
+@@ -264,7 +318,10 @@ export const stream = (model, context, options) => {
                      const headerTimeoutSignal = httpTimeoutMs !== undefined && httpTimeoutMs > 0 ? AbortSignal.timeout(httpTimeoutMs) : undefined;
                      const combinedSignal = combineAbortSignals([options?.signal, headerTimeoutSignal]);
                      try {
@@ -120,7 +152,7 @@ index 40014b3..01b1e7b 100644
                              method: "POST",
                              headers: sseHeaders,
                              body: sseBody,
-@@ -281,6 +334,7 @@ export const stream = (model, context, options) => {
+@@ -281,6 +338,7 @@ export const stream = (model, context, options) => {
                          combinedSignal.cleanup();
                      }
                      await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
@@ -128,7 +160,7 @@ index 40014b3..01b1e7b 100644
                      if (response.ok) {
                          break;
                      }
-@@ -299,6 +353,7 @@ export const stream = (model, context, options) => {
+@@ -299,6 +357,7 @@ export const stream = (model, context, options) => {
                          statusText: response.statusText,
                      });
                      const info = await parseErrorResponse(fakeResponse);
@@ -136,7 +168,7 @@ index 40014b3..01b1e7b 100644
                      throw new Error(info.friendlyMessage || info.message);
                  }
                  catch (error) {
-@@ -325,6 +380,7 @@ export const stream = (model, context, options) => {
+@@ -325,6 +384,7 @@ export const stream = (model, context, options) => {
              if (!response.body) {
                  throw new Error("No response body");
              }
@@ -144,18 +176,22 @@ index 40014b3..01b1e7b 100644
              if (!startEmitted) {
                  startEmitted = true;
                  stream.push({ type: "start", partial: output });
-@@ -344,6 +400,10 @@ export const stream = (model, context, options) => {
+@@ -344,7 +404,13 @@ export const stream = (model, context, options) => {
                  delete block.customInput;
              }
              output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+-            output.errorMessage = formatProviderError(normalizeProviderError(error));
 +            if (output.stopReason === "error") {
 +                if (websocketFailure && failureTransport !== "websocket") appendAssistantMessageDiagnostic(output, failureFacts(websocketFailure.error, "websocket", websocketFailure.phase, websocketFailure.attempt, undefined, options?.codexBrokerDiagnostics));
 +                if (failureTransport) appendAssistantMessageDiagnostic(output, failureFacts(error, failureTransport, (failureTransport === "sse" ? sseStarted : startEmitted) ? "after_message_stream_start" : "before_message_stream_start", failureAttempt, httpFailure, options?.codexBrokerDiagnostics));
 +            }
-             output.errorMessage = formatProviderError(normalizeProviderError(error));
++            output.errorMessage = error instanceof WebSocketCloseError
++                ? `WebSocket closed ${Number.isInteger(error.code) && error.code >= 1000 && error.code <= 4999 ? error.code : "unknown"}`
++                : formatProviderError(normalizeProviderError(error));
              stream.push({ type: "error", reason: output.stopReason, error: output });
              stream.end();
-@@ -365,6 +425,7 @@ export const streamSimple = (model, context, options) => {
+         }
+@@ -365,6 +431,7 @@ export const streamSimple = (model, context, options) => {
      return stream(model, context, {
          ...base,
          reasoningEffort,
@@ -163,7 +199,7 @@ index 40014b3..01b1e7b 100644
      });
  };
  // ============================================================================
-@@ -1241,11 +1302,12 @@ async function parseErrorResponse(response) {
+@@ -1241,11 +1308,12 @@ async function parseErrorResponse(response) {
      const raw = await response.text();
      let message = raw || response.statusText || "Request failed";
      let friendlyMessage;
@@ -177,7 +213,7 @@ index 40014b3..01b1e7b 100644
              if (/usage_limit_reached|usage_not_included|rate_limit_exceeded/i.test(code) || response.status === 429) {
                  const plan = err.plan_type ? ` (${err.plan_type.toLowerCase()} plan)` : "";
                  const mins = err.resets_at
-@@ -1258,7 +1320,7 @@ async function parseErrorResponse(response) {
+@@ -1258,7 +1326,7 @@ async function parseErrorResponse(response) {
          }
      }
      catch { }

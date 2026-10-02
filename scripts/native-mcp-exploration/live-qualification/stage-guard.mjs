@@ -15,7 +15,7 @@ const patches = new Map([
   ],
   [
     "@earendil-works+pi-ai+1.0.0.patch",
-    "343595d54de7fa7eaf0fb47a9172b759dcb5a262763133abbc409993f66f5e57",
+    "e503e81db607ca52be72d4f1cc67cc1a52c4321212cf4013f569978d08fb9830",
   ],
 ]);
 
@@ -78,6 +78,11 @@ export async function guardInstalledStage(stage, manifest) {
   assert.equal(manifest.bundleSha, sha(join(stage, "initial-auth.mjs")));
   assert.equal(manifest.hostBundleSha, manifest.bundleSha);
   assert.equal(sha(join(stage, "package-lock.json")), manifest.lockSha);
+  assert.equal(
+    manifest.lockSha,
+    "fddf8c7ecb31b0786bcacea89adddc6c45ab097a557e65e8c75dc90a16897694",
+    "qualified lock mismatch",
+  );
   assert.equal(manifest.patches.length, patches.size);
   for (const [name, qualifiedSha] of patches) {
     const entry = manifest.patches.find((p) => p.source === `patches/${name}`);

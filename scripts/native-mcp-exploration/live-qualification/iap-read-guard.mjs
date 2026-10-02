@@ -10,8 +10,36 @@ export async function guard(stage) {
   const manifest = JSON.parse(readFileSync(join(stage, "manifest.json")));
   assert.equal(
     manifest.lockSha,
+    "fddf8c7ecb31b0786bcacea89adddc6c45ab097a557e65e8c75dc90a16897694",
+  );
+  assert.equal(
+    manifest.sourceLockSha,
     "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8",
   );
+  const vendor = "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz";
+  assert.equal(
+    sha(join(stage, vendor)),
+    "eb67747b526d862e6bd0c959a330b7897ece86ebed3a21e7cf846730e293e509",
+    "vendor archive mismatch",
+  );
+  assert.equal(
+    manifest.files[vendor],
+    sha(join(stage, vendor)),
+    "vendor archive missing from manifest",
+  );
+  const lock = JSON.parse(readFileSync(join(stage, "package-lock.json")));
+  const reference = `file:./${vendor}`;
+  assert.equal(
+    lock.packages[""].dependencies["@earendil-works/pi-coding-agent"],
+    reference,
+    "vendor reference mismatch",
+  );
+  assert.equal(
+    lock.packages["node_modules/@earendil-works/pi-coding-agent"].resolved,
+    reference,
+    "vendor reference mismatch",
+  );
+  assert.equal(sha(join(stage, "package-lock.json")), manifest.lockSha);
   for (const [file, hash] of Object.entries(manifest.files))
     assert.equal(sha(join(stage, file)), hash, file);
   const meta = JSON.parse(readFileSync(join(stage, "bundle-meta.json")));

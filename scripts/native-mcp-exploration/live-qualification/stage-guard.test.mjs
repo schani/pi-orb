@@ -19,9 +19,13 @@ async function fixture() {
   );
   await writeFile(join(stage, "initial-auth.mjs"), "export const isolated = true;\n");
   await writeFile(join(stage, "bundle-meta.json"), JSON.stringify({ outputs: {} }));
-  await cp(
+  const sourceLock = readFileSync(
     join(root, "scripts/native-mcp-exploration/live-qualification/package-lock.json"),
+    "utf8",
+  );
+  await writeFile(
     join(stage, "package-lock.json"),
+    sourceLock.replaceAll("file:../../../vendor/", "file:./vendor/"),
   );
   for (const name of names) await cp(join(root, "patches", name), join(stage, "patches", name));
   const manifest = {
@@ -79,6 +83,14 @@ test("stage rejects a changed SDK patch even when archive and manifest agree", a
     manifest.patches[0].archiveSha = sha(file);
     manifest.patches[0].sourceSha = sha(file);
     await assert.rejects(guardInstalledStage(stage, manifest), /qualified patch mismatch/);
+  });
+});
+
+test("installed stage rejects a substituted lock and matching mutable manifest", async () => {
+  await withFixture(async (stage, manifest) => {
+    await writeFile(join(stage, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}');
+    manifest.lockSha = sha(join(stage, "package-lock.json"));
+    await assert.rejects(guardInstalledStage(stage, manifest), /qualified lock mismatch/);
   });
 });
 

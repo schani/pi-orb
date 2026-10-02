@@ -23,8 +23,10 @@ export async function guard(stage) {
   );
   assert.equal(
     manifest.source.patches["@earendil-works+pi-ai+1.0.0.patch"],
-    "343595d54de7fa7eaf0fb47a9172b759dcb5a262763133abbc409993f66f5e57",
+    "e503e81db607ca52be72d4f1cc67cc1a52c4321212cf4013f569978d08fb9830",
   );
+  for (const [name, pinned] of Object.entries(manifest.source.patches))
+    assert.equal(sha(join(stage, "patches", name)), pinned, `qualified patch mismatch: ${name}`);
   for (const [file, hash] of Object.entries(manifest.files))
     assert.equal(sha(join(stage, file)), hash, file);
   const lock = JSON.parse(readFileSync(join(stage, "package-lock.json")));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
 import { connect, isIP, Socket } from "node:net";
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 
 function fixtureIp(value) {
   if (isIP(value) !== 4) return false;
@@ -60,7 +60,7 @@ export function installFixtureTransport(f, { forwardPort = 18880 } = {}) {
     if (url.protocol !== "http:" || !fixtureTarget(f, url.hostname, Number(url.port || 80)))
       return originalFetch(input, init);
     announce();
-    return originalFetch(input, { ...init, dispatcher });
+    return undiciFetch(input, { ...init, dispatcher });
   };
   Socket.prototype.connect = function (...args) {
     const normalized = Array.isArray(args[0]);

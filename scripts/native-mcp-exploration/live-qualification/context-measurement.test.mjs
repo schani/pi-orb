@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
@@ -140,10 +140,8 @@ test("generic output receives exactly one sanitized argument, never SDK context"
 });
 
 test("pinned SDK fixture manually emits hooks for independent root/child active tool profiles, not a model pipeline", async () => {
-  const stage = join(
-    resolve(import.meta.dirname, "../../.."),
-    ".context/dedicated-oauth-reauthorization/corrected-2/package-2/staging",
-  );
+  const stage = process.env["STAGED_INITIAL_AUTH"];
+  assert.ok(stage, "STAGED_INITIAL_AUTH must name a clean-installed qualification stage");
   const sdkPath = join(stage, "node_modules/@earendil-works/pi-coding-agent");
   const sdk = await import(pathToFileURL(join(sdkPath, "dist/index.js")).href);
   assert.equal(JSON.parse(await readFile(join(sdkPath, "package.json"), "utf8")).version, "1.0.0");

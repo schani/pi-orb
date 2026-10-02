@@ -538,6 +538,16 @@ describe("Pi SDK broker provider contract (pinned SDK version)", () => {
       expect(
         JSON.stringify(first.diagnostics?.filter((item) => item.type === "codex_failure")),
       ).not.toContain("raw-secret");
+      const { mapPiEntry } = await import("../pi/mapping.ts");
+      const history = mapPiEntry({
+        id: "synthetic-close",
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        type: "message",
+        message: first,
+      });
+      expect(history.isOk()).toBe(true);
+      if (history.isOk()) expect(JSON.stringify(history.value)).not.toContain("raw-secret-reason");
       const second = await runtime.complete(model, context, { transport: "websocket" });
       expect(second.stopReason).toBe("error");
       expect(second.diagnostics).toContainEqual(
@@ -594,6 +604,22 @@ describe("Pi SDK broker provider contract (pinned SDK version)", () => {
         }),
         expect.objectContaining({ transport: "sse", status: 401, code: "invalid_api_key" }),
       ]);
+      const { mapPiEntry } = await import("../pi/mapping.ts");
+      const mapped = mapPiEntry({
+        id: "synthetic-ws",
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        type: "message",
+        message: outcome,
+      });
+      expect(mapped.isOk()).toBe(true);
+      if (mapped.isOk()) {
+        const jsonl = `${JSON.stringify(mapped.value)}\n`;
+        expect(jsonl).toContain("provider_transport_failure");
+        expect(jsonl).not.toContain("raw-secret-reason");
+        expect(jsonl).not.toContain("raw-secret-provider-text");
+      }
+      expect(JSON.stringify(outcome.diagnostics)).not.toContain("raw-secret-reason");
     } finally {
       for (const socket of sockets.clients) socket.terminate();
       await new Promise<void>((resolve) => sockets.close(() => server.close(() => resolve())));

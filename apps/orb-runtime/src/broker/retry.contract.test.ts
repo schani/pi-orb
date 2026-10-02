@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -100,7 +100,7 @@ it("AgentSession retries a started WS 1011 once, retains failures, and never rep
     await runtime.refresh({ allowNetwork: false });
     const model = runtime.getModels("openai-codex")[0];
     if (!model) throw new Error("no Codex model");
-    const manager = SessionManager.inMemory(dir);
+    const manager = SessionManager.create(dir, join(dir, "sessions"));
     ({ session } = await createAgentSession({
       cwd: dir,
       agentDir: join(dir, "agent"),
@@ -187,7 +187,7 @@ it("AgentSession retries a started WS 1011 once, retains failures, and never rep
       ).toBe(true);
     }
     expect(failures[0]?.message.role === "assistant" && failures[0].message.errorMessage).toBe(
-      "WebSocket closed 1011 SECRET_WS_REASON",
+      "WebSocket closed 1011",
     );
     expect(failures[1]?.message.role === "assistant" && failures[1].message.errorMessage).toBe(
       "SECRET_PROVIDER_TEXT",
@@ -207,6 +207,15 @@ it("AgentSession retries a started WS 1011 once, retains failures, and never rep
     expect(JSON.stringify([diagnostics, contexts])).not.toContain("SECRET_PROVIDER_TEXT");
     expect(JSON.stringify([diagnostics, contexts])).not.toContain("SECRET_WS_REASON");
     expect(JSON.stringify([diagnostics, contexts])).not.toContain(token);
+    const file = manager.getSessionFile();
+    expect(file).toBeDefined();
+    const persisted = readFileSync(file as string, "utf8");
+    expect(persisted).not.toContain("SECRET_WS_REASON");
+    const reopened = SessionManager.open(file as string, join(dir, "sessions"), dir);
+    const replicated = reopened.getEntries().map((entry) => mapPiEntry(entry)._unsafeUnwrap());
+    expect(JSON.stringify(replicated)).not.toContain("SECRET_WS_REASON");
+    expect(replicated.filter((entry) => entry.type === "message" && entry.failure)).toHaveLength(2);
+    expect(persisted).toContain("SECRET_PROVIDER_TEXT");
   } finally {
     session?.dispose();
     for (const socket of sockets.clients) socket.terminate();

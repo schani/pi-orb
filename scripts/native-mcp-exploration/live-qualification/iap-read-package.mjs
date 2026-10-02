@@ -12,6 +12,7 @@ assert.ok(output.startsWith(join(root, ".context/iap-consent-20261001") + sep));
 await mkdir(output); // Immutable output: existing artifacts cannot be replaced.
 const stage = join(output, "staging");
 await mkdir(join(stage, "patches"), { recursive: true });
+await mkdir(join(stage, "vendor"));
 const fixture = JSON.parse(
   await readFile(join(root, ".context/iap-consent-20261001/fixture.json")),
 );
@@ -25,6 +26,15 @@ assert.deepEqual(
 );
 for (const file of ["package.json", "package-lock.json"])
   await cp(join(local, file), join(stage, file));
+const vendor = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
+await cp(join(root, "vendor", vendor), join(stage, "vendor", vendor));
+for (const file of ["package.json", "package-lock.json"]) {
+  const path = join(stage, file);
+  const source = await readFile(path, "utf8");
+  const original = `file:../../../vendor/${vendor}`;
+  assert.ok(source.includes(original), `missing vendor reference: ${file}`);
+  await writeFile(path, source.replaceAll(original, `file:./vendor/${vendor}`));
+}
 for (const file of ["iap-read.test.mjs", "iap-read-guard.mjs", "iap-read-preflight.mjs"])
   await cp(join(local, file), join(stage, file));
 const patches = [
@@ -68,6 +78,7 @@ await run(
 const files = [
   "package.json",
   "package-lock.json",
+  `vendor/${vendor}`,
   "iap-read.mjs",
   "bundle-meta.json",
   "iap-read.test.mjs",
@@ -78,6 +89,7 @@ const files = [
 const manifest = {
   projectId: fixture.projectId,
   fixtureSha: sha(join(root, ".context/iap-consent-20261001/fixture.json")),
+  sourceLockSha: sha(join(local, "package-lock.json")),
   lockSha: sha(join(stage, "package-lock.json")),
   files: Object.fromEntries(files.map((x) => [x, sha(join(stage, x))])),
 };
