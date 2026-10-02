@@ -1,0 +1,13 @@
+# Frontend session fixture leak — 2026-10-02
+
+## Failure and cause
+
+PR #51 source `95da476` passed 2,458 unit tests (nine skips), 36 Node/65 Python/24 native infrastructure tests and 102 real-PostgreSQL tests. Its first [CI E2E run 36966450680](https://github.com/schani/pi-orb/actions/runs/36966450680), merge checkout `8d0335b` (same tree), reported 26 failures among 76 frontend-session cases, then was cancelled at 40 minutes without final suite results or failure artifacts. A controlled local process-backend run reproduced the first phone readiness failure after 45 passes. Later private-route failures cascaded; orb creation waited for an unreachable POST until its 720-second watchdog. Evidence: `.context/consolidation/rebase-2db5225/ci-95da476/{summary.md,e2e.log}` and the retained local first-failure log.
+
+The preceding desktop lifecycle-notice test expired the **Vite server's** mock session; closing its Playwright page could not restore server state. Main's implicit `GET /` login had hidden the leak; the rebased explicit Google-login mock did not. `bc18a68` restores the test-owned session via `POST /__pi_orb_fixture/session/restore` in `finally`, checks success, then closes the page. Production auth and timeout values did not change. Do not weaken admission assertions or extend timeouts to mask this prerequisite.
+
+Focused process-backend checks passed: Chromium session 76/76 and Chromium/WebKit mobile 28/28. [CI 36970792467](https://github.com/schani/pi-orb/actions/runs/36970792467) passed 2,458 unit tests (nine skips), and [Docker E2E 36970792471](https://github.com/schani/pi-orb/actions/runs/36970792471) passed 257 tests (zero skips), at exact merge checkout `fc2b701` (parents `667ea55` and `bc18a68`, matching branch tree). These qualify that **old tree only**. The later rebase onto pinned `19d30253` has 53 affected runtime/web tests green; full unit, PostgreSQL and Docker/browser qualification of its new tree is pending. No production deployment or migration occurred.
+
+## Independent Docker boundary
+
+The first local default-Docker attempt failed before tests on missing cached parent `7w0nf2i8ynv80j0bpbar8iuri`; the old store's cause is unknown. Preserve that failure and the independent fresh-store boundary; a passing new build does not repair the old store (`docs/postmortems/2026-09-15-docker-snapshot-validation-failure.md`). The later fresh-store PostgreSQL failure has a distinct cause (`docs/postmortems/2026-10-02-docker-daemon-umask.md`).
