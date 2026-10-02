@@ -21,6 +21,15 @@ function gate() {
 
 const scenario = process.env.SCENARIO;
 const useRuntime = process.env.USE_RUNTIME === "1";
+const toolModelScenario = scenario.startsWith("model-tool");
+const profileModelScenario = scenario.endsWith("profile") && scenario.startsWith("model-");
+const lockedModelScenario = scenario.endsWith("locked") && scenario.startsWith("model-");
+const modelPolicyScenario =
+  toolModelScenario || profileModelScenario || lockedModelScenario || scenario === "model-inherit";
+const expectedPolicyModel =
+  scenario === "model-inherit"
+    ? { provider: "liveness-probe", id: "probe" }
+    : { provider: "openai-codex", id: "gpt-6.1-sol" };
 // The characterization install must not shadow production's SDK when both
 // locked dependency trees are present (the README deliberately installs both).
 const sdk = useRuntime
@@ -81,7 +90,7 @@ writeFileSync(
 );
 writeFileSync(
   join(agentDir, "agents", "probe.md"),
-  `---\nname: probe\ndescription: Deterministic liveness child\ntools: ${useMcpTool ? "mcp__approved__probe" : "probe_gate"}\n---\nExecute the test task.\n`,
+  `---\nname: probe\ndescription: Deterministic liveness child\ntools: ${useMcpTool ? "mcp__approved__probe" : "probe_gate"}\n${profileModelScenario || lockedModelScenario ? "model: SoL\n" : ""}${lockedModelScenario || scenario === "model-inherit" ? "locked: [model]\n" : ""}---\nExecute the test task.\n`,
 );
 writeFileSync(
   join(agentDir, "settings.json"),
@@ -177,7 +186,14 @@ function until(predicate) {
   return pending.promise;
 }
 const saw = (event) => trace.some((row) => row.event === event);
-const waitEvent = (event) => until(() => saw(event));
+const waitEvent = async (event) => {
+  await until(() => saw(event) || saw("model:error"));
+  assert.equal(
+    saw("model:error"),
+    false,
+    trace.find((row) => row.event === "model:error")?.message,
+  );
+};
 const labelFor = (id) => [...ids].find(([, value]) => value === id)?.[0] ?? "new";
 const terminalRecordExists = (id) =>
   manager
@@ -255,8 +271,9 @@ function transcriptToolNames(messages) {
 function scriptedStream(model, context, options) {
   const stream = createAssistantMessageEventStream();
   const allText = JSON.stringify(context.messages);
-  const child =
-    resumePhase && allText.includes("CONTINUE_CHILD")
+  const child = transcriptToolNames(context.messages).includes("subagent")
+    ? null
+    : resumePhase && allText.includes("CONTINUE_CHILD")
       ? "two"
       : allText.includes("CHILD_one")
         ? "one"
@@ -280,11 +297,21 @@ function scriptedStream(model, context, options) {
       ])
         assert.equal(names.includes(rootOnly), false);
       if (credentialScenario) assert.equal(options.apiKey === "fake-access-2", true);
-      note(`model:child:${child}`, { model: model.id });
+      note(`model:child:${child}`, { model: model.id, provider: model.provider });
+      if (modelPolicyScenario)
+        assert.deepEqual({ provider: model.provider, id: model.id }, expectedPolicyModel);
+      if (scenario === "parent-first" || (scenario === "resume-cancel" && resumePhase))
+        assert.deepEqual(
+          { provider: model.provider, id: model.id },
+          { provider: "liveness-probe", id: "probe" },
+        );
       if (scenario === "model-selection" || scenario === "model-unavailable")
-        assert.equal(
-          model.id,
-          child === "one" && scenario === "model-selection" ? "gpt-6.1-sol" : "gpt-6-sol",
+        assert.deepEqual(
+          { provider: model.provider, id: model.id },
+          {
+            provider: "openai-codex",
+            id: child === "one" && scenario === "model-selection" ? "gpt-6.1-sol" : "gpt-6-sol",
+          },
         );
       if (scenario === "mcp-profile" && toolResults.length === 1) {
         const result = JSON.stringify(toolResults[0]);
@@ -347,17 +374,54 @@ text("denied:" + denied + ";js:" + (6 * 7));`,
       message = output(model, text("parent processed child outcome"), "stop");
     } else if (toolResults.length === 0) {
       note("model:root-launch");
-      message = output(model, call("launch_children", {}), "toolUse");
+      message = output(
+        model,
+        toolModelScenario
+          ? call("subagent", {
+              subagent_type: "probe",
+              prompt: "CHILD_one",
+              description: "one",
+              run_in_background: true,
+              ...(lockedModelScenario
+                ? { model: "sol-new" }
+                : profileModelScenario
+                  ? {}
+                  : { model: "SoL" }),
+            })
+          : call("launch_children", {}),
+        "toolUse",
+      );
     } else {
-      note("model:parent-final-entered");
-      await parentGate.promise;
-      message = output(model, text("parent finished its own turn"), "stop");
+      assert.equal(toolResults.at(-1).isError, false, JSON.stringify(toolResults.at(-1).content));
+      if (toolModelScenario) {
+        const receipt = toolResults.at(-1);
+        assert.equal(receipt.details.requestedModel, "SoL");
+        assert.deepEqual(receipt.details.resolvedModel, expectedPolicyModel);
+        if (receipt.toolName === "subagent") {
+          ids.set("one", receipt.details.agentId);
+          note("children:admitted");
+          message = output(
+            model,
+            call("get_subagent_result", { agent_id: ids.get("one") }),
+            "toolUse",
+          );
+        } else {
+          assert.equal(receipt.toolName, "get_subagent_result");
+          note("assert:background-and-retrieval-model-receipts");
+        }
+      }
+      if (!message) {
+        note("model:parent-final-entered");
+        await parentGate.promise;
+        message = output(model, text("parent finished its own turn"), "stop");
+      }
     }
     stream.push({ type: "start", partial: message });
     stream.push({ type: "done", reason: message.stopReason, message });
     stream.end();
   };
   void ResultAsync.fromPromise(run(), (error) => ({ message: String(error) })).mapErr((error) => {
+    note("model:error", { message: error.message });
     const message = { ...output(model, [], "error"), errorMessage: error.message };
     stream.push({ type: "error", reason: "error", error: message });
     stream.end();
@@ -503,7 +567,7 @@ manager = SessionManager.create(root, join(root, "sessions"));
     settingsManager,
     sessionManager: manager,
     resourceLoader: loader,
-    tools: ["launch_children", "subagent"],
+    tools: ["launch_children", "subagent", ...(toolModelScenario ? ["get_subagent_result"] : [])],
     customTools: [
       {
         name: "launch_children",
@@ -522,7 +586,9 @@ manager = SessionManager.create(root, join(root, "sessions"));
                 ? { model: label === "one" ? "SoL" : "OPENAI-CODEX/GPT-6-SOL" }
                 : scenario === "model-unavailable"
                   ? { model: "openai-codex/gpt-6-sol" }
-                  : {}),
+                  : lockedModelScenario || scenario === "model-inherit"
+                    ? { model: "sol-new" }
+                    : {}),
             });
             ids.set(label, id);
           }
@@ -532,7 +598,7 @@ manager = SessionManager.create(root, join(root, "sessions"));
                 () => service.spawn("probe", "INVALID_CHILD", { model: "SoL" }),
                 /Model unavailable/,
               );
-            for (const selector of ["sol-new", "openai-codex/gpt-6.2-sol", "gpt-6-sol"])
+            for (const selector of ["", "sol-new", "openai-codex/gpt-6.2-sol", "gpt-6-sol"])
               assert.throws(
                 () => service.spawn("probe", "INVALID_CHILD", { model: selector }),
                 /Model not found/,
@@ -771,6 +837,15 @@ if (scenario === "model-unavailable") {
     true,
   );
 }
+if (modelPolicyScenario) {
+  await until(() => terminalRows.length === 1);
+  const receipt = manager
+    .getEntries()
+    .find((entry) => entry.type === "custom" && entry.customType === "subagents:record");
+  assert.equal(receipt.data.requestedModel, scenario === "model-inherit" ? undefined : "SoL");
+  assert.deepEqual(receipt.data.resolvedModel, expectedPolicyModel);
+  assert.ok(trace.some((row) => row.event === "model:child:one"));
+}
 if (scenario === "model-selection") {
   await until(() => terminalRows.length === 2);
   const records = manager
@@ -912,6 +987,14 @@ if (scenario === "resume-cancel") {
     .filter((entry) => entry.type === "custom" && entry.customType === "subagents:record");
   assert.equal(records.at(-1)?.data.requestedModel, undefined);
   assert.deepEqual(records.at(-1)?.data.resolvedModel, { provider: "liveness-probe", id: "probe" });
+  assert.ok(
+    trace.some(
+      (row) =>
+        row.event === "model:child:two" &&
+        row.provider === "liveness-probe" &&
+        row.model === "probe",
+    ),
+  );
   note("assert:explicit-resume-owns-fresh-cancellation-and-operation");
 }
 

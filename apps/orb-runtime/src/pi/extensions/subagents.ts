@@ -116,7 +116,11 @@ export function createSubagentsExtension(
       cwd,
       childExtensions,
       shouldWake: ({ id }) => host.mayWakeSubagent(id),
-      resolveModel: resolveSubagentModel,
+      resolveModel: (selector, registry) =>
+        resolveSubagentModel(selector, registry).match(
+          (model) => model,
+          (error) => error.message,
+        ),
     });
     pi.on("session_start", () => {
       const service = getSubagentsService();

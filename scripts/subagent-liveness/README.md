@@ -1,6 +1,6 @@
 # Subagent package / Pi runtime contracts
 
-Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 1.0.0; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.6.tgz` fork plus `patches/@gotgenes+pi-subagents+21.7.0-orb.6.patch` for child-codemode allowlists and reserved MCP namespaces. The lost local fork commit is identified by the artifact's `FORK.json`; its source was recovered to `/workspace/rebase-backup/fork-orb.6/package/src`, not its Git history.
+Recovered from orb `b18fc524-632d-42cd-ab90-8b2ac55de80d`, then extended for the production adapter. Local runtime integration pins Pi 1.0.0; historical qualification used 0.87.1. The isolated characterization install pins unmodified gotgenes 21.7.0; evidence also retains the original 21.4.2 run. The runtime uses the immutable `vendor/gotgenes-pi-subagents-21.7.0-orb.7.tgz` fork plus `patches/@gotgenes+pi-subagents+21.7.0-orb.7.patch` for child-codemode allowlists and reserved MCP namespaces. Source lives in `/workspace/pi-packages`, with full history in `/workspace/rebase-backup/pi-packages-orb.7.bundle`.
 
 ```bash
 npm ci
@@ -43,16 +43,16 @@ Promises and explicit model/tool/lifecycle checkpoints establish ordering; the 6
 
 ## Fork reproduction
 
-The upstream base is `b3b6159399f541fd0623f65818557dd3e707a34f` (21.7.0). The fork owns the source commits; pi-orb keeps the installed artifact rather than duplicate patches. The source pin is [`1658ccb15a1c6cc8e88c9d16181910b111001964`](https://github.com/schani/pi-packages/commit/1658ccb15a1c6cc8e88c9d16181910b111001964), published on `pi-orb-integration`. From a fresh pi-orb checkout:
+The upstream base is `b3b6159399f541fd0623f65818557dd3e707a34f` (21.7.0). The fork owns source; pi-orb keeps the artifact, not duplicate source patches. Current `orb.7` pin `fc7134ba0694674e8b3546dd7b967815610f8f70` is local and unpublished. It fixes locked-profile SDK selection, profile/background/get-result model receipts, and explicitly empty model selectors. Six empty-selector regression tests were added; five failed before the fix. Fork validation passes **82 files / 1,785 tests**, typecheck and lint. Rebuild using the preserved bundle:
 
 ```bash
 npm ci
-git clone https://github.com/schani/pi-packages.git .context/pi-packages-fork
-git -C .context/pi-packages-fork checkout --detach 1658ccb15a1c6cc8e88c9d16181910b111001964
+git clone /workspace/rebase-backup/pi-packages-orb.7.bundle .context/pi-packages-fork
+git -C .context/pi-packages-fork checkout --detach fc7134ba0694674e8b3546dd7b967815610f8f70
 scripts/subagent-liveness/build-fork.sh .context/pi-packages-fork
 ```
 
-The recipe requires source HEAD `1658ccb15a1c6cc8e88c9d16181910b111001964` and a clean package tree. It copies the installed declaration from root `node_modules`, packages source/license/provenance, and bundles public extension/service entry points with esbuild 0.28.1; dependencies remain external. The TypeBox import maps to the SDK's `typebox` package. The root lockfile records artifact integrity. The vendored artifact installs without a fork checkout.
+The recipe requires pinned HEAD, a clean package tree and esbuild 0.28.2. It copies the installed public declaration from root `node_modules`, packages source/license/provenance, and bundles extension/service entry points with external dependencies. The TypeBox import maps to the SDK's `typebox` package. The lockfile records artifact integrity; vendored installs need no fork checkout. Remote source reproduction remains unavailable until this commit is published to `schani/pi-packages`.
 
 ## Evidence limits
 

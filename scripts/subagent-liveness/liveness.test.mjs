@@ -17,6 +17,12 @@ const scenarios = [
     ? [
         "model-selection",
         "model-unavailable",
+        "model-tool",
+        "model-tool-profile",
+        "model-tool-locked",
+        "model-profile",
+        "model-locked",
+        "model-inherit",
         "resume-cancel",
         "credential-refresh",
         "credential-failure",
