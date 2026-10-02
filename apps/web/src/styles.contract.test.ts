@@ -179,8 +179,17 @@ describe("orb workspace layout contract", () => {
   });
 
   it("keeps the project index beside the transcript with plain hover rows", () => {
-    expect(rule(".orb-index")).toContain("position: sticky");
-    expect(rule(".orb-index")).toContain("max-height: 100dvh");
+    expect(rule(".orb-index")).toContain("position: fixed");
+    expect(rule(".orb-index")).toContain("width: 236px");
+    expect(rule(".orb-index")).toContain("overflow-y: auto");
+    expect(rule(".orb-main")).toContain("grid-column: 2");
+    expect(rule(".app:has(> .session-ribbon) .orb-index")).toContain("top: var(--ribbon)");
+    expect(rule(".app:has(> .session-ribbon) .orb-index")).toContain(
+      "height: calc(100dvh - var(--ribbon))",
+    );
+    const phone = css.slice(css.indexOf("@media (max-width: 600px)"));
+    expect(phone).toMatch(/\.orb-main \{\s*grid-column: 1;/);
+    expect(phone).toMatch(/\.orb-index \{\s*display: none;/);
     expect(rule(".orb-index")).toContain("border-right: 1px solid var(--k)");
     const row = rule(".ix-row");
     expect(row).toContain("grid-template-columns: 16px minmax(0, 1fr) auto");

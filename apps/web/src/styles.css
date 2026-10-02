@@ -1254,9 +1254,10 @@ button.modal-close:focus-visible {
 /* The index scrolls itself while the transcript scrolls the document, so the
    window-level bottom pinning in lib/scroll-pin.ts keeps working. */
 .orb-index {
-  position: sticky;
+  position: fixed;
   top: 0;
-  align-self: start;
+  left: 0;
+  width: 236px;
   height: 100dvh;
   max-height: 100dvh;
   overflow-y: auto;
@@ -1346,6 +1347,7 @@ button.modal-close:focus-visible {
 /* ---------- orb header ---------- */
 
 .orb-main {
+  grid-column: 2;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -1379,6 +1381,7 @@ button.modal-close:focus-visible {
 
 .app:has(> .session-ribbon) .orb-index {
   top: var(--ribbon);
+  height: calc(100dvh - var(--ribbon));
   max-height: calc(100dvh - var(--ribbon));
 }
 
@@ -2551,6 +2554,7 @@ button.orb-phone-menu {
   }
 
   .orb-main {
+    grid-column: 1;
     min-height: 0;
     overflow: hidden;
   }

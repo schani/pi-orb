@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Browser, chromium, expect, webkit } from "@playwright/test";
@@ -21,6 +21,9 @@ it.each(["chromium", "webkit"] as const)(
   async (engine) => {
     const root = join(import.meta.dirname, "../apps/web");
     const cacheDir = await mkdtemp(join(tmpdir(), `pi-orb-lazy-${engine}-`));
+    const evidence = await mkdtemp(
+      join(import.meta.dirname, `../test-failures/lazy-return-${engine}-`),
+    );
     const vite = await createServer({
       root,
       configFile: join(root, "vite.config.ts"),
@@ -47,11 +50,53 @@ it.each(["chromium", "webkit"] as const)(
         viewport: { width: 1280, height: 900 },
       });
       const origin = `http://127.0.0.1:${address.port}`;
+      await page.context().tracing.start({ screenshots: true, snapshots: true });
+      await page.addInitScript(() => {
+        const scope = globalThis as unknown as {
+          pointerEvidence: string[];
+          location: { hash: string };
+          scrollY: number;
+          addEventListener: (
+            name: string,
+            handler: (event: unknown) => void,
+            capture: boolean,
+          ) => void;
+        };
+        scope.pointerEvidence = [];
+        for (const name of ["pointermove", "pointerdown", "pointerup", "click", "hashchange"]) {
+          scope.addEventListener(
+            name,
+            (event) => {
+              if (name === "hashchange") {
+                scope.pointerEvidence.push(`hash ${scope.location.hash}`);
+                return;
+              }
+              const mouse = event as {
+                target: {
+                  tagName: string;
+                  closest: (
+                    selector: string,
+                  ) => { getAttribute: (name: string) => string | null } | null;
+                };
+                clientX: number;
+                clientY: number;
+              };
+              if (mouse.clientX >= 236) return;
+              scope.pointerEvidence.push(
+                `${name} ${mouse.target.tagName} ${mouse.target.closest("a[href^='#/orbs/']")?.getAttribute("href") ?? "none"} (${mouse.clientX},${mouse.clientY}) y=${scope.scrollY} ${scope.location.hash}`,
+              );
+            },
+            true,
+          );
+        }
+      });
       const details: string[] = [];
       const imageUrls: string[] = [];
       const leaks: string[] = [];
       const frames: string[] = [];
       let syncs = 0;
+      const pageErrors: string[] = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
       let historyBytes = 0;
       let historyCalls = 0;
       let selectedDetailPath = "";
@@ -219,6 +264,125 @@ it.each(["chromium", "webkit"] as const)(
         await expect(history.locator("img.msg-image")).toBeVisible();
         expect(imageUrls.length).toBeGreaterThan(0);
         for (const path of imageUrls) expect(path).toMatch(/\/images\/[^/]+\/[^/]+\/\d+$/);
+        // An unchanged transcript must not issue programmatic document scrolls on a metadata poll.
+        await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)");
+        await page.evaluate(
+          "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+        );
+        await page.evaluate(`(() => {
+          window.__scrollWrites = 0;
+          const native = window.scrollTo.bind(window);
+          window.scrollTo = (...args) => {
+            window.__scrollWrites++;
+            native(...args);
+          };
+        })()`);
+        const pollPath = `/api/v1/orbs/${ORB}`;
+        await page.route(`**${pollPath}`, async (route) => {
+          const response = await route.fetch();
+          const orb = await response.json();
+          await route.fulfill({ response, json: { ...orb, name: "Lazy polling" } });
+        });
+        await expect(page.locator(".orb-name")).toHaveText("Lazy polling");
+        expect(await page.evaluate<number>("window.__scrollWrites")).toBe(0);
+        await page.unroute(`**${pollPath}`);
+        await page.locator(`.orb-index a[href="#/orbs/frontend-fixture-orb"]`).click();
+        await expect(page.locator(".orb-name")).toHaveText("Frontend Playground");
+        // A document scroll during a native pointer sequence must not move the rail's hit targets.
+        const rail = await page.evaluate<{
+          positioning: string;
+          delta: number;
+          before: { anchor: number; archive: number; hit: boolean };
+          after: { anchor: number; archive: number; hit: boolean };
+        }>(`(() => {
+          const nav = document.querySelector('.orb-index');
+          const anchor = document.querySelector('.orb-index a[href="#/orbs/frontend-lazy-details"]');
+          const archive = document.querySelector('.orb-index .project-archive summary');
+          if (!nav || !anchor || !archive) throw new Error('Missing rail target');
+          const sample = () => {
+            const y = anchor.getBoundingClientRect().top;
+            const target = document.elementFromPoint(117, y + 10);
+            return {
+              anchor: y,
+              archive: archive.getBoundingClientRect().top,
+              hit: target === anchor || anchor.contains(target),
+            };
+          };
+          window.scrollTo(0, document.documentElement.scrollHeight);
+          const before = sample();
+          const start = window.scrollY;
+          window.scrollTo(0, start - 32);
+          return { positioning: getComputedStyle(nav).position, delta: start - window.scrollY, before, after: sample() };
+        })()`);
+        expect(rail.positioning).toBe("fixed");
+        expect(rail.delta).toBe(32);
+        expect(rail.before).toEqual(rail.after);
+        expect(rail.before.hit).toBe(true);
+        // Separate controlled native pointer sequence: verify actual scroll movement and anchor ownership.
+        const controlledSyncs = syncs;
+        const pointerStart = await page.evaluate<number>("window.pointerEvidence.length");
+        await page.mouse.move(117, rail.after.anchor + 10);
+        await page.mouse.down();
+        expect(
+          await page.evaluate<number>(
+            "(() => { const y = scrollY; scrollTo(0, y - 32); return y - scrollY })()",
+          ),
+        ).toBe(32);
+        await page.mouse.up();
+        await expect(page).toHaveURL(`${origin}/#/orbs/${ORB}`);
+        const controlledClick = await page.evaluate<string[]>("window.pointerEvidence");
+        expect(
+          controlledClick.slice(pointerStart).find((event) => event.startsWith("click ")),
+        ).toMatch(new RegExp(`^click (SPAN|A) #/orbs/${ORB} `));
+        await expect(page.locator(".orb-name")).toHaveText("Lazy details");
+        await expect.poll(() => syncs).toBeGreaterThan(controlledSyncs);
+        await page.context().tracing.stop();
+        await rm(evidence, { recursive: true });
+      } catch (cause) {
+        const snapshot: Record<string, unknown> = {
+          cause: String(cause),
+          stack: cause instanceof Error ? cause.stack : null,
+          url: page.url(),
+          syncs,
+          pageErrors,
+        };
+        try {
+          snapshot.browser = await page.evaluate(() => {
+            const scope = globalThis as unknown as {
+              location: { href: string; hash: string };
+              pointerEvidence?: string[];
+              document: {
+                querySelector: (selector: string) => {
+                  textContent: string | null;
+                  getAttribute: (name: string) => string | null;
+                } | null;
+              };
+              piOrbDebug?: { dump: () => unknown };
+            };
+            return {
+              href: scope.location.href,
+              hash: scope.location.hash,
+              pointer: scope.pointerEvidence,
+              name: scope.document.querySelector(".orb-name")?.textContent,
+              inert: scope.document.querySelector(".orb-main")?.getAttribute("inert"),
+              debug: scope.piOrbDebug?.dump(),
+            };
+          });
+        } catch (error) {
+          snapshot.browserError = String(error);
+        }
+        try {
+          await page.screenshot({ path: join(evidence, "failure.png"), timeout: 2000 });
+        } catch (error) {
+          snapshot.screenshotError = String(error);
+        }
+        await writeFile(join(evidence, "failure.json"), JSON.stringify(snapshot, null, 2));
+        try {
+          await page.context().tracing.stop({ path: join(evidence, "trace.zip") });
+        } catch (error) {
+          await writeFile(join(evidence, "trace-error.txt"), String(error));
+        }
+        throw new Error(`Diagnostic failure: ${evidence}; ${String(cause)}`, { cause });
       } finally {
         releaseHeld();
         await page.close();

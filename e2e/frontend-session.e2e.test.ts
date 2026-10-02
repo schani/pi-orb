@@ -2817,11 +2817,13 @@ describe("frontend-only browser behavior", () => {
           const banner = rect(".orb-header-stack .notice-error");
           const header = rect(".orb-header");
           const ribbon = rect(".session-ribbon");
+          const index = rect(".orb-index");
           const scroller = document.querySelector(".orb-transcript-scroll");
           return {
             banner: banner && { top: banner.top, bottom: banner.bottom },
             headerBottom: header?.bottom,
             ribbonBottom: ribbon?.bottom,
+            index: index && { top: index.top, bottom: index.bottom, width: index.width },
             scroll: scroller?.scrollTop,
             windowScroll: view?.scrollY,
             overflow: document.documentElement.scrollWidth > (view?.innerWidth ?? 0),
@@ -2831,6 +2833,13 @@ describe("frontend-only browser behavior", () => {
         expectPage(geometry.banner).not.toBeNull();
         expectPage(geometry.banner?.top).toBeGreaterThanOrEqual(geometry.headerBottom ?? Infinity);
         expectPage(geometry.headerBottom).toBeGreaterThanOrEqual(geometry.ribbonBottom ?? Infinity);
+        if (!phone) {
+          expectPage(geometry.index).toEqual({
+            top: geometry.ribbonBottom,
+            bottom: viewport.height,
+            width: 236,
+          });
+        }
         expectPage(geometry.banner?.bottom).toBeLessThan(viewport.height);
         expectPage(geometry.overflow).toBe(false);
         if (!phone) {

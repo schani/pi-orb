@@ -1330,11 +1330,11 @@ function OrbConversation({
     if (scrollContentRef.current) observer.observe(scrollContentRef.current);
     return () => observer.disconnect();
   }, [phone]);
-  // Preserve desktop document pinning. Phone scrolling is owned exclusively by
-  // the geometry observer above, never by unrelated component renders.
+  // Desktop retains document pinning; a satisfied target must not restart native scrolling.
   useLayoutEffect(() => {
     if (!phone && state.historyLoaded && pinnedRef.current) {
       const target = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      if (Math.abs(window.scrollY - target) <= 1) return;
       autoScrollYRef.current = target;
       window.scrollTo({ top: target });
       // Browsers can round the requested position; remember what was applied.
