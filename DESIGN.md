@@ -23,6 +23,7 @@ The first target is deliberately narrow:
 - Support a linear conversation and compaction. Do not expose branching, session switching, cloning, or forking initially. Durable send-anytime input is implemented: a message steers when delivered to a busy agent and otherwise starts a turn, while submission to a stopped or failed orb durably queues the message and requests startup (`docs/runtime-protocol.md`). Scheduled self-sleep is approved and under DST-first implementation: graceful stop/start with a durable deadline and combined first-wake notification (`docs/orb-sleep.md`).
 - Persist the orb itself only through its filesystem.
 - Replicate the complete conversation history to the control plane database.
+- Show browser history through a compact display projection with on-demand HTTP details; retain complete records for replication and the in-orb CLI (`docs/history-replication.md`, `docs/web-ui.md`).
 - Make stopped-orb history viewable immediately from the database without starting the orb.
 - Put Docker behind an infrastructure abstraction that can later gain a GCE implementation.
 - Build deterministic simulation testing into concurrency-critical code from the start using [`determined`](https://www.npmjs.com/package/determined).
@@ -37,7 +38,7 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The original first slice has no application authentication or authorization: anybody who can reach it can perform every operation. It is local/trusted-development software and must not be exposed publicly.
 - Stages 1–2 application identity, owned projects, and per-user personal instructions are deployed from `ec81e80` for existing single-user use. Stage 2's schema/data cutover is verified; typed-history migration compatibility enforcement remains a follow-up (`docs/postmortems/2026-09-17-typed-history-runtime-fence.md`). Stage 3 per-user credentials is on `main`, qualified, and undeployed; coworker onboarding remains unauthorized. Cloud IAP remains the login boundary; local development uses one explicit fixed developer identity. `docs/multi-user.md`.
 - After routing and runtime connection, the control plane proxies one live WebSocket between browser and runtime without interpreting agent content.
-- That WebSocket carries browser commands, transient streaming events, committed history-record notifications, runtime status, acknowledgements, and errors.
+- That WebSocket carries browser commands, visible transient streaming events, compact committed display-record notifications, runtime status, acknowledgements, and errors. Open private-detail disclosures poll control-plane HTTP; the backend is implemented locally, frontend work and validation remain underway (`docs/runtime-protocol.md`).
 - The control plane never uses WebSocket traffic for persistence. Replica persistence happens only through separate control-plane HTTP pulls from the runtime.
 - We will not use tmux as the user interaction or session-persistence mechanism.
 - The orb's lifetime is independent of the browser or local CLI session.
@@ -75,7 +76,7 @@ Orb host
           `-- Pi history adapter
 ```
 
-The browser talks only to the control plane. In the original first slice, the control plane resolves/starts the orb, loads replicated history, and performs the cursor-aware handoff. It proxies the live WebSocket content-agnostically between browser and runtime. History persistence is a separate control-plane-to-runtime HTTP pull, so the proxy does not need to understand agent messages. Cloud Run WebSocket behavior was validated operationally in 2026-07 (`docs/open-questions.md`, question 2).
+The browser talks only to the control plane. In the original first slice, the control plane resolves/starts the orb, loads replicated history, and performs the cursor-aware handoff. It proxies the live WebSocket content-agnostically between browser and runtime. Browser detail/image HTTP reads go through the control plane to one replica record or an already-running runtime, without waking compute. History persistence is a separate control-plane-to-runtime HTTP pull of full records, so the proxy does not need to understand agent messages. Cloud Run WebSocket behavior was validated operationally in 2026-07 (`docs/open-questions.md`, question 2).
 
 ## In-orb spawning and deferred suborbs
 
@@ -107,14 +108,14 @@ Subsystem designs:
 - [docs/project-deletion.md](docs/project-deletion.md) — permanent project deletion by atomic fan-out through deletion-grade cleanup for every child orb
 - [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup
 - [docs/orb-spawning.md](docs/orb-spawning.md) — in-orb CLI creation with an atomically queued prompt and browser URL
-- [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, frame union, ordering, backpressure
+- [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
 - [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, the PostgreSQL schema
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
-- [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules and deterministic/browser qualification
+- [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules, compact transport measurements and qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
 - [docs/project-instructions.md](docs/project-instructions.md) — additional per-project instructions, Config tab, additive virtual context and next-start adoption

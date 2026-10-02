@@ -2,11 +2,13 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { HistoryRecord } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage, type Page, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { projectFixtureHistory } from "./testkit/projected-history.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_ID = "frontend-fixture-orb";
@@ -81,7 +83,7 @@ async function seedUnavailableImages(page: Page, origin: string): Promise<void> 
         overflow: {},
       },
     ];
-    body.records.push(...records);
+    body.records.push(...(await projectFixtureHistory(page, ORB_ID, records as HistoryRecord[])));
     body.headId = records.at(-1)?.id;
     body.cursor = body.headId;
     await route.fulfill({ response, json: body });
@@ -195,7 +197,7 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
       const read = imageActivity(page, "artifacts/dashboard-preview.svg");
       const image = read.getByRole("img", { name: "Image returned by read", exact: true });
       const output = read.getByText("Dashboard preview (960 × 540)", { exact: true });
-      const previews = read.locator(":scope > .tool-image-previews > .tool-image-preview");
+      const previews = read.locator(".tool-image-preview");
       await expectPage(image).toHaveCount(1);
       await expectPage(previews).toHaveCount(1);
       await expectPage(output).toBeVisible();
@@ -304,6 +306,66 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
     }
   });
 
+  it("uses call arguments only when a completed read's result has no displayable body", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    let emptyResult = "";
+    let emptyCall = "";
+    let normalCall = "";
+    const requested: string[] = [];
+    await page.route(`**/api/v1/orbs/${ORB_ID}/history`, async (route) => {
+      const response = await route.fetch();
+      const view = await response.json();
+      for (const record of view.records)
+        for (const block of record.content ?? []) {
+          if (block.callId === "fixture-read-one") {
+            if (block.type === "tool_call") emptyCall = `${record.id}/${block.detailKey}`;
+            if (block.type === "tool_result") emptyResult = `${record.id}/${block.detailKey}`;
+          }
+          if (block.callId === "fixture-read-two" && block.type === "tool_call")
+            normalCall = `${record.id}/${block.detailKey}`;
+        }
+      await route.fulfill({ response, json: view });
+    });
+    await page.route(`**/api/v1/orbs/${ORB_ID}/details/**`, async (route) => {
+      const path = decodeURIComponent(new URL(route.request().url()).pathname);
+      requested.push(path);
+      if (!path.endsWith(`/details/${emptyResult}`)) return route.continue();
+      const response = await route.fetch();
+      const detail = await response.json();
+      detail.body.content = [];
+      await route.fulfill({ response, json: detail });
+    });
+    try {
+      await gotoFrontendHistory(page, url, ORB_ID);
+      const read = page
+        .locator("details.tool-activity-category")
+        .filter({ hasText: "HistoryView.tsx" })
+        .filter({ hasText: "docs/web-ui.md" });
+      await read.locator(":scope > summary").click();
+      const empty = read
+        .locator("details.tool-activity-call")
+        .filter({ hasText: "HistoryView.tsx" });
+      const normal = read
+        .locator("details.tool-activity-call")
+        .filter({ hasText: "docs/web-ui.md" });
+      await normal.locator(":scope > summary").click();
+      await expectPage(normal.locator(".tool-call-output")).toContainText(
+        "Web UI design decisions",
+      );
+      expectPage(requested.some((path) => path.endsWith(`/details/${normalCall}`))).toBe(false);
+      await empty.locator(":scope > summary").click();
+      await expectPage(empty.locator(".tool-input")).toContainText("HistoryView.tsx");
+      expectPage(requested.filter((path) => path.endsWith(`/details/${emptyResult}`))).toHaveLength(
+        1,
+      );
+      expectPage(requested.filter((path) => path.endsWith(`/details/${emptyCall}`))).toHaveLength(
+        1,
+      );
+    } finally {
+      await page.close();
+    }
+  });
+
   it("enlarges a preview and Escape restores focus to its trigger", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     try {
@@ -330,7 +392,7 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
     const page = await browser.newPage({ viewport: { width, height: 844 } });
     try {
       await gotoFrontendHistory(page, url, ORB_ID);
-      const previews = page.locator(".tool-image-previews");
+      const previews = page.locator(".tool-image-preview");
       await expectPage(previews.first()).toBeVisible();
       const geometry = await previews.evaluateAll((nodes) =>
         nodes.map((node) => {

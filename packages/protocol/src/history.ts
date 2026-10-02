@@ -86,7 +86,7 @@ const LeafBlockSchema = Type.Union([
   OtherBlockSchema,
 ]);
 
-const NestedCallsSchema = Type.Object(
+export const NestedCallsSchema = Type.Object(
   {
     complete: Type.Boolean(),
     calls: Type.Array(

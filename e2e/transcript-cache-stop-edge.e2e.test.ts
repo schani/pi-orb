@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { projectDisplayRecord } from "@pi-orb/protocol";
 import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
@@ -30,15 +31,17 @@ it.each(["chromium", "webkit"] as const)(
         const response = await route.fetch();
         const view = await response.json();
         if (lifecycle === "stopped") {
-          view.records.push({
-            id: "sealed-tail",
-            parentId: view.cursor,
-            timestamp: "now",
-            type: "message",
-            role: "assistant",
-            content: [{ type: "text", text: "FINAL_REPLICATED_TAIL" }],
-            overflow: {},
-          });
+          view.records.push(
+            projectDisplayRecord({
+              id: "sealed-tail",
+              parentId: view.cursor,
+              timestamp: "now",
+              type: "message",
+              role: "assistant",
+              content: [{ type: "text", text: "FINAL_REPLICATED_TAIL" }],
+              overflow: {},
+            }),
+          );
           view.cursor = "sealed-tail";
           view.headId = view.cursor;
         }

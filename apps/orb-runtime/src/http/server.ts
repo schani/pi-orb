@@ -140,6 +140,69 @@ export function buildRuntimeServer(
     },
   );
 
+  app.get<{ Params: { recordId: string; detailKey: string }; Querystring: { sessionId?: string } }>(
+    "/v1/details/:recordId/:detailKey",
+    async (request, reply) => {
+      if (!request.query.sessionId || agent.sessionId() !== request.query.sessionId)
+        return reply
+          .status(409)
+          .send(runtimeError("cursor_not_found", "session does not match", false));
+      const detail = agent.readDisplayDetail(request.params.recordId, request.params.detailKey);
+      return detail.isErr()
+        ? reply
+            .status(detail.error.type === "detail_not_found" ? 404 : 503)
+            .send(
+              runtimeError(
+                "history_unavailable",
+                detail.error.message,
+                detail.error.type !== "detail_not_found",
+              ),
+            )
+        : reply.status(200).send(detail.value);
+    },
+  );
+
+  app.get<{ Params: { operationId: string; blockId: string } }>(
+    "/v1/details/live/:operationId/:blockId",
+    async (request, reply) =>
+      reply
+        .status(200)
+        .send(agent.readLiveDisplayDetail(request.params.operationId, request.params.blockId)),
+  );
+
+  app.get<{
+    Params: { recordId: string; detailKey: string; imageIndex: string };
+    Querystring: { sessionId?: string };
+  }>("/v1/images/:recordId/:detailKey/:imageIndex", async (request, reply) => {
+    if (!request.query.sessionId || agent.sessionId() !== request.query.sessionId)
+      return reply
+        .status(409)
+        .send(runtimeError("cursor_not_found", "session does not match", false));
+    const index = Number(request.params.imageIndex);
+    if (!Number.isSafeInteger(index) || index < 0)
+      return reply.status(400).send(runtimeError("invalid_request", "invalid image index", false));
+    const image = agent.readDisplayImage(request.params.recordId, request.params.detailKey, index);
+    return image.isErr()
+      ? reply
+          .status(image.error.type === "detail_not_found" ? 404 : 503)
+          .send(
+            runtimeError(
+              "history_unavailable",
+              image.error.message,
+              image.error.type !== "detail_not_found",
+            ),
+          )
+      : reply
+          .header(
+            "Content-Type",
+            /^image\/(png|jpeg|gif|webp|bmp|avif)$/i.test(image.value.mediaType)
+              ? image.value.mediaType
+              : "application/octet-stream",
+          )
+          .status(200)
+          .send(image.value.data);
+  });
+
   app.put<{ Params: { messageId: string } }>(
     "/v1/messages/:messageId",
     { bodyLimit: MAX_INCOMING_FRAME_BYTES },

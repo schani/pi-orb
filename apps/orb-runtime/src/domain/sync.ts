@@ -1,4 +1,4 @@
-import type { RuntimeEvent, ServerFrame } from "@pi-orb/protocol";
+import { projectDisplayRecord, type RuntimeEvent, type ServerFrame } from "@pi-orb/protocol";
 import type { HarnessSnapshot, LiveOperationView } from "./types.ts";
 
 /**
@@ -36,7 +36,7 @@ export function computeSyncFrames(
       v: 1,
       type: "history.record",
       at,
-      record,
+      record: projectDisplayRecord(record),
       retiredBlockIds: [],
       headId: representedHead,
     });
@@ -56,7 +56,7 @@ export function computeSyncFrames(
         blockId: block.blockId,
         blockType: block.blockType,
         revision: block.revision,
-        patch: { type: "replace", text: block.text },
+        patch: { type: "replace", text: block.blockType === "reasoning" ? "" : block.text },
       });
     }
     for (const tool of live.tools) {

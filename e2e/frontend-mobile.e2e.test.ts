@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type HistoryRecord, projectDisplayRecord } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage, webkit } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendFixture, gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { waitForFixtureMedia } from "./testkit/media-ready.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_HASH = "#/orbs/frontend-fixture-orb";
@@ -66,7 +68,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         const response = await route.fetch();
         const history = await response.json();
         const records = history.records;
-        records.push({
+        const failure: HistoryRecord = {
           id: "long-assistant-failure",
           parentId: records.at(-1).id,
           timestamp: records.at(-1).timestamp,
@@ -76,7 +78,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           failure: { message: `Incorrect API key provided: sk-example${long}.`, diagnostics: [] },
           content: [],
           overflow: {},
-        });
+        };
+        records.push(projectDisplayRecord(failure));
         await route.fulfill({
           response,
           json: {
@@ -679,6 +682,41 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     },
   );
 
+  it("follows the initial phone tail while default-open image details arrive", async () => {
+    const page = await browser.newPage({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    let releaseDetails = () => {};
+    const detailsGate = new Promise<void>((resolve) => {
+      releaseDetails = resolve;
+    });
+    await page.route("**/api/v1/orbs/frontend-fixture-orb/details/**", async (route) => {
+      await detailsGate;
+      await route.continue();
+    });
+    try {
+      const firstDetail = page.waitForRequest((request) =>
+        new URL(request.url()).pathname.startsWith("/api/v1/orbs/frontend-fixture-orb/details/"),
+      );
+      await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb");
+      await firstDetail;
+      const scroller = page.locator(".orb-transcript-scroll");
+      const distanceFromTail = () =>
+        scroller.evaluate(
+          (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+        );
+      await expectPage.poll(distanceFromTail).toBeLessThanOrEqual(1);
+      releaseDetails();
+      await waitForFixtureMedia(page);
+      await expectPage.poll(distanceFromTail).toBeLessThanOrEqual(1);
+    } finally {
+      releaseDetails();
+      await page.close();
+    }
+  });
+
   it("does not write phone scroll position during unrelated polling renders", async () => {
     const page = await browser.newPage({
       viewport: { width: 390, height: 844 },
@@ -697,8 +735,12 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const write = page.getByRole("button", { name: "Write message" });
       await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb", write);
       await expectPage(write).toBeVisible();
+      await waitForFixtureMedia(page);
       await page.clock.runFor(100);
       const scroller = page.locator(".orb-transcript-scroll");
+      await scroller.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
       await expectPage
         .poll(() =>
           scroller.evaluate(

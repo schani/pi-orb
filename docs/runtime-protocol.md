@@ -241,7 +241,7 @@ interface HistoryRecordFrame {
   v: 1;
   type: "history.record";
   at: string;
-  record: HistoryRecord;
+  record: DisplayRecord;
   headId: string | null;
   retiredBlockIds: string[];
 }
@@ -251,7 +251,7 @@ Pi's `message_end` and its persisted entry share the same message object (pinned
 
 **Superseded approach:** the 2026-09-09 separate `output_retired` event fixed permanently stale reasoning but left an observable two-frame duplicate-render window. It is removed, not retained as a compatibility path. Tolerating the overlap in the MCP E2E selector was an insufficient correction and has been reverted. Shell output retains its operation lifetime. Sixteen explicit deterministic schedules enumerate next-response timing, backpressure, snapshot versus microtask publication, and a mapping failpoint; they inspect every delivered frame and reconnect state. Evidence: `docs/postmortems/2026-09-09-stale-thinking.md`, `docs/postmortems/2026-09-12-mcp-completion-selector.md`.
 
-Complete records use `history.record` both during synchronization and live operation. They improve UI responsiveness, but the control plane ignores them for persistence. A successful `operation_finished` event is sent only after all complete history records caused by that operation have been emitted.
+Complete display projections use `history.record` both during synchronization and live operation. They improve UI responsiveness, but the control plane ignores them for persistence. A successful `operation_finished` event is sent only after all complete history records caused by that operation have been emitted.
 
 Agent turns may later emit a live-only `turn_notification { operationId, summary }` runtime event. The Luna summary starts only after `operation_finished` and idle status have been broadcast, so inference never delays completion and failure can only be error-logged. This event is presentation data: it is not a Pi history record, is not replicated or replayed during synchronization, and is simply lost when no browser is connected. Shell operations do not produce it (decided 2026-08-06).
 
@@ -260,6 +260,14 @@ No application-level ping frame is needed. The control-plane proxy probes both l
 **Field finding and fix (2026-09-01) — half-open background tabs.** The protocol claimed protocol-level dead-peer detection, but neither the runtime nor proxy had implemented a ping loop. A browser/network path could therefore become half-open while a tab was backgrounded: the browser still reported an open WebSocket, no close event started reconnect, and all history committed after the break remained absent until a page reload established a new connection. A deterministic transport reproduction pins the exact failure shape—locally open peer that stops answering pings—and the proxy now monitors both browser↔proxy and proxy↔runtime legs. Timeout logs are edge-only and identify orb, connection, and failed leg; healthy connections log nothing. Reconnecting rather than inventing a second catch-up path is required because the existing `afterRecordId` handshake is already the authoritative recovery mechanism.
 
 All schemas will be closed TypeBox schemas. An invalid request receives a rejected `request.result` where its request ID can be recovered, otherwise `server.error`. A v1 browser should ignore a well-formed unknown server event so optional capabilities can be added without breaking old clients.
+
+## Lazy transcript detail (decided 2026-10-01; implemented locally, validation pending)
+
+`history.record` and browser HTTP history project each full persisted record into `DisplayRecord` (`packages/protocol/src/display.ts`). The runtime's `GET /v1/history` still returns complete `HistoryRecord` for replication. Browser display records preserve IDs, ancestry, order, cursor and head. Visible prose and shell command/output remain inline; reasoning, tool arguments/results, compaction summary and subagent detail are addressed by `detailKey` (`recordId:blockIndex`, `recordId:summary`, `recordId:subagent`). Each tool call/result survives as its own block; the browser groups by `callId`. Known `bash` command and `read`/`edit`/`write` path headlines are capped at 1 KiB UTF-8 including the ellipsis; unknown tools use an empty headline. `targetId` distinguishes clipped paths without exposing full paths. Tool-result image presence and diff counts remain in the summary. Model exposes only optional provider; failure exposes message and `providerTransportFailure` boolean, not raw diagnostics, native overflow, usage or full image data.
+
+Authenticated runtime `GET /v1/details/:recordId/:detailKey?sessionId=<expected>` returns `{v:1,sessionId,recordId,detailKey,state:"committed",body}` and `GET /v1/images/:recordId/:detailKey/:imageIndex?sessionId=<expected>` returns binary image bytes with a safe Content-Type. Session mismatch is rejected with 409 before reading. The detail body union includes reasoning text, tool-call arguments, tool-result content, top-level image, compaction text and subagent fields; image leaves may contain only an HTTP(S) URL and/or `imageRef`, never base64. The binary route handles local image bytes. Missing keys return 404 and unavailable history 503 with typed runtime errors.
+
+`GET /v1/details/live/:operationId/:blockId` returns `{v:1,sessionId,operationId,blockId,state:"running"|"completed"|"unavailable",body?}` for current reasoning, shell or tool-result progress. The runtime retains full active text for coherent snapshots. Reasoning `output_patch` frames carry empty text on live send and replay; visible prose and shell patches remain unchanged. Browser disclosures poll live HTTP roughly once per second while open, without subscriptions, revision tokens or a guaranteed gapless transition to committed detail. The WebSocket still carries identity, lifecycle and atomic block retirement; no streamed private reasoning/tool body is required. This is a direct breaking browser/runtime contract: old running orbs are stopped and restarted, with no compatibility path.
 
 ## Ordering, request identity, and backpressure
 

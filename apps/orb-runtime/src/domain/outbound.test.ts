@@ -27,7 +27,6 @@ const historyFrame = (id: string): ServerFrame => ({
     id,
     parentId: null,
     timestamp: "t",
-    overflow: { native: {} },
     type: "message",
     role: "user",
     content: [{ type: "text", text: "x".repeat(200) }],

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import {
@@ -11,13 +12,15 @@ import {
   McpCatalogSchema,
   mcpSecretUsers,
   missingMcpSecrets,
-  type OrbHistoryView,
   type OrbMessageView,
   type OrbView,
   PERSONAL_INSTRUCTIONS_PATH,
   type PersonalInstructions,
   type ProjectInstructions,
   type ProjectView,
+  projectDisplayRecord,
+  projectRecordDetail,
+  projectRecordImage,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
   TERMINAL_SUBPROTOCOL,
@@ -39,29 +42,13 @@ const ARCHIVED_ORB_ID = "frontend-archived-orb";
 const NEW_ORB_STARTUP_DELAY_MS = 10_000;
 const now = () => new Date().toISOString();
 
-const fixtureSvg = (svg: string) => Buffer.from(svg).toString("base64");
-const dashboardPreview =
-  fixtureSvg(`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
-  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef3ff"/><stop offset="1" stop-color="#fdf7ef"/></linearGradient><linearGradient id="chart" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#675cff"/><stop offset="1" stop-color="#29c5a5"/></linearGradient></defs>
-  <rect width="960" height="540" rx="28" fill="url(#bg)"/><rect x="24" y="24" width="912" height="492" rx="22" fill="#fff" stroke="#d8deea"/>
-  <rect x="24" y="24" width="188" height="492" rx="22" fill="#182238"/><circle cx="64" cy="66" r="16" fill="#ffd66b"/><text x="91" y="73" fill="#fff" font-family="system-ui" font-size="20" font-weight="700">Northstar</text>
-  <g fill="#9facbe" font-family="system-ui" font-size="14"><text x="52" y="130">Overview</text><text x="52" y="174">Projects</text><text x="52" y="218">Reports</text><text x="52" y="262">Settings</text></g><rect x="40" y="103" width="154" height="42" rx="10" fill="#2b3851"/>
-  <text x="246" y="70" fill="#172033" font-family="system-ui" font-size="26" font-weight="700">Workspace pulse</text><text x="246" y="96" fill="#68748a" font-family="system-ui" font-size="14">Tuesday, September 18</text>
-  <g font-family="system-ui"><rect x="246" y="126" width="194" height="104" rx="16" fill="#f7f8fb" stroke="#e2e6ee"/><text x="266" y="156" fill="#68748a" font-size="13">ACTIVE ORBS</text><text x="266" y="204" fill="#172033" font-size="38" font-weight="700">24</text><text x="376" y="202" fill="#119b7d" font-size="13">↑ 18%</text>
-  <rect x="458" y="126" width="194" height="104" rx="16" fill="#f7f8fb" stroke="#e2e6ee"/><text x="478" y="156" fill="#68748a" font-size="13">COMPLETED</text><text x="478" y="204" fill="#172033" font-size="38" font-weight="700">186</text><text x="584" y="202" fill="#675cff" font-size="13">this week</text>
-  <rect x="670" y="126" width="234" height="104" rx="16" fill="#fff7e2"/><text x="690" y="156" fill="#8d6b10" font-size="13">FOCUS TIME</text><text x="690" y="204" fill="#493805" font-size="38" font-weight="700">31.4h</text></g>
-  <rect x="246" y="254" width="420" height="226" rx="16" fill="#f7f8fb" stroke="#e2e6ee"/><text x="266" y="287" fill="#172033" font-family="system-ui" font-size="16" font-weight="700">Activity</text><path d="M270 430 C320 390 337 408 380 356 S460 390 506 322 S584 348 640 292" fill="none" stroke="url(#chart)" stroke-width="8" stroke-linecap="round"/><g fill="#cbd2df"><rect x="270" y="449" width="362" height="1"/><rect x="270" y="397" width="362" height="1"/><rect x="270" y="345" width="362" height="1"/></g>
-  <rect x="686" y="254" width="218" height="226" rx="16" fill="#182238"/><text x="708" y="288" fill="#fff" font-family="system-ui" font-size="16" font-weight="700">Next up</text><circle cx="720" cy="329" r="6" fill="#ffd66b"/><text x="740" y="334" fill="#fff" font-family="system-ui" font-size="14">Review launch copy</text><circle cx="720" cy="374" r="6" fill="#29c5a5"/><text x="740" y="379" fill="#fff" font-family="system-ui" font-size="14">Ship usage report</text><circle cx="720" cy="419" r="6" fill="#8a82ff"/><text x="740" y="424" fill="#fff" font-family="system-ui" font-size="14">Plan next sprint</text>
-</svg>`);
-const mobilePreview = fixtureSvg(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="720" viewBox="0 0 420 720"><rect width="420" height="720" rx="32" fill="#182238"/><rect x="18" y="18" width="384" height="684" rx="24" fill="#f7f8fb"/><circle cx="48" cy="57" r="12" fill="#ffd66b"/><text x="70" y="63" font-family="system-ui" font-size="18" font-weight="700" fill="#172033">Northstar</text><text x="38" y="118" font-family="system-ui" font-size="28" font-weight="700" fill="#172033">Good morning</text><rect x="38" y="150" width="344" height="142" rx="18" fill="#675cff"/><text x="60" y="186" font-family="system-ui" font-size="13" fill="#dcd9ff">WEEKLY PROGRESS</text><text x="60" y="246" font-family="system-ui" font-size="48" font-weight="700" fill="#fff">78%</text><path d="M60 270H360" stroke="#8f88ff" stroke-width="8"/><path d="M60 270H294" stroke="#ffd66b" stroke-width="8"/><text x="38" y="342" font-family="system-ui" font-size="16" font-weight="700" fill="#172033">Today</text><g font-family="system-ui" font-size="14" fill="#172033"><rect x="38" y="364" width="344" height="76" rx="14" fill="#fff"/><circle cx="64" cy="402" r="9" fill="#29c5a5"/><text x="86" y="407">Publish release notes</text><rect x="38" y="454" width="344" height="76" rx="14" fill="#fff"/><circle cx="64" cy="492" r="9" fill="#ffd66b"/><text x="86" y="497">Review accessibility pass</text><rect x="38" y="544" width="344" height="76" rx="14" fill="#fff"/><circle cx="64" cy="582" r="9" fill="#8a82ff"/><text x="86" y="587">Prepare customer demo</text></g></svg>`,
-);
-const chartPreview = fixtureSvg(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="420" viewBox="0 0 800 420"><rect width="800" height="420" rx="24" fill="#fffaf1"/><text x="42" y="58" font-family="system-ui" font-size="22" font-weight="700" fill="#172033">Weekly completions</text><g fill="#ded8ca"><rect x="42" y="340" width="716" height="2"/><rect x="42" y="260" width="716" height="1"/><rect x="42" y="180" width="716" height="1"/><rect x="42" y="100" width="716" height="1"/></g><g fill="#675cff"><rect x="72" y="252" width="58" height="88" rx="8"/><rect x="170" y="205" width="58" height="135" rx="8"/><rect x="268" y="224" width="58" height="116" rx="8"/><rect x="366" y="154" width="58" height="186" rx="8"/><rect x="464" y="176" width="58" height="164" rx="8"/><rect x="562" y="112" width="58" height="228" rx="8"/><rect x="660" y="76" width="58" height="264" rx="8"/></g><g font-family="system-ui" font-size="13" fill="#68748a"><text x="86" y="372">Mon</text><text x="184" y="372">Tue</text><text x="282" y="372">Wed</text><text x="380" y="372">Thu</text><text x="478" y="372">Fri</text><text x="576" y="372">Sat</text><text x="674" y="372">Sun</text></g></svg>`,
-);
-const failedPreview = fixtureSvg(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="360" viewBox="0 0 800 360"><rect width="800" height="360" rx="24" fill="#fff"/><rect x="24" y="24" width="752" height="312" rx="18" fill="#f8f1ef" stroke="#ead6d1"/><circle cx="400" cy="148" r="54" fill="#c74b3f"/><path d="M375 123l50 50m0-50l-50 50" stroke="#fff" stroke-width="10" stroke-linecap="round"/><text x="400" y="236" text-anchor="middle" font-family="system-ui" font-size="22" font-weight="700" fill="#54241f">Visual comparison failed</text><text x="400" y="270" text-anchor="middle" font-family="system-ui" font-size="15" fill="#87534d">Header alignment differs by 12 px</text></svg>`,
-);
+const fixturePng = (name: string) =>
+  readFileSync(new URL(`./fixtures/${name}.png`, import.meta.url)).toString("base64");
+const dashboardPreview = fixturePng("dashboard");
+const mobilePreview = fixturePng("mobile");
+const chartPreview = fixturePng("chart");
+const failedPreview = fixturePng("failed");
+const attachmentPreview = fixturePng("attachment");
 
 interface MockState {
   projects: Map<string, ProjectView>;
@@ -70,6 +57,10 @@ interface MockState {
   messages: Map<string, OrbMessageView[]>;
   uploads: Map<string, WorkspaceUpload[]>;
   liveSessions: Map<string, Set<LiveSession>>;
+  lazyRunning: Map<
+    string,
+    { session: LiveSession; operationId: string; blockId: string; reads: number }
+  >;
   startupTimers: Map<string, NodeJS.Timeout>;
   projectSecrets: Map<string, Map<string, { value: string; updatedAt: string }>>;
   projectSecretRevisions: Map<string, number>;
@@ -180,8 +171,8 @@ function initialState(): MockState {
         },
         {
           type: "image",
-          mediaType: "image/svg+xml",
-          data: "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCAxNjAgNjAiPjxyZWN0IHdpZHRoPSIxNjAiIGhlaWdodD0iNjAiIGZpbGw9IndoaXRlIi8+PHBhdGggZD0iTTEgMUgxNTlWNTlIMVoiIGZpbGw9Im5vbmUiIHN0cm9rZT0iYmxhY2siLz48dGV4dCB4PSI4IiB5PSIzNCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+YXR0YWNobWVudCBwcmV2aWV3PC90ZXh0Pjwvc3ZnPg==",
+          mediaType: "image/png",
+          data: attachmentPreview,
         },
       ],
       overflow: {},
@@ -460,7 +451,7 @@ function initialState(): MockState {
           callId: "fixture-image-read",
           content: [
             { type: "text", text: "Dashboard preview (960 × 540)" },
-            { type: "image", mediaType: "image/svg+xml", data: dashboardPreview },
+            { type: "image", mediaType: "image/png", data: dashboardPreview },
           ],
         },
       ],
@@ -478,9 +469,9 @@ function initialState(): MockState {
           callId: "fixture-browser-snapshot",
           content: [
             { type: "text", text: "Desktop and mobile viewport captures" },
-            { type: "image", mediaType: "image/svg+xml", data: dashboardPreview },
-            { type: "image", mediaType: "image/svg+xml", data: mobilePreview },
-            { type: "image", mediaType: "image/svg+xml", data: chartPreview },
+            { type: "image", mediaType: "image/png", data: dashboardPreview },
+            { type: "image", mediaType: "image/png", data: mobilePreview },
+            { type: "image", mediaType: "image/png", data: chartPreview },
           ],
         },
       ],
@@ -499,7 +490,7 @@ function initialState(): MockState {
           isError: true,
           content: [
             { type: "text", text: "Header alignment differs by 12 px" },
-            { type: "image", mediaType: "image/svg+xml", data: failedPreview },
+            { type: "image", mediaType: "image/png", data: failedPreview },
           ],
         },
       ],
@@ -574,6 +565,73 @@ function initialState(): MockState {
       overflow: {},
     });
   }
+  const lazyOrb: OrbView = { ...orb, id: "frontend-lazy-details", name: "Lazy details" };
+  const lazyRecords: HistoryRecord[] = [
+    {
+      id: "lazy-intro",
+      parentId: null,
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: "LAZY_REASONING_SECRET" },
+        { type: "text", text: "Thirty reads completed." },
+      ],
+      overflow: { native: "LAZY_NATIVE_SECRET" },
+    },
+    {
+      id: "lazy-reads",
+      parentId: "lazy-intro",
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [
+        ...Array.from({ length: 30 }, (_, index) => [
+          {
+            type: "tool_call" as const,
+            callId: `lazy-read-${index}`,
+            name: "read",
+            arguments: {
+              path: `/src/lazy-${index}.ts`,
+              secret: "LAZY_ARGUMENT_SECRET",
+              ...(index === 0 ? { command: "é".repeat(600) } : {}),
+            },
+          },
+          {
+            type: "tool_result" as const,
+            callId: `lazy-read-${index}`,
+            content: [{ type: "text" as const, text: `LAZY_RESULT_SECRET output ${index}` }],
+          },
+        ]).flat(),
+      ],
+      overflow: {},
+    },
+    {
+      id: "lazy-image",
+      parentId: "lazy-reads",
+      timestamp: createdAt,
+      type: "message",
+      role: "assistant",
+      content: [{ type: "image", mediaType: "image/png", data: mobilePreview }],
+      overflow: {},
+    },
+    {
+      id: "lazy-shell",
+      parentId: "lazy-image",
+      timestamp: createdAt,
+      type: "event",
+      eventType: "shell",
+      shell: {
+        command: "echo visible",
+        output: "visible shell output",
+        exitCode: 0,
+        cancelled: false,
+        truncated: false,
+        excludeFromContext: false,
+      },
+      overflow: {},
+    },
+  ];
   const seededMessages: OrbMessageView[] = [
     {
       id: "00000000-0000-4000-8000-000000000125",
@@ -648,6 +706,7 @@ function initialState(): MockState {
       ...fleetOrbs.map((entry): [string, OrbView] => [entry.id, entry]),
       [orb.id, orb],
       [longOrb.id, longOrb],
+      [lazyOrb.id, lazyOrb],
       [authOrb.id, authOrb],
       [archivedOrb.id, archivedOrb],
     ]),
@@ -655,6 +714,7 @@ function initialState(): MockState {
       ...fleetHistories,
       [orb.id, records],
       [longOrb.id, longRecords],
+      [lazyOrb.id, lazyRecords],
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),
@@ -663,10 +723,12 @@ function initialState(): MockState {
       ...fleetOrbs.map((entry): [string, OrbMessageView[]] => [entry.id, []]),
       [orb.id, seededMessages],
       [longOrb.id, []],
+      [lazyOrb.id, []],
       [authOrb.id, []],
       [archivedOrb.id, []],
     ]),
     liveSessions: new Map(),
+    lazyRunning: new Map(),
     startupTimers: new Map(),
     projectSecrets: new Map([
       [
@@ -828,7 +890,7 @@ async function handleApi(
         v: 1,
         type: "history.record",
         at: now(),
-        record,
+        record: projectDisplayRecord(record),
         headId: record.id,
         retiredBlockIds: [],
       });
@@ -1466,6 +1528,170 @@ async function handleApi(
     return true;
   }
 
+  const liveDetailRoute = /^\/api\/v1\/orbs\/([^/]+)\/details\/live\/([^/]+)\/([^/]+)$/.exec(path);
+  if (method === "GET" && liveDetailRoute !== null) {
+    const orbId = decodeURIComponent(liveDetailRoute[1] ?? "");
+    const running = state.lazyRunning.get(orbId);
+    if (url.searchParams.get("sessionId") !== `fixture-session-${orbId}`) {
+      sendJson(response, 409, {
+        error: { code: "stale_session", message: "detail session changed", retryable: true },
+      });
+      return true;
+    }
+    const operationId = decodeURIComponent(liveDetailRoute[2] ?? "");
+    const blockId = decodeURIComponent(liveDetailRoute[3] ?? "");
+    if (!state.orbs.has(orbId)) {
+      notFound(response);
+      return true;
+    }
+    if (running?.operationId !== operationId || running.blockId !== blockId) {
+      sendJson(response, 200, {
+        v: 1,
+        sessionId: `fixture-session-${orbId}`,
+        operationId,
+        blockId,
+        state: "unavailable",
+      });
+      return true;
+    }
+    running.reads++;
+    sendJson(response, 200, {
+      v: 1,
+      sessionId: `fixture-session-${orbId}`,
+      operationId,
+      blockId,
+      state: "running",
+      body: running.blockId.endsWith("-tool")
+        ? {
+            type: "tool_result",
+            content: [{ type: "text", text: `running tool ${running.reads}` }],
+          }
+        : { type: "reasoning", text: `running reasoning ${running.reads}` },
+    });
+    return true;
+  }
+  const releaseRoute = /^\/api\/v1\/orbs\/([^/]+)\/fixture-lazy-release$/.exec(path);
+  if (method === "POST" && releaseRoute !== null) {
+    const orbId = decodeURIComponent(releaseRoute[1] ?? "");
+    const running = state.lazyRunning.get(orbId);
+    if (running === undefined) {
+      notFound(response);
+      return true;
+    }
+    state.lazyRunning.delete(orbId);
+    if (running.session.operation !== null) clearTimeout(running.session.operation.timer);
+    running.session.operation = null;
+    const records = state.histories.get(orbId) ?? [];
+    const record: HistoryRecord = running.blockId.endsWith("-tool")
+      ? {
+          id: randomUUID(),
+          parentId: records.at(-1)?.id ?? null,
+          timestamp: now(),
+          type: "message",
+          role: "tool",
+          content: [
+            {
+              type: "tool_result",
+              callId: running.blockId,
+              content: [{ type: "text", text: "final paired tool detail" }],
+            },
+          ],
+          overflow: {},
+        }
+      : {
+          id: randomUUID(),
+          parentId: records.at(-1)?.id ?? null,
+          timestamp: now(),
+          type: "message",
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "final reasoning" },
+            { type: "text", text: "Lazy operation complete." },
+          ],
+          overflow: {},
+        };
+    records.push(record);
+    send(running.session.socket, {
+      v: 1,
+      type: "history.record",
+      at: now(),
+      record: projectDisplayRecord(record),
+      retiredBlockIds: [running.blockId],
+      headId: record.id,
+    });
+    send(
+      running.session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: {
+          type: "operation_finished",
+          operationId: running.operationId,
+          outcome: "completed",
+        },
+      }),
+    );
+    send(
+      running.session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: { type: "status", activity: "idle" },
+      }),
+    );
+    sendJson(response, 200, { recordId: record.id, operationId: running.operationId });
+    return true;
+  }
+
+  const detailRoute =
+    /^\/api\/v1\/orbs\/([^/]+)\/(details|images)\/([^/]+)\/([^/]+)(?:\/(\d+))?$/.exec(path);
+  if (method === "GET" && detailRoute !== null) {
+    const [, orbIdRaw, action, recordIdRaw, keyRaw, imageIndex] = detailRoute;
+    const orbId = decodeURIComponent(orbIdRaw ?? "");
+    const recordId = decodeURIComponent(recordIdRaw ?? "");
+    const detailKey = decodeURIComponent(keyRaw ?? "");
+    if (url.searchParams.get("sessionId") !== `fixture-session-${orbId}`) {
+      sendJson(response, 409, {
+        error: { code: "stale_session", message: "detail session changed", retryable: true },
+      });
+      return true;
+    }
+    const record = state.histories.get(orbId)?.find((entry) => entry.id === recordId);
+    if (record === undefined || !state.orbs.has(orbId)) {
+      notFound(response);
+      return true;
+    }
+    if (action === "details") {
+      const body = projectRecordDetail(record, detailKey);
+      if (body === null) {
+        notFound(response);
+        return true;
+      }
+      sendJson(response, 200, {
+        v: 1,
+        state: "committed",
+        sessionId: `fixture-session-${orbId}`,
+        recordId,
+        detailKey,
+        body,
+      });
+      return true;
+    }
+    const image = projectRecordImage(record, detailKey, Number(imageIndex));
+    if (image === null) {
+      notFound(response);
+      return true;
+    }
+    response.writeHead(200, {
+      "content-type": image.mediaType,
+      "cache-control": "private, no-store",
+    });
+    response.end(Buffer.from(image.data, "base64"));
+    return true;
+  }
+
   const orbRoute = /^\/api\/v1\/orbs\/([^/]+)(?:\/(history|start|stop|archive))?$/.exec(path);
   if (orbRoute !== null) {
     const orbId = decodeURIComponent(orbRoute[1] ?? "");
@@ -1514,12 +1740,12 @@ async function handleApi(
     if (method === "GET" && action === "history") {
       const records = state.histories.get(orbId) ?? [];
       const headId = records.at(-1)?.id ?? null;
-      const view: OrbHistoryView = {
+      const view = {
         orbId,
-        session: { id: `fixture-session-${orbId}`, overflow: {} },
+        session: { id: `fixture-session-${orbId}` },
         cursor: headId,
         headId,
-        records,
+        records: records.map(projectDisplayRecord),
       };
       sendJson(response, 200, view);
       return true;
@@ -1606,7 +1832,7 @@ function completeEcho(
     type: "history.record",
     retiredBlockIds: [`${operationId}-text`],
     at: now(),
-    record,
+    record: projectDisplayRecord(record),
     headId: record.id,
   });
   send(
@@ -1695,7 +1921,7 @@ function completeShell(
     type: "history.record",
     retiredBlockIds: [],
     at: now(),
-    record,
+    record: projectDisplayRecord(record),
     headId: record.id,
   });
   send(
@@ -1991,7 +2217,7 @@ function handleAction(
     v: 1,
     type: "history.record",
     at: now(),
-    record: userRecord,
+    record: projectDisplayRecord(userRecord),
     retiredBlockIds: [],
     headId: userRecord.id,
   });
@@ -2004,6 +2230,94 @@ function handleAction(
       event: { type: "operation_started", operationId },
     }),
   );
+  if (session.orbId === "frontend-lazy-details" && inputText.includes("LAZY_TOOL_PAIR_HOLD")) {
+    const callId = `${operationId}-tool`;
+    const callRecord: HistoryRecord = {
+      id: randomUUID(),
+      parentId: userRecord.id,
+      timestamp: now(),
+      type: "message",
+      role: "assistant",
+      content: [
+        { type: "tool_call", callId, name: "read", arguments: { path: "paired-tool.txt" } },
+      ],
+      overflow: {},
+    };
+    const notice: HistoryRecord = {
+      id: randomUUID(),
+      parentId: callRecord.id,
+      timestamp: now(),
+      type: "event",
+      eventType: "pi.custom_message",
+      custom: { customType: "status", display: true },
+      content: [{ type: "text", text: "Interposed tool notice" }],
+      overflow: {},
+    };
+    const alert: HistoryRecord = {
+      id: randomUUID(),
+      parentId: notice.id,
+      timestamp: now(),
+      type: "event",
+      eventType: "pi.custom",
+      alert: { message: "Interposed tool alert", requestId: operationId },
+      content: [],
+      overflow: {},
+    };
+    for (const record of [callRecord, notice, alert]) {
+      state.histories.get(session.orbId)?.push(record);
+      send(session.socket, {
+        v: 1,
+        type: "history.record",
+        at: now(),
+        record: projectDisplayRecord(record),
+        retiredBlockIds: [],
+        headId: record.id,
+      });
+    }
+    send(
+      session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: { type: "status", activity: "busy", operationId },
+      }),
+    );
+    session.operation = { id: operationId, timer: setTimeout(() => {}, 2_000_000) };
+    state.lazyRunning.set(session.orbId, { session, operationId, blockId: callId, reads: 0 });
+    return;
+  }
+  if (session.orbId === "frontend-lazy-details" && inputText.includes("LAZY_RUNNING_HOLD")) {
+    const blockId = `${operationId}-reasoning`;
+    send(
+      session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: { type: "status", activity: "busy", operationId },
+      }),
+    );
+    send(
+      session.socket,
+      eventFrame({
+        v: 1,
+        type: "runtime.event",
+        at: now(),
+        event: {
+          type: "output_patch",
+          operationId,
+          blockId,
+          blockType: "reasoning",
+          revision: 1,
+          patch: { type: "replace", text: "" },
+        },
+      }),
+    );
+    session.operation = { id: operationId, timer: setTimeout(() => {}, 2_000_000) };
+    state.lazyRunning.set(session.orbId, { session, operationId, blockId, reads: 0 });
+    return;
+  }
   const echoedInput = `> ${inputText || "(image attachment)"}`;
   const echo = `You said:\n\n${echoedInput}\n\n_Echoed by the frontend fixture._`;
   send(
@@ -2116,7 +2430,7 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
         type: "history.record",
         retiredBlockIds: [],
         at: now(),
-        record,
+        record: projectDisplayRecord(record),
         headId: record.id,
       });
     }
@@ -2139,6 +2453,7 @@ function acceptLiveSocket(state: MockState, socket: WebSocket, orbId: string): v
   });
   socket.on("close", () => {
     if (session.operation !== null) clearTimeout(session.operation.timer);
+    if (state.lazyRunning.get(orbId)?.session === session) state.lazyRunning.delete(orbId);
     const current = state.liveSessions.get(orbId);
     current?.delete(session);
     if (current?.size === 0) state.liveSessions.delete(orbId);

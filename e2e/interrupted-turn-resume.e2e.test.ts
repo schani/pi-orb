@@ -11,6 +11,7 @@ import {
   type FakeSession,
   FatalProbeError,
   fakeControl,
+  readReplicatedHistorySnapshot,
   removeOrbContainers,
   startControlPlane,
   waitFor,
@@ -79,8 +80,16 @@ const SCENARIO = {
       {
         match: { userMessage: { regex: KICKOFF } },
         steps: [
-          { type: "reasoning", text: "Starting the long-running check.", deltas: 3 },
-          { type: "toolCall", name: "bash", arguments: { command: SLEEP_COMMAND } },
+          {
+            type: "reasoning",
+            text: "Starting the long-running check.",
+            deltas: 3,
+          },
+          {
+            type: "toolCall",
+            name: "bash",
+            arguments: { command: SLEEP_COMMAND },
+          },
           { type: "usage", input_tokens: 130, output_tokens: 30 },
           { type: "stop", status: "completed" },
         ],
@@ -177,6 +186,7 @@ beforeAll(async () => {
     nameFake,
     dockerNetwork: NETWORK,
     runtimeImage: RUNTIME_IMAGE,
+    extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
   });
 }, 720_000);
 
@@ -242,7 +252,9 @@ describe("interrupted-turn resume E2E", () => {
     // Fresh orbs launch as incarnation 0, and this test never replaces
     // compute, so the container name is stable for the whole scenario.
     const container = `pi-orb-${orbId}-i0`;
-    const orb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, { id: orbId });
+    const orb = await api(base, "POST", `/api/v1/projects/${projectId}/orbs`, {
+      id: orbId,
+    });
     expect(orb.status, JSON.stringify(orb.body)).toBe(202);
 
     const challenge = await waitFor(
@@ -259,7 +271,9 @@ describe("interrupted-turn resume E2E", () => {
       },
       { timeoutMs: 60_000 },
     );
-    await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: challenge });
+    await fakeControl(fake.sessionKey, "/deviceauth/approve", {
+      user_code: challenge,
+    });
 
     await waitFor(
       "orb running",
@@ -368,8 +382,8 @@ describe("interrupted-turn resume E2E", () => {
     await waitFor(
       "assistant tool call replicated",
       async () => {
-        const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-        const serialized = JSON.stringify(snapshot.body["records"]);
+        const snapshot = await readReplicatedHistorySnapshot(controlPlane, orbId);
+        const serialized = JSON.stringify(snapshot.records);
         return serialized.includes(SLEEP_COMMAND) ? true : null;
       },
       { timeoutMs: 90_000, intervalMs: 1_000 },
@@ -407,8 +421,8 @@ describe("interrupted-turn resume E2E", () => {
     const resumed = await waitFor(
       "resume marker and closing text replicated",
       async () => {
-        const snapshot = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-        const records = snapshot.body["records"] as unknown[];
+        const snapshot = await readReplicatedHistorySnapshot(controlPlane, orbId);
+        const records = snapshot.records as unknown[];
         const markers = customRecords(records, RESUME_CUSTOM_TYPE);
         if (markers.length === 0) return null;
         return JSON.stringify(records).includes(RESUME_OK) ? { records, markers } : null;
@@ -487,8 +501,8 @@ describe("interrupted-turn resume E2E", () => {
       { timeoutMs: 180_000, intervalMs: 2_000 },
     );
 
-    const stopped = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
-    const stoppedRecords = stopped.body["records"] as unknown[];
+    const stopped = await readReplicatedHistorySnapshot(controlPlane, orbId);
+    const stoppedRecords = stopped.records as unknown[];
     expect(customRecords(stoppedRecords, RESUME_CUSTOM_TYPE).length).toBe(1);
     expect(JSON.stringify(stoppedRecords)).toContain(RESUME_OK);
   }

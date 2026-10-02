@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { projectDisplayRecord } from "@pi-orb/protocol";
 import { expect as check, chromium, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
@@ -53,15 +54,17 @@ it.each(["chromium", "webkit"] as const)(
             },
           });
         const view = await response.json();
-        view.records.push({
-          id: "cache-new-tail",
-          parentId: view.cursor,
-          timestamp: "now",
-          type: "message",
-          role: "assistant",
-          content: [{ type: "text", text: "REFRESH_NEW_TAIL" }],
-          overflow: {},
-        });
+        view.records.push(
+          projectDisplayRecord({
+            id: "cache-new-tail",
+            parentId: view.cursor,
+            timestamp: "now",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "REFRESH_NEW_TAIL" }],
+            overflow: {},
+          }),
+        );
         view.cursor = "cache-new-tail";
         view.headId = view.cursor;
         return route.fulfill({ response, json: view });

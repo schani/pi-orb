@@ -142,7 +142,7 @@ it.each(
     bufferedAmount = 0;
     writer.onDrain();
     expect(agent.liveView()?.blocks.map((block) => block.text)).toEqual(["second"]);
-    expect([...browser.liveBlocks.values()].map((block) => block.text)).toEqual(["second"]);
+    expect([...browser.liveBlocks.values()].map((block) => block.text)).toEqual([""]);
     expect(firstIds).not.toContain([...browser.liveBlocks.keys()][0]);
     const saved = frames.findIndex((frame) => frame.type === "history.record");
     expect(saved).toBeGreaterThanOrEqual(0);

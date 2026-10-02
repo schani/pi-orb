@@ -1,4 +1,4 @@
-import { OrbHistoryViewSchema } from "@pi-orb/protocol";
+import { DisplayHistoryViewSchema, projectDisplayRecord } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { Check } from "typebox/value";
@@ -6,7 +6,7 @@ import { expect, it, vi } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { registerRoutes } from "./routes.ts";
 
-it("streams the browser's complete history schema including session and cursor metadata", async () => {
+it("streams the browser's display history with session and cursor metadata", async () => {
   const task = new NoSimulationTask("history route", false);
   const log = vi.spyOn(task, "log");
   const harness = makeHarness();
@@ -41,22 +41,18 @@ it("streams the browser's complete history schema including session and cursor m
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-length"]).toBeUndefined();
     expect(response.headers["transfer-encoding"]).toBe("chunked");
-    expect(Check(OrbHistoryViewSchema, response.json())).toBe(true);
+    expect(Check(DisplayHistoryViewSchema, response.json())).toBe(true);
     expect(response.body).toBe(
       JSON.stringify({
         orbId: "orb",
-        session,
+        session: { id: session.id },
         cursor: record.id,
         headId: record.id,
-        records: [record],
+        records: [projectDisplayRecord(record)],
       }),
     );
     expect(Buffer.byteLength(response.body)).toBeGreaterThan(32 * 1024 * 1024);
-    expect(log).toHaveBeenCalledWith(
-      expect.stringMatching(
-        /^lifecycle: orb=orb history-streamed producedBytes=\d+ totalRecords=1$/,
-      ),
-    );
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("history-streamed"));
   } finally {
     await app.close();
   }

@@ -1,4 +1,4 @@
-import type { HistoryRecord, OrbMessageView } from "@pi-orb/protocol";
+import type { DisplayRecord, OrbMessageView } from "@pi-orb/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { history } from "../testkit/transcript.ts";
 import { DevConsoleDebug, installDevConsoleDebug } from "./dev-console-debug.ts";
@@ -62,7 +62,7 @@ describe("DevConsoleDebug", () => {
     const records = history("orb", ["first", "second"]).records;
     const second = records[1] ?? expect.fail("second record missing");
     if (second.type !== "message") expect.fail("message record expected");
-    const broken: HistoryRecord = {
+    const broken: DisplayRecord = {
       ...second,
       parentId: "missing",
       inboxMessageIds: ["matched"],

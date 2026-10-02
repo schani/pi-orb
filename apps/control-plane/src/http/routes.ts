@@ -8,6 +8,7 @@ import {
   PROJECT_NAME_MAX_CHARS,
   ProjectSecretNameSchema,
   PutProjectSecretRequestSchema,
+  projectDisplayRecord,
   type SystemView,
   UpdateOrbRequestSchema,
   UpdateProjectRequestSchema,
@@ -18,6 +19,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { Result } from "neverthrow";
 import { Type } from "typebox";
 import { Check } from "typebox/value";
+import {
+  readDisplayDetail,
+  readDisplayImage,
+  readLiveDisplayDetail,
+} from "../domain/display-detail.ts";
 import type { ProjectConflict, ProjectSecretError, StoreError } from "../domain/errors.ts";
 import {
   type CommandError,
@@ -28,6 +34,7 @@ import {
   requestOrbStart,
   requestOrbStop,
 } from "../domain/lifecycle.ts";
+import { logOrbEvent } from "../domain/log.ts";
 import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { ackOrbAlert } from "../domain/orb-alerts.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
@@ -798,6 +805,83 @@ export function registerRoutes(
       : reply.send({ items: messages.value.map(messageView) });
   });
 
+  const sendDetailError = (
+    reply: FastifyReply,
+    orbId: string,
+    error: { type: string; source: string },
+  ) => {
+    const status =
+      error.type === "orb_missing" || error.type === "detail_missing"
+        ? 404
+        : error.type === "invalid_session"
+          ? 409
+          : 503;
+    const code = status === 404 ? "not_found" : status === 409 ? "conflict" : "unavailable";
+    logOrbEvent(task, orbId, "display-detail-read-failed", {
+      source: error.source,
+      reason: error.type,
+    });
+    return reply
+      .status(status)
+      .send(
+        httpError(
+          code,
+          error.type === "orb_missing"
+            ? "orb not found"
+            : error.type === "detail_missing"
+              ? "detail not found"
+              : "detail unavailable",
+          status === 503,
+        ),
+      );
+  };
+  app.get<{
+    Params: { orbId: string; recordId: string; detailKey: string };
+    Querystring: { sessionId?: string };
+  }>("/api/v1/orbs/:orbId/details/:recordId/:detailKey", async (request, reply) => {
+    if (!request.query.sessionId)
+      return reply.status(400).send(httpError("invalid_request", "sessionId required", false));
+    const result = await readDisplayDetail(task, deps, {
+      ...request.params,
+      sessionId: request.query.sessionId,
+    });
+    if (result.isErr()) return sendDetailError(reply, request.params.orbId, result.error);
+    reply.header("cache-control", "private, no-store");
+    return reply.send(result.value);
+  });
+  app.get<{
+    Params: { orbId: string; operationId: string; blockId: string };
+    Querystring: { sessionId?: string };
+  }>("/api/v1/orbs/:orbId/details/live/:operationId/:blockId", async (request, reply) => {
+    if (!request.query.sessionId)
+      return reply.status(400).send(httpError("invalid_request", "sessionId required", false));
+    const result = await readLiveDisplayDetail(task, deps, {
+      ...request.params,
+      sessionId: request.query.sessionId,
+    });
+    if (result.isErr()) return sendDetailError(reply, request.params.orbId, result.error);
+    reply.header("cache-control", "private, no-store");
+    return reply.send(result.value);
+  });
+  app.get<{
+    Params: { orbId: string; recordId: string; detailKey: string; imageIndex: string };
+    Querystring: { sessionId?: string };
+  }>("/api/v1/orbs/:orbId/images/:recordId/:detailKey/:imageIndex", async (request, reply) => {
+    if (!request.query.sessionId || !/^(0|[1-9][0-9]*)$/.test(request.params.imageIndex))
+      return reply
+        .status(400)
+        .send(httpError("invalid_request", "valid sessionId and imageIndex required", false));
+    const result = await readDisplayImage(task, deps, {
+      ...request.params,
+      sessionId: request.query.sessionId,
+      imageIndex: Number(request.params.imageIndex),
+    });
+    if (result.isErr()) return sendDetailError(reply, request.params.orbId, result.error);
+    reply.header("cache-control", "private, no-store");
+    reply.header("content-type", result.value.mediaType);
+    return reply.send(result.value.data);
+  });
+
   app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/history", async (request, reply) => {
     const orb = await deps.store.getOrb(task, request.params.orbId);
     if (orb.isErr()) {
@@ -821,11 +905,19 @@ export function registerRoutes(
       request.params.orbId,
       {
         orbId: request.params.orbId,
-        session: snapshot.value.session,
+        session:
+          snapshot.value.session === null
+            ? null
+            : {
+                id: snapshot.value.session.id,
+                ...(snapshot.value.session.timestamp === undefined
+                  ? {}
+                  : { timestamp: snapshot.value.session.timestamp }),
+              },
         cursor: snapshot.value.cursor,
         headId: snapshot.value.headId,
       },
-      snapshot.value.records,
+      snapshot.value.records.map(projectDisplayRecord),
     );
   });
 }

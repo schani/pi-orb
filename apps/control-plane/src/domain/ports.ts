@@ -473,6 +473,14 @@ export interface ControlPlaneStore {
     session: HarnessSessionMetadata,
   ): ResultAsync<void, StoreError | import("./errors.ts").ReplicationIntegrityError>;
 
+  /** One committed record, fenced to the current replica session; no transcript materialization. */
+  readHistoryRecord(
+    task: SimulationTask,
+    orbId: string,
+    sessionId: string,
+    recordId: string,
+  ): ResultAsync<HistoryRecord | null, StoreError>;
+
   /** Consistent snapshot for the history API and live handoff (docs/history-replication.md). */
   readHistorySnapshot(
     task: SimulationTask,
@@ -625,6 +633,30 @@ export interface PullHistoryClientRequest {
 }
 
 export interface OrbRuntimeClient {
+  readDisplayDetail(
+    task: SimulationTask,
+    baseUrl: string,
+    sessionId: string,
+    recordId: string,
+    detailKey: string,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").CommittedDisplayDetail, RuntimeClientError>;
+  readLiveDisplayDetail(
+    task: SimulationTask,
+    baseUrl: string,
+    operationId: string,
+    blockId: string,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").LiveDisplayDetail, RuntimeClientError>;
+  readDisplayImage(
+    task: SimulationTask,
+    baseUrl: string,
+    sessionId: string,
+    recordId: string,
+    detailKey: string,
+    imageIndex: number,
+    context: OperationContext,
+  ): ResultAsync<{ mediaType: string; data: Buffer }, RuntimeClientError>;
   deliverMessage(
     task: SimulationTask,
     request: DeliverMessageClientRequest,

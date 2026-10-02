@@ -1,4 +1,4 @@
-import type { HistoryRecord, OrbMessageView } from "@pi-orb/protocol";
+import type { DisplayRecord, OrbMessageView } from "@pi-orb/protocol";
 
 /**
  * Guards the queued-message list against the poll/enqueue race.
@@ -35,7 +35,7 @@ export function createMutationEpoch(): MutationEpoch {
   };
 }
 
-export function representedInboxMessageIds(records: readonly HistoryRecord[]): Set<string> {
+export function representedInboxMessageIds(records: readonly DisplayRecord[]): Set<string> {
   return new Set(
     records.flatMap((record) =>
       record.type === "message" || record.type === "event" ? (record.inboxMessageIds ?? []) : [],
@@ -52,7 +52,7 @@ export function representedInboxMessageIds(records: readonly HistoryRecord[]): S
  */
 export function messagesAwaitingHistory(
   items: readonly OrbMessageView[],
-  records: readonly HistoryRecord[],
+  records: readonly DisplayRecord[],
 ): OrbMessageView[] {
   const represented = representedInboxMessageIds(records);
   return items.filter((message) => message.status !== "delivered" || !represented.has(message.id));
@@ -89,7 +89,7 @@ export function reuseQueuedMessages(
 
 export function hasDeliveredMessageAwaitingHistory(
   items: readonly OrbMessageView[],
-  records: readonly HistoryRecord[],
+  records: readonly DisplayRecord[],
 ): boolean {
   const represented = representedInboxMessageIds(records);
   return items.some((message) => message.status === "delivered" && !represented.has(message.id));

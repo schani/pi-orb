@@ -2095,6 +2095,20 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     );
   }
 
+  readHistoryRecord(
+    task: SimulationTask,
+    orbId: string,
+    sessionId: string,
+    recordId: string,
+  ): ResultAsync<HistoryRecord | null, StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "read history record", () => {
+      const orb = this.orbs.get(orbId);
+      if (orb === undefined || orb.state === "deleting" || orb.harnessSessionId !== sessionId)
+        return null;
+      return this.replicas.get(orbId)?.records.get(recordId) ?? null;
+    });
+  }
+
   readHistorySnapshot(
     task: SimulationTask,
     orbId: string,

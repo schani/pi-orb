@@ -1,22 +1,12 @@
-import type { ContentBlock } from "@pi-orb/protocol";
 import { useRef, useState } from "react";
 
-type ImageBlock = Extract<ContentBlock, { type: "image" }>;
-
 interface ToolImagePreviewProps {
-  block: ImageBlock;
+  src?: string;
   toolName: string;
 }
 
-function imageSource(block: ImageBlock): string | null {
-  if (block.data !== undefined) {
-    return `data:${block.mediaType ?? "image/png"};base64,${block.data}`;
-  }
-  return block.url ?? null;
-}
-
-export function ToolImagePreview({ block, toolName }: ToolImagePreviewProps) {
-  const source = imageSource(block);
+export function ToolImagePreview({ src, toolName }: ToolImagePreviewProps) {
+  const source = src ?? null;
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);

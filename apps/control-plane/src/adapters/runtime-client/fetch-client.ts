@@ -1,5 +1,7 @@
 import {
+  CommittedDisplayDetailSchema,
   DeliverOrbMessageResponseSchema,
+  LiveDisplayDetailSchema,
   type PrepareIdleStopResponse,
   PrepareIdleStopResponseSchema,
   type PullHistoryResponse,
@@ -174,6 +176,83 @@ export class FetchRuntimeClient implements OrbRuntimeClient {
           ),
         );
       return ok(body);
+    });
+  }
+
+  readDisplayDetail(
+    _task: SimulationTask,
+    baseUrl: string,
+    sessionId: string,
+    recordId: string,
+    detailKey: string,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").CommittedDisplayDetail, RuntimeClientError> {
+    return this.request(
+      `${baseUrl}/v1/details/${encodeURIComponent(recordId)}/${encodeURIComponent(detailKey)}?sessionId=${encodeURIComponent(sessionId)}`,
+      context,
+    ).andThen(({ status, body }) =>
+      status !== 200
+        ? err(this.mapErrorResponse(status, body))
+        : Check(CommittedDisplayDetailSchema, body)
+          ? ok(body)
+          : err(clientError("invalid_response", "detail failed schema validation", false, true)),
+    );
+  }
+
+  readLiveDisplayDetail(
+    _task: SimulationTask,
+    baseUrl: string,
+    operationId: string,
+    blockId: string,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").LiveDisplayDetail, RuntimeClientError> {
+    return this.request(
+      `${baseUrl}/v1/details/live/${encodeURIComponent(operationId)}/${encodeURIComponent(blockId)}`,
+      context,
+    ).andThen(({ status, body }) =>
+      status !== 200
+        ? err(this.mapErrorResponse(status, body))
+        : Check(LiveDisplayDetailSchema, body)
+          ? ok(body)
+          : err(
+              clientError("invalid_response", "live detail failed schema validation", false, true),
+            ),
+    );
+  }
+
+  readDisplayImage(
+    _task: SimulationTask,
+    baseUrl: string,
+    sessionId: string,
+    recordId: string,
+    detailKey: string,
+    imageIndex: number,
+    context: OperationContext,
+  ): ResultAsync<{ mediaType: string; data: Buffer }, RuntimeClientError> {
+    const url = `${baseUrl}/v1/images/${encodeURIComponent(recordId)}/${encodeURIComponent(detailKey)}/${imageIndex}?sessionId=${encodeURIComponent(sessionId)}`;
+    return ResultAsync.fromPromise(fetch(url, { signal: context.signal }), (error) =>
+      clientError(
+        context.signal.aborted ? "cancelled" : "unreachable",
+        describeFetchError(error),
+        true,
+        false,
+      ),
+    ).andThen((response) => {
+      if (response.status !== 200)
+        return err(
+          clientError(
+            response.status === 409 ? "cursor_not_found" : "http_error",
+            `image HTTP ${response.status}`,
+            response.status >= 500,
+            true,
+          ),
+        );
+      const mediaType = response.headers.get("content-type");
+      if (mediaType === null || !/^image\/(png|jpeg|gif|webp)$/.test(mediaType))
+        return err(clientError("invalid_response", "invalid image content type", false, true));
+      return ResultAsync.fromPromise(response.arrayBuffer(), () =>
+        clientError("invalid_response", "invalid image body", true, true),
+      ).map((data) => ({ mediaType, data: Buffer.from(data) }));
     });
   }
 

@@ -21,6 +21,7 @@ import {
   FatalProbeError,
   fakeControl,
   newModelRequestsById,
+  readReplicatedHistorySnapshot,
   requestIds,
   startControlPlane,
   waitFor,
@@ -113,6 +114,7 @@ it("retains a real sleep CLI turn, stops, and wakes with one combined system not
       hostingRoot: join(root, "hosting"),
       webDist: join(root, "web"),
       controlledClockEpoch: epoch,
+      extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
     });
     const activeFake = fake;
     const activeCp = cp;
@@ -178,9 +180,28 @@ it("retains a real sleep CLI turn, stops, and wakes with one combined system not
         const view = await api(activeCp.baseUrl, "GET", `/api/v1/orbs/${orbId}`);
         const history = await api(activeCp.baseUrl, "GET", `/api/v1/orbs/${orbId}/history`);
         const serialized = JSON.stringify(history.body["records"]);
-        return typeof view.body["sleepUntil"] === "string" &&
-          serialized.includes("Sleep scheduled until") &&
-          serialized.includes("SLEEP_ACCEPTED_FINAL")
+        if (
+          typeof view.body["sleepUntil"] !== "string" ||
+          !serialized.includes("SLEEP_ACCEPTED_FINAL")
+        )
+          return null;
+        const sessionId = (history.body["session"] as { id: string }).id;
+        const results: unknown[] = [];
+        for (const record of history.body["records"] as {
+          id: string;
+          content?: { type: string; detailKey?: string }[];
+        }[]) {
+          for (const block of record.content ?? []) {
+            if (block.type !== "tool_result" || !block.detailKey) continue;
+            const detail = await api(
+              activeCp.baseUrl,
+              "GET",
+              `/api/v1/orbs/${orbId}/details/${encodeURIComponent(record.id)}/${encodeURIComponent(block.detailKey)}?sessionId=${encodeURIComponent(sessionId)}`,
+            );
+            if (detail.status === 200) results.push(detail.body);
+          }
+        }
+        return JSON.stringify(results).includes("Sleep scheduled until")
           ? String(view.body["sleepUntil"])
           : null;
       },
@@ -223,7 +244,9 @@ it("retains a real sleep CLI turn, stops, and wakes with one combined system not
       { timeoutMs: 120_000, intervalMs: 500 },
     );
     const stoppedHistory = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orbId}/history`);
-    expect(JSON.stringify(stoppedHistory.body["records"])).toContain("Sleep scheduled until");
+    expect(JSON.stringify((await readReplicatedHistorySnapshot(cp, orbId)).records)).toContain(
+      "Sleep scheduled until",
+    );
     expect(JSON.stringify(stoppedHistory.body["records"])).toContain("SLEEP_ACCEPTED_FINAL");
     const ownedRequestIdsBeforeWake = requestIds(
       (await fakeControl(activeFake.sessionKey, "/requests")) as unknown as unknown[],

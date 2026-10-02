@@ -30,6 +30,9 @@ describe("authenticated browser route scope", () => {
           "/api/v1/uploads",
           "/api/v1/orbs/orb/live",
           "/api/v1/orbs/orb/terminal",
+          "/api/v1/orbs/orb/details/r1/r1:0",
+          "/api/v1/orbs/orb/details/live/op/block",
+          "/api/v1/orbs/orb/images/r1/r1:0/0",
           "/s/orb/file",
         ]) {
           scope.get(path, async (request) => ({
@@ -46,6 +49,9 @@ describe("authenticated browser route scope", () => {
       "/api/v1/uploads",
       "/api/v1/orbs/orb/live",
       "/api/v1/orbs/orb/terminal",
+      "/api/v1/orbs/orb/details/r1/r1:0",
+      "/api/v1/orbs/orb/details/live/op/block",
+      "/api/v1/orbs/orb/images/r1/r1:0/0",
       "/s/orb/file",
     ]) {
       const denied = await app.inject({ url });

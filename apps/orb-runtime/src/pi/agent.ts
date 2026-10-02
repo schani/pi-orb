@@ -14,14 +14,21 @@ import {
 import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
   type AgentSettings,
+  type CommittedDisplayDetail,
   type DeliverOrbMessageResponse,
   type HistoryRecord,
+  type JsonValue,
+  JsonValueSchema,
+  type LiveDisplayDetail,
   type MessageInputBlock,
   ORB_NAME_MESSAGE_MAX_BYTES,
   ORB_NAME_README_MAX_BYTES,
   type OrbBootContext,
   type OrbBootContextResponse,
   type OrbMessageSystem,
+  projectDisplayRecord,
+  projectRecordDetail,
+  projectRecordImage,
   type RuntimeAlertRequest,
   type RuntimeAlertResponse,
   type RuntimeEvent,
@@ -34,10 +41,16 @@ import {
 } from "@pi-orb/protocol";
 import { NoSimulationTask } from "determined";
 import { err, errAsync, ok, Result, ResultAsync } from "neverthrow";
+import { Check } from "typebox/value";
 import { type BrokerEnv, HttpBrokerEndpoint } from "../broker/endpoint.ts";
 import { brokerProviderConfig } from "../broker/provider.ts";
 import { AgentSettingsController } from "../domain/agent-settings.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
+import {
+  readLiveDisplayDetail,
+  shouldBroadcastOutputPatch,
+  toolTextContent,
+} from "../domain/display-detail.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { AgentGateView } from "../domain/requests.ts";
@@ -141,6 +154,7 @@ export type PiSession = Pick<
 export type PiSessionManager = Pick<
   SessionManager,
   | "getEntries"
+  | "getEntry"
   | "getLeafId"
   | "getHeader"
   | "getSessionId"
@@ -243,6 +257,10 @@ export class PiOrbAgent {
   private outputMessageSequence = 0;
   private readonly messageBlocks = new WeakMap<object, string[]>();
   private readonly liveTools = new Map<string, LiveTool>();
+  private readonly liveToolBodies = new Map<
+    string,
+    { arguments?: JsonValue; content: Array<{ type: "text"; text: string }> }
+  >();
   private readonly listeners = new Set<FrameListener>();
   private readonly pendingInboxMessages = new Map<
     string,
@@ -917,7 +935,7 @@ export class PiOrbAgent {
         type: "history.record",
         retiredBlockIds,
         at: new Date().toISOString(),
-        record,
+        record: projectDisplayRecord(record),
         headId: record.id,
       });
     });
@@ -1139,7 +1157,11 @@ export class PiOrbAgent {
           if (existing !== undefined && existing.text === text) return;
           const revision = (existing?.revision ?? 0) + 1;
           this.liveBlocks.set(blockId, { blockType, revision, text });
-          if (this.operationId === null) return;
+          if (
+            this.operationId === null ||
+            !shouldBroadcastOutputPatch(blockType, existing !== undefined)
+          )
+            return;
           this.broadcastEvent({
             type: "output_patch",
             operationId: this.operationId,
@@ -1147,15 +1169,21 @@ export class PiOrbAgent {
             blockType,
             revision,
             patch:
-              existing !== undefined && text.startsWith(existing.text)
-                ? { type: "append", text: text.slice(existing.text.length) }
-                : { type: "replace", text },
+              blockType === "reasoning"
+                ? { type: "replace", text: "" }
+                : existing !== undefined && text.startsWith(existing.text)
+                  ? { type: "append", text: text.slice(existing.text.length) }
+                  : { type: "replace", text },
           });
         });
         break;
       }
       case "tool_execution_start": {
         if (this.operationId === null || event.parentToolCallId !== undefined) break;
+        this.liveToolBodies.set(event.toolCallId, {
+          ...(Check(JsonValueSchema, event.args) ? { arguments: event.args as JsonValue } : {}),
+          content: [],
+        });
         this.liveTools.set(event.toolCallId, {
           name: event.toolName,
           revision: 1,
@@ -1171,8 +1199,23 @@ export class PiOrbAgent {
         });
         break;
       }
+      case "tool_execution_update": {
+        if (this.operationId === null || !this.liveTools.has(event.toolCallId)) break;
+        const content = toolTextContent(event.partialResult);
+        const previous = this.liveToolBodies.get(event.toolCallId);
+        this.liveToolBodies.set(event.toolCallId, {
+          ...(previous?.arguments === undefined ? {} : { arguments: previous.arguments }),
+          content,
+        });
+        break;
+      }
       case "tool_execution_end": {
         if (this.operationId === null || event.parentToolCallId !== undefined) break;
+        const previous = this.liveToolBodies.get(event.toolCallId);
+        this.liveToolBodies.set(event.toolCallId, {
+          ...(previous?.arguments === undefined ? {} : { arguments: previous.arguments }),
+          content: toolTextContent(event.result),
+        });
         const existing = this.liveTools.get(event.toolCallId);
         const revision = (existing?.revision ?? 0) + 1;
         const state = event.isError ? "failed" : "completed";
@@ -1220,6 +1263,7 @@ export class PiOrbAgent {
     this.summaryStartIndex = summaryStartIndex;
     this.liveBlocks.clear();
     this.liveTools.clear();
+    this.liveToolBodies.clear();
     this.broadcastEvent({ type: "operation_started", operationId });
     this.broadcastEvent({ type: "status", activity: "busy", operationId });
   }
@@ -1234,6 +1278,7 @@ export class PiOrbAgent {
     this.activity = "idle";
     this.liveBlocks.clear();
     this.liveTools.clear();
+    this.liveToolBodies.clear();
     // A turn that ends without ever starting still releases its waiters.
     this.settleTurnStart();
     if (operationId !== null) {
@@ -1678,6 +1723,87 @@ export class PiOrbAgent {
     };
   }
 
+  private indexedDisplayRecord(
+    recordId: string,
+  ): Result<
+    { record: HistoryRecord; sessionId: string },
+    { type: "detail_unavailable" | "detail_not_found"; message: string }
+  > {
+    const manager = this.sessionManager;
+    if (manager === null || this.health.status !== "ready")
+      return err({ type: "detail_unavailable", message: "session is not ready" });
+    const entry = Result.fromThrowable(
+      () => manager.getEntry(recordId),
+      (cause) => ({
+        type: "detail_unavailable" as const,
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
+    )();
+    if (entry.isErr()) return err(entry.error);
+    if (entry.value === undefined)
+      return err({ type: "detail_not_found", message: "record does not exist" });
+    const mapped = mapPiEntry(entry.value);
+    if (mapped.isErr()) return err({ type: "detail_unavailable", message: mapped.error.message });
+    return ok({ record: mapped.value, sessionId: manager.getSessionId() });
+  }
+
+  readDisplayDetail(
+    recordId: string,
+    detailKey: string,
+  ): Result<
+    CommittedDisplayDetail,
+    { type: "detail_unavailable" | "detail_not_found"; message: string }
+  > {
+    const source = this.indexedDisplayRecord(recordId);
+    if (source.isErr()) return err(source.error);
+    const body = projectRecordDetail(source.value.record, detailKey);
+    if (body === null) return err({ type: "detail_not_found", message: "detail does not exist" });
+    return ok({
+      v: 1,
+      sessionId: source.value.sessionId,
+      recordId,
+      detailKey,
+      state: "committed",
+      body,
+    });
+  }
+
+  readDisplayImage(
+    recordId: string,
+    detailKey: string,
+    imageIndex: number,
+  ): Result<
+    { mediaType: string; data: Buffer },
+    { type: "detail_unavailable" | "detail_not_found"; message: string }
+  > {
+    const source = this.indexedDisplayRecord(recordId);
+    if (source.isErr()) return err(source.error);
+    const image = projectRecordImage(source.value.record, detailKey, imageIndex);
+    if (image === null) return err({ type: "detail_not_found", message: "image does not exist" });
+    return ok({ mediaType: image.mediaType, data: Buffer.from(image.data, "base64") });
+  }
+
+  readLiveDisplayDetail(operationId: string, blockId: string): LiveDisplayDetail {
+    const sessionId = this.sessionId() ?? "";
+    const tool = this.operationId === operationId ? this.liveTools.get(blockId) : undefined;
+    if (tool !== undefined) {
+      const body = this.liveToolBodies.get(blockId);
+      return {
+        v: 1,
+        sessionId,
+        operationId,
+        blockId,
+        state: tool.state === "running" ? "running" : "completed",
+        body: {
+          type: "tool_result",
+          ...(body?.arguments === undefined ? {} : { arguments: body.arguments }),
+          content: body?.content ?? [],
+        },
+      };
+    }
+    return readLiveDisplayDetail(sessionId, this.liveView(), operationId, blockId);
+  }
+
   sessionId(): string | null {
     return this.sessionManager?.getSessionId() ?? null;
   }
@@ -1928,6 +2054,7 @@ export class PiOrbAgent {
     this.shellOutputTruncated = false;
     this.liveBlocks.clear();
     this.liveTools.clear();
+    this.liveToolBodies.clear();
 
     const blockId = `${operationId}-shell`;
     this.liveBlocks.set(blockId, { blockType: "shell", revision: 1, text: `$ ${command}` });
@@ -1982,6 +2109,7 @@ export class PiOrbAgent {
     this.shellOutputTruncated = false;
     this.liveBlocks.clear();
     this.liveTools.clear();
+    this.liveToolBodies.clear();
     this.broadcastEvent({
       type: "operation_finished",
       operationId,

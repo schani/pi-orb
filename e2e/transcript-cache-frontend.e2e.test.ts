@@ -40,15 +40,15 @@ it.each(["chromium", "webkit"] as const)(
         }
         const response = await route.fetch();
         const view = await response.json();
-        // Large lossless payloads exercise real JSON processing without adding UI rows.
-        for (const record of view.records) record.overflow.cacheFixture = "x".repeat(128 * 1024);
+        // Browser history is the compact display projection, never the native transcript.
+        check(JSON.stringify(view)).not.toContain('"overflow"');
         lastRecord = view.cursor;
         return route.fulfill({ response, json: view });
       });
       await page.route(`**/orbs/${b}/history`, async (route) => {
         const response = await route.fetch();
         const view = await response.json();
-        view.records[0].overflow.cacheFixture = "y".repeat(6 * 1024 * 1024);
+        check(JSON.stringify(view)).not.toContain('"overflow"');
         return route.fulfill({ response, json: view });
       });
       await page.routeWebSocket(`**/orbs/${a}/live`, (socket) => {

@@ -1,9 +1,10 @@
-import type { HistoryRecord, OrbHistoryView } from "@pi-orb/protocol";
+import type { DisplayHistoryView, DisplayRecord, HistoryRecord } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
+import { displayRecord } from "../testkit/display-fixtures.ts";
 import { canRepairFromReplica, mergeReplicatedHistory } from "./history-refresh.ts";
 
-function record(id: string, parentId: string | null): HistoryRecord {
-  return {
+function record(id: string, parentId: string | null): DisplayRecord {
+  return displayRecord({
     id,
     parentId,
     timestamp: `time-${id}`,
@@ -11,10 +12,14 @@ function record(id: string, parentId: string | null): HistoryRecord {
     role: "assistant",
     content: [{ type: "text", text: id }],
     overflow: {},
-  };
+  } satisfies HistoryRecord);
 }
 
-function view(records: HistoryRecord[], cursor: string | null, headId = cursor): OrbHistoryView {
+function view(
+  records: DisplayRecord[],
+  cursor: string | null,
+  headId = cursor,
+): DisplayHistoryView {
   return { orbId: "orb-1", session: null, records, cursor, headId };
 }
 

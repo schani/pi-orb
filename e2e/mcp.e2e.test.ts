@@ -16,6 +16,7 @@ import {
   fakeControl,
   fakeRequest,
   type RecordedFakeRequest,
+  readReplicatedHistorySnapshot,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
@@ -65,7 +66,10 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       let body = "";
       for await (const chunk of req) body += chunk;
       const message = JSON.parse(body);
-      calls.push({ method: message.method, authorization: req.headers.authorization });
+      calls.push({
+        method: message.method,
+        authorization: req.headers.authorization,
+      });
       if (message.id === undefined) {
         res.writeHead(202).end();
         return;
@@ -89,10 +93,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
             },
           ],
         },
-        "resources/list": {
-          resources: [{ name: "readme", uri: "test://readme" }],
-          nextCursor: undefined,
-        },
+        "resources/list": { resources: [{ name: "readme", uri: "test://readme" }] },
         "resources/templates/list": {
           resourceTemplates: [{ name: "item", uriTemplate: "test://{id}" }],
         },
@@ -154,7 +155,11 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
               ]
             : []),
           {
-            match: { userMessage: { regex: index === 1 ? "MCP_CHILD_CHECK" : "^MCP check$" } },
+            match: {
+              userMessage: {
+                regex: index === 1 ? "MCP_CHILD_CHECK" : "^MCP check$",
+              },
+            },
             steps: [
               {
                 type: "toolCall",
@@ -187,7 +192,10 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
           {
             match: { userMessage: { regex: index === 1 ? "MCP_CHILD_CHECK" : "^MCP check$" } },
             steps: [
-              { type: "text", content: index === 1 ? "MCP_CHILD_COMPLETE" : "MCP_CHECK_COMPLETE" },
+              {
+                type: "text",
+                content: index === 1 ? "MCP_CHILD_COMPLETE" : "MCP_CHECK_COMPLETE",
+              },
               { type: "stop", status: "completed" },
             ],
           },
@@ -204,7 +212,9 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
             : []),
           {
             match: {
-              userMessage: { regex: "^Write a single short desktop-notification sentence" },
+              userMessage: {
+                regex: "^Write a single short desktop-notification sentence",
+              },
             },
             steps: [
               { type: "text", content: "Checked MCP capabilities." },
@@ -284,7 +294,11 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
           ],
         },
         {
-          match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+          match: {
+            userMessage: {
+              regex: "^Write a single short desktop-notification sentence",
+            },
+          },
           steps: [
             { type: "text", content: "Checked project isolation." },
             { type: "stop", status: "completed" },
@@ -328,6 +342,7 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     pglitePath: join(root, "db"),
     processStateDirectory: join(root, "hosts"),
     webDist: join(root, "web"),
+    extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
   });
   if (oldCert === undefined) delete process.env["NODE_EXTRA_CA_CERTS"];
   else process.env["NODE_EXTRA_CA_CERTS"] = oldCert;
@@ -382,7 +397,9 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
               name: "fixture",
               description: "MCP E2E inventory",
               url: `https://127.0.0.1:${address.port}/mcp`,
-              headers: { Authorization: { secret: "MCP_KEY", prefix: "Bearer " } },
+              headers: {
+                Authorization: { secret: "MCP_KEY", prefix: "Bearer " },
+              },
             },
           ],
         })
@@ -400,7 +417,11 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       servers: [],
     });
     expect(
-      (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: first })).status,
+      (
+        await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, {
+          id: first,
+        })
+      ).status,
     ).toBe(202);
     const challenge = await waitFor(
       "MCP login",
@@ -413,7 +434,9 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       },
       { timeoutMs: 60_000 },
     );
-    await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: challenge });
+    await fakeControl(fake.sessionKey, "/deviceauth/approve", {
+      user_code: challenge,
+    });
     await waitRunning(first);
     expect(calls.map((call) => call.method)).toEqual(
       expect.arrayContaining(["initialize", "tools/list", "resources/list"]),
@@ -488,6 +511,29 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
     await expectPage(
       page.locator(".activity-rail-label", { hasText: "mcp__fixture__echo" }),
     ).toHaveCount(0);
+    const replica = JSON.stringify((await readReplicatedHistorySnapshot(cp, first)).records);
+    const history = await api(cp.baseUrl, "GET", `/api/v1/orbs/${first}/history`);
+    const sessionId = (history.body["session"] as { id: string }).id;
+    const details: unknown[] = [];
+    for (const record of history.body["records"] as {
+      id: string;
+      content?: { type: string; detailKey?: string }[];
+    }[]) {
+      for (const block of record.content ?? []) {
+        if (block.type !== "tool_result" || !block.detailKey) continue;
+        const detail = await api(
+          cp.baseUrl,
+          "GET",
+          `/api/v1/orbs/${first}/details/${encodeURIComponent(record.id)}/${encodeURIComponent(block.detailKey)}?sessionId=${encodeURIComponent(sessionId)}`,
+        );
+        expect(detail.status).toBe(200);
+        details.push(detail.body);
+      }
+    }
+    const output = JSON.stringify(details);
+    expect(output).toContain("MCP_RESOURCE_OK");
+    expect(output).toContain("test://{id}");
+    expect(replica).not.toContain("synthetic-first");
     expect(encoded).not.toContain("synthetic-first");
     expect(calls.some((call) => call.method === "resources/read")).toBe(true);
     expect(calls.some((call) => call.method === "resources/templates/list")).toBe(true);
@@ -531,7 +577,11 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       ).status,
     ).toBe(200);
     expect(
-      (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: second })).status,
+      (
+        await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, {
+          id: second,
+        })
+      ).status,
     ).toBe(202);
     await waitRunning(second);
     await page.goto(`${cp.baseUrl}/#/orbs/${second}`);
@@ -593,7 +643,11 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       "Bearer synthetic-second",
     ]);
     expect(
-      (await api(cp.baseUrl, "POST", `/api/v1/projects/${other}/orbs`, { id: isolated })).status,
+      (
+        await api(cp.baseUrl, "POST", `/api/v1/projects/${other}/orbs`, {
+          id: isolated,
+        })
+      ).status,
     ).toBe(202);
     await waitRunning(isolated);
     await page.goto(`${cp.baseUrl}/#/orbs/${isolated}`);
@@ -726,7 +780,9 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
               name: "missing",
               description: "Missing secret",
               url: "https://example.com/mcp",
-              headers: { Authorization: { secret: "MCP_KEY", prefix: "Bearer " } },
+              headers: {
+                Authorization: { secret: "MCP_KEY", prefix: "Bearer " },
+              },
             },
           ],
         })
@@ -749,8 +805,8 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
         );
         const history: Record<string, unknown> = {};
         for (const id of [first, second, isolated, unavailable])
-          history[id] = await api(cp.baseUrl, "GET", `/api/v1/orbs/${id}/history`).then(
-            (value) => mcpFailureHistory(value.body),
+          history[id] = await readReplicatedHistorySnapshot(cp, id).then(
+            (value) => mcpFailureHistory(value),
             () => "unavailable",
           );
         return { requests, history };

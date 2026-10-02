@@ -1,6 +1,101 @@
+import type { ContentBlock, HistoryRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { ToolActivity } from "./ToolActivity.tsx";
+import { detailContext, displayRecord } from "../testkit/display-fixtures.ts";
+import { DetailContent } from "./DetailBody.tsx";
+import { ToolActivity as BrowserToolActivity } from "./ToolActivity.tsx";
+
+type RawPair = {
+  call: Extract<ContentBlock, { type: "tool_call" }>;
+  result?: Extract<ContentBlock, { type: "tool_result" }>;
+};
+function ToolActivity({ persisted }: { persisted: readonly RawPair[] }) {
+  const projected = persisted.map(({ call, result }, index) => {
+    const callRecordId = `call-${index}`;
+    const callRecord = displayRecord({
+      id: callRecordId,
+      parentId: null,
+      timestamp: "now",
+      type: "message",
+      role: "assistant",
+      content: [call],
+      overflow: {},
+    });
+    if (callRecord.type !== "message") throw new Error("expected message projection");
+    const displayCall = callRecord.content[0];
+    if (displayCall?.type !== "tool_call") throw new Error("expected call projection");
+    if (result === undefined) return { call: displayCall, callRecordId };
+    const resultRecordId = `result-${index}`;
+    const resultRecord = displayRecord({
+      id: resultRecordId,
+      parentId: callRecordId,
+      timestamp: "now",
+      type: "message",
+      role: "tool",
+      content: [result],
+      overflow: {},
+    } satisfies HistoryRecord);
+    if (resultRecord.type !== "message") throw new Error("expected message projection");
+    const displayResult = resultRecord.content[0];
+    if (displayResult?.type !== "tool_result") throw new Error("expected result projection");
+    return { call: displayCall, callRecordId, result: displayResult, resultRecordId };
+  });
+  return <BrowserToolActivity persisted={projected} detailContext={detailContext()} />;
+}
+
+describe("bounded call labels", () => {
+  it("uses the tool name for an empty generic projection heading and tooltip", () => {
+    const html = renderToStaticMarkup(
+      <ToolActivity
+        persisted={[
+          {
+            call: {
+              type: "tool_call",
+              callId: "generic-1",
+              name: "browser_snapshot",
+              arguments: {},
+            },
+          },
+        ]}
+      />,
+    );
+    expect(html).toContain('<code class="trunc" title="browser_snapshot">browser_snapshot</code>');
+    const longName = "界".repeat(400);
+    const capped = renderToStaticMarkup(
+      <ToolActivity
+        persisted={[
+          {
+            call: { type: "tool_call", callId: "generic-2", name: longName, arguments: {} },
+          },
+        ]}
+      />,
+    );
+    const label = capped.match(/<code class="trunc" title="([^"]+)">([^<]+)<\/code>/);
+    expect(label?.[1]).toBe(label?.[2]);
+    expect(Buffer.byteLength(label?.[1] ?? "")).toBeLessThanOrEqual(1024);
+  });
+  it("caps a multibyte read path with its range once for text and tooltip", () => {
+    const html = renderToStaticMarkup(
+      <ToolActivity
+        persisted={[
+          {
+            call: {
+              type: "tool_call",
+              callId: "read-1",
+              name: "read",
+              arguments: { path: "界".repeat(400), offset: 12, limit: 5 },
+            },
+          },
+        ]}
+      />,
+    );
+    const match = html.match(/<code class="trunc" title="([^"]+)">([^<]+)<\/code>/);
+    expect(match).not.toBeNull();
+    expect(match?.[1]).toBe(match?.[2]);
+    expect(match?.[1]).toMatch(/…:12–16$/);
+    expect(Buffer.byteLength(match?.[1] ?? "")).toBeLessThanOrEqual(1024);
+  });
+});
 
 describe("edit diff stats", () => {
   it("counts added and removed lines from the tool result patch", () => {
@@ -30,7 +125,7 @@ describe("edit diff stats", () => {
 });
 
 describe("tool image previews", () => {
-  it("keeps image calls in call order with one visible provenance header per call", () => {
+  it("keeps image calls in order without embedding image bodies", () => {
     const html = renderToStaticMarkup(
       <ToolActivity
         persisted={[
@@ -70,17 +165,46 @@ describe("tool image previews", () => {
 
     expect(html.match(/tool-image-activity/g)).toHaveLength(2);
     expect(html.match(/<details[^>]*tool-image-activity[^>]*open=""/g)).toHaveLength(2);
-    expect(html.match(/class="tool-image-thumbnail"/g)).toHaveLength(3);
-    expect(html.match(/class="tool-image-previews"/g)).toHaveLength(2);
+    expect(html).not.toContain("tool-image-thumbnail");
+    expect(html).not.toContain("tool-image-previews");
     expect(html.indexOf("first.png")).toBeLessThan(html.indexOf("browser"));
-    expect(html.indexOf("https://example.test/second.png")).toBeLessThan(
-      html.indexOf("https://example.test/third.png"),
+    expect(html).not.toContain("https://example.test/second.png");
+    expect(html).not.toContain("https://example.test/third.png");
+    expect(html).not.toContain("first text");
+    const body = renderToStaticMarkup(
+      <DetailContent
+        body={{
+          type: "tool_result",
+          content: [
+            { type: "text", text: "first text" },
+            { type: "image", imageRef: "result-0:0:1" },
+          ],
+        }}
+        context={detailContext()}
+        recordId="result-0"
+        detailKey="result-0:0"
+      />,
     );
-    expect(html).toContain('aria-label="Enlarge image returned by read"');
-    expect(html).toContain('aria-label="Close image preview"');
-    expect(html.match(/first text/g)).toHaveLength(1);
-    expect(html).toContain('class="tool-image-previews"><div class="tool-image-preview">');
-    expect(html).not.toContain('<details class="tool-activity-call');
+    expect(body).toContain("first text");
+    expect(body).toContain("Loading…");
+    expect(body).not.toContain("/images/");
+    const sparse = renderToStaticMarkup(
+      <DetailContent
+        body={{
+          type: "tool_result",
+          content: [
+            { type: "text", text: "visible" },
+            { type: "image", imageRef: "result-0:0:4" },
+          ],
+        }}
+        context={detailContext()}
+        recordId="result-0"
+        detailKey="result-0:0"
+      />,
+    );
+    expect(sparse).toContain("Loading…");
+    expect(sparse).not.toContain("/images/");
+    expect(html.match(/<details class="tool-activity-call" open=""/g)).toHaveLength(2);
     expect(html).not.toContain("image/png Zmlyc3Q=");
   });
 
@@ -142,7 +266,7 @@ describe("tool image previews", () => {
     }
   });
 
-  it("shows missing image data inline without exposing an empty image", () => {
+  it("defers missing image data without exposing an empty image", () => {
     const html = renderToStaticMarkup(
       <ToolActivity
         persisted={[
@@ -162,8 +286,18 @@ describe("tool image previews", () => {
         ]}
       />,
     );
-    expect(html).toContain('class="tool-image-state" role="status">image unavailable');
     expect(html).not.toContain("tool-image-thumbnail");
+    expect(html).not.toContain("image unavailable");
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{ type: "image" }}
+          context={detailContext()}
+          recordId="result"
+          detailKey="result:0"
+        />,
+      ),
+    ).toContain("[image]");
   });
 
   it("leaves text-only compact category grouping unchanged", () => {
@@ -232,14 +366,43 @@ describe("codemode nested calls", () => {
         ]}
       />,
     );
-    expect(html.match(/<details\b/g)).toHaveLength(1);
-    expect(html).toContain("mcp__fixture__echo");
-    expect(html).toContain("MCP request aborted");
-    expect(html).toContain("11 ms");
-    expect(html).toContain("arguments omitted (9000 bytes)");
-    expect(html).toContain("unfinished");
-    expect(html).toContain("incomplete");
-    expect(html).not.toContain("child output");
+    expect(html.match(/<details\b/g)).toHaveLength(2);
+    expect(html).not.toContain("MCP request aborted");
+    const detail = renderToStaticMarkup(
+      <DetailContent
+        body={{
+          type: "tool_result",
+          content: [{ type: "text", text: "Script failed" }],
+          nestedCalls: {
+            complete: false,
+            calls: [
+              {
+                id: "parent/1",
+                name: "mcp__fixture__echo",
+                status: "error",
+                arguments: { value: "marker" },
+                durationMs: 11,
+                error: "MCP request aborted",
+              },
+              { id: "parent/2", name: "read", status: "unfinished", argumentsBytes: 9000 },
+            ],
+          },
+        }}
+        context={detailContext()}
+        recordId="result-0"
+        detailKey="result-0:0"
+      />,
+    );
+    for (const value of [
+      "mcp__fixture__echo",
+      "MCP request aborted",
+      "11 ms",
+      "arguments omitted (9000 bytes)",
+      "unfinished",
+      "incomplete",
+    ])
+      expect(detail).toContain(value);
+    expect(detail).not.toContain("child output");
   });
 });
 
@@ -263,14 +426,31 @@ describe("generic nested tool summary", () => {
         ]}
       />,
     );
-    expect(html).toContain("read · ok · 4 ms");
-    expect(html.match(/<details\b/g)).toHaveLength(1);
+    expect(html).not.toContain("read · ok · 4 ms");
+    expect(html.match(/<details\b/g)).toHaveLength(2);
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{
+            type: "tool_result",
+            content: [],
+            nestedCalls: {
+              complete: true,
+              calls: [{ id: "parent/1", name: "read", status: "ok", durationMs: 4 }],
+            },
+          }}
+          context={detailContext()}
+          recordId="result-0"
+          detailKey="result-0:0"
+        />,
+      ),
+    ).toContain("read · ok · 4 ms");
   });
 });
 
 describe("generic tool disclosure", () => {
-  it.each(["subagent", "get_subagent_result", "mcp__fixture__echo"])(
-    "shows %s input and output behind just the category disclosure",
+  it.each(["subagent", "get_subagent_result", "mcp__fixture__echo", "codemode"])(
+    "defers %s input and output to detail rendering",
     (name) => {
       const html = renderToStaticMarkup(
         <ToolActivity
@@ -291,9 +471,29 @@ describe("generic tool disclosure", () => {
           ]}
         />,
       );
-      expect(html.match(/<details\b/g)).toHaveLength(1);
-      expect(html).toContain("Inspect services");
-      expect(html).toContain("Four services found");
+      expect(html.match(/<details\b/g)).toHaveLength(2);
+      expect(html).not.toContain("Inspect services");
+      expect(html).not.toContain("Four services found");
+      expect(
+        renderToStaticMarkup(
+          <DetailContent
+            body={{ type: "tool_call", arguments: { task: "Inspect services" } }}
+            context={detailContext()}
+            recordId="call-0"
+            detailKey="call-0:0"
+          />,
+        ),
+      ).toContain("Inspect services");
+      expect(
+        renderToStaticMarkup(
+          <DetailContent
+            body={{ type: "tool_result", content: [{ type: "text", text: "Four services found" }] }}
+            context={detailContext()}
+            recordId="result-0"
+            detailKey="result-0:0"
+          />,
+        ),
+      ).toContain("Four services found");
     },
   );
 });

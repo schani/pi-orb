@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
   DEFAULT_TTL_SECONDS,
-  type HistoryRecord,
+  type DisplayRecord,
   ID_TOKEN_PATH,
   RUNTIME_SUBPROTOCOL,
   type ServerFrame,
@@ -38,6 +38,7 @@ import {
   fetchIssuerKeys,
   forceReconcilePass,
   orbContainerNames,
+  readReplicatedHistorySnapshot,
   removeOrbContainers,
   startControlPlane,
   verifyIdToken,
@@ -72,8 +73,16 @@ const SCENARIO = {
       {
         match: { userMessage: { regex: "run the e2e tool check" } },
         steps: [
-          { type: "reasoning", text: "I will run the requested check with bash.", deltas: 3 },
-          { type: "toolCall", name: "bash", arguments: { command: "echo E2E_TOOL_OK" } },
+          {
+            type: "reasoning",
+            text: "I will run the requested check with bash.",
+            deltas: 3,
+          },
+          {
+            type: "toolCall",
+            name: "bash",
+            arguments: { command: "echo E2E_TOOL_OK" },
+          },
           { type: "usage", input_tokens: 120, output_tokens: 25 },
           { type: "stop", status: "completed" },
         ],
@@ -81,13 +90,21 @@ const SCENARIO = {
       {
         match: { toolResultContains: { regex: "E2E_TOOL_OK" } },
         steps: [
-          { type: "text", content: "The check succeeded: E2E_TOOL_OK.", deltas: 4 },
+          {
+            type: "text",
+            content: "The check succeeded: E2E_TOOL_OK.",
+            deltas: 4,
+          },
           { type: "usage", input_tokens: 180, output_tokens: 12 },
           { type: "stop", status: "completed" },
         ],
       },
       {
-        match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+        match: {
+          userMessage: {
+            regex: "^Write a single short desktop-notification sentence",
+          },
+        },
         steps: [
           { type: "text", content: "Ran the requested tool check." },
           { type: "stop", status: "completed" },
@@ -108,7 +125,11 @@ const SCENARIO = {
         ],
       },
       {
-        match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+        match: {
+          userMessage: {
+            regex: "^Write a single short desktop-notification sentence",
+          },
+        },
         steps: [
           { type: "text", content: "Completed the spawned task." },
           { type: "stop", status: "completed" },
@@ -143,7 +164,11 @@ const SCENARIO = {
         ],
       },
       {
-        match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+        match: {
+          userMessage: {
+            regex: "^Write a single short desktop-notification sentence",
+          },
+        },
         steps: [
           { type: "text", content: "Verified the uploaded file." },
           { type: "stop", status: "completed" },
@@ -163,21 +188,31 @@ const SCENARIO = {
       {
         match: { userMessage: { regex: "^please archive this orb$" } },
         steps: [
-          { type: "toolCall", name: "bash", arguments: { command: "pi-orb archive" } },
+          {
+            type: "toolCall",
+            name: "bash",
+            arguments: { command: "pi-orb archive" },
+          },
           { type: "stop", status: "completed" },
         ],
       },
       {
         match: { toolResultContains: { regex: "Archive requested" } },
         steps: [
-          { type: "text", content: "SELF_ARCHIVE_FINAL: archival requested as you asked." },
+          {
+            type: "text",
+            content: "SELF_ARCHIVE_FINAL: archival requested as you asked.",
+          },
           { type: "stop", status: "completed" },
         ],
       },
       {
         match: { default: true },
         steps: [
-          { type: "text", content: "Unexpected prompt reached the fallback rule." },
+          {
+            type: "text",
+            content: "Unexpected prompt reached the fallback rule.",
+          },
           { type: "stop", status: "completed" },
         ],
       },
@@ -512,7 +547,10 @@ async function mintDirect(
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const response = await fetch(`${controlPlane.baseUrl}${ID_TOKEN_PATH}`, {
     method: "POST",
-    headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${bearer}`,
+      "content-type": "application/json",
+    },
     body: JSON.stringify({ audience }),
   });
   return {
@@ -535,7 +573,11 @@ async function dumpOrbDiagnostics(id: string): Promise<void> {
       const entries = existsSync(hostDirectory) ? readdirSync(hostDirectory) : [];
       console.error(
         "=== process host inventory ===",
-        JSON.stringify({ hostDirectory, entries, hostMetadata: entries.includes("host.json") }),
+        JSON.stringify({
+          hostDirectory,
+          entries,
+          hostMetadata: entries.includes("host.json"),
+        }),
       );
     } else {
       const names = await orbContainerNames(id).catch((error: unknown) => [
@@ -585,7 +627,10 @@ beforeAll(async () => {
       e2eHostSpec: "stage2-spec-a",
       hostingRoot: hostingRootDirectory,
       webDist: webDistDirectory,
-      extraEnv: { PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1" },
+      extraEnv: {
+        PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1",
+        PI_ORB_E2E_HISTORY_INSPECTION: "1",
+      },
     });
     return;
   }
@@ -621,7 +666,10 @@ beforeAll(async () => {
     e2eHostSpec: "stage2-spec-a",
     hostingRoot: hostingRootDirectory,
     webDist: webDistDirectory,
-    extraEnv: { PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1" },
+    extraEnv: {
+      PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1",
+      PI_ORB_E2E_HISTORY_INSPECTION: "1",
+    },
   });
 }, 720_000);
 
@@ -664,7 +712,10 @@ async function restartControlPlaneWithSpec(spec: string, generation: number): Pr
     authDir,
     hostingRoot: hostingRootDirectory,
     webDist: webDistDirectory,
-    extraEnv: { PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1" },
+    extraEnv: {
+      PI_ORB_E2E_RECONCILE_CHECKPOINTS: "1",
+      PI_ORB_E2E_HISTORY_INSPECTION: "1",
+    },
   });
 }
 
@@ -755,13 +806,16 @@ describe("full slice E2E", () => {
         await writeWorkspaceFiles(
           replacementOrbId,
           0,
-          { "repo/.agents/setup": SETUP_HOOK, "repo/.agents/resume": RESUME_HOOK },
+          {
+            "repo/.agents/setup": SETUP_HOOK,
+            "repo/.agents/resume": RESUME_HOOK,
+          },
           0o755,
         );
         const oldToken = await readRuntimeToken(replacementOrbId, 0);
         const historyBefore = await waitFor("initial settings replicated", async () => {
           const view = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
-          return (view.body["records"] as HistoryRecord[]).some(
+          return (view.body["records"] as DisplayRecord[]).some(
             (record) => record.type === "event" && record.eventType === "pi.thinking_level_change",
           )
             ? view
@@ -893,7 +947,10 @@ describe("full slice E2E", () => {
         await waitForDiscardFenceCleared(replacementOrbId);
         const unauthorized = await fetch(`${base}/runtime/v1/tokens/model`, {
           method: "POST",
-          headers: { authorization: `Bearer ${oldToken}`, "content-type": "application/json" },
+          headers: {
+            authorization: `Bearer ${oldToken}`,
+            "content-type": "application/json",
+          },
           body: JSON.stringify({ reason: "startup" }),
         });
         expect(unauthorized.status).toBe(401);
@@ -959,33 +1016,18 @@ describe("full slice E2E", () => {
         }
         const historyAfter = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}/history`);
         expect(historyAfter.status).toBe(200);
-        const beforeRecords = historyBefore.body["records"] as HistoryRecord[];
-        const afterRecords = historyAfter.body["records"] as HistoryRecord[];
+        const beforeRecords = historyBefore.body["records"] as DisplayRecord[];
+        const afterRecords = historyAfter.body["records"] as DisplayRecord[];
         expect(afterRecords.slice(0, beforeRecords.length)).toEqual(beforeRecords);
         // The SDK re-appends binding settings for message-free sessions (real-SDK contract).
-        // Preserve every old record; only unchanged settings and silent boot baselines may follow.
+        // Browser records keep the complete prefix but omit native settings payloads.
         for (const record of afterRecords.slice(beforeRecords.length)) {
-          if (
-            record.type === "event" &&
-            (record.eventType === "pi.model_change" ||
-              record.eventType === "pi.thinking_level_change")
-          ) {
-            const previous = beforeRecords.findLast(
-              (item) => item.type === "event" && item.eventType === record.eventType,
-            );
-            const native = previous?.overflow["native"] as Record<string, unknown>;
-            expect(record.overflow["native"]).toMatchObject(
-              record.eventType === "pi.model_change"
-                ? { provider: native["provider"], modelId: native["modelId"] }
-                : { thinkingLevel: native["thinkingLevel"] },
-            );
-          } else {
-            expect(record).toMatchObject({
-              type: "event",
-              eventType: "pi.custom",
-              overflow: { native: { customType: "pi-orb.boot" } },
-            });
-          }
+          expect(record.type).toBe("event");
+          if (record.type !== "event") continue;
+          if (record.eventType === "pi.custom")
+            expect(record.custom?.customType).toBe("pi-orb.boot");
+          else expect(["pi.model_change", "pi.thinking_level_change"]).toContain(record.eventType);
+          expect(JSON.stringify(record)).not.toContain('"native"');
         }
         expect(historyAfter.body["session"]).not.toBeNull();
 
@@ -1015,7 +1057,11 @@ describe("full slice E2E", () => {
         const status = JSON.parse(
           await readWorkspaceFile(replacementOrbId, 1, "home/.cache/pi-orb/logs/setup.status.json"),
         ) as { outcome: string; exitCode: number; incarnation: string };
-        expect(status).toMatchObject({ outcome: "failed", exitCode: 3, incarnation: "1" });
+        expect(status).toMatchObject({
+          outcome: "failed",
+          exitCode: 3,
+          incarnation: "1",
+        });
         const hooked = await api(base, "GET", `/api/v1/orbs/${replacementOrbId}`);
         expect(hooked.body["state"]).toBe("running");
         expect(hooked.body["stateDetail"]).toEqual({
@@ -1124,7 +1170,9 @@ describe("full slice E2E", () => {
         );
         expect(await computeIncarnation(specOrbId)).toBe(0);
         const sentinel = `stage2-${specOrbId}`;
-        await writeWorkspaceFiles(specOrbId, 0, { "stage2-sentinel": sentinel });
+        await writeWorkspaceFiles(specOrbId, 0, {
+          "stage2-sentinel": sentinel,
+        });
         // Captured before the specification changes: the running incarnation
         // must still be this exact compute afterwards, not a same-numbered
         // replacement or an in-place bounce.
@@ -1381,12 +1429,17 @@ describe("full slice E2E", () => {
       args: ["--no-sandbox"],
     });
     try {
-      const context = await creationBrowser.newContext({ timezoneId: "Pacific/Auckland" });
+      const context = await creationBrowser.newContext({
+        timezoneId: "Pacific/Auckland",
+      });
       const page = await context.newPage();
       let postedTimeZone: string | undefined;
       await page.route(`**/api/v1/projects/${projectId}/orbs`, async (route) => {
         if (route.request().method() === "POST") {
-          const body = route.request().postDataJSON() as { id: string; userTimeZone?: string };
+          const body = route.request().postDataJSON() as {
+            id: string;
+            userTimeZone?: string;
+          };
           orbId = body.id;
           postedTimeZone = body.userTimeZone;
         }
@@ -1415,7 +1468,9 @@ describe("full slice E2E", () => {
       },
       { timeoutMs: 60_000 },
     );
-    await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: challenge });
+    await fakeControl(fake.sessionKey, "/deviceauth/approve", {
+      user_code: challenge,
+    });
 
     // Clone + session + auth resolve inside the container (docs/testing.md steps 3-4).
     await waitFor(
@@ -1596,7 +1651,14 @@ describe("full slice E2E", () => {
     ]) {
       const settingsId = randomUUID();
       if (action.thinkingLevel === "high") earlierSettingsId = settingsId;
-      socket.send(JSON.stringify({ v: 1, type: "client.request", requestId: settingsId, action }));
+      socket.send(
+        JSON.stringify({
+          v: 1,
+          type: "client.request",
+          requestId: settingsId,
+          action,
+        }),
+      );
       const applied = await untilFrame("settings applied", () =>
         frames.find((frame) => frame.type === "request.result" && frame.requestId === settingsId),
       );
@@ -1624,7 +1686,9 @@ describe("full slice E2E", () => {
         .slice(replayStart)
         .find((frame) => frame.type === "request.result" && frame.requestId === earlierSettingsId),
     );
-    expect(replayed).toMatchObject({ result: { type: "settings_applied", duplicate: true } });
+    expect(replayed).toMatchObject({
+      result: { type: "settings_applied", duplicate: true },
+    });
     expect(
       frames
         .filter((frame) => frame.type === "runtime.event" && frame.event.type === "agent_settings")
@@ -1692,6 +1756,18 @@ describe("full slice E2E", () => {
         frame.event.blockType === "reasoning",
     );
     expect(sawReasoningDelta, "streamed reasoning deltas reached the client").toBe(true);
+    const projectedFrames = JSON.stringify(frames);
+    expect(projectedFrames).not.toContain("I will run the requested check with bash.");
+    expect(projectedFrames).not.toContain('"overflow"');
+    const toolCall = frames
+      .flatMap((frame) =>
+        frame.type === "history.record" && frame.record.type === "message"
+          ? frame.record.content.filter((block) => block.type === "tool_call")
+          : [],
+      )
+      .find((block) => block.callId !== undefined);
+    expect(toolCall).toBeDefined();
+    expect(projectedFrames).not.toContain('"arguments"');
 
     // A user-shell action executes directly through Pi (not through the model),
     // streams as a shell block, and publishes its persisted bashExecution entry.
@@ -1719,14 +1795,13 @@ describe("full slice E2E", () => {
       throw new Error("shell request was not accepted");
     }
     const shellOperationId = shellResult.result.operationId;
-    await untilFrame("shell output", () =>
+    await untilFrame("shell activity", () =>
       frames.find(
         (frame) =>
           frame.type === "runtime.event" &&
           frame.event.type === "output_patch" &&
           frame.event.operationId === shellOperationId &&
-          frame.event.blockType === "shell" &&
-          frame.event.patch.text.includes("USER_SHELL_E2E_OK"),
+          frame.event.blockType === "shell",
       ),
     );
     await untilFrame("shell history record", () =>
@@ -1735,7 +1810,7 @@ describe("full slice E2E", () => {
           frame.type === "history.record" &&
           frame.record.type === "event" &&
           frame.record.eventType === "pi.bash_execution" &&
-          JSON.stringify(frame.record).includes("USER_SHELL_E2E_OK"),
+          JSON.stringify(frame.record).includes("printf USER_SHELL_E2E_OK"),
       ),
     );
     await untilFrame("shell operation finished", () =>
@@ -1774,6 +1849,47 @@ describe("full slice E2E", () => {
       },
       { timeoutMs: 60_000, intervalMs: 2_000 },
     );
+
+    const projectedHistory = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
+    expect(projectedHistory.status).toBe(200);
+    const historyJson = JSON.stringify(projectedHistory.body);
+    expect(historyJson).not.toContain('"overflow"');
+    expect(historyJson).not.toContain('"arguments"');
+    expect(historyJson).not.toContain("I will run the requested check with bash.");
+    const callRecord = (
+      projectedHistory.body["records"] as {
+        id: string;
+        content?: { type: string; callId?: string; detailKey?: string }[];
+      }[]
+    ).find((record) => record.content?.some((block) => block.type === "tool_call"));
+    const call = callRecord?.content?.find((block) => block.type === "tool_call");
+    expect(callRecord).toBeDefined();
+    expect(call?.detailKey).toBeDefined();
+    const callDetail = await api(
+      base,
+      "GET",
+      `/api/v1/orbs/${orbId}/details/${encodeURIComponent(callRecord?.id ?? "")}/${encodeURIComponent(call?.detailKey ?? "")}?sessionId=${encodeURIComponent((projectedHistory.body["session"] as { id: string }).id)}`,
+    );
+    expect(callDetail.status).toBe(200);
+    expect(JSON.stringify(callDetail.body)).toContain("echo E2E_TOOL_OK");
+    expect(JSON.stringify(callDetail.body)).not.toContain('"overflow"');
+    const resultRecord = (
+      projectedHistory.body["records"] as {
+        id: string;
+        content?: { type: string; detailKey?: string }[];
+      }[]
+    ).find((record) => record.content?.some((block) => block.type === "tool_result"));
+    const resultKey = resultRecord?.content?.find(
+      (block) => block.type === "tool_result",
+    )?.detailKey;
+    expect(resultKey).toBeDefined();
+    const resultDetail = await api(
+      base,
+      "GET",
+      `/api/v1/orbs/${orbId}/details/${encodeURIComponent(resultRecord?.id ?? "")}/${encodeURIComponent(resultKey ?? "")}?sessionId=${encodeURIComponent((projectedHistory.body["session"] as { id: string }).id)}`,
+    );
+    expect(resultDetail.status).toBe(200);
+    expect(JSON.stringify(resultDetail.body)).toContain("E2E_TOOL_OK");
 
     // The fake saw exactly the two scripted inference turns, the second one
     // carrying the real tool output produced inside the orb.
@@ -1853,7 +1969,11 @@ describe("full slice E2E", () => {
     for (const [index, reply] of ["E2E_RESTART_NOTICE_OK", "E2E_REPLACEMENT_NOTICE_OK"].entries()) {
       if (index === 1) {
         expect(
-          (await api(base, "PUT", "/api/v1/personal-instructions", { content: "" })).status,
+          (
+            await api(base, "PUT", "/api/v1/personal-instructions", {
+              content: "",
+            })
+          ).status,
         ).toBe(200);
         expect(
           (await api(base, "PUT", `/api/v1/projects/${projectId}/instructions`, { content: "" }))
@@ -1891,15 +2011,19 @@ describe("full slice E2E", () => {
       const history = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
       const serialized = JSON.stringify(history.body["records"]);
       expect(serialized).toContain(warning);
-      expect(serialized).toContain("pi-orb:personal-instructions");
-      expect(serialized).toContain("pi-orb:project-instructions");
+      const replica = JSON.stringify(
+        (await readReplicatedHistorySnapshot(controlPlane, orbId)).records,
+      );
+      expect(replica).toContain("pi-orb:personal-instructions");
+      expect(replica).toContain("pi-orb:project-instructions");
       expect(serialized).not.toContain("PERSONAL_E2E_");
       expect(serialized).not.toContain("PROJECT_E2E_");
-      const records = history.body["records"] as {
-        overflow?: { native?: { customType?: string } };
-      }[];
+      const records = history.body["records"] as DisplayRecord[];
       expect(
-        records.filter((record) => record.overflow?.native?.customType === "pi-orb.host-restarted"),
+        records.filter(
+          (record) =>
+            record.type === "event" && record.custom?.customType === "pi-orb.host-restarted",
+        ),
       ).toHaveLength(index + 1);
       const calls: unknown = await fakeControl(fake.sessionKey, "/requests");
       expect(
@@ -2119,19 +2243,30 @@ describe("full slice E2E", () => {
       let unnecessaryHistoryReads = 0;
       let appliedCursor: string | null = null;
       const cachedHellos: (string | null)[] = [];
+      const browserPayloads: string[] = [];
+      await page.route(`**/api/v1/orbs/${orbId}/history`, async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        browserPayloads.push(body);
+        await route.fulfill({ response, body });
+      });
       await page.route(`**/api/v1/orbs/${spawnedOrbId}/history`, async (route) => {
         if (blockCachedHistory) {
           unnecessaryHistoryReads++;
           return route.abort();
         }
         const response = await route.fetch();
-        appliedCursor = (await response.json()).cursor;
-        return route.fulfill({ response });
+        const body = await response.text();
+        browserPayloads.push(body);
+        appliedCursor = JSON.parse(body).cursor;
+        return route.fulfill({ response, body });
       });
       page.on("websocket", (transport) => {
         if (!transport.url().endsWith(`/orbs/${spawnedOrbId}/live`)) return;
         transport.on("framereceived", ({ payload }) => {
-          const frame = JSON.parse(String(payload));
+          const text = String(payload);
+          browserPayloads.push(text);
+          const frame = JSON.parse(text);
           if (frame.type === "history.record") appliedCursor = frame.record.id;
         });
         transport.on("framesent", ({ payload }) => {
@@ -2159,6 +2294,8 @@ describe("full slice E2E", () => {
       expect(cachedHellos.length).toBeGreaterThan(0);
       expect(cachedHellos.every((cursor) => cursor === resumeCursor)).toBe(true);
       expect(unnecessaryHistoryReads).toBe(0);
+      expect(browserPayloads.join("\n")).not.toContain('"overflow"');
+      expect(browserPayloads.join("\n")).not.toContain('"arguments"');
       // The following upload submits a real inbox message and completes inference
       // after cached browser→runtime handoff, without another model script rule.
       const choosing = page.waitForEvent("filechooser");
@@ -2226,9 +2363,9 @@ describe("full slice E2E", () => {
 
     const siblingHistoryBeforeDelete = await api(base, "GET", `/api/v1/orbs/${orbId}/history`);
     const siblingComputeBeforeDelete = await computeIdentity(secondOrbId, 0);
-    const hostedObjectsBeforeDelete = readdirSync(hostingRootDirectory, { recursive: true }).map(
-      String,
-    );
+    const hostedObjectsBeforeDelete = readdirSync(hostingRootDirectory, {
+      recursive: true,
+    }).map(String);
     await writeWorkspaceFiles(spawnedOrbId, 0, {
       "repo/deleted.html": "self-deleted-hosted-file",
     });
@@ -2244,7 +2381,9 @@ describe("full slice E2E", () => {
     )?.[0];
     if (deletedHostedUrl === undefined) throw new Error("delete hosting URL was absent");
     expect(await (await fetch(deletedHostedUrl)).text()).toBe("self-deleted-hosted-file");
-    const deletedObjects = readdirSync(hostingRootDirectory, { recursive: true }).filter(
+    const deletedObjects = readdirSync(hostingRootDirectory, {
+      recursive: true,
+    }).filter(
       (entry) =>
         basename(String(entry)) === "data" && !hostedObjectsBeforeDelete.includes(String(entry)),
     );
@@ -2320,10 +2459,27 @@ describe("full slice E2E", () => {
       { timeoutMs: 240_000, intervalMs: 1_000 },
     );
     const archiveHistory = await api(base, "GET", `/api/v1/orbs/${secondOrbId}/history`);
-    expect(JSON.stringify(archiveHistory.body["records"])).toContain("Archive requested.");
+    expect(
+      JSON.stringify((await readReplicatedHistorySnapshot(controlPlane, secondOrbId)).records),
+    ).toContain("Archive requested.");
     expect(JSON.stringify(archiveHistory.body["records"])).toContain(
       "SELF_ARCHIVE_FINAL: archival requested as you asked.",
     );
+    const archivedCallRecord = (
+      archiveHistory.body["records"] as {
+        id: string;
+        content?: { type: string; detailKey?: string }[];
+      }[]
+    ).find((record) => record.content?.some((block) => block.type === "tool_call"));
+    const archivedCall = archivedCallRecord?.content?.find((block) => block.type === "tool_call");
+    expect(archivedCall?.detailKey).toBeDefined();
+    const archivedDetail = await api(
+      base,
+      "GET",
+      `/api/v1/orbs/${secondOrbId}/details/${encodeURIComponent(archivedCallRecord?.id ?? "")}/${encodeURIComponent(archivedCall?.detailKey ?? "")}?sessionId=${encodeURIComponent((archiveHistory.body["session"] as { id: string }).id)}`,
+    );
+    expect(archivedDetail.status).toBe(200);
+    expect(JSON.stringify(archivedDetail.body)).toContain("pi-orb archive");
     expect((await api(base, "POST", `/api/v1/orbs/${secondOrbId}/start`)).status).toBe(409);
     if (archivedHostedUrl === undefined) throw new Error("archive hosting URL was absent");
     expect(await (await fetch(archivedHostedUrl)).text()).toBe("archived-hosted-file");

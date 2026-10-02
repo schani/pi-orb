@@ -6,6 +6,7 @@ import type {
 } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import { describe, expect, it } from "vitest";
+import { displayRecord } from "../testkit/display-fixtures.ts";
 import type { ApiError } from "./api.ts";
 import {
   createMutationEpoch,
@@ -121,8 +122,10 @@ describe("queued message list updates", () => {
 
     expect(messagesAwaitingHistory([delivered], [])).toEqual([delivered]);
     expect(hasDeliveredMessageAwaitingHistory([delivered], [])).toBe(true);
-    expect(messagesAwaitingHistory([delivered], [represented])).toEqual([]);
-    expect(hasDeliveredMessageAwaitingHistory([delivered], [represented])).toBe(false);
+    expect(messagesAwaitingHistory([delivered], [displayRecord(represented)])).toEqual([]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered], [displayRecord(represented)])).toBe(
+      false,
+    );
   });
 
   it("retires a delivered system notice when an event names its inbox identity", () => {
@@ -144,8 +147,10 @@ describe("queued message list updates", () => {
 
     expect(messagesAwaitingHistory([delivered], [])).toEqual([delivered]);
     expect(hasDeliveredMessageAwaitingHistory([delivered], [])).toBe(true);
-    expect(messagesAwaitingHistory([delivered], [represented])).toEqual([]);
-    expect(hasDeliveredMessageAwaitingHistory([delivered], [represented])).toBe(false);
+    expect(messagesAwaitingHistory([delivered], [displayRecord(represented)])).toEqual([]);
+    expect(hasDeliveredMessageAwaitingHistory([delivered], [displayRecord(represented)])).toBe(
+      false,
+    );
   });
 
   it("does not read inbox identity from native overflow", () => {
@@ -166,7 +171,7 @@ describe("queued message list updates", () => {
       },
     };
 
-    expect(messagesAwaitingHistory([delivered], [legacy])).toEqual([delivered]);
+    expect(messagesAwaitingHistory([delivered], [displayRecord(legacy)])).toEqual([delivered]);
   });
 
   it("reuses an unchanged polled list and updates changed message metadata", () => {

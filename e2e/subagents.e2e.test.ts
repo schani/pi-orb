@@ -14,6 +14,7 @@ import {
   deleteFakeSession,
   FatalProbeError,
   fakeControl,
+  readReplicatedHistorySnapshot,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
@@ -40,7 +41,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
         {
           type: "toolCall",
           name: "bash",
-          arguments: { command: `read -r ready < '${root}/ready-${i}'; echo PARENT_READY_${i}` },
+          arguments: {
+            command: `read -r ready < '${root}/ready-${i}'; echo PARENT_READY_${i}`,
+          },
         },
         stop,
       ],
@@ -66,7 +69,11 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
                 name: "write",
                 arguments: { path: `${root}/ready-${i}`, content: "ready\n" },
               },
-              { type: "toolCall", name: "read", arguments: { path: `${root}/release-${i}` } },
+              {
+                type: "toolCall",
+                name: "read",
+                arguments: { path: `${root}/release-${i}` },
+              },
             ]
           : [
               {
@@ -96,7 +103,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
           },
           {
             match: {
-              userMessage: { regex: "^Write a single short desktop-notification sentence" },
+              userMessage: {
+                regex: "^Write a single short desktop-notification sentence",
+              },
             },
             steps: [{ type: "text", content: "Completed delegated work." }, stop],
           },
@@ -106,7 +115,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
   const rules = [0, 1, 2].flatMap(rulesFor);
   rules.push(
     {
-      match: { userMessage: { regex: "Local subagent runs .* were interrupted" } },
+      match: {
+        userMessage: { regex: "Local subagent runs .* were interrupted" },
+      },
       steps: [{ type: "text", content: "CHILD_INTERRUPTION_ACKNOWLEDGED" }, stop],
     },
     {
@@ -127,7 +138,11 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       steps: [{ type: "text", content: "ARCHIVE_DELEGATION_COMPLETE" }, stop],
     },
     {
-      match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+      match: {
+        userMessage: {
+          regex: "^Write a single short desktop-notification sentence",
+        },
+      },
       steps: [{ type: "text", content: "Completed archived delegation." }, stop],
     },
   );
@@ -138,7 +153,10 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
   const names = await createFakeSession(`subagents-names-${randomUUID()}`, {
     model: {
       rules: [
-        { match: { default: true }, steps: [{ type: "text", content: "Subagent test" }, stop] },
+        {
+          match: { default: true },
+          steps: [{ type: "text", content: "Subagent test" }, stop],
+        },
       ],
     },
   });
@@ -156,6 +174,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     pglitePath: join(root, "db"),
     processStateDirectory: join(root, "hosts"),
     webDist: join(root, "web"),
+    extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
   });
   const browser = await chromium.launch({
     ...(existsSync("/usr/bin/chromium") ? { executablePath: "/usr/bin/chromium" } : {}),
@@ -182,7 +201,11 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       ).status,
     ).toBe(200);
     expect(
-      (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: orb })).status,
+      (
+        await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, {
+          id: orb,
+        })
+      ).status,
     ).toBe(202);
     const code = await waitFor(
       "subagent login",
@@ -195,7 +218,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       },
       { timeoutMs: 60_000 },
     );
-    await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: code });
+    await fakeControl(fake.sessionKey, "/deviceauth/approve", {
+      user_code: code,
+    });
     await waitFor(
       "subagent runtime ready",
       async () => {
@@ -250,7 +275,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
         timeout: 60_000,
       });
       await expectPage(page.getByRole("button", { name: "abort", exact: true })).toBeVisible();
-      await expectPage(page.locator(".orb-life")).toContainText("busy", { timeout: 30_000 });
+      await expectPage(page.locator(".orb-life")).toContainText("busy", {
+        timeout: 30_000,
+      });
       await expectPage(page.locator(".subagent-live-rail .subagent-counts")).toContainText(
         "1 running",
       );
@@ -332,9 +359,11 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
         "replicated aggregate idle and child result",
         async () => {
           const view = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}`);
-          const history = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`);
+          const history =
+            i === 0 ? await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`) : null;
+          const replica = i === 0 ? null : await readReplicatedHistorySnapshot(cp, orb);
           return view.body["activity"] === "idle" &&
-            JSON.stringify(history.body).includes(
+            JSON.stringify(history?.body ?? replica).includes(
               i === 0
                 ? "DELEGATION_COMPLETE"
                 : i === 1
@@ -375,9 +404,7 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     expect(
       JSON.stringify((await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body),
     ).toContain("DELEGATION_COMPLETE");
-    const replicated = JSON.stringify(
-      (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body,
-    );
+    const replicated = JSON.stringify(await readReplicatedHistorySnapshot(cp, orb));
     expect(replicated).toContain("interruptedSubagents");
     expect(replicated).not.toContain("PRIVATE_CHILD_TRANSCRIPT_ONLY");
     // Resume the retained workspace, then archive with an actually blocked child.
@@ -404,7 +431,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     await expectPage(page.getByText("PARENT_SETTLED_3", { exact: true })).toBeVisible({
       timeout: 60_000,
     });
-    await expectPage(page.locator(".orb-life")).toContainText("busy", { timeout: 30_000 });
+    await expectPage(page.locator(".orb-life")).toContainText("busy", {
+      timeout: 30_000,
+    });
     const archiveChildId = rootEntries()
       .filter(
         (entry) =>
@@ -441,9 +470,11 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
       { timeoutMs: DEFAULT_LIFECYCLE_CONSTANTS.deletionQuarantineMs + 60_000 },
     );
     expect(existsSync(workspace)).toBe(false);
-    const archivedHistory = (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body;
-    const archivedRecords = archivedHistory["records"] as {
-      overflow?: { native?: { customType?: string; data?: Record<string, unknown> } };
+    const archivedHistory = await readReplicatedHistorySnapshot(cp, orb);
+    const archivedRecords = archivedHistory.records as {
+      overflow?: {
+        native?: { customType?: string; data?: Record<string, unknown> };
+      };
     }[];
     expect(
       archivedRecords.filter(
@@ -456,9 +487,9 @@ it("keeps delegated work busy through abort, crash recovery and active-child arc
     expect(JSON.stringify(archivedHistory)).toContain("idle-stop-prepared");
     expect(JSON.stringify(archivedHistory)).toContain("ARCHIVE_DELEGATION_COMPLETE");
     expect(JSON.stringify(archivedHistory)).not.toContain("PRIVATE_CHILD_TRANSCRIPT_ONLY");
-    expect(
-      JSON.stringify((await api(cp.baseUrl, "GET", `/api/v1/orbs/${orb}/history`)).body),
-    ).toContain("interruptedSubagents");
+    expect(JSON.stringify(await readReplicatedHistorySnapshot(cp, orb))).toContain(
+      "interruptedSubagents",
+    );
   } catch (error) {
     failed = true;
     console.error(`Preserved runtime files: ${root}`);

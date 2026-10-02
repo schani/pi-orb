@@ -2058,12 +2058,15 @@ button.modal-close:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.tool-command-output,
+.tool-command .tool-call-output,
 .tool-command-footer {
   max-height: 20rem;
   overflow: auto;
   padding-left: calc(4ch + 8px);
   color: var(--g3);
+}
+.tool-command .tool-call-output {
+  margin-left: 0;
 }
 
 .subagent-notice-body {

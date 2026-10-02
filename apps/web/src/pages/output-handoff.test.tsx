@@ -1,7 +1,8 @@
-import type { ServerFrame } from "@pi-orb/protocol";
+import { type HistoryRecord, projectDisplayRecord, type ServerFrame } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { HistoryView } from "../components/HistoryView.tsx";
+import { detailContext } from "../testkit/display-fixtures.ts";
 import { initialState, reducer } from "./OrbPage.tsx";
 
 it("does not let HTTP jump ahead of an open socket even before its first output patch", () => {
@@ -26,6 +27,7 @@ it("commits and retires output atomically without suppressing a later identical 
         liveBlocks={[...state.liveBlocks.values()]}
         tools={[]}
         busy={true}
+        detailContext={detailContext()}
       />,
     ).match(/<p>MCP_CHECK_COMPLETE<\/p>/g)?.length;
   };
@@ -60,7 +62,6 @@ it("commits and retires output atomically without suppressing a later identical 
           type: "message",
           role: "assistant",
           content: [{ type: "text", text: "MCP_CHECK_COMPLETE" }],
-          overflow: {},
         },
       ],
     },
@@ -73,7 +74,7 @@ it("commits and retires output atomically without suppressing a later identical 
       type: "history.record",
       headId: "committed",
       retiredBlockIds: ["operation:message:0"],
-      record: {
+      record: projectDisplayRecord({
         id: "committed",
         parentId: null,
         timestamp: base.at,
@@ -81,7 +82,7 @@ it("commits and retires output atomically without suppressing a later identical 
         type: "message",
         role: "assistant",
         content: [{ type: "text", text: "MCP_CHECK_COMPLETE" }],
-      },
+      } satisfies HistoryRecord),
     }),
   ).toBe(1);
   expect(state.records.size).toBe(1);

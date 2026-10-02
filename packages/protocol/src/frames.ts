@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
 import { AgentSettingsEventSchema, SettingsActionSchema } from "./agent-settings.ts";
-import { HistoryRecordSchema } from "./history.ts";
+import { DisplayRecordSchema } from "./display.ts";
 import { JsonValueSchema } from "./json.ts";
 
 const closed = { additionalProperties: false } as const;
@@ -142,7 +142,7 @@ export const HistoryRecordFrameSchema = Type.Object(
     v: Type.Literal(1),
     type: Type.Literal("history.record"),
     at: Type.String(),
-    record: HistoryRecordSchema,
+    record: DisplayRecordSchema,
     retiredBlockIds: Type.Array(Type.String()),
     headId: Type.Union([Type.String(), Type.Null()]),
   },

@@ -1,4 +1,4 @@
-import type { OrbHistoryView, OrbView } from "@pi-orb/protocol";
+import type { DisplayHistoryView, OrbView } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 import type { ApiError } from "./api.ts";
 import {
@@ -23,7 +23,7 @@ export function startOrbLoad(options: {
   orbId: string;
   cache: TranscriptCache;
   getOrb: (id: string) => Promise<Result<OrbView, ApiError>>;
-  getHistory: (id: string) => Promise<Result<OrbHistoryView, ApiError>>;
+  getHistory: (id: string) => Promise<Result<DisplayHistoryView, ApiError>>;
   diagnostic?: (data: { orbId: string; cacheHit: boolean; records: number }) => void;
 }): {
   result: Promise<OrbLoad | null>;

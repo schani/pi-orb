@@ -1,7 +1,33 @@
-import type { HistoryRecord } from "@pi-orb/protocol";
+import { type HistoryRecord, projectRecordDetail } from "@pi-orb/protocol";
+import type { ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { assistantResponseMarkdown, HistoryView } from "./HistoryView.tsx";
+import { detailContext, displayRecord } from "../testkit/display-fixtures.ts";
+import { DetailContent } from "./DetailBody.tsx";
+import {
+  HistoryView as BrowserHistoryView,
+  assistantResponseMarkdown as browserAssistantResponseMarkdown,
+} from "./HistoryView.tsx";
+
+function HistoryView({
+  records,
+  ...props
+}: Omit<ComponentProps<typeof BrowserHistoryView>, "records" | "detailContext"> & {
+  records: readonly HistoryRecord[];
+}) {
+  return (
+    <BrowserHistoryView
+      {...props}
+      records={records.map(displayRecord)}
+      detailContext={detailContext()}
+    />
+  );
+}
+function assistantResponseMarkdown(record: Extract<HistoryRecord, { type: "message" }>) {
+  const projected = displayRecord(record);
+  if (projected.type !== "message") throw new Error("expected message projection");
+  return browserAssistantResponseMarkdown(projected);
+}
 
 type MessageRecord = Extract<HistoryRecord, { type: "message" }>;
 
@@ -63,7 +89,19 @@ describe("HistoryView turn structure", () => {
       <HistoryView records={[call, result]} liveBlocks={[]} tools={[]} busy={false} />,
     );
     expect(html.match(/class="activity-rail-row [^"]*tool-activity-category"/g)).toHaveLength(1);
-    expect(html).toContain("Parent output");
+    expect(html).not.toContain("Parent output");
+    const body = projectRecordDetail(result, `${result.id}:0`);
+    expect(body?.type).toBe("tool_result");
+    if (body === null) throw new Error("missing projected detail");
+    const detailHtml = renderToStaticMarkup(
+      <DetailContent
+        body={body}
+        context={detailContext()}
+        recordId={result.id}
+        detailKey={`${result.id}:0`}
+      />,
+    );
+    expect(detailHtml).toContain("Parent output");
     for (const detail of [
       "bash · ok",
       "read · ok",
@@ -75,7 +113,7 @@ describe("HistoryView turn structure", () => {
       "&quot;offset&quot;: 20",
       "&quot;limit&quot;: 30",
     ]) {
-      expect(html).toContain(detail);
+      expect(detailHtml).toContain(detail);
     }
   });
   it("renders historical alerts as literal reverse bands, even after acknowledgement", () => {
@@ -122,9 +160,8 @@ describe("HistoryView turn structure", () => {
     expect(html).toMatch(
       /Explanation between runs[\s\S]*?<\/div><details class="activity-rail-row[^"]*reasoning/,
     );
-    expect(html).toMatch(
-      /Next plan[\s\S]*?<\/details><details class="activity-rail-row[^"]*tool-activity-category/,
-    );
+    expect(html).not.toContain("Next plan");
+    expect(html).toContain('title="b.ts"');
   });
   it.each([
     [
@@ -156,7 +193,7 @@ describe("HistoryView turn structure", () => {
       { kind: "workspace_notice" as const, notice: "Changes retained in the checkout." },
       "Changes retained in the checkout.",
     ],
-  ])("renders %s through one readable receipt, not machine XML", (customType, subagent, text) => {
+  ])("renders %s receipt without machine XML or hidden body", (customType, subagent, text) => {
     const record: HistoryRecord = {
       id: "notice",
       parentId: null,
@@ -175,15 +212,22 @@ describe("HistoryView turn structure", () => {
     );
     expect(html.match(/<details/g)).toHaveLength(1);
     expect(html).toContain("Check deployment");
-    expect(html).toContain(text);
-    expect(html).toContain(
-      `class="subagent-notice-body${"status" in subagent && subagent.status === "error" ? " tool-call-output-error" : ""}"`,
+    expect(html).not.toContain(text);
+    expect(html).not.toContain("subagent-notice-body");
+    const body = renderToStaticMarkup(
+      <DetailContent
+        body={{ type: "subagent", ...subagent }}
+        context={detailContext()}
+        recordId="notice"
+        detailKey="notice:0"
+      />,
     );
+    expect(body).toContain(text);
     expect(html).not.toContain("machine instructions");
   });
 
   it.each([undefined, 0, 1250, -1, Number.NaN])(
-    "hides the internal subagent ID and shows only a valid duration (%s)",
+    "hides the internal subagent ID and body duration (%s)",
     (durationMs) => {
       const record: HistoryRecord = {
         id: "notice",
@@ -208,11 +252,8 @@ describe("HistoryView turn structure", () => {
       );
       expect(html).not.toContain("private-child-identifier");
       expect(html).not.toContain("subagent-identity");
-      if (durationMs !== undefined && Number.isFinite(durationMs) && durationMs >= 0) {
-        expect(html).toContain(`class="subagent-duration">${(durationMs / 1000).toFixed(1)}s`);
-      } else {
-        expect(html).not.toContain("subagent-duration");
-      }
+      expect(html).not.toContain("subagent-duration");
+      expect(html).not.toContain("Done.");
     },
   );
 
@@ -527,8 +568,18 @@ describe("HistoryView turn structure", () => {
     expect(html.match(/class="visually-hidden">Orb:<\/span>/g)).toHaveLength(1);
     expect(html.match(/class="activity-rail-row [^"]* reasoning"/g)).toHaveLength(2);
     expect(html.match(/activity-rail-label">thinking</g)).toHaveLength(2);
-    expect(html).toContain("considering persisted evidence");
-    expect(html).toContain("considering live evidence");
+    expect(html).not.toContain("considering persisted evidence");
+    expect(html).not.toContain("considering live evidence");
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{ type: "reasoning", text: "considering persisted evidence" }}
+          context={detailContext()}
+          recordId="reasoning"
+          detailKey="reasoning:0"
+        />,
+      ),
+    ).toContain("considering persisted evidence");
   });
 
   it("does not hide a new live block merely because its text matches history", () => {
@@ -558,7 +609,8 @@ describe("HistoryView turn structure", () => {
       />,
     );
 
-    expect(html.match(/same reasoning/g)).toHaveLength(2);
+    expect(html).not.toContain("same reasoning");
+    expect(html.match(/activity-rail-label">thinking/g)).toHaveLength(2);
     expect(html.match(/class="rec rec-orb"/g)).toHaveLength(1);
   });
 
@@ -580,7 +632,7 @@ describe("HistoryView turn structure", () => {
     );
 
     expect(html).toContain("context compacted");
-    expect(html.match(/record-compaction/g)).toHaveLength(1);
+    expect(html.match(/class="record-compaction"/g)).toHaveLength(1);
     // The divider must close the preceding agent grouping context, not live inside a record.
     expect(html.match(/rec rec-orb/g)).toHaveLength(1);
   });
@@ -705,7 +757,9 @@ describe("HistoryView turn structure", () => {
             "<span>001</span><span>011</span><span>010</span><span>110</span><span>111</span><span>101</span><span>100</span><span>000</span>",
           );
         }
-        if (liveBlocks.length > 0) expect(html).toContain("retained output");
+        if (liveBlocks.length > 0 && scenario !== "reasoning")
+          expect(html).toContain("retained output");
+        if (scenario === "reasoning") expect(html).not.toContain("retained output");
       }
     },
   );
@@ -852,7 +906,7 @@ describe("HistoryView", () => {
     expect(html).not.toContain('href="https://example.com/code"');
   });
 
-  it("renders image blocks inline from base64 data or url, with a placeholder fallback", () => {
+  it("renders image references without inline bytes or URLs, with a fetched-body fallback", () => {
     const record = (
       id: string,
       content: Extract<HistoryRecord, { type: "message" }>["content"],
@@ -878,12 +932,32 @@ describe("HistoryView", () => {
         busy={false}
       />,
     );
-    expect(html).toContain('src="data:image/png;base64,aGVsbG8="');
-    expect(html).toContain('src="https://example.com/pic.png"');
-    expect(html).toContain("[image]");
+    expect(html).toContain("Loading…");
+    expect(html).not.toContain("aGVsbG8=");
+    expect(html).not.toContain("https://example.com/pic.png");
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{ type: "image", url: "https://example.com/pic.png" }}
+          context={detailContext()}
+          recordId="with-url"
+          detailKey="with-url:0"
+        />,
+      ),
+    ).toContain('src="https://example.com/pic.png"');
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{ type: "image" }}
+          context={detailContext()}
+          recordId="bare"
+          detailKey="bare:0"
+        />,
+      ),
+    ).toContain("[image]");
   });
 
-  it("consolidates persisted tool calls and nests command output disclosures", () => {
+  it("consolidates persisted tool calls and defers command output bodies", () => {
     const records: HistoryRecord[] = [
       {
         id: "assistant-tool-call",
@@ -939,10 +1013,30 @@ describe("HistoryView", () => {
     expect(html).toContain('class="activity-rail-headline" title="echo tool-input"');
     expect(html).not.toContain("1 command ran");
     expect(html).not.toContain("1 ran");
-    expect(html).toContain('class="tool-command-text">echo tool-input</span>');
-    expect(html).toContain('class="rec-px">run</span>');
-    expect(html).toContain("✓ completed");
-    expect(html).toContain("tool-output");
+    expect(html).toContain('title="echo tool-input"');
+    expect(html).not.toContain('class="tool-command-text"');
+    expect(html).toContain("tool-call-completed");
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{ type: "tool_call", arguments: { command: "echo tool-input" } }}
+          context={detailContext()}
+          recordId="assistant-tool-call"
+          detailKey="assistant-tool-call:0"
+        />,
+      ),
+    ).toContain("echo tool-input");
+    expect(html).not.toContain("tool-output");
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{ type: "tool_result", content: [{ type: "text", text: "tool-output" }] }}
+          context={detailContext()}
+          recordId="result"
+          detailKey="result:0"
+        />,
+      ),
+    ).toContain("tool-output");
     expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
     expect(html).not.toContain("live-tool-secret");
   });
@@ -1149,11 +1243,21 @@ describe("HistoryView", () => {
     expect(html).toContain("1 failed");
     expect(html).toContain("2 files");
     expect(html).toContain(">src/b.ts</code></summary>");
-    expect(html).toContain("✕ failed");
-    expect(html).toContain("one test failed");
+    expect(html).toContain('class="tool-call-status tool-call-failed">failed');
+    expect(html).not.toContain("one test failed");
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{ type: "tool_result", content: [{ type: "text", text: "one test failed" }] }}
+          context={detailContext()}
+          recordId="result"
+          detailKey="result:0"
+        />,
+      ),
+    ).toContain("one test failed");
   });
 
-  it("opens unmatched image results with previews inside their fallback drawer", () => {
+  it("opens unmatched image result disclosures without embedding previews", () => {
     const record: HistoryRecord = {
       id: "orphan-result",
       parentId: null,
@@ -1177,10 +1281,18 @@ describe("HistoryView", () => {
     );
 
     expect(html).toContain("tool output · missing-call");
-    expect(html).toMatch(
-      /<details class="tool-details" open="">[\s\S]*<div class="tool-image-previews">[\s\S]*<\/div><\/details>/,
-    );
-    expect(html).toContain('alt="Image returned by tool result missing-call"');
-    expect(html.match(/fallback text/g)).toHaveLength(1);
+    expect(html).toContain('<details class="tool-details" open="">');
+    expect(html).not.toContain("tool-image-previews");
+    expect(html).not.toContain("fallback text");
+    expect(
+      renderToStaticMarkup(
+        <DetailContent
+          body={{ type: "tool_result", content: [{ type: "image", imageRef: "result:0:0" }] }}
+          context={detailContext()}
+          recordId="result"
+          detailKey="result:0"
+        />,
+      ),
+    ).toContain("Loading…");
   });
 });

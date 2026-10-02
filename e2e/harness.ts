@@ -3,6 +3,7 @@ import { createPublicKey, createVerify, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { OrbHistoryView } from "@pi-orb/protocol";
 import { err, ok, type Result } from "neverthrow";
 
 export const FAKE_ORIGIN = process.env["PI_ORB_FAKE_OPENAI"] ?? "https://fake-openai.flingit.run";
@@ -115,7 +116,10 @@ export async function fakeControl(
   return (await response.json()) as Record<string, unknown>;
 }
 
-type OpenAIResponseInput = { readonly role?: unknown; readonly content?: unknown };
+type OpenAIResponseInput = {
+  readonly role?: unknown;
+  readonly content?: unknown;
+};
 
 type OpenAIResponseBody = {
   readonly instructions?: unknown;
@@ -207,9 +211,9 @@ export function newModelRequestsById(
 }
 
 export async function deleteFakeSession(sessionKey: string): Promise<void> {
-  await fakeRequest("DELETE", controlPath(sessionKey), { retryTransport: false }).catch(
-    () => undefined,
-  );
+  await fakeRequest("DELETE", controlPath(sessionKey), {
+    retryTransport: false,
+  }).catch(() => undefined);
 }
 
 export function docker(args: string[], timeoutMs = 120_000): Promise<string> {
@@ -279,12 +283,18 @@ export async function fetchIssuerKeys(baseUrl: string): Promise<IssuerKeySet> {
   // pointing at a key set that is not served is itself a failure.
   const jwksResponse = await fetch(jwksUri);
   if (!jwksResponse.ok) throw new Error(`JWKS: HTTP ${jwksResponse.status}`);
-  const jwks = (await jwksResponse.json()) as { keys?: Record<string, unknown>[] };
+  const jwks = (await jwksResponse.json()) as {
+    keys?: Record<string, unknown>[];
+  };
   return { issuer, jwksUri, keys: jwks.keys ?? [] };
 }
 
 export type RelyingPartyVerdict =
-  | { readonly ok: true; readonly claims: Record<string, unknown>; readonly kid: string }
+  | {
+      readonly ok: true;
+      readonly claims: Record<string, unknown>;
+      readonly kid: string;
+    }
   | { readonly ok: false; readonly reason: string };
 
 function decodeSegment(segment: string): Buffer {
@@ -336,13 +346,22 @@ export function verifyIdToken(
   if (!verified) return { ok: false, reason: "signature does not verify" };
 
   if (claims["iss"] !== options.issuer) {
-    return { ok: false, reason: `issuer ${String(claims["iss"])} is not ${options.issuer}` };
+    return {
+      ok: false,
+      reason: `issuer ${String(claims["iss"])} is not ${options.issuer}`,
+    };
   }
   if (claims["aud"] !== options.audience) {
-    return { ok: false, reason: `audience ${String(claims["aud"])} is not ${options.audience}` };
+    return {
+      ok: false,
+      reason: `audience ${String(claims["aud"])} is not ${options.audience}`,
+    };
   }
   if (claims["token_use"] !== "exchanged") {
-    return { ok: false, reason: `token_use ${String(claims["token_use"])} is not exchanged` };
+    return {
+      ok: false,
+      reason: `token_use ${String(claims["token_use"])} is not exchanged`,
+    };
   }
   const nowSeconds = Math.floor((options.nowMs ?? Date.now()) / 1000);
   const skew = options.clockSkewSeconds ?? 60;
@@ -471,7 +490,9 @@ export function attachControlledClock(child: ChildProcess): ControlledClock {
   const close = (): void => {
     if (closed) return;
     closed = true;
-    const failure = err<{ now: number }, ControlledClockError>({ type: "clock_closed" });
+    const failure = err<{ now: number }, ControlledClockError>({
+      type: "clock_closed",
+    });
     settleReady(failure);
     for (const settle of pending.values()) settle(failure);
     pending.clear();
@@ -486,7 +507,10 @@ export function attachControlledClock(child: ChildProcess): ControlledClock {
         settleReady(ok({ now: message.now }));
       else
         settleReady(
-          err({ type: "clock_protocol", message: "controlled clock failed to initialize" }),
+          err({
+            type: "clock_protocol",
+            message: "controlled clock failed to initialize",
+          }),
         );
       return;
     }
@@ -509,7 +533,12 @@ export function attachControlledClock(child: ChildProcess): ControlledClock {
         }),
       );
     } else {
-      settle(err({ type: "clock_protocol", message: "invalid controlled clock response" }));
+      settle(
+        err({
+          type: "clock_protocol",
+          message: "invalid controlled clock response",
+        }),
+      );
     }
   };
   const request = (
@@ -737,6 +766,59 @@ export async function startControlPlane(options: {
   };
 }
 
+export async function readReplicatedHistorySnapshot(
+  controlPlane: ControlPlaneHandle,
+  orbId: string,
+): Promise<Pick<OrbHistoryView, "session" | "cursor" | "headId" | "records">> {
+  const requestId = randomUUID();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`timed out inspecting replicated history of ${orbId}`));
+    }, 30_000);
+    const onMessage = (message: unknown): void => {
+      if (
+        typeof message !== "object" ||
+        message === null ||
+        !("type" in message) ||
+        message.type !== "pi-orb.e2e.history-result" ||
+        !("requestId" in message) ||
+        message.requestId !== requestId
+      )
+        return;
+      cleanup();
+      if ("error" in message)
+        reject(new Error(`history inspection failed: ${String(message.error)}`));
+      else if ("snapshot" in message)
+        resolve(
+          message.snapshot as Pick<OrbHistoryView, "session" | "cursor" | "headId" | "records">,
+        );
+      else reject(new Error("history inspection returned no snapshot"));
+    };
+    const onExit = (): void => {
+      cleanup();
+      reject(new Error(`control plane exited while inspecting ${orbId}`));
+    };
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      controlPlane.process.off("message", onMessage);
+      controlPlane.process.off("exit", onExit);
+    };
+    controlPlane.process.on("message", onMessage);
+    controlPlane.process.once("exit", onExit);
+    try {
+      controlPlane.process.send({ type: "pi-orb.e2e.history", orbId, requestId }, (error) => {
+        if (error === null) return;
+        cleanup();
+        reject(error);
+      });
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
+  });
+}
+
 export async function forceReconcilePass(
   controlPlane: ControlPlaneHandle,
   orbId: string,
@@ -783,7 +865,10 @@ export async function api(
     method,
     ...(body === undefined
       ? {}
-      : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      : {
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
   });
   const parsed = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   return { status: response.status, body: parsed };

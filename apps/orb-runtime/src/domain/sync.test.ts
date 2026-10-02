@@ -68,6 +68,45 @@ describe("computeSyncFrames", () => {
     expect(completed.headId).toBe("rec-3");
   });
 
+  it("never exposes hidden bodies in full or delta replay, including active reasoning and shell", () => {
+    const source = snapshot(1, "busy");
+    const records: HistoryRecord[] = [
+      ...source.records,
+      {
+        id: "r2",
+        parentId: "rec-1",
+        timestamp: "t",
+        type: "message",
+        role: "assistant",
+        overflow: { native: "SECRET_CANARY" },
+        content: [
+          { type: "reasoning", text: "SECRET_CANARY" },
+          {
+            type: "tool_call",
+            callId: "call",
+            name: "bash",
+            arguments: { command: "echo ok", hidden: "SECRET_CANARY" },
+          },
+        ],
+      },
+    ];
+    const withHidden = { ...source, records };
+    const live: LiveOperationView = {
+      operationId: "op",
+      operationKind: "agent",
+      blocks: [{ blockId: "b", blockType: "reasoning", revision: 2, text: "SECRET_CANARY" }],
+      tools: [],
+      subagents: [],
+    };
+    for (const cursor of [null, "rec-1"]) {
+      const frames = computeSyncFrames(withHidden, live, cursor, "now");
+      expect(JSON.stringify(frames)).not.toContain("SECRET_CANARY");
+      expect(frames.filter((frame) => frame.type === "history.record").at(-1)).toMatchObject({
+        record: { id: "r2", parentId: "rec-1" },
+      });
+    }
+  });
+
   it("reconstructs live operation state with replace patches and tool states", () => {
     const live: LiveOperationView = {
       operationId: "op-1",

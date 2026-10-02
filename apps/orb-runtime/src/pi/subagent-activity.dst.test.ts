@@ -51,6 +51,8 @@ function fixture(promptResult?: Promise<void>) {
     for (const fn of listeners) fn({ type } as AgentSessionEvent);
   }
   const manager: PiSessionManager = {
+    getEntry: (id) =>
+      (entries as ReturnType<PiSessionManager["getEntries"]>).find((entry) => entry.id === id),
     getEntries: () => {
       if (failHistoryRead) throw new Error("injected SDK history read failure");
       return entries as ReturnType<PiSessionManager["getEntries"]>;

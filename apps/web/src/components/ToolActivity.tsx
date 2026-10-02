@@ -1,473 +1,407 @@
-import type { ContentBlock, JsonValue } from "@pi-orb/protocol";
-import type { ReactNode } from "react";
+import { capHeadline, type DisplayBlock, type DisplayDetailBody } from "@pi-orb/protocol";
+import { type ReactNode, useState } from "react";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
+import { CommittedImage, imageIndex } from "./CommittedImage.tsx";
+import { CommittedBody, type DetailContext, NestedSummary, RunningBody } from "./DetailBody.tsx";
 import { ToolImagePreview } from "./ToolImagePreview.tsx";
 
-export type ToolCallBlock = ContentBlock & { type: "tool_call" };
-export type ToolResultBlock = ContentBlock & { type: "tool_result" };
-
+export type ToolCallBlock = Extract<DisplayBlock, { type: "tool_call" }>;
+export type ToolResultBlock = Extract<DisplayBlock, { type: "tool_result" }>;
 export interface PersistedToolCall {
   call: ToolCallBlock;
+  callRecordId: string;
   result?: ToolResultBlock;
+  resultRecordId?: string;
 }
-
 export interface LiveToolCall {
   callId: string;
   name: string;
   state: "running" | "completed" | "failed";
 }
-
-interface ToolActivityProps {
-  persisted?: readonly PersistedToolCall[];
-  live?: readonly LiveToolCall[];
-}
-
-type ActivityCall = {
-  callId: string;
+interface Call {
+  id: string;
   name: string;
-  arguments: JsonValue | null;
+  headline: string;
+  targetId?: string;
+  callRecordId?: string;
+  callKey?: string;
+  resultRecordId?: string;
   result?: ToolResultBlock;
+  offset?: number;
+  limit?: number;
   state: "running" | "completed" | "failed";
-};
-
-type CategoryKind = "edit" | "command" | "read" | "other";
-
-interface ActivityCategory {
+}
+type Kind = "edit" | "command" | "read" | "other";
+interface Category {
   key: string;
-  kind: CategoryKind;
+  kind: Kind;
   label: string;
-  calls: ActivityCall[];
+  calls: Call[];
 }
-
-interface DiffStats {
-  added: number;
-  removed: number;
+function categoryFor(name: string): Omit<Category, "calls"> {
+  if (name === "edit" || name === "write") return { key: "edit", kind: "edit", label: "edit" };
+  if (name === "bash") return { key: "command", kind: "command", label: "commands" };
+  if (name === "read") return { key: "read", kind: "read", label: "read" };
+  return { key: `other:${name}`, kind: "other", label: name };
 }
-
-function objectValue(value: JsonValue | null): Record<string, JsonValue> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
-}
-
-function stringArgument(call: ActivityCall, key: string): string | null {
-  const value = objectValue(call.arguments)?.[key];
-  return typeof value === "string" ? value : null;
-}
-
-function numberArgument(call: ActivityCall, key: string): number | null {
-  const value = objectValue(call.arguments)?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function callPath(call: ActivityCall): string | null {
-  return stringArgument(call, "path");
-}
-
-function readCallLabel(call: ActivityCall): string {
-  const path = callPath(call) ?? call.name;
-  const offset = numberArgument(call, "offset");
-  const limit = numberArgument(call, "limit");
-  if (offset === null && limit === null) return path;
-  const start = offset ?? 1;
-  return limit === null ? `${path}:${start}+` : `${path}:${start}–${start + limit - 1}`;
-}
-
-function resultText(result: ToolResultBlock | undefined): string {
-  if (result === undefined) return "";
-  return result.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
-}
-
-function resultImages(result: ToolResultBlock | undefined) {
-  return result?.content.filter((block) => block.type === "image") ?? [];
-}
-
-function patchStats(patch: string | null): DiffStats | null {
-  if (patch === null) return null;
-  let added = 0;
-  let removed = 0;
-  for (const line of patch.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
-    if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
-  }
-  return { added, removed };
-}
-
-function statsForCalls(calls: readonly ActivityCall[]): DiffStats | null {
-  let found = false;
-  let added = 0;
-  let removed = 0;
-  for (const call of calls) {
-    const stats = patchStats(call.result?.patch ?? null);
-    if (stats === null) continue;
-    found = true;
-    added += stats.added;
-    removed += stats.removed;
-  }
-  return found ? { added, removed } : null;
-}
-
-function categoryFor(name: string): { key: string; kind: CategoryKind; label: string } {
-  switch (name) {
-    case "edit":
-    case "write":
-      return { key: "edit", kind: "edit", label: "edit" };
-    case "bash":
-      return { key: "command", kind: "command", label: "commands" };
-    case "read":
-      return { key: "read", kind: "read", label: "read" };
-    default:
-      return { key: `other:${name}`, kind: "other", label: name };
-  }
-}
-
-function categorize(calls: readonly ActivityCall[]): ActivityCategory[] {
-  const categories = new Map<string, ActivityCategory>();
+function categorize(calls: readonly Call[]): Category[] {
+  const categories = new Map<string, Category>();
   for (const call of calls) {
     const descriptor = categoryFor(call.name);
-    const existing = categories.get(descriptor.key);
-    if (existing !== undefined) {
-      existing.calls.push(call);
-    } else {
-      categories.set(descriptor.key, { ...descriptor, calls: [call] });
-    }
+    const category = categories.get(descriptor.key);
+    if (category) category.calls.push(call);
+    else categories.set(descriptor.key, { ...descriptor, calls: [call] });
   }
   return [...categories.values()];
 }
-
-/** Image calls stay in call order and get their own visible provenance header. */
-function displayCategories(calls: readonly ActivityCall[]): ActivityCategory[] {
-  if (!calls.some((call) => resultImages(call.result).length > 0)) return categorize(calls);
-  const categories: ActivityCategory[] = [];
-  let textCalls: ActivityCall[] = [];
-  const flushText = () => {
+function displayCategories(calls: readonly Call[]): Category[] {
+  if (!calls.some((call) => call.result?.hasImages)) return categorize(calls);
+  const categories: Category[] = [];
+  let textCalls: Call[] = [];
+  const flush = () => {
     categories.push(
       ...categorize(textCalls).map((category) => ({
         ...category,
-        key: `${category.key}:segment:${category.calls[0]?.callId ?? "empty"}`,
+        key: `${category.key}:segment:${category.calls[0]?.id ?? "empty"}`,
       })),
     );
     textCalls = [];
   };
   for (const call of calls) {
-    if (resultImages(call.result).length === 0) {
+    if (!call.result?.hasImages) {
       textCalls.push(call);
       continue;
     }
-    flushText();
-    const descriptor = categoryFor(call.name);
-    categories.push({ ...descriptor, key: `${descriptor.key}:${call.callId}`, calls: [call] });
+    flush();
+    categories.push({
+      ...categoryFor(call.name),
+      key: `image:${call.id}`,
+      calls: [call],
+    });
   }
-  flushText();
+  flush();
   return categories;
 }
-
-function uniquePathCount(calls: readonly ActivityCall[]): number {
-  const paths = new Set(calls.map(callPath).filter((path): path is string => path !== null));
-  return paths.size > 0 ? paths.size : calls.length;
+function uniqueCount(calls: readonly Call[]): number {
+  const targets = new Set(
+    calls.map((call) => call.targetId).filter((value): value is string => value !== undefined),
+  );
+  return targets.size || calls.length;
 }
-
-function categoryState(category: ActivityCategory): "running" | "completed" | "failed" {
-  if (category.calls.some((call) => call.state === "failed")) return "failed";
-  if (category.calls.some((call) => call.state === "running")) return "running";
-  return "completed";
-}
-
-/** A category of one names its file or command; larger runs count in the metric. */
-function categoryHeadline(category: ActivityCategory): string | undefined {
-  const firstCall = category.calls[0];
-  if (firstCall === undefined) return undefined;
-  switch (category.kind) {
-    case "edit":
-      return category.calls.length === 1 ? (callPath(firstCall) ?? undefined) : undefined;
-    case "command":
-      return category.calls.length === 1
-        ? (stringArgument(firstCall, "command") ?? undefined)
-        : undefined;
-    case "read":
-      return uniquePathCount(category.calls) === 1 ? (callPath(firstCall) ?? undefined) : undefined;
-    case "other":
-      return undefined;
-  }
-}
-
-function countMetric(category: ActivityCategory): ReactNode | null {
-  if (category.kind === "edit") {
-    const stats = statsForCalls(category.calls);
-    if (stats !== null) {
-      return (
-        <>
-          <span className="tool-diff-added">+{stats.added}</span>{" "}
-          <span className="tool-diff-removed">−{stats.removed}</span>
-        </>
-      );
-    }
-  }
-  const count =
-    category.kind === "edit" || category.kind === "read"
-      ? uniquePathCount(category.calls)
-      : category.calls.length;
-  if (count < 2) return null;
-  if (category.kind === "command") return `${count} ran`;
-  return `${count} ${category.kind === "other" ? "calls" : "files"}`;
-}
-
-function categoryMetric(category: ActivityCategory): ReactNode | undefined {
+function metric(category: Category): ReactNode {
   const failures = category.calls.filter((call) => call.state === "failed").length;
-  const lead = countMetric(category);
-  const trail =
-    failures > 0 ? (
-      <span className="tool-activity-failed">{failures} failed</span>
-    ) : category.calls.some((call) => call.state === "running") ? (
-      <span className="tool-activity-running">running</span>
-    ) : null;
-  if (lead === null) return trail ?? undefined;
-  if (trail === null) return lead;
-  return (
+  const running = category.calls.some((call) => call.state === "running");
+  const added = category.calls.reduce((sum, call) => sum + (call.result?.added ?? 0), 0);
+  const removed = category.calls.reduce((sum, call) => sum + (call.result?.removed ?? 0), 0);
+  const diff =
+    category.kind === "edit" &&
+    category.calls.some(
+      (call) => call.result?.added !== undefined || call.result?.removed !== undefined,
+    );
+  const count =
+    category.kind === "read" || category.kind === "edit"
+      ? uniqueCount(category.calls)
+      : category.calls.length;
+  const lead = diff ? (
     <>
-      {lead}
-      {" · "}
-      {trail}
+      <span className="tool-diff-added">+{added}</span>{" "}
+      <span className="tool-diff-removed">−{removed}</span>
+    </>
+  ) : count > 1 ? (
+    `${count} ${category.kind === "command" ? "ran" : category.kind === "other" ? "calls" : "files"}`
+  ) : null;
+  const trail = failures ? (
+    <span className="tool-activity-failed">{failures} failed</span>
+  ) : running ? (
+    <span className="tool-activity-running">running</span>
+  ) : null;
+  return lead === null ? (
+    trail
+  ) : trail === null ? (
+    lead
+  ) : (
+    <>
+      {lead} · {trail}
     </>
   );
 }
-
-function callStatus(call: ActivityCall): string {
-  if (call.state === "failed") return "failed";
-  if (call.state === "running") return "running";
-  return "complete";
+function headline(category: Category): string | undefined {
+  const first = category.calls[0];
+  if (!first) return undefined;
+  if (category.kind === "other") return undefined;
+  if (category.kind === "read")
+    return uniqueCount(category.calls) === 1 ? first.headline : undefined;
+  return category.calls.length === 1 ? first.headline : undefined;
 }
-
-function CommandCall({ call }: { call: ActivityCall }) {
-  const command = stringArgument(call, "command") ?? call.name;
-  const output = resultText(call.result);
-  return (
-    <div className="tool-command">
-      <div className="tool-command-line">
-        <span className="rec-px">run</span>
-        <span className="tool-command-text">{command}</span>
-      </div>
-      {output !== "" && <pre className="tool-command-output">{output}</pre>}
-      <div className="tool-command-footer">
-        <span
+function boundedReadLabel(call: Call): string {
+  if (call.offset === undefined && call.limit === undefined) return call.headline;
+  const start = call.offset ?? 1;
+  const range = `:${start}${call.limit === undefined ? "+" : `–${start + call.limit - 1}`}`;
+  const encoder = new TextEncoder();
+  const budget = 1024 - encoder.encode(range).length;
+  const headline = call.headline;
+  let path = "";
+  let bytes = 0;
+  for (const char of headline) {
+    const size = encoder.encode(char).length;
+    if (bytes + size > budget - 3) return `${path}…${range}`;
+    path += char;
+    bytes += size;
+  }
+  return `${path}${range}`;
+}
+function ReadBody({ call, context, kind }: { call: Call; context: DetailContext; kind: Kind }) {
+  const render = (body: DisplayDetailBody) =>
+    body.type === "tool_result" &&
+    body.nestedCalls === undefined &&
+    body.content.every(
+      (item) => item.type !== "image" && (item.type !== "text" || item.text === ""),
+    ) &&
+    call.callRecordId &&
+    call.callKey &&
+    kind !== "command" ? (
+      <CommittedBody
+        context={context}
+        recordId={call.callRecordId}
+        detailKey={call.callKey}
+        render={(input) =>
+          input.type === "tool_call" ? (
+            <pre className="tool-input">{JSON.stringify(input.arguments, null, 2)}</pre>
+          ) : null
+        }
+      />
+    ) : body.type === "tool_result" ? (
+      <>
+        <pre
           className={
-            call.state === "failed"
-              ? "tool-activity-failed"
-              : call.state === "running"
-                ? "tool-activity-running"
-                : undefined
+            call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
           }
         >
-          {call.state === "failed"
-            ? "✕ failed"
-            : call.state === "running"
-              ? "◐ running"
-              : "✓ completed"}
-        </span>
-      </div>
-    </div>
-  );
+          {body.content
+            .filter((item) => item.type === "text")
+            .map((item) => item.text)
+            .join("\n")}
+        </pre>
+        {body.content.map((item, index) =>
+          item.type === "image" &&
+          call.resultRecordId !== undefined &&
+          call.result !== undefined ? (
+            item.url !== undefined ? (
+              <ToolImagePreview key={index} src={item.url} toolName={call.name} />
+            ) : item.imageRef !== undefined &&
+              imageIndex(call.result.detailKey, item.imageRef) !== null ? (
+              <CommittedImage
+                key={index}
+                context={context}
+                recordId={call.resultRecordId}
+                detailKey={call.result.detailKey}
+                index={imageIndex(call.result.detailKey, item.imageRef) ?? 0}
+                toolName={call.name}
+              />
+            ) : (
+              <ToolImagePreview key={index} toolName={call.name} />
+            )
+          ) : null,
+        )}
+        {body.nestedCalls !== undefined && <NestedSummary nested={body.nestedCalls} />}
+      </>
+    ) : null;
+  if (context.operationId && call.state === "running")
+    return <RunningBody context={context} blockId={call.id} command={kind === "command"} />;
+  if (call.result && call.resultRecordId && kind !== "other")
+    return (
+      <CommittedBody
+        context={context}
+        recordId={call.resultRecordId}
+        detailKey={call.result.detailKey}
+        render={render}
+      />
+    );
+  if (kind === "command" && !call.result) return null;
+  if (call.callRecordId && call.callKey)
+    return (
+      <CommittedBody
+        context={context}
+        recordId={call.callRecordId}
+        detailKey={call.callKey}
+        render={(body) => (
+          <>
+            {body.type === "tool_call" && (
+              <pre className="tool-input">{JSON.stringify(body.arguments, null, 2)}</pre>
+            )}
+            {call.result && call.resultRecordId ? (
+              <CommittedBody
+                context={context}
+                recordId={call.resultRecordId}
+                detailKey={call.result.detailKey}
+                render={render}
+              />
+            ) : null}
+          </>
+        )}
+      />
+    );
+  return null;
 }
-
-function FileCall({
+function CallRow({
   call,
   kind,
-  flat = false,
+  context,
+  categoryOpen,
 }: {
-  call: ActivityCall;
-  kind: "edit" | "read";
-  flat?: boolean;
+  call: Call;
+  kind: Kind;
+  context: DetailContext;
+  categoryOpen: boolean;
 }) {
-  const path = kind === "read" ? readCallLabel(call) : (callPath(call) ?? call.name);
-  const output = resultText(call.result);
-  const stats = kind === "edit" ? patchStats(call.result?.patch ?? null) : null;
-  const input = call.arguments === null ? "" : JSON.stringify(call.arguments, null, 2);
-  const detail = output !== "" ? output : input;
-  const metric =
-    kind === "read" ? null : stats === null ? (
-      callStatus(call)
-    ) : (
+  const [open, setOpen] = useState(call.result?.hasImages === true);
+  const label = kind === "read" ? boundedReadLabel(call) : call.headline || capHeadline(call.name);
+  const stats =
+    call.result?.added === undefined && call.result?.removed === undefined ? null : (
       <>
-        <span className="tool-diff-added">+{stats.added}</span>{" "}
-        <span className="tool-diff-removed">−{stats.removed}</span>
+        <span className="tool-diff-added">+{call.result.added ?? 0}</span>{" "}
+        <span className="tool-diff-removed">−{call.result.removed ?? 0}</span>
       </>
     );
-  if (flat) {
-    return detail === "" ? null : (
-      <pre
-        className={
-          call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
-        }
-      >
-        {detail}
-      </pre>
-    );
-  }
-  if (detail === "") {
-    return (
-      <div className="tool-activity-call">
-        <span className="tool-call-marker">·</span>
-        <code className="trunc">{path}</code>
-        {metric !== null && (
-          <span className={`tool-call-status tool-call-${call.state}`}>{metric}</span>
-        )}
-      </div>
-    );
-  }
   return (
-    <details className="tool-activity-call">
+    <details
+      className="tool-activity-call"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>
         <span className="tool-call-marker">·</span>
-        <code className="trunc">{path}</code>
-        {metric !== null && (
-          <span className={`tool-call-status tool-call-${call.state}`}>{metric}</span>
+        <code className="trunc" title={label}>
+          {label}
+        </code>
+        {kind !== "read" && (
+          <span className={`tool-call-status tool-call-${call.state}`}>
+            {stats ??
+              (call.state === "failed"
+                ? "failed"
+                : call.state === "running"
+                  ? "running"
+                  : "complete")}
+          </span>
         )}
       </summary>
-      <pre
-        className={
-          call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
-        }
-      >
-        {detail}
-      </pre>
-    </details>
-  );
-}
-
-function OtherCall({ call, single }: { call: ActivityCall; single: boolean }) {
-  const input = call.arguments === null ? "" : JSON.stringify(call.arguments, null, 2);
-  const output = resultText(call.result);
-  const nested = call.result?.nestedCalls;
-  const detail = (
-    <>
-      <pre
-        className={
-          call.state === "failed" ? "tool-call-output tool-call-output-error" : "tool-call-output"
-        }
-      >
-        {[input, output].filter(Boolean).join("\n\n") || "(no details)"}
-      </pre>
-      {nested !== undefined && (
-        <div className="tool-nested-calls">
-          {nested.calls.map((child) => (
-            <div className="tool-nested-call" key={child.id}>
-              <span className={child.status === "error" ? "tool-activity-failed" : undefined}>
-                {child.name} · {child.status}
-                {child.durationMs !== undefined ? ` · ${child.durationMs} ms` : ""}
+      {open && categoryOpen && (
+        <div className={kind === "command" ? "tool-command" : undefined}>
+          {kind === "command" && !(call.state === "running" && context.operationId) && (
+            <div className="tool-command-line">
+              <span className="rec-px">run</span>
+              <span className="tool-command-text">
+                {call.callRecordId && call.callKey ? (
+                  <CommittedBody
+                    context={context}
+                    recordId={call.callRecordId}
+                    detailKey={call.callKey}
+                    render={(body) =>
+                      body.type === "tool_call" &&
+                      typeof body.arguments === "object" &&
+                      body.arguments !== null &&
+                      !Array.isArray(body.arguments) &&
+                      typeof body.arguments.command === "string"
+                        ? body.arguments.command
+                        : call.headline
+                    }
+                  />
+                ) : (
+                  call.headline
+                )}
               </span>
-              {child.arguments !== undefined && (
-                <pre className="tool-call-output">{JSON.stringify(child.arguments, null, 2)}</pre>
-              )}
-              {child.argumentsBytes !== undefined && child.arguments === undefined && (
-                <span>arguments omitted ({child.argumentsBytes} bytes)</span>
-              )}
-              {child.error !== undefined && (
-                <pre className="tool-call-output tool-call-output-error">{child.error}</pre>
-              )}
             </div>
-          ))}
-          {!nested.complete && <span className="tool-activity-running">incomplete</span>}
+          )}
+          <ReadBody call={call} context={context} kind={kind} />
+          {kind === "command" && (
+            <div className="tool-command-footer">
+              {call.state === "failed"
+                ? "✕ failed"
+                : call.state === "running"
+                  ? "◐ running"
+                  : "✓ completed"}
+            </div>
+          )}
         </div>
       )}
-    </>
-  );
-  if (single) return detail;
-  return (
-    <details className="tool-activity-call">
-      <summary>
-        <span className="tool-call-marker">·</span>
-        <code className="trunc">{call.name}</code>
-        <span className={`tool-call-status tool-call-${call.state}`}>{callStatus(call)}</span>
-      </summary>
-      {detail}
     </details>
   );
 }
-
-function CategoryCalls({
-  category,
-  flattenSingle = false,
-}: {
-  category: ActivityCategory;
-  flattenSingle?: boolean;
-}) {
+function CategoryRow({ category, context }: { category: Category; context: DetailContext }) {
+  const image = category.calls.length === 1 && category.calls[0]?.result?.hasImages;
+  const [open, setOpen] = useState(image === true);
   return (
-    <div className="tool-activity-calls">
-      {category.calls.map((call) => {
-        if (category.kind === "command") return <CommandCall call={call} key={call.callId} />;
-        if (category.kind === "edit" || category.kind === "read") {
-          return (
-            <FileCall
-              call={call}
-              flat={flattenSingle && category.calls.length === 1}
-              kind={category.kind}
-              key={call.callId}
-            />
-          );
-        }
-        return <OtherCall call={call} single={category.calls.length === 1} key={call.callId} />;
-      })}
-    </div>
+    <ActivityRailRow
+      className={image ? "tool-activity-category tool-image-activity" : "tool-activity-category"}
+      label={category.label}
+      {...(headline(category) !== undefined ? { headline: headline(category) } : {})}
+      {...(metric(category) !== null ? { metric: metric(category) } : {})}
+      state={
+        category.calls.some((call) => call.state === "failed")
+          ? "failed"
+          : category.calls.some((call) => call.state === "running")
+            ? "running"
+            : "completed"
+      }
+      defaultOpen={image === true}
+      onToggle={setOpen}
+    >
+      <div className="tool-activity-calls">
+        {category.calls.map((call) => (
+          <CallRow
+            key={call.id}
+            call={call}
+            kind={category.kind}
+            context={context}
+            categoryOpen={open}
+          />
+        ))}
+      </div>
+    </ActivityRailRow>
   );
 }
 
-export function ToolActivity({ persisted = [], live = [] }: ToolActivityProps) {
-  const calls: ActivityCall[] = [
-    ...persisted.map(({ call, result }) => ({
-      callId: call.callId,
+export function ToolActivity({
+  persisted = [],
+  live = [],
+  detailContext,
+}: {
+  persisted?: readonly PersistedToolCall[];
+  live?: readonly LiveToolCall[];
+  detailContext: DetailContext;
+}) {
+  const calls: Call[] = [
+    ...persisted.map(({ call, callRecordId, result, resultRecordId }) => ({
+      id: call.callId,
       name: call.name,
-      arguments: call.arguments,
-      ...(result !== undefined ? { result } : {}),
+      headline: call.headline,
+      targetId: call.targetId,
+      offset: call.offset,
+      limit: call.limit,
+      callRecordId,
+      callKey: call.detailKey,
+      ...(result ? { result } : {}),
+      ...(resultRecordId ? { resultRecordId } : {}),
       state:
         result === undefined
           ? ("running" as const)
-          : result.isError === true
+          : result.isError
             ? ("failed" as const)
             : ("completed" as const),
     })),
-    ...live.map((call) => ({ ...call, arguments: null })),
+    ...live.map((call) => ({
+      id: call.callId,
+      name: call.name,
+      headline: call.name,
+      state: call.state,
+    })),
   ];
   if (calls.length === 0) return null;
   return (
     <>
-      {displayCategories(calls).map((category) => {
-        const state = categoryState(category);
-        const imageCall =
-          category.calls.length === 1 && resultImages(category.calls[0]?.result).length > 0
-            ? category.calls[0]
-            : undefined;
-        const previews =
-          imageCall === undefined ? undefined : (
-            <div className="tool-image-previews">
-              {resultImages(imageCall.result).map((image, index) => (
-                <ToolImagePreview
-                  block={image}
-                  key={`${imageCall.callId}-image-${index}`}
-                  toolName={imageCall.name}
-                />
-              ))}
-            </div>
-          );
-        return (
-          <ActivityRailRow
-            className={
-              previews === undefined
-                ? "tool-activity-category"
-                : "tool-activity-category tool-image-activity"
-            }
-            defaultOpen={previews !== undefined}
-            headline={categoryHeadline(category)}
-            key={category.key}
-            label={category.label}
-            metric={categoryMetric(category)}
-            state={state}
-          >
-            {previews}
-            <CategoryCalls category={category} flattenSingle={imageCall !== undefined} />
-          </ActivityRailRow>
-        );
-      })}
+      {displayCategories(calls).map((category) => (
+        <CategoryRow key={category.key} category={category} context={detailContext} />
+      ))}
     </>
   );
 }

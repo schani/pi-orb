@@ -1917,6 +1917,24 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     });
   }
 
+  readHistoryRecord(
+    _task: SimulationTask,
+    orbId: string,
+    sessionId: string,
+    recordId: string,
+  ): ResultAsync<HistoryRecord | null, StoreError> {
+    return this.db.transaction<HistoryRecord | null, StoreError>(async (query) => {
+      const result = await query(
+        `SELECT h.record FROM history_records h JOIN orbs o ON o.id = h.orb_id
+          WHERE h.orb_id = $1 AND h.record_id = $2 AND o.harness_session_id = $3 AND o.state <> 'deleting'`,
+        [orbId, recordId, sessionId],
+      );
+      return result.isErr()
+        ? err(result.error)
+        : ok((result.value.rows[0]?.["record"] ?? null) as HistoryRecord | null);
+    });
+  }
+
   readHistorySnapshot(
     _task: SimulationTask,
     orbId: string,

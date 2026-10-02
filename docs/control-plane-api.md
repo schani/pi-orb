@@ -87,6 +87,9 @@ POST /api/v1/orbs/:orbId/archive
 DELETE /api/v1/orbs/:orbId
 
 GET  /api/v1/orbs/:orbId/history
+GET  /api/v1/orbs/:orbId/details/:recordId/:detailKey?sessionId=...
+GET  /api/v1/orbs/:orbId/details/live/:operationId/:blockId?sessionId=...
+GET  /api/v1/orbs/:orbId/images/:recordId/:detailKey/:imageIndex?sessionId=...
 GET  /api/v1/orbs/:orbId/hosted-files
 PUT  /api/v1/orbs/:orbId/messages/:messageId
 GET  /api/v1/orbs/:orbId/messages
@@ -141,7 +144,7 @@ GET /runtime/v1/orbs/:orbId/transcript
 
 Both require the existing per-incarnation runtime bearer and are available only while the calling orb's lifecycle authorizes that bearer. The list derives the authenticated orb's project owner and returns only that owner's projects/orbs, including archived or stopped orbs. The list response is one non-cacheable aggregate snapshot containing `currentOrbId` plus each orb's ID, nullable name, state, update time, and parent project ID/name/repository URL. `pi-orb orbs [query]` performs NFKC case-insensitive substring filtering locally across those identity fields, so there is no server search index, request per keystroke, or transcript-content search.
 
-The explicit transcript route remains trusted-company cross-user access. It returns the exact consistent replicated-history snapshot used by the browser, plus the same compact orb/project identity. It does not start the target orb or contact its runtime. Archived transcripts are sealed and complete; stopped/running transcripts have the completeness and lag semantics of `docs/history-replication.md`, so an active turn may briefly be newer than the returned replica. Missing targets return a typed `404`; deleting targets return a typed `409`, never another resource or a dashboard redirect. Both successful responses set `Cache-Control: no-store`. The default CLI renderer omits `overflow.native` while retaining normalized messages, reasoning, tool calls/results, compactions, and events; `--json` returns the complete replica wire response. Native conversation records remain lossless, but harness system prompt/tool state is reduced to identity before either response is built.
+The explicit transcript route remains trusted-company cross-user access. It returns the exact consistent full replicated-history snapshot, plus the same compact orb/project identity. The browser instead receives a projected display snapshot. It does not start the target orb or contact its runtime. Archived transcripts are sealed and complete; stopped/running transcripts have the completeness and lag semantics of `docs/history-replication.md`, so an active turn may briefly be newer than the returned replica. Missing targets return a typed `404`; deleting targets return a typed `409`, never another resource or a dashboard redirect. Both successful responses set `Cache-Control: no-store`. The default CLI renderer omits `overflow.native` while retaining normalized messages, reasoning, tool calls/results, compactions, and events; `--json` returns the complete replica wire response. Native conversation records remain lossless, but harness system prompt/tool state is reduced to identity before either response is built.
 
 This is intentionally not implemented by calling `/api/v1/*`: the cloud runtime role hard-registers only `/runtime/v1/*`. It adds no table, migration, search cache, pagination, or mutable operation. Because these reads make no autonomous decision and write no state, durable lifecycle events would be noise; typed CLI errors are the user-visible observability, and route logging must never include transcript content. Conventional boundary tests cover protocol validation, CLI stdout/stderr and exit classes, bearer authorization, sanitized retryable/non-retryable store failures, and missing/deleting targets; the full-slice E2E covers one real sibling reading another. DST was rejected for this read path: it has no retry loop, lease, CAS, durable mutation, or concurrent state machine whose interleavings define correctness. If a stronger cross-row snapshot contract is later required during concurrent project/orb deletion, define that transaction boundary first and test it at the store/route concurrency boundary rather than adding schedule permutations to the current sequential reads.
 
@@ -259,14 +262,23 @@ interface OrbView {
   updatedAt: string;
 }
 
-interface OrbHistoryView {
+interface DisplayHistoryView {
   orbId: string;
-  session: HarnessSessionMetadata | null;
+  session: { id: string; timestamp?: string } | null;
   cursor: string | null;
   headId: string | null;
-  records: HistoryRecord[];
+  records: DisplayRecord[];
 }
+
+// GET /api/v1/orbs/:orbId/history is the browser display projection.
+// /runtime/v1/orbs/:orbId/transcript and /v1/history keep full HistoryRecord.
 ```
+
+### Lazy transcript reads (decided 2026-10-01; implemented locally, validation pending)
+
+The browser history response and live `history.record` frames carry `DisplayRecord`, not full `HistoryRecord`. `DisplayHistoryView` retains the existing cursor/head envelope with nullable minimal session identity and no version field. The in-orb transcript CLI and runtime replication pull retain complete records. Details and images use the routes above; each requires `sessionId` to fence a replaced session. A committed response is `{v:1,sessionId,recordId,detailKey,state:"committed",body}`; live reads return `{v:1,sessionId,operationId,blockId,state:"running"|"completed"|"unavailable",body?}`. The committed body is a typed reasoning, tool-call, tool-result, image, compaction, or subagent detail. Live bodies are reasoning, shell, or tool-result progress. Images return binary bytes with a safe image Content-Type; no base64 enters JSON display responses. Successful responses are private, no-store.
+
+The control plane reads one addressed record from the replica before considering the current runtime. Missing orb/detail returns typed 404, session mismatch 409, unavailable runtime/storage 503; malformed query 400. Errors use `ControlPlaneHttpError` and the detail-read failure is logged as a content-free `display-detail-read-failed` edge with source and reason. A stopped/archived orb never wakes for a detail. See `docs/runtime-protocol.md` for runtime routes and `docs/web-ui.md` for disclosure polling.
 
 ### Project secrets (decided and implemented 2026-08-28)
 
@@ -286,7 +298,7 @@ The current running incarnation may call `POST /runtime/v1/orb/sleep` with `{v:1
 
 All user messages use the idempotent message resource, including messages sent while the runtime is live. This is one ingress path, not an offline fallback beside WebSocket sending. The request body contains the same validated text/image block union as the current live `message` action and deliberately has no caller-selected steer/follow-up mode or `expectedHeadId`.
 
-`PUT` returns `202` after the inbox row and lifecycle wake intent are durable. A client-generated UUID makes retries idempotent under the same identical-body/conflicting-body rule as project/orb creation. The response identifies `queued | delivering | delivered | failed`, may report `turn | steer` after runtime admission, and exposes only a sanitized failure. `failed` is written when the runtime rejects a delivery non-retryably (`docs/runtime-protocol.md`), and the sanitized reason is returned as `error`; retryable delivery failures never change the status, they are simply retried. `GET .../messages` restores outstanding and recent delivery state after reload; it is not conversation history. Actual user transcript records still enter `OrbHistoryView` only through runtime history replication.
+`PUT` returns `202` after the inbox row and lifecycle wake intent are durable. A client-generated UUID makes retries idempotent under the same identical-body/conflicting-body rule as project/orb creation. The response identifies `queued | delivering | delivered | failed`, may report `turn | steer` after runtime admission, and exposes only a sanitized failure. `failed` is written when the runtime rejects a delivery non-retryably (`docs/runtime-protocol.md`), and the sanitized reason is returned as `error`; retryable delivery failures never change the status, they are simply retried. `GET .../messages` restores outstanding and recent delivery state after reload; it is not conversation history. Actual user transcript records still enter the replica only through runtime history replication; the browser sees their `DisplayHistoryView` projections.
 
 The command is accepted for `creating`, `starting`, `running`, `stopping`, `stopped`, and recoverable `failed` orbs. It conflicts for `archiving`, `archived`, or `deleting` orbs. Acceptance requests ordinary startup when needed, but **acceptance itself never transitions the orb** (2026-08-11): the `202` means the message and its wake intent are durable, and the reconciler — nudged to run immediately by the same command — performs the one message-driven `stopped`/`failed` → `starting` transition a tick later (`docs/lifecycle.md`). A client that wants to display "starting" therefore reads the orb resource or its live updates rather than the message response. Explicit stop/message ordering and the durable wake rule are specified in `docs/lifecycle.md`. Payload limits must be enforceable before the runtime exists, so the control-plane limit is fixed at or below every enabled harness/runtime limit rather than learned only from `server.welcome`.
 
@@ -325,7 +337,7 @@ Status behavior:
 - lifecycle work is asynchronous and recoverable from `orbs.state`; the browser polls `GET /api/v1/orbs/:orbId`;
 - while an orb is `stopping`, or failed-compute disposal is pending, the orb resource includes `stateDetail` so the requester sees drain/cleanup progress and retryable blockers instead of an unexplained wait;
 - a process restart finds `creating`, `starting`, `stopping`, and `deleting` rows and resumes reconciliation, including restarting a required OAuth flow or destructive cleanup, so no transient job is authoritative;
-- history is returned as one complete database snapshot without pagination in the first slice;
+- browser history is returned as one complete projected database snapshot without pagination; opening a committed detail fetches only its addressed record, first from the replica and then from an already-running runtime if replication lags. Transient detail requires an already-running runtime. Neither read starts compute;
 - the live upgrade is accepted only for a running orb; otherwise it fails with `409`/`1013` as appropriate.
 
 All list responses use `{ items: [...] }`. Errors use one shape:

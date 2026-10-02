@@ -8,6 +8,7 @@ import type {
   RuntimeHooks,
   RuntimeTurnResume,
 } from "@pi-orb/protocol";
+import { projectRecordDetail, projectRecordImage } from "@pi-orb/protocol";
 import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import type { OrbHostProviderError, RuntimeClientError } from "../domain/errors.ts";
@@ -1697,6 +1698,79 @@ export class FakeRuntimeClient implements OrbRuntimeClient {
       if (health.activity === "busy") return okAsync({ v: 1 as const, prepared: false });
       state.host.idleStopPrepared = true;
       return okAsync({ v: 1 as const, prepared: true });
+    });
+  }
+
+  readDisplayDetail(
+    task: SimulationTask,
+    baseUrl: string,
+    sessionId: string,
+    recordId: string,
+    detailKey: string,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").CommittedDisplayDetail, RuntimeClientError> {
+    return this.req(task, FAILPOINTS.runtimePull, "read display detail", context, () => {
+      const state = this.world.resolveRuntime(baseUrl, task);
+      const record = state?.filesystem.entries.find((entry) => entry.id === recordId);
+      const body = record === undefined ? null : projectRecordDetail(record, detailKey);
+      if (
+        state === null ||
+        state.filesystem.header?.id !== sessionId ||
+        record === undefined ||
+        body === null
+      )
+        return errAsync(clientError("history_unavailable", "detail unavailable", true, true));
+      return okAsync({
+        v: 1 as const,
+        sessionId: state.filesystem.header.id,
+        recordId,
+        detailKey,
+        state: "committed" as const,
+        body,
+      });
+    });
+  }
+
+  readLiveDisplayDetail(
+    task: SimulationTask,
+    baseUrl: string,
+    operationId: string,
+    blockId: string,
+    context: OperationContext,
+  ): ResultAsync<import("@pi-orb/protocol").LiveDisplayDetail, RuntimeClientError> {
+    return this.req(task, FAILPOINTS.runtimePull, "read live display detail", context, () => {
+      const state = this.world.resolveRuntime(baseUrl, task);
+      if (state?.filesystem.header === null || state === null)
+        return errAsync(clientError("history_unavailable", "detail unavailable", true, true));
+      return okAsync({
+        v: 1 as const,
+        sessionId: state.filesystem.header.id,
+        operationId,
+        blockId,
+        state: "unavailable" as const,
+      });
+    });
+  }
+
+  readDisplayImage(
+    task: SimulationTask,
+    baseUrl: string,
+    sessionId: string,
+    recordId: string,
+    detailKey: string,
+    imageIndex: number,
+    context: OperationContext,
+  ): ResultAsync<{ mediaType: string; data: Buffer }, RuntimeClientError> {
+    return this.req(task, FAILPOINTS.runtimePull, "read display image", context, () => {
+      const state = this.world.resolveRuntime(baseUrl, task);
+      const record = state?.filesystem.entries.find((entry) => entry.id === recordId);
+      const image =
+        state?.filesystem.header?.id !== sessionId || record === undefined
+          ? null
+          : projectRecordImage(record, detailKey, imageIndex);
+      return image === null
+        ? errAsync(clientError("history_unavailable", "image unavailable", true, true))
+        : okAsync({ mediaType: image.mediaType, data: Buffer.from(image.data, "base64") });
     });
   }
 

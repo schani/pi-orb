@@ -73,6 +73,53 @@ describe("describeFetchError", () => {
 });
 
 describe("FetchRuntimeClient response evidence", () => {
+  it("binds detail and binary image reads to the requested session", async () => {
+    const fetch = vi.fn(async (url: string) =>
+      url.includes("/images/")
+        ? new Response(Buffer.from("image"), { headers: { "content-type": "image/png" } })
+        : Response.json({
+            v: 1,
+            sessionId: "session",
+            recordId: "record",
+            detailKey: "record:0",
+            state: "committed",
+            body: { type: "reasoning", text: "detail" },
+          }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = new FetchRuntimeClient();
+    const context = { signal: new AbortController().signal };
+    expect(
+      (
+        await client.readDisplayDetail(
+          task,
+          "http://runtime.test",
+          "session",
+          "record",
+          "record:0",
+          context,
+        )
+      ).isOk(),
+    ).toBe(true);
+    const image = await client.readDisplayImage(
+      task,
+      "http://runtime.test",
+      "session",
+      "record",
+      "record:0",
+      0,
+      context,
+    );
+    expect(image.isOk()).toBe(true);
+    if (image.isOk()) {
+      expect(image.value.mediaType).toBe("image/png");
+      expect(image.value.data).toEqual(Buffer.from("image"));
+    }
+    expect(fetch.mock.calls.map(([url]) => new URL(url).searchParams.get("sessionId"))).toEqual([
+      "session",
+      "session",
+    ]);
+  });
   it.each([true, false])("validates idle-stop admission response %s", async (prepared) => {
     const fetch = vi.fn(async () => Response.json({ v: 1, prepared }));
     vi.stubGlobal("fetch", fetch);

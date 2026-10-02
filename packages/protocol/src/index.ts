@@ -1,6 +1,7 @@
 export * from "./agent-settings.ts";
 export * from "./broker.ts";
 export * from "./control-plane-api.ts";
+export * from "./display.ts";
 export * from "./frames.ts";
 export * from "./history.ts";
 export * from "./hosting.ts";

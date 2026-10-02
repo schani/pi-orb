@@ -54,7 +54,7 @@ for (const width of [1280, 390, 320]) {
           below: gap(rows[0], prose[1]),
           adjacent: gap(rows[1], rows[2]),
           rail: getComputedStyle(rows[1], "::before").bottom,
-          bodyLeft: body.getBoundingClientRect().left + parseFloat(getComputedStyle(body).paddingLeft),
+          bodyLeft: body === null ? null : body.getBoundingClientRect().left + parseFloat(getComputedStyle(body).paddingLeft),
           railLeft: rows[0].getBoundingClientRect().left + parseFloat(getComputedStyle(rows[0], "::before").left),
           overflow: document.documentElement.scrollWidth - innerWidth,
         };
@@ -74,10 +74,13 @@ for (const width of [1280, 390, 320]) {
       expectPage(collapsed.overflow).toBeLessThanOrEqual(0);
       await rows.first().locator("summary").click();
       await rows.nth(1).locator("summary").click();
+      await expectPage(rows.first().locator(".subagent-notice-body")).toBeVisible();
+      await expectPage(rows.nth(1).locator(".subagent-notice-body")).toBeVisible();
       const expanded = await measure();
       expectPage(expanded.above).toBeCloseTo(expanded.below, 1);
       expectPage(expanded.adjacent).toBe(4);
-      expectPage(expanded.bodyLeft).toBeGreaterThan(expanded.railLeft);
+      expectPage(expanded.bodyLeft).not.toBeNull();
+      expectPage(expanded.bodyLeft ?? -Infinity).toBeGreaterThan(expanded.railLeft);
       await expectPage(rows.first().locator(".subagent-duration")).toHaveText("1.3s");
       await expectPage(rows.nth(1).locator(".subagent-duration")).toHaveCount(0);
       await expectPage(page.locator("body")).not.toContainText("private-child-");

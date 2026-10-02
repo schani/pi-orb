@@ -66,13 +66,15 @@ describe("transcript cache", () => {
     const cache = new TranscriptCache();
     const view = history();
     const first = view.records[0] ?? expect.fail("fixture record missing");
-    first.overflow = { native: "x".repeat(65 * 1024 * 1024) };
+    if (first.type !== "message") expect.fail("message record expected");
+    first.content = [{ type: "text", text: "x".repeat(65 * 1024 * 1024) }];
     expect(cache.acquire("a", "p").publish(snapshotFromHistory(view))).toBe("stored");
     expect(cache.stats.bytes).toBeGreaterThan(128 * 1024 * 1024);
     expect(cache.stats.bytes).toBeLessThan(256 * 1024 * 1024);
     const oversized = history();
     const oversizedFirst = oversized.records[0] ?? expect.fail("fixture record missing");
-    oversizedFirst.overflow = { native: "x".repeat(128 * 1024 * 1024) };
+    if (oversizedFirst.type !== "message") expect.fail("message record expected");
+    oversizedFirst.content = [{ type: "text", text: "x".repeat(128 * 1024 * 1024) }];
     expect(cache.acquire("a", "p").publish(snapshotFromHistory(oversized))).toBe("oversized");
     expect(cache.stats.bytes).toBe(0);
   });
@@ -91,6 +93,40 @@ describe("transcript cache", () => {
     expect(cache.get("c")).toBeDefined();
   });
 
+  it("does not claim a replacement snapshot was stored when retained images evict its older orb", () => {
+    const sample = new TranscriptCache();
+    sample.acquire("a", "p").publish(snapshotFromHistory(history()));
+    const baseline = sample.stats.bytes;
+    const cache = new TranscriptCache({ maxBytes: baseline * 4 + 200 });
+    const first = cache.acquire("a", "p");
+    const second = cache.acquire("b", "p");
+    expect(first.publish(snapshotFromHistory(history()))).toBe("stored");
+    const blob = new Blob([new Uint8Array(baseline * 2)], { type: "image/png" });
+    expect(
+      first.publishImage({
+        sessionId: "session",
+        recordId: "one",
+        detailKey: "one:0",
+        imageIndex: 0,
+        blob,
+      }),
+    ).toBe("stored");
+    expect(second.publish(snapshotFromHistory(history()))).toBe("stored");
+    expect(cache.stats.entries).toBe(2);
+    const view = history();
+    const record = view.records[0] ?? expect.fail("fixture record missing");
+    if (record.type !== "message") expect.fail("message record expected");
+    record.content = [{ type: "text", text: "x".repeat(baseline) }];
+    const expanded = snapshotFromHistory(view);
+    expect(
+      new TranscriptCache({ maxBytes: baseline * 4 + 200 }).acquire("c", "p").publish(expanded),
+    ).toBe("stored");
+    expect(first.publish(expanded)).toBe("oversized");
+    expect(cache.get("a")).toBeUndefined();
+    expect(cache.get("b")).toBeUndefined();
+    expect(cache.stats.bytes).toBeLessThanOrEqual(baseline * 4 + 200);
+  });
+
   it("bounds accounted bytes including native payloads; oversized replacement removes old entry", () => {
     const sample = new TranscriptCache();
     sample.acquire("a", "p").publish(snapshotFromHistory(history()));
@@ -100,7 +136,8 @@ describe("transcript cache", () => {
     expect(owner.publish(snapshotFromHistory(history()))).toBe("stored");
     const view = history();
     const first = view.records[0] ?? expect.fail("fixture record missing");
-    first.overflow = { native: "x".repeat(bytes) };
+    if (first.type !== "message") expect.fail("message record expected");
+    first.content = [{ type: "text", text: "x".repeat(bytes) }];
     expect(owner.publish(snapshotFromHistory(view))).toBe("oversized");
     expect(cache.get("a")).toBeUndefined();
     expect(cache.stats.bytes).toBe(0);

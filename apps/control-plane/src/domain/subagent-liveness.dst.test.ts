@@ -60,6 +60,9 @@ function runtime() {
 function bindRuntime(harness: TestHarness, agent: PiOrbAgent) {
   const transport = harness.deps.runtimeClient;
   const runtimeClient: OrbRuntimeClient = {
+    readDisplayDetail: (...args) => transport.readDisplayDetail(...args),
+    readLiveDisplayDetail: (...args) => transport.readLiveDisplayDetail(...args),
+    readDisplayImage: (...args) => transport.readDisplayImage(...args),
     prepareIdleStop: (task) =>
       ResultAsync.fromSafePromise(task.checkpoint("runtime idle-stop admission boundary")).andThen(
         () =>

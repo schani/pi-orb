@@ -12,6 +12,7 @@ import {
   OrbViewSchema,
   ProjectViewSchema,
   PullHistoryResponseSchema,
+  projectDisplayRecord,
   RequestResultFrameSchema,
   RuntimeEventFrameSchema,
   RuntimeHealthSchema,
@@ -368,7 +369,7 @@ describe("frame schemas", () => {
       v: 1,
       type: "history.record",
       at: "now",
-      record: messageRecord,
+      record: projectDisplayRecord(messageRecord as Parameters<typeof projectDisplayRecord>[0]),
       headId: "rec-2",
     };
     expect(Check(ServerFrameSchema, frame)).toBe(false);
@@ -526,7 +527,7 @@ describe("frame schemas", () => {
         type: "history.record",
         retiredBlockIds: [],
         at: "2026-07-20T10:00:00.000Z",
-        record: messageRecord,
+        record: projectDisplayRecord(messageRecord as Parameters<typeof projectDisplayRecord>[0]),
         headId: "rec-2",
       }),
     ).toBe(true);

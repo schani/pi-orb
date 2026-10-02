@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { HistoryRecord } from "@pi-orb/protocol";
 import { type Browser, chromium, expect as expectPage, type Page } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
@@ -11,6 +12,8 @@ import {
   gotoFrontendHistory,
   observeFrontendBoot,
 } from "./testkit/frontend-fixture.ts";
+import { waitForFixtureMedia } from "./testkit/media-ready.ts";
+import { projectFixtureHistory } from "./testkit/projected-history.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_HASH = "#/orbs/frontend-fixture-orb";
@@ -239,7 +242,7 @@ describe("frontend-only browser behavior", () => {
             }
             return code.replace(
               anchor,
-              `Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1); ${anchor}`,
+              `Reflect.set(globalThis, "__historyObservedConnected", detailContext.connected); Reflect.set(globalThis, "__historyRenders", (Reflect.get(globalThis, "__historyRenders") ?? 0) + 1); ${anchor}`,
             );
           },
         },
@@ -781,7 +784,7 @@ describe("frontend-only browser behavior", () => {
         await route.fulfill({
           json: {
             ...(await response.json()),
-            records: [
+            records: await projectFixtureHistory(page, id, [
               {
                 id: "notice",
                 parentId: null,
@@ -805,7 +808,8 @@ describe("frontend-only browser behavior", () => {
                 },
                 overflow: {},
               },
-            ],
+            ] as HistoryRecord[]),
+            cursor: "notice",
             headId: "notice",
           },
         });
@@ -965,7 +969,7 @@ describe("frontend-only browser behavior", () => {
       await page.route(`**/api/v1/orbs/${id}/history`, async (route) => {
         const response = await route.fetch();
         await route.fulfill({
-          json: { ...(await response.json()), records: [], headId: null },
+          json: { ...(await response.json()), records: [], cursor: null, headId: null },
         });
       });
       await page.routeWebSocket(`**/api/v1/orbs/${id}/live`, (socket) => {
@@ -1102,7 +1106,6 @@ describe("frontend-only browser behavior", () => {
             timestamp: "2026-09-14T00:00:00Z",
             type: "message",
             role: "assistant",
-            overflow: {},
             content: [{ type: "text", text: "Persisted register output" }],
           },
         });
@@ -1130,6 +1133,7 @@ describe("frontend-only browser behavior", () => {
       const page = await browser.newPage({ viewport: { width, height: 900 } });
       try {
         await gotoFrontendHistory(page, `${origin}/${ORB_HASH}`, "frontend-fixture-orb");
+        await waitForFixtureMedia(page);
         for (const tool of ["read", "browser_snapshot", "visual_diff"]) {
           const row = page
             .locator(".rec-orb > .rec-bd > .tool-image-activity")
@@ -1144,9 +1148,9 @@ describe("frontend-only browser behavior", () => {
           const geometry = await row.evaluate((element) => {
             const view = element.ownerDocument.defaultView;
             const summary = element.querySelector("summary .activity-rail-summary");
-            const gallery = element.querySelector(":scope > .tool-image-previews");
-            const image = gallery?.querySelector(".tool-image-trigger");
             const output = element.querySelector(":scope > .tool-activity-calls");
+            const image = output?.querySelector(".tool-image-trigger");
+            const gallery = image?.parentElement;
             if (!view || !summary || !gallery || !image || !output) return null;
             const rail = view.getComputedStyle(element, "::before");
             return {
@@ -1155,7 +1159,7 @@ describe("frontend-only browser behavior", () => {
               galleryLeft: gallery.getBoundingClientRect().left,
               imageLeft: image.getBoundingClientRect().left,
               outputLeft: output.firstElementChild?.getBoundingClientRect().left ?? 0,
-              galleryBorder: view.getComputedStyle(gallery).borderTopWidth,
+              outputBorder: view.getComputedStyle(output).borderTopWidth,
               gallerySideBorder: view.getComputedStyle(gallery).borderLeftWidth,
               imageBorder: view.getComputedStyle(image).borderLeftWidth,
               bodyRight: output.getBoundingClientRect().right,
@@ -1167,7 +1171,7 @@ describe("frontend-only browser behavior", () => {
           expectPage(geometry.imageLeft).toBeGreaterThanOrEqual(geometry.textLeft);
           expectPage(geometry.outputLeft).toBeGreaterThanOrEqual(geometry.textLeft);
           expectPage(geometry.bodyRight).toBe(geometry.rowRight);
-          expectPage(geometry.galleryBorder).toBe("0px");
+          expectPage(geometry.outputBorder).toBe("0px");
           expectPage(geometry.gallerySideBorder).toBe("0px");
           expectPage(geometry.imageBorder).toBe("1px");
         }
@@ -1230,6 +1234,13 @@ describe("frontend-only browser behavior", () => {
           .first();
         await edit.locator(":scope > summary").click();
         await commands.locator(":scope > summary").click();
+        await commands.locator(".tool-activity-call > summary").first().click();
+        await expectPage(
+          commands.locator(".tool-command-line .tool-command-text").first(),
+        ).toContainText("npm test -- HistoryView.test.tsx");
+        await expectPage(commands.locator(".tool-call-output").first()).toContainText(
+          "PASS HistoryView.test.tsx",
+        );
         const dotLeft = await edit
           .locator(".tool-call-marker")
           .first()
@@ -1246,7 +1257,7 @@ describe("frontend-only browser behavior", () => {
           .first()
           .evaluate((element) => {
             const run = element.querySelector(".tool-command-line .rec-px");
-            const output = element.querySelector(".tool-command-output");
+            const output = element.querySelector(".tool-call-output");
             const commandText = element.querySelector(".tool-command-text");
             if (!run || !output || !commandText) return null;
             const range = element.ownerDocument.createRange();
@@ -1370,7 +1381,12 @@ describe("frontend-only browser behavior", () => {
         },
       ];
       await route.fulfill({
-        json: { ...(await response.json()), records, headId: "prose" },
+        json: {
+          ...(await response.json()),
+          records: await projectFixtureHistory(page, id, records as HistoryRecord[]),
+          cursor: "prose",
+          headId: "prose",
+        },
       });
     });
     try {
@@ -1514,7 +1530,14 @@ describe("frontend-only browser behavior", () => {
           ],
         },
       ]);
-      await route.fulfill({ json: { ...(await response.json()), records, headId: "result-1" } });
+      await route.fulfill({
+        json: {
+          ...(await response.json()),
+          records: await projectFixtureHistory(page, id, records as HistoryRecord[]),
+          cursor: "result-1",
+          headId: "result-1",
+        },
+      });
     });
     try {
       await page.goto(`${origin}/#/orbs/${id}`);
@@ -1523,9 +1546,12 @@ describe("frontend-only browser behavior", () => {
           has: page.locator(".activity-rail-label", { hasText: new RegExp(`^${tool.name}$`) }),
         });
         await category.locator(":scope > summary").click();
+        await category.locator(".tool-activity-call > summary").click();
         const output = category.locator(".tool-call-output");
         await expectPage(output).toBeVisible();
-        await expectPage(output).toContainText(Object.values(tool.input)[0] as string);
+        await expectPage(category.locator(".tool-input")).toContainText(
+          Object.values(tool.input)[0] as string,
+        );
         await expectPage(output).toContainText(tool.output);
       }
     } finally {
@@ -2753,6 +2779,12 @@ describe("frontend-only browser behavior", () => {
       const error = `Lifecycle failed: ${"unbroken-diagnostic".repeat(35)}`;
       await page.route("**/api/v1/orbs/frontend-long-history", async (route) => {
         const response = await route.fetch();
+        // Expiring the session deliberately changes this endpoint to IAP's HTML 401.
+        if (response.status() === 401) {
+          await route.fulfill({ response });
+          return;
+        }
+        expectPage(response.status()).toBe(200);
         const orb = await response.json();
         await route.fulfill({ response, json: { ...orb, lastError: error } });
       });
@@ -3534,10 +3566,18 @@ describe("frontend-only browser behavior", () => {
       // Hold live replay and inbox responses before navigation: an initial
       // sync can otherwise race the typing assertion and legitimately render.
       let releaseLive = () => {};
+      let liveHelloReceived = () => {};
+      const liveHello = new Promise<void>((resolve) => {
+        liveHelloReceived = resolve;
+      });
       await page.routeWebSocket("**/orbs/frontend-long-history/live", (socket) => {
         const server = socket.connectToServer();
         const buffered: (string | Buffer)[] = [];
         let released = false;
+        socket.onMessage((message) => {
+          if (JSON.parse(message.toString()).type === "client.hello") liveHelloReceived();
+          server.send(message);
+        });
         server.onMessage((message) => {
           if (released) socket.send(message);
           else buffered.push(message);
@@ -3553,6 +3593,10 @@ describe("frontend-only browser behavior", () => {
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
       await expectPage(page.locator(".history")).toContainText("Review 100");
+      await liveHello;
+      await expectPage
+        .poll(() => page.evaluate(() => Reflect.get(globalThis, "__historyObservedConnected")))
+        .toBe(true);
       // The fixture is idle. Gate background history/inbox refreshes so this
       // assertion measures only draft updates, not unrelated polling commits.
       await page.route("**/api/v1/orbs/frontend-long-history/history", (route) => route.abort());

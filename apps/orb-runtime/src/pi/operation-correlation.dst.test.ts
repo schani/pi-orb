@@ -134,6 +134,8 @@ const fakeManager = (entries: unknown[] = []): PiSessionManager => ({
   appendCustomEntry: () => "baseline",
   appendCustomMessageEntry: () => "failure",
   getEntries: () => entries as ReturnType<PiSessionManager["getEntries"]>,
+  getEntry: (id) =>
+    (entries as ReturnType<PiSessionManager["getEntries"]>).find((entry) => entry.id === id),
   getLeafId: () => null,
   getHeader: () => ({ id: "session-under-test" }) as ReturnType<PiSessionManager["getHeader"]>,
   getSessionId: () => "session-under-test",

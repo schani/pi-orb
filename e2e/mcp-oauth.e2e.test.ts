@@ -13,6 +13,7 @@ import {
   deleteFakeSession,
   FatalProbeError,
   fakeControl,
+  readReplicatedHistorySnapshot,
   startControlPlane,
   waitFor,
 } from "./harness.ts";
@@ -183,7 +184,11 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
           ],
         },
         {
-          match: { userMessage: { regex: "^Write a single short desktop-notification sentence" } },
+          match: {
+            userMessage: {
+              regex: "^Write a single short desktop-notification sentence",
+            },
+          },
           steps: [
             { type: "text" as const, content: "Checked OAuth." },
             { type: "stop" as const, status: "completed" as const },
@@ -222,6 +227,7 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     processStateDirectory: join(root, "hosts"),
     webDist: join(root, "web"),
     entry: "e2e/mcp-oauth-entry.ts",
+    extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
   });
   if (priorCert === undefined) delete process.env["NODE_EXTRA_CA_CERTS"];
   else process.env["NODE_EXTRA_CA_CERTS"] = priorCert;
@@ -319,7 +325,11 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     ).toBe(200);
     for (const [index, orb] of orbs.entries()) {
       expect(
-        (await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, { id: orb })).status,
+        (
+          await api(cp.baseUrl, "POST", `/api/v1/projects/${project}/orbs`, {
+            id: orb,
+          })
+        ).status,
       ).toBe(202);
       if (index === 0) {
         const challenge = await waitFor(
@@ -333,7 +343,9 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
           },
           { timeoutMs: 60_000 },
         );
-        await fakeControl(fake.sessionKey, "/deviceauth/approve", { user_code: challenge });
+        await fakeControl(fake.sessionKey, "/deviceauth/approve", {
+          user_code: challenge,
+        });
       }
       await waitFor(
         "OAuth orb running",
@@ -439,8 +451,11 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
       ).status,
     ).toBe(201);
     expect(
-      (await api(cp.baseUrl, "POST", `/api/v1/projects/${otherProject}/orbs`, { id: foreignOrb }))
-        .status,
+      (
+        await api(cp.baseUrl, "POST", `/api/v1/projects/${otherProject}/orbs`, {
+          id: foreignOrb,
+        })
+      ).status,
     ).toBe(202);
     await waitFor(
       "foreign OAuth orb running",
@@ -481,10 +496,13 @@ it("initial auth recovery → two real Pi runtimes reuse the grant → rejection
     const history = JSON.stringify(
       (await api(cp.baseUrl, "GET", `/api/v1/orbs/${orbs[0]}/history`)).body,
     );
+    const replica = JSON.stringify(await readReplicatedHistorySnapshot(cp, orbs[0]));
     expect(history).not.toContain("fixture-access-");
     expect(history).not.toContain("fixture-refresh-");
     expect(await page.locator("body").innerText()).not.toContain("fixture-access-");
     expect(await page.locator("body").innerText()).not.toContain("fixture-refresh-");
+    expect(replica).not.toContain("fixture-access-");
+    expect(replica).not.toContain("fixture-refresh-");
     expect(
       JSON.stringify((await api(cp.baseUrl, "GET", `/api/v1/projects/${project}/mcp`)).body),
     ).not.toContain("fixture-access-");

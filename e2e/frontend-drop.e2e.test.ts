@@ -6,6 +6,7 @@ import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+import { waitForFixtureMedia } from "./testkit/media-ready.ts";
 
 const WEB_ROOT = join(import.meta.dirname, "../apps/web");
 const ORB_ID = "frontend-fixture-orb";
@@ -114,6 +115,7 @@ describe("orb native file drop", () => {
   it("shows an inset dashed transcript target on hover and clears it on exit and drop", async () => {
     const page = await openOrb();
     try {
+      await waitForFixtureMedia(page);
       const inset = page.locator(".orb-drop-inset.orb-drop-transcript");
       const layoutHeight = () =>
         page.evaluate(
@@ -201,7 +203,7 @@ describe("orb native file drop", () => {
       const response = await route.fetch();
       await route.fulfill({
         response,
-        json: { ...(await response.json()), records: [], headId: null },
+        json: { ...(await response.json()), records: [], cursor: null, headId: null },
       });
     });
     await page.routeWebSocket(`**/api/v1/orbs/${ORB_ID}/live`, (socket) => {

@@ -1,6 +1,8 @@
+import { projectDisplayRecord } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { mapPiEntry } from "../../../orb-runtime/src/pi/mapping.ts";
+import { detailContext } from "../testkit/display-fixtures.ts";
 import { HistoryView } from "./HistoryView.tsx";
 
 it("renders autonomous settings fallback durably without adding model context", () => {
@@ -18,7 +20,13 @@ it("renders autonomous settings fallback durably without adding model context", 
   expect(mapped.value.type).toBe("event");
   expect(
     renderToStaticMarkup(
-      <HistoryView records={[mapped.value]} liveBlocks={[]} tools={[]} busy={false} />,
+      <HistoryView
+        records={[projectDisplayRecord(mapped.value)]}
+        detailContext={detailContext()}
+        liveBlocks={[]}
+        tools={[]}
+        busy={false}
+      />,
     ),
   ).toContain("Saved model disappeared; using Astra.");
   expect(mapped.value.overflow["native"]).toEqual(native);

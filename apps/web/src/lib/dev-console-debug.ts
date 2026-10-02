@@ -1,4 +1,4 @@
-import type { HistoryRecord, OrbMessageView, ServerFrame } from "@pi-orb/protocol";
+import type { DisplayRecord, OrbMessageView, ServerFrame } from "@pi-orb/protocol";
 
 const TRACE_LIMIT = 200;
 const ANOMALY_LIMIT = 50;
@@ -42,7 +42,7 @@ interface DebugTraceEntry extends DebugTraceInput {
 interface TranscriptProjection {
   orbId: string;
   sessionId: string | null;
-  records: ReadonlyMap<string, HistoryRecord>;
+  records: ReadonlyMap<string, DisplayRecord>;
   afterRecordId: string | null;
   headId: string | null;
   synced: boolean;

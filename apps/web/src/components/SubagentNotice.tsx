@@ -1,13 +1,23 @@
-import type { EventRecord } from "@pi-orb/protocol";
+import type { DisplayRecord } from "@pi-orb/protocol";
+import { useState } from "react";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { PlainChatText } from "./ChatText.tsx";
+import { CommittedBody, type DetailContext } from "./DetailBody.tsx";
 
 function text(value: string | undefined): string | null {
   return value !== undefined && value.trim() !== "" ? value : null;
 }
 
 /** Root receipt fields only: never load or link a private child session. */
-export function SubagentNotice({ record }: { record: EventRecord }) {
+type DisplayEvent = Extract<DisplayRecord, { type: "event" }>;
+export function SubagentNotice({
+  record,
+  detailContext,
+}: {
+  record: DisplayEvent;
+  detailContext: DetailContext;
+}) {
+  const [open, setOpen] = useState(false);
   const notice = record.subagent;
   if (notice === undefined) return null;
   const description = text(notice.description) ?? "Subagent";
@@ -22,29 +32,43 @@ export function SubagentNotice({ record }: { record: EventRecord }) {
           : notice.status === "steered"
             ? "completed (steered)"
             : (text(notice.status) ?? "notification");
-  const body =
-    notice.kind === "update"
-      ? text(notice.message)
-      : notice.kind === "workspace_notice"
-        ? text(notice.notice)
-        : (text(notice.error) ?? text(notice.resultPreview));
-  const duration = notice.durationMs;
-  const showDuration = duration !== undefined && Number.isFinite(duration) && duration >= 0;
   return (
     <ActivityRailRow
       label={description}
       metric={status}
       state={failed ? "failed" : "neutral"}
       className="subagent-notice"
+      onToggle={setOpen}
     >
-      <div className={`subagent-notice-body${failed ? " tool-call-output-error" : ""}`}>
-        <PlainChatText>{body ?? "Notification details unavailable."}</PlainChatText>
-        {showDuration && <div className="subagent-duration">{(duration / 1000).toFixed(1)}s</div>}
-      </div>
+      {open && (
+        <CommittedBody
+          context={detailContext}
+          recordId={record.id}
+          detailKey={notice.detailKey}
+          render={(body) =>
+            body.type === "subagent" ? (
+              <div className={`subagent-notice-body${failed ? " tool-call-output-error" : ""}`}>
+                <PlainChatText>
+                  {notice.kind === "update"
+                    ? (text(body.message) ?? "Notification details unavailable.")
+                    : notice.kind === "workspace_notice"
+                      ? (text(body.notice) ?? "Notification details unavailable.")
+                      : (text(body.error) ??
+                        text(body.resultPreview) ??
+                        "Notification details unavailable.")}
+                </PlainChatText>
+                {body.durationMs !== undefined && body.durationMs >= 0 && (
+                  <div className="subagent-duration">{(body.durationMs / 1000).toFixed(1)}s</div>
+                )}
+              </div>
+            ) : null
+          }
+        />
+      )}
     </ActivityRailRow>
   );
 }
 
-export function isSubagentNotice(record: EventRecord): boolean {
+export function isSubagentNotice(record: Pick<DisplayEvent, "subagent">): boolean {
   return record.subagent !== undefined;
 }

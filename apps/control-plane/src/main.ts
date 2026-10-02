@@ -411,7 +411,10 @@ export async function main(
           clientId: tailscaleClientId,
           clientSecret: tailscaleClientSecret,
           onKeyEvent: ({ orbId, action, incarnation, keyId }) => {
-            logOrbEvent(bootTask, orbId, `tailscale-key-${action}`, { incarnation, key_id: keyId });
+            logOrbEvent(bootTask, orbId, `tailscale-key-${action}`, {
+              incarnation,
+              key_id: keyId,
+            });
           },
         })
       : null;
@@ -563,6 +566,41 @@ export async function main(
   };
   if (process.env["PI_ORB_E2E_RECONCILE_CHECKPOINTS"] === "1") {
     process.on("message", e2eReconcileMessageHandler);
+  }
+  const e2eHistoryMessageHandler = (message: unknown): void => {
+    if (
+      typeof message !== "object" ||
+      message === null ||
+      !("type" in message) ||
+      message.type !== "pi-orb.e2e.history" ||
+      !("orbId" in message) ||
+      typeof message.orbId !== "string" ||
+      !("requestId" in message) ||
+      typeof message.requestId !== "string"
+    )
+      return;
+    void deps.store
+      .readHistorySnapshot(new NoSimulationTask("e2e-history", true), message.orbId)
+      .then((result) => {
+        if (!process.connected) return;
+        try {
+          process.send?.(
+            {
+              type: "pi-orb.e2e.history-result",
+              requestId: message.requestId,
+              ...(result.isOk() ? { snapshot: result.value } : { error: result.error.message }),
+            },
+            (error) => {
+              if (error) bootTask.error("e2e history IPC failed:", error.message);
+            },
+          );
+        } catch (error) {
+          bootTask.error("e2e history IPC failed:", error);
+        }
+      });
+  };
+  if (process.env["PI_ORB_E2E_HISTORY_INSPECTION"] === "1") {
+    process.on("message", e2eHistoryMessageHandler);
   }
 
   const app = Fastify({ logger: false });
@@ -748,6 +786,7 @@ export async function main(
     if (stop.signal.aborted) return;
     bootTask.log("shutting down");
     process.off("message", e2eReconcileMessageHandler);
+    process.off("message", e2eHistoryMessageHandler);
     stop.abort();
     // Stop accepting requests immediately, but the browser service keeps its
     // provider/database boundaries open until concurrent reconciliations drain.

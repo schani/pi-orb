@@ -1,14 +1,18 @@
 import {
   AckOrbAlertResponseSchema,
+  type CommittedDisplayDetail,
+  CommittedDisplayDetailSchema,
   ControlPlaneHttpErrorSchema,
   type CreateOrbRequest,
   type CreateProjectRequest,
+  type DisplayHistoryView,
+  DisplayHistoryViewSchema,
   type EnqueueOrbMessageRequest,
   type HostedFilesResponse,
   HostedFilesResponseSchema,
   ListResponseSchema,
-  type OrbHistoryView,
-  OrbHistoryViewSchema,
+  type LiveDisplayDetail,
+  LiveDisplayDetailSchema,
   OrbMessageListViewSchema,
   type OrbMessageView,
   OrbMessageViewSchema,
@@ -428,6 +432,95 @@ export function listOrbMessages(orbId: string) {
   return apiFetch(OrbMessageListViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/messages`);
 }
 
-export function getOrbHistory(orbId: string): Promise<Result<OrbHistoryView, ApiError>> {
-  return apiFetch(OrbHistoryViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/history`);
+export function getOrbHistory(orbId: string): Promise<Result<DisplayHistoryView, ApiError>> {
+  return apiFetch(DisplayHistoryViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/history`);
+}
+
+export function getCommittedDetail(
+  orbId: string,
+  recordId: string,
+  detailKey: string,
+  sessionId: string,
+): Promise<Result<CommittedDisplayDetail, ApiError>> {
+  return apiFetch(
+    CommittedDisplayDetailSchema,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/details/${encodeURIComponent(recordId)}/${encodeURIComponent(detailKey)}?sessionId=${encodeURIComponent(sessionId)}`,
+    { cache: "no-store" },
+  );
+}
+
+export async function getCommittedImage(
+  orbId: string,
+  recordId: string,
+  detailKey: string,
+  imageIndex: number,
+  sessionId: string,
+): Promise<Result<Blob, ApiError>> {
+  const path = `/api/v1/orbs/${encodeURIComponent(orbId)}/images/${encodeURIComponent(recordId)}/${encodeURIComponent(detailKey)}/${imageIndex}?sessionId=${encodeURIComponent(sessionId)}`;
+  const sequence = beginSessionRequest();
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      cache: "no-store",
+      headers: { "x-requested-with": "XMLHttpRequest" },
+    });
+  } catch (cause) {
+    return err({ type: "network", message: describeThrown(cause) });
+  }
+  if (response.status === 401) {
+    reportAuthenticationRequired(sequence);
+    return err({
+      type: "auth_required",
+      message: "Your pi-orb session expired. Sign in again to continue.",
+    });
+  }
+  reportApplicationReached(sequence);
+  if (!response.ok) {
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+    if (Check(ControlPlaneHttpErrorSchema, body)) {
+      return err({
+        type: "http",
+        status: response.status,
+        code: body.error.code,
+        message: body.error.message,
+        retryable: body.error.retryable,
+      });
+    }
+    return err({
+      type: "http",
+      status: response.status,
+      code: null,
+      message: `request to ${path} failed`,
+      retryable: response.status >= 500,
+    });
+  }
+  const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (!mime || !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime)) {
+    return err({ type: "invalid_response", message: `unexpected image type from ${path}` });
+  }
+  let blob: Blob;
+  try {
+    blob = await response.blob();
+  } catch (cause) {
+    return err({ type: "network", message: describeThrown(cause) });
+  }
+  return ok(blob);
+}
+
+export function getLiveDetail(
+  orbId: string,
+  operationId: string,
+  blockId: string,
+  sessionId: string,
+): Promise<Result<LiveDisplayDetail, ApiError>> {
+  return apiFetch(
+    LiveDisplayDetailSchema,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/details/live/${encodeURIComponent(operationId)}/${encodeURIComponent(blockId)}?sessionId=${encodeURIComponent(sessionId)}`,
+    { cache: "no-store" },
+  );
 }

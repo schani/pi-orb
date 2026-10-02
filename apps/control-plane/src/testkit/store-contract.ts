@@ -1551,6 +1551,15 @@ export function storeSemanticsContractTests(
 
       const snapshot = await store.readHistorySnapshot(task, orb.id);
       expect(snapshot.isOk() && snapshot.value.records).toEqual([first, second]);
+      expect(
+        (await store.readHistoryRecord(task, orb.id, session.id, second.id))._unsafeUnwrap(),
+      ).toEqual(second);
+      expect(
+        (await store.readHistoryRecord(task, orb.id, "wrong-session", second.id))._unsafeUnwrap(),
+      ).toBeNull();
+      expect(
+        (await store.readHistoryRecord(task, orb.id, session.id, "missing"))._unsafeUnwrap(),
+      ).toBeNull();
     });
 
     it("rejects cursor and immutable-record conflicts without partial advancement", async () => {

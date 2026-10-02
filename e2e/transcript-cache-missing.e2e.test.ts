@@ -1,9 +1,26 @@
 import { join } from "node:path";
-import { expect as check, chromium, type WebSocket, webkit } from "@playwright/test";
+import { expect as check, chromium, type Page, type WebSocket, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
+
+function lastTraceOutcome(page: Page, event: string, orbId: string) {
+  return page.evaluate(
+    ({ event, id }) => {
+      const debug = globalThis as typeof globalThis & {
+        piOrbDebug: {
+          dump(): { trace: { event: string; orbId?: string; outcome?: string }[] };
+        };
+      };
+      return debug.piOrbDebug
+        .dump()
+        .trace.filter((entry) => entry.event === event && entry.orbId === id)
+        .at(-1)?.outcome;
+    },
+    { event, id: orbId },
+  );
+}
 
 it.each(["chromium", "webkit"] as const)(
   "%s: history 404 retires live ownership even when metadata is still running",
@@ -25,15 +42,34 @@ it.each(["chromium", "webkit"] as const)(
       b = "frontend-fixture-orb";
     let state = "stopped",
       refresh = false,
-      holdMetadata = false;
+      holdMetadata = false,
+      holdReturnMetadata = false;
     let releaseHistory = () => {},
-      releaseMetadata = () => {};
+      releaseMetadata = () => {},
+      releaseReturnMetadata = () => {};
     const historyGate = new Promise<void>((resolve) => {
       releaseHistory = resolve;
     });
     const metadataGate = new Promise<void>((resolve) => {
       releaseMetadata = resolve;
     });
+    const returnMetadataGate = new Promise<void>((resolve) => {
+      releaseReturnMetadata = resolve;
+    });
+    const waits: Promise<unknown>[] = [];
+    const own = <T>(promise: Promise<T>) => {
+      const settled = promise.then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      waits.push(settled);
+      return settled;
+    };
+    const required = async <T>(pending: ReturnType<typeof own<T>>) => {
+      const result = await pending;
+      if (!result.ok) throw result.error;
+      return result.value;
+    };
     const sockets = new Set<WebSocket>();
     page.on("websocket", (socket) => {
       if (!socket.url().endsWith(`/orbs/${a}/live`)) return;
@@ -44,6 +80,7 @@ it.each(["chromium", "webkit"] as const)(
       await page.route(`**/api/v1/orbs/${a}`, async (route) => {
         const responseState = state;
         const response = await route.fetch();
+        if (holdReturnMetadata) await returnMetadataGate;
         if (holdMetadata) await metadataGate;
         return route.fulfill({
           response,
@@ -60,42 +97,65 @@ it.each(["chromium", "webkit"] as const)(
       });
       await gotoFrontendHistory(page, `${origin}/#/orbs/${a}`, a);
       await check(page.locator(".history")).toContainText("Review 100");
+      // A visible row does not prove retained cache state; the return cache hit does.
+      await check.poll(() => lastTraceOutcome(page, "cache", a)).toBe("stored");
       await page.locator(`.orb-index a[href="#/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
       refresh = true;
-      const historyRequested = page.waitForRequest((request) =>
-        request.url().endsWith(`/orbs/${a}/history`),
+      holdReturnMetadata = true;
+      const historyRequested = own(
+        page.waitForRequest((request) => request.url().endsWith(`/orbs/${a}/history`)),
+      );
+      const returnMetadataRequested = own(
+        page.waitForRequest((request) => request.url().endsWith(`/api/v1/orbs/${a}`)),
+      );
+      const returnedMetadata = own(
+        page.waitForResponse(
+          (response) => response.url().endsWith(`/api/v1/orbs/${a}`) && response.status() === 200,
+        ),
       );
       await page.locator(`.orb-index a[href="#/orbs/${a}"]`).click();
+      await required(returnMetadataRequested);
+      // A held load leaves B painted; history visibility alone cannot end this wait.
+      await check(page.locator(".history")).toContainText("Frontend playground");
+      releaseReturnMetadata();
+      await required(returnedMetadata);
+      await check.poll(() => lastTraceOutcome(page, "navigation", a)).toBe("cache_hit");
       await check(page.locator(".history")).toContainText("Review 100");
-      await historyRequested;
+      await required(historyRequested);
       // A newer metadata poll starts live synchronization while the older HTTP
       // request is held. Its definitive 404 must still retire all live ownership.
       state = "running";
       await check(page.getByRole("button", { name: "Change thinking", exact: true })).toBeEnabled();
       await check.poll(() => sockets.size).toBe(1);
-      const metadataRequested = page.waitForRequest((request) =>
-        request.url().endsWith(`/api/v1/orbs/${a}`),
+      const metadataRequested = own(
+        page.waitForRequest((request) => request.url().endsWith(`/api/v1/orbs/${a}`)),
       );
       holdMetadata = true;
-      await metadataRequested;
-      const missingResponse = page.waitForResponse(
-        (response) => response.url().endsWith(`/orbs/${a}/history`) && response.status() === 404,
+      await required(metadataRequested);
+      const missingResponse = own(
+        page.waitForResponse(
+          (response) => response.url().endsWith(`/orbs/${a}/history`) && response.status() === 404,
+        ),
       );
       releaseHistory();
-      await missingResponse;
-      const staleMetadataResponse = page.waitForResponse(
-        (response) => response.url().endsWith(`/api/v1/orbs/${a}`) && response.status() === 200,
+      await required(missingResponse);
+      const staleMetadataResponse = own(
+        page.waitForResponse(
+          (response) => response.url().endsWith(`/api/v1/orbs/${a}`) && response.status() === 200,
+        ),
       );
       releaseMetadata();
-      await staleMetadataResponse;
+      await required(staleMetadataResponse);
       await check(page.getByText("Orb doesn't exist", { exact: true })).toBeVisible();
       await check.poll(() => sockets.size).toBe(0);
       check(page.url()).toBe(`${origin}/#/orbs/${a}`);
     } finally {
       releaseHistory();
       releaseMetadata();
+      releaseReturnMetadata();
       await page.close();
+      await Promise.all(waits);
       await browser.close();
       await vite.close();
     }

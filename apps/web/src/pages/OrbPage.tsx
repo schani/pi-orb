@@ -2,10 +2,10 @@ import {
   type ActiveSubagent,
   type AgentSettingsEvent,
   CAPABILITY_ABORT,
-  type HistoryRecord,
+  type DisplayHistoryView,
+  type DisplayRecord,
   type HostedFilesResponse,
   type MessageInputBlock,
-  type OrbHistoryView,
   type OrbMessageView,
   type OrbView,
   type RuntimeEvent,
@@ -23,6 +23,7 @@ import {
 } from "react";
 import { Composer, type ComposerHandle, type ComposerImage } from "../components/Composer.tsx";
 import type { ComposerMode } from "../components/composer-mode.ts";
+import type { DetailContext } from "../components/DetailBody.tsx";
 import { HistoryView, type LiveBlock, type ToolChip } from "../components/HistoryView.tsx";
 import { HostedFiles } from "../components/HostedFiles.tsx";
 import { Icon } from "../components/Icons.tsx";
@@ -111,7 +112,7 @@ const FALLBACK_MAX_PROMPT_BYTES = 6 * 1024 * 1024;
 
 interface OrbPageState {
   /** Insertion-ordered records keyed by id for cross-boundary dedupe. */
-  records: ReadonlyMap<string, HistoryRecord>;
+  records: ReadonlyMap<string, DisplayRecord>;
   sessionId: string | null;
   cacheReady: boolean;
   historyEpoch: number;
@@ -127,6 +128,8 @@ interface OrbPageState {
   operationId: string | null;
   subagents: readonly ActiveSubagent[];
   liveBlocks: Map<string, LiveBlock>;
+  detailAliases: ReadonlyMap<string, string>;
+  detailScope: number;
   tools: Map<string, ToolChip>;
   composerText: string;
   composerMode: ComposerMode;
@@ -152,9 +155,9 @@ export function missingResourceReducer(
 }
 
 type OrbPageAction =
-  | { type: "history_loaded"; view: OrbHistoryView }
+  | { type: "history_loaded"; view: DisplayHistoryView }
   | { type: "history_restored"; snapshot: CachedTranscript }
-  | { type: "history_refreshed"; view: OrbHistoryView; epoch: number }
+  | { type: "history_refreshed"; view: DisplayHistoryView; epoch: number }
   | { type: "history_failed"; error: ApiError }
   | { type: "frame"; frame: ServerFrame }
   | { type: "connection_status"; status: LiveConnectionStatus }
@@ -163,7 +166,11 @@ type OrbPageAction =
   | { type: "image_removed"; id: string }
   | { type: "notice"; message: string }
   | { type: "open_settings"; command: "model" | "thinking" }
-  | { type: "request_sent"; requestId: string; kind: "message" | "shell" | "abort" | "settings" }
+  | {
+      type: "request_sent";
+      requestId: string;
+      kind: "message" | "shell" | "abort" | "settings";
+    }
   | { type: "request_lost"; requestId: string }
   | { type: "message_enqueued"; requestId: string }
   | { type: "message_enqueue_failed"; requestId: string; error: ApiError }
@@ -187,6 +194,8 @@ export function initialState(orbId: string): OrbPageState {
     operationId: null,
     subagents: [],
     liveBlocks: new Map(),
+    detailAliases: new Map(),
+    detailScope: 0,
     tools: new Map(),
     composerText: draft?.text ?? "",
     composerMode: draft?.mode ?? "message",
@@ -201,7 +210,7 @@ export function initialState(orbId: string): OrbPageState {
   };
 }
 
-function lastKey(map: ReadonlyMap<string, HistoryRecord>): string | null {
+function lastKey(map: ReadonlyMap<string, DisplayRecord>): string | null {
   let last: string | null = null;
   for (const key of map.keys()) last = key;
   return last;
@@ -219,7 +228,9 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
         ...state,
         settings: event,
         ...(adjusted
-          ? { notice: `Thinking adjusted to ${event.settings.thinkingLevel} for this model.` }
+          ? {
+              notice: `Thinking adjusted to ${event.settings.thinkingLevel} for this model.`,
+            }
           : {}),
       };
     }
@@ -308,6 +319,8 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
               afterRecordId: null,
               headId: null,
               cacheReady: false,
+              detailAliases: new Map(),
+              detailScope: state.detailScope + 1,
               historyEpoch: state.historyEpoch + 1,
             }
           : {}),
@@ -336,6 +349,8 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
         return {
           ...next,
           records: new Map(),
+          detailAliases: new Map(),
+          detailScope: state.detailScope + 1,
           afterRecordId: null,
           headId: null,
           cacheReady: false,
@@ -347,11 +362,23 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
       const records = new Map(state.records);
       records.set(frame.record.id, frame.record);
       const liveBlocks = new Map(state.liveBlocks);
+      const detailAliases = new Map(state.detailAliases);
+      const retiredReasoning = frame.retiredBlockIds.filter(
+        (id) => liveBlocks.get(id)?.blockType === "reasoning",
+      );
+      if (frame.record.type === "message") {
+        for (const block of frame.record.content) {
+          if (block.type !== "reasoning") continue;
+          const oldId = retiredReasoning.shift();
+          if (oldId !== undefined) detailAliases.set(block.detailKey, oldId);
+        }
+      }
       for (const id of frame.retiredBlockIds) liveBlocks.delete(id);
       return {
         ...state,
         records,
         liveBlocks,
+        detailAliases,
         afterRecordId: frame.record.id,
         headId: frame.headId ?? frame.record.id,
       };
@@ -473,6 +500,11 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       return {
         ...state,
         ...action.snapshot,
+        detailAliases:
+          state.sessionId === action.snapshot.sessionId ? state.detailAliases : new Map(),
+        detailScope:
+          state.detailScope +
+          (state.sessionId !== null && state.sessionId !== action.snapshot.sessionId ? 1 : 0),
         historyLoaded: true,
         historyError: null,
         cacheReady: true,
@@ -537,7 +569,13 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         historyEpoch: state.historyEpoch + (action.status === "connecting" ? 1 : 0),
         ...(action.status === "open"
           ? {}
-          : { activity: null, operationId: null, subagents: [], settings: null, synced: false }),
+          : {
+              activity: null,
+              operationId: null,
+              subagents: [],
+              settings: null,
+              synced: false,
+            }),
       };
     case "open_settings":
       return {
@@ -560,9 +598,18 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
           commandDraft: null,
           notice: null,
         };
-      return { ...state, composerText: action.text, composerMode: action.mode, notice: null };
+      return {
+        ...state,
+        composerText: action.text,
+        composerMode: action.mode,
+        notice: null,
+      };
     case "image_added":
-      return { ...state, composerImages: [...state.composerImages, action.image], notice: null };
+      return {
+        ...state,
+        composerImages: [...state.composerImages, action.image],
+        notice: null,
+      };
     case "image_removed":
       return {
         ...state,
@@ -612,7 +659,10 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       return {
         ...state,
         pendingRequest: null,
-        requestError: { code: "enqueue_failed", message: describeApiError(action.error) },
+        requestError: {
+          code: "enqueue_failed",
+          message: describeApiError(action.error),
+        },
       };
     case "send_unavailable":
       return { ...state, notice: "Not connected — the request was not sent." };
@@ -671,7 +721,10 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
           outcome: data.cacheHit ? "cache_hit" : "cache_miss",
           recordCount: data.records,
         });
-        console.debug("transcript navigation", { ...data, loadMs: performance.now() - started });
+        console.debug("transcript navigation", {
+          ...data,
+          loadMs: performance.now() - started,
+        });
       },
     });
     void load.result.then((value) => {
@@ -898,6 +951,9 @@ function OrbConversation({
     }
   };
   const [ageNow, setAgeNow] = useState(() => Date.now());
+  const [liveDetailPending] = useState<DetailContext["livePending"]>(() => new Map());
+  const [committedDetailPending] = useState<DetailContext["committedPending"]>(() => new Map());
+  const [imagePending] = useState<DetailContext["imagePending"]>(() => new Map());
   const [orbError, setOrbError] = useState<ApiError | null>(() =>
     initial.orb.isErr() ? initial.orb.error : null,
   );
@@ -948,6 +1004,31 @@ function OrbConversation({
     initial.orb.isErr() && initial.orb.error.type === "http" && initial.orb.error.status === 404,
   );
   const cacheOwner = useRef<TranscriptOwner | null>(null);
+  const getOwner = useCallback(() => cacheOwner.current, []);
+  const detailContext = useMemo<DetailContext>(
+    () => ({
+      orbId,
+      sessionId: state.sessionId,
+      connected: state.connection === "open",
+      operationId: state.operationId,
+      cache,
+      getOwner,
+      livePending: liveDetailPending,
+      committedPending: committedDetailPending,
+      imagePending,
+    }),
+    [
+      orbId,
+      state.sessionId,
+      state.connection,
+      state.operationId,
+      cache,
+      getOwner,
+      liveDetailPending,
+      committedDetailPending,
+      imagePending,
+    ],
+  );
   const lifecycle = orb?.state ?? null;
   const resourceGone = orbNotFound || lifecycle === "deleting";
   const resourceProjectId = !resourceGone ? (orb?.projectId ?? null) : null;
@@ -1023,7 +1104,10 @@ function OrbConversation({
       if (history.isOk() && history.value.orbId !== orbId) {
         dispatch({
           type: "history_failed",
-          error: { type: "invalid_response", message: "History identity mismatch" },
+          error: {
+            type: "invalid_response",
+            message: "History identity mismatch",
+          },
         });
         return;
       }
@@ -1294,7 +1378,10 @@ function OrbConversation({
               operationId: event.operationId,
               summary: event.summary,
             });
-            console.info("turn notification", { operationId: event.operationId, result });
+            console.info("turn notification", {
+              operationId: event.operationId,
+              result,
+            });
           });
         }
         dispatch({ type: "frame", frame });
@@ -1327,7 +1414,10 @@ function OrbConversation({
       });
       return;
     }
-    dispatch({ type: "image_added", image: { id: generateUuid(), mediaType, data } });
+    dispatch({
+      type: "image_added",
+      image: { id: generateUuid(), mediaType, data },
+    });
   };
 
   const sendComposer = () => {
@@ -1379,7 +1469,11 @@ function OrbConversation({
         setQueuedMessages((current) => withQueuedMessage(current, enqueued));
         dispatch({ type: "message_enqueued", requestId });
       } else {
-        dispatch({ type: "message_enqueue_failed", requestId, error: result.error });
+        dispatch({
+          type: "message_enqueue_failed",
+          requestId,
+          error: result.error,
+        });
       }
     });
   };
@@ -1835,6 +1929,9 @@ function OrbConversation({
           )}
 
           <HistoryView
+            key={state.detailScope}
+            detailAliases={state.detailAliases}
+            detailContext={detailContext}
             records={historyRecords}
             liveBlocks={liveBlocks}
             tools={tools}

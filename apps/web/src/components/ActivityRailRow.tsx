@@ -8,6 +8,7 @@ interface ActivityRailRowProps {
   className?: string;
   children?: ReactNode;
   defaultOpen?: boolean;
+  onToggle?: (open: boolean) => void;
 }
 
 /**
@@ -23,11 +24,13 @@ export function ActivityRailRow({
   className = "",
   children,
   defaultOpen = false,
+  onToggle,
 }: ActivityRailRowProps) {
   return (
     <details
       className={`activity-rail-row activity-rail-row-${state} ${className}`.trim()}
       open={defaultOpen || undefined}
+      onToggle={onToggle === undefined ? undefined : (event) => onToggle(event.currentTarget.open)}
     >
       <summary>
         <span className="activity-rail-marker" aria-hidden="true" />

@@ -1,4 +1,4 @@
-import type { HistoryRecord, OrbHistoryView, OrbView } from "@pi-orb/protocol";
+import type { DisplayHistoryView, DisplayRecord, OrbView } from "@pi-orb/protocol";
 import type { LiveConnectionStatus } from "./live.ts";
 
 /** Initial hello owns ordinary running-orb catch-up; HTTP is the disconnected fallback. */
@@ -10,7 +10,7 @@ export function canRepairFromReplica(
 }
 
 export interface LocalHistory {
-  readonly records: readonly HistoryRecord[];
+  readonly records: readonly DisplayRecord[];
   readonly afterRecordId: string | null;
   readonly headId: string | null;
 }
@@ -24,7 +24,10 @@ export interface LocalHistory {
  * first in their authoritative order; local records absent from that prefix
  * stay after them in their existing live order.
  */
-export function mergeReplicatedHistory(current: LocalHistory, view: OrbHistoryView): LocalHistory {
+export function mergeReplicatedHistory(
+  current: LocalHistory,
+  view: DisplayHistoryView,
+): LocalHistory {
   const currentById = new Map(current.records.map((record) => [record.id, record]));
   const replicatedIds = new Set(view.records.map((record) => record.id));
   const replicatedPrefix = view.records.map((record) => currentById.get(record.id) ?? record);
