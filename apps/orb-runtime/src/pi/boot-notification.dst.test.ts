@@ -126,8 +126,7 @@ it("generic and sleep boot crash windows preserve context and bound automatic tu
                 };
                 expect(planBootNotification(entries, entries, identity, wake).kind).toBe("none");
                 const combined = entries.findLast(
-                  (entry) =>
-                    (entry as { customType?: string }).customType === "pi-orb.sleep-wake",
+                  (entry) => (entry as { customType?: string }).customType === "pi-orb.sleep-wake",
                 );
                 expect(combined).toBeDefined();
                 expect(mapPiEntry(combined)._unsafeUnwrap()).toMatchObject({
