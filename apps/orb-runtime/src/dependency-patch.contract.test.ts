@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -53,7 +53,7 @@ describe("Pi dependency patch installation", () => {
     expect(patch).toContain("async _runCustomMessagePrompt(appMessage)");
   });
 
-  it("applies the patch during root and both container installs", () => {
+  it("applies exactly the installed patches during root and container installs", () => {
     expect(json("package.json").scripts?.postinstall).toMatch(/^patch-package --error-on-fail && /);
 
     for (const [path, workspace] of [
@@ -63,14 +63,39 @@ describe("Pi dependency patch installation", () => {
       const dockerfile = read(path);
       const install = dockerfile.indexOf(`RUN npm ci --workspace ${workspace}`);
       expect(install).toBeGreaterThan(-1);
-      expect(dockerfile.indexOf("COPY patches patches")).toBeGreaterThan(-1);
-      expect(dockerfile.indexOf("COPY patches patches")).toBeLessThan(install);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(install);
       expect(
         dockerfile.indexOf("npx --no-install patch-package --error-on-fail", install),
       ).toBeGreaterThan(install);
     }
+
+    const patchFiles = [
+      "@earendil-works+pi-ai+1.0.0.patch",
+      "@earendil-works+pi-coding-agent+1.0.0.patch",
+      "@gotgenes+pi-subagents+21.7.0-orb.8.patch",
+    ];
+    expect(readdirSync(join(root, "patches")).sort()).toEqual([...patchFiles].sort());
+    const controlPlaneDependencies = json("apps/control-plane/package.json").dependencies;
+    expect(controlPlaneDependencies?.["@earendil-works/pi-ai"]).toBe(piVersion);
+    expect(controlPlaneDependencies?.["@gotgenes/pi-subagents"]).toBeUndefined();
+    const controlPlane = read("apps/control-plane/Dockerfile");
+    const install = controlPlane.indexOf("RUN npm ci --workspace @pi-orb/control-plane");
+    expect(controlPlane).not.toContain("COPY patches patches");
+    for (const patch of patchFiles) {
+      const copy = `COPY patches/${patch} patches/${patch}`;
+      if (patch.startsWith("@gotgenes+")) {
+        expect(controlPlane).not.toContain(copy);
+      } else {
+        expect(controlPlane.indexOf(copy)).toBeGreaterThan(-1);
+        expect(controlPlane.indexOf(copy)).toBeLessThan(install);
+      }
+    }
+    const runtime = read("apps/orb-runtime/Dockerfile");
+    expect(runtime.indexOf("COPY patches patches")).toBeGreaterThan(-1);
+    expect(runtime.indexOf("COPY patches patches")).toBeLessThan(
+      runtime.indexOf("RUN npm ci --workspace @pi-orb/orb-runtime"),
+    );
   });
 
   it("applies the packaged patch during native-image installation", () => {

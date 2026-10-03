@@ -1,5 +1,7 @@
 # Cloud deployment direction
 
+**Failed pre-apply release (2026-10-02):** [run 37079397373](https://github.com/schani/pi-orb/actions/runs/37079397373) of `fd37eff` passed checks but the control-plane Docker build failed on a runtime-only dependency patch. No apply occurred; native temporary resources were cleaned, and the previous `19d3025` serving release was not displaced. Cause, reproduction and image-scope correction: `docs/postmortems/2026-10-02-control-plane-patch-image-build.md`. The corrected image has not yet been built by Docker or deployed.
+
 Decisions about where the control plane runs and how infrastructure is managed. The operational workflow (build, apply, deploy, gotchas) lives in `infra/README.md`.
 
 ## Nested MCP live-row production release (2026-10-02)
