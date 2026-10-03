@@ -100,15 +100,15 @@ it("fetches the full bash command only when its call opens", async () => {
       await expect(commands).toHaveCount(1);
       expect(reads).toBe(0);
       expect(await page.locator(".history").textContent()).not.toContain("CANARY_AFTER_1K");
+      await expect(commands.locator(".activity-rail-headline")).not.toContainText(
+        "CANARY_AFTER_1K",
+      );
       await commands.locator(":scope > summary").click();
-      expect(reads).toBe(0);
-      const call = commands.locator("details.tool-activity-call");
-      await expect(call.locator("summary code")).not.toContainText("CANARY_AFTER_1K");
-      await call.locator(":scope > summary").click();
-      await expect(call.locator(".tool-command-text")).toHaveText(command);
-      await expect(call.locator(".tool-call-output")).toContainText("done");
+      await expect(commands.locator("details")).toHaveCount(0);
+      await expect(commands.locator(".tool-command-text")).toHaveText(command);
+      await expect(commands.locator(".tool-call-output")).toContainText("done");
       expect(reads).toBe(2);
-      expect(await call.locator(".tool-command").textContent()).not.toContain("timeout");
+      expect(await commands.locator(".tool-command").textContent()).not.toContain("timeout");
     } finally {
       await page.close();
     }

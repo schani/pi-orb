@@ -58,14 +58,14 @@ it.each(["chromium", "webkit"] as const)(
         await composer.fill("LAZY_TOOL_PAIR_HOLD");
         await composer.press("Control+Enter");
         const category = page.locator("details.activity-rail-row.tool-activity-category").filter({
-          has: page.locator('code[title="paired-tool.txt"]'),
+          has: page.locator('.activity-rail-headline[title="paired-tool.txt"]'),
         });
         await expect(category).toHaveCount(1);
         await expect(page.locator(".alert-band")).toContainText("Interposed tool alert");
         await expect(page.locator(".record-custom")).toContainText("Interposed tool notice");
         await category.locator(":scope > summary").click();
-        const call = category.locator("details.tool-activity-call");
-        await call.locator(":scope > summary").click();
+        await expect(category.locator("details")).toHaveCount(0);
+        const call = category.locator(".tool-call-output");
         await expect(call).toContainText("running tool 1");
         const release = await page.request.post(
           `${origin}/api/v1/orbs/${ORB}/fixture-lazy-release`,

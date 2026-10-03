@@ -1015,7 +1015,7 @@ describe("HistoryView", () => {
     expect(html).not.toContain("1 ran");
     expect(html).toContain('title="echo tool-input"');
     expect(html).not.toContain('class="tool-command-text"');
-    expect(html).toContain("tool-call-completed");
+    expect(html).toContain("activity-rail-row-completed");
     expect(
       renderToStaticMarkup(
         <DetailContent

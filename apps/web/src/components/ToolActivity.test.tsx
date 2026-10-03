@@ -56,6 +56,14 @@ describe("bounded call labels", () => {
               arguments: {},
             },
           },
+          {
+            call: {
+              type: "tool_call",
+              callId: "generic-other",
+              name: "browser_snapshot",
+              arguments: {},
+            },
+          },
         ]}
       />,
     );
@@ -66,6 +74,9 @@ describe("bounded call labels", () => {
         persisted={[
           {
             call: { type: "tool_call", callId: "generic-2", name: longName, arguments: {} },
+          },
+          {
+            call: { type: "tool_call", callId: "generic-3", name: longName, arguments: {} },
           },
         ]}
       />,
@@ -89,12 +100,57 @@ describe("bounded call labels", () => {
         ]}
       />,
     );
-    const match = html.match(/<code class="trunc" title="([^"]+)">([^<]+)<\/code>/);
+    const match = html.match(
+      /<span class="activity-rail-headline" title="([^"]+)">([^<]+)<\/span>/,
+    );
     expect(match).not.toBeNull();
     expect(match?.[1]).toBe(match?.[2]);
     expect(match?.[1]).toMatch(/…:12–16$/);
     expect(Buffer.byteLength(match?.[1] ?? "")).toBeLessThanOrEqual(1024);
   });
+});
+
+describe("single-call categories", () => {
+  it.each(["read", "write", "edit", "bash", "subagent", "codemode", "mcp__fixture__echo"])(
+    "%s uses only the category disclosure for committed and live calls",
+    (name) => {
+      const call: RawPair["call"] = {
+        type: "tool_call",
+        callId: "one",
+        name,
+        arguments: { path: "a.ts", command: "pwd" },
+      };
+      const persisted: RawPair[] = [
+        {
+          call,
+          result: {
+            type: "tool_result",
+            callId: "one",
+            content: [{ type: "text", text: "private output" }],
+          },
+        },
+      ];
+      for (const element of [
+        <ToolActivity key="committed" persisted={persisted} />,
+        <BrowserToolActivity
+          key="live"
+          live={[{ callId: "one", name, state: "running" }]}
+          detailContext={detailContext()}
+        />,
+      ]) {
+        const html = renderToStaticMarkup(element);
+        expect(html.match(/<details\b/g)).toHaveLength(1);
+        expect(html).not.toContain('class="tool-activity-call"');
+        expect(html).not.toContain("private output");
+        expect(html).not.toContain("Loading…");
+        expect(html).not.toMatch(/<details[^>]*\sopen(?:=|>)/);
+      }
+      const grouped = renderToStaticMarkup(
+        <ToolActivity persisted={[...persisted, { call: { ...call, callId: "two" } }]} />,
+      );
+      expect(grouped.match(/<details\b/g)).toHaveLength(3);
+    },
+  );
 });
 
 describe("edit diff stats", () => {
@@ -204,7 +260,7 @@ describe("tool image previews", () => {
     );
     expect(sparse).toContain("Loading…");
     expect(sparse).not.toContain("/images/");
-    expect(html.match(/<details class="tool-activity-call" open=""/g)).toHaveLength(2);
+    expect(html).not.toContain('class="tool-activity-call"');
     expect(html).not.toContain("image/png Zmlyc3Q=");
   });
 
@@ -366,7 +422,7 @@ describe("codemode nested calls", () => {
         ]}
       />,
     );
-    expect(html.match(/<details\b/g)).toHaveLength(2);
+    expect(html.match(/<details\b/g)).toHaveLength(1);
     expect(html).not.toContain("MCP request aborted");
     const detail = renderToStaticMarkup(
       <DetailContent
@@ -427,7 +483,7 @@ describe("generic nested tool summary", () => {
       />,
     );
     expect(html).not.toContain("read · ok · 4 ms");
-    expect(html.match(/<details\b/g)).toHaveLength(2);
+    expect(html.match(/<details\b/g)).toHaveLength(1);
     expect(
       renderToStaticMarkup(
         <DetailContent
@@ -471,7 +527,7 @@ describe("generic tool disclosure", () => {
           ]}
         />,
       );
-      expect(html.match(/<details\b/g)).toHaveLength(2);
+      expect(html.match(/<details\b/g)).toHaveLength(1);
       expect(html).not.toContain("Inspect services");
       expect(html).not.toContain("Four services found");
       expect(

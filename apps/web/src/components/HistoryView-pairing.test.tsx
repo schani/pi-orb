@@ -105,8 +105,8 @@ describe("persisted tool pairing across display boundaries", () => {
     expect(pairs()).toEqual([
       { callId: "one", callRecordId: "first", resultRecordId: "last", resultKey: "last:0" },
     ]);
-    expect(html).toContain("tool-call-completed");
-    expect(html).not.toContain("tool-call-running");
+    expect(html).toContain("activity-rail-row-completed");
+    expect(html).not.toContain("activity-rail-row-running");
     expect(html).not.toContain("tool output");
     const boundary =
       _label === "prose"
@@ -114,7 +114,7 @@ describe("persisted tool pairing across display boundaries", () => {
         : _label === "alert"
           ? "Interposed alert"
           : "Interposed notice";
-    expect(html.indexOf("tool-call-completed")).toBeLessThan(html.indexOf(boundary));
+    expect(html.indexOf("activity-rail-row-completed")).toBeLessThan(html.indexOf(boundary));
   });
 
   it("pairs interleaved IDs independently and consumes reused IDs in order", () => {
@@ -148,7 +148,7 @@ describe("persisted tool pairing across display boundaries", () => {
       },
     ]);
     expect(html).toContain("tool output");
-    expect(html).not.toContain("tool-call-running");
+    expect(html).not.toContain("activity-rail-row-running");
   });
 
   it.each([
@@ -175,7 +175,7 @@ describe("persisted tool pairing across display boundaries", () => {
       expect(pairs()).toEqual([
         { callId: "one", callRecordId: "old", resultKey: undefined, resultRecordId: undefined },
       ]);
-      expect(html).toContain("tool-call-running");
+      expect(html).toContain("activity-rail-row-running");
       expect(html).toContain("tool output");
     },
   );

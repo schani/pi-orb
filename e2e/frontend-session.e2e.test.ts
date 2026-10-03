@@ -1317,10 +1317,10 @@ describe("frontend-only browser behavior", () => {
             markerCenterX: box.left + box.width / 2,
           };
         });
-        const edit = page
+        const read = page
           .locator(".tool-activity-category")
           .filter({
-            has: page.locator(".activity-rail-label", { hasText: /^edit$/ }),
+            has: page.locator(".activity-rail-label", { hasText: /^read$/ }),
           })
           .first();
         const commands = page
@@ -1329,7 +1329,7 @@ describe("frontend-only browser behavior", () => {
             has: page.locator(".activity-rail-label", { hasText: /^commands$/ }),
           })
           .first();
-        await edit.locator(":scope > summary").click();
+        await read.locator(":scope > summary").click();
         await commands.locator(":scope > summary").click();
         await commands.locator(".tool-activity-call > summary").first().click();
         await expectPage(
@@ -1338,7 +1338,7 @@ describe("frontend-only browser behavior", () => {
         await expectPage(commands.locator(".tool-call-output").first()).toContainText(
           "PASS HistoryView.test.tsx",
         );
-        const dotLeft = await edit
+        const dotLeft = await read
           .locator(".tool-call-marker")
           .first()
           .evaluate((element) => {
@@ -1346,7 +1346,7 @@ describe("frontend-only browser behavior", () => {
             range.selectNodeContents(element);
             return range.getBoundingClientRect().left;
           });
-        const summaryLeft = await edit
+        const summaryLeft = await read
           .locator(":scope > summary .activity-rail-summary")
           .evaluate((element) => element.getBoundingClientRect().left);
         const command = await commands
@@ -1577,7 +1577,97 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("reveals generic tool inputs and outputs with a single disclosure", async () => {
+  it.each(["read", "write", "edit", "bash", "subagent", "codemode", "mcp__fixture__echo"])(
+    "reveals live %s data on the category's first expansion",
+    async (name) => {
+      const page = await browser.newPage();
+      const id = "frontend-fixture-orb";
+      let reads = 0;
+      let started = false;
+      await page.clock.install();
+      await page.route(`**/api/v1/orbs/${id}/history`, async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          json: { ...(await response.json()), records: [], cursor: null, headId: null },
+        });
+      });
+      await page.route(`**/api/v1/orbs/${id}/messages/poll`, (route) =>
+        route.fulfill({ json: { items: [], updates: [], cursor: 0 } }),
+      );
+      await page.routeWebSocket(`**/api/v1/orbs/${id}/live`, (socket) => {
+        const server = socket.connectToServer();
+        const emit = (event: object) =>
+          socket.send(
+            JSON.stringify({
+              v: 1,
+              at: new Date().toISOString(),
+              type: "runtime.event",
+              event,
+            }),
+          );
+        server.onMessage((message) => {
+          const frame = JSON.parse(message.toString());
+          if (frame.type === "history.record") return;
+          if (frame.type === "sync.started") {
+            socket.send(JSON.stringify({ ...frame, mode: "after", afterRecordId: null }));
+            return;
+          }
+          if (frame.type === "runtime.event") {
+            if (frame.event.type === "status" && !started) {
+              started = true;
+              emit({ type: "operation_started", operationId: "single-tool-op" });
+              emit({
+                type: "tool_state",
+                operationId: "single-tool-op",
+                callId: "single-tool",
+                name,
+                revision: 1,
+                state: "running",
+              });
+            }
+            return;
+          }
+          socket.send(message);
+        });
+      });
+      await page.route(`**/api/v1/orbs/${id}/details/live/**`, (route) => {
+        reads++;
+        return route.fulfill({
+          json: {
+            v: 1,
+            sessionId: new URL(route.request().url()).searchParams.get("sessionId"),
+            operationId: "single-tool-op",
+            blockId: "single-tool",
+            state: "running",
+            body: {
+              type: "tool_result",
+              arguments: { command: "pwd", path: "a.ts" },
+              content: [{ type: "text", text: "live tool data" }],
+            },
+          },
+        });
+      });
+      try {
+        await page.goto(`${origin}/orbs/${id}`);
+        const category = page.locator(".tool-activity-category");
+        await expectPage(category).toHaveCount(1);
+        await expectPage(category).toContainText("running");
+        expectPage(reads).toBe(0);
+        await category.locator(":scope > summary").click();
+        await expectPage(category.locator("details")).toHaveCount(0);
+        await expectPage(category.locator(".tool-call-output")).toContainText("live tool data");
+        expectPage(reads).toBe(1);
+        await category.locator(":scope > summary").click();
+        await expectPage(category.locator(".tool-call-output")).toHaveCount(0);
+        await page.clock.runFor(2100);
+        expectPage(reads).toBe(1);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  it("reveals committed tool inputs and outputs with a single disclosure", async () => {
     const page = await browser.newPage();
     const id = "frontend-auth-copy-test";
     const tools = [
@@ -1591,7 +1681,24 @@ describe("frontend-only browser behavior", () => {
         input: { agent_id: "local-child-one" },
         output: "Four services found",
       },
+      {
+        name: "codemode",
+        input: { code: "text(await tools.read({path: 'a.ts'}))" },
+        output: "Script completed",
+      },
+      { name: "mcp__fixture__echo", input: { text: "echo input" }, output: "echo output" },
+      { name: "read", input: { path: "a.ts", offset: 12, limit: 5 }, output: "read output" },
+      { name: "write", input: { path: "a.ts", content: "new file" }, output: "write output" },
+      {
+        name: "edit",
+        input: { path: "b.ts", oldText: "old", newText: "new" },
+        output: "edit output",
+      },
     ];
+    let detailReads = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.startsWith(`/api/v1/orbs/${id}/details/`)) detailReads++;
+    });
     await page.route(`**/api/v1/orbs/${id}`, async (route) => {
       const response = await route.fetch();
       await route.fulfill({
@@ -1609,6 +1716,7 @@ describe("frontend-only browser behavior", () => {
           type: "message",
           role: "assistant",
           content: [
+            { type: "text", text: `Call ${index}` },
             { type: "tool_call", callId: `tool-${index}`, name: tool.name, arguments: tool.input },
           ],
         },
@@ -1631,25 +1739,33 @@ describe("frontend-only browser behavior", () => {
         json: {
           ...(await response.json()),
           records: await projectFixtureHistory(page, id, records as HistoryRecord[]),
-          cursor: "result-1",
-          headId: "result-1",
+          cursor: `result-${tools.length - 1}`,
+          headId: `result-${tools.length - 1}`,
         },
       });
     });
     try {
       await page.goto(`${origin}/orbs/${id}`);
-      for (const tool of tools) {
-        const category = page.locator(".tool-activity-category").filter({
-          has: page.locator(".activity-rail-label", { hasText: new RegExp(`^${tool.name}$`) }),
-        });
+      await expectPage(page.locator(".tool-activity-category")).toHaveCount(tools.length);
+      expectPage(detailReads).toBe(0);
+      for (const [index, tool] of tools.entries()) {
+        const category = page.locator(".tool-activity-category").nth(index);
         await category.locator(":scope > summary").click();
-        await category.locator(".tool-activity-call > summary").click();
+        await expectPage(category.locator("details")).toHaveCount(0);
         const output = category.locator(".tool-call-output");
         await expectPage(output).toBeVisible();
-        await expectPage(category.locator(".tool-input")).toContainText(
-          Object.values(tool.input)[0] as string,
-        );
+        if (!["read", "write", "edit"].includes(tool.name)) {
+          await expectPage(category.locator(".tool-input")).toContainText(
+            Object.values(tool.input)[0] as string,
+          );
+        }
         await expectPage(output).toContainText(tool.output);
+        const readsBeforeReopen = detailReads;
+        await category.locator(":scope > summary").click();
+        await expectPage(category.locator(".tool-call-output")).toHaveCount(0);
+        await category.locator(":scope > summary").click();
+        await expectPage(category.locator(".tool-call-output")).toContainText(tool.output);
+        expectPage(detailReads).toBe(readsBeforeReopen);
       }
     } finally {
       await page.close();

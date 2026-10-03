@@ -130,7 +130,11 @@ function headline(category: Category): string | undefined {
   if (!first) return undefined;
   if (category.kind === "other") return undefined;
   if (category.kind === "read")
-    return uniqueCount(category.calls) === 1 ? first.headline : undefined;
+    return category.calls.length === 1
+      ? boundedReadLabel(first)
+      : uniqueCount(category.calls) === 1
+        ? first.headline
+        : undefined;
   return category.calls.length === 1 ? first.headline : undefined;
 }
 function boundedReadLabel(call: Call): string {
@@ -243,6 +247,47 @@ function ReadBody({ call, context, kind }: { call: Call; context: DetailContext;
     );
   return null;
 }
+function CallBody({ call, kind, context }: { call: Call; kind: Kind; context: DetailContext }) {
+  return (
+    <div className={kind === "command" ? "tool-command" : undefined}>
+      {kind === "command" && !(call.state === "running" && context.operationId) && (
+        <div className="tool-command-line">
+          <span className="rec-px">run</span>
+          <span className="tool-command-text">
+            {call.callRecordId && call.callKey ? (
+              <CommittedBody
+                context={context}
+                recordId={call.callRecordId}
+                detailKey={call.callKey}
+                render={(body) =>
+                  body.type === "tool_call" &&
+                  typeof body.arguments === "object" &&
+                  body.arguments !== null &&
+                  !Array.isArray(body.arguments) &&
+                  typeof body.arguments.command === "string"
+                    ? body.arguments.command
+                    : call.headline
+                }
+              />
+            ) : (
+              call.headline
+            )}
+          </span>
+        </div>
+      )}
+      <ReadBody call={call} context={context} kind={kind} />
+      {kind === "command" && (
+        <div className="tool-command-footer">
+          {call.state === "failed"
+            ? "✕ failed"
+            : call.state === "running"
+              ? "◐ running"
+              : "✓ completed"}
+        </div>
+      )}
+    </div>
+  );
+}
 function CallRow({
   call,
   kind,
@@ -285,45 +330,7 @@ function CallRow({
           </span>
         )}
       </summary>
-      {open && categoryOpen && (
-        <div className={kind === "command" ? "tool-command" : undefined}>
-          {kind === "command" && !(call.state === "running" && context.operationId) && (
-            <div className="tool-command-line">
-              <span className="rec-px">run</span>
-              <span className="tool-command-text">
-                {call.callRecordId && call.callKey ? (
-                  <CommittedBody
-                    context={context}
-                    recordId={call.callRecordId}
-                    detailKey={call.callKey}
-                    render={(body) =>
-                      body.type === "tool_call" &&
-                      typeof body.arguments === "object" &&
-                      body.arguments !== null &&
-                      !Array.isArray(body.arguments) &&
-                      typeof body.arguments.command === "string"
-                        ? body.arguments.command
-                        : call.headline
-                    }
-                  />
-                ) : (
-                  call.headline
-                )}
-              </span>
-            </div>
-          )}
-          <ReadBody call={call} context={context} kind={kind} />
-          {kind === "command" && (
-            <div className="tool-command-footer">
-              {call.state === "failed"
-                ? "✕ failed"
-                : call.state === "running"
-                  ? "◐ running"
-                  : "✓ completed"}
-            </div>
-          )}
-        </div>
-      )}
+      {open && categoryOpen && <CallBody call={call} kind={kind} context={context} />}
     </details>
   );
 }
@@ -347,15 +354,19 @@ function CategoryRow({ category, context }: { category: Category; context: Detai
       onToggle={setOpen}
     >
       <div className="tool-activity-calls">
-        {category.calls.map((call) => (
-          <CallRow
-            key={call.id}
-            call={call}
-            kind={category.kind}
-            context={context}
-            categoryOpen={open}
-          />
-        ))}
+        {category.calls.map((call) =>
+          category.calls.length === 1 ? (
+            open && <CallBody key={call.id} call={call} kind={category.kind} context={context} />
+          ) : (
+            <CallRow
+              key={call.id}
+              call={call}
+              kind={category.kind}
+              context={context}
+              categoryOpen={open}
+            />
+          ),
+        )}
       </div>
     </ActivityRailRow>
   );
