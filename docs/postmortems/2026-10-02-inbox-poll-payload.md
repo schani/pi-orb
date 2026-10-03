@@ -1,0 +1,25 @@
+# Repeated inbox payload transfers (2026-10-02)
+
+## Finding
+
+The user observed a 2.32 MB `/api/v1/orbs/:id/messages` response every few seconds. This is the durable command inbox, not transcript `/history`; the earlier history-response-size incident is distinct.
+
+`OrbPage.tsx` called `listOrbMessages` every 2s. The route returned every inbox row, including delivered rows and inline base64 images; PostgreSQL selected the entire orb's inbox. `messagesAwaitingHistory` filtered represented delivered rows only after download. Existing history cursors and compact display projection did not affect this endpoint. The API prose promised outstanding/recent delivery state, but the implementation had neither a recent bound nor incremental reads.
+
+## Decision
+
+Use the existing insertion ordinal plus explicitly tracked provisional IDs (`docs/control-plane-api.md`). Full immutable content travels only for new rows. Tracked rows receive content-free status/delivery/operation/error updates, including changes after `delivered`. `POST /messages/poll` carries selectors in a JSON body. The explicit store result separates full new rows from metadata updates; SQL omits tracked content/system, rather than fabricating empty content. Bootstrap remains a full snapshot. No migration or runtime protocol/harness change.
+
+Do not drop delivered rows merely because replication committed them: this browser may not have applied their history. Retire by local history identity and preserve disconnected replica repair (`docs/web-ui.md`). Singleflight and mutation/navigation fences protect polling. The poller owns authoritative rows and cursor synchronously, including enqueue and history retirement; React consumes snapshots, never supplies the next poll’s rows. Enqueue acknowledgements append only unseen IDs; already-observed rows retain authoritative ordering and metadata.
+
+Rejected: timestamp cursors (ties and late status updates); dropping all delivered rows (breaks handoff/repair); conditional GET alone (any new message or metadata change retransmits old images); a transcript-transport redesign (wrong subsystem); tracked-ID query strings (420 IDs produced a 16,452-byte URL and HTTP 431); chunking tracked IDs (unnecessary transport complexity).
+
+## Evidence
+
+Tests first reproduced repeated full rows, absent cursors and unchecked selectors. Route tests bootstrap a 2,320,000-character image then assert tracked delivery metadata is under 1 KB with no content, alongside insertion/timestamp-tie and empty-delta cases. A real HTTP test polls 420 failed IDs through the JSON body without expanding the URL. Shared memory/PGlite store contracts exercise new-row plus tracked-row selection.
+
+DST first exposed a response-acceptance/publication gap. That recorded schedule was replayed before moving publication into the accepted callback. Independent review then reproduced a separate real-React gap: `setQueuedMessages` schedules rendering, so a callback alone did not atomically publish rows with the cursor. A first-failing delayed-publication regression demonstrated the next empty delta losing newly fetched rows. The final fix stores authoritative rows inside the poller before scheduling React, including synchronous enqueue/retirement. Chromium/WebKit tests suspend a real React transition across the next poll and prove pending rows remain owned/tracked and render after release. Retained trace: `test-failures/inbox-delta-handoff-1790994095313-3.json`. Normal runs explore 30 schedules. Adapter validation separately caught an unwrapped SQL array; tracked IDs now use `arrayParam`. Final review reproduced a delayed enqueue acknowledgement moving polled `[A,B]` to `[B,A]` and regressing delivered metadata to queued after cursor advancement. First-failing regressions now cover retaining the observed row and order through subsequent metadata-only polls.
+
+Chromium and WebKit tests exercise the actual API/UI adapters with held history repair: delivered provisional content stays visible, native history retires tracking, subsequent empty deltas contain no image, and inbox failures appear and recover. Existing bounded browser diagnostics record content-free cursor/count and error classifications; no durable healthy-poll spam.
+
+Validation before removing the separate disappearing-answer changes passed 2,529 repository tests (eight integration skips), 112 infra tests, typecheck and lint (20 warnings, six infos). After removal, 91 focused tests, typecheck and lint passed; the full suite was not rerun. Both new inbox browser suites passed in Chromium and WebKit before removal. Process E2E remained unqualified: 186 passes and two phone-scroll failures across 29 completed files, then termination at the validator's 30-minute tool deadline before the full suite finished. Diagnostic isolation reproduced scroll failures; no product fix, commit or deployment. Evidence: `.context/inbox-handoff-final/`. Docker/PostgreSQL was not exercised; the daemon is unavailable.

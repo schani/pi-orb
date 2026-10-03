@@ -2232,7 +2232,10 @@ describe("full slice E2E", () => {
       "SPAWN_RETRY",
     );
     expect(retriedSpawn).toContain(`"orbId":"${spawnedOrbId}"`);
-    const spawnedMessages = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/messages`);
+    const spawnedMessages = await api(base, "POST", `/api/v1/orbs/${spawnedOrbId}/messages/poll`, {
+      after: 0,
+      tracked: [],
+    });
     expect(spawnedMessages.body["items"]).toHaveLength(1);
     const spawnedHistory = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/history`);
     expect(
@@ -2349,7 +2352,10 @@ describe("full slice E2E", () => {
       await expectPage(page.getByText("UPLOAD_VERIFIED", { exact: true })).toBeVisible({
         timeout: 30_000,
       });
-      const uploadMessages = await api(base, "GET", `/api/v1/orbs/${spawnedOrbId}/messages`);
+      const uploadMessages = await api(base, "POST", `/api/v1/orbs/${spawnedOrbId}/messages/poll`, {
+        after: 0,
+        tracked: [],
+      });
       const acceptedUploads = (uploadMessages.body["items"] as { content: unknown }[]).filter(
         (row) => JSON.stringify(row.content).includes("The user uploaded files:"),
       );

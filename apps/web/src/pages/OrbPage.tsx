@@ -63,6 +63,7 @@ import { copyToClipboard } from "../lib/copy-to-clipboard.ts";
 import { devConsoleDebug } from "../lib/dev-console-debug.ts";
 import { deriveOrbFaviconStatus, setOrbFavicon } from "../lib/favicon.ts";
 import { canRepairFromReplica, mergeReplicatedHistory } from "../lib/history-refresh.ts";
+import { createInboxPoller } from "../lib/inbox-poller.ts";
 import { type LiveConnection, type LiveConnectionStatus, openLiveConnection } from "../lib/live.ts";
 import {
   acceptAlertMetadata,
@@ -960,13 +961,15 @@ function OrbConversation({
   const [hostedFiles, setHostedFiles] = useState<HostedFilesResponse | null>(null);
   const [hostedFilesError, setHostedFilesError] = useState<ApiError | null>(null);
   const [queuedMessages, setQueuedMessages] = useState<OrbMessageView[]>([]);
+  const [inboxError, setInboxError] = useState<ApiError | null>(null);
+  const [inboxPoller] = useState(() =>
+    createInboxPoller((after, tracked) => listOrbMessages(orbId, after, tracked)),
+  );
   // Invalidates queued-message reads that were already in flight when a
   // message mutation committed (see lib/queued-messages.ts).
   const [messageEpoch] = useState(createMutationEpoch);
   const transcriptRef = useRef(state);
   transcriptRef.current = state;
-  const queuedMessagesRef = useRef(queuedMessages);
-  queuedMessagesRef.current = queuedMessages;
   useLayoutEffect(
     () =>
       devConsoleDebug.ownCurrent(() => {
@@ -979,10 +982,10 @@ function OrbConversation({
           headId: current.headId,
           synced: current.synced,
           connection: current.connection,
-          queuedMessages: queuedMessagesRef.current,
+          queuedMessages: inboxPoller.rows(),
         };
       }),
-    [orbId],
+    [orbId, inboxPoller],
   );
   const tracedCursor = useRef<string | null>(state.afterRecordId);
   useEffect(() => {
@@ -1241,25 +1244,44 @@ function OrbConversation({
     if (resourceGone) return;
     const poll = () => {
       const token = messageEpoch.begin();
-      void listOrbMessages(orbId).then((result) => {
-        // Discard a snapshot taken before a message mutation committed: it
-        // would clobber the optimistic append with a list that predates it.
-        if (cancelled || messageEpoch.isStale(token) || result.isErr()) return;
-        const transcript = transcriptRef.current;
-        const records = [...transcript.records.values()];
-        const awaiting = messagesAwaitingHistory(result.value.items, records);
-        setQueuedMessages((current) => reuseQueuedMessages(current, awaiting));
+      const cursorBefore = inboxPoller.cursor();
+      void inboxPoller
+        .poll(
+          () => !cancelled && !messageEpoch.isStale(token),
+          (messages) => {
+            setInboxError(null);
+            if (inboxPoller.cursor() !== cursorBefore)
+              devConsoleDebug.record({
+                event: "inbox",
+                orbId,
+                outcome: "advanced",
+                cursorBefore: String(cursorBefore),
+                cursorAfter: String(inboxPoller.cursor()),
+                recordCount: messages.length,
+              });
+            const transcript = transcriptRef.current;
+            const records = [...transcript.records.values()];
+            const awaiting = inboxPoller.update((current) =>
+              reuseQueuedMessages(current, messagesAwaitingHistory(current, records)),
+            );
+            setQueuedMessages(awaiting);
 
-        // `delivered` and replicated history commit together. PostgreSQL can
-        // repair a disconnected tab without hiding provisional turns. The
-        // reducer fences responses against a socket that has since reopened.
-        if (
-          transcript.historyLoaded &&
-          hasDeliveredMessageAwaitingHistory(result.value.items, records) &&
-          canRepairFromReplica(lifecycle, transcript.connection)
+            // `delivered` and replicated history commit together. PostgreSQL can
+            // repair a disconnected tab without hiding provisional turns. The
+            // reducer fences responses against a socket that has since reopened.
+            if (
+              transcript.historyLoaded &&
+              hasDeliveredMessageAwaitingHistory(messages, records) &&
+              canRepairFromReplica(lifecycle, transcript.connection)
+            )
+              refreshHistory();
+          },
         )
-          refreshHistory();
-      });
+        .then((result) => {
+          if (cancelled || messageEpoch.isStale(token) || result.isOk()) return;
+          setInboxError(result.error);
+          devConsoleDebug.record({ event: "inbox", orbId, outcome: result.error.type });
+        });
     };
     poll();
     const timer = window.setInterval(poll, POLL_INTERVAL_MS);
@@ -1267,7 +1289,16 @@ function OrbConversation({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [orbId, messageEpoch, refreshHistory, lifecycle, resourceGone]);
+  }, [orbId, messageEpoch, inboxPoller, refreshHistory, lifecycle, resourceGone]);
+
+  useEffect(() => {
+    const records = [...state.records.values()];
+    setQueuedMessages(
+      inboxPoller.update((current) =>
+        reuseQueuedMessages(current, messagesAwaitingHistory(current, records)),
+      ),
+    );
+  }, [state.records, inboxPoller]);
 
   useEffect(() => {
     orbNameRef.current = orb?.name ?? null;
@@ -1466,7 +1497,7 @@ function OrbConversation({
         // Commit before the append so any list request already in flight is
         // discarded rather than replacing the queue without this message.
         messageEpoch.commit();
-        setQueuedMessages((current) => withQueuedMessage(current, enqueued));
+        setQueuedMessages(inboxPoller.update((current) => withQueuedMessage(current, enqueued)));
         dispatch({ type: "message_enqueued", requestId });
       } else {
         dispatch({
@@ -1898,6 +1929,9 @@ function OrbConversation({
           )}
           <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
           {orbError !== null && <OrbNotice error>{describeApiError(orbError)}</OrbNotice>}
+          {inboxError !== null && (
+            <OrbNotice error>inbox unavailable: {describeApiError(inboxError)}</OrbNotice>
+          )}
           <div className="orb-composer-feedback-original">
             {state.serverError !== null && (
               <OrbNotice error>

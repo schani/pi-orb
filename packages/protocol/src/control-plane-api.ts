@@ -341,8 +341,29 @@ export const OrbMessageViewSchema = Type.Object(
 );
 export type OrbMessageView = Static<typeof OrbMessageViewSchema>;
 
+export const PollOrbMessagesRequestSchema = Type.Object(
+  {
+    after: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    tracked: Type.Array(
+      Type.String({
+        pattern:
+          "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+      }),
+    ),
+  },
+  closed,
+);
+export type PollOrbMessagesRequest = Static<typeof PollOrbMessagesRequestSchema>;
+
+export const OrbMessageUpdateViewSchema = Type.Omit(OrbMessageViewSchema, ["content", "system"]);
+export type OrbMessageUpdateView = Static<typeof OrbMessageUpdateViewSchema>;
+
 export const OrbMessageListViewSchema = Type.Object(
-  { items: Type.Array(OrbMessageViewSchema) },
+  {
+    items: Type.Array(OrbMessageViewSchema),
+    updates: Type.Array(OrbMessageUpdateViewSchema),
+    cursor: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  },
   closed,
 );
 export type OrbMessageListView = Static<typeof OrbMessageListViewSchema>;

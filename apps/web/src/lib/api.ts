@@ -428,8 +428,18 @@ export function enqueueOrbMessage(
   );
 }
 
-export function listOrbMessages(orbId: string) {
-  return apiFetch(OrbMessageListViewSchema, `/api/v1/orbs/${encodeURIComponent(orbId)}/messages`);
+export function listOrbMessages(orbId: string, after = 0, tracked: readonly string[] = []) {
+  return apiFetch(
+    OrbMessageListViewSchema,
+    `/api/v1/orbs/${encodeURIComponent(orbId)}/messages/poll`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ after, tracked }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
 }
 
 export function getOrbHistory(orbId: string): Promise<Result<DisplayHistoryView, ApiError>> {

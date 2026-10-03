@@ -1,0 +1,40 @@
+{
+  "name": "inbox-delta-handoff",
+  "iteration": 3,
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of poll, mutation, response",
+      "value": 0.874344397920698
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of poll, mutation",
+      "value": 0.3422991172226798
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of poll, mutation, response",
+      "value": 0.47583209799909654
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of poll, mutation, response",
+      "value": 0.6916659620507755
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of poll, mutation",
+      "value": 0.5497681221401798
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of poll, mutation",
+      "value": 0.7022686667830865
+    }
+  ]
+}

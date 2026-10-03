@@ -94,6 +94,14 @@ export interface OrbMessageRow {
   readonly updatedAt: number;
 }
 
+export type OrbMessageMetadataRow = Omit<OrbMessageRow, "content" | "system">;
+
+export interface OrbMessagePoll {
+  readonly items: OrbMessageRow[];
+  readonly updates: OrbMessageMetadataRow[];
+  readonly cursor: number;
+}
+
 export interface OrbDeletionRow {
   readonly orbId: string;
   readonly hostKind: string;

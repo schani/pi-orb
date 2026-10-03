@@ -53,7 +53,7 @@ it.each(["chromium", "webkit"] as const)(
         const body = await response.json();
         await route.fulfill({ response, json: { ...body, state: "stopped", activity: "idle" } });
       });
-      await page.route(`**/api/v1/orbs/${ORB}/messages`, async (route) => {
+      await page.route(`**/api/v1/orbs/${ORB}/messages/poll`, async (route) => {
         const response = await route.fetch();
         await held;
         await route.fulfill({ response });

@@ -80,7 +80,9 @@ it.each(["chromium", "webkit"] as const)(
       check(sent.status()).toBe(202);
       await check
         .poll(async () => {
-          const response = await page.request.get(`${origin}/api/v1/orbs/${a}/messages`);
+          const response = await page.request.post(`${origin}/api/v1/orbs/${a}/messages/poll`, {
+            data: { after: 0, tracked: [] },
+          });
           const view = await response.json();
           return view.items.find((item: { id: string; status: string }) => item.id === messageId)
             ?.status;

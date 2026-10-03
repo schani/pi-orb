@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getCommittedImage, getSystem, listHostedFiles, probeSession } from "./api.ts";
+import {
+  getCommittedImage,
+  getSystem,
+  listHostedFiles,
+  listOrbMessages,
+  probeSession,
+} from "./api.ts";
 import { readBrowserSession, resetBrowserSessionForTest } from "./session.ts";
 
 describe("API session handling", () => {
@@ -49,6 +55,27 @@ describe("API session handling", () => {
 
     expect(result.isOk()).toBe(true);
     expect(readBrowserSession()).toEqual({ status: "active" });
+  });
+
+  it("reads bounded no-store inbox deltas with encoded orb ID and JSON selectors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        const url = new URL(path, "http://test");
+        expect(url.pathname).toBe("/api/v1/orbs/orb%2Fone/messages/poll");
+        expect(url.search).toBe("");
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({ after: 42, tracked: ["m1", "m2"] });
+        expect(init?.cache).toBe("no-store");
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        return new Response(JSON.stringify({ items: [], updates: [], cursor: 42 }));
+      }),
+    );
+    expect((await listOrbMessages("orb/one", 42, ["m1", "m2"]))._unsafeUnwrap()).toEqual({
+      items: [],
+      updates: [],
+      cursor: 42,
+    });
   });
 
   it("rejects a system response that does not match the closed schema", async () => {

@@ -1286,6 +1286,35 @@ export function storeSemanticsContractTests(
         "delivered",
         "delivered",
       ]);
+      const rows = messages._unsafeUnwrap();
+      const firstOrdinal = rows[0]?.ordinal ?? 0;
+      const selected = (
+        await store.pollOrbMessages(task, orb.id, {
+          afterOrdinal: firstOrdinal,
+          trackedIds: [messageId],
+        })
+      )._unsafeUnwrap();
+      expect(selected.items.map((row) => row.messageId)).toEqual([secondMessageId]);
+      expect(selected.updates.map((row) => row.messageId)).toEqual([messageId]);
+      expect(selected.updates[0]).not.toHaveProperty("content");
+      expect(selected.updates[0]).not.toHaveProperty("system");
+      const cursor = rows[1]?.ordinal ?? 0;
+      expect(selected.cursor).toBe(cursor);
+      expect(
+        (
+          await store.pollOrbMessages(task, orb.id, { afterOrdinal: cursor, trackedIds: [] })
+        )._unsafeUnwrap(),
+      ).toEqual({ items: [], updates: [], cursor });
+      expect(
+        (
+          await store.pollOrbMessages(task, orb.id, {
+            afterOrdinal: cursor,
+            trackedIds: [messageId],
+          })
+        )
+          ._unsafeUnwrap()
+          .updates.map((row) => row.messageId),
+      ).toEqual([messageId]);
     });
 
     it("fails a rejected batch terminally and keeps the queue moving", async () => {

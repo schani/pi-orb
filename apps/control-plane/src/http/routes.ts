@@ -5,6 +5,7 @@ import {
   CreateProjectRequestSchema,
   EnqueueOrbMessageRequestSchema,
   PERSONAL_INSTRUCTIONS_PATH,
+  PollOrbMessagesRequestSchema,
   PROJECT_NAME_MAX_CHARS,
   ProjectSecretNameSchema,
   PutProjectSecretRequestSchema,
@@ -35,7 +36,7 @@ import {
   requestOrbStop,
 } from "../domain/lifecycle.ts";
 import { logOrbEvent } from "../domain/log.ts";
-import type { OrbMessageRow, ProjectRow } from "../domain/orb.ts";
+import type { OrbMessageMetadataRow, OrbMessageRow, ProjectRow } from "../domain/orb.ts";
 import { ackOrbAlert } from "../domain/orb-alerts.ts";
 import { normalizeOrbName, setOrbName } from "../domain/orb-naming.ts";
 import {
@@ -76,10 +77,16 @@ function normalizeProjectName(value: string): string | null {
 
 function messageView(row: OrbMessageRow) {
   return {
-    id: row.messageId,
-    orbId: row.orbId,
+    ...messageMetadataView(row),
     content: row.content,
     ...(row.system !== null ? { system: row.system } : {}),
+  };
+}
+
+function messageMetadataView(row: OrbMessageMetadataRow) {
+  return {
+    id: row.messageId,
+    orbId: row.orbId,
     status: row.status,
     ...(row.delivery !== null ? { delivery: row.delivery } : {}),
     ...(row.operationId !== null ? { operationId: row.operationId } : {}),
@@ -794,16 +801,30 @@ export function registerRoutes(
     },
   );
 
-  app.get<{ Params: { orbId: string } }>("/api/v1/orbs/:orbId/messages", async (request, reply) => {
-    const orb = await deps.store.getOrb(task, request.params.orbId);
-    if (orb.isErr()) return sendStoreError(reply, orb.error);
-    if (orb.value === null)
-      return reply.status(404).send(httpError("not_found", "orb not found", false));
-    const messages = await deps.store.listOrbMessages(task, request.params.orbId);
-    return messages.isErr()
-      ? sendStoreError(reply, messages.error)
-      : reply.send({ items: messages.value.map(messageView) });
-  });
+  app.post<{ Params: { orbId: string } }>(
+    "/api/v1/orbs/:orbId/messages/poll",
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!Check(PollOrbMessagesRequestSchema, request.body))
+        return reply
+          .status(400)
+          .send(httpError("invalid_request", "invalid inbox selector", false));
+      const orb = await deps.store.getOrb(task, request.params.orbId);
+      if (orb.isErr()) return sendStoreError(reply, orb.error);
+      if (orb.value === null)
+        return reply.status(404).send(httpError("not_found", "orb not found", false));
+      const messages = await deps.store.pollOrbMessages(task, request.params.orbId, {
+        afterOrdinal: request.body.after,
+        trackedIds: request.body.tracked,
+      });
+      if (messages.isErr()) return sendStoreError(reply, messages.error);
+      return reply.send({
+        items: messages.value.items.map(messageView),
+        updates: messages.value.updates.map(messageMetadataView),
+        cursor: messages.value.cursor,
+      });
+    },
+  );
 
   const sendDetailError = (
     reply: FastifyReply,

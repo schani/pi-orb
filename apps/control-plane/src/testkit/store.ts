@@ -15,7 +15,13 @@ import type {
 } from "../domain/errors.ts";
 import { jsonEqual } from "../domain/json-equal.ts";
 import { logOrbEvent } from "../domain/log.ts";
-import type { OrbDeletionRow, OrbMessageRow, OrbRow, ProjectRow } from "../domain/orb.ts";
+import type {
+  OrbDeletionRow,
+  OrbMessagePoll,
+  OrbMessageRow,
+  OrbRow,
+  ProjectRow,
+} from "../domain/orb.ts";
 import type {
   CasTransitionParams,
   CasUpdateFieldsParams,
@@ -869,6 +875,25 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     return this.access(task, FAILPOINTS.storeRead, "list orb messages", () => [
       ...(this.messages.get(orbId) ?? []),
     ]);
+  }
+
+  pollOrbMessages(
+    task: SimulationTask,
+    orbId: string,
+    selector: { afterOrdinal: number; trackedIds: readonly string[] },
+  ): ResultAsync<OrbMessagePoll, StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "poll orb messages", () => {
+      const rows = (this.messages.get(orbId) ?? []).filter(
+        (row) => row.ordinal > selector.afterOrdinal || selector.trackedIds.includes(row.messageId),
+      );
+      return {
+        items: rows.filter((row) => row.ordinal > selector.afterOrdinal),
+        updates: rows
+          .filter((row) => row.ordinal <= selector.afterOrdinal)
+          .map(({ content: _content, system: _system, ...update }) => update),
+        cursor: rows.reduce((cursor, row) => Math.max(cursor, row.ordinal), selector.afterOrdinal),
+      };
+    });
   }
 
   seedSystemMessage(

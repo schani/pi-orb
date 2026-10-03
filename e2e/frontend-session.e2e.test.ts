@@ -217,8 +217,7 @@ describe("frontend-only browser behavior", () => {
             }
             if (id.endsWith("/pages/OrbPage.tsx")) {
               const historyAnchor = /case\s*["']history_refreshed["']\s*:\s*\{/;
-              const inboxAnchor =
-                /setQueuedMessages\(\s*\(current\)\s*=>\s*reuseQueuedMessages\(current,\s*awaiting\)\s*\);/;
+              const inboxAnchor = /setQueuedMessages\(awaiting\);/;
               if (!historyAnchor.test(code) || !inboxAnchor.test(code)) {
                 throw new Error(`refresh checkpoint anchor not found in ${id}`);
               }
@@ -230,7 +229,7 @@ describe("frontend-only browser behavior", () => {
                 )
                 .replace(
                   inboxAnchor,
-                  'setQueuedMessages((current) => { Reflect.set(globalThis, "__inboxRefreshes", (Reflect.get(globalThis, "__inboxRefreshes") ?? 0) + 1); return reuseQueuedMessages(current, awaiting); });',
+                  'Reflect.set(globalThis, "__inboxRefreshes", (Reflect.get(globalThis, "__inboxRefreshes") ?? 0) + 1); setQueuedMessages(awaiting);',
                 );
             }
             if (!id.endsWith("/components/HistoryView.tsx")) return;
@@ -1060,8 +1059,8 @@ describe("frontend-only browser behavior", () => {
           json: { ...(await response.json()), state: "running", activity: "busy" },
         });
       });
-      await page.route(`**/api/v1/orbs/${id}/messages`, (route) =>
-        route.fulfill({ json: { items: [] } }),
+      await page.route(`**/api/v1/orbs/${id}/messages/poll`, (route) =>
+        route.fulfill({ json: { items: [], updates: [], cursor: 0 } }),
       );
       await page.route(`**/api/v1/orbs/${id}/history`, async (route) => {
         const response = await route.fetch();
@@ -3103,8 +3102,9 @@ describe("frontend-only browser behavior", () => {
       } else await route.continue();
     });
     const messages = async () => {
-      const response = await page.request.get(
-        `${origin}/api/v1/orbs/${ORB_PATH.split("/").at(-1)}/messages`,
+      const response = await page.request.post(
+        `${origin}/api/v1/orbs/${ORB_PATH.split("/").at(-1)}/messages/poll`,
+        { data: { after: 0, tracked: [] } },
       );
       return (
         (await response.json()) as { items: { id: string; content: unknown }[] }
@@ -3292,8 +3292,8 @@ describe("frontend-only browser behavior", () => {
     await page.routeWebSocket("**/orbs/frontend-long-history/live", (socket) => {
       socket.connectToServer().onMessage(() => {});
     });
-    await page.route("**/orbs/frontend-long-history/messages", (route) =>
-      route.fulfill({ json: { items: [] } }),
+    await page.route("**/orbs/frontend-long-history/messages/poll", (route) =>
+      route.fulfill({ json: { items: [], updates: [], cursor: 0 } }),
     );
     const geometry = () =>
       page.locator("body").evaluate((body) => {
@@ -3659,9 +3659,11 @@ describe("frontend-only browser behavior", () => {
       await page.route("**/api/v1/orbs/frontend-long-history/history", async (route) => {
         await route.fulfill({ response: await route.fetch() });
       });
-      await page.route("**/api/v1/orbs/frontend-long-history/messages", async (route) => {
+      await page.route("**/api/v1/orbs/frontend-long-history/messages/poll", async (route) => {
         await route.fulfill({
           json: {
+            cursor: 1,
+            updates: [],
             items: [
               {
                 id: "delivered-awaiting-history",
@@ -3733,7 +3735,9 @@ describe("frontend-only browser behavior", () => {
           buffered.length = 0;
         };
       });
-      await page.route("**/api/v1/orbs/frontend-long-history/messages", (route) => route.abort());
+      await page.route("**/api/v1/orbs/frontend-long-history/messages/poll", (route) =>
+        route.abort(),
+      );
       await page.goto(`${origin}/orbs/frontend-long-history`);
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
@@ -3755,7 +3759,7 @@ describe("frontend-only browser behavior", () => {
         before,
       );
       await page.unroute("**/api/v1/orbs/frontend-long-history/history");
-      await page.unroute("**/api/v1/orbs/frontend-long-history/messages");
+      await page.unroute("**/api/v1/orbs/frontend-long-history/messages/poll");
       releaseLive();
       await composer.press("Control+Enter");
       await expectPage(composer).toHaveValue("");

@@ -26,6 +26,7 @@ import type {
 } from "./errors.ts";
 import type {
   OrbDeletionRow,
+  OrbMessagePoll,
   OrbMessageRow,
   OrbRow,
   ProjectDeletionProgress,
@@ -256,6 +257,11 @@ export interface ControlPlaneStore {
     StoreError | StateConflict
   >;
   listOrbMessages(task: SimulationTask, orbId: string): ResultAsync<OrbMessageRow[], StoreError>;
+  pollOrbMessages(
+    task: SimulationTask,
+    orbId: string,
+    selector: { afterOrdinal: number; trackedIds: readonly string[] },
+  ): ResultAsync<OrbMessagePoll, StoreError>;
   scheduleOrbSleep(
     task: SimulationTask,
     params: { orbId: string; caller: ArchiveCaller; sleepId: string; durationSeconds: number },

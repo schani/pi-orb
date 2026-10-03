@@ -34,7 +34,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
-type ListResult = Result<OrbMessageListView, ApiError>;
+type ListResult = Result<Pick<OrbMessageListView, "items">, ApiError>;
 type EnqueueResult = Result<OrbMessageView, ApiError>;
 
 /**
@@ -203,11 +203,27 @@ describe("queued message list updates", () => {
     expect(changed[0]?.status).toBe("failed");
   });
 
-  it("replaces an existing entry instead of duplicating it", () => {
+  it("appends an unobserved enqueue acknowledgement", () => {
     const queued = withQueuedMessage([message("a", "queued")], message("b", "queued"));
-    const updated = withQueuedMessage(queued, message("b", "delivering"));
+    expect(queued.map((entry) => entry.id)).toEqual(["a", "b"]);
+  });
+
+  it("preserves an already-observed row's position on enqueue acknowledgement", () => {
+    const observed = [message("a", "queued"), message("b", "queued")];
+    const updated = withQueuedMessage(observed, message("a", "queued"));
     expect(updated.map((entry) => entry.id)).toEqual(["a", "b"]);
-    expect(updated[1]?.status).toBe("delivering");
+    expect(updated[0]).toBe(observed[0]);
+  });
+
+  it("does not replace authoritative delivery metadata with a late enqueue acknowledgement", () => {
+    const delivered: OrbMessageView = {
+      ...message("a", "delivered"),
+      delivery: "steer",
+      operationId: "operation-a",
+      updatedAt: "2026-08-10T00:00:01.000Z",
+    };
+    const updated = withQueuedMessage([delivered], message("a", "queued"));
+    expect(updated[0]).toBe(delivered);
   });
 });
 

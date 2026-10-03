@@ -16,6 +16,7 @@ import {
   type OrbView,
   PERSONAL_INSTRUCTIONS_PATH,
   type PersonalInstructions,
+  PollOrbMessagesRequestSchema,
   type ProjectInstructions,
   type ProjectView,
   projectDisplayRecord,
@@ -1344,8 +1345,22 @@ async function handleApi(
       notFound(response);
       return true;
     }
-    if (method === "GET" && messageId === undefined) {
-      sendJson(response, 200, { items: state.messages.get(orbId) ?? [] });
+    if (method === "POST" && messageId === "poll") {
+      const body = await readJson(request);
+      if (!Check(PollOrbMessagesRequestSchema, body)) {
+        sendJson(response, 400, {
+          error: { code: "invalid_request", message: "invalid inbox selector", retryable: false },
+        });
+        return true;
+      }
+      const after = body.after;
+      const tracked = new Set(body.tracked);
+      const messages = state.messages.get(orbId) ?? [];
+      const items = messages.filter((_message, index) => index + 1 > after);
+      const updates = messages
+        .filter((message, index) => index + 1 <= after && tracked.has(message.id))
+        .map(({ content: _content, system: _system, ...update }) => update);
+      sendJson(response, 200, { items, updates, cursor: Math.max(after, messages.length) });
       return true;
     }
     if (method === "PUT" && messageId !== undefined) {

@@ -95,10 +95,12 @@ export function hasDeliveredMessageAwaitingHistory(
   return items.some((message) => message.status === "delivered" && !represented.has(message.id));
 }
 
-/** Optimistic append; any existing entry for the same message id is replaced. */
+/** Append an unseen enqueue acknowledgement; observed rows retain order and newer metadata. */
 export function withQueuedMessage(
   current: readonly OrbMessageView[],
   message: OrbMessageView,
 ): OrbMessageView[] {
-  return [...current.filter((existing) => existing.id !== message.id), message];
+  return current.some((existing) => existing.id === message.id)
+    ? [...current]
+    : [...current, message];
 }

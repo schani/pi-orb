@@ -10,7 +10,14 @@ import type {
 } from "../../domain/errors.ts";
 import { jsonEqual } from "../../domain/json-equal.ts";
 import { logOrbEvent } from "../../domain/log.ts";
-import type { OrbDeletionRow, OrbMessageRow, OrbRow, ProjectRow } from "../../domain/orb.ts";
+import type {
+  OrbDeletionRow,
+  OrbMessageMetadataRow,
+  OrbMessagePoll,
+  OrbMessageRow,
+  OrbRow,
+  ProjectRow,
+} from "../../domain/orb.ts";
 import type {
   CasTransitionParams,
   CasUpdateFieldsParams,
@@ -100,11 +107,17 @@ function mapOrbRow(row: PgRow): OrbRow {
 
 function mapMessageRow(row: PgRow): OrbMessageRow {
   return {
+    ...mapMessageMetadataRow(row),
+    content: row["content"] as OrbMessageRow["content"],
+    system: (row["system"] ?? null) as OrbMessageRow["system"],
+  };
+}
+
+function mapMessageMetadataRow(row: PgRow): OrbMessageMetadataRow {
+  return {
     orbId: String(row["orb_id"]),
     messageId: String(row["message_id"]),
     ordinal: Number(row["ordinal"]),
-    content: row["content"] as OrbMessageRow["content"],
-    system: (row["system"] ?? null) as OrbMessageRow["system"],
     status: String(row["status"]) as OrbMessageRow["status"],
     delivery: row["delivery"] == null ? null : (String(row["delivery"]) as "turn" | "steer"),
     operationId: row["operation_id"] == null ? null : String(row["operation_id"]),
@@ -792,6 +805,36 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
     return this.db
       .query("SELECT * FROM orb_messages WHERE orb_id = $1 ORDER BY ordinal", [orbId])
       .map((result) => result.rows.map(mapMessageRow));
+  }
+
+  pollOrbMessages(
+    _task: SimulationTask,
+    orbId: string,
+    selector: { afterOrdinal: number; trackedIds: readonly string[] },
+  ): ResultAsync<OrbMessagePoll, StoreError> {
+    return this.db
+      .query(
+        `SELECT orb_id, message_id, ordinal, status, delivery, operation_id,
+              delivery_batch_id, auto_start, wake_state_version, last_error, created_at, updated_at,
+              CASE WHEN ordinal > $2 THEN content END AS content,
+              CASE WHEN ordinal > $2 THEN system END AS system
+       FROM orb_messages
+       WHERE orb_id = $1 AND (ordinal > $2 OR message_id = ANY($3::uuid[]))
+       ORDER BY ordinal`,
+        [orbId, selector.afterOrdinal, arrayParam(selector.trackedIds)],
+      )
+      .map((result) => ({
+        items: result.rows
+          .filter((row) => Number(row["ordinal"]) > selector.afterOrdinal)
+          .map(mapMessageRow),
+        updates: result.rows
+          .filter((row) => Number(row["ordinal"]) <= selector.afterOrdinal)
+          .map(mapMessageMetadataRow),
+        cursor: result.rows.reduce(
+          (cursor, row) => Math.max(cursor, Number(row["ordinal"])),
+          selector.afterOrdinal,
+        ),
+      }));
   }
 
   scheduleOrbSleep(

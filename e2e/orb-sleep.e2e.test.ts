@@ -295,7 +295,10 @@ it("retains a real sleep CLI turn, stops, and wakes with one combined system not
     );
     expect(sleepRecords).toHaveLength(1);
     expect(sleepRecords[0]?.inboxMessageIds).toHaveLength(1);
-    const messages = await api(cp.baseUrl, "GET", `/api/v1/orbs/${orbId}/messages`);
+    const messages = await api(cp.baseUrl, "POST", `/api/v1/orbs/${orbId}/messages/poll`, {
+      after: 0,
+      tracked: [],
+    });
     expect(
       (messages.body["items"] as { system?: { kind?: string } }[]).filter(
         (message) => message.system?.kind === "sleep_wake",
@@ -319,9 +322,14 @@ it("retains a real sleep CLI turn, stops, and wakes with one combined system not
         for (const [name, path] of [
           ["orb-view.json", `/api/v1/orbs/${orbId}`],
           ["history.json", `/api/v1/orbs/${orbId}/history`],
-          ["messages.json", `/api/v1/orbs/${orbId}/messages`],
+          ["messages.json", `/api/v1/orbs/${orbId}/messages/poll`],
         ] as const) {
-          const result = await api(cp.baseUrl, "GET", path).catch((diagnosticError: unknown) => ({
+          const result = await api(
+            cp.baseUrl,
+            name === "messages.json" ? "POST" : "GET",
+            path,
+            name === "messages.json" ? { after: 0, tracked: [] } : undefined,
+          ).catch((diagnosticError: unknown) => ({
             diagnosticError: String(diagnosticError),
           }));
           writeFileSync(join(evidence, name), JSON.stringify(result, null, 2));

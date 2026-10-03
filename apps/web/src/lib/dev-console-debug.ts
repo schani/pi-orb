@@ -6,6 +6,7 @@ const ID_LIMIT = 128;
 const IDS_PER_ENTRY = 20;
 
 export type DebugTraceEvent =
+  | "inbox"
   | "navigation"
   | "cache"
   | "connection"
