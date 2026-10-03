@@ -34,6 +34,46 @@ describe("isPinnedAfterScroll", () => {
     expect(isPinnedAfterScroll(viewAfterMoreContent, 600)).toBe(true);
   });
 
+  it("retains a pinned offset when growth precedes its scroll event", () => {
+    expect(
+      isPinnedAfterScroll({ scrollY: 600, viewportHeight: 400, contentHeight: 1400 }, null, {
+        scrollY: 600,
+        viewportHeight: 400,
+        contentHeight: 1000,
+      }),
+    ).toBe(true);
+  });
+
+  it("retains a pinned offset clamped by content shrinkage before growth", () => {
+    expect(
+      isPinnedAfterScroll({ scrollY: 580, viewportHeight: 400, contentHeight: 1400 }, null, {
+        scrollY: 600,
+        viewportHeight: 400,
+        contentHeight: 1000,
+      }),
+    ).toBe(true);
+  });
+
+  it("retains pin across duplicate events before the growth observer", () => {
+    expect(
+      isPinnedAfterScroll({ scrollY: 580, viewportHeight: 400, contentHeight: 1400 }, null, {
+        scrollY: 580,
+        viewportHeight: 400,
+        contentHeight: 1400,
+      }),
+    ).toBe(true);
+  });
+
+  it("still releases the pin for a changed offset without geometry changes", () => {
+    expect(
+      isPinnedAfterScroll({ scrollY: 300, viewportHeight: 400, contentHeight: 1000 }, null, {
+        scrollY: 600,
+        viewportHeight: 400,
+        contentHeight: 1000,
+      }),
+    ).toBe(false);
+  });
+
   it("still unpins for a reader scroll away from the automatic target", () => {
     expect(
       isPinnedAfterScroll({ scrollY: 300, viewportHeight: 400, contentHeight: 1200 }, 600),

@@ -22,7 +22,19 @@ export function isPinnedToBottom(view: ScrollView): boolean {
  * again before that event is delivered, making its once-bottom position look
  * unpinned against the newer content height.
  */
-export function isPinnedAfterScroll(view: ScrollView, autoScrollY: number | null): boolean {
+export function isPinnedAfterScroll(
+  view: ScrollView,
+  autoScrollY: number | null,
+  previousPinnedView?: ScrollView,
+): boolean {
   const isOwnScroll = autoScrollY !== null && Math.abs(view.scrollY - autoScrollY) <= 1;
-  return isOwnScroll || isPinnedToBottom(view);
+  // Native anchoring/clamping can deliver scroll before the resize observer.
+  // Reader input clears the previous pinned view at the caller.
+  const geometryChanged =
+    previousPinnedView !== undefined &&
+    (view.contentHeight !== previousPinnedView.contentHeight ||
+      view.viewportHeight !== previousPinnedView.viewportHeight);
+  const unchangedOffset =
+    previousPinnedView !== undefined && Math.abs(view.scrollY - previousPinnedView.scrollY) <= 1;
+  return isOwnScroll || geometryChanged || unchangedOffset || isPinnedToBottom(view);
 }

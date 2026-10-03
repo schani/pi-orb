@@ -1313,51 +1313,64 @@ function OrbConversation({
   // stays locked until they return to the bottom themselves.
   const pinnedRef = useRef(true);
   const autoScrollYRef = useRef<number | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const target = scrollRef.current;
+    const view = () => ({
+      scrollY: target?.scrollTop ?? 0,
+      viewportHeight: target?.clientHeight ?? 0,
+      contentHeight: target?.scrollHeight ?? 0,
+    });
+    let previousView = view();
     const onScroll = () => {
+      const current = view();
       pinnedRef.current = isPinnedAfterScroll(
-        {
-          scrollY: scrollRef.current?.scrollTop ?? 0,
-          viewportHeight: scrollRef.current?.clientHeight ?? 0,
-          contentHeight: scrollRef.current?.scrollHeight ?? 0,
-        },
+        current,
         autoScrollYRef.current,
+        pinnedRef.current ? previousView : undefined,
       );
+      previousView = current;
       autoScrollYRef.current = null;
     };
-    const target = scrollRef.current;
     const readerIntent = () => {
       pinnedRef.current = false;
       autoScrollYRef.current = null;
     };
+    const keyboardIntent = (event: KeyboardEvent) => {
+      if (
+        ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "].includes(event.key) &&
+        event.target instanceof HTMLElement &&
+        !event.target.closest("input, textarea, select, [contenteditable]")
+      )
+        readerIntent();
+    };
+    target?.addEventListener("keydown", keyboardIntent);
     target?.addEventListener("scroll", onScroll, { passive: true });
     target?.addEventListener("pointerdown", readerIntent, { passive: true });
     target?.addEventListener("wheel", readerIntent, { passive: true });
     target?.addEventListener("pointerup", onScroll, { passive: true });
+    // Observe geometry, not React renders. Polling must not write into a native
+    // scrolling layer, even at the same offset.
+    const observer = new ResizeObserver(() => {
+      if (target && pinnedRef.current) {
+        const bottom = Math.max(0, target.scrollHeight - target.clientHeight);
+        if (Math.abs(target.scrollTop - bottom) > 1) {
+          target.scrollTop = bottom;
+          autoScrollYRef.current = target.scrollTop;
+        }
+      }
+      previousView = view();
+    });
+    if (target) observer.observe(target);
+    if (scrollContentRef.current) observer.observe(scrollContentRef.current);
     return () => {
+      observer.disconnect();
+      target?.removeEventListener("keydown", keyboardIntent);
       target?.removeEventListener("scroll", onScroll);
       target?.removeEventListener("pointerdown", readerIntent);
       target?.removeEventListener("wheel", readerIntent);
       target?.removeEventListener("pointerup", onScroll);
     };
   }, []);
-  useLayoutEffect(() => {
-    const scroller = scrollRef.current;
-    if (!scroller) return;
-    // Observe actual geometry, not React renders. Polling/typing must never write
-    // scrollTop into an asynchronously scrolling WebKit layer, even at the same offset.
-    const observer = new ResizeObserver(() => {
-      if (!pinnedRef.current) return;
-      const target = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-      if (Math.abs(scroller.scrollTop - target) <= 1) return;
-      scroller.scrollTop = target;
-      autoScrollYRef.current = scroller.scrollTop;
-    });
-    observer.observe(scroller);
-    if (scrollContentRef.current) observer.observe(scrollContentRef.current);
-    return () => observer.disconnect();
-  }, []);
-
   // Live connection while running; hello carries the latest applied cursor.
   const afterRecordIdRef = useRef<string | null>(null);
   useEffect(() => {

@@ -717,6 +717,96 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     }
   });
 
+  it.each(["wheel", "pointer", "PageUp", "Home", "ArrowUp", "Shift+Space", "focus"])(
+    "preserves reader position after %s intent and content growth",
+    async (intent) => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      try {
+        await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+        await waitForFixtureMedia(page);
+        await expectPage(page.locator(".history .rec-q")).toHaveCount(2);
+        const scroller = page.locator(".orb-transcript-scroll");
+        const distance = () =>
+          scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
+        await expectPage.poll(distance).toBeLessThanOrEqual(1);
+        await scroller.evaluate((pane) => {
+          pane.setAttribute("tabindex", "0");
+          (pane as typeof pane & { focus(options: { preventScroll: boolean }): void }).focus({
+            preventScroll: true,
+          });
+        });
+        if (intent === "wheel") {
+          await scroller.hover();
+          await page.mouse.wheel(0, -500);
+        } else if (intent === "pointer") {
+          await scroller.hover();
+          await page.mouse.down();
+          await scroller.evaluate((pane) => {
+            pane.scrollTop -= 500;
+          });
+          await page.mouse.up();
+        } else if (intent === "focus") {
+          await scroller.evaluate((pane) => {
+            const first = pane.querySelector(".rec") as (typeof pane & { focus(): void }) | null;
+            first?.setAttribute("tabindex", "0");
+            first?.focus();
+          });
+        } else {
+          await page.keyboard.press(intent);
+          if (intent === "ArrowUp") {
+            await page.keyboard.press(intent);
+            await page.keyboard.press(intent);
+          }
+        }
+        await expectPage.poll(distance).toBeGreaterThan(48);
+        await scroller.evaluate((pane) => {
+          // Deliver the current native offset before the same-task growth.
+          pane.dispatchEvent(new Event("scroll"));
+          const spacer = pane.ownerDocument.createElement("div");
+          spacer.style.height = "800px";
+          pane.querySelector(".orb-transcript-content")?.append(spacer);
+        });
+        await expectPage.poll(distance).toBeGreaterThan(800);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  it("keeps tail intent when native clamping precedes a growth observer", async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    try {
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+      await waitForFixtureMedia(page);
+      await expectPage(page.locator(".history .rec-q")).toHaveCount(2);
+      const scroller = page.locator(".orb-transcript-scroll");
+      await scroller.evaluate((pane) => {
+        const spacer = pane.ownerDocument.createElement("div");
+        spacer.id = "pin-growth-spacer";
+        spacer.style.height = "400px";
+        pane.querySelector(".orb-transcript-content")?.append(spacer);
+      });
+      const distance = () =>
+        scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
+      await expectPage.poll(distance).toBeLessThanOrEqual(1);
+      await scroller.evaluate((pane) => {
+        const spacer = pane.querySelector("#pin-growth-spacer") as {
+          style: { height: string };
+        } | null;
+        if (!spacer) return;
+        spacer.style.height = "0px";
+        // Force native range clamping, then grow before the observer can run.
+        const clamped = pane.scrollTop;
+        spacer.style.height = "800px";
+        pane.setAttribute("data-clamped-top", String(clamped));
+        pane.dispatchEvent(new Event("scroll"));
+      });
+      await expectPage.poll(distance).toBeLessThanOrEqual(1);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("does not write phone scroll position during unrelated polling renders", async () => {
     const page = await browser.newPage({
       viewport: { width: 390, height: 844 },
@@ -736,6 +826,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", write);
       await expectPage(write).toBeVisible();
       await waitForFixtureMedia(page);
+      await expectPage(page.locator(".history .rec-q")).toHaveCount(2);
       await page.clock.runFor(100);
       const scroller = page.locator(".orb-transcript-scroll");
       await scroller.evaluate((element) => {
