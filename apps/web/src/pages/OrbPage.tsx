@@ -1317,37 +1317,33 @@ function OrbConversation({
     const onScroll = () => {
       pinnedRef.current = isPinnedAfterScroll(
         {
-          scrollY: phone ? (scrollRef.current?.scrollTop ?? 0) : window.scrollY,
-          viewportHeight: phone ? (scrollRef.current?.clientHeight ?? 0) : window.innerHeight,
-          contentHeight: phone
-            ? (scrollRef.current?.scrollHeight ?? 0)
-            : document.documentElement.scrollHeight,
+          scrollY: scrollRef.current?.scrollTop ?? 0,
+          viewportHeight: scrollRef.current?.clientHeight ?? 0,
+          contentHeight: scrollRef.current?.scrollHeight ?? 0,
         },
         autoScrollYRef.current,
       );
       autoScrollYRef.current = null;
     };
-    const target = phone ? scrollRef.current : window;
+    const target = scrollRef.current;
     const readerIntent = () => {
       pinnedRef.current = false;
       autoScrollYRef.current = null;
     };
     target?.addEventListener("scroll", onScroll, { passive: true });
-    if (phone) {
-      target?.addEventListener("pointerdown", readerIntent, { passive: true });
-      target?.addEventListener("wheel", readerIntent, { passive: true });
-      target?.addEventListener("pointerup", onScroll, { passive: true });
-    }
+    target?.addEventListener("pointerdown", readerIntent, { passive: true });
+    target?.addEventListener("wheel", readerIntent, { passive: true });
+    target?.addEventListener("pointerup", onScroll, { passive: true });
     return () => {
       target?.removeEventListener("scroll", onScroll);
       target?.removeEventListener("pointerdown", readerIntent);
       target?.removeEventListener("wheel", readerIntent);
       target?.removeEventListener("pointerup", onScroll);
     };
-  }, [phone]);
+  }, []);
   useLayoutEffect(() => {
     const scroller = scrollRef.current;
-    if (!phone || !scroller) return;
+    if (!scroller) return;
     // Observe actual geometry, not React renders. Polling/typing must never write
     // scrollTop into an asynchronously scrolling WebKit layer, even at the same offset.
     const observer = new ResizeObserver(() => {
@@ -1360,18 +1356,7 @@ function OrbConversation({
     observer.observe(scroller);
     if (scrollContentRef.current) observer.observe(scrollContentRef.current);
     return () => observer.disconnect();
-  }, [phone]);
-  // Desktop retains document pinning; a satisfied target must not restart native scrolling.
-  useLayoutEffect(() => {
-    if (!phone && state.historyLoaded && pinnedRef.current) {
-      const target = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      if (Math.abs(window.scrollY - target) <= 1) return;
-      autoScrollYRef.current = target;
-      window.scrollTo({ top: target });
-      // Browsers can round the requested position; remember what was applied.
-      autoScrollYRef.current = window.scrollY;
-    }
-  });
+  }, []);
 
   // Live connection while running; hello carries the latest applied cursor.
   const afterRecordIdRef = useRef<string | null>(null);
@@ -1796,16 +1781,18 @@ function OrbConversation({
             </button>
           </div>
         </header>
-        {orb?.state === "running" && connected && state.subagents.length > 0 && (
-          <SubagentRail agents={state.subagents} />
-        )}
-        {uploads.progress}
-        <OrbFailureBanner message={orb?.lastError} />
-        {dropFeedback && (
-          <div className="orb-drop-feedback" role="status">
-            {dropFeedback}
-          </div>
-        )}
+        <div className="orb-header-scroll">
+          {orb?.state === "running" && connected && state.subagents.length > 0 && (
+            <SubagentRail agents={state.subagents} />
+          )}
+          {uploads.progress}
+          <OrbFailureBanner message={orb?.lastError} />
+          {dropFeedback && (
+            <div className="orb-drop-feedback" role="status">
+              {dropFeedback}
+            </div>
+          )}
+        </div>
       </div>
       <div className="orb-transcript-scroll" ref={scrollRef}>
         {dropZone === "transcript" && (

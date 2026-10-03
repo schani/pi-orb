@@ -1036,6 +1036,7 @@ describe("frontend-only browser behavior", () => {
             ),
         ).toBe(true);
       } finally {
+        await page.unrouteAll({ behavior: "wait" });
         await page.close();
       }
     },
@@ -2930,17 +2931,10 @@ describe("frontend-only browser behavior", () => {
         await metadataArrival;
         releaseMetadata();
         expectPage(await expiredMetadata).toBe(401);
-        if (phone) {
-          await page.setViewportSize(viewport);
-          await page.locator(".orb-transcript-scroll").evaluate((element) => {
-            element.scrollTop = element.scrollHeight;
-          });
-        } else {
-          await page.locator("body").evaluate((body) => {
-            const view = body.ownerDocument.defaultView;
-            view?.scrollTo(0, body.ownerDocument.documentElement.scrollHeight);
-          });
-        }
+        if (phone) await page.setViewportSize(viewport);
+        await page.locator(".orb-transcript-scroll").evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
         const geometry = await page.locator("body").evaluate((body) => {
           const document = body.ownerDocument;
           const view = document.defaultView;
@@ -2961,7 +2955,8 @@ describe("frontend-only browser behavior", () => {
             overflow: document.documentElement.scrollWidth > (view?.innerWidth ?? 0),
           };
         });
-        expectPage(phone ? geometry.scroll : geometry.windowScroll).toBeGreaterThan(200);
+        expectPage(geometry.scroll).toBeGreaterThan(200);
+        expectPage(geometry.windowScroll).toBe(0);
         expectPage(geometry.banner).not.toBeNull();
         expectPage(geometry.banner?.top).toBeGreaterThanOrEqual(geometry.headerBottom ?? Infinity);
         expectPage(geometry.headerBottom).toBeGreaterThanOrEqual(geometry.ribbonBottom ?? Infinity);
@@ -3028,17 +3023,10 @@ describe("frontend-only browser behavior", () => {
           phone ? page.getByRole("button", { name: "Write message" }) : undefined,
         );
         const scroller = page.locator(".orb-transcript-scroll");
-        if (phone) {
-          await scroller.evaluate((element) => {
-            element.scrollTop = element.scrollHeight;
-          });
-          await page.getByRole("button", { name: "Orb actions" }).click();
-        } else {
-          await page.locator("body").evaluate((body) => {
-            const view = body.ownerDocument.defaultView;
-            view?.scrollTo(0, body.ownerDocument.documentElement.scrollHeight);
-          });
-        }
+        await scroller.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+        if (phone) await page.getByRole("button", { name: "Orb actions" }).click();
         const choosing = page.waitForEvent("filechooser");
         await page.getByRole("button", { name: "Upload files", exact: true }).click();
         await (await choosing).setFiles({
@@ -3050,7 +3038,7 @@ describe("frontend-only browser behavior", () => {
         await expectPage(transfers).toContainText("pending.bin");
         expectPage(
           await transfers.evaluate((element) =>
-            element.parentElement?.classList.contains("orb-header-stack"),
+            element.parentElement?.classList.contains("orb-header-scroll"),
           ),
         ).toBe(true);
         const box = await transfers.boundingBox();
@@ -3301,7 +3289,7 @@ describe("frontend-only browser behavior", () => {
         const history = document.querySelector(".history")?.getBoundingClientRect();
         const composer = document.querySelector(".composer")?.getBoundingClientRect();
         return {
-          scroll: document.defaultView?.scrollY,
+          scroll: document.querySelector(".orb-transcript-scroll")?.scrollTop,
           history: history && { top: history.top, width: history.width, height: history.height },
           composer: composer && { top: composer.top, height: composer.height },
         };
@@ -3311,14 +3299,14 @@ describe("frontend-only browser behavior", () => {
       await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("draft survives terminal toggles");
-      await page.locator("body").evaluate(async (body) => {
-        const window = body.ownerDocument.defaultView;
-        if (window === null) return;
+      await page.locator(".orb-transcript-scroll").evaluate(async (pane) => {
         await new Promise<void>((resolve) => {
-          window.addEventListener("scroll", () => window.requestAnimationFrame(() => resolve()), {
-            once: true,
-          });
-          window.scrollTo(0, 1200);
+          pane.addEventListener(
+            "scroll",
+            () => pane.ownerDocument.defaultView?.requestAnimationFrame(() => resolve()),
+            { once: true },
+          );
+          pane.scrollTop = 1200;
         });
       });
       const before = await geometry();

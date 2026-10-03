@@ -170,7 +170,14 @@ describe("orb workspace layout contract", () => {
     expect(rule(".app")).toContain("display: flex");
     expect(rule(".app")).toContain("min-height: 100dvh");
     expect(rule(".app")).toContain("flex-direction: column");
+    expect(rule(".app:has(.orb-page)")).toContain("height: 100dvh");
     expect(rule(".orb-page")).toContain("flex: 1");
+    expect(rule(".orb-page")).toContain("min-height: 0");
+    expect(rule(".orb-main")).toContain("overflow: hidden");
+    expect(rule(".orb-header-stack")).toContain("flex: 0 1 auto");
+    expect(rule(".orb-header-scroll")).toContain("overflow-y: auto");
+    expect(rule(".orb-transcript-scroll")).toContain("overflow: auto");
+    expect(rule(".orb-transcript-scroll")).toContain("min-height: 40px");
     expect(rule(".orb-page")).toContain("grid-template-columns: 236px minmax(0, 1fr)");
     expect(rule(".orb-transcript-content > .history")).toContain("flex: 1 0 auto");
     expect(rule(".composer")).toContain("position: sticky");
@@ -220,7 +227,7 @@ describe("orb workspace layout contract", () => {
   });
 
   it("overlays a full-width headerless terminal below the header and active-child rail", () => {
-    expect(rule(".orb-header-stack")).toContain("position: sticky");
+    expect(rule(".orb-header-stack")).toContain("position: relative");
     expect(rule(".orb-header")).toContain("position: relative");
     const terminal = rule(".orb-terminal-window");
     expect(terminal).toContain("position: absolute");

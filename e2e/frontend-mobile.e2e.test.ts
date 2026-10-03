@@ -909,7 +909,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       // Leaving the phone breakpoint restores document scrolling and removes overrides.
       await page.setViewportSize({ width: 1280, height: 900 });
       await expectPage(app).toHaveCSS("position", "static");
-      await expectPage(scroller).toHaveCSS("display", "contents");
+      await expectPage(scroller).toHaveCSS("display", "block");
       expectPage(
         await app.evaluate((element) => element.style.getPropertyValue("--phone-viewport-height")),
       ).toBe("");

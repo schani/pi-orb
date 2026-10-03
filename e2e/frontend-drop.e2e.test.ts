@@ -177,11 +177,11 @@ describe("orb native file drop", () => {
       await page.screenshot({ path: "test-failures/frontend-drop-inset-success.png" });
       await dragFiles(page, ".orb-transcript-scroll", "dragleave", [documentFile]);
       await expectPage(inset).toHaveCount(0);
-      await page.evaluate(() =>
-        (globalThis as unknown as { scrollTo(x: number, y: number): void }).scrollTo(0, 800),
-      );
+      await page.locator(".orb-transcript-scroll").evaluate((pane) => {
+        pane.scrollTop = 800;
+      });
       await expectPage
-        .poll(() => page.evaluate(() => (globalThis as unknown as { scrollY: number }).scrollY))
+        .poll(() => page.locator(".orb-transcript-scroll").evaluate((pane) => pane.scrollTop))
         .toBeGreaterThan(0);
       await dragFiles(page, ".orb-transcript-scroll", "dragover", [documentFile]);
       await assertInset();
@@ -266,7 +266,7 @@ describe("orb native file drop", () => {
         return { x, y, headerBottom: h.bottom, composerTop: c.top, targetClass: target.className };
       });
       expectPage(point.composerTop - point.headerBottom).toBeGreaterThan(100);
-      assert.equal(point.targetClass, "orb-main", JSON.stringify(point));
+      assert.equal(point.targetClass, "orb-transcript-scroll", JSON.stringify(point));
       const dropAtPoint = (type: "dragover" | "drop", x: number, y: number) =>
         page.evaluate(
           ({ type, x, y, file }) => {

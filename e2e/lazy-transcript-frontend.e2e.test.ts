@@ -271,18 +271,43 @@ it.each(["chromium", "webkit"] as const)(
         await expect(history.locator("img.msg-image")).toBeVisible();
         expect(imageUrls.length).toBeGreaterThan(0);
         for (const path of imageUrls) expect(path).toMatch(/\/images\/[^/]+\/[^/]+\/\d+$/);
-        // An unchanged transcript must not issue programmatic document scrolls on a metadata poll.
-        await page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)");
+        // The page is bounded; the transcript alone moves when reading history.
+        const scrollOwnership = await page.locator(".orb-transcript-scroll").evaluate((pane) => {
+          const root = pane.ownerDocument.scrollingElement;
+          if (!root) throw new Error("Missing document scroller");
+          const before = { root: root.scrollTop, pane: pane.scrollTop };
+          pane.scrollTop = 0;
+          const top = { root: root.scrollTop, pane: pane.scrollTop };
+          pane.scrollTop = pane.scrollHeight;
+          return {
+            before,
+            top,
+            after: { root: root.scrollTop, pane: pane.scrollTop },
+            rootOverflow: root.scrollHeight - root.clientHeight,
+            paneOverflow: pane.scrollHeight - pane.clientHeight,
+          };
+        });
+        expect(scrollOwnership.rootOverflow).toBe(0);
+        expect(scrollOwnership.before.root).toBe(0);
+        expect(scrollOwnership.top.root).toBe(0);
+        expect(scrollOwnership.after.root).toBe(0);
+        expect(scrollOwnership.top.pane).toBe(0);
+        expect(scrollOwnership.after.pane).toBe(scrollOwnership.paneOverflow);
+        // An unchanged transcript must not issue programmatic scrolls on a metadata poll.
         await page.evaluate(
           "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
         );
         await page.evaluate(`(() => {
           window.__scrollWrites = 0;
-          const native = window.scrollTo.bind(window);
-          window.scrollTo = (...args) => {
-            window.__scrollWrites++;
-            native(...args);
-          };
+          const pane = document.querySelector('.orb-transcript-scroll');
+          let prototype = Object.getPrototypeOf(pane);
+          while (prototype && !Object.getOwnPropertyDescriptor(prototype, 'scrollTop'))
+            prototype = Object.getPrototypeOf(prototype);
+          const property = Object.getOwnPropertyDescriptor(prototype, 'scrollTop');
+          Object.defineProperty(pane, 'scrollTop', {
+            get() { return property.get.call(this); },
+            set(value) { window.__scrollWrites++; property.set.call(this, value); },
+          });
         })()`);
         const pollPath = `/api/v1/orbs/${ORB}`;
         await page.route(`**${pollPath}`, async (route) => {
@@ -295,7 +320,7 @@ it.each(["chromium", "webkit"] as const)(
         await page.unroute(`**${pollPath}`);
         await page.locator(`.orb-index a[href="/orbs/frontend-fixture-orb"]`).click();
         await expect(page.locator(".orb-name")).toHaveText("Frontend Playground");
-        // A document scroll during a native pointer sequence must not move the rail's hit targets.
+        // Transcript movement during a native pointer sequence must not move the rail's hit targets.
         const rail = await page.evaluate<{
           positioning: string;
           delta: number;
@@ -315,11 +340,15 @@ it.each(["chromium", "webkit"] as const)(
               hit: target === anchor || anchor.contains(target),
             };
           };
-          window.scrollTo(0, document.documentElement.scrollHeight);
+          const pane = document.querySelector('.orb-transcript-scroll');
+          const change = document.createElement('div');
+          change.style.height = '1200px';
+          pane.querySelector('.orb-transcript-content').append(change);
+          pane.scrollTop = pane.scrollHeight;
           const before = sample();
-          const start = window.scrollY;
-          window.scrollTo(0, start - 32);
-          return { positioning: getComputedStyle(nav).position, delta: start - window.scrollY, before, after: sample() };
+          const start = pane.scrollTop;
+          pane.scrollTop = start - 32;
+          return { positioning: getComputedStyle(nav).position, delta: start - pane.scrollTop, before, after: sample() };
         })()`);
         expect(rail.positioning).toBe("fixed");
         expect(rail.delta).toBe(32);
@@ -332,7 +361,7 @@ it.each(["chromium", "webkit"] as const)(
         await page.mouse.down();
         expect(
           await page.evaluate<number>(
-            "(() => { const y = scrollY; scrollTo(0, y - 32); return y - scrollY })()",
+            "(() => { const pane = document.querySelector('.orb-transcript-scroll'); const y = pane.scrollTop; pane.scrollTop = y - 32; return y - pane.scrollTop })()",
           ),
         ).toBe(32);
         await page.mouse.up();

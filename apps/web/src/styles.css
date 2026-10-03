@@ -1245,14 +1245,27 @@ button.modal-close:focus-visible {
 
 /* ---------- orb page: two panes filling the viewport ---------- */
 
+html:has(.orb-page),
+body:has(.orb-page) {
+  overflow: hidden;
+}
+
+.app:has(.orb-page) {
+  flex: none;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .orb-page {
   display: grid;
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
   grid-template-columns: 236px minmax(0, 1fr);
 }
 
-/* The index scrolls itself while the transcript scrolls the document, so the
-   window-level bottom pinning in lib/scroll-pin.ts keeps working. */
+/* The index scrolls independently of the transcript. */
 .orb-index {
   position: fixed;
   top: 0;
@@ -1350,16 +1363,25 @@ button.modal-close:focus-visible {
   grid-column: 2;
   display: flex;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   flex-direction: column;
 }
 
 .orb-header-stack {
-  position: sticky;
+  position: relative;
   z-index: 20;
-  top: 0;
-  flex: none;
+  display: flex;
+  flex: 0 1 auto;
   min-width: 0;
+  min-height: 0;
+  flex-direction: column;
   background: var(--w);
+}
+
+.orb-header-scroll {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .orb-header {
@@ -1373,10 +1395,6 @@ button.modal-close:focus-visible {
   background: var(--w);
   border-bottom: 1px solid var(--k);
   white-space: nowrap;
-}
-
-.app:has(> .session-ribbon) .orb-header-stack {
-  top: var(--ribbon);
 }
 
 .app:has(> .session-ribbon) .orb-index {
@@ -2264,7 +2282,7 @@ button.modal-close:focus-visible {
   gap: 0;
 }
 
-.orb-header-stack > .rec-sys .notice {
+.orb-header-scroll > .rec-sys .notice {
   overflow-wrap: anywhere;
 }
 
@@ -2284,10 +2302,6 @@ button.modal-close:focus-visible {
   padding: 4px 12px;
   border-bottom: 1px solid var(--k);
   color: #b42318;
-}
-
-.orb-transcript-scroll {
-  position: relative;
 }
 
 .orb-drop-inset {
@@ -2520,10 +2534,21 @@ button.orb-phone-menu {
   display: none;
 }
 
-.orb-composer-feedback-original,
-.orb-transcript-scroll,
-.orb-transcript-content {
+.orb-composer-feedback-original {
   display: contents;
+}
+
+.orb-transcript-scroll {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-height: 40px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.orb-transcript-content {
+  display: flow-root;
 }
 
 @media (max-width: 600px) {
@@ -2587,7 +2612,12 @@ button.orb-phone-menu {
   .orb-header-stack,
   .app:has(> .session-ribbon) .orb-header-stack {
     position: relative;
+    flex: none;
     top: auto;
+  }
+
+  .orb-header-scroll {
+    overflow: visible;
   }
 
   .subagent-live-rail > summary,
