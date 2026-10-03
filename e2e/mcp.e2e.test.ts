@@ -503,8 +503,8 @@ it("MCP traverses root, restricted and default general-purpose delegates → aut
       const parentCodemode = page
         .locator(".tool-activity-category")
         .filter({ has: page.locator(".activity-rail-label", { hasText: "codemode" }) });
-      await parentCodemode.locator("summary").first().click();
-      await parentCodemode.locator(".tool-activity-call > summary").click();
+      await parentCodemode.locator(":scope > summary").click();
+      await expectPage(parentCodemode.locator(".tool-activity-call")).toHaveCount(0);
       const nestedEcho = parentCodemode
         .locator(".tool-nested-call")
         .filter({ hasText: "mcp__fixture__echo" });
