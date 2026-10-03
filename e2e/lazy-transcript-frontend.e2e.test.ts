@@ -54,7 +54,7 @@ it.each(["chromium", "webkit"] as const)(
       await page.addInitScript(() => {
         const scope = globalThis as unknown as {
           pointerEvidence: string[];
-          location: { hash: string };
+          location: { pathname: string };
           scrollY: number;
           addEventListener: (
             name: string,
@@ -63,12 +63,19 @@ it.each(["chromium", "webkit"] as const)(
           ) => void;
         };
         scope.pointerEvidence = [];
-        for (const name of ["pointermove", "pointerdown", "pointerup", "click", "hashchange"]) {
+        for (const name of [
+          "pointermove",
+          "pointerdown",
+          "pointerup",
+          "click",
+          "pi-orb:navigate",
+          "popstate",
+        ]) {
           scope.addEventListener(
             name,
             (event) => {
-              if (name === "hashchange") {
-                scope.pointerEvidence.push(`hash ${scope.location.hash}`);
+              if (name === "pi-orb:navigate" || name === "popstate") {
+                scope.pointerEvidence.push(`${name} ${scope.location.pathname}`);
                 return;
               }
               const mouse = event as {
@@ -83,7 +90,7 @@ it.each(["chromium", "webkit"] as const)(
               };
               if (mouse.clientX >= 236) return;
               scope.pointerEvidence.push(
-                `${name} ${mouse.target.tagName} ${mouse.target.closest("a[href^='#/orbs/']")?.getAttribute("href") ?? "none"} (${mouse.clientX},${mouse.clientY}) y=${scope.scrollY} ${scope.location.hash}`,
+                `${name} ${mouse.target.tagName} ${mouse.target.closest("a[href^='/orbs/']")?.getAttribute("href") ?? "none"} (${mouse.clientX},${mouse.clientY}) y=${scope.scrollY} ${scope.location.pathname}`,
               );
             },
             true,
@@ -286,7 +293,7 @@ it.each(["chromium", "webkit"] as const)(
         await expect(page.locator(".orb-name")).toHaveText("Lazy polling");
         expect(await page.evaluate<number>("window.__scrollWrites")).toBe(0);
         await page.unroute(`**${pollPath}`);
-        await page.locator(`.orb-index a[href="#/orbs/frontend-fixture-orb"]`).click();
+        await page.locator(`.orb-index a[href="/orbs/frontend-fixture-orb"]`).click();
         await expect(page.locator(".orb-name")).toHaveText("Frontend Playground");
         // A document scroll during a native pointer sequence must not move the rail's hit targets.
         const rail = await page.evaluate<{
@@ -296,7 +303,7 @@ it.each(["chromium", "webkit"] as const)(
           after: { anchor: number; archive: number; hit: boolean };
         }>(`(() => {
           const nav = document.querySelector('.orb-index');
-          const anchor = document.querySelector('.orb-index a[href="#/orbs/frontend-lazy-details"]');
+          const anchor = document.querySelector('.orb-index a[href="/orbs/frontend-lazy-details"]');
           const archive = document.querySelector('.orb-index .project-archive summary');
           if (!nav || !anchor || !archive) throw new Error('Missing rail target');
           const sample = () => {
@@ -329,11 +336,11 @@ it.each(["chromium", "webkit"] as const)(
           ),
         ).toBe(32);
         await page.mouse.up();
-        await expect(page).toHaveURL(`${origin}/#/orbs/${ORB}`);
+        await expect(page).toHaveURL(`${origin}/orbs/${ORB}`);
         const controlledClick = await page.evaluate<string[]>("window.pointerEvidence");
         expect(
           controlledClick.slice(pointerStart).find((event) => event.startsWith("click ")),
-        ).toMatch(new RegExp(`^click (SPAN|A) #/orbs/${ORB} `));
+        ).toMatch(new RegExp(`^click (SPAN|A) /orbs/${ORB} `));
         await expect(page.locator(".orb-name")).toHaveText("Lazy details");
         await expect.poll(() => syncs).toBeGreaterThan(controlledSyncs);
         await page.context().tracing.stop();
@@ -349,7 +356,7 @@ it.each(["chromium", "webkit"] as const)(
         try {
           snapshot.browser = await page.evaluate(() => {
             const scope = globalThis as unknown as {
-              location: { href: string; hash: string };
+              location: { href: string; pathname: string };
               pointerEvidence?: string[];
               document: {
                 querySelector: (selector: string) => {
@@ -361,7 +368,7 @@ it.each(["chromium", "webkit"] as const)(
             };
             return {
               href: scope.location.href,
-              hash: scope.location.hash,
+              pathname: scope.location.pathname,
               pointer: scope.pointerEvidence,
               name: scope.document.querySelector(".orb-name")?.textContent,
               inert: scope.document.querySelector(".orb-main")?.getAttribute("inert"),
