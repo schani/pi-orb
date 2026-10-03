@@ -115,6 +115,8 @@ it.each(["chromium", "webkit"] as const)(
       await check.poll(() => lastTraceOutcome(page, "cache", a)).toBe("stored");
       await page.locator(`.orb-index a[href="/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
+      await check(page.locator(".orb-index")).toHaveAttribute("aria-busy", "false");
+      check(page.url()).toBe(`${origin}/orbs/${b}`);
       refresh = true;
       holdReturnMetadata = true;
       const historyRequested = own(
@@ -129,6 +131,7 @@ it.each(["chromium", "webkit"] as const)(
         ),
       );
       await page.locator(`.orb-index a[href="/orbs/${a}"]`).click();
+      await check.poll(() => page.url()).toBe(`${origin}/orbs/${a}`);
       await required(returnMetadataRequested);
       await returnEntry;
       // Flip the next-request gate while the return request is paused in its producer.

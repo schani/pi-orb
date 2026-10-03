@@ -71,6 +71,22 @@ it.each(["chromium", "webkit"] as const)(
       });
       await page.goto(`${origin}/orbs/${a}`);
       await check(page.locator(".history")).toContainText("Review 100");
+      // Rendering may precede admission; departure must own a stored snapshot.
+      await check
+        .poll(() =>
+          page.evaluate((orbId) => {
+            const debug = globalThis as typeof globalThis & {
+              piOrbDebug: {
+                dump(): { trace: { event: string; orbId?: string; outcome?: string }[] };
+              };
+            };
+            return debug.piOrbDebug
+              .dump()
+              .trace.filter((entry) => entry.event === "cache" && entry.orbId === orbId)
+              .at(-1)?.outcome;
+          }, a),
+        )
+        .toBe("stored");
       await page.locator(`.orb-index a[href="/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
       refresh = true;
