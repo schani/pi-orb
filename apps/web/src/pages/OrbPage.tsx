@@ -1335,15 +1335,18 @@ function OrbConversation({
       pinnedRef.current = false;
       autoScrollYRef.current = null;
     };
+    const isScrollKey = (event: KeyboardEvent) =>
+      ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "].includes(event.key) &&
+      event.target instanceof HTMLElement &&
+      !event.target.closest("input, textarea, select, [contenteditable]");
     const keyboardIntent = (event: KeyboardEvent) => {
-      if (
-        ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "].includes(event.key) &&
-        event.target instanceof HTMLElement &&
-        !event.target.closest("input, textarea, select, [contenteditable]")
-      )
-        readerIntent();
+      if (isScrollKey(event)) readerIntent();
+    };
+    const keyboardSettled = (event: KeyboardEvent) => {
+      if (isScrollKey(event)) onScroll();
     };
     target?.addEventListener("keydown", keyboardIntent);
+    target?.addEventListener("keyup", keyboardSettled);
     target?.addEventListener("scroll", onScroll, { passive: true });
     target?.addEventListener("pointerdown", readerIntent, { passive: true });
     target?.addEventListener("wheel", readerIntent, { passive: true });
@@ -1365,6 +1368,7 @@ function OrbConversation({
     return () => {
       observer.disconnect();
       target?.removeEventListener("keydown", keyboardIntent);
+      target?.removeEventListener("keyup", keyboardSettled);
       target?.removeEventListener("scroll", onScroll);
       target?.removeEventListener("pointerdown", readerIntent);
       target?.removeEventListener("wheel", readerIntent);

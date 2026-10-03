@@ -773,6 +773,35 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     },
   );
 
+  it.each([390, 1280])("keeps tail intent after a no-op End key at %ipx", async (width) => {
+    const page = await browser.newPage({ viewport: { width, height: 844 } });
+    try {
+      await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+      await waitForFixtureMedia(page);
+      await expectPage(page.locator(".history .rec-q")).toHaveCount(2);
+      const scroller = page.locator(".orb-transcript-scroll");
+      const distance = () =>
+        scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
+      await expectPage.poll(distance).toBeLessThanOrEqual(1);
+      await scroller.evaluate((pane) => {
+        pane.setAttribute("tabindex", "0");
+        (pane as typeof pane & { focus(options: { preventScroll: boolean }): void }).focus({
+          preventScroll: true,
+        });
+      });
+      await page.keyboard.press("End");
+      await expectPage.poll(distance).toBeLessThanOrEqual(1);
+      await scroller.evaluate((pane) => {
+        const spacer = pane.ownerDocument.createElement("div");
+        spacer.style.height = "800px";
+        pane.querySelector(".orb-transcript-content")?.append(spacer);
+      });
+      await expectPage.poll(distance).toBeLessThanOrEqual(1);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("keeps tail intent when native clamping precedes a growth observer", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     try {
