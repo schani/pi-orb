@@ -37,7 +37,7 @@ describe("subagent roster", () => {
 });
 
 describe("composer typography", () => {
-  it("inherits the transcript face and size at every viewport and input capability", () => {
+  it("inherits the transcript face with zoom-safe phone and touch input sizes", () => {
     expect(rule("body")).toContain("font-family: var(--text)");
     expect(rule("body")).toContain("font-size: var(--text-size)");
     expect(rule(":root")).toContain("--text-size: 13px");
@@ -46,8 +46,14 @@ describe("composer typography", () => {
       selector?.includes(".composer"),
     );
     for (const [, selector, declarations] of composerRules) {
-      expect(declarations, selector).not.toMatch(/font(?:-size|-family)?\s*:/);
+      expect(declarations, selector).not.toMatch(/font(?:-family)?\s*:/);
     }
+    expect(css).toMatch(
+      /@media \(max-width: 600px\), \(any-pointer: coarse\)\s*\{\s*input,\s*textarea,\s*select,\s*\.composer-caret-mirror,\s*\.composer-caret\s*\{\s*font-size: 16px;/,
+    );
+    const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    expect(html).toContain("width=device-width, initial-scale=1");
+    expect(html).not.toMatch(/user-scalable|maximum-scale|minimum-scale/);
   });
 });
 
@@ -124,6 +130,12 @@ describe("dashboard layout contract", () => {
     expect(rule(".project-column")).toContain("border-left: 1px solid var(--k)");
     expect(rule(".project-column")).toContain("border-bottom: 1px solid var(--k)");
     expect(rule(".new-project")).toContain("border-left: 1px dashed var(--k)");
+  });
+
+  it("fills available width whenever two fixed columns cannot fit", () => {
+    expect(css).toMatch(
+      /@media \(width < 632px\)\s*\{\s*\.dashboard\s*\{\s*grid-template-columns: minmax\(0, 1fr\);/,
+    );
   });
 
   it("rules the board from the totals strip to the bottom-pinned footer", () => {

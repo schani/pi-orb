@@ -51,6 +51,40 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     await vite?.close();
   });
 
+  it.each([320, 390, 402, 600, 631, 632, 1280])(
+    "fills single-column dashboard width and retains fixed multi-column tracks at %ipx",
+    async (width) => {
+      const page = await browser.newPage({
+        viewport: { width, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      try {
+        await gotoFrontendFixture(page, origin, page.locator(".dashboard .project-column").first());
+        const columns = page.locator(".dashboard > *");
+        await expectPage(columns.first()).toBeVisible();
+        const geometry = await columns.evaluateAll((elements) =>
+          elements.map((element) => element.getBoundingClientRect().width),
+        );
+        expectPage(geometry.length).toBeGreaterThan(1);
+        for (const columnWidth of geometry) {
+          expectPage(columnWidth).toBe(width < 632 ? width : 316);
+        }
+        expectPage(
+          await page.evaluate(() => {
+            const doc = Reflect.get(globalThis, "document").documentElement;
+            return doc.scrollWidth <= doc.clientWidth;
+          }),
+        ).toBe(true);
+        for (const field of await page.locator(".new-project input").all()) {
+          await expectPage(field).toHaveCSS("font-size", "16px");
+        }
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
   it.each([320, 390])(
     "wraps assistant failure text inside the phone transcript at %ipx",
     async (width) => {
@@ -127,7 +161,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     { width: 390, hasTouch: true },
     { width: 320, hasTouch: false },
   ])(
-    "matches composer and transcript typography at $width px with touch=$hasTouch",
+    "keeps the reading face and zoom-safe input typography at $width px with touch=$hasTouch",
     async ({ width, hasTouch }) => {
       const page = await browser.newPage({
         viewport: { width, height: 900 },
@@ -142,7 +176,8 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           page.locator(".history"),
         );
         if (width <= 600) await page.locator(".composer-open").click();
-        await expectPage(composer).toHaveCSS("font-size", "13px");
+        const inputSize = width <= 600 || hasTouch ? "16px" : "13px";
+        await expectPage(composer).toHaveCSS("font-size", inputSize);
         const typography = await page.locator(".orb-main").evaluate((main) => {
           const input = main.querySelector(".composer-input");
           const prose = main.querySelector(".rec-orb .chat-markdown");
@@ -202,7 +237,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           }
           await session.detach();
         }
-        expectPage(typography[1]).toEqual(typography[0]);
+        expectPage(typography[1]).toEqual({ ...typography[0], size: "13px" });
         expectPage(typography[2]).toEqual(typography[0]);
       } finally {
         await page.close();
@@ -220,7 +255,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
       await expectPage(composer).not.toBeFocused();
-      await expectPage(composer).toHaveCSS("font-size", "13px");
+      await expectPage(composer).toHaveCSS("font-size", "16px");
       const rename = page.getByRole("button", { name: "Rename orb", exact: true });
       await rename.focus();
       await page.evaluate(() => {

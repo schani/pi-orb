@@ -523,6 +523,12 @@ h3 {
   min-height: calc(100dvh - 48px);
 }
 
+@media (width < 632px) {
+  .dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .app:has(> .session-ribbon) .dashboard {
   min-height: calc(100dvh - 48px - var(--ribbon));
 }
@@ -1046,6 +1052,17 @@ button.personal-instructions-gear {
   }
   .personal-instructions-feedback button {
     min-height: 44px;
+  }
+}
+
+/* Safari zooms focused fields below 16px; include touch tablets at desktop widths. */
+@media (max-width: 600px), (any-pointer: coarse) {
+  input,
+  textarea,
+  select,
+  .composer-caret-mirror,
+  .composer-caret {
+    font-size: 16px;
   }
 }
 
