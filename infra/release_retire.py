@@ -5,16 +5,7 @@ import sys
 import re
 import time
 import urllib.parse
-from infra.release_state import Cloud, Result, fail, load, now, publish, save, valid_id, validate_record
-
-
-def epoch(value):
-    if not isinstance(value, str) or not value.endswith("Z"):
-        return None
-    try:
-        return datetime.fromisoformat(value[:-1] + "+00:00").timestamp()
-    except ValueError:
-        return None
+from infra.release_state import Cloud, Result, fail, load, now, publish, save, utc_epoch as epoch, valid_id, valid_retirement, validate_record
 
 
 def metrics(cloud, project, region, start, end):
@@ -72,6 +63,21 @@ def samples(series, region, end):
     return Result(result)
 
 
+def latest_zeroes(states):
+    zeroes = {}
+    for state in ("active", "idle"):
+        points = states.get(state, [])
+        if points:
+            _, value, stamp = max(points)
+            if value == 0:
+                zeroes[state] = stamp
+    return zeroes if len(zeroes) == 2 else {}
+
+
+def unresolved_positive(states):
+    return any(value > 0 for points in states.values() for _, value, _ in points) and not latest_zeroes(states)
+
+
 def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
     names = set()
     for service in services:
@@ -99,30 +105,48 @@ def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb
         return parsed
     admitted = {item['resource']['labels'].get('revision_name') for item in observed.value
                 if isinstance(item['resource'].get('labels'), dict) and item['resource']['labels'].get('service_name') in services}
+    excluded = {}
     for revision, states in parsed.value.items():
-        if revision not in admitted:
+        if revision not in admitted or revision in names:
             continue
-        if any(points and max(points)[1] > 0 for points in states.values()):
+        if unresolved_positive(states):
             names.add(revision)
+        elif any(value > 0 for points in states.values() for _, value, _ in points):
+            excluded[revision] = latest_zeroes(states)
     operations = pending_operations(cloud, record["project"])
     if operations.error:
         return operations
-    record["retirement"] = {"after": boundary, "revisions": sorted(names), "zeroes": {}, "operations": operations.value}
+    record["retirement"] = {"after": boundary, "revisions": sorted(names), "zeroes": {}, "excluded": excluded, "operations": operations.value}
     return Result(record)
 
 
 def evidence(record, series, end):
-    if epoch(end) is None or epoch(record["retirement"]["after"]) is None:
-        return fail("invalid", "invalid retirement clock")
+    if not valid_retirement(record["retirement"]) or record["retirement"] is None or epoch(end) is None:
+        return fail("invalid", "invalid retirement record or clock")
     parsed = samples(series, record["region"], epoch(end))
     if parsed.error:
         return parsed
     current = next((item["revision"] for item in record["serving"] or [] if item["service"] == "pi-orb-issuer"), None)
     retirement = record["retirement"]
     targets = set(retirement["revisions"])
-    for revision, states in parsed.value.items():
-        if revision != current and any(points and max(points)[1] > 0 for points in states.values()):
+    excluded = {revision: dict(states) for revision, states in retirement["excluded"].items()}
+    for revision, states in excluded.copy().items():
+        if any(epoch(stamp) > epoch(end) for stamp in states.values()):
+            return fail("invalid", "future excluded retirement evidence")
+        observed = parsed.value.get(revision, {})
+        if any(value > 0 and at >= epoch(states[state]) for state, points in observed.items() for at, value, _ in points):
+            del excluded[revision]
             targets.add(revision)
+        else:
+            excluded[revision] = latest_zeroes({state: observed.get(state, []) + [(epoch(stamp), 0, stamp)]
+                                                for state, stamp in states.items()})
+    for revision, states in parsed.value.items():
+        if revision == current or revision in targets or revision in excluded:
+            continue
+        if unresolved_positive(states):
+            targets.add(revision)
+        elif any(value > 0 for points in states.values() for _, value, _ in points):
+            excluded[revision] = latest_zeroes(states)
     if current in targets:
         return fail("conflict", "retirement inventory includes the serving browser")
     after = epoch(retirement["after"])
@@ -146,7 +170,7 @@ def evidence(record, series, end):
                     states[state] = stamp
         if len(states) == 2:
             zeroes[revision] = states
-    return Result({"after": retirement["after"], "revisions": sorted(targets), "zeroes": zeroes, "operations": retirement["operations"]})
+    return Result({"after": retirement["after"], "revisions": sorted(targets), "zeroes": zeroes, "excluded": excluded, "operations": retirement["operations"]})
 
 
 def pending_operations(cloud, project):

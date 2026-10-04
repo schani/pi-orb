@@ -31,9 +31,28 @@ def record():
                       "workspace_image_resource": "projects/test-project/global/images/workspace", "workspace_image_id": "456"},
         "previousServing": None,
         "serving": [{"service": name, "revision": name + "-new", "image": IMAGE, "generation": 42} for name in SERVICES],
-        "retirement": {"after": STAMP, "operations": [], "revisions": ["pi-orb-old"], "zeroes": {"pi-orb-old": {"active": STAMP, "idle": STAMP}}},
+        "retirement": {"excluded": {}, "after": STAMP, "operations": [], "revisions": ["pi-orb-old"], "zeroes": {"pi-orb-old": {"active": STAMP, "idle": STAMP}}},
         "fixtures": [], "migrationJob": None, "nativeCleanup": [],
     }
+
+
+class RetirementSchemaTest(unittest.TestCase):
+    def test_excluded_proof_is_required_and_disjoint_from_admitted_targets(self):
+        value = record()
+        value["retirement"]["excluded"] = {"pi-orb-deleted": {"active": "2026-09-09T11:59:00Z", "idle": "2026-09-09T11:59:00.123456789Z"}}
+        self.assertTrue(validate_record(value))
+        for change in ("missing", "overlap", "state", "date", "offset", "future", "old-admitted"):
+            with self.subTest(change=change):
+                invalid = copy.deepcopy(value)
+                retired = invalid["retirement"]
+                if change == "missing": del retired["excluded"]
+                if change == "overlap": retired["revisions"].append("pi-orb-deleted")
+                if change == "state": del retired["excluded"]["pi-orb-deleted"]["idle"]
+                if change == "date": retired["excluded"]["pi-orb-deleted"]["idle"] = "2026-02-30T11:59:00Z"
+                if change == "offset": retired["excluded"]["pi-orb-deleted"]["idle"] = "2026-09-09T11:59:00+00:00"
+                if change == "future": retired["after"] = "2026-02-30T12:00:00Z"
+                if change == "old-admitted": retired["zeroes"]["pi-orb-old"]["idle"] = "2026-09-09T11:59:00Z"
+                self.assertFalse(validate_record(invalid))
 
 
 class FakeCloud:
@@ -76,6 +95,13 @@ class ReleaseStateTest(unittest.TestCase):
             cloud = FakeCloud()
             self.assertIsNotNone(publish(cloud, corrupt).error)
             self.assertEqual(cloud.writes, [])
+
+    def test_publication_retains_excluded_retirement_proof(self):
+        value = record()
+        value["retirement"]["excluded"] = {"pi-orb-deleted": {"active": "2026-09-09T11:59:00Z", "idle": "2026-09-09T11:59:00Z"}}
+        cloud = FakeCloud()
+        self.assertIsNone(publish(cloud, value).error)
+        self.assertEqual(cloud.writes[0][2]["retirement"]["excluded"], value["retirement"]["excluded"])
 
     def test_native_cleanup_is_strictly_allowlisted_and_scope_bound(self):
         value = record()

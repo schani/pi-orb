@@ -289,13 +289,41 @@ not a per-mutation lease. The supported release must establish retirement before
 publishing authority; out-of-band deployments and late-side-effect compensation
 remain distinct from this operational boundary.
 
-Before apply, retirement inventory includes revision metadata and positive
-Monitoring samples, so already-deleted live controllers are not invisible. After
-apply and pruning, all pages are read and both active and idle states must have
-explicit zero evidence after the recorded boundary. Newly observed old revisions
-join the inventory. Previously recorded zero evidence can be reused, but newer
-positive samples refute it. Pending pi-orb instance/disk/image operations also
-block activation. The 75-minute operational cap permits natural Cloud Run
+**Retirement sample rule (clarified 2026-10-04):** before apply, inventory includes
+all surviving revision resources and already-deleted revisions with unresolved
+positive Monitoring samples in the existing 15-minute lookback. All pages use
+exact service AND region filters. A deleted revision's positive is resolved only
+when its latest explicit active AND idle samples are both zero; missing either
+state is unknown, not zero, and positives win timestamp ties. Complete latest
+zeros can exclude a deleted revision even if its series stops before inventory.
+After apply and pruning, newly discovered revisions follow the same distinction.
+Every admitted target needs explicit active and idle zeros **at or after the
+recorded pre-apply inventory boundary** (`>=`, whole-second timestamps and an
+instantaneous gauge). Saved qualified zeros remain reusable when series disappear;
+newer positives invalidate the corresponding state. Neither deletion nor missing
+samples prove retirement. Requiring new postboundary emission from an already
+retired, excluded revision is rejected: it adds no unresolved-writer protection
+and can stall permanently when Monitoring stops emitting that deleted series.
+No post-deletion sample condition applies.
+
+The durable release report's `retirement` object contains `after`, `revisions`,
+`zeroes`, `excluded` and `operations`. `excluded` maps previously-positive,
+resolved candidates to their latest active/idle zero timestamps (counts are
+implicitly zero); inventory exclusions imply absence from the revision-resource
+list. Zero-only deleted series add no evidence noise. Excluded and admitted
+revisions are disjoint. Saved exclusions survive absent observations, but a
+positive at or after either state's saved zero removes the exclusion and admits
+the target. Its preboundary exclusion zeros cannot supply postboundary proof:
+both states must independently qualify against `after`. UTC timestamps and
+conflicting evidence are validated before publication. Cutover verification accepts
+an excluded-only inventory with complete proof, but rejects an inventory with
+neither admitted nor excluded revisions; pending operations and positive rechecks
+still block it. Deterministic local
+missing-state regressions do not establish a historical unsafe activation;
+evidence and the rejected broader any-positive rule are retained in
+`.context/consolidation/retirement-invariant-20261004/`.
+
+Pending pi-orb instance/disk/image operations also block activation. The 75-minute operational cap permits natural Cloud Run
 retirement without a UI pause (the observed incident took roughly 44 minutes);
 time passing is never the proof. Failure leaves new loops gated and HTTP available.
 The per-service Monitoring filter correction and sandbox API evidence are in

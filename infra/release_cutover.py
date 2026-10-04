@@ -21,7 +21,7 @@ def verify(cloud, record, manifest):
     if not validate_record(candidate):
         return fail('invalid', 'invalid maintenance retirement evidence')
     proof = candidate['retirement']
-    if proof is None or not proof['revisions'] or proof['operations'] or set(proof['revisions']) != set(proof['zeroes']):
+    if proof is None or (not proof['revisions'] and not proof['excluded']) or proof['operations'] or set(proof['revisions']) != set(proof['zeroes']):
         return fail('invalid', 'explicit zero-container and completed-operation proof required')
     fenced = check_fenced_services(cloud, record)
     return fenced if fenced.error else Result(candidate)

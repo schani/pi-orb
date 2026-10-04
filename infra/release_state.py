@@ -75,6 +75,38 @@ def save(path, value):
     return Result(value)
 
 
+def utc_epoch(value):
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z", value):
+        return None
+    try:
+        return datetime.fromisoformat(value[:-1] + "+00:00").timestamp()
+    except ValueError:
+        return None
+
+
+def valid_retirement(retirement):
+    if retirement is not None:
+        if not isinstance(retirement, dict) or set(retirement) != {"after", "revisions", "zeroes", "excluded", "operations"}:
+            return False
+        if utc_epoch(retirement["after"]) is None or not isinstance(retirement["revisions"], list) or not all(valid_id(item) for item in retirement["revisions"]):
+            return False
+        if not isinstance(retirement["operations"], list) or not all(valid_id(item) for item in retirement["operations"]):
+            return False
+        for field in ("zeroes", "excluded"):
+            if not isinstance(retirement[field], dict):
+                return False
+            for revision, states in retirement[field].items():
+                if not valid_id(revision) or (revision in retirement["revisions"]) != (field == "zeroes"):
+                    return False
+                if not isinstance(states, dict) or set(states) != {"active", "idle"}:
+                    return False
+                for stamp in states.values():
+                    at = utc_epoch(stamp)
+                    if at is None or (field == "zeroes" and at < utc_epoch(retirement["after"])):
+                        return False
+    return True
+
+
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -245,16 +277,8 @@ def validate_record(record):
         return False
     if not valid_native_cleanup(record["nativeCleanup"], record["project"]):
         return False
-    retirement = record["retirement"]
-    if retirement is not None:
-        if not isinstance(retirement, dict) or set(retirement) != {"after", "revisions", "zeroes", "operations"}:
-            return False
-        if not re.fullmatch(r"[0-9-]+T[0-9:]+Z", str(retirement["after"])) or not isinstance(retirement["revisions"], list) or not all(valid_id(item) for item in retirement["revisions"]):
-            return False
-        if not isinstance(retirement["operations"], list) or not all(valid_id(item) for item in retirement["operations"]):
-            return False
-        if not isinstance(retirement["zeroes"], dict) or any(key not in retirement["revisions"] or not isinstance(value, dict) or set(value) != {"active", "idle"} or not all(isinstance(stamp, str) and re.fullmatch(r"[0-9-]+T[0-9:.]+Z", stamp) for stamp in value.values()) for key, value in retirement["zeroes"].items()):
-            return False
+    if not valid_retirement(record["retirement"]):
+        return False
     return True
 
 
