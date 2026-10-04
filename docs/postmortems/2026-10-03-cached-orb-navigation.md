@@ -36,6 +36,10 @@ Click→first application-task end is about **777 ms**; click→last observed bu
 
 Source corroborates the mechanism, not exact attribution of every minified frame. Unlike the September 15 capture (`docs/postmortems/2026-09-15-long-transcript-navigation.md`), this sequence has no large history transfer dominating the delay. Memory caching removes repeat history transfer, not metadata latency, remount/render, layout, accessibility or extension traversal.
 
-## Result
+## Result (investigation, 2026-10-03)
 
 The selected bare-cache contract already excludes instant rendering (`docs/transcript-cache.md`). This capture demonstrates the remaining costs. An extension-disabled comparison and bounded mounted transcript/virtualization remain proposals, not adopted fixes. Showing read-only cached content before fresh metadata is also unadopted; lifecycle controls would still require fresh authority. No navigation/focus policy changes follow from this investigation. Content-free cache/load, mount, first-paint and live-ready timings would distinguish future outcomes; follow-up is recorded only in the existing **Bound transcript loading** item in `TODO.md`.
+
+## Subsequent decision and release
+
+The investigation describes baseline `e5a2233`. The user subsequently approved nonblocking provisional cached display and automatic last-20/fixed-20 mounting, rejecting a reveal button and virtualization. Fresh metadata retains authority; scroll position, drafts and detail ownership are tested (`docs/transcript-cache.md`, `docs/testing.md`). Source `3032017` was deployed 2026-10-04 through [Deploy 37200573956](https://github.com/schani/pi-orb/actions/runs/37200573956), with all release gates and independent rollout/cleanup checks passing (`docs/deployment.md`). The original field profile remains a diagnosis, not proof of post-release first-paint latency.

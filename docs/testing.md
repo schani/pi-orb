@@ -1,6 +1,6 @@
 # Testing strategy
 
-## Cached navigation and automatic mounting (2026-10-03; locally qualified, not deployed)
+## Cached navigation and automatic mounting (qualified 2026-10-03; deployed 2026-10-04)
 
 Tests preceded implementation. Untouched-HEAD browser regressions show metadata blocking cached display and 200 mounted rows instead of 20, in Chromium and WebKit (`.context/cached-navigation/{browser-red,automatic-browser-red}.log`). The first automatic baseline had a Vite transform signature mismatch; its log is retained, and the corrected instrumentation reached the intended red assertion.
 
@@ -18,7 +18,7 @@ Failure and schedule evidence stays in `.context/cached-navigation/` and `.conte
 - real Pi login, tool round trip, replication and drain, including cached cursor hello/replay/send — `accepted-runtime-handoff.log` (process backend; one selected case, three unselected lifecycle cases);
 - repository typecheck and lint — `accepted-{typecheck,lint}.log` (20 warnings, six infos).
 
-Docker/full lifecycle and extension-amplified field latency are not qualified here. The bounded mount/derivation performance mark is not a first-paint metric. Remaining measurement work is in `TODO.md`; no deployment.
+[Deploy 37200573956](https://github.com/schani/pi-orb/actions/runs/37200573956) subsequently passed **307/307 full Docker/PostgreSQL/Chromium/WebKit E2Es**, repeated the unit/infra checks, and passed native acceptance and production lifecycle/identity smokes. Independent serving, IAP, activation, cleanup and bounded log checks passed (`docs/deployment.md`). Local red/green evidence survives archive: [test bundle](https://files---pi-orb-1077475695242.us-central1.run.app/s/c3fe1a3c-c335-4b89-8298-1046528e7f52/evidence/cached-navigation-tests.tar.gz), [manifest](https://files---pi-orb-1077475695242.us-central1.run.app/s/c3fe1a3c-c335-4b89-8298-1046528e7f52/evidence/cached-navigation-tests-manifest.md). Extension-amplified field latency remains unmeasured; the bounded mount/derivation mark is not first-paint instrumentation. Measurement work stays in `TODO.md`.
 
 ## WebKit lazy-return gate (2026-10-02)
 
