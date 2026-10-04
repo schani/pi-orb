@@ -919,9 +919,58 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       await expectPage
         .poll(() => scroller.evaluate((element) => element.scrollTop))
         .toBeGreaterThan(0);
+      const rows = scroller.locator("[data-history-row]");
+      const stableLayout = () =>
+        scroller.evaluate(
+          (element) =>
+            new Promise<void>((resolve) => {
+              const view = element.ownerDocument.defaultView;
+              if (!view) throw new Error("Transcript viewport window missing");
+              let previous = "";
+              const frame = () => {
+                const current = JSON.stringify([
+                  element.scrollTop,
+                  element.scrollHeight,
+                  [...element.querySelectorAll("[data-history-row]")].map((row) => [
+                    row.getAttribute("data-history-row"),
+                    row.getBoundingClientRect().top,
+                    row.getBoundingClientRect().height,
+                  ]),
+                ]);
+                if (current === previous) resolve();
+                else {
+                  previous = current;
+                  view.requestAnimationFrame(frame);
+                }
+              };
+              view.requestAnimationFrame(frame);
+            }),
+        );
+      await expectPage(rows).toHaveCount(20);
+      await stableLayout();
       await page.mouse.move(195, 350);
+      // Native upward crossings prepend twenty-row batches and preserve the old anchor.
+      let count = 20;
+      while (count < 200) {
+        await page.mouse.wheel(0, -1000000);
+        await expectPage.poll(() => rows.count()).toBeGreaterThan(count);
+        await expectPage
+          .poll(() => scroller.evaluate((element) => element.scrollTop))
+          .toBeGreaterThan(0);
+        await stableLayout();
+        const materialized = await rows.count();
+        expectPage(materialized).toBeGreaterThan(count);
+        expectPage(materialized).toBeLessThanOrEqual(200);
+        expectPage((materialized - count) % 20).toBe(0);
+        count = materialized;
+        // Restored downward scrolls must not fill another batch without upward input.
+        await stableLayout();
+        await expectPage(rows).toHaveCount(count);
+      }
+      await expectPage(rows.first()).toHaveAttribute("data-history-row", "long-history-0");
       await page.mouse.wheel(0, -1000000);
       await expectPage.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+      await stableLayout();
       const before = await scroller.screenshot();
       await page.mouse.wheel(0, 1200);
       await expectPage
@@ -929,6 +978,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         .toBeGreaterThan(0);
       await page.mouse.wheel(0, -1000000);
       await expectPage.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(0);
+      await stableLayout();
       expectPage(await scroller.screenshot()).toEqual(before);
     } finally {
       await page.close();

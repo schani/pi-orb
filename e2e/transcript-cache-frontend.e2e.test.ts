@@ -28,6 +28,17 @@ it.each(["chromium", "webkit"] as const)(
     let lastRecord: string | null = null;
     const hellos: (string | null)[] = [];
     const committedReplies: string[] = [];
+    const mutations: string[] = [];
+    let heldMetadata = false;
+    page.on("request", (request) => {
+      if (heldMetadata && request.method() !== "GET" && request.url().includes(`/orbs/${a}/`))
+        mutations.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    });
+    const terminalConnections: string[] = [];
+    page.on("websocket", (socket) => {
+      if (heldMetadata && socket.url().endsWith(`/orbs/${a}/terminal`))
+        terminalConnections.push(socket.url());
+    });
     // Readiness assertions follow the frame that supplies settings, not large-history wall time.
     const settingsWaiters: (() => void)[] = [];
     const nextSettings = () => new Promise<void>((resolve) => settingsWaiters.push(resolve));
@@ -102,26 +113,99 @@ it.each(["chromium", "webkit"] as const)(
         metadataArrived = resolve;
       });
       const metadataPath = `**/api/v1/orbs/${a}`;
+      heldMetadata = true;
+      let metadataDrained = () => {};
+      const metadataFinished = new Promise<void>((resolve) => {
+        metadataDrained = resolve;
+      });
       await page.route(metadataPath, async (route) => {
         metadataArrived();
         await metadataGate;
-        return route.continue();
+        try {
+          return await route.continue();
+        } finally {
+          metadataDrained();
+        }
       });
       const cachedSettings = nextSettings();
       await page.locator(`.orb-index a[href="/orbs/${a}"]`).click();
       await metadataRequested;
+      const history = page.locator(".history");
+      const scroller = page.locator(".orb-transcript-scroll");
+      let mounted: Awaited<ReturnType<typeof history.elementHandle>> | null = null;
+      let heldScroll = 0;
       try {
-        await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
-        await check(page.locator(".orb-main")).toHaveAttribute("inert", "");
+        await check(history).toContainText("cache a completed live record");
+        await check(history).not.toContainText("Use this orb to check");
+        await check(page.locator(".orb-main")).not.toHaveAttribute("inert", "");
+        await check(composer).toBeEditable();
+        await check(composer).toHaveValue("retain cache draft");
+        await composer.fill("draft typed before metadata");
+        await composer.press("Control+Enter");
+        await check(
+          page.getByRole("button", { name: "Send message", exact: true, includeHidden: true }),
+        ).toBeDisabled();
+        for (const name of ["Rename orb", "Archive orb", "Delete orb", "Change model"]) {
+          await check(page.getByRole("button", { name, exact: true })).toBeDisabled();
+        }
+        await check(
+          page.getByRole("button", { name: "Open terminal", exact: true, includeHidden: true }),
+        ).toHaveCount(0);
+        await composer.press("Control+j");
+        await check(
+          page.getByRole("button", { name: "Upload files", exact: true, includeHidden: true }),
+        ).toHaveCount(0);
+        await page.locator(".orb-main").evaluate((node) => {
+          const browser = globalThis as unknown as {
+            DataTransfer: new () => { items: { add(file: File): void } };
+            DragEvent: new (
+              type: string,
+              options: { bubbles: boolean; cancelable: boolean; dataTransfer: unknown },
+            ) => Event;
+          };
+          const transfer = new browser.DataTransfer();
+          transfer.items.add(
+            new File(["cached navigation upload"], "cached.txt", { type: "text/plain" }),
+          );
+          node.dispatchEvent(
+            new browser.DragEvent("drop", {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: transfer,
+            }),
+          );
+        });
+        await check(page.getByRole("button", { name: /^(Start|Stop) orb$/ })).toHaveCount(0);
+        await check(ready).toBeDisabled();
+        check(hellos).toEqual([]);
+        check(mutations).toEqual([]);
+        check(terminalConnections).toEqual([]);
+        check(unexpectedHistory).toBe(0);
+        await scroller.evaluate((pane) => {
+          pane.scrollTop -= 120;
+        });
+        await page.evaluate(
+          "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+        );
+        heldScroll = await scroller.evaluate((pane) => pane.scrollTop);
+        mounted = await history.elementHandle();
       } finally {
+        heldMetadata = false;
         releaseMetadata();
+        await metadataFinished;
       }
       await page.unroute(metadataPath);
       await cachedSettings;
+      if (!mounted) throw new Error("Cached transcript was not mounted");
+      check(
+        await mounted.evaluate((node) => node === node.ownerDocument.querySelector(".history")),
+      ).toBe(true);
+      check(await scroller.evaluate((pane) => pane.scrollTop)).toBe(heldScroll);
       await check(page.locator(".history")).toContainText("Review 100");
       await check(ready).toBeEnabled();
-      await check(composer).toHaveValue("retain cache draft");
+      await check(composer).toHaveValue("draft typed before metadata");
       await check(page.locator(".history")).toContainText("cache a completed live record");
+      await composer.fill("retain cache draft");
       check(unexpectedHistory).toBe(0);
       check(hellos.length).toBeGreaterThan(0);
       check(hellos.every((cursor) => cursor === expectedCursor)).toBe(true);

@@ -3412,7 +3412,7 @@ describe("frontend-only browser behavior", () => {
       });
     try {
       await page.goto(`${origin}/orbs/frontend-long-history`);
-      await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
+      await expectPage(page.locator(".history .rec-you")).toHaveCount(10);
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("draft survives terminal toggles");
       await page.locator(".orb-transcript-scroll").evaluate(async (pane) => {
@@ -3844,7 +3844,7 @@ describe("frontend-only browser behavior", () => {
       );
       await page.goto(`${origin}/orbs/frontend-long-history`);
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
-      await expectPage(page.locator(".history .rec-you")).toHaveCount(100);
+      await expectPage(page.locator(".history .rec-you")).toHaveCount(10);
       await expectPage(page.locator(".history")).toContainText("Review 100");
       await liveHello;
       await expectPage

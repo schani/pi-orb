@@ -60,6 +60,10 @@ it.each(["chromium", "webkit"] as const)(
       missing = false,
       fail = true,
       holdReturnMetadata = false;
+    let metadataArrived = () => {};
+    const metadataRequested = new Promise<void>((resolve) => {
+      metadataArrived = resolve;
+    });
     let releaseMetadata = () => {};
     const metadataGate = new Promise<void>((resolve) => {
       releaseMetadata = resolve;
@@ -81,8 +85,10 @@ it.each(["chromium", "webkit"] as const)(
               },
             },
           });
+        const held = holdReturnMetadata;
+        if (held) metadataArrived();
         const response = await route.fetch();
-        if (holdReturnMetadata) await metadataGate;
+        if (held) await metadataGate;
         const orb = await response.json();
         orb.state = "stopped";
         return route.fulfill({ response, json: orb });
@@ -246,20 +252,40 @@ it.each(["chromium", "webkit"] as const)(
               .at(-1)?.outcome;
           }, a),
         )
-        .toBe("cache_hit");
+        .toBe("metadata_completion");
       await check(page.locator(".orb-main")).toHaveAttribute("aria-busy", "false");
 
-      // Independently prove the metadata wait retains B before publishing cached A.
+      // Held metadata paints cached A without granting mutation authority.
       await page.locator(`.orb-index a[href="/orbs/${b}"]`).click();
       await check(page.locator(".orb-name")).toHaveText("Frontend Playground");
       holdReturnMetadata = true;
-      const metadataRequest = page.waitForRequest((request) =>
-        request.url().endsWith(`/api/v1/orbs/${a}`),
-      );
       await page.locator(`.orb-index a[href="/orbs/${a}"]`).click();
-      await metadataRequest;
+      await metadataRequested;
       await check.poll(() => page.url()).toBe(`${origin}/orbs/${a}`);
-      await check(page.locator(".history")).toContainText("Frontend playground");
+      await check(page.locator(".history")).toContainText("Review 100");
+      await check(page.locator(".history")).not.toContainText("Frontend playground");
+      const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+      await check(composer).toBeEditable();
+      await composer.fill("stopped cached draft before metadata");
+      await check(
+        page.getByRole("button", { name: "Send message", exact: true, includeHidden: true }),
+      ).toBeDisabled();
+      await check(page.getByRole("button", { name: "Rename orb", exact: true })).toBeDisabled();
+      await check
+        .poll(() =>
+          page.evaluate((orbId) => {
+            const debug = globalThis as typeof globalThis & {
+              piOrbDebug: {
+                dump(): { trace: { event: string; orbId?: string; outcome?: string }[] };
+              };
+            };
+            return debug.piOrbDebug
+              .dump()
+              .trace.filter((entry) => entry.event === "navigation" && entry.orbId === orbId)
+              .at(-1)?.outcome;
+          }, a),
+        )
+        .toBe("cached_selection");
       const metadataResponse = page.waitForResponse((response) =>
         response.url().endsWith(`/api/v1/orbs/${a}`),
       );
@@ -281,8 +307,9 @@ it.each(["chromium", "webkit"] as const)(
               .at(-1)?.outcome;
           }, a),
         )
-        .toBe("cache_hit");
+        .toBe("metadata_completion");
       await check(page.locator(".history")).toContainText("Review 100");
+      await check(composer).toHaveValue("stopped cached draft before metadata");
       await check(page.locator(".orb-main")).toHaveAttribute("aria-busy", "false");
       release();
       await check(page.getByText(/held refresh failure/)).toBeVisible();

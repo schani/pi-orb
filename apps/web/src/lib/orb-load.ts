@@ -7,11 +7,20 @@ import {
   type TranscriptCache,
 } from "./transcript-cache.ts";
 
-export interface OrbLoad {
+export interface OrbSelection {
   orbId: string;
-  orb: Result<OrbView, ApiError>;
+  /** Null until the navigation's fresh metadata request completes. */
+  orb: Result<OrbView, ApiError> | null;
   history: Result<CachedTranscript, ApiError>;
   cacheHit: boolean;
+}
+
+export interface OrbLoad extends OrbSelection {
+  orb: Result<OrbView, ApiError>;
+}
+
+export function retainsOrbSelection(selection: OrbSelection | null, orbId: string): boolean {
+  return selection?.orbId === orbId && selection.orb !== null;
 }
 
 export function isMissing(error: ApiError): boolean {
@@ -24,8 +33,14 @@ export function startOrbLoad(options: {
   cache: TranscriptCache;
   getOrb: (id: string) => Promise<Result<OrbView, ApiError>>;
   getHistory: (id: string) => Promise<Result<DisplayHistoryView, ApiError>>;
-  diagnostic?: (data: { orbId: string; cacheHit: boolean; records: number }) => void;
+  diagnostic?: (data: {
+    phase: "cached_selection" | "metadata_completion";
+    orbId: string;
+    cacheHit: boolean;
+    records: number;
+  }) => void;
 }): {
+  initial: OrbSelection | null;
   result: Promise<OrbLoad | null>;
   accept(value: OrbLoad | null): OrbLoad | null;
   cancel(): void;
@@ -43,12 +58,44 @@ export function startOrbLoad(options: {
     return { orbId, orb: changed, history: changed, cacheHit: false };
   };
   const cached = cache.get(orbId);
-  // Preserve parallel cold reads. Hits need only fresh resource metadata before rendering.
+  const initial: OrbSelection | null =
+    cached === undefined
+      ? null
+      : {
+          orbId,
+          orb: null,
+          history: ok(cached),
+          cacheHit: true,
+        };
+  if (cached !== undefined)
+    options.diagnostic?.({
+      phase: "cached_selection",
+      orbId,
+      cacheHit: true,
+      records: cached.records.size,
+    });
+  // Cold reads remain parallel; cached display does not grant resource authority.
   const metadata = options.getOrb(orbId);
   const history = cached === undefined ? options.getHistory(orbId) : null;
   const result = (async (): Promise<OrbLoad | null> => {
     const orb = await metadata;
     if (!active) return null;
+    options.diagnostic?.({
+      phase: "metadata_completion",
+      orbId,
+      cacheHit: cached !== undefined,
+      records: cached?.records.size ?? 0,
+    });
+    if (epoch !== cache.invalidationEpoch)
+      return accept({
+        orbId,
+        orb,
+        history: err({
+          type: "invalid_response",
+          message: "Resources changed during navigation. Retry history.",
+        }),
+        cacheHit: false,
+      });
     if ((orb.isErr() && isMissing(orb.error)) || (orb.isOk() && orb.value.state === "deleting")) {
       cache.invalidate(orbId);
       epoch = cache.invalidationEpoch;
@@ -85,14 +132,10 @@ export function startOrbLoad(options: {
       );
     }
     if (!active) return null;
-    options.diagnostic?.({
-      orbId,
-      cacheHit: current !== undefined,
-      records: snapshot.isOk() ? snapshot.value.records.size : 0,
-    });
     return { orbId, orb, history: snapshot, cacheHit: current !== undefined };
   })();
   return {
+    initial,
     result: result.then(accept),
     accept,
     cancel: () => {

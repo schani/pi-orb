@@ -1,13 +1,24 @@
 import type { DisplayBlock, DisplayRecord, OrbMessageView } from "@pi-orb/protocol";
-import { createContext, memo, type ReactNode, useContext, useState } from "react";
+import {
+  createContext,
+  memo,
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { representedInboxMessageIds } from "../lib/queued-messages.ts";
+import { useHistoryTail } from "../lib/use-history-tail.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { BitRegister } from "./BitRegister.tsx";
-import { ChatMarkdown } from "./ChatMarkdown.tsx";
+import { ChatMarkdown as UnmemoizedChatMarkdown } from "./ChatMarkdown.tsx";
 import { PlainChatText } from "./ChatText.tsx";
 import { CommittedImage, imageIndex } from "./CommittedImage.tsx";
 import { CommittedBody, type DetailContext, RunningBody } from "./DetailBody.tsx";
-import { ResponseMarkdown } from "./ResponseMarkdown.tsx";
+import { ResponseMarkdown as UnmemoizedResponseMarkdown } from "./ResponseMarkdown.tsx";
 import { isSubagentNotice, SubagentNotice } from "./SubagentNotice.tsx";
 import {
   type PersistedToolCall,
@@ -15,6 +26,9 @@ import {
   type ToolCallBlock,
   type ToolResultBlock,
 } from "./ToolActivity.tsx";
+
+const ChatMarkdown = memo(UnmemoizedChatMarkdown);
+const ResponseMarkdown = memo(UnmemoizedResponseMarkdown);
 
 type MessageRecord = Extract<DisplayRecord, { type: "message" }>;
 type EventRecord = Extract<DisplayRecord, { type: "event" }>;
@@ -37,6 +51,8 @@ export interface ToolChip {
 }
 
 interface HistoryViewProps {
+  viewportRef?: RefObject<HTMLDivElement | null>;
+  onCompensatedRef?: RefObject<(() => void) | null>;
   records: readonly DisplayRecord[];
   detailContext: DetailContext;
   detailAliases?: ReadonlyMap<string, string>;
@@ -404,6 +420,49 @@ function renderAgentRecords(
   return nodes;
 }
 
+const MessageBlocks = memo(function MessageBlocks({ record }: { record: MessageRecord }) {
+  return renderMessageBlocks(record);
+});
+
+const AgentRecords = memo(
+  function AgentRecords({
+    records,
+    pairing,
+  }: {
+    records: readonly (MessageRecord | EventRecord)[];
+    pairing: ToolPairing;
+  }) {
+    return renderAgentRecords(records, pairing);
+  },
+  (previous, next) => {
+    if (
+      previous.records.length !== next.records.length ||
+      previous.records.some((record, index) => record !== next.records[index])
+    )
+      return false;
+    if (previous.pairing === next.pairing) return true;
+    return next.records.every(
+      (record) =>
+        record.type !== "message" ||
+        record.content.every((block) => {
+          if (block.type === "tool_call") {
+            const before = previous.pairing.results.get(block);
+            const after = next.pairing.results.get(block);
+            return before?.block === after?.block && before?.recordId === after?.recordId;
+          }
+          return (
+            block.type !== "tool_result" ||
+            previous.pairing.pairedResults.has(block) === next.pairing.pairedResults.has(block)
+          );
+        }),
+    );
+  },
+);
+
+function turnKey(turn: Turn): string {
+  return turn.kind === "agent" ? turn.key : turn.record.id;
+}
+
 function groupTurns(records: readonly DisplayRecord[]): Turn[] {
   const turns: Turn[] = [];
   const appendAgentPart = (record: MessageRecord | EventRecord) => {
@@ -479,24 +538,31 @@ function renderTurn(
   switch (turn.kind) {
     case "user":
       return (
-        <article className="rec rec-you" key={turn.record.id}>
+        <article className="rec rec-you" key={turn.record.id} data-history-row={turn.record.id}>
           <span className="visually-hidden">You:</span>
-          <div className="rec-bd">{renderMessageBlocks(turn.record)}</div>
+          <div className="rec-bd">
+            <MessageBlocks record={turn.record} />
+          </div>
         </article>
       );
     case "agent":
       return (
-        <article className="rec rec-orb" key={turn.key}>
+        <article className="rec rec-orb" key={turn.key} data-history-row={turn.key}>
           <span className="visually-hidden">Orb:</span>
           <div className="rec-bd">
-            {renderAgentRecords(turn.records, pairing)}
+            <AgentRecords records={turn.records} pairing={pairing} />
             {live !== undefined && renderLiveAgentContent(live, busy)}
           </div>
         </article>
       );
     case "alert":
       return (
-        <article className="rec rec-alert" key={turn.record.id} aria-label="Orb alert">
+        <article
+          className="rec rec-alert"
+          key={turn.record.id}
+          data-history-row={turn.record.id}
+          aria-label="Orb alert"
+        >
           <div className="rec-bd">
             <div className="alert-band">{turn.message}</div>
           </div>
@@ -514,7 +580,7 @@ function renderTurn(
         ...(shell.truncated ? ["output truncated"] : []),
       ];
       return (
-        <article className="rec rec-sh" key={turn.record.id}>
+        <article className="rec rec-sh" key={turn.record.id} data-history-row={turn.record.id}>
           <span className="rec-px">sh</span>
           <div className="rec-bd">
             <div className="shblk">
@@ -528,7 +594,7 @@ function renderTurn(
     }
     case "compaction":
       return (
-        <div className="record-compaction" key={turn.record.id}>
+        <div className="record-compaction" key={turn.record.id} data-history-row={turn.record.id}>
           <span className="compaction-line">context compacted</span>
           <LazyDisclosure
             className="record-compaction-details"
@@ -552,6 +618,8 @@ function persistedToolCallIds(records: readonly DisplayRecord[]): Set<string> {
   return ids;
 }
 
+const EMPTY_ALIASES: ReadonlyMap<string, string> = new Map();
+
 export const HistoryView = memo(function HistoryView({
   records,
   liveBlocks,
@@ -559,19 +627,49 @@ export const HistoryView = memo(function HistoryView({
   busy,
   queuedMessages = [],
   detailContext,
-  detailAliases = new Map(),
+  detailAliases = EMPTY_ALIASES,
+  viewportRef,
+  onCompensatedRef,
 }: HistoryViewProps) {
   const [openedDetails] = useState(() => new Set<string>());
-  const representedMessageIds = representedInboxMessageIds(records);
+  const representedMessageIds = useMemo(() => representedInboxMessageIds(records), [records]);
   const pendingMessages = queuedMessages.filter(
     (message) => !representedMessageIds.has(message.id),
   );
   const shellBlocks = liveBlocks.filter((block) => block.blockType === "shell");
-  const turns = groupTurns(records);
-  const pairing = pairToolResults(records);
+  const { turns, pairing, committedToolCallIds, derivationMs } = useMemo(() => {
+    const start = performance.now();
+    return {
+      turns: groupTurns(records),
+      pairing: pairToolResults(records),
+      committedToolCallIds: persistedToolCallIds(records),
+      derivationMs: performance.now() - start,
+    };
+  }, [records]);
+  const keys = useMemo(() => turns.map(turnKey), [turns]);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const firstMounted = useHistoryTail(keys, historyRef, viewportRef, onCompensatedRef);
+  const openDetailValue = useMemo(
+    () => ({ aliases: detailAliases, opened: openedDetails }),
+    [detailAliases, openedDetails],
+  );
+  const measuredRecords = useRef<readonly DisplayRecord[] | null>(null);
+  useLayoutEffect(() => {
+    const derived = measuredRecords.current !== records;
+    measuredRecords.current = records;
+    performance.clearMarks("pi-orb:history-mount");
+    performance.mark("pi-orb:history-mount", {
+      detail: {
+        records: records.length,
+        totalRows: turns.length,
+        mountedRows: turns.length - firstMounted,
+        derivationRecords: derived ? records.length : 0,
+        derivationMs: derived ? derivationMs : 0,
+      },
+    });
+  }, [records, turns.length, firstMounted, derivationMs]);
   const finalTurn = turns[turns.length - 1];
   const agentBlocks = liveBlocks.filter((block) => block.blockType !== "shell");
-  const committedToolCallIds = persistedToolCallIds(records);
   const uncommittedTools = tools.filter((tool) => !committedToolCallIds.has(tool.callId));
   const hasAgentLive = agentBlocks.length > 0 || uncommittedTools.length > 0;
   const mergeLiveIntoFinalTurn =
@@ -586,13 +684,15 @@ export const HistoryView = memo(function HistoryView({
   };
   return (
     <DetailContextValue.Provider value={detailContext}>
-      <OpenDetailValue.Provider value={{ aliases: detailAliases, opened: openedDetails }}>
-        <div className="history">
-          {turns.map((turn, index) =>
-            index === mergedTurnIndex
-              ? renderTurn(turn, pairing, liveAgentContent, busy)
-              : renderTurn(turn, pairing),
-          )}
+      <OpenDetailValue.Provider value={openDetailValue}>
+        <div className="history" ref={historyRef}>
+          {turns
+            .slice(firstMounted)
+            .map((turn, index) =>
+              index + firstMounted === mergedTurnIndex
+                ? renderTurn(turn, pairing, liveAgentContent, busy)
+                : renderTurn(turn, pairing),
+            )}
           {pendingMessages.map((message) => {
             const system = message.system !== undefined;
             const status =

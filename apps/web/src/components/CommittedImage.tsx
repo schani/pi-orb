@@ -65,15 +65,16 @@ export function CommittedImage({
       report("hit", { bytes: cached.size });
       show(cached);
     } else {
+      const owner = getOwner();
+      if (owner === null) return;
       const key = requestKey;
       let pending = imagePending.get(key);
       if (
         pending !== undefined &&
-        (pending.epoch !== cache.invalidationEpoch || pending.owner !== getOwner())
+        (pending.epoch !== cache.invalidationEpoch || pending.owner !== owner)
       )
         pending = undefined;
       if (pending === undefined) {
-        const owner = getOwner();
         const epoch = cache.invalidationEpoch;
         pending = {
           request: getCommittedImage(orbId, recordId, detailKey, index, sessionId),
@@ -89,7 +90,7 @@ export function CommittedImage({
       } else {
         report("coalesced");
       }
-      const { owner, epoch } = pending;
+      const { epoch } = pending;
       void pending.request.then((result) => {
         if (!active) return;
         if (cache.invalidationEpoch !== epoch) {
@@ -99,11 +100,6 @@ export function CommittedImage({
         }
         if (result.isErr()) {
           report(result.error.type);
-          setView({ scope, failed: true });
-          return;
-        }
-        if (owner === null) {
-          report("stale_owner");
           setView({ scope, failed: true });
           return;
         }

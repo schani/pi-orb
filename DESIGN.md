@@ -135,6 +135,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-03-cached-orb-navigation.md](docs/postmortems/2026-10-03-cached-orb-navigation.md) — cached switching still pays metadata, remount, accessibility and 1Password focus costs; investigation only
 - [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set
 - [docs/postmortems/2026-10-02-webkit-lazy-return-gate.md](docs/postmortems/2026-10-02-webkit-lazy-return-gate.md) — captured split-target sidebar click, fixed rail/scroll ownership and diagnostic callback race
 - [docs/postmortems/2026-10-02-expired-metadata-route.md](docs/postmortems/2026-10-02-expired-metadata-route.md) — frontend metadata interception parsed expired-session HTML 401 as JSON; response preservation and owned route drain

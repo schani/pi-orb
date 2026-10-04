@@ -1,5 +1,25 @@
 # Testing strategy
 
+## Cached navigation and automatic mounting (2026-10-03; locally qualified, not deployed)
+
+Tests preceded implementation. Untouched-HEAD browser regressions show metadata blocking cached display and 200 mounted rows instead of 20, in Chromium and WebKit (`.context/cached-navigation/{browser-red,automatic-browser-red}.log`). The first automatic baseline had a Vite transform signature mismatch; its log is retained, and the corrected instrumentation reached the intended red assertion.
+
+Controlled regressions establish the fixes, not passing reruns:
+
+- Child layout effects precede ancestor ref attachment; viewport listeners now acquire refs in an effect.
+- Off-tail readers retain anchors after downward/nonmoving input and delayed image growth. Pending native scrolling cannot restore a stale anchor. Hook compensation advances the parent's geometry baseline synchronously without changing pin state; actual-hook/pin composition reproduced a 600px snap before correction.
+- Provisional views defer uncached detail/image reads until fresh ownership and resume automatically. Pending reads are owner/epoch-fenced. StrictMode setup→cleanup→setup reproduced duplicate detail reads; one-microtask request creation checks active ownership before HTTP.
+- Browser checkpoints capture the prepend boundary, acknowledge native tail scrolling, and sample Retry position after native button reveal. Phone pixel tests first materialize the complete history through native upward input. The original 1px anchor and byte-identical screenshot assertions remain; no assertion timeout increased.
+
+Failure and schedule evidence stays in `.context/cached-navigation/` and `.context/lazy-owner/`. The final frozen tree passes:
+
+- **2,585 unit/DST tests**, eight conditional skips, plus **112 infrastructure checks** — `accepted-unit.log`;
+- **216/216 frontend Chromium/WebKit tests** — `accepted-frontend.log`;
+- real Pi login, tool round trip, replication and drain, including cached cursor hello/replay/send — `accepted-runtime-handoff.log` (process backend; one selected case, three unselected lifecycle cases);
+- repository typecheck and lint — `accepted-{typecheck,lint}.log` (20 warnings, six infos).
+
+Docker/full lifecycle and extension-amplified field latency are not qualified here. The bounded mount/derivation performance mark is not a first-paint metric. Remaining measurement work is in `TODO.md`; no deployment.
+
 ## WebKit lazy-return gate (2026-10-02)
 
 Lazy-return browser failures retain JSON, screenshot and Playwright trace under a test-owned `test-failures/lazy-return-<engine>-*` directory; success removes only its empty directory. E2E and Deploy failure jobs upload only those three filenames as separate browser-fixture artifacts, never broad workspace logs or release state. The fixture uses synthetic data and no cloud API. Workflow allowlists and evidence paths have an infrastructure contract test.

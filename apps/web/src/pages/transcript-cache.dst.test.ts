@@ -27,6 +27,22 @@ it("DST: cancelled navigation and invalidation fence actual loader/cache/reducer
             },
             getHistory: async () => ok(history()),
           });
+          const provisional = load.initial;
+          if (provisional?.history.isOk()) {
+            expect(provisional.orb).toBeNull();
+            const draft = reducer(
+              reducer(initialState("a"), {
+                type: "history_restored",
+                snapshot: provisional.history.value,
+              }),
+              { type: "composer_changed", text: "retained draft", mode: "message" },
+            );
+            expect(draft.records.get("one")?.id).toBe("one");
+            expect(draft.composerText).toBe("retained draft");
+            expect(draft.connection).toBe("closed");
+            expect(draft.welcome).toBeNull();
+            expect(draft.synced).toBe(false);
+          }
           if (cancelled) load.cancel();
           const loaded = await load.result;
           if (cancelled) expect(loaded).toBeNull();

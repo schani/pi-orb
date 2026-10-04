@@ -2,13 +2,36 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Browser, chromium, expect, webkit } from "@playwright/test";
+import { type Browser, chromium, expect, type Page, webkit } from "@playwright/test";
 import { createServer } from "vite";
 import { it } from "vitest";
 import { listenFrontend } from "./frontend-listen.ts";
 import { gotoFrontendHistory } from "./testkit/frontend-fixture.ts";
 
 const ORB = "frontend-fixture-orb";
+
+async function holdMetadata(page: Page) {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let arrived = () => {};
+  const requested = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  await page.route(`**/api/v1/orbs/${ORB}`, async (route) => {
+    const response = await route.fetch();
+    arrived();
+    await gate;
+    await route.fulfill({ response });
+  });
+  return { requested, release };
+}
+
+const renderCheckpoint = (page: Page) =>
+  page.evaluate(
+    "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+  );
 
 it.each(["chromium", "webkit"] as const)(
   "%s: image bytes survive drawer and orb navigation",
@@ -42,6 +65,12 @@ it.each(["chromium", "webkit"] as const)(
       });
       const origin = `http://127.0.0.1:${address.port}`;
       const requests: string[] = [];
+      const detailRequests: string[] = [];
+      page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (path.startsWith(`/api/v1/orbs/${ORB}/details/`)) detailRequests.push(path);
+      });
+      let releaseMetadata = () => {};
       await page.addInitScript(() => {
         const create = URL.createObjectURL.bind(URL);
         const revoke = URL.revokeObjectURL.bind(URL);
@@ -138,8 +167,16 @@ it.each(["chromium", "webkit"] as const)(
         await page.locator('.orb-index a[href="/orbs/frontend-lazy-details"]').click();
         await expect(page.locator(".orb-name")).not.toHaveText("Frontend Playground");
         await expect.poll(() => revoked(firstUrl)).toBe(true);
+        const cachedMetadata = await holdMetadata(page);
+        releaseMetadata = cachedMetadata.release;
+        const cachedReads = { details: detailRequests.length, images: requests.length };
         await page.locator(`.orb-index a[href="/orbs/${ORB}"]`).click();
+        await cachedMetadata.requested;
+        // Provisional views may display admitted bytes, but cannot start fresh reads.
         await expect(thumbnail).toBeVisible();
+        await renderCheckpoint(page);
+        expect({ details: detailRequests.length, images: requests.length }).toEqual(cachedReads);
+        cachedMetadata.release();
         await expect
           .poll(() => thumbnail.evaluate((node) => Reflect.get(node, "naturalWidth") as number))
           .toBeGreaterThan(0);
@@ -164,18 +201,30 @@ it.each(["chromium", "webkit"] as const)(
           };
         });
         const pendingRequests: string[] = [];
+        const pendingDetailRequests: string[] = [];
+        pendingPage.on("request", (request) => {
+          const path = new URL(request.url()).pathname;
+          if (path.startsWith(`/api/v1/orbs/${ORB}/details/`)) pendingDetailRequests.push(path);
+        });
+        let releasePendingMetadata = () => {};
         let release = () => {};
         const gate = new Promise<void>((resolve) => {
           release = resolve;
         });
+        let pendingRoutes = 0;
         await pendingPage.route(`**/api/v1/orbs/${ORB}/images/**`, async (route) => {
           pendingRequests.push(new URL(route.request().url()).pathname);
-          const response = await route.fetch();
-          await gate;
-          await route.fulfill({
-            response,
-            headers: { ...response.headers(), "cache-control": "no-store" },
-          });
+          pendingRoutes++;
+          try {
+            const response = await route.fetch();
+            await gate;
+            await route.fulfill({
+              response,
+              headers: { ...response.headers(), "cache-control": "no-store" },
+            });
+          } finally {
+            pendingRoutes--;
+          }
         });
         try {
           await gotoFrontendHistory(pendingPage, `${origin}/orbs/${ORB}`, ORB);
@@ -207,6 +256,7 @@ it.each(["chromium", "webkit"] as const)(
           );
           release();
           await oldResponse;
+          await expect.poll(() => pendingRoutes).toBe(0);
           await pendingPage.evaluate(
             () =>
               new Promise<void>((resolve) => {
@@ -219,13 +269,50 @@ it.each(["chromium", "webkit"] as const)(
           expect(await created(), "abandoned image response cannot create an object URL").toBe(
             beforeRelease,
           );
+          const pendingMetadata = await holdMetadata(pendingPage);
+          releasePendingMetadata = pendingMetadata.release;
+          const provisionalReads = {
+            details: pendingDetailRequests.length,
+            images: pendingRequests.length,
+          };
           await pendingPage.locator(`.orb-entry-link[href="/orbs/${ORB}"]`).click();
-          await expect(pendingImage.locator("img.tool-image-thumbnail").first()).toBeVisible();
+          await pendingMetadata.requested;
+          await expect(pendingImage).toBeVisible();
+          await expect(pendingImage.locator("img.tool-image-thumbnail")).toHaveCount(0);
+          const uncachedReasoning = pendingPage.locator("details.reasoning").first();
+          await uncachedReasoning.locator(":scope > summary").click();
+          await expect(uncachedReasoning.getByText("Loading…")).toBeVisible();
+          await renderCheckpoint(pendingPage);
+          expect({
+            details: pendingDetailRequests.length,
+            images: pendingRequests.length,
+          }).toEqual(provisionalReads);
+          const provisionalImage = await pendingImage.elementHandle();
+          pendingMetadata.release();
+          await expect(uncachedReasoning).toContainText(
+            "The activity should share the Orb gutter instead of introducing another visual rail.",
+          );
+          await expect
+            .poll(() => pendingDetailRequests.length)
+            .toBeGreaterThan(provisionalReads.details);
+          const returnedThumbnail = pendingImage.locator("img.tool-image-thumbnail").first();
+          await expect(returnedThumbnail).toBeVisible();
+          await expect
+            .poll(() =>
+              returnedThumbnail.evaluate((node) => Reflect.get(node, "naturalWidth") as number),
+            )
+            .toBeGreaterThan(0);
+          expect(
+            await provisionalImage.evaluate((node) => node.isConnected),
+            "metadata readiness retries in the mounted disclosure",
+          ).toBe(true);
           await expect
             .poll(() => pendingRequests.filter((path) => path === pendingTarget).length)
             .toBeGreaterThan(1);
         } finally {
           release();
+          releasePendingMetadata();
+          await pendingPage.unrouteAll({ behavior: "wait" });
           await pendingPage.close();
         }
 
@@ -251,6 +338,8 @@ it.each(["chromium", "webkit"] as const)(
           await retryPage.close();
         }
       } finally {
+        releaseMetadata();
+        await page.unrouteAll({ behavior: "wait" });
         await page.close();
       }
     } finally {

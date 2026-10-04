@@ -19,7 +19,10 @@ export interface DetailContext {
   cache: TranscriptCache;
   getOwner: () => TranscriptOwner | null;
   livePending: Map<string, Promise<Result<LiveDisplayDetail, string>>>;
-  committedPending: Map<string, ReturnType<typeof getCommittedDetail>>;
+  committedPending: Map<
+    string,
+    { request: ReturnType<typeof getCommittedDetail>; owner: TranscriptOwner; epoch: number }
+  >;
   imagePending: Map<
     string,
     {
@@ -186,59 +189,69 @@ export function CommittedBody({
       setBody({ scope, value: cached.body });
       return;
     }
-    let active = true;
     const owner = getOwner();
+    if (owner === null) return;
+    let active = true;
     const epoch = cache.invalidationEpoch;
-    const key = JSON.stringify([orbId, sessionId, recordId, detailKey]);
-    let request = committedPending.get(key);
-    if (request === undefined) {
-      request = getCommittedDetail(orbId, recordId, detailKey, sessionId);
-      committedPending.set(key, request);
-      void request.then(() => {
-        if (committedPending.get(key) === request) committedPending.delete(key);
-      });
-    }
-    void request.then((result) => {
+    // StrictMode may clean up this effect before its owner can start a read.
+    queueMicrotask(() => {
       if (!active || cache.invalidationEpoch !== epoch) return;
-      if (result.isErr()) {
+      const key = JSON.stringify([orbId, sessionId, recordId, detailKey]);
+      let pending = committedPending.get(key);
+      if (pending?.owner !== owner || pending.epoch !== epoch) pending = undefined;
+      if (pending === undefined) {
+        pending = {
+          request: getCommittedDetail(orbId, recordId, detailKey, sessionId),
+          owner,
+          epoch,
+        };
+        committedPending.set(key, pending);
+        const started = pending;
+        void started.request.then(() => {
+          if (committedPending.get(key) === started) committedPending.delete(key);
+        });
+      }
+      void pending.request.then((result) => {
+        if (!active || cache.invalidationEpoch !== epoch) return;
+        if (result.isErr()) {
+          console.debug("display detail", {
+            orbId,
+            recordId,
+            detailKey,
+            outcome: result.error.type,
+          });
+          setError({ scope, message: describeApiError(result.error) });
+          return;
+        }
+        const detail: CommittedDisplayDetail = result.value;
+        if (
+          detail.sessionId !== sessionId ||
+          detail.recordId !== recordId ||
+          detail.detailKey !== detailKey
+        ) {
+          console.debug("display detail", {
+            orbId,
+            recordId,
+            detailKey,
+            outcome: "stale_identity",
+          });
+          setError({ scope, message: "Detail changed. Retry." });
+          return;
+        }
+        const admission = owner.publishDetail(detail);
         console.debug("display detail", {
           orbId,
           recordId,
           detailKey,
-          outcome: result.error.type,
+          outcome: admission,
+          bytes: cache.stats.bytes,
         });
-        setError({ scope, message: describeApiError(result.error) });
-        return;
-      }
-      const detail: CommittedDisplayDetail = result.value;
-      if (
-        detail.sessionId !== sessionId ||
-        detail.recordId !== recordId ||
-        detail.detailKey !== detailKey ||
-        owner === null
-      ) {
-        console.debug("display detail", {
-          orbId,
-          recordId,
-          detailKey,
-          outcome: "stale_identity",
-        });
-        setError({ scope, message: "Detail changed. Retry." });
-        return;
-      }
-      const admission = owner.publishDetail(detail);
-      console.debug("display detail", {
-        orbId,
-        recordId,
-        detailKey,
-        outcome: admission,
-        bytes: cache.stats.bytes,
+        if (admission === "stale") {
+          setError({ scope, message: "Detail changed. Retry." });
+          return;
+        }
+        setBody({ scope, value: detail.body });
       });
-      if (admission === "stale") {
-        setError({ scope, message: "Detail changed. Retry." });
-        return;
-      }
-      setBody({ scope, value: detail.body });
     });
     return () => {
       active = false;

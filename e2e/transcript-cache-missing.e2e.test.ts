@@ -137,12 +137,21 @@ it.each(["chromium", "webkit"] as const)(
       // Flip the next-request gate while the return request is paused in its producer.
       // That request must retain its entry ownership and complete independently.
       holdMetadata = true;
-      // A held load leaves B painted; history visibility alone cannot end this wait.
-      await check(page.locator(".history")).toContainText("Frontend playground");
+      // The return-entry gate owns cached selection before metadata can complete.
+      await check.poll(() => lastTraceOutcome(page, "navigation", a)).toBe("cached_selection");
+      await check(page.locator(".history")).toContainText("Review 100");
+      await check(page.locator(".history")).not.toContainText("Frontend playground");
+      await check(
+        page.getByRole("textbox", { name: "Message the orb", exact: true }),
+      ).toBeEditable();
+      await check(
+        page.getByRole("button", { name: "Change thinking", exact: true }),
+      ).toBeDisabled();
+      check(sockets.size).toBe(0);
       releaseReturnMetadata();
       await required(returnedMetadata);
       holdMetadata = false;
-      await check.poll(() => lastTraceOutcome(page, "navigation", a)).toBe("cache_hit");
+      await check.poll(() => lastTraceOutcome(page, "navigation", a)).toBe("metadata_completion");
       await check(page.locator(".history")).toContainText("Review 100");
       await required(historyRequested);
       // A newer metadata poll starts live synchronization while the older HTTP

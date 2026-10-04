@@ -71,7 +71,12 @@ import {
   latestEntryAlertId,
   resolveAlertAck,
 } from "../lib/orb-alert.ts";
-import { isMissing, type OrbLoad, startOrbLoad } from "../lib/orb-load.ts";
+import {
+  isMissing,
+  type OrbSelection,
+  retainsOrbSelection,
+  startOrbLoad,
+} from "../lib/orb-load.ts";
 import { DEFAULT_PAGE_TITLE, orbPageTitle, setPageTitle } from "../lib/page-title.ts";
 import { formatTimeRemaining, projectOrbGlyph } from "../lib/project-orbs.ts";
 import {
@@ -160,6 +165,7 @@ type OrbPageAction =
   | { type: "history_restored"; snapshot: CachedTranscript }
   | { type: "history_refreshed"; view: DisplayHistoryView; epoch: number }
   | { type: "history_failed"; error: ApiError }
+  | { type: "history_invalidated"; error: ApiError }
   | { type: "frame"; frame: ServerFrame }
   | { type: "connection_status"; status: LiveConnectionStatus }
   | { type: "composer_changed"; text: string; mode: ComposerMode }
@@ -559,6 +565,19 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         historyError: null,
       };
     }
+    case "history_invalidated":
+      return {
+        ...state,
+        records: new Map(),
+        sessionId: null,
+        afterRecordId: null,
+        headId: null,
+        cacheReady: false,
+        historyLoaded: false,
+        historyError: action.error,
+        detailScope: state.detailScope + 1,
+        historyEpoch: state.historyEpoch + 1,
+      };
     case "history_failed":
       return { ...state, historyError: action.error };
     case "frame":
@@ -706,9 +725,16 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
   const selectCurrentOrb = useRef<() => void>(() => {});
   usePhoneViewport(pageRef);
   const [project, setProject] = useState<{ id: string; name: string } | null>(null);
-  const [loaded, setLoaded] = useState<OrbLoad | null>(null);
-  useEffect(() => {
-    if (loaded?.orbId === orbId) return;
+  const [loaded, setLoaded] = useState<OrbSelection | null>(null);
+  const navigationGeneration = useRef(0);
+  const [conversationKey, setConversationKey] = useState(0);
+  const selectionRef = useRef({ loaded, conversationKey });
+  selectionRef.current = { loaded, conversationKey };
+  useLayoutEffect(() => {
+    const selected = selectionRef.current;
+    if (retainsOrbSelection(selected.loaded, orbId)) return;
+    const generation =
+      selected.loaded?.orbId === orbId ? selected.conversationKey : ++navigationGeneration.current;
     const started = performance.now();
     const load = startOrbLoad({
       orbId,
@@ -719,7 +745,7 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
         devConsoleDebug.record({
           event: "navigation",
           orbId: data.orbId,
-          outcome: data.cacheHit ? "cache_hit" : "cache_miss",
+          outcome: data.phase,
           recordCount: data.records,
         });
         console.debug("transcript navigation", {
@@ -728,18 +754,25 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
         });
       },
     });
+    if (load.initial !== null) {
+      setConversationKey(generation);
+      setLoaded(load.initial);
+    }
     void load.result.then((value) => {
       const accepted = load.accept(value);
-      if (accepted !== null) setLoaded(accepted);
+      if (accepted !== null) {
+        setConversationKey(generation);
+        setLoaded(accepted);
+      }
     });
     return load.cancel;
-  }, [orbId, loaded, cache]);
+  }, [orbId, cache]);
   const pending = loaded?.orbId !== orbId;
   return (
     <div className="orb-page" ref={pageRef}>
       <OrbIndex
         onProjectChange={setProject}
-        projectId={loaded?.orb.isOk() ? loaded.orb.value.projectId : null}
+        projectId={loaded?.orb?.isOk() ? loaded.orb.value.projectId : null}
         orbId={orbId}
         pending={pending}
         onSelect={() => {
@@ -750,13 +783,13 @@ export function OrbPage({ orbId, cache }: { orbId: string; cache: TranscriptCach
         <div className="orb-main" aria-busy="true" />
       ) : (
         <OrbConversation
-          key={loaded.orbId}
+          key={conversationKey}
           initial={loaded}
           cache={cache}
           onSelectionReady={selectCurrentOrb}
           pending={pending}
           projectName={
-            loaded.orb.isOk() && project?.id === loaded.orb.value.projectId ? project.name : null
+            loaded.orb?.isOk() && project?.id === loaded.orb.value.projectId ? project.name : null
           }
         />
       )}
@@ -771,7 +804,7 @@ function OrbConversation({
   projectName,
   onSelectionReady,
 }: {
-  initial: OrbLoad;
+  initial: OrbSelection;
   cache: TranscriptCache;
   pending: boolean;
   projectName: string | null;
@@ -807,8 +840,9 @@ function OrbConversation({
     }
   }, [orbId, state.composerImages, state.composerMode, state.composerText, state.commandDraft]);
   const [orb, setOrb] = useState<OrbView | null>(() =>
-    initial.orb.isOk() ? initial.orb.value : null,
+    initial.orb?.isOk() ? initial.orb.value : null,
   );
+  const metadataAvailable = orb !== null;
   const orbRef = useRef(orb);
   orbRef.current = orb;
   const setObservedOrb = useCallback((next: OrbView | null) => {
@@ -832,7 +866,7 @@ function OrbConversation({
       alertEntry.current = recordId;
       const attempt = ++alertAttempt.current;
       setAlertAckError(null);
-      if (recordId === null) return;
+      if (recordId === null || orbRef.current === null) return;
       ++metadataRevision.current;
       const entry = beginAlertEntry(recordId, null);
       void acknowledgeOrbAlert(orbId, recordId).then((result) => {
@@ -860,6 +894,7 @@ function OrbConversation({
     [orbId, setObservedOrb],
   );
   useEffect(() => {
+    if (!metadataAvailable) return;
     if (document.visibilityState === "visible") {
       const observed = beginAlertEntry(orbRef.current?.unreadAlertId, latestVisibleAlert());
       acknowledgeEntry(observed.recordId);
@@ -873,7 +908,7 @@ function OrbConversation({
       ++alertAttempt.current;
       onSelectionReady.current = () => {};
     };
-  }, [acknowledgeEntry, latestVisibleAlert, onSelectionReady]);
+  }, [acknowledgeEntry, latestVisibleAlert, onSelectionReady, metadataAvailable]);
   const uploads = useWorkspaceUploads(orbId, orb?.state === "running");
   const mainRef = useRef<HTMLElement>(null);
   const [dropZone, setDropZone] = useState<DropZone | null>(null);
@@ -956,7 +991,7 @@ function OrbConversation({
   const [committedDetailPending] = useState<DetailContext["committedPending"]>(() => new Map());
   const [imagePending] = useState<DetailContext["imagePending"]>(() => new Map());
   const [orbError, setOrbError] = useState<ApiError | null>(() =>
-    initial.orb.isErr() ? initial.orb.error : null,
+    initial.orb?.isErr() ? initial.orb.error : null,
   );
   const [hostedFiles, setHostedFiles] = useState<HostedFilesResponse | null>(null);
   const [hostedFilesError, setHostedFilesError] = useState<ApiError | null>(null);
@@ -1004,10 +1039,47 @@ function OrbConversation({
   }, [orbId, state.afterRecordId, state.headId, state.records, state.sessionId, state.synced]);
   const [orbNotFound, observeOrbResource] = useReducer(
     missingResourceReducer,
-    initial.orb.isErr() && initial.orb.error.type === "http" && initial.orb.error.status === 404,
+    (initial.orb?.isErr() && isMissing(initial.orb.error)) ||
+      (initial.orb?.isOk() && initial.orb.value.state === "deleting") ||
+      false,
   );
+  const missingRef = useRef(orbNotFound);
+  const markMissing = useCallback(() => {
+    missingRef.current = true;
+    cache.invalidate(orbId);
+    setObservedOrb(null);
+    setOrbError(null);
+    observeOrbResource("missing");
+  }, [cache, orbId, setObservedOrb]);
+  useLayoutEffect(() => {
+    if (initial.orb === null || missingRef.current) return;
+    if (
+      (initial.orb.isErr() && isMissing(initial.orb.error)) ||
+      (initial.orb.isOk() && initial.orb.value.state === "deleting")
+    ) {
+      markMissing();
+      return;
+    }
+    if (initial.orb.isOk()) {
+      setObservedOrb(initial.orb.value);
+      setOrbError(null);
+    } else setOrbError(initial.orb.error);
+    if (initial.history.isErr())
+      dispatch({ type: "history_invalidated", error: initial.history.error });
+    else if (initial.history.value.records !== transcriptRef.current.records) {
+      dispatch({ type: "history_restored", snapshot: initial.history.value });
+    }
+  }, [initial, markMissing, setObservedOrb]);
+  const metadataComplete = initial.orb !== null;
+  const [metadataRetry, retryMetadata] = useReducer((attempt: number) => attempt + 1, 0);
   const cacheOwner = useRef<TranscriptOwner | null>(null);
-  const getOwner = useCallback(() => cacheOwner.current, []);
+  const lifecycle = orb?.state ?? null;
+  const resourceGone = orbNotFound || lifecycle === "deleting";
+  const resourceProjectId = !resourceGone ? (orb?.projectId ?? null) : null;
+  const getOwner = useCallback(
+    () => (resourceProjectId === null ? null : cacheOwner.current),
+    [resourceProjectId],
+  );
   const detailContext = useMemo<DetailContext>(
     () => ({
       orbId,
@@ -1032,9 +1104,6 @@ function OrbConversation({
       imagePending,
     ],
   );
-  const lifecycle = orb?.state ?? null;
-  const resourceGone = orbNotFound || lifecycle === "deleting";
-  const resourceProjectId = !resourceGone ? (orb?.projectId ?? null) : null;
   useLayoutEffect(() => {
     if (resourceGone) cache.invalidate(orbId);
     if (resourceProjectId === null) return;
@@ -1090,7 +1159,7 @@ function OrbConversation({
     [],
   );
   const refreshHistory = useCallback(() => {
-    if (orbNotFound || refreshOwner.current !== null) return;
+    if (orbNotFound || orbRef.current === null || refreshOwner.current !== null) return;
     const owner = {};
     const epoch = transcriptRef.current.historyEpoch;
     refreshOwner.current = owner;
@@ -1098,10 +1167,7 @@ function OrbConversation({
       if (refreshOwner.current !== owner) return;
       refreshOwner.current = null;
       if (history.isErr() && isMissing(history.error)) {
-        cache.invalidate(orbId);
-        setOrb(null);
-        setOrbError(null);
-        observeOrbResource("missing");
+        markMissing();
         return;
       }
       if (history.isOk() && history.value.orbId !== orbId) {
@@ -1125,8 +1191,8 @@ function OrbConversation({
           : { type: "history_failed", error: history.error },
       );
     });
-  }, [orbId, cache, orbNotFound]);
-  const priorLifecycle = useRef(initial.orb.isOk() ? initial.orb.value.state : null);
+  }, [orbId, orbNotFound, markMissing]);
+  const priorLifecycle = useRef(initial.orb?.isOk() ? initial.orb.value.state : null);
   useEffect(() => {
     if (lifecycle === null || resourceGone) return;
     const lifecycleChanged = priorLifecycle.current !== lifecycle;
@@ -1190,36 +1256,46 @@ function OrbConversation({
 
   // Poll the orb resource every 2s (docs/control-plane-api.md).
   useEffect(() => {
-    if (orbNotFound) return;
+    if (orbNotFound || !metadataComplete) return;
     let cancelled = false;
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       const revision = metadataRevision.current;
       const result = await getOrb(orbId);
-      if (cancelled || !acceptAlertMetadata(revision, metadataRevision.current)) return;
+      inFlight = false;
+      if (
+        cancelled ||
+        missingRef.current ||
+        !acceptAlertMetadata(revision, metadataRevision.current)
+      )
+        return;
+      if (
+        (result.isErr() && isMissing(result.error)) ||
+        (result.isOk() && result.value.state === "deleting")
+      ) {
+        markMissing();
+        return;
+      }
       if (result.isOk()) {
         setObservedOrb(result.value);
         setOrbError(null);
         observeOrbResource("found");
       } else {
-        if (result.error.type === "http" && result.error.status === 404) {
-          setOrb(null);
-          setOrbError(null);
-          observeOrbResource("missing");
-          return;
-        }
         setOrbError(result.error);
       }
     };
-    poll();
+    if (metadataRetry > 0) void poll();
     const timer = window.setInterval(poll, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [orbId, orbNotFound, setObservedOrb]);
+  }, [orbId, orbNotFound, metadataComplete, metadataRetry, setObservedOrb, markMissing]);
 
   useEffect(() => {
-    if (orbNotFound) return;
+    if (orbNotFound || !metadataAvailable) return;
     let cancelled = false;
     const poll = async () => {
       const result = await listHostedFiles(orbId);
@@ -1237,11 +1313,11 @@ function OrbConversation({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [orbId, orbNotFound]);
+  }, [orbId, orbNotFound, metadataAvailable]);
 
   useEffect(() => {
     let cancelled = false;
-    if (resourceGone) return;
+    if (resourceGone || lifecycle === null) return;
     const poll = () => {
       const token = messageEpoch.begin();
       const cursorBefore = inboxPoller.cursor();
@@ -1313,6 +1389,7 @@ function OrbConversation({
   // stays locked until they return to the bottom themselves.
   const pinnedRef = useRef(true);
   const autoScrollYRef = useRef<number | null>(null);
+  const onHistoryCompensatedRef = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     const target = scrollRef.current;
     const view = () => ({
@@ -1321,6 +1398,9 @@ function OrbConversation({
       contentHeight: target?.scrollHeight ?? 0,
     });
     let previousView = view();
+    onHistoryCompensatedRef.current = () => {
+      previousView = view();
+    };
     const onScroll = () => {
       const current = view();
       pinnedRef.current = isPinnedAfterScroll(
@@ -1354,6 +1434,14 @@ function OrbConversation({
     // Observe geometry, not React renders. Polling must not write into a native
     // scrolling layer, even at the same offset.
     const observer = new ResizeObserver(() => {
+      const current = view();
+      // Reconcile native movement before measuring the newly grown content.
+      if (Math.abs(current.scrollY - previousView.scrollY) > 1) {
+        pinnedRef.current = isPinnedAfterScroll(
+          { ...previousView, scrollY: current.scrollY },
+          autoScrollYRef.current,
+        );
+      }
       if (target && pinnedRef.current) {
         const bottom = Math.max(0, target.scrollHeight - target.clientHeight);
         if (Math.abs(target.scrollTop - bottom) > 1) {
@@ -1366,6 +1454,7 @@ function OrbConversation({
     if (target) observer.observe(target);
     if (scrollContentRef.current) observer.observe(scrollContentRef.current);
     return () => {
+      onHistoryCompensatedRef.current = null;
       observer.disconnect();
       target?.removeEventListener("keydown", keyboardIntent);
       target?.removeEventListener("keyup", keyboardSettled);
@@ -1399,7 +1488,14 @@ function OrbConversation({
           // so a just-committed display name wins even if the ordinary 2s orb poll has not seen it.
           const revision = metadataRevision.current;
           void getOrb(orbId).then((latest) => {
-            if (!active) return;
+            if (!active || missingRef.current) return;
+            if (
+              (latest.isErr() && isMissing(latest.error)) ||
+              (latest.isOk() && latest.value.state === "deleting")
+            ) {
+              markMissing();
+              return;
+            }
             const orbName = latest.isOk() ? (latest.value.name ?? null) : orbNameRef.current;
             if (latest.isOk() && acceptAlertMetadata(revision, metadataRevision.current)) {
               setObservedOrb(latest.value);
@@ -1433,7 +1529,7 @@ function OrbConversation({
       liveRef.current = null;
       connection.dispose();
     };
-  }, [orbId, shouldConnect, setObservedOrb]);
+  }, [orbId, shouldConnect, setObservedOrb, markMissing]);
 
   const maxPromptBytes = state.welcome?.maxPromptBytes ?? FALLBACK_MAX_PROMPT_BYTES;
 
@@ -1626,7 +1722,7 @@ function OrbConversation({
       ? null
       : projectOrbGlyph(orb.state, orb.activity, orb.sleepUntil, orb.unreadAlertId);
   const lifecycleWord = orb === null ? null : orbLifecycleStatus(orb, ageNow);
-  const busyLocked = orb?.state === "deleting" || orb?.state === "archiving";
+  const busyLocked = orb === null || orb.state === "deleting" || orb.state === "archiving";
   const expiresIn =
     orb?.actionRequired === undefined || orb.actionRequired.type === "owner_login_required"
       ? null
@@ -1791,7 +1887,7 @@ function OrbConversation({
               className="icon-button danger"
               aria-label="Delete orb"
               title="delete"
-              disabled={orb?.state === "deleting"}
+              disabled={orb === null || orb.state === "deleting"}
               onClick={() => void permanentlyDelete()}
             >
               <Icon name="bin" />
@@ -1932,7 +2028,15 @@ function OrbConversation({
             </OrbNotice>
           )}
           <HostedFiles inventory={hostedFiles} error={hostedFilesError} />
-          {orbError !== null && <OrbNotice error>{describeApiError(orbError)}</OrbNotice>}
+          {orbError !== null && (
+            <OrbNotice error>
+              {orb === null && "metadata unavailable: "}
+              {describeApiError(orbError)}{" "}
+              <button type="button" onClick={retryMetadata}>
+                Retry
+              </button>
+            </OrbNotice>
+          )}
           {inboxError !== null && (
             <OrbNotice error>inbox unavailable: {describeApiError(inboxError)}</OrbNotice>
           )}
@@ -1967,6 +2071,8 @@ function OrbConversation({
           )}
 
           <HistoryView
+            viewportRef={scrollRef}
+            onCompensatedRef={onHistoryCompensatedRef}
             key={state.detailScope}
             detailAliases={state.detailAliases}
             detailContext={detailContext}
