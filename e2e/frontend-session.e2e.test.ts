@@ -428,7 +428,7 @@ describe("frontend-only browser behavior", () => {
         await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
         await expectPage(composer).toBeVisible();
         expectPage(await page.evaluate(() => Reflect.get(globalThis, "__composerFocuses"))).toBe(0);
-        await expectPage(composer).toHaveCSS("font-size", "16px");
+        await expectPage(composer).toHaveCSS("font-size", "13px");
         const rename = page.getByRole("button", { name: "Rename orb", exact: true });
         await rename.focus();
         await expectPage(rename).toBeFocused();
