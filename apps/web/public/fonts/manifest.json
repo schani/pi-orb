@@ -1,0 +1,71 @@
+{
+  "subset": "Latin/ASCII and UI symbols; upstream shaping retained. Internal families renamed in the study. Bold italic is synthesized; other styles use real assets.",
+  "assets": [
+    {
+      "file": "iosevka-etoile-bold-7ec739ec82b2.woff2",
+      "sha256": "7ec739ec82b22f48cb0f2fe98f05faae7d523cb1217d97fc1bf8357e4cf4ce9b",
+      "family": "Iosevka Etoile",
+      "internalFamily": "Orb Study 5",
+      "weight": 700,
+      "style": "normal",
+      "source": "be5invis/Iosevka v34.9.0",
+      "sourceUrl": "https://github.com/be5invis/Iosevka",
+      "license": "iosevka-etoile-OFL.txt"
+    },
+    {
+      "file": "iosevka-etoile-italic-ff9ea6b1ef88.woff2",
+      "sha256": "ff9ea6b1ef880001c534a73041129c822bde320cd7693cb55cbce5c2b1867ef2",
+      "family": "Iosevka Etoile",
+      "internalFamily": "Orb Study 5",
+      "weight": 400,
+      "style": "italic",
+      "source": "be5invis/Iosevka v34.9.0",
+      "sourceUrl": "https://github.com/be5invis/Iosevka",
+      "license": "iosevka-etoile-OFL.txt"
+    },
+    {
+      "file": "iosevka-etoile-regular-989cbc25c646.woff2",
+      "sha256": "989cbc25c6466c3fdf788c076fc24285dfe696b29597b9376a39b60af06ea88b",
+      "family": "Iosevka Etoile",
+      "internalFamily": "Orb Study 5",
+      "weight": 400,
+      "style": "normal",
+      "source": "be5invis/Iosevka v34.9.0",
+      "sourceUrl": "https://github.com/be5invis/Iosevka",
+      "license": "iosevka-etoile-OFL.txt"
+    },
+    {
+      "file": "jetbrains-mono-bold-f73d6b79ab0c.woff2",
+      "sha256": "f73d6b79ab0ca909cb5d1869df4846d4cb03bc2116864195a886265b65b07a44",
+      "family": "JetBrains Mono",
+      "internalFamily": "Orb Study 1",
+      "weight": 700,
+      "style": "normal",
+      "source": "JetBrains/JetBrainsMono v2.304",
+      "sourceUrl": "https://github.com/JetBrains/JetBrainsMono",
+      "license": "jetbrains-mono-OFL.txt"
+    },
+    {
+      "file": "jetbrains-mono-italic-406a79f3245e.woff2",
+      "sha256": "406a79f3245e24610796331640ae837bd6e48724519da5e1ffcdbf28616b05af",
+      "family": "JetBrains Mono",
+      "internalFamily": "Orb Study 1",
+      "weight": 400,
+      "style": "italic",
+      "source": "JetBrains/JetBrainsMono v2.304",
+      "sourceUrl": "https://github.com/JetBrains/JetBrainsMono",
+      "license": "jetbrains-mono-OFL.txt"
+    },
+    {
+      "file": "jetbrains-mono-regular-fa06becb7e66.woff2",
+      "sha256": "fa06becb7e666c30320b94bbae3cc11ea4aff194c185822177d1853051a01541",
+      "family": "JetBrains Mono",
+      "internalFamily": "Orb Study 1",
+      "weight": 400,
+      "style": "normal",
+      "source": "JetBrains/JetBrainsMono v2.304",
+      "sourceUrl": "https://github.com/JetBrains/JetBrainsMono",
+      "license": "jetbrains-mono-OFL.txt"
+    }
+  ]
+}

@@ -121,6 +121,95 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     },
   );
 
+  it.each([
+    { width: 1280, hasTouch: false },
+    { width: 820, hasTouch: true },
+    { width: 390, hasTouch: true },
+    { width: 320, hasTouch: false },
+  ])(
+    "matches composer and transcript typography at $width px with touch=$hasTouch",
+    async ({ width, hasTouch }) => {
+      const page = await browser.newPage({
+        viewport: { width, height: 900 },
+        hasTouch,
+      });
+      try {
+        const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
+        await gotoFrontendHistory(
+          page,
+          `${origin}${ORB_PATH}`,
+          "frontend-fixture-orb",
+          page.locator(".history"),
+        );
+        if (width <= 600) await page.locator(".composer-open").click();
+        await expectPage(composer).toHaveCSS("font-size", "13px");
+        const typography = await page.locator(".orb-main").evaluate((main) => {
+          const input = main.querySelector(".composer-input");
+          const prose = main.querySelector(".rec-orb .chat-markdown");
+          const mirror = main.querySelector(".composer-caret-mirror");
+          return [input, prose, mirror].map((element) => {
+            if (!element) return null;
+            const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+            if (!style) return null;
+            return {
+              family: style.fontFamily,
+              size: style.fontSize,
+              ligatures: style.fontVariantLigatures,
+              features: style.fontFeatureSettings,
+            };
+          });
+        });
+        expectPage(typography[0]?.family).toContain("Iosevka Etoile");
+        const loaded = await composer.evaluate(async (element) => {
+          const families = ["Iosevka Etoile", "JetBrains Mono"];
+          return Promise.all(
+            families.flatMap((family) =>
+              ["", "bold ", "italic "].map(async (style) => {
+                const faces = await element.ownerDocument.fonts.load(`${style}13px "${family}"`);
+                return (
+                  faces.length > 0 &&
+                  faces.every((face: { status: string }) => face.status === "loaded")
+                );
+              }),
+            ),
+          );
+        });
+        expectPage(loaded).toEqual(Array(6).fill(true));
+        await expectPage(page.locator(".chat-markdown code").first()).toHaveCSS(
+          "font-family",
+          /^"?JetBrains Mono"?, monospace$/,
+        );
+        if (engine === "chromium") {
+          const session = await page.context().newCDPSession(page);
+          await session.send("DOM.enable");
+          await session.send("CSS.enable");
+          const { root } = await session.send("DOM.getDocument");
+          for (const [selector, family] of [
+            [".rec-orb .chat-markdown p", "Orb Study 5"],
+            [".chat-markdown code", "Orb Study 1"],
+          ] as const) {
+            const { nodeId } = await session.send("DOM.querySelector", {
+              nodeId: root.nodeId,
+              selector,
+            });
+            const { fonts } = await session.send("CSS.getPlatformFontsForNode", { nodeId });
+            expectPage(
+              fonts.some(
+                (font: { familyName: string; isCustomFont: boolean; glyphCount: number }) =>
+                  font.familyName === family && font.isCustomFont && font.glyphCount > 0,
+              ),
+            ).toBe(true);
+          }
+          await session.detach();
+        }
+        expectPage(typography[1]).toEqual(typography[0]);
+        expectPage(typography[2]).toEqual(typography[0]);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
   it("leaves tablet-width touch focus and document position alone on tab return", async () => {
     const page = await browser.newPage({
       viewport: { width: 820, height: 900 },
@@ -131,7 +220,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
       await expectPage(composer).not.toBeFocused();
-      await expectPage(composer).toHaveCSS("font-size", "16px");
+      await expectPage(composer).toHaveCSS("font-size", "13px");
       const rename = page.getByRole("button", { name: "Rename orb", exact: true });
       await rename.focus();
       await page.evaluate(() => {

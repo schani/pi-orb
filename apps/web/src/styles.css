@@ -1,4 +1,52 @@
-/* Signal / Boards — one monospace face, white paper, black rules, two signal
+@font-face {
+  font-family: "Iosevka Etoile";
+  src: url("/fonts/iosevka-etoile-bold-7ec739ec82b2.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Iosevka Etoile";
+  src: url("/fonts/iosevka-etoile-italic-ff9ea6b1ef88.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Iosevka Etoile";
+  src: url("/fonts/iosevka-etoile-regular-989cbc25c646.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-bold-f73d6b79ab0c.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-italic-406a79f3245e.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono-regular-fa06becb7e66.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Signal / Boards — reading and code faces, white paper, black rules, two signal
    hues. Light only, by product decision. Prototype:
    design-prototypes/signal-boards.html. */
 
@@ -21,7 +69,8 @@
   --st-arch: #666;
   --st-archng: var(--st-start);
   --st-del: var(--bad);
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --text: "Iosevka Etoile", serif;
+  --mono: "JetBrains Mono", monospace;
   --text-size: 13px;
   --row: 20px;
   --ribbon: 24px;
@@ -41,7 +90,8 @@ body {
   margin: 0;
   background: var(--w);
   color: var(--k);
-  font-family: var(--mono);
+  font-family: var(--text);
+  font-feature-settings: "calt" 1;
   font-size: var(--text-size);
   line-height: var(--row);
   font-variant-numeric: tabular-nums;
@@ -1682,6 +1732,13 @@ body:has(.orb-page) {
   border-left: 2px solid var(--g2);
 }
 
+code,
+pre,
+.tool-output {
+  font-family: var(--mono);
+  font-feature-settings: "calt" 1;
+}
+
 .notice code,
 .chat-markdown :not(pre) > code {
   padding: 0 3px;
@@ -2358,10 +2415,6 @@ body:has(.orb-page) {
   isolation: isolate;
 }
 
-.composer[data-touch-capable="true"] .composer-editor {
-  font-size: 16px;
-}
-
 .composer-caret-mirror {
   position: absolute;
   top: 0;
@@ -2775,7 +2828,6 @@ button.orb-phone-menu {
     min-height: 88px;
     padding: 12px 0;
     resize: none;
-    font-size: 16px;
     line-height: 20px;
   }
 

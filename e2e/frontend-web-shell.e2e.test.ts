@@ -47,6 +47,21 @@ it("boots the production shell and loads its built JS, CSS and favicon on direct
     await page.reload();
     await expectPage(page.getByText("Orb doesn't exist")).toBeVisible();
     expect(page.url()).toBe(`${origin}/orbs/missing-orb`);
+    const fontsLoaded = await page.locator("body").evaluate(async (body) => {
+      const fonts = body.ownerDocument.fonts;
+      const faces = await Promise.all([
+        fonts.load('13px "Iosevka Etoile"'),
+        fonts.load('13px "JetBrains Mono"'),
+      ]);
+      return faces.every(
+        (family: { status: string }[]) =>
+          family.length > 0 && family.every((face) => face.status === "loaded"),
+      );
+    });
+    expect(fontsLoaded).toBe(true);
+    expect(
+      responses.filter(({ path, status }) => path.endsWith(".woff2") && status === 200).length,
+    ).toBeGreaterThanOrEqual(2);
     expect(
       responses.some(({ path, status }) => path.startsWith("/assets/") && status === 200),
     ).toBe(true);

@@ -32,6 +32,42 @@ describe("subagent roster", () => {
   });
 });
 
+describe("composer typography", () => {
+  it("inherits the transcript face and size at every viewport and input capability", () => {
+    expect(rule("body")).toContain("font-family: var(--text)");
+    expect(rule("body")).toContain("font-size: var(--text-size)");
+    expect(rule(":root")).toContain("--text-size: 13px");
+    expect(rule("button,\ninput,\ntextarea,\nselect")).toContain("font: inherit");
+    const composerRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) =>
+      selector?.includes(".composer"),
+    );
+    for (const [, selector, declarations] of composerRules) {
+      expect(declarations, selector).not.toMatch(/font(?:-size|-family)?\s*:/);
+    }
+  });
+});
+
+describe("bundled typography", () => {
+  it("separates quasi-proportional reading text from fixed-cell code", () => {
+    expect(rule(":root")).toContain('--text: "Iosevka Etoile"');
+    expect(rule(":root")).toContain('--mono: "JetBrains Mono"');
+    expect(rule("body")).toContain('font-feature-settings: "calt" 1');
+    expect(rule("code,\npre,\n.tool-output")).toContain("font-family: var(--mono)");
+    expect(rule(".orb-terminal-emulator")).toContain("--term-font-family: var(--mono)");
+    const faces = [...css.matchAll(/@font-face\s*\{([^}]+)\}/g)];
+    expect(faces).toHaveLength(6);
+    for (const [, face] of faces) {
+      const path = /url\("([^"]+)"\)/.exec(face ?? "")?.[1];
+      expect(path).toMatch(/^\/fonts\/.+\.woff2$/);
+      expect(
+        readFileSync(new URL(`../public${path}`, import.meta.url))
+          .subarray(0, 4)
+          .toString(),
+      ).toBe("wOF2");
+    }
+  });
+});
+
 describe("shared text fields", () => {
   it("overlays shared crop marks without changing field spacing", () => {
     const focused = rule("input:focus,\ntextarea:focus");
