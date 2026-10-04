@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SessionProbe } from "@pi-orb/protocol";
 import { chromium, expect as expectPage } from "@playwright/test";
 import Fastify from "fastify";
 import { build } from "vite";
@@ -17,6 +18,13 @@ beforeAll(async () => {
     configFile: join(import.meta.dirname, "../apps/web/vite.config.ts"),
     build: { outDir: root, emptyOutDir: true },
   });
+  app.get(
+    "/api/v1/session",
+    (): SessionProbe => ({
+      status: "ok",
+      principal: { kind: "user", user: { id: "built-shell-user", email: null } },
+    }),
+  );
   await registerWebAssets(app, root);
   await app.listen({ host: "127.0.0.1", port: 0 });
   browser = await chromium.launch({
