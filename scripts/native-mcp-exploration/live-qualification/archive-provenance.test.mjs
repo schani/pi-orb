@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { guard as guardGlideos, sha as hash } from "./glideos-read-guard.mjs";
 import { guard as guardIap } from "./iap-read-guard.mjs";
 
-const lock = "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8";
+const lock = "d23afb6b1e2750426ef59f4cba18808485345759e7c54e57679e9399585db53c";
 const patch = "@earendil-works+pi-coding-agent+1.0.0.patch";
 const patchHash = "c684fe6a6a57426521a6fd822ced3636f2004b29eebff3af489e84f59f84c0cf";
 
@@ -54,7 +54,7 @@ test("IAP extracted lock resolves the included vendor archive", async () => {
       join(dir, "manifest.json"),
       JSON.stringify({
         sourceLockSha: lock,
-        lockSha: "fddf8c7ecb31b0786bcacea89adddc6c45ab097a557e65e8c75dc90a16897694",
+        lockSha: "c926b9531fe1cc4c59269e852bdc79582db339f335228487cd39d1b26a402abe",
         files: {},
       }),
     );

@@ -19,17 +19,19 @@ const json = (
   };
 
 const piVersion = "1.0.0";
-const patchPackageVersion = "8.0.1";
+const patchPackageArchive = "vendor/patch-package-8.0.1-orb.1.tgz";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
 describe("Pi dependency patch installation", () => {
   it("pins the patched SDK and patch-package in every installing workspace", () => {
-    expect(json("package.json").devDependencies?.["patch-package"]).toBe(patchPackageVersion);
+    expect(json("package.json").devDependencies?.["patch-package"]).toBe(
+      `file:${patchPackageArchive}`,
+    );
     for (const manifest of ["apps/orb-runtime/package.json", "apps/control-plane/package.json"]) {
       expect(json(manifest).dependencies).toMatchObject({
         "@earendil-works/pi-coding-agent":
           "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
-        "patch-package": patchPackageVersion,
+        "patch-package": `file:../../${patchPackageArchive}`,
       });
     }
   });

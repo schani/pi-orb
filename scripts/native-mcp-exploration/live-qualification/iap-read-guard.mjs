@@ -10,11 +10,11 @@ export async function guard(stage) {
   const manifest = JSON.parse(readFileSync(join(stage, "manifest.json")));
   assert.equal(
     manifest.lockSha,
-    "fddf8c7ecb31b0786bcacea89adddc6c45ab097a557e65e8c75dc90a16897694",
+    "c926b9531fe1cc4c59269e852bdc79582db339f335228487cd39d1b26a402abe",
   );
   assert.equal(
     manifest.sourceLockSha,
-    "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8",
+    "d23afb6b1e2750426ef59f4cba18808485345759e7c54e57679e9399585db53c",
   );
   const vendor = "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz";
   assert.equal(
@@ -39,6 +39,19 @@ export async function guard(stage) {
     reference,
     "vendor reference mismatch",
   );
+  const patchPackage = "vendor/patch-package-8.0.1-orb.1.tgz";
+  assert.equal(
+    sha(join(stage, patchPackage)),
+    "8f29fbb091eefde2bc96a871c540b155afc9e0bfd52f0908d1180e3ee904d41f",
+    "patch-package archive mismatch",
+  );
+  assert.equal(
+    manifest.files[patchPackage],
+    sha(join(stage, patchPackage)),
+    "patch-package archive missing from manifest",
+  );
+  assert.equal(lock.packages[""].dependencies["patch-package"], `file:./${patchPackage}`);
+  assert.equal(lock.packages["node_modules/patch-package"].resolved, `file:./${patchPackage}`);
   assert.equal(sha(join(stage, "package-lock.json")), manifest.lockSha);
   for (const [file, hash] of Object.entries(manifest.files))
     assert.equal(sha(join(stage, file)), hash, file);

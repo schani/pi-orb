@@ -16,7 +16,7 @@ assert.ok(
 await mkdir(output); // Refuse to overwrite evidence.
 const stage = join(output, "staging");
 const lockSha = sha(join(local, "package-lock.json"));
-assert.equal(lockSha, "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8");
+assert.equal(lockSha, "d23afb6b1e2750426ef59f4cba18808485345759e7c54e57679e9399585db53c");
 const names = ["@earendil-works+pi-coding-agent+1.0.0.patch", "@earendil-works+pi-ai+1.0.0.patch"];
 function run(command, args, cwd, log, env = {}) {
   const result = spawnSync(command, args, {
@@ -55,13 +55,18 @@ for (const file of [
 for (const name of names) await cp(join(root, "patches", name), join(stage, "patches", name));
 const vendor = "pi-coding-agent-1.0.0-brace-5.0.12.tgz";
 await mkdir(join(stage, "vendor"));
-await cp(join(root, "vendor", vendor), join(stage, "vendor", vendor));
+const patchPackage = "patch-package-8.0.1-orb.1.tgz";
+for (const archive of [vendor, patchPackage])
+  await cp(join(root, "vendor", archive), join(stage, "vendor", archive));
 for (const file of ["package.json", "package-lock.json"]) {
   const path = join(stage, file);
-  const source = await readFile(path, "utf8");
-  const original = `file:../../../vendor/${vendor}`;
-  assert.ok(source.includes(original), `missing vendor reference: ${file}`);
-  await writeFile(path, source.replaceAll(original, `file:./vendor/${vendor}`));
+  let source = await readFile(path, "utf8");
+  for (const archive of [vendor, patchPackage]) {
+    const original = `file:../../../vendor/${archive}`;
+    assert.ok(source.includes(original), `missing vendor reference: ${file}: ${archive}`);
+    source = source.replaceAll(original, `file:./vendor/${archive}`);
+  }
+  await writeFile(path, source);
 }
 run(
   join(root, "node_modules/.bin/esbuild"),
@@ -91,6 +96,7 @@ const manifest = {
   sourceLockSha: lockSha,
   lockSha: sha(join(stage, "package-lock.json")),
   vendorSha: sha(join(root, "vendor", vendor)),
+  patchPackageSha: sha(join(root, "vendor", patchPackage)),
   piAiPath: "node_modules/@earendil-works/pi-ai",
   patches: names.map((name) => ({
     source: `patches/${name}`,

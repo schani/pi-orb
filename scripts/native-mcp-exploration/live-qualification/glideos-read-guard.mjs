@@ -11,7 +11,7 @@ export async function guard(stage) {
   assert.equal(manifest.projectId, "35f581fb-7bbf-4542-a1e8-0d047657a71d");
   assert.equal(
     manifest.source.lock,
-    "9a890cc3efd65ff14a142cb6175ab0b46e4d6a0cebea5e66ed4501abdba6c9a8",
+    "d23afb6b1e2750426ef59f4cba18808485345759e7c54e57679e9399585db53c",
   );
   assert.equal(
     manifest.source.vendor,
@@ -27,12 +27,24 @@ export async function guard(stage) {
   );
   for (const [name, pinned] of Object.entries(manifest.source.patches))
     assert.equal(sha(join(stage, "patches", name)), pinned, `qualified patch mismatch: ${name}`);
+  const patchPackage = "vendor/patch-package-8.0.1-orb.1.tgz";
+  assert.equal(
+    manifest.source.patchPackage,
+    "8f29fbb091eefde2bc96a871c540b155afc9e0bfd52f0908d1180e3ee904d41f",
+  );
+  assert.equal(
+    sha(join(stage, patchPackage)),
+    manifest.source.patchPackage,
+    "patch-package archive mismatch",
+  );
   for (const [file, hash] of Object.entries(manifest.files))
     assert.equal(sha(join(stage, file)), hash, file);
   const lock = JSON.parse(readFileSync(join(stage, "package-lock.json")));
   const vendor = "file:./vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz";
   assert.equal(lock.packages[""].dependencies["@earendil-works/pi-coding-agent"], vendor);
   assert.equal(lock.packages["node_modules/@earendil-works/pi-coding-agent"].resolved, vendor);
+  assert.equal(lock.packages[""].dependencies["patch-package"], `file:./${patchPackage}`);
+  assert.equal(lock.packages["node_modules/patch-package"].resolved, `file:./${patchPackage}`);
   const meta = JSON.parse(readFileSync(join(stage, "bundle-meta.json")));
   const entries = Object.values(meta.outputs).filter((x) => x.entryPoint);
   assert.equal(entries.length, 1);

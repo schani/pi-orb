@@ -28,13 +28,17 @@ for (const file of [
 ])
   await cp(join(local, file), join(stage, file));
 for (const name of patches) await cp(join(root, "patches", name), join(stage, "patches", name));
-await cp(join(root, "vendor", vendorName), join(stage, "vendor", vendorName));
-const oldVendor = "file:../../../vendor/" + vendorName;
-const newVendor = "file:./vendor/" + vendorName;
+const patchPackage = "patch-package-8.0.1-orb.1.tgz";
+for (const archive of [vendorName, patchPackage])
+  await cp(join(root, "vendor", archive), join(stage, "vendor", archive));
 for (const file of ["package.json", "package-lock.json"]) {
-  const source = await readFile(join(local, file), "utf8");
-  assert.ok(source.includes(oldVendor), `missing source vendor reference: ${file}`);
-  await writeFile(join(stage, file), source.replaceAll(oldVendor, newVendor));
+  let source = await readFile(join(local, file), "utf8");
+  for (const archive of [vendorName, patchPackage]) {
+    const original = `file:../../../vendor/${archive}`;
+    assert.ok(source.includes(original), `missing vendor reference: ${file}: ${archive}`);
+    source = source.replaceAll(original, `file:./vendor/${archive}`);
+  }
+  await writeFile(join(stage, file), source);
 }
 function run(command, args, cwd, log) {
   const result = spawnSync(command, args, {
@@ -74,6 +78,7 @@ const files = [
   "glideos-read-guard.mjs",
   "glideos-read-preflight.mjs",
   `vendor/${vendorName}`,
+  `vendor/${patchPackage}`,
   ...patches.map((name) => `patches/${name}`),
 ];
 const manifest = {
@@ -85,6 +90,7 @@ const manifest = {
     runner: sha(join(local, "runner.ts")),
     protocol: sha(join(root, "packages/protocol/src/mcp.ts")),
     vendor: sha(join(root, "vendor", vendorName)),
+    patchPackage: sha(join(root, "vendor", patchPackage)),
     patches: Object.fromEntries(patches.map((name) => [name, sha(join(root, "patches", name))])),
   },
   files: Object.fromEntries(files.map((file) => [file, sha(join(stage, file))])),

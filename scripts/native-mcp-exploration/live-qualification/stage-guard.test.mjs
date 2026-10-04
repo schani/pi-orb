@@ -17,6 +17,10 @@ async function fixture() {
     join(root, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz"),
     join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz"),
   );
+  await cp(
+    join(root, "vendor/patch-package-8.0.1-orb.1.tgz"),
+    join(stage, "vendor/patch-package-8.0.1-orb.1.tgz"),
+  );
   await writeFile(join(stage, "initial-auth.mjs"), "export const isolated = true;\n");
   await writeFile(join(stage, "bundle-meta.json"), JSON.stringify({ outputs: {} }));
   const sourceLock = readFileSync(
@@ -38,6 +42,7 @@ async function fixture() {
     hostBundleSha: sha(join(stage, "initial-auth.mjs")),
     bundleMetaSha: sha(join(stage, "bundle-meta.json")),
     vendorSha: sha(join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz")),
+    patchPackageSha: sha(join(stage, "vendor/patch-package-8.0.1-orb.1.tgz")),
     piAiPath: "node_modules/@earendil-works/pi-ai",
     patches: names.map((name) => ({
       source: `patches/${name}`,
@@ -91,6 +96,15 @@ test("installed stage rejects a substituted lock and matching mutable manifest",
     await writeFile(join(stage, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}');
     manifest.lockSha = sha(join(stage, "package-lock.json"));
     await assert.rejects(guardInstalledStage(stage, manifest), /qualified lock mismatch/);
+  });
+});
+
+test("stage rejects substituted patch tooling even with an updated manifest", async () => {
+  await withFixture(async (stage, manifest) => {
+    const file = join(stage, "vendor/patch-package-8.0.1-orb.1.tgz");
+    await writeFile(file, "changed patch tooling");
+    manifest.patchPackageSha = sha(file);
+    await assert.rejects(guardInstalledStage(stage, manifest), /qualified patch-package mismatch/);
   });
 });
 

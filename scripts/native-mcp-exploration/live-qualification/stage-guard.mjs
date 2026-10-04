@@ -75,12 +75,23 @@ export async function guardInstalledStage(stage, manifest) {
     sha(join(stage, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz")),
     manifest.vendorSha,
   );
+  const patchPackage = "vendor/patch-package-8.0.1-orb.1.tgz";
+  assert.equal(
+    manifest.patchPackageSha,
+    "8f29fbb091eefde2bc96a871c540b155afc9e0bfd52f0908d1180e3ee904d41f",
+    "qualified patch-package mismatch",
+  );
+  assert.equal(
+    sha(join(stage, patchPackage)),
+    manifest.patchPackageSha,
+    "patch-package archive mismatch",
+  );
   assert.equal(manifest.bundleSha, sha(join(stage, "initial-auth.mjs")));
   assert.equal(manifest.hostBundleSha, manifest.bundleSha);
   assert.equal(sha(join(stage, "package-lock.json")), manifest.lockSha);
   assert.equal(
     manifest.lockSha,
-    "fddf8c7ecb31b0786bcacea89adddc6c45ab097a557e65e8c75dc90a16897694",
+    "c926b9531fe1cc4c59269e852bdc79582db339f335228487cd39d1b26a402abe",
     "qualified lock mismatch",
   );
   assert.equal(manifest.patches.length, patches.size);
