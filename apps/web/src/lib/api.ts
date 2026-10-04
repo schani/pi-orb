@@ -482,23 +482,19 @@ export async function getCommittedImage(
 ): Promise<Result<Blob, ApiError>> {
   const path = `/api/v1/orbs/${encodeURIComponent(orbId)}/images/${encodeURIComponent(recordId)}/${encodeURIComponent(detailKey)}/${imageIndex}?sessionId=${encodeURIComponent(sessionId)}`;
   const sequence = beginSessionRequest();
+  const generation = readSessionGeneration();
+  const stale = () => generation !== readSessionGeneration();
   let response: Response;
   try {
-    response = await fetch(path, {
-      cache: "no-store",
-      headers: { "x-requested-with": "XMLHttpRequest" },
-    });
+    response = await fetch(path, { cache: "no-store" });
   } catch (cause) {
     return err({ type: "network", message: describeThrown(cause) });
   }
+  if (stale()) return err({ type: "auth_required", message: "Session changed." });
   if (response.status === 401) {
     reportAuthenticationRequired(sequence);
-    return err({
-      type: "auth_required",
-      message: "Your pi-orb session expired. Sign in again to continue.",
-    });
+    return err({ type: "auth_required", message: "Sign in to continue." });
   }
-  reportApplicationReached(sequence);
   if (!response.ok) {
     let body: unknown = null;
     try {
@@ -506,6 +502,7 @@ export async function getCommittedImage(
     } catch {
       body = null;
     }
+    if (stale()) return err({ type: "auth_required", message: "Session changed." });
     if (Check(ControlPlaneHttpErrorSchema, body)) {
       return err({
         type: "http",
@@ -533,6 +530,7 @@ export async function getCommittedImage(
   } catch (cause) {
     return err({ type: "network", message: describeThrown(cause) });
   }
+  if (stale()) return err({ type: "auth_required", message: "Session changed." });
   return ok(blob);
 }
 

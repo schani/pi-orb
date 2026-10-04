@@ -17,7 +17,7 @@ export async function registerWebAssets(app: FastifyInstance, root: string): Pro
     if (
       shellExists &&
       (request.method === "GET" || request.method === "HEAD") &&
-      !/^\/(?:api|assets|favicons|s|mcp|oauth|runtime|\.well-known)(?:\/|$)/.test(path) &&
+      !/^\/(?:api|assets|favicons|s|mcp|oauth|auth|runtime|\.well-known)(?:\/|$)/.test(path) &&
       !/\.[^/]+$/.test(path)
     ) {
       return reply.sendFile("index.html");

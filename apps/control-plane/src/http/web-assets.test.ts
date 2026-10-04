@@ -54,6 +54,8 @@ describe("web assets", () => {
     "/mcp/oauth/failed",
     "/s/missing",
     "/oauth/callback",
+    "/auth",
+    "/auth/missing",
     "/.well-known/missing",
     "/missing.css",
   ])("never serves the shell for %s", async (url) => {

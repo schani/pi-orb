@@ -4727,17 +4727,17 @@ describe("frontend-only browser behavior", () => {
     });
     await page.request.post(`${origin}/__pi_orb_fixture/session/expire`);
     try {
-      await page.goto(`${origin}/${ORB_HASH}`);
+      await page.goto(`${origin}${ORB_PATH}`);
       await expectPage(page.locator(".session-ribbon")).toContainText("sign in required");
       await expectPage(page.locator(".history")).toHaveCount(0);
-      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      await expectPage(page).toHaveURL(`${origin}${ORB_PATH}`);
       expectPage(logins).toBe(0);
       await page.getByRole("button", { name: "sign in", exact: true }).click();
       await expectPage(
         page.getByRole("textbox", { name: "Message the orb", exact: true }),
       ).toBeVisible();
       expectPage(logins).toBe(1);
-      await expectPage(page).toHaveURL(`${origin}/${ORB_HASH}`);
+      await expectPage(page).toHaveURL(`${origin}${ORB_PATH}`);
     } finally {
       await page.request.post(`${origin}/__pi_orb_fixture/session/restore`);
       await page.close();
@@ -4772,7 +4772,7 @@ describe("frontend-only browser behavior", () => {
     );
     const focus = () => page.evaluate("window.dispatchEvent(new Event('focus'))");
     try {
-      await page.goto(`${origin}/${ORB_HASH}`);
+      await page.goto(`${origin}${ORB_PATH}`);
       const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
       await composer.fill("Alice private draft");
       await composer.evaluate((node) => node.setAttribute("data-owner", "alice"));
@@ -4788,7 +4788,7 @@ describe("frontend-only browser behavior", () => {
       await focus();
       await expectPage(composer).not.toHaveAttribute("data-owner", "alice");
       await expectPage(composer).toHaveValue("");
-      await page.evaluate("window.location.hash = '/'");
+      await page.locator(".ix-brand").click();
       const signOut = page.getByRole("button", { name: "Sign out", exact: true });
       await expectPage(signOut).toBeVisible();
       await page.route("**/auth/logout", (route) =>
@@ -4862,7 +4862,7 @@ describe("frontend-only browser behavior", () => {
     );
     const loaded = page.waitForEvent("load");
     await ribbon.getByRole("button", { name: "sign in", exact: true }).click();
-    expectPage(new URL((await login).url()).searchParams.get("returnTo")).toBe(`/${ORB_HASH}`);
+    expectPage(new URL((await login).url()).searchParams.get("returnTo")).toBe(ORB_PATH);
     await loaded;
 
     await expectPage(page).toHaveURL(`${origin}${ORB_PATH}`);

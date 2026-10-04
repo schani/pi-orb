@@ -241,14 +241,14 @@ describe("API session handling", () => {
     expect(result.isOk() && result.value).toEqual(system);
   });
 
-  it("reads exact committed image bytes using the encoded private URL and AJAX session header", async () => {
+  it("reads exact committed image bytes using the encoded private URL", async () => {
     const bytes = new Uint8Array([0, 255, 137, 80, 78, 71, 1]);
     vi.stubGlobal(
       "fetch",
       vi.fn(async (path: string, init?: RequestInit) => {
         expect(path).toBe("/api/v1/orbs/orb%2F1/images/record%2F1/key%3A0/2?sessionId=session%2F1");
         expect(init?.cache).toBe("no-store");
-        expect(new Headers(init?.headers).get("x-requested-with")).toBe("XMLHttpRequest");
+        expect(new Headers(init?.headers).has("x-requested-with")).toBe(false);
         return new Response(bytes, { headers: { "content-type": "image/png" } });
       }),
     );
@@ -258,6 +258,68 @@ describe("API session handling", () => {
       expect(result.value.type).toBe("image/png");
       expect(new Uint8Array(await result.value.arrayBuffer())).toEqual(bytes);
     }
+  });
+
+  it.each(["headers", "blob", "error body"])(
+    "fences committed images held across logout at %s",
+    async (boundary) => {
+      let release!: () => void;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (path: string) => {
+          if (path === "/auth/logout") return new Response(null, { status: 204 });
+          if (boundary === "headers") {
+            entered();
+            await held;
+          }
+          return {
+            status: boundary === "error body" ? 404 : 200,
+            ok: boundary !== "error body",
+            headers: new Headers({ "content-type": "image/png" }),
+            blob: async () => {
+              if (boundary === "blob") {
+                entered();
+                await held;
+              }
+              return new Blob(["old"], { type: "image/png" });
+            },
+            json: async () => {
+              entered();
+              await held;
+              return { error: { code: "not_found", message: "old", retryable: false } };
+            },
+          };
+        }),
+      );
+      const image = getCommittedImage("a", "r", "k", 0, "s");
+      await started;
+      await logout();
+      release();
+      const result = await image;
+      expect(result.isErr() && result.error.type).toBe("auth_required");
+      expect(readBrowserSession().status).toBe("auth_required");
+    },
+  );
+
+  it("does not recover an expired session from successful image bytes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+    await probeSession();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("image", { headers: { "content-type": "image/png" } })),
+    );
+    expect((await getCommittedImage("a", "r", "k", 0, "s")).isOk()).toBe(true);
+    expect(readBrowserSession().status).toBe("auth_required");
   });
 
   it("accepts only supported image MIME types", async () => {
