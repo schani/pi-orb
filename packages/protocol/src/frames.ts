@@ -206,6 +206,7 @@ export const OutputPatchEventSchema = Type.Object(
     blockId: Type.String(),
     blockType: Type.Union([Type.Literal("text"), Type.Literal("reasoning"), Type.Literal("shell")]),
     revision: Type.Number(),
+    headline: Type.Optional(Type.String()),
     patch: Type.Union([
       Type.Object({ type: Type.Literal("append"), text: Type.String() }, closed),
       Type.Object({ type: Type.Literal("replace"), text: Type.String() }, closed),

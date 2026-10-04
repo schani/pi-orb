@@ -274,6 +274,7 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
         blockId: event.blockId,
         blockType: event.blockType,
         text,
+        ...(event.headline === undefined ? {} : { headline: event.headline }),
         revision: event.revision,
       });
       return { ...state, liveBlocks };

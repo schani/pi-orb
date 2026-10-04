@@ -8,6 +8,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { describeApiError, getCommittedDetail, getLiveDetail } from "../lib/api.ts";
 import { DetailLoader } from "../lib/detail-loader.ts";
 import type { TranscriptCache, TranscriptOwner } from "../lib/transcript-cache.ts";
+import { ChatMarkdown } from "./ChatMarkdown.tsx";
 import { CommittedImage, imageIndex } from "./CommittedImage.tsx";
 import { ToolImagePreview } from "./ToolImagePreview.tsx";
 
@@ -110,7 +111,7 @@ export function DetailContent({
 }): ReactNode {
   switch (body.type) {
     case "reasoning":
-      return <span>{body.text}</span>;
+      return <ChatMarkdown>{body.text}</ChatMarkdown>;
     case "tool_call":
       return <pre className="tool-input">{JSON.stringify(body.arguments, null, 2)}</pre>;
     case "tool_result":
@@ -364,6 +365,7 @@ export function RunningBody({
       </p>
     );
   const current = body?.scope === scope ? body.value : undefined;
+  if (current?.type === "reasoning") return <ChatMarkdown>{current.text}</ChatMarkdown>;
   return (
     <pre className="tool-call-output">
       {current?.type === "tool_result"

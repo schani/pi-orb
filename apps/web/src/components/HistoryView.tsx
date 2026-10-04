@@ -39,6 +39,7 @@ export interface LiveBlock {
   blockId: string;
   blockType: "text" | "reasoning" | "shell";
   text: string;
+  headline?: string;
   revision: number;
 }
 
@@ -197,10 +198,12 @@ function ReasoningRail({
   detailKey,
   recordId,
   live,
+  headline,
 }: {
   detailKey: string;
   recordId: string;
   live: boolean;
+  headline: string | undefined;
 }) {
   const openState = useContext(OpenDetailValue);
   const identity = openState?.aliases.get(detailKey) ?? detailKey;
@@ -214,14 +217,15 @@ function ReasoningRail({
     <ActivityRailRow
       className="reasoning"
       label="thinking"
+      headline={headline || undefined}
       state={live ? "running" : "neutral"}
       defaultOpen={open}
       onToggle={onToggle}
     >
       {open && (
-        <p className="reasoning-body">
+        <div className="reasoning-body">
           <LazyLegacyBody recordId={recordId} detailKey={detailKey} live={live} />
-        </p>
+        </div>
       )}
     </ActivityRailRow>
   );
@@ -231,8 +235,17 @@ function renderReasoningRail(
   key: string | number,
   recordId: string,
   live = false,
+  headline?: string,
 ): ReactNode {
-  return <ReasoningRail key={key} detailKey={detailKey} recordId={recordId} live={live} />;
+  return (
+    <ReasoningRail
+      key={key}
+      detailKey={detailKey}
+      recordId={recordId}
+      live={live}
+      headline={headline}
+    />
+  );
 }
 
 function renderMessageBlocks(record: MessageRecord): ReactNode[] {
@@ -243,7 +256,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
         nodes.push(<ChatMarkdown key={index}>{block.text}</ChatMarkdown>);
         break;
       case "reasoning":
-        nodes.push(renderReasoningRail(block.detailKey, index, record.id));
+        nodes.push(renderReasoningRail(block.detailKey, index, record.id, false, block.headline));
         break;
       case "tool_call":
         nodes.push(renderToolCall(block, record.id));
@@ -518,7 +531,7 @@ function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNod
   for (const block of live.blocks) {
     nodes.push(
       block.blockType === "reasoning" ? (
-        renderReasoningRail(block.blockId, block.blockId, "live", true)
+        renderReasoningRail(block.blockId, block.blockId, "live", true, block.headline)
       ) : block.text.trim() === "" ? null : (
         <ResponseMarkdown key={block.blockId} markdown={block.text} copySource={block.text} />
       ),

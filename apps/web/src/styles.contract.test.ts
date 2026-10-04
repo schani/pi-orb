@@ -10,6 +10,10 @@ function rule(selector: string): string {
   return match?.[1] ?? "";
 }
 
+it("renders reasoning Markdown without inheriting literal pre-wrap whitespace", () => {
+  expect(rule(".reasoning-body > .chat-markdown")).toContain("white-space: normal");
+});
+
 describe("orb alerts", () => {
   it("keeps long plain text inside a phone-width reverse band without coloring the orb row", () => {
     const band = rule(".alert-band");

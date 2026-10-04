@@ -94,8 +94,37 @@ it.each(["chromium", "webkit"] as const)(
         await expect.poll(() => blockId).not.toBe("");
         const live = page.locator("details.activity-rail-row.reasoning").last();
         await expect(live).toBeVisible();
+        await expect(live.locator(":scope > summary .activity-rail-headline")).toHaveText(
+          "Running plan · Inspect files",
+        );
+        expect(liveReads, "collapsed headline must not fetch private reasoning").toBe(0);
+        for (const width of [390, 320]) {
+          await page.setViewportSize({ width, height: 900 });
+          await expect(live.locator(":scope > summary")).toBeVisible();
+          expect(
+            await page.evaluate(() => {
+              const scope = globalThis as unknown as {
+                document: { documentElement: { scrollWidth: number } };
+                innerWidth: number;
+              };
+              return scope.document.documentElement.scrollWidth <= scope.innerWidth;
+            }),
+          ).toBe(true);
+        }
         await live.locator(":scope > summary").click();
         await expect(live.locator(".reasoning-body")).toContainText("running reasoning 1");
+        await expect(live.locator(".reasoning-body h2")).toHaveText("Running plan");
+        await expect(live.locator(".reasoning-body strong")).toHaveText("Inspect files");
+        await expect(live.locator(".reasoning-body li code")).toHaveText("file.ts");
+        expect(
+          await page.evaluate(() => {
+            const scope = globalThis as unknown as {
+              document: { documentElement: { scrollWidth: number } };
+              innerWidth: number;
+            };
+            return scope.document.documentElement.scrollWidth <= scope.innerWidth;
+          }),
+        ).toBe(true);
         expect(liveReads).toBe(1);
         await page.clock.runFor(1100);
         await secondRequested;
@@ -116,6 +145,11 @@ it.each(["chromium", "webkit"] as const)(
         await expect(page.locator(".history")).toContainText("Lazy operation complete.");
         const final = page.locator("details.activity-rail-row.reasoning").last();
         await expect(final.locator(".reasoning-body")).toContainText("final reasoning");
+        await expect(final.locator(":scope > summary .activity-rail-headline")).toHaveText(
+          "Final plan · Verify fix",
+        );
+        await expect(final.locator(".reasoning-body h2")).toHaveText("Final plan");
+        await expect(final.locator(".reasoning-body strong")).toHaveText("Verify fix");
         const lateResponse = page.waitForResponse(
           (response) =>
             new URL(response.url()).pathname ===

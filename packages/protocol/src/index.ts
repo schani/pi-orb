@@ -17,6 +17,7 @@ export * from "./orb-spawn.ts";
 export * from "./personal-instructions.ts";
 export * from "./project-instructions.ts";
 export * from "./project-secrets.ts";
+export * from "./reasoning-headline.ts";
 export * from "./repository-url.ts";
 export * from "./runtime-http.ts";
 export * from "./runtime-launch.ts";

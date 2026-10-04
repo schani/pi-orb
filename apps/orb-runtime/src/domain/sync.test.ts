@@ -107,6 +107,63 @@ describe("computeSyncFrames", () => {
     }
   });
 
+  it("replays compact reasoning headings in full and delta sync without bodies", () => {
+    const live: LiveOperationView = {
+      operationId: "op",
+      operationKind: "agent",
+      tools: [],
+      subagents: [],
+      blocks: [
+        {
+          blockId: "b",
+          blockType: "reasoning",
+          revision: 2,
+          text: "# Inspect\n\nSECRET_CANARY\n\n**Fix**",
+        },
+        {
+          blockId: "redacted",
+          blockType: "reasoning",
+          revision: 1,
+          text: "# REDACTED_HEADING",
+          redacted: true,
+        },
+      ],
+    };
+    for (const cursor of [null, "rec-1"]) {
+      const frames = computeSyncFrames(snapshot(1, "busy"), live, cursor, "now");
+      expect(frames).toContainEqual({
+        v: 1,
+        type: "runtime.event",
+        at: "now",
+        event: {
+          type: "output_patch",
+          operationId: "op",
+          blockId: "b",
+          blockType: "reasoning",
+          revision: 2,
+          headline: "Inspect · Fix",
+          patch: { type: "replace", text: "" },
+        },
+      });
+      expect(JSON.stringify(frames)).not.toContain("SECRET_CANARY");
+      expect(JSON.stringify(frames)).not.toContain("REDACTED_HEADING");
+      expect(frames).toContainEqual({
+        v: 1,
+        type: "runtime.event",
+        at: "now",
+        event: {
+          type: "output_patch",
+          operationId: "op",
+          blockId: "redacted",
+          blockType: "reasoning",
+          revision: 1,
+          headline: "",
+          patch: { type: "replace", text: "" },
+        },
+      });
+    }
+  });
+
   it("reconstructs live operation state with replace patches and tool states", () => {
     const live: LiveOperationView = {
       operationId: "op-1",

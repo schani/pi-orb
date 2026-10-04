@@ -54,6 +54,54 @@ it("Pi reasoning updates retain active HTTP body without emitting token-by-token
   unsubscribe();
 });
 
+it("Pi publishes only changed compact reasoning headlines, including removal and redaction", () => {
+  const agent = new PiOrbAgent({
+    orbId: "test",
+    repositoryUrl: "https://example.com/repo",
+    workDir: "/unused",
+    skillsDir: null,
+    broker: null,
+    executionId: "test",
+    idleStopFence: new MemoryIdleStopFence(),
+  });
+  agent.attachSession(
+    { isIdle: true, subscribe: () => () => undefined } as unknown as PiSession,
+    SessionManager.inMemory("/unused"),
+    { summarize: () => okAsync("") },
+  );
+  const frames: unknown[] = [];
+  agent.subscribe((frame) => frames.push(frame));
+  const send = (thinking: string, redacted = false) =>
+    agent["onAgentEvent"]({
+      type: "message_update",
+      message: { role: "assistant", content: [{ type: "thinking", thinking, redacted }] },
+    } as Parameters<(typeof agent)["onAgentEvent"]>[0]);
+  agent["onAgentEvent"]({ type: "agent_start" } as Parameters<(typeof agent)["onAgentEvent"]>[0]);
+  send("# Inspect\n\nPRIVATE_BODY");
+  send("# Inspect\n\nPRIVATE_BODY grows");
+  send("# Inspect\n\nPRIVATE_BODY\n\n**Fix**");
+  send("PRIVATE_BODY");
+  send("# REDACTED_HEADING", true);
+  send("# Visible");
+  send("# Visible", true);
+  const events = (frames as import("@pi-orb/protocol").ServerFrame[]).flatMap((frame) =>
+    frame.type === "runtime.event" && frame.event.type === "output_patch" ? [frame.event] : [],
+  );
+  expect(events.map((event) => event.headline)).toEqual([
+    "Inspect",
+    "Inspect · Fix",
+    "",
+    "Visible",
+    "",
+  ]);
+  expect(events.every((event) => event.patch.type === "replace" && event.patch.text === "")).toBe(
+    true,
+  );
+  expect(JSON.stringify(frames)).not.toContain("PRIVATE_BODY");
+  expect(JSON.stringify(frames)).not.toContain("REDACTED_HEADING");
+  expect(agent.liveView()?.blocks[0]?.redacted).toBe(true);
+});
+
 it("Pi tool progress remains HTTP-only and retires when the operation finishes", () => {
   const agent = new PiOrbAgent({
     orbId: "test",

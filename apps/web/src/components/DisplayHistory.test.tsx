@@ -69,7 +69,7 @@ describe("browser summary rendering", () => {
         failure: { message: "bad model", providerTransportFailure: false },
         content: [
           { type: "text", text: "visible prose" },
-          { type: "reasoning", detailKey: "r:1" },
+          { type: "reasoning", headline: "", detailKey: "r:1" },
         ],
       },
     ];

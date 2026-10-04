@@ -35,6 +35,7 @@ import {
   type RuntimeHealth,
   type RuntimeHooks,
   type RuntimeTurnResume,
+  reasoningHeadline,
   type ServerFrame,
   type SettingsAction,
   validateRepositoryUrl,
@@ -46,11 +47,7 @@ import { type BrokerEnv, HttpBrokerEndpoint } from "../broker/endpoint.ts";
 import { brokerProviderConfig } from "../broker/provider.ts";
 import { AgentSettingsController } from "../domain/agent-settings.ts";
 import { BrokerTokenClient } from "../domain/broker-client.ts";
-import {
-  readLiveDisplayDetail,
-  shouldBroadcastOutputPatch,
-  toolTextContent,
-} from "../domain/display-detail.ts";
+import { readLiveDisplayDetail, toolTextContent } from "../domain/display-detail.ts";
 import { gateUnflushedSnapshot } from "../domain/history.ts";
 import { configurePersistentHome } from "../domain/home.ts";
 import type { AgentGateView } from "../domain/requests.ts";
@@ -170,6 +167,8 @@ interface LiveBlock {
   blockType: "text" | "reasoning" | "shell";
   revision: number;
   text: string;
+  headline?: string;
+  redacted?: boolean;
 }
 
 interface LiveTool {
@@ -1147,19 +1146,36 @@ export class PiOrbAgent {
         if (message.role !== "assistant" || !Array.isArray(message.content)) break;
         message.content.forEach((block: unknown, index: number) => {
           if (typeof block !== "object" || block === null) return;
-          const typed = block as { type?: string; text?: string; thinking?: string };
+          const typed = block as {
+            type?: string;
+            text?: string;
+            thinking?: string;
+            redacted?: boolean;
+          };
           const blockType =
             typed.type === "text" ? "text" : typed.type === "thinking" ? "reasoning" : null;
           if (blockType === null) return;
           const text = blockType === "text" ? (typed.text ?? "") : (typed.thinking ?? "");
           const blockId = `${this.operationId}-${this.outputMessageSequence}-${index}`;
           const existing = this.liveBlocks.get(blockId);
-          if (existing !== undefined && existing.text === text) return;
+          if (
+            existing !== undefined &&
+            existing.text === text &&
+            existing.redacted === typed.redacted
+          )
+            return;
+          const headline =
+            blockType === "reasoning" ? reasoningHeadline(text, typed.redacted) : undefined;
           const revision = (existing?.revision ?? 0) + 1;
-          this.liveBlocks.set(blockId, { blockType, revision, text });
+          this.liveBlocks.set(blockId, {
+            blockType,
+            revision,
+            text,
+            ...(headline === undefined ? {} : { headline, redacted: typed.redacted }),
+          });
           if (
             this.operationId === null ||
-            !shouldBroadcastOutputPatch(blockType, existing !== undefined)
+            (blockType === "reasoning" && existing !== undefined && existing.headline === headline)
           )
             return;
           this.broadcastEvent({
@@ -1168,6 +1184,7 @@ export class PiOrbAgent {
             blockId,
             blockType,
             revision,
+            ...(headline === undefined ? {} : { headline }),
             patch:
               blockType === "reasoning"
                 ? { type: "replace", text: "" }
@@ -1712,6 +1729,7 @@ export class PiOrbAgent {
         blockType: block.blockType,
         revision: block.revision,
         text: block.text,
+        ...(block.redacted === undefined ? {} : { redacted: block.redacted }),
       })),
       tools: [...this.liveTools.entries()].map(([callId, tool]) => ({
         callId,

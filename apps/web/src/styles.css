@@ -1629,6 +1629,10 @@ body:has(.orb-page) {
   overflow-wrap: anywhere;
 }
 
+.reasoning-body > .chat-markdown {
+  white-space: normal;
+}
+
 .chat-markdown > :last-child {
   margin-bottom: 0;
 }

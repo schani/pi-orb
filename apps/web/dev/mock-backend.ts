@@ -1581,7 +1581,10 @@ async function handleApi(
             type: "tool_result",
             content: [{ type: "text", text: `running tool ${running.reads}` }],
           }
-        : { type: "reasoning", text: `running reasoning ${running.reads}` },
+        : {
+            type: "reasoning",
+            text: `## Running plan\n\n**Inspect files**\n\n- Read \`file.ts\`\n\nrunning reasoning ${running.reads}`,
+          },
     });
     return true;
   }
@@ -1620,7 +1623,7 @@ async function handleApi(
           type: "message",
           role: "assistant",
           content: [
-            { type: "reasoning", text: "final reasoning" },
+            { type: "reasoning", text: "## Final plan\n\n**Verify fix**\n\nfinal reasoning" },
             { type: "text", text: "Lazy operation complete." },
           ],
           overflow: {},
@@ -2325,6 +2328,7 @@ function handleAction(
           blockId,
           blockType: "reasoning",
           revision: 1,
+          headline: "Running plan · Inspect files",
           patch: { type: "replace", text: "" },
         },
       }),

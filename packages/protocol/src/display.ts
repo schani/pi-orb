@@ -1,12 +1,17 @@
 import { type Static, Type } from "typebox";
+import { capHeadline } from "./headline.ts";
 import { type ContentBlock, type HistoryRecord, NestedCallsSchema } from "./history.ts";
 import { JsonValueSchema } from "./json.ts";
+import { reasoningHeadline } from "./reasoning-headline.ts";
+
+export { capHeadline } from "./headline.ts";
 
 const closed = { additionalProperties: false } as const;
 const text = Type.Object({ type: Type.Literal("text"), text: Type.String() }, closed);
 const reasoning = Type.Object(
   {
     type: Type.Literal("reasoning"),
+    headline: Type.String(),
     detailKey: Type.String(),
     redacted: Type.Optional(Type.Boolean()),
   },
@@ -219,21 +224,6 @@ export const LiveDisplayDetailSchema = Type.Object(
 );
 export type LiveDisplayDetail = Static<typeof LiveDisplayDetailSchema>;
 
-/** UTF-8 byte bound, including ellipsis; avoids splitting surrogate pairs. */
-export function capHeadline(value: string): string {
-  const encoder = new TextEncoder();
-  if (encoder.encode(value).length <= 1024) return value;
-  let prefix = "";
-  let bytes = 0;
-  for (const char of value) {
-    const size = encoder.encode(char).length;
-    if (bytes + size > 1021) break;
-    prefix += char;
-    bytes += size;
-  }
-  return `${prefix}…`;
-}
-
 function headline(block: Extract<ContentBlock, { type: "tool_call" }>): string {
   const args = block.arguments;
   if (typeof args === "object" && args !== null && !Array.isArray(args)) {
@@ -282,6 +272,7 @@ function projectBlock(block: ContentBlock, key: string): DisplayBlock {
     case "reasoning":
       return {
         type: "reasoning",
+        headline: reasoningHeadline(block.text, block.redacted),
         detailKey: key,
         ...(block.redacted === undefined ? {} : { redacted: block.redacted }),
       };

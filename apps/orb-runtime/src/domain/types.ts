@@ -27,6 +27,7 @@ export interface LiveBlockState {
   readonly blockType: "text" | "reasoning" | "shell";
   readonly revision: number;
   readonly text: string;
+  readonly redacted?: boolean;
 }
 
 export interface LiveToolState {

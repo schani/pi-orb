@@ -545,7 +545,7 @@ describe("HistoryView turn structure", () => {
       timestamp: "time-reasoning",
       type: "message",
       role: "assistant",
-      content: [{ type: "reasoning", text: "considering persisted evidence" }],
+      content: [{ type: "reasoning", text: "# Persisted plan\n\nconsidering persisted evidence" }],
       overflow: {},
     };
     const html = renderToStaticMarkup(
@@ -555,7 +555,8 @@ describe("HistoryView turn structure", () => {
           {
             blockId: "live-reasoning",
             blockType: "reasoning",
-            text: "considering live evidence",
+            text: "",
+            headline: "Live plan",
             revision: 1,
           },
         ]}
@@ -568,6 +569,10 @@ describe("HistoryView turn structure", () => {
     expect(html.match(/class="visually-hidden">Orb:<\/span>/g)).toHaveLength(1);
     expect(html.match(/class="activity-rail-row [^"]* reasoning"/g)).toHaveLength(2);
     expect(html.match(/activity-rail-label">thinking</g)).toHaveLength(2);
+    expect(html).toContain(
+      'class="activity-rail-headline" title="Persisted plan">Persisted plan</span>',
+    );
+    expect(html).toContain('class="activity-rail-headline" title="Live plan">Live plan</span>');
     expect(html).not.toContain("considering persisted evidence");
     expect(html).not.toContain("considering live evidence");
     expect(

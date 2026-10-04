@@ -36,6 +36,24 @@ const record: HistoryRecord = {
 };
 
 describe("browser display projection", () => {
+  it("projects only capped reasoning headings and hides redacted headings", () => {
+    const source: HistoryRecord = {
+      ...record,
+      content: [
+        { type: "reasoning", text: "# Inspect files\n\nHIDDEN_BODY_CANARY\n\n**Choose fix**" },
+        { type: "reasoning", text: "# REDACTED_HEADING\nHIDDEN_BODY_CANARY", redacted: true },
+      ],
+    };
+    const projected = projectDisplayRecord(source);
+    expect(projected).toMatchObject({
+      content: [
+        { type: "reasoning", headline: "Inspect files · Choose fix", detailKey: "r1:0" },
+        { type: "reasoning", headline: "", detailKey: "r1:1", redacted: true },
+      ],
+    });
+    expect(JSON.stringify(projected)).not.toContain(secret);
+    expect(JSON.stringify(projected)).not.toContain("REDACTED_HEADING");
+  });
   it("keeps a hidden boot baseline as an untyped custom event without native data", () => {
     const baseline: HistoryRecord = {
       id: "boot",

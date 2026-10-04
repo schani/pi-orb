@@ -16,6 +16,27 @@ const context = {
   imagePending: new Map(),
 };
 
+it("renders reasoning with shared Markdown semantics, preserving headings in the body", () => {
+  const html = renderToStaticMarkup(
+    <DetailContent
+      context={context}
+      recordId="r"
+      detailKey="r:0"
+      body={{
+        type: "reasoning",
+        text: "# Plan\n\n**Inspect files**\n\n- Read `file.ts`\n\n[Docs](https://example.com)\n\n```ts\nconst x = 1;\n```",
+      }}
+    />,
+  );
+  expect(html).toContain('class="chat-markdown"');
+  expect(html).toContain("<h1>Plan</h1>");
+  expect(html).toContain("<strong>Inspect files</strong>");
+  expect(html).toContain("<ul>");
+  expect(html).toContain("<code>file.ts</code>");
+  expect(html).toContain('href="https://example.com"');
+  expect(html).toContain('class="language-ts"');
+});
+
 it("keeps remote URLs browser-managed and local images loading on initial SSR", () => {
   const external = renderToStaticMarkup(
     <DetailContent
