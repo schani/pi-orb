@@ -14,6 +14,7 @@ import {
 import type { MockOpenAiConfig } from "@pi-orb/mock-openai";
 import {
   type AgentSettings,
+  activityCallCode,
   type CommittedDisplayDetail,
   type DeliverOrbMessageResponse,
   type HistoryRecord,
@@ -166,6 +167,7 @@ interface LiveBlock {
 
 interface LiveTool {
   name: string;
+  code?: string;
   revision: number;
   state: "running" | "completed" | "failed";
   message?: string;
@@ -1187,8 +1189,10 @@ export class PiOrbAgent {
           ...(Check(JsonValueSchema, event.args) ? { arguments: event.args as JsonValue } : {}),
           content: [],
         });
+        const code = activityCallCode(event.toolName, event.args);
         this.liveTools.set(event.toolCallId, {
           name: event.toolName,
+          ...(code === undefined ? {} : { code }),
           revision: 1,
           state: "running",
         });
@@ -1197,6 +1201,7 @@ export class PiOrbAgent {
           operationId: this.operationId,
           callId: event.toolCallId,
           name: event.toolName,
+          ...(code === undefined ? {} : { code }),
           revision: 1,
           state: "running",
         });
@@ -1224,6 +1229,7 @@ export class PiOrbAgent {
         const state = event.isError ? "failed" : "completed";
         this.liveTools.set(event.toolCallId, {
           name: event.toolName,
+          ...(existing?.code === undefined ? {} : { code: existing.code }),
           revision,
           state,
         });
@@ -1232,6 +1238,7 @@ export class PiOrbAgent {
           operationId: this.operationId,
           callId: event.toolCallId,
           name: event.toolName,
+          ...(existing?.code === undefined ? {} : { code: existing.code }),
           revision,
           state,
         });
@@ -1716,6 +1723,7 @@ export class PiOrbAgent {
       tools: [...this.liveTools.entries()].map(([callId, tool]) => ({
         callId,
         name: tool.name,
+        ...(tool.code === undefined ? {} : { code: tool.code }),
         revision: tool.revision,
         state: tool.state,
         ...(tool.message !== undefined ? { message: tool.message } : {}),

@@ -9,7 +9,12 @@ import { err, ok, type Result, ResultAsync } from "neverthrow";
 import type { ActivityHeadlineRef, StoredActivityHeadline } from "./activity-headline-store.ts";
 import { sleepResult, withDeadline } from "./dst.ts";
 import { logOrbEvent } from "./log.ts";
-import type { ControlPlaneDeps, OperationContext } from "./ports.ts";
+import type {
+  ActivityHeadlineFailureDiagnostics,
+  ActivityHeadlineGenerationError,
+  ControlPlaneDeps,
+  OperationContext,
+} from "./ports.ts";
 
 export type ActivityHeadlineError = {
   readonly type:
@@ -35,6 +40,29 @@ export function generateActivityHeadline(
   let stage: ActivityHeadlineError["stage"] = "source";
   let cacheHit = false;
   let winner = false;
+  let attempts = 0;
+  let diagnostics: ActivityHeadlineFailureDiagnostics = {};
+  let failureStage: string | undefined;
+  let termination:
+    | "succeeded"
+    | "retry_exhausted"
+    | "not_retriable"
+    | "cancelled"
+    | "deadline_exceeded" = "not_retriable";
+  const diagnosticFields = () => ({
+    attempts,
+    termination,
+    failure_stage: failureStage,
+    provider_reason: diagnostics.reason,
+    provider_status: diagnostics.providerStatus,
+    provider_transport: diagnostics.transport,
+    provider_phase: diagnostics.phase,
+    provider_stop_reason: diagnostics.stopReason,
+    provider_error_code: diagnostics.errorCode,
+    input_tokens: diagnostics.inputTokens,
+    output_tokens: diagnostics.outputTokens,
+    reasoning_tokens: diagnostics.reasoningTokens,
+  });
   return withDeadline(task, 30_000, "activity headline", (deadline) => {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -46,10 +74,11 @@ export function generateActivityHeadline(
       deadline.signal.removeEventListener("abort", abort);
       caller?.signal.removeEventListener("abort", abort);
     };
-    const stopped = (): ActivityHeadlineError | null =>
-      signal.aborted || task.monotonicNow() >= expires
-        ? { type: caller?.signal.aborted === true ? "cancelled" : "unavailable", stage }
-        : null;
+    const stopped = (): ActivityHeadlineError | null => {
+      if (!signal.aborted && task.monotonicNow() < expires) return null;
+      termination = caller?.signal.aborted === true ? "cancelled" : "deadline_exceeded";
+      return { type: caller?.signal.aborted === true ? "cancelled" : "unavailable", stage };
+    };
     const state = async (
       exact: boolean,
     ): Promise<Result<import("./orb.ts").ProjectRow, ActivityHeadlineError>> => {
@@ -136,18 +165,64 @@ export function generateActivityHeadline(
       stop = stopped();
       if (stop !== null) return err(stop);
       stage = "inference";
-      const generated = await deps.headlineGenerator.generate(
-        task,
-        { ownerUserId: current.value.ownerUserId, source },
-        { signal, deadlineAt: expires },
-      );
-      stop = stopped();
-      if (stop !== null) return err(stop);
-      if (generated.isErr())
-        return err({
-          type: generated.error.stage === "cancelled" ? "cancelled" : "unavailable",
-          stage,
+      let generated: Result<string, ActivityHeadlineGenerationError>;
+      for (;;) {
+        stop = stopped();
+        if (stop !== null) return err(stop);
+        attempts++;
+        generated = await deps.headlineGenerator.generate(
+          task,
+          { ownerUserId: current.value.ownerUserId, source },
+          { signal, deadlineAt: expires },
+        );
+        if (generated.isErr()) {
+          diagnostics = generated.error;
+          failureStage = generated.error.stage;
+        }
+        stop = stopped();
+        if (stop !== null) return err(stop);
+        if (generated.isOk()) break;
+        const retryable =
+          generated.error.stage === "inference" &&
+          generated.error.reason === "provider_error" &&
+          generated.error.providerStatus === 503;
+        termination =
+          generated.error.stage === "cancelled"
+            ? "cancelled"
+            : retryable && attempts === 3
+              ? "retry_exhausted"
+              : "not_retriable";
+        if (!retryable || attempts === 3)
+          return err({
+            type: generated.error.stage === "cancelled" ? "cancelled" : "unavailable",
+            stage,
+          });
+        const delay = attempts * 1_000;
+        logOrbEvent(task, ref.orbId, "headline.retry_scheduled", {
+          session: ref.sessionId,
+          record: ref.recordId,
+          detail: ref.detailKey,
+          correlation: correlationId,
+          attempt: attempts,
+          delay_ms: delay,
+          provider_status: 503,
+          provider_reason: diagnostics.reason,
+          model: "gpt-6-luna",
+          elapsed_ms: task.monotonicNow() - admitted,
         });
+        const slept = await sleepResult(
+          task,
+          Math.min(delay, expires - task.monotonicNow()),
+          "headline provider retry",
+          signal,
+        );
+        stop = stopped();
+        if (stop !== null) return err(stop);
+        if (slept.isErr()) {
+          termination = "cancelled";
+          return err({ type: "cancelled", stage });
+        }
+      }
       stage = "persistence";
       const valid = await state(true);
       if (valid.isErr()) return err(valid.error);
@@ -174,6 +249,7 @@ export function generateActivityHeadline(
       });
   })
     .map((value) => {
+      termination = "succeeded";
       if (!cacheHit)
         logOrbEvent(task, ref.orbId, "headline.completed", {
           session: ref.sessionId,
@@ -185,11 +261,14 @@ export function generateActivityHeadline(
           model: "gpt-6-luna",
           winner,
           generated_at: value.generatedAt,
+          ...diagnosticFields(),
           elapsed_ms: task.monotonicNow() - admitted,
         });
       return value;
     })
     .mapErr((error) => {
+      if (caller?.signal.aborted) termination = "cancelled";
+      else if (task.monotonicNow() >= expires) termination = "deadline_exceeded";
       logOrbEvent(task, ref.orbId, "headline.completed", {
         session: ref.sessionId,
         record: ref.recordId,
@@ -199,6 +278,7 @@ export function generateActivityHeadline(
         outcome: error.type,
         model: "gpt-6-luna",
         winner: false,
+        ...diagnosticFields(),
         elapsed_ms: task.monotonicNow() - admitted,
       });
       return error;

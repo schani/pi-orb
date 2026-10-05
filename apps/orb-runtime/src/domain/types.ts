@@ -33,6 +33,7 @@ export interface LiveBlockState {
 export interface LiveToolState {
   readonly callId: string;
   readonly name: string;
+  readonly code?: string;
   readonly revision: number;
   readonly state: "running" | "completed" | "failed";
   readonly message?: string;

@@ -1054,7 +1054,36 @@ export interface SigningKeyDeps extends SigningKeyMaterialDeps, JwksDeps {
 
 // ---------------------------------------------------------------------------
 
-export interface ActivityHeadlineGenerationError {
+export interface ActivityHeadlineFailureDiagnostics {
+  readonly reason?:
+    | "model_unavailable"
+    | "completion_rejected"
+    | "provider_error"
+    | "aborted"
+    | "empty_text"
+    | undefined;
+  readonly providerStatus?: number | undefined;
+  readonly transport?: "sse" | "websocket" | undefined;
+  readonly phase?: "before_message_stream_start" | "after_message_stream_start" | undefined;
+  readonly stopReason?: "error" | "aborted" | undefined;
+  readonly inputTokens?: number | undefined;
+  readonly outputTokens?: number | undefined;
+  readonly reasoningTokens?: number | undefined;
+  readonly errorCode?:
+    | "invalid_api_key"
+    | "invalid_grant"
+    | "unauthorized"
+    | "authentication_error"
+    | "invalid_token"
+    | "rate_limit_exceeded"
+    | "usage_limit_reached"
+    | "insufficient_quota"
+    | "websocket_connection_limit_reached"
+    | "previous_response_not_found"
+    | undefined;
+}
+
+export interface ActivityHeadlineGenerationError extends ActivityHeadlineFailureDiagnostics {
   readonly type: "headline_generation_failed";
   readonly stage: "auth" | "inference" | "cancelled";
 }

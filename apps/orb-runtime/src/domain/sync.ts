@@ -75,6 +75,7 @@ export function computeSyncFrames(
         operationId: live.operationId,
         callId: tool.callId,
         name: tool.name,
+        ...(tool.code === undefined ? {} : { code: tool.code }),
         revision: tool.revision,
         state: tool.state,
         ...(tool.message !== undefined ? { message: tool.message } : {}),

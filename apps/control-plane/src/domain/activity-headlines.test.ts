@@ -92,6 +92,8 @@ describe("activity headlines", () => {
       outcome: "unavailable",
       model: "gpt-6-luna",
       winner: "false",
+      attempts: "0",
+      termination: "not_retriable",
       elapsed_ms: expect.stringMatching(/^\d+(\.\d+)?$/),
     });
     expect(task.lines.join("\n")).not.toMatch(
@@ -139,6 +141,8 @@ describe("activity headlines", () => {
       outcome: "stored",
       model: "gpt-6-luna",
       winner: "true",
+      attempts: "1",
+      termination: "succeeded",
       generated_at: expect.stringMatching(/^\d+$/),
       elapsed_ms: expect.stringMatching(/^\d+(\.\d+)?$/),
     });
@@ -169,6 +173,37 @@ describe("activity headlines", () => {
     expect(failed._unsafeUnwrapErr()).toEqual({ type: "unavailable", stage: "inference" });
     expect(put).not.toHaveBeenCalled();
     expect((await generateActivityHeadline(task, h.deps, headlineRef)).isOk()).toBe(true);
+  });
+  it.each([
+    { stage: "auth" as const, reason: "provider_error" as const, providerStatus: 503 },
+    { stage: "inference" as const, reason: "completion_rejected" as const },
+    { stage: "inference" as const, reason: "empty_text" as const },
+    { stage: "inference" as const, reason: "provider_error" as const },
+    { stage: "inference" as const, reason: "provider_error" as const, providerStatus: 429 },
+    { stage: "inference" as const, reason: "provider_error" as const, providerStatus: 404 },
+    { stage: "inference" as const, reason: "provider_error" as const, providerStatus: 502 },
+  ])("does not retry other failures: %j", async (error) => {
+    const task = new HeadlineLogTask("nonretryable", false);
+    const h = makeHarness();
+    await seedHeadline(task, h);
+    const generate = vi.fn(() =>
+      errAsync({ type: "headline_generation_failed" as const, ...error }),
+    );
+    const put = vi.spyOn(h.store, "putActivityHeadlineIfAbsent");
+    const result = await generateActivityHeadline(
+      task,
+      { ...h.deps, headlineGenerator: { generate } },
+      headlineRef,
+    );
+    expect(result.isErr()).toBe(true);
+    expect(generate).toHaveBeenCalledOnce();
+    expect(put).not.toHaveBeenCalled();
+    expect(task.lines).toHaveLength(1);
+    expect(fields(task.lines[0])).toMatchObject({
+      attempts: "1",
+      termination: "not_retriable",
+      failure_stage: error.stage,
+    });
   });
   it("existing ineligible read detail fails without inference or cache write", async () => {
     const task = new NoSimulationTask("text ineligible", false);

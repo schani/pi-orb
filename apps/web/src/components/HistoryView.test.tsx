@@ -946,7 +946,7 @@ describe("HistoryView", () => {
 
     expect(html).toContain("activity-rail-row-completed tool-activity-category");
     expect(html).toContain('class="activity-rail-label">commands</span>');
-    expect(html).toContain('class="activity-rail-headline" title="echo tool-input"');
+    expect(html).toContain('<code class="trunc" title="echo tool-input">echo tool-input</code>');
     expect(html).not.toContain("1 command ran");
     expect(html).not.toContain("1 ran");
     expect(html).toContain('title="echo tool-input"');

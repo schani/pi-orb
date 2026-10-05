@@ -1,6 +1,6 @@
 import type { HistoryRecord } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
-import { ok, okAsync, ResultAsync } from "neverthrow";
+import { errAsync, ok, okAsync, ResultAsync } from "neverthrow";
 import { describe, expect, it } from "vitest";
 import { makeHarness, makeOrbRow, makeProjectRow } from "../testkit/fixtures.ts";
 import { runDst } from "../testkit/sim.ts";
@@ -374,6 +374,262 @@ describe("headline request lifetimes DST", () => {
       expect(outcomes.isOk(), outcomes.isErr() ? outcomes.error.message : "").toBe(true);
     });
   });
+});
+
+describe("headline bounded provider retries DST", () => {
+  // Nominal campaigns must reach backoff; default-late safety remains separately covered.
+  it.each([2, 4])("503 recovers or exhausts with success attempt %i", async (successAt) => {
+    await runDst(
+      { name: `headline-retry-${successAt}`, iterations: 20, lateTimerProbability: 0 },
+      async (sim) => {
+        const h = harness();
+        let calls = 0;
+        let writes = 0;
+        const times: number[] = [];
+        const put = h.store.putActivityHeadlineIfAbsent.bind(h.store);
+        h.store.putActivityHeadlineIfAbsent = (...args) => {
+          writes++;
+          return put(...args);
+        };
+        const outcomes = await sim.runTasks([
+          {
+            name: "request",
+            f: async (task) => {
+              await replicate(task, h);
+              const original = structuredClone(h.store.replicaRecords("orb"));
+              const logs: string[] = [];
+              const logged = new Proxy(task, {
+                get(target, key) {
+                  if (key === "log") return (...parts: unknown[]) => logs.push(parts.join(" "));
+                  const value = Reflect.get(target, key);
+                  return typeof value === "function" ? value.bind(target) : value;
+                },
+              });
+              const result = await generateActivityHeadline(
+                logged,
+                {
+                  ...h.deps,
+                  headlineGenerator: {
+                    generate: (t) => {
+                      times.push(t.monotonicNow());
+                      return ++calls === successAt
+                        ? okAsync("Winner")
+                        : errAsync({
+                            type: "headline_generation_failed",
+                            stage: "inference",
+                            reason: "provider_error",
+                            providerStatus: 503,
+                          });
+                    },
+                  },
+                },
+                ref,
+              );
+              expect(result.isOk()).toBe(successAt === 2);
+              expect(calls).toBe(Math.min(successAt, 3));
+              expect(writes).toBe(successAt === 2 ? 1 : 0);
+              // Virtual timestamps are fractional milliseconds; subtraction can round below 1000.
+              expect(times[1]! - times[0]!).toBeCloseTo(1_000, 6);
+              if (calls === 3) expect(times[2]! - times[1]!).toBeCloseTo(2_000, 6);
+              expect(h.store.replicaRecords("orb")).toEqual(original);
+              const retryLogs = logs.filter((line) => line.includes("headline.retry_scheduled"));
+              const terminal = logs.filter((line) => line.includes("headline.completed"));
+              expect(retryLogs).toHaveLength(calls - 1);
+              expect(terminal).toHaveLength(1);
+              expect(terminal[0]).toContain(`attempts=${calls}`);
+              expect(terminal[0]).toContain(
+                `termination=${successAt === 2 ? "succeeded" : "retry_exhausted"}`,
+              );
+              expect(terminal[0]).toContain("provider_status=503");
+              expect(logs.join("\n")).not.toMatch(/Inspect configuration|Winner|PRIVATE/);
+              return ok(undefined);
+            },
+          },
+        ]);
+        expect(outcomes.isOk(), outcomes.isErr() ? outcomes.error.message : "").toBe(true);
+      },
+    );
+  });
+  it("default late retry scheduling never admits IO after expiry", async () => {
+    await runDst({ name: "headline-retry-default-late", iterations: 100 }, async (sim) => {
+      const h = harness();
+      const outcomes = await sim.runTasks([
+        {
+          name: "request",
+          f: async (task) => {
+            await replicate(task, h);
+            const expiry = task.monotonicNow() + 30_000;
+            let calls = 0;
+            const allowed = () => expect(task.monotonicNow()).toBeLessThan(expiry);
+            const store = new Proxy(h.store, {
+              get(target, key) {
+                const value = Reflect.get(target, key);
+                return typeof value === "function"
+                  ? (...args: unknown[]) => {
+                      allowed();
+                      return value.apply(target, args);
+                    }
+                  : value;
+              },
+            });
+            const result = await generateActivityHeadline(
+              task,
+              {
+                ...h.deps,
+                store,
+                headlineGenerator: {
+                  generate: () => {
+                    allowed();
+                    calls++;
+                    return errAsync({
+                      type: "headline_generation_failed",
+                      stage: "inference",
+                      reason: "provider_error",
+                      providerStatus: 503,
+                    });
+                  },
+                },
+              },
+              ref,
+            );
+            expect(result.isErr()).toBe(true);
+            expect(calls).toBeLessThanOrEqual(3);
+            return ok(undefined);
+          },
+        },
+      ]);
+      expect(outcomes.isOk(), outcomes.isErr() ? outcomes.error.message : "").toBe(true);
+    });
+  });
+  it("source wait and retry share the original budget", async () => {
+    await runDst(
+      { name: "headline-source-retry-budget", iterations: 20, lateTimerProbability: 0 },
+      async (sim) => {
+        const h = harness();
+        let calls = 0;
+        const outcomes = await sim.runTasks([
+          {
+            name: "request",
+            f: async (task) => {
+              await replicate(task, h);
+              const read = h.store.readHistoryRecord.bind(h.store);
+              h.store.readHistoryRecord = (...args) =>
+                new ResultAsync(
+                  (async () => {
+                    await task.sleep(26_000, "source read consumes request budget");
+                    return await read(...args);
+                  })(),
+                );
+              const before = task.monotonicNow();
+              const result = await generateActivityHeadline(
+                task,
+                {
+                  ...h.deps,
+                  headlineGenerator: {
+                    generate: (_t, _i, context) =>
+                      new ResultAsync(
+                        (async () => {
+                          expect(context.deadlineAt).toBe(before + 30_000);
+                          calls++;
+                          await task.sleep(3_001, "provider consumes remaining budget");
+                          return await errAsync({
+                            type: "headline_generation_failed" as const,
+                            stage: "inference" as const,
+                            reason: "provider_error" as const,
+                            providerStatus: 503,
+                          });
+                        })(),
+                      ),
+                  },
+                },
+                ref,
+              );
+              expect(result.isErr()).toBe(true);
+              expect(calls).toBe(1);
+              expect((await h.store.readActivityHeadline(task, ref))._unsafeUnwrap()).toBeNull();
+              // Store verification adds a scheduled checkpoint; settlement need not equal expiry.
+              expect(task.monotonicNow() - before).toBeGreaterThanOrEqual(30_000);
+              return ok(undefined);
+            },
+          },
+        ]);
+        expect(outcomes.isOk(), outcomes.isErr() ? outcomes.error.message : "").toBe(true);
+      },
+    );
+  });
+  it.each(["cancel", "expiry"] as const)(
+    "blocks all fresh IO after %s during backoff",
+    async (mode) => {
+      await runDst(
+        { name: `headline-backoff-${mode}`, iterations: 20, lateTimerProbability: 0 },
+        async (sim) => {
+          const h = harness();
+          const controller = new AbortController();
+          let calls = 0;
+          const outcomes = await sim.runTasks([
+            {
+              name: "request",
+              f: async (task) => {
+                await replicate(task, h);
+                let offset = 0;
+                const delayed = new Proxy(task, {
+                  get(target, key) {
+                    if (key === "monotonicNow") return () => target.monotonicNow() + offset;
+                    if (key === "sleep")
+                      return async (...args: Parameters<SimulationTask["sleep"]>) => {
+                        if (args[1] === "headline provider retry") {
+                          if (mode === "cancel") controller.abort();
+                          else offset = 30_001;
+                        }
+                        return target.sleep(...args);
+                      };
+                    const value = Reflect.get(target, key);
+                    return typeof value === "function" ? value.bind(target) : value;
+                  },
+                });
+                const store = new Proxy(h.store, {
+                  get(target, key) {
+                    const value = Reflect.get(target, key);
+                    return typeof value === "function"
+                      ? (...args: unknown[]) => {
+                          expect(controller.signal.aborted).toBe(false);
+                          expect(offset).toBe(0);
+                          return value.apply(target, args);
+                        }
+                      : value;
+                  },
+                });
+                const result = await generateActivityHeadline(
+                  delayed,
+                  {
+                    ...h.deps,
+                    store,
+                    headlineGenerator: {
+                      generate: () => {
+                        calls++;
+                        return errAsync({
+                          type: "headline_generation_failed",
+                          stage: "inference",
+                          reason: "provider_error",
+                          providerStatus: 503,
+                        });
+                      },
+                    },
+                  },
+                  ref,
+                  { signal: controller.signal },
+                );
+                expect(result.isErr()).toBe(true);
+                expect(calls).toBe(1);
+                return ok(undefined);
+              },
+            },
+          ]);
+          expect(outcomes.isOk(), outcomes.isErr() ? outcomes.error.message : "").toBe(true);
+        },
+      );
+    },
+  );
 });
 
 describe("headline concurrent publication DST", () => {

@@ -327,6 +327,12 @@ h3 {
   color: var(--bad);
 }
 
+button.text-action.error-text {
+  color: var(--bad);
+  border-bottom-color: var(--bad);
+  background: transparent;
+}
+
 .rec-orb .error-text {
   overflow-wrap: anywhere;
 }

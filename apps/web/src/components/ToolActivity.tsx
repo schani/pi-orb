@@ -18,12 +18,14 @@ export interface PersistedToolCall {
 export interface LiveToolCall {
   callId: string;
   name: string;
+  code?: string;
   state: "running" | "completed" | "failed";
 }
 interface Call {
   id: string;
   name: string;
   headline: string;
+  code?: string;
   headlineSource?: ActivityHeadlineSource;
   targetId?: string;
   callRecordId?: string;
@@ -301,7 +303,10 @@ function CallBody({ call, kind, context }: { call: Call; kind: Kind; context: De
   );
 }
 function callLabel(call: Call, kind: Kind): string {
-  return kind === "read" ? boundedReadLabel(call) : call.headline || capHeadline(call.name);
+  return (
+    call.code ??
+    (kind === "read" ? boundedReadLabel(call) : call.headline || capHeadline(call.name))
+  );
 }
 type CallRowProps = {
   call: Call;
@@ -369,7 +374,16 @@ function CategoryRow({ category, context }: { category: Category; context: Detai
   const summary = useActivityHeadline(
     first ? headlineSource(first, category.kind) : undefined,
     context,
-    single ? headline(category) : first ? callLabel(first, category.kind) : undefined,
+    single && first?.code !== undefined ? (
+      <code className="trunc" title={first.code}>
+        {first.code}
+      </code>
+    ) : single ? (
+      headline(category) ||
+      (category.kind === "command" && first ? capHeadline(first.name) : undefined)
+    ) : first ? (
+      callLabel(first, category.kind)
+    ) : undefined,
   );
   const categoryHeadline = single ? summary.headline : headline(category);
   return (
@@ -431,6 +445,7 @@ export function ToolActivity({
       id: call.callId,
       name: call.name,
       headline: call.headline ?? "",
+      ...(call.code === undefined ? {} : { code: call.code }),
       headlineSource: selectToolHeadline(call, callRecordId, result, resultRecordId),
       targetId: call.targetId,
       offset: call.offset,
@@ -450,6 +465,7 @@ export function ToolActivity({
       id: call.callId,
       name: call.name,
       headline: call.name,
+      ...(call.code === undefined ? {} : { code: call.code }),
       state: call.state,
     })),
   ];

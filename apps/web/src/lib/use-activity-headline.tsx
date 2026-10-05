@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { DetailContext } from "../components/DetailBody.tsx";
 import { type ActivityHeadlineSource, HeadlineLimiter } from "./activity-headline.ts";
 import { getActivityHeadline } from "./api.ts";
@@ -9,7 +17,7 @@ type State = { key: string; text?: string; failed?: boolean };
 export function useActivityHeadline(
   source: ActivityHeadlineSource | undefined,
   context: Pick<DetailContext, "orbId" | "sessionId">,
-  fallback?: string,
+  fallback?: ReactNode,
 ) {
   const shared = useContext(HeadlineSlots);
   const local = useMemo(() => new HeadlineLimiter(), []);
@@ -132,10 +140,10 @@ export function useActivityHeadline(
     headerRef,
     headline: failed ? (
       <>
-        <span>Summary unavailable.</span>{" "}
+        <span className="error-text">Summary unavailable.</span>{" "}
         <button
           type="button"
-          className="text-action activity-headline-retry"
+          className="text-action activity-headline-retry error-text"
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();

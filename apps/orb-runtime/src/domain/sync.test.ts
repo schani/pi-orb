@@ -34,6 +34,30 @@ function snapshot(n: number, activity: "idle" | "busy" = "idle"): HarnessSnapsho
 const frameTypes = (frames: ServerFrame[]) => frames.map((frame) => frame.type);
 
 describe("computeSyncFrames", () => {
+  it("replays public live code unchanged without arguments or tool bodies", () => {
+    const code = "  echo first\n\techo second  ";
+    const live: LiveOperationView = {
+      operationId: "op",
+      blocks: [],
+      subagents: [],
+      tools: [{ callId: "c", name: "bash", code, revision: 1, state: "running" }],
+    };
+    const frames = computeSyncFrames(snapshot(0, "busy"), live, null, "now");
+    expect(frames).toContainEqual(
+      expect.objectContaining({
+        type: "runtime.event",
+        event: {
+          type: "tool_state",
+          operationId: "op",
+          callId: "c",
+          name: "bash",
+          code,
+          revision: 1,
+          state: "running",
+        },
+      }),
+    );
+  });
   it("projects result markers using calls before the replay cursor", () => {
     const source = snapshot(0);
     const records: HistoryRecord[] = [

@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import {
   ActivityHeadlineContext,
+  activityCallCode,
   activityCallEligible,
   activityResultEligible,
 } from "./activity-headline.ts";
@@ -35,6 +36,7 @@ const call = Type.Object(
     type: Type.Literal("tool_call"),
     callId: Type.String(),
     name: Type.String(),
+    code: Type.Optional(Type.String()),
     headline: Type.Optional(Type.Union([Type.String(), Type.Null()])),
     detailKey: Type.String(),
     targetId: Type.Optional(Type.String()),
@@ -222,15 +224,10 @@ function headline(block: Extract<ContentBlock, { type: "tool_call" }>): string |
   if (activityCallEligible(block)) return null;
   const args = block.arguments;
   if (typeof args === "object" && args !== null && !Array.isArray(args)) {
-    const value =
-      block.name === "bash"
-        ? args.command
-        : ["read", "edit", "write"].includes(block.name)
-          ? args.path
-          : undefined;
+    const value = ["read", "edit", "write"].includes(block.name) ? args.path : undefined;
     if (typeof value === "string") return capHeadline(value);
   }
-  return ["bash", "read", "edit", "write"].includes(block.name) ? "" : undefined;
+  return ["read", "edit", "write"].includes(block.name) ? "" : undefined;
 }
 
 function targetId(path: string): string {
@@ -286,10 +283,12 @@ function projectBlock(block: ContentBlock, key: string): DisplayBlock {
           : null;
       const path = args?.path;
       const selectedHeadline = headline(block);
+      const code = activityCallCode(block.name, block.arguments);
       return {
         type: "tool_call",
         callId: block.callId,
         name: block.name,
+        ...(code === undefined ? {} : { code }),
         ...(selectedHeadline === undefined ? {} : { headline: selectedHeadline }),
         detailKey: key,
         ...(typeof path === "string" ? { targetId: targetId(path) } : {}),

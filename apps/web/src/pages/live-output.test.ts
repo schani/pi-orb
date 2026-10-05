@@ -10,6 +10,30 @@ import {
 } from "../../../orb-runtime/src/pi/agent.ts";
 import { initialState, reducer } from "./OrbPage.tsx";
 
+it.each(["bash", "codemode"])("retains %s code through live tool states", (name) => {
+  let state = initialState("test");
+  for (const phase of ["running", "completed"] as const) {
+    state = reducer(state, {
+      type: "frame",
+      frame: {
+        v: 1,
+        type: "runtime.event",
+        at: "now",
+        event: {
+          type: "tool_state",
+          operationId: "op",
+          callId: "call",
+          name,
+          state: phase,
+          revision: 1,
+          code: "raw source",
+        },
+      },
+    });
+    expect(state.tools.get("call")).toMatchObject({ code: "raw source", state: phase });
+  }
+});
+
 it("reduces live headline replacements independently of hidden reasoning text", () => {
   let state = initialState("test");
   for (const headline of ["Inspect", "Inspect · Fix", ""]) {

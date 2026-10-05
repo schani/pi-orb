@@ -55,6 +55,7 @@ export interface LiveBlock {
 export interface ToolChip {
   callId: string;
   name: string;
+  code?: string;
   state: "running" | "completed" | "failed";
   message: string | null;
 }
