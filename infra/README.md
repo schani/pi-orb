@@ -17,7 +17,24 @@ In GitHub Actions, select **Deploy → Run workflow → main**, leaving
 rejects a dispatched commit that is no longer main, and runs `infra/release.sh`
 under non-cancelled concurrency. Its summary and single allowlisted JSON artifact
 report the actual outcome and retained fixtures; raw plans/state/log bundles are
-never uploaded. The job timeout is 240 minutes; no browser pause is introduced.
+never uploaded. The release job timeout is 240 minutes; no browser pause is introduced.
+
+CI, E2E and Deploy use `ubuntu-24.04` / Node `24.6.0`; E2E runs four isolated,
+serial shards (`docs/testing.md`). **Qualification reuse (implemented locally
+2026-10-05; not deployed or hosted-qualified):** new GitHub releases
+wait before the release lock for successful same-repository `push`/`main` CI and
+E2E runs at the dispatched SHA, then recheck latest main. Their run IDs and attempts
+become release evidence instead of rerunning the suites. Each workflow must have
+one matching push run on its first attempt, with every required job successful.
+Missing/pending runs wait up to 60 minutes in a 65-minute job; failed/cancelled
+runs block. Even a successful rerun is refused: diagnose the first attempt and
+qualify a new commit. `release.sh` re-verifies the evidence before locking.
+Concurrency covers only the release job: qualification waits do not block
+validation-only recovery, which does not require new-source checks. Local
+`release.sh` still runs checks/E2E normally. Full local checks and focused
+review-fix tests passed (`docs/testing.md`); hosted/live qualification is pending.
+Native acceptance and all deployment-specific gates remain required; see
+`docs/deployment.md` for the decision and evidence limits.
 
 The supported manual deployment is one command from the repository root:
 
@@ -59,7 +76,7 @@ The script owns the complete transaction. Native image versions use
 
 The stages are:
 
-1. verify tools, Docker, auth, foundation, ops access and a non-mutating application plan; install locked dependencies, run typecheck/lint/unit checks, build the local Docker E2E runtime image and run E2E before cloud image builds;
+1. verify tools, Docker, auth, foundation, ops access and a non-mutating application plan; install locked dependencies. GitHub releases reuse the verified CI/E2E qualification; local releases run typecheck/lint/unit checks and E2E, which builds its Docker runtime image, before cloud image builds;
 2. build/boot-validate native images and push the digest-pinned, source-labelled control-plane image;
 3. clamp generation above serving and published authority, create the exact saved plan, and reject database/credential changes;
 4. run migrations using that image in a one-task Cloud Run job, with retries disabled, before any new service consumes schema;

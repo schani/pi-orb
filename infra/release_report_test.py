@@ -93,7 +93,42 @@ class ReportTest(unittest.TestCase):
             self.assertFalse((path / 'artifact').exists())
 
 
+class QualificationReportTest(unittest.TestCase):
+    def test_reused_runs_are_linked_in_summary(self):
+        from infra.ci_qualification_test import FakeAPI, SHA
+        from infra.ci_qualification import inspect
+        value = record()
+        value['commit'] = SHA
+        value['qualification'] = inspect(FakeAPI(), SHA).value
+        result = report(value, value['runnerCommit'], 'failure')
+        self.assertIsNone(result.error)
+        self.assertIn('https://github.com/schani/pi-orb/actions/runs/2/attempts/1', result.value)
+
+
 class WorkflowContractTest(unittest.TestCase):
+    def test_only_release_job_holds_non_cancelling_production_concurrency(self):
+        workflow = Path('.github/workflows/deploy.yml').read_text()
+        qualification, release = workflow.split('  release:\n', 1)
+        self.assertNotIn('concurrency:', qualification)
+        self.assertIn('    concurrency:\n      group: pi-orb-production-release\n      cancel-in-progress: false\n', release)
+        self.assertEqual(workflow.count('concurrency:'), 1)
+
+    def test_read_only_qualification_precedes_deployment_and_recovery_bypasses_it(self):
+        workflow = Path('.github/workflows/deploy.yml').read_text()
+        qualification, release = workflow.split('  release:\n', 1)
+        self.assertIn('  qualify:', qualification)
+        self.assertIn('actions: read', qualification)
+        self.assertNotIn('id-token: write', qualification)
+        self.assertNotIn('google-github-actions', qualification)
+        self.assertIn("inputs.validate_release == ''", qualification)
+        self.assertIn('python3 -m infra.ci_qualification wait', qualification)
+        self.assertIn('needs: qualify', release)
+        self.assertIn("needs.qualify.result == 'success'", release)
+        self.assertIn("inputs.validate_release != ''", release)
+        self.assertIn('PI_ORB_CI_QUALIFICATION: ${{ needs.qualify.outputs.evidence }}', release)
+        self.assertIn('GITHUB_STEP_SUMMARY', qualification)
+
+
     def test_manual_exact_commit_shared_transaction_and_allowlisted_artifact(self):
         import re
         workflow = Path('.github/workflows/deploy.yml').read_text()
@@ -110,7 +145,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(len(actions), 7)
         self.assertTrue(all(re.fullmatch(r'[A-Za-z0-9_./-]+@[a-f0-9]{40}', action) for action in actions))
         self.assertIn('cache: npm', workflow)
-        self.assertIn("key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}", workflow)
+        self.assertNotIn('Cache Playwright browsers', workflow)
         self.assertEqual(workflow.count('./infra/release.sh'), 1)
         self.assertIn('exec ./infra/release.sh "${args[@]}"', workflow)
         self.assertIn('args+=(--validate "$VALIDATE_RELEASE")', workflow)

@@ -20,6 +20,7 @@ REMOTE_LOCK_GENERATION=""
 KEEP_REMOTE_LOCK=false
 APPLY_ATTEMPTED=false
 IAP_REPAIRED=false
+QUALIFICATION=""
 
 usage() {
   echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest]'
@@ -79,6 +80,7 @@ state() { python3 -m infra.release_state "$1" "$RECORD" "${@:2}"; }
 release_run_check() {
   release_run_child env \
     -u PI_ORB_RELEASE_RESULT_DIR -u PI_ORB_RELEASE_RECORD \
+    -u GH_TOKEN -u PI_ORB_CI_QUALIFICATION \
     -u PI_ORB_USER_ID -u PI_ORB_ORIGINAL_USER_ID \
     -u PI_ORB_ORIGINAL_IDENTITY_ISSUER -u PI_ORB_ORIGINAL_IDENTITY_SUBJECT \
     "$@"
@@ -148,6 +150,11 @@ git fetch --quiet origin main
 head_commit=$(git rev-parse HEAD)
 if [ "$head_commit" != "$(git rev-parse origin/main)" ]; then echo 'release preflight failed: HEAD is not latest origin/main' >&2; exit 1; fi
 python3 infra/artifact_guard.py
+if [ -z "$VALIDATE" ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
+  [ "$head_commit" = "${GITHUB_SHA:-}" ] || { echo 'release: GitHub SHA differs from checkout' >&2; exit 1; }
+  QUALIFICATION=$(python3 -m infra.ci_qualification verify)
+fi
+unset GH_TOKEN PI_ORB_CI_QUALIFICATION
 gcloud auth print-access-token >/dev/null
 if ! mkdir "$LOCAL_LOCK_DIR" 2>/dev/null; then echo 'release preflight failed: another local release may be active' >&2; exit 1; fi
 LOCAL_LOCK_HELD=true
@@ -187,6 +194,10 @@ mkdir -p "$RESULT_DIR"
 chmod 700 "$RESULT_DIR"
 RECORD="$RESULT_DIR/release.json"
 state init "$release_id" "$head_commit" "$PROJECT" "$REGION" "$ZONE" "$workflow_url"
+if [ -n "$QUALIFICATION" ]; then
+  printf '%s\n' "$QUALIFICATION" > "$WORK_DIR/qualification.json"
+  state qualification "$WORK_DIR/qualification.json"
+fi
 export PI_ORB_RELEASE_RECORD="$RECORD"
 if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; else state previous; fi
 state publish
@@ -219,11 +230,15 @@ if [ -z "$VALIDATE" ]; then
   python3 -m infra.release_retire inventory "$RECORD"
   stage checks
   release_run_check npm ci
-  release_run_check npm run test:e2e:install
-  release_run_check npm run typecheck
-  release_run_check npm run lint
-  release_run_check npm test
-  release_run_check npm run test:e2e
+  if [ -z "$QUALIFICATION" ]; then
+    release_run_check npm run test:e2e:install
+    release_run_check npm run typecheck
+    release_run_check npm run lint
+    release_run_check npm test
+    release_run_check npm run test:e2e
+  else
+    echo 'release: reusing verified exact-commit main CI and E2E; provenance is in the release record'
+  fi
   stage build
   release_run_child "$INFRA/build-push.sh" > "$WORK_DIR/release.tfvars"
   state vars "$WORK_DIR/release.tfvars"

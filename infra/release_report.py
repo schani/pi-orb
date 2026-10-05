@@ -24,6 +24,10 @@ def report(record, commit, outcome):
         f"Recorded outcome: **{record['outcome']}**; phase: `{record['phase']}`",
         f"Durable evidence: `gs://pi-orb-tfstate-{record['project']}/static-plane/releases/{record['releaseId']}.json`",
     ])
+    if record.get("qualification"):
+        lines.append("Reused exact-commit push/main qualification:\n" + "\n".join(
+            f"- [{run['name']} run {run['runId']}, attempt {run['attempt']}](https://github.com/schani/pi-orb/actions/runs/{run['runId']}/attempts/{run['attempt']})"
+            for run in record["qualification"]["runs"]))
     if record["validatesRelease"]:
         lines.append(f"Validation of `{record['validatesRelease']}`; the original record is unchanged.")
     if record["migrationJob"]:

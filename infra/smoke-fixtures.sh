@@ -2,7 +2,7 @@
 # Shared smoke ownership and verified cleanup. Never delete failed fixtures.
 fixture_record() {
   if [ -n "${PI_ORB_RELEASE_RECORD:-}" ]; then
-    python3 "$DIR/release_state.py" fixture "$PI_ORB_RELEASE_RECORD" "$@"
+    (cd "$DIR/.." && python3 -m infra.release_state fixture "$PI_ORB_RELEASE_RECORD" "$@")
   fi
 }
 

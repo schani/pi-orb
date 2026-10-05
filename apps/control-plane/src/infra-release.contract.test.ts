@@ -41,6 +41,10 @@ function makeFixture(): { root: string; log: string } {
 const fs = require('node:fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.CALL_LOG, 'record:' + a.join(' ') + '\\n');
+if (a[1] === 'infra.ci_qualification') {
+ if (process.env.MOCK_QUALIFICATION_STATUS === 'failed') process.exit(1);
+ console.log('{}'); process.exit(0);
+}
 if (a[0] !== '-m' || a[1] !== 'infra.release_state') process.exit(0);
 const [action, path, ...rest] = a.slice(2);
 if (action === 'init') fs.writeFileSync(path, JSON.stringify({commit:rest[1],phase:'preflight',artifacts:{control_plane_image:'registry/control@sha256:abc',deploy_generation:201}}));
@@ -215,6 +219,8 @@ esac
 }
 
 beforeEach(() => {
+  vi.stubEnv("GITHUB_ACTIONS", undefined);
+  vi.stubEnv("PI_ORB_CI_QUALIFICATION", undefined);
   vi.stubEnv("PI_ORB_RELEASE_RESULT_DIR", undefined);
   vi.stubEnv("PI_ORB_RELEASE_RECORD", undefined);
   vi.stubEnv("PI_ORB_USER_ID", "00000000-0000-4000-8000-000000000001");
@@ -368,6 +374,38 @@ describe("workload-identity cloud release configuration", () => {
 });
 
 describe("infra/release.sh", () => {
+  it.each([false, true])("rechecks GitHub qualification before locking (failed=%s)", (failed) => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        TMPDIR: join(root, "tmp"),
+        PROJECT: "test-project",
+        GITHUB_ACTIONS: "true",
+        GITHUB_SHA: "abc123",
+        PI_ORB_CI_QUALIFICATION: "{}",
+        MOCK_QUALIFICATION_STATUS: failed ? "failed" : "success",
+      },
+    });
+    const calls = readFileSync(log, "utf8");
+    expect(result.status, result.stderr).toBe(failed ? 1 : 0);
+    expect(calls).toContain("infra.ci_qualification verify");
+    expect(calls).not.toMatch(/npm:test\n|npm:run (typecheck|lint|test:e2e)/);
+    if (failed) {
+      expect(calls).not.toContain("gcloud:storage cp");
+      expect(calls).not.toContain("\nbuild\n");
+    } else {
+      expect(calls.indexOf("infra.ci_qualification verify")).toBeLessThan(
+        calls.indexOf("gcloud:storage cp"),
+      );
+      expect(calls).toContain("npm:ci");
+      expect(calls).toContain("infra.release_state qualification");
+    }
+  });
+
   it("runs the complete release in order and clamps the generation forward", () => {
     const { root, log } = makeFixture();
     const result = spawnSync(join(root, "infra/release.sh"), ["--yes"], {
@@ -435,30 +473,35 @@ describe("infra/release.sh", () => {
     );
   });
 
-  it("validation-only neither builds, migrates nor applies", () => {
-    const { root, log } = makeFixture();
-    const result = spawnSync(join(root, "infra/release.sh"), ["--validate", "release-original"], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        CALL_LOG: log,
-        PATH: `${join(root, "bin")}:${process.env.PATH}`,
-        PROJECT: "test-project",
-        TMPDIR: join(root, "tmp"),
-      },
-    });
-    expect(result.status, result.stderr).toBe(0);
-    const calls = readFileSync(log, "utf8");
-    expect(calls).toContain("release-original");
-    expect(calls).toMatch(
-      /infra.release_state stage[^\n]* repair[\s\S]*deploy:[\s\S]*infra.release_state check[\s\S]*infra.release_retire wait/,
-    );
-    expect(calls).toContain("infra.release_state activate");
-    expect(calls).toContain("wif-smoke");
-    expect(calls).not.toMatch(
-      /\nbuild\n|docker:build|npm:|tofu:.* plan |tofu:.* apply |run jobs create/,
-    );
-  });
+  it.each(["true", "false"])(
+    "validation-only neither qualifies, builds, migrates nor applies (GitHub=%s)",
+    (github) => {
+      const { root, log } = makeFixture();
+      const result = spawnSync(join(root, "infra/release.sh"), ["--validate", "release-original"], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_ACTIONS: github,
+          MOCK_QUALIFICATION_STATUS: "failed",
+          CALL_LOG: log,
+          PATH: `${join(root, "bin")}:${process.env.PATH}`,
+          PROJECT: "test-project",
+          TMPDIR: join(root, "tmp"),
+        },
+      });
+      expect(result.status, result.stderr).toBe(0);
+      const calls = readFileSync(log, "utf8");
+      expect(calls).toContain("release-original");
+      expect(calls).toMatch(
+        /infra.release_state stage[^\n]* repair[\s\S]*deploy:[\s\S]*infra.release_state check[\s\S]*infra.release_retire wait/,
+      );
+      expect(calls).toContain("infra.release_state activate");
+      expect(calls).toContain("wif-smoke");
+      expect(calls).not.toMatch(
+        /infra.ci_qualification|\nbuild\n|docker:build|npm:|tofu:.* plan |tofu:.* apply |run jobs create/,
+      );
+    },
+  );
 
   it("refuses missing IAP tooling or policy access before checks and builds", () => {
     const { root, log } = makeFixture();

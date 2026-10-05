@@ -141,9 +141,88 @@ owned child and waits for cleanup, preserving native remote-resource cleanup.
 Typecheck, lint, database migration, apply, retirement, activation, and
 post-deploy smokes remain serial; short npm children are not parallelized because
 terminating npm does not guarantee termination of its tool subprocess. E2E owns its one runtime image
-build rather than release wrappers rebuilding it. Deploy and E2E cache npm data
-and Playwright browser binaries by OS and exact lockfile only; release records,
+build rather than release wrappers rebuilding it. Deploy and E2E cache npm data;
+E2E caches Playwright browser binaries by OS and exact lockfile only. Release records,
 test output, credentials, and other mutable state are not cached.
+
+## Deployment-speed decisions and proposals (2026-10-05)
+
+**Items 1 and 5 approved and implemented locally; not deployed or hosted-qualified. Other items remain unapproved.** The
+September 18 example above took 62m15s: checks 33m14s, build/acceptance/publication
+9m51s, smokes 10m36s, and all remaining stages 8m34s (roughly nine minutes).
+These historical timings identify candidates, not measured savings.
+
+**Latest measured evidence:** October 5 [Deploy 37316402844](https://github.com/schani/pi-orb/actions/runs/37316402844)
+(`d67de4c`; [release artifact](https://github.com/schani/pi-orb/actions/runs/37316402844/artifacts/11352071718))
+took 70m25s from dispatch to workflow completion, including six seconds queued;
+the release artifact spans 68m56s. Successive timestamped `release:<stage>`
+markers give rounded durations: checks 40m16s (E2E 35m12s for 407 tests; units
+4m15s), image build/acceptance/publication 9m41s, plan 8s, migration 4m36s,
+apply 1m28s, repair 18s, retirement 1m05s, activation 10s, lifecycle smoke
+4m59s and identity smoke 5m29s. Compared with September 18's 62m15s total
+and 27m40s E2E, total elapsed grew 8m10s and E2E grew 7m32s. This comparison
+does not isolate causes or measure any proposed optimization's savings.
+
+In priority order:
+
+1. **Approved: four isolated E2E runner shards.** Keep `maxWorkers: 1` and
+   serial files within each runner, with `fail-fast: false` across runners.
+   Earlier same-host parallelism failed; separate runners isolate Docker,
+   databases and ports without weakening assertions. Require complete, disjoint
+   file coverage, execution-owned mock sessions and shard-specific failure
+   evidence. Local inventory contracts prove all 44 files appear exactly once
+   across four 11-file shards. A live fake-service probe isolated eight requests
+   across four concurrent, equally named sessions. The hosted matrix and
+   elapsed-time savings remain unvalidated; evidence limits are in `docs/testing.md`.
+2. **Persist a trusted BuildKit layer cache.** Reuse build layers without treating
+   cache hits as acceptance. Restrict cache writers to trusted workflows, retain
+   input/digest provenance, and exclude credentials and mutable test/release state.
+3. **Overlap the remote native build with checks.** Native and control-plane
+   builds already run together; the additional overlap is with qualification.
+   No publication or deployment before all required checks and acceptance pass.
+   Failure/cancellation must terminate owned work, await remote cleanup and retain
+   cleanup uncertainty; speculative builds may increase cost.
+4. **Reuse an exact-input accepted runtime image for frontend/control-only
+   changes.** Current exact-commit provenance prevents this. Propose artifact-input
+   identity covering runtime source, shared dependencies/lockfile, patches, build
+   recipe and OS/tool inputs, linked to prior acceptance and exact image IDs—not
+   permission to select an arbitrary older image. Uncertain or changed inputs
+   require rebuilding and acceptance; host-spec generation fencing remains intact.
+5. **Approved: reuse trusted exact-SHA CI and E2E qualification.** Keep manual
+   Deploy. Before acquiring the release lock, wait for both workflows' successful
+   same-repository `push`/`main` runs at the exact dispatched SHA; record run IDs
+   and attempts. Accept only one matching push run per workflow, on its first
+   attempt; reruns cannot mask an earlier failure. CI, E2E and Deploy are aligned
+   on `ubuntu-24.04` and Node `24.6.0`.
+   This removes duplicate checks, not coverage. Failed or cancelled runs block;
+   pending or missing runs must succeed within 60 minutes (65-minute job limit).
+   Require the CI checks job and all four E2E jobs. Before the release lock,
+   `release.sh` re-verifies the exact evidence and checks latest main without
+   changing the selected SHA, then removes the qualification token from its
+   environment. Run/job identities are retained in the optional `qualification`
+   release-record field and preserved by recovery. Refusal reasons appear in
+   the job summary; a rerun is refused even if green—diagnose the first attempt
+   and qualify a new commit.
+   Concurrency applies only to the release job, so qualification waits cannot
+   block validation-only recovery. Recovery bypasses new-source qualification; local releases
+   still run their normal checks/E2E. Reuse neither clears unexplained failures
+   nor replaces native acceptance or deployment-specific live gates.
+6. **Later, separate immutable frontend publication.** Preserve the authenticated
+   browser origin and atomic index/assets publication, including referenced-asset
+   and real-browser validation. Never rebuild a live static root in place
+   (`docs/postmortems/2026-09-09-live-web-rebuild.md`).
+
+Full local typecheck, lint and tests passed; focused review-fix checks also passed.
+Counts and logs are recorded in `docs/testing.md`. Hosted qualification and live
+release reuse remain unvalidated; no deployment was performed.
+
+**Proposed instrumentation:** extend the token-free release record with per-stage
+start/end/duration, shard coverage, cache hits/misses, artifact-input identities,
+qualification provenance and explicit reuse/rebuild decisions. Measure critical
+path and resource cost before claiming improvement. Serialized deployment,
+migration, IAP, retirement, activation and applicable production smoke gates remain
+required; none of these proposals authorizes skipping them or retrying failures
+until green.
 
 ## Native runtime VM image release (implemented 2026-09-05; first deployed 2026-09-07)
 
@@ -175,7 +254,7 @@ The deployed image `pi-orb-image-v-db8cb5d-ebd0a574514547e9` occupies 1,369,020,
 2. **Make prerequisites reproducible and fail early.** Provision pinned deployment tools through repository setup; check tool availability, Docker readiness and scoped cloud access before an expensive build. The missing hosting-bucket permission and missing OpenTofu executable should be actionable preflight failures, not late surprises. Foundation permission changes stay separately administered.
 3. **Make the release outcome durable and explicit.** Record the commit, accepted image identities/digest, generation, per-gate verdicts and fixture IDs in a token-free release artifact outside the agent workspace. Distinguish failed-before-apply, applied-but-unvalidated and validated. An explicit validation-only operation can reuse that record after verifying the serving deployment still matches; it must not rebuild/reapply or silently retry unexplained failures.
 4. **Finish fixture ownership automation.** Successful lifecycle and identity fixtures should both be deleted and verified absent. Failed fixtures retain diagnostic evidence, with their IDs, cleanup failures and potential cost visible in the release result. Do not restore unconditional deletion on failure.
-5. **Then provide one manually triggered external workflow.** A GitHub Actions entry point should call the same release command, run checks/E2E for the selected commit, use scoped OIDC, hold the existing global lock and publish the final result. It should not depend on this orb, its agent process or the web UI remaining alive. Keep one release implementation rather than a second YAML deployment algorithm. Automatic deployment on push remains a later policy choice in `docs/open-questions.md`, question 40.
+5. **Then provide one manually triggered external workflow.** A GitHub Actions entry point should call the same release command, require checks/E2E for the selected commit, use scoped OIDC, hold the existing global lock and publish the final result. It should not depend on this orb, its agent process or the web UI remaining alive. Keep one release implementation rather than a second YAML deployment algorithm. Automatic deployment on push remains a later policy choice in `docs/open-questions.md`, question 40.
 
 The first useful milestone is “start one release and receive one trustworthy result,” not automatic production changes on every push. Do not add blind retries, a custom deployment service, another generation allocator alongside the current lock/clamp, or automatic migration rollback merely to label the process automated.
 

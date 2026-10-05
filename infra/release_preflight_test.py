@@ -50,20 +50,24 @@ class PreflightTest(unittest.TestCase):
         package = json.loads(Path("package.json").read_text())
         self.assertEqual(package["scripts"]["test:e2e:install"],
                          "playwright install --with-deps chromium webkit")
-        for path in ["infra/release.sh", ".github/workflows/e2e.yml"]:
+        for path, command in [
+            ("infra/release.sh", "npm run test:e2e\n"),
+            (".github/workflows/e2e.yml", "npm run test:e2e -- --shard=${{ matrix.shard }}/4\n"),
+        ]:
             script = Path(path).read_text()
             self.assertLess(script.index("npm ci"), script.index("npm run test:e2e:install"))
-            self.assertLess(script.index("npm run test:e2e:install"),
-                            script.index("npm run test:e2e\n"))
+            self.assertLess(script.index("npm run test:e2e:install"), script.index(command))
 
     def test_release_workflows_cache_only_dependencies_and_do_not_prebuild_runtime(self):
         key = "key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}"
+        e2e = Path(".github/workflows/e2e.yml").read_text()
+        self.assertIn("path: ~/.cache/ms-playwright", e2e)
+        self.assertIn(key, e2e)
+        self.assertNotIn("ms-playwright", Path(".github/workflows/deploy.yml").read_text())
         for path in [".github/workflows/deploy.yml", ".github/workflows/e2e.yml"]:
             workflow = Path(path).read_text()
-            self.assertIn("path: ~/.cache/ms-playwright", workflow)
-            self.assertIn(key, workflow)
+            self.assertIn("cache: npm", workflow)
             self.assertNotIn("apps/orb-runtime/Dockerfile", workflow)
-        self.assertIn("cache: npm", Path(".github/workflows/deploy.yml").read_text())
         self.assertNotIn("apps/orb-runtime/Dockerfile", Path("infra/release.sh").read_text())
 
     def test_check_precedes_checks_build_schema_and_apply(self):

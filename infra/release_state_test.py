@@ -1,5 +1,7 @@
 import copy
 import json
+import os
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -32,7 +34,7 @@ def record():
         "previousServing": None,
         "serving": [{"service": name, "revision": name + "-new", "image": IMAGE, "generation": None if name == "pi-orb-issuer" else 42} for name in SERVICES],
         "retirement": {"after": STAMP, "operations": [], "revisions": ["pi-orb-old"], "zeroes": {"pi-orb-old": {"active": STAMP, "idle": STAMP}}},
-        "fixtures": [], "migrationJob": None, "nativeCleanup": [],
+        "fixtures": [], "migrationJob": None, "nativeCleanup": [], "qualification": None,
     }
 
 
@@ -62,6 +64,30 @@ class FakeCloud:
         return self.put(bucket, key, body, "7")
 
 
+class SmokeFixtureShellTest(unittest.TestCase):
+    def test_real_shell_records_fixture_outside_repo_and_propagates_publish_failure(self):
+        infra = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root)
+            release = path / 'release.json'
+            release.write_text(json.dumps(record()))
+            gcloud = path / 'gcloud'
+            gcloud.write_text('#!/bin/sh\necho PERMISSION_DENIED >&2\nexit 7\n')
+            gcloud.chmod(0o700)
+            env = {**os.environ, 'DIR': str(infra), 'PI_ORB_RELEASE_RECORD': str(release),
+                   'PATH': str(path) + os.pathsep + os.environ['PATH']}
+            env.pop('PYTHONPATH', None)
+            for outcome in ('requested', 'created', 'retained', 'cleanup-failed', 'deleted'):
+                with self.subTest(outcome=outcome):
+                    result = subprocess.run(
+                        ['bash', '-eu', '-c', 'source "$DIR/smoke-fixtures.sh"; fixture_record orb fixture-42 "$1"',
+                         'smoke-fixture-test', outcome], cwd=path, env=env, capture_output=True, text=True)
+                    self.assertEqual(json.loads(release.read_text())['fixtures'],
+                                     [{'kind': 'orb', 'id': 'fixture-42', 'outcome': outcome}], result.stderr)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('gcloud auth print-access-token exited 7 (PERMISSION_DENIED)', result.stderr)
+
+
 class ReleaseStateTest(unittest.TestCase):
     def test_only_allowlisted_records_can_be_published(self):
         value = record()
@@ -76,6 +102,43 @@ class ReleaseStateTest(unittest.TestCase):
             cloud = FakeCloud()
             self.assertIsNotNone(publish(cloud, corrupt).error)
             self.assertEqual(cloud.writes, [])
+
+    def test_records_without_external_qualification_remain_valid(self):
+        value = record()
+        del value['qualification']
+        self.assertTrue(validate_record(value))
+        cloud = FakeCloud()
+        cloud.source = value
+        self.assertIsNone(recover(cloud, record(), 'release-42').error)
+
+    def test_qualification_is_allowlisted_and_bound_to_deployed_commit(self):
+        from infra.ci_qualification_test import FakeAPI, SHA
+        from infra.ci_qualification import inspect
+        value = record()
+        value['commit'] = SHA
+        value['qualification'] = inspect(FakeAPI(), SHA).value
+        self.assertTrue(validate_record(value))
+        value['qualification']['runs'][0]['attempt'] = 2
+        self.assertFalse(validate_record(value))
+        value['qualification'] = inspect(FakeAPI(), SHA).value
+        value['commit'] = 'b' * 40
+        self.assertFalse(validate_record(value))
+
+    def test_recovery_preserves_original_qualification(self):
+        from infra.ci_qualification_test import FakeAPI
+        from infra.ci_qualification import inspect
+        api = FakeAPI()
+        for runs in api.runs.values():
+            runs[0]['head_sha'] = 'b' * 40
+        for jobs in api.jobs.values():
+            for job in jobs:
+                job['head_sha'] = 'b' * 40
+        cloud = FakeCloud()
+        cloud.source = record()
+        cloud.source['qualification'] = inspect(api, 'b' * 40).value
+        recovered = recover(cloud, record(), 'release-42')
+        self.assertIsNone(recovered.error)
+        self.assertEqual(recovered.value['qualification'], cloud.source['qualification'])
 
     def test_native_cleanup_is_strictly_allowlisted_and_scope_bound(self):
         value = record()
