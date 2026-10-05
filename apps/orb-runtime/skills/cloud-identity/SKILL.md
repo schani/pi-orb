@@ -42,6 +42,7 @@ budget, so treat whatever it returns as final rather than wrapping it in a loop.
 
 ## Rules — read these before your first mint
 
+- Only do non-trivial validations in the cloud if you have confirmation from the user.
 - **Never mint under a traced shell.** `set -x`, `bash -x`, or any wrapper that
   echoes commands prints a live bearer credential into the transcript.
 - **Never write the JWT to a file, a log, or a command line.** Use command
