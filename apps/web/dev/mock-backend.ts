@@ -42,6 +42,7 @@ const ORB_ID = "frontend-fixture-orb";
 const AUTH_ORB_ID = "frontend-auth-copy-test";
 const ARCHIVED_ORB_ID = "frontend-archived-orb";
 const HEADLINE_ORB_ID = "frontend-activity-headlines";
+const TIMESTAMP_CHURN_ORB_IDS = [ORB_ID, "frontend-long-history", "frontend-lazy-details"];
 const NEW_ORB_STARTUP_DELAY_MS = 10_000;
 const now = () => new Date().toISOString();
 
@@ -54,6 +55,7 @@ const failedPreview = fixturePng("failed");
 const attachmentPreview = fixturePng("attachment");
 
 interface MockState {
+  timestampChurnPoll: number | null;
   headlines: {
     cache: Map<string, string>;
     markers: Map<string, string | null | undefined>;
@@ -81,7 +83,7 @@ interface MockState {
   projectInstructions: Map<string, ProjectInstructions>;
 }
 
-function initialState(): MockState {
+function initialState(timestampChurn: boolean): MockState {
   const createdAt = now();
   const runningOrbCreatedAt = new Date(Date.now() - 14 * 60_000).toISOString();
   const authOrbCreatedAt = new Date(Date.now() - 3 * 24 * 60 * 60_000).toISOString();
@@ -693,6 +695,7 @@ function initialState(): MockState {
     ],
   ]);
   return {
+    timestampChurnPoll: timestampChurn ? 0 : null,
     headlines: {
       cache: new Map(),
       markers: new Map(),
@@ -1533,6 +1536,13 @@ async function handleApi(
       return true;
     }
     if (method === "GET") {
+      if (projectId === PROJECT_ID && state.timestampChurnPoll !== null) {
+        const id =
+          TIMESTAMP_CHURN_ORB_IDS[state.timestampChurnPoll % TIMESTAMP_CHURN_ORB_IDS.length];
+        state.timestampChurnPoll += 1;
+        const orb = id === undefined ? undefined : state.orbs.get(id);
+        if (orb !== undefined) state.orbs.set(orb.id, { ...orb, updatedAt: now() });
+      }
       sendJson(response, 200, {
         items: [...state.orbs.values()].filter((orb) => orb.projectId === projectId),
       });
@@ -2635,8 +2645,8 @@ function acceptTerminalSocket(socket: WebSocket): void {
  * It implements the real HTTP and WebSocket contracts, so production UI code
  * has no mock branches and protocol drift remains visible.
  */
-export function mockBackendPlugin(): Plugin {
-  const state = initialState();
+export function mockBackendPlugin({ timestampChurn = false } = {}): Plugin {
+  const state = initialState(timestampChurn);
   let sessionExpired = false;
   const sockets = new WebSocketServer({
     noServer: true,

@@ -2,6 +2,7 @@ import type { OrbState, OrbView, ProjectView } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import { matchAppSearchItems } from "./app-search.ts";
 import { buildDashboardSearchSource } from "./dashboard-search-source.ts";
+import { splitProjectOrbs } from "./project-orbs.ts";
 
 const project = (id: string, name: string, repositoryUrl: string): ProjectView => ({
   id,
@@ -70,6 +71,31 @@ describe("dashboard search source", () => {
     expect(matchAppSearchItems(source.items, "github.com/acme/atlas")[0]?.key).toBe(
       "dashboard:project:project/1",
     );
+  });
+
+  it("shares rendered first-appearance order while refreshing Find metadata", () => {
+    const orbOrder = new Map();
+    const older = { ...orb("older", "Old name", "running"), updatedAt: "2026-08-25T00:00:00Z" };
+    const newer = orb("newer", "Newer", "running");
+    splitProjectOrbs([older, newer], orbOrder);
+    const refreshed = {
+      ...older,
+      name: "Updated name",
+      updatedAt: new Date(now).toISOString(),
+      activity: "busy" as const,
+    };
+    const source = buildDashboardSearchSource({
+      projects: [project("project-1", "Atlas", "https://github.com/acme/atlas")],
+      projectsLoading: false,
+      projectsFailed: false,
+      now,
+      orbOrder,
+      orbLists: { "project-1": { type: "loaded", items: [refreshed, newer] } },
+    });
+    const items = source.items.filter((item) => item.group === "orbs");
+    expect(items.map((item) => item.title)).toEqual(["Newer", "Updated name"]);
+    expect(items[1]?.age).toBe("1s");
+    expect(items[1]?.glyph?.state).toBe("busy");
   });
 
   it("forwards sleep metadata into Find glyphs", () => {

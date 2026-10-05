@@ -1,6 +1,11 @@
 import type { OrbView, ProjectView } from "@pi-orb/protocol";
 import type { AppSearchItem, AppSearchSource } from "./app-search.ts";
-import { formatProjectOrbAge, projectOrbGlyph, splitProjectOrbs } from "./project-orbs.ts";
+import {
+  formatProjectOrbAge,
+  type OrbOrderCache,
+  projectOrbGlyph,
+  splitProjectOrbs,
+} from "./project-orbs.ts";
 
 export type DashboardOrbListSnapshot =
   | { type: "loading" }
@@ -13,6 +18,7 @@ export interface DashboardSearchSnapshot {
   projectsFailed: boolean;
   orbLists: Readonly<Record<string, DashboardOrbListSnapshot | undefined>>;
   now: number;
+  orbOrder?: OrbOrderCache;
 }
 
 function githubRepositoryAlias(repositoryUrl: string): string | null {
@@ -80,7 +86,7 @@ export function buildDashboardSearchSource(snapshot: DashboardSearchSnapshot): A
       hasFailedOrbs = true;
       continue;
     }
-    const shelves = splitProjectOrbs(orbList.items);
+    const shelves = splitProjectOrbs(orbList.items, snapshot.orbOrder);
     items.push(...shelves.working.map((orb) => orbItem(project, orb, false, snapshot.now)));
     items.push(...shelves.archive.map((orb) => orbItem(project, orb, true, snapshot.now)));
   }

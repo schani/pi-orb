@@ -156,6 +156,82 @@ describe("project orb presentation", () => {
   });
 });
 
+describe("first-appearance orb ordering", () => {
+  const old = "2026-08-09T01:00:00.000Z";
+  const recent = "2026-08-09T02:00:00.000Z";
+  const latest = "2026-08-09T03:00:00.000Z";
+
+  it("freezes sort timestamps but returns fresh metadata and inserts newcomers by their timestamp", () => {
+    const order = new Map();
+    const initial: [OrbView, OrbView] = [
+      orb("old", "running", old),
+      orb("recent", "stopped", recent),
+    ];
+    expect(splitProjectOrbs(initial, order).working.map((item) => item.id)).toEqual([
+      "recent",
+      "old",
+    ]);
+    const refreshed = {
+      ...initial[0],
+      name: "Renamed",
+      activity: "busy" as const,
+      updatedAt: latest,
+    };
+    const newcomer = orb("new", "running", "2026-08-09T01:30:00.000Z");
+    const result = splitProjectOrbs([refreshed, newcomer, initial[1]], order);
+    expect(result.working.map((item) => item.id)).toEqual(["recent", "new", "old"]);
+    expect(result.working[2]).toBe(refreshed);
+    expect(initial.map((item) => item.id)).toEqual(["old", "recent"]);
+    expect(splitProjectOrbs([refreshed, initial[1]], new Map()).working[0]).toBe(refreshed);
+  });
+
+  it("retains keys through absence and lifecycle shelf changes", () => {
+    const order = new Map();
+    splitProjectOrbs([orb("old", "running", old), orb("recent", "archived", recent)], order);
+    splitProjectOrbs([], order);
+    const result = splitProjectOrbs(
+      [orb("old", "archiving", latest), orb("recent", "archived", recent)],
+      order,
+    );
+    expect(result.archive.map((item) => item.id)).toEqual(["recent", "old"]);
+    expect(result.working).toEqual([]);
+  });
+
+  it("breaks equal update times by first-seen creation time, then first-appearance position", () => {
+    const order = new Map();
+    const first = orb("first", "running", recent);
+    const second = orb("second", "running", recent);
+    const newerCreation = { ...orb("created-later", "running", recent), createdAt: recent };
+    expect(
+      splitProjectOrbs([first, second, newerCreation], order).working.map((item) => item.id),
+    ).toEqual(["created-later", "first", "second"]);
+    expect(
+      splitProjectOrbs([second, first, newerCreation], order).working.map((item) => item.id),
+    ).toEqual(["created-later", "first", "second"]);
+    const result = splitProjectOrbs(
+      [second, { ...first, createdAt: latest }, newerCreation, orb("new-tie", "running", recent)],
+      order,
+    );
+    expect(result.working.map((item) => item.id)).toEqual([
+      "created-later",
+      "first",
+      "second",
+      "new-tie",
+    ]);
+  });
+
+  it("keeps invalid first-seen timestamps last even if later corrected", () => {
+    const order = new Map();
+    splitProjectOrbs([orb("invalid", "running", "invalid"), orb("valid", "running", old)], order);
+    expect(
+      splitProjectOrbs(
+        [orb("invalid", "running", latest), orb("valid", "running", old)],
+        order,
+      ).working.map((item) => item.id),
+    ).toEqual(["valid", "invalid"]);
+  });
+});
+
 describe("dashboard project order", () => {
   const old = "2026-08-09T01:00:00.000Z";
   const recent = "2026-08-09T05:00:00.000Z";

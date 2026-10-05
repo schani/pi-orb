@@ -112,7 +112,13 @@ export function projectOrbShelf(state: OrbState): ProjectOrbShelf {
     : "working";
 }
 
-export function splitProjectOrbs(items: OrbView[]): {
+export type OrbOrderCache = Map<string, { updated: number; created: number; position: number }>;
+
+/** Keep one cache per mounted fleet view, including keys for temporarily absent orbs. */
+export function splitProjectOrbs(
+  items: OrbView[],
+  order: OrbOrderCache = new Map(),
+): {
   working: OrbView[];
   archive: OrbView[];
 } {
@@ -120,20 +126,31 @@ export function splitProjectOrbs(items: OrbView[]): {
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
   };
-  const latestFirst = (left: OrbView, right: OrbView) => {
-    const leftUpdated = sortableTime(left.updatedAt);
-    const rightUpdated = sortableTime(right.updatedAt);
-    if (leftUpdated !== rightUpdated) return rightUpdated > leftUpdated ? 1 : -1;
-
-    const leftCreated = sortableTime(left.createdAt);
-    const rightCreated = sortableTime(right.createdAt);
-    if (leftCreated === rightCreated) return 0;
-    return rightCreated > leftCreated ? 1 : -1;
-  };
+  const ordered = items
+    .map((orb) => {
+      let key = order.get(orb.id);
+      if (key === undefined) {
+        key = {
+          updated: sortableTime(orb.updatedAt),
+          created: sortableTime(orb.createdAt),
+          position: order.size,
+        };
+        order.set(orb.id, key);
+      }
+      return { orb, key };
+    })
+    .sort((left, right) => {
+      if (left.key.updated !== right.key.updated)
+        return right.key.updated > left.key.updated ? 1 : -1;
+      if (left.key.created !== right.key.created)
+        return right.key.created > left.key.created ? 1 : -1;
+      return left.key.position - right.key.position;
+    })
+    .map(({ orb }) => orb);
 
   return {
-    working: items.filter((orb) => projectOrbShelf(orb.state) === "working").sort(latestFirst),
-    archive: items.filter((orb) => projectOrbShelf(orb.state) === "archive").sort(latestFirst),
+    working: ordered.filter((orb) => projectOrbShelf(orb.state) === "working"),
+    archive: ordered.filter((orb) => projectOrbShelf(orb.state) === "archive"),
   };
 }
 

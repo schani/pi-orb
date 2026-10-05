@@ -23,6 +23,7 @@ const orb: OrbView = {
 };
 const props = {
   project,
+  orbOrder: new Map(),
   orbId: orb.id,
   pending: false,
   now: Date.parse(project.createdAt),

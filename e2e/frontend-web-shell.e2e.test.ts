@@ -42,6 +42,64 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+it.each(["/", "/orbs/missing-orb"])(
+  "%s freezes orb ordering across polls, but not activity or reload",
+  async (path) => {
+    const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+    const page = await browser.newPage();
+    const project = {
+      id: "ordering",
+      name: "Ordering",
+      state: "active",
+      repositoryUrl: "https://github.com/example/ordering",
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    };
+    const older = {
+      id: "older",
+      projectId: project.id,
+      name: "Older",
+      state: "running",
+      stateVersion: 1,
+      stateChangedAt: project.createdAt,
+      createdAt: project.createdAt,
+      updatedAt: "2026-10-02T00:00:00Z",
+      activity: "idle",
+    };
+    const newer = { ...older, id: "newer", name: "Newer", updatedAt: "2026-10-03T00:00:00Z" };
+    let items = [older, newer];
+    const rows = path === "/" ? ".orb-entry-link" : ".ix-row .trunc";
+    try {
+      await page.route("**/api/v1/projects", (route) =>
+        route.fulfill({ json: { items: [project] } }),
+      );
+      await page.route("**/api/v1/projects/ordering/orbs", (route) =>
+        route.fulfill({ json: { items } }),
+      );
+      await page.goto(`${origin}${path}`);
+      await expectPage(page.locator(rows)).toHaveText(["Newer", "Older"]);
+      items = [
+        { ...older, name: "Refreshed", activity: "busy", updatedAt: "2100-01-01T00:00:00Z" },
+        newer,
+      ];
+      await expectPage(page.locator(rows).filter({ hasText: "Refreshed" })).toHaveCount(1);
+      await expectPage(page.locator(rows)).toHaveText(["Newer", "Refreshed"]);
+      const refreshedRow = page.locator(path === "/" ? ".orb-entry" : ".ix-row", {
+        hasText: "Refreshed",
+      });
+      await expectPage(refreshedRow.locator('img[src="/favicons/busy.svg"]')).toHaveCount(1);
+      await expectPage(
+        refreshedRow.locator(path === "/" ? ".orb-entry-meta > span:first-child" : ".ix-age"),
+      ).toHaveText("1s");
+      await page.reload();
+      await expectPage(page.locator(rows)).toHaveText(["Refreshed", "Newer"]);
+    } finally {
+      await page.unrouteAll({ behavior: "wait" });
+      await page.close();
+    }
+  },
+);
+
 it("boots the production shell and loads its built JS, CSS and favicon on direct deep links and reload", async () => {
   const origin = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
   const page = await browser.newPage();
