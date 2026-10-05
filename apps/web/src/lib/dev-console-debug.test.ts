@@ -57,6 +57,25 @@ describe("DevConsoleDebug", () => {
     expect(JSON.stringify(dump)).not.toContain("secret");
   });
 
+  it("records content-free pin transition geometry", () => {
+    const debug = new DevConsoleDebug();
+    debug.record({
+      event: "scroll_pin",
+      orbId: "orb",
+      outcome: "released:intent",
+      scrollY: 600,
+      viewportHeight: 400,
+      contentHeight: 1000,
+    });
+    expect(debug.dump().trace[0]).toMatchObject({
+      event: "scroll_pin",
+      outcome: "released:intent",
+      scrollY: 600,
+      viewportHeight: 400,
+      contentHeight: 1000,
+    });
+  });
+
   it("returns detached dumps and scans current order and inbox evidence on demand", () => {
     const debug = new DevConsoleDebug();
     const records = history("orb", ["first", "second"]).records;

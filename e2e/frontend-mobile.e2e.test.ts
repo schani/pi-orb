@@ -868,6 +868,19 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           pane.querySelector(".orb-transcript-content")?.append(spacer);
         });
         await expectPage.poll(distance).toBeGreaterThan(800);
+        const pinEdges = await page.evaluate(() =>
+          (
+            Reflect.get(globalThis, "window") as {
+              piOrbDebug: {
+                dump(): { trace: { event: string; outcome: string; contentHeight: number }[] };
+              };
+            }
+          ).piOrbDebug
+            .dump()
+            .trace.filter((entry) => entry.event === "scroll_pin"),
+        );
+        expectPage(pinEdges.some((entry) => entry.outcome.startsWith("released:"))).toBe(true);
+        expectPage(pinEdges.every((entry) => entry.contentHeight > 0)).toBe(true);
       } finally {
         await page.close();
       }
@@ -903,39 +916,220 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     }
   });
 
-  it("keeps tail intent when native clamping precedes a growth observer", async () => {
-    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  it.each([false, true])(
+    "preserves cancelled touch pan and momentum through growth (scroll delivered: %s)",
+    async (deliverScroll) => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      try {
+        await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+        await waitForFixtureMedia(page);
+        const scroller = page.locator(".orb-transcript-scroll");
+        const distance = () =>
+          scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
+        await expectPage.poll(distance).toBeLessThanOrEqual(1);
+        await scroller.evaluate((pane, deliverScroll) => {
+          const touch = (type: string, y: number) => {
+            const event = new Event(type, { bubbles: true });
+            Object.defineProperty(event, "touches", {
+              value: type === "touchend" ? [] : [{ clientY: y }],
+            });
+            pane.dispatchEvent(event);
+          };
+          pane.dispatchEvent(
+            new (Reflect.get(globalThis, "PointerEvent"))("pointerdown", {
+              bubbles: true,
+              pointerType: "touch",
+            }),
+          );
+          touch("touchstart", 400);
+          // Native touch scrolling cancels the pointer stream before movement settles.
+          pane.dispatchEvent(
+            new (Reflect.get(globalThis, "PointerEvent"))("pointercancel", {
+              bubbles: true,
+              pointerType: "touch",
+            }),
+          );
+          touch("touchmove", 600);
+          touch("touchend", 600);
+          // Movement may continue as momentum after the finger leaves the pane.
+          pane.scrollTop -= 300;
+          pane.setAttribute("data-reader-top", String(pane.scrollTop));
+          const spacer = pane.ownerDocument.createElement("div");
+          spacer.style.height = "800px";
+          pane.querySelector(".orb-transcript-content")?.append(spacer);
+          if (deliverScroll) pane.dispatchEvent(new Event("scroll"));
+          else
+            pane.addEventListener(
+              "scroll",
+              (event: { stopImmediatePropagation(): void }) => event.stopImmediatePropagation(),
+              { capture: true },
+            );
+        }, deliverScroll);
+        // Allow the growth observer and its automatic scroll event to run before sampling.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              const frame = Reflect.get(globalThis, "requestAnimationFrame");
+              frame(() => frame(() => resolve()));
+            }),
+        );
+        await expectPage.poll(distance).toBeGreaterThan(1000);
+        expectPage(await scroller.evaluate((pane) => pane.scrollTop)).toBe(
+          Number(await scroller.getAttribute("data-reader-top")),
+        );
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  it.each(["inside", "outside", "cancel"])(
+    "keeps tail during a stationary pointer with %s release",
+    async (release) => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      try {
+        await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+        await waitForFixtureMedia(page);
+        const scroller = page.locator(".orb-transcript-scroll");
+        const distance = () =>
+          scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
+        await expectPage.poll(distance).toBeLessThanOrEqual(1);
+        await scroller.evaluate((pane) => {
+          pane.dispatchEvent(
+            new (Reflect.get(globalThis, "PointerEvent"))("pointerdown", { bubbles: true }),
+          );
+          const spacer = pane.ownerDocument.createElement("div");
+          spacer.id = "pointer-spacer";
+          spacer.style.height = "800px";
+          pane.querySelector(".orb-transcript-content")?.append(spacer);
+        });
+        await expectPage.poll(distance).toBeLessThanOrEqual(1);
+        await scroller.evaluate((pane, release) => {
+          const target = release === "inside" ? pane : pane.ownerDocument.body;
+          target.dispatchEvent(
+            new (Reflect.get(globalThis, "PointerEvent"))(
+              release === "cancel" ? "pointercancel" : "pointerup",
+              {
+                bubbles: true,
+              },
+            ),
+          );
+          const spacer = pane.querySelector("#pointer-spacer") as { style: { height: string } };
+          spacer.style.height = "0px";
+          pane.setAttribute("data-clamped-top", String(pane.scrollTop));
+          spacer.style.height = "1600px";
+          // The released gesture must no longer suppress native geometry protection.
+          pane.addEventListener(
+            "scroll",
+            (event: { stopImmediatePropagation(): void }) => event.stopImmediatePropagation(),
+            { capture: true },
+          );
+        }, release);
+        await expectPage.poll(distance).toBeLessThanOrEqual(1);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  it.each([
+    [390, 0, 500],
+    [1280, 0, 500],
+    [390, 500, 0],
+    [1280, 500, 0],
+    [390, 0, 0],
+  ])("keeps tail after no-op wheel at %ipx (%i, %i)", async (width, dx, dy) => {
+    const page = await browser.newPage({ viewport: { width, height: 844 } });
     try {
       await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
       await waitForFixtureMedia(page);
-      await expectPage(page.locator(".history .rec-q")).toHaveCount(2);
       const scroller = page.locator(".orb-transcript-scroll");
-      await scroller.evaluate((pane) => {
-        const spacer = pane.ownerDocument.createElement("div");
-        spacer.id = "pin-growth-spacer";
-        spacer.style.height = "400px";
-        pane.querySelector(".orb-transcript-content")?.append(spacer);
-      });
       const distance = () =>
         scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
       await expectPage.poll(distance).toBeLessThanOrEqual(1);
+      if (dx > 0) {
+        await scroller.evaluate((pane) => {
+          const code = pane.ownerDocument.createElement("div");
+          code.id = "wheel-code";
+          code.style.cssText = "overflow-x:auto;width:200px;height:40px";
+          const line = pane.ownerDocument.createElement("div");
+          line.style.cssText = "width:2000px;height:20px";
+          code.append(line);
+          pane.querySelector(".orb-transcript-content")?.append(code);
+        });
+        await expectPage.poll(distance).toBeLessThanOrEqual(1);
+        await scroller.locator("#wheel-code").hover();
+      } else {
+        await scroller.hover();
+      }
       await scroller.evaluate((pane) => {
-        const spacer = pane.querySelector("#pin-growth-spacer") as {
-          style: { height: string };
-        } | null;
-        if (!spacer) return;
-        spacer.style.height = "0px";
-        // Force native range clamping, then grow before the observer can run.
-        const clamped = pane.scrollTop;
+        pane.addEventListener("wheel", () => pane.setAttribute("data-wheel-seen", "yes"), {
+          once: true,
+        });
+      });
+      if (dx === 0 && dy === 0) {
+        await scroller.evaluate((pane) =>
+          pane.dispatchEvent(new (Reflect.get(globalThis, "WheelEvent"))("wheel")),
+        );
+      } else {
+        await page.mouse.wheel(dx, dy);
+      }
+      await expectPage(scroller).toHaveAttribute("data-wheel-seen", "yes");
+      await scroller.evaluate((pane) => {
+        const spacer = pane.ownerDocument.createElement("div");
         spacer.style.height = "800px";
-        pane.setAttribute("data-clamped-top", String(clamped));
-        pane.dispatchEvent(new Event("scroll"));
+        pane.querySelector(".orb-transcript-content")?.append(spacer);
       });
       await expectPage.poll(distance).toBeLessThanOrEqual(1);
     } finally {
       await page.close();
     }
   });
+
+  it.each([false, true])(
+    "keeps tail when clamping precedes resize (scroll delivered: %s)",
+    async (deliverScroll) => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      try {
+        await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+        await waitForFixtureMedia(page);
+        await expectPage(page.locator(".history .rec-q")).toHaveCount(2);
+        const scroller = page.locator(".orb-transcript-scroll");
+        await scroller.evaluate((pane) => {
+          const spacer = pane.ownerDocument.createElement("div");
+          spacer.id = "pin-growth-spacer";
+          spacer.style.height = "400px";
+          pane.querySelector(".orb-transcript-content")?.append(spacer);
+        });
+        const distance = () =>
+          scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
+        await expectPage.poll(distance).toBeLessThanOrEqual(1);
+        await scroller.evaluate((pane, deliverScroll) => {
+          const spacer = pane.querySelector("#pin-growth-spacer") as {
+            style: { height: string };
+          } | null;
+          if (!spacer) return;
+          spacer.style.height = "0px";
+          // Force native range clamping, then grow before the observer can run.
+          const clamped = pane.scrollTop;
+          spacer.style.height = "800px";
+          pane.setAttribute("data-clamped-top", String(clamped));
+          if (deliverScroll) pane.dispatchEvent(new Event("scroll"));
+          else
+            pane.addEventListener(
+              "scroll",
+              (event: { stopImmediatePropagation(): void }) => event.stopImmediatePropagation(),
+              {
+                capture: true,
+              },
+            );
+        }, deliverScroll);
+        await expectPage.poll(distance).toBeLessThanOrEqual(1);
+      } finally {
+        await page.close();
+      }
+    },
+  );
 
   it("does not write phone scroll position during unrelated polling renders", async () => {
     const page = await browser.newPage({
