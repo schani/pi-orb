@@ -1,0 +1,47 @@
+{
+  "name": "live-cache-half-open",
+  "iteration": 0,
+  "records": [
+    {
+      "type": "run-start",
+      "wallClockEpoch": 1767225600000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of browser-recovery, retired-socket-delivery, empty-inbox, dispose",
+      "value": 0.36727755839948595
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of browser-recovery, empty-inbox, dispose",
+      "value": 0.20403200973386426
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of browser-recovery, empty-inbox, dispose",
+      "value": 0.32195570707894616
+    },
+    {
+      "type": "timer-create",
+      "id": 1,
+      "reason": "browser-recovery sleep: offline interval without socket close delivery",
+      "deadline": 10000
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of empty-inbox, dispose",
+      "value": 0.3677894139973442
+    },
+    {
+      "type": "entropy",
+      "name": "Picking task out of empty-inbox, dispose",
+      "value": 0.3732979688151131
+    },
+    {
+      "type": "timer-fire",
+      "id": 1,
+      "reason": "browser-recovery sleep: offline interval without socket close delivery",
+      "virtualTime": 10000
+    }
+  ]
+}

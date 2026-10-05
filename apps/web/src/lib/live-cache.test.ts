@@ -1,4 +1,4 @@
-import type { ServerFrame } from "@pi-orb/protocol";
+import type { ClientAction, ServerFrame } from "@pi-orb/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 import { initialState, reducer } from "../pages/OrbPage.tsx";
 import { history } from "../testkit/transcript.ts";
@@ -9,6 +9,7 @@ class Socket {
   static OPEN = 1;
   static instances: Socket[] = [];
   readyState = 1;
+  completeClose = true;
   sent: Record<string, unknown>[] = [];
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
@@ -20,6 +21,7 @@ class Socket {
     this.sent.push(JSON.parse(text));
   }
   close() {
+    if (!this.completeClose) return;
     this.readyState = 3;
     this.onclose?.();
   }
@@ -30,30 +32,196 @@ class Socket {
     this.onmessage?.({ data });
   }
 }
-const welcome = (sessionId: string): ServerFrame => ({
+const welcome = (sessionId: string, runtimeInstanceId = "new-runtime"): ServerFrame => ({
   v: 1,
   at: "now",
   type: "server.welcome",
   orbId: "a",
   sessionId,
   connectionId: "c",
-  runtimeInstanceId: "new-runtime",
+  runtimeInstanceId,
   capabilities: [],
   limits: { maxIncomingFrameBytes: 10000, maxPromptBytes: 1000 },
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+function connectivityHarness() {
+  vi.useFakeTimers();
+  Socket.instances = [];
+  vi.stubGlobal("WebSocket", Socket);
+  const browser = Object.assign(new EventTarget(), {
+    location: { protocol: "http:", host: "localhost" },
+    setTimeout,
+    clearTimeout,
+  });
+  vi.stubGlobal("window", browser);
+  let cursor = "one";
+  const frames: ServerFrame[] = [];
+  const statuses: string[] = [];
+  const lost: { requestId: string; action: ClientAction }[] = [];
+  const live = openLiveConnection({
+    orbId: "a",
+    sessionId: "session",
+    getAfterRecordId: () => cursor,
+    getVisible: () => true,
+    onRequestLost: (requestId, action) => lost.push({ requestId, action }),
+    onFrame: (frame) => frames.push(frame),
+    onStatus: (status) => statuses.push(status),
+  });
+  const first = Socket.instances[0] ?? expect.fail("first socket missing");
+  first.onopen?.();
+  return {
+    browser,
+    live,
+    first,
+    frames,
+    statuses,
+    lost,
+    advanceCursor: () => {
+      cursor = "two";
+    },
+  };
+}
+
+it("offline relinquishes live authority; online replaces a half-open socket using the latest cursor", () => {
+  const h = connectivityHarness();
+  const lateOpen = h.first.onopen;
+  const lateClose = h.first.onclose;
+  const lateMessage = h.first.onmessage;
+  h.first.completeClose = false;
+  h.browser.dispatchEvent(new Event("offline"));
+  expect(h.statuses.at(-1)).toBe("retrying");
+  expect(h.first.readyState).toBe(Socket.OPEN);
+  expect(h.live.sendRequest({ type: "abort", operationId: "operation" })).toBeNull();
+  vi.advanceTimersByTime(10_000);
+  expect(Socket.instances).toHaveLength(1);
+  h.advanceCursor();
+  h.browser.dispatchEvent(new Event("online"));
+  expect(Socket.instances).toHaveLength(2);
+  const next = Socket.instances[1] ?? expect.fail("replacement missing");
+  next.onopen?.();
+  expect(next.sent[0]?.afterRecordId).toBe("two");
+  const beforeStatuses = [...h.statuses];
+  const beforeSent = h.first.sent.length;
+  lateOpen?.();
+  lateClose?.();
+  lateMessage?.({ data: JSON.stringify(welcome("session")) });
+  expect(h.first.sent).toHaveLength(beforeSent);
+  expect(h.frames).toEqual([]);
+  expect(h.statuses).toEqual(beforeStatuses);
+  vi.advanceTimersByTime(10_000);
+  expect(Socket.instances).toHaveLength(2);
+  expect(devConsoleDebug.dump().trace).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ event: "connection", outcome: "browser_offline" }),
+      expect.objectContaining({ event: "connection", outcome: "browser_online" }),
+    ]),
+  );
+  h.live.dispose();
+});
+
+it.each(["same", "runtime_changed", "session_changed"] as const)(
+  "half-open recovery preserves pending command ownership: %s",
+  (change) => {
+    const h = connectivityHarness();
+    h.first.frame(welcome("session"));
+    const action: ClientAction = { type: "abort", operationId: "operation" };
+    const requestId = h.live.sendRequest(action) ?? expect.fail("request not sent");
+    const original = h.first.sent.find((frame) => frame.type === "client.request");
+    const lateResult = h.first.onmessage;
+    h.first.completeClose = false;
+    h.browser.dispatchEvent(new Event("offline"));
+    expect(h.first.readyState).toBe(Socket.OPEN);
+    h.browser.dispatchEvent(new Event("online"));
+    const next = Socket.instances[1] ?? expect.fail("replacement missing");
+    next.onopen?.();
+    const beforeFrames = h.frames.length;
+    lateResult?.({
+      data: JSON.stringify({
+        v: 1,
+        at: "now",
+        type: "request.result",
+        requestId,
+        result: { type: "accepted", operationId: "operation", duplicate: false },
+      } satisfies ServerFrame),
+    });
+    expect(h.frames).toHaveLength(beforeFrames);
+    next.frame(
+      welcome(
+        change === "session_changed" ? "replacement-session" : "session",
+        change === "runtime_changed" ? "replacement-runtime" : "new-runtime",
+      ),
+    );
+    const resends = next.sent.filter((frame) => frame.type === "client.request");
+    if (change === "same") {
+      expect(resends).toEqual([original]);
+      expect(h.lost).toEqual([]);
+    } else {
+      expect(resends).toEqual([]);
+      expect(h.lost).toEqual([{ requestId, action }]);
+      if (change === "session_changed") {
+        const fullSync = Socket.instances[2] ?? expect.fail("full sync transport missing");
+        fullSync.onopen?.();
+        expect(fullSync.sent[0]?.afterRecordId).toBeNull();
+        fullSync.frame(welcome("replacement-session"));
+        expect(fullSync.sent.filter((frame) => frame.type === "client.request")).toEqual([]);
+        expect(h.lost).toEqual([{ requestId, action }]);
+      }
+    }
+    h.live.dispose();
+  },
+);
+
+it("online alone replaces an open socket and cancels an existing retry", () => {
+  const h = connectivityHarness();
+  h.browser.dispatchEvent(new Event("online"));
+  expect(Socket.instances).toHaveLength(2);
+  expect(h.first.readyState).toBe(3);
+  const second = Socket.instances[1] ?? expect.fail("second socket missing");
+  second.close();
+  h.browser.dispatchEvent(new Event("online"));
+  expect(Socket.instances).toHaveLength(3);
+  vi.advanceTimersByTime(10_000);
+  expect(Socket.instances).toHaveLength(3);
+  h.live.dispose();
+});
+
+it("disposal removes connectivity listeners, cancels retries, and fences late socket callbacks", () => {
+  const h = connectivityHarness();
+  const remove = vi.spyOn(h.browser, "removeEventListener");
+  const lateOpen = h.first.onopen;
+  const lateClose = h.first.onclose;
+  h.first.close();
+  h.live.dispose();
+  expect(remove).toHaveBeenCalledWith("offline", expect.any(Function));
+  expect(remove).toHaveBeenCalledWith("online", expect.any(Function));
+  const before = [...h.statuses];
+  h.browser.dispatchEvent(new Event("offline"));
+  h.browser.dispatchEvent(new Event("online"));
+  lateOpen?.();
+  lateClose?.();
+  vi.advanceTimersByTime(10_000);
+  expect(Socket.instances).toHaveLength(1);
+  expect(h.statuses).toEqual(before);
+});
 
 it.each([false, true])(
   "cached session handshake: session replaced=%s; disposed transports cannot publish",
   (changed) => {
     Socket.instances = [];
     vi.stubGlobal("WebSocket", Socket);
-    vi.stubGlobal("window", {
-      location: { protocol: "http:", host: "localhost" },
-      setTimeout,
-      clearTimeout,
-    });
+    vi.stubGlobal(
+      "window",
+      Object.assign(new EventTarget(), {
+        location: { protocol: "http:", host: "localhost" },
+        setTimeout,
+        clearTimeout,
+      }),
+    );
     let state = reducer(initialState("a"), { type: "history_loaded", view: history() });
     const live = openLiveConnection({
       orbId: "a",

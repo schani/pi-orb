@@ -135,6 +135,7 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-05-offline-online-transcript.md](docs/postmortems/2026-10-05-offline-online-transcript.md) — reported missing transcript after connectivity recovery; reproduced half-open client gap, field cause unproved
 - [docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md](docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md) — fresh fixture inventory crossed the shared daemon's ownership boundary; scoped gate preserves foreign resources
 - [docs/postmortems/2026-10-04-workspace-full-history-desync.md](docs/postmortems/2026-10-04-workspace-full-history-desync.md) — full workspace followed by cursor-not-found; offline repair and normal replication verified 2026-10-05 (America/Cancun), with all original SQL rows unchanged
 - [docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md](docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md) — visible read summary blocked by markdown pointer interception; root cause unproved

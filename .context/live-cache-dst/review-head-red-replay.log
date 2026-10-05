@@ -1,0 +1,37 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m apps/web/src/lib/live-cache.dst.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 47[2mms[22m[39m
+[31m   [31m×[31m DST: half-open offline/online recovers a parent-closed assistant suffix despite an empty inbox[39m[32m 45[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/lib/live-cache.dst.test.ts[2m > [22mDST: half-open offline/online recovers a parent-closed assistant suffix despite an empty inbox
+[31m[1mAssertionError[22m: expected [ 'one' ] to deeply equal [ 'one', 'two' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "one",[22m
+[32m-   "two",[39m
+[2m  ][22m
+
+[36m [2m❯[22m apps/web/src/lib/live-cache.dst.test.ts:[2m296:9[22m[39m
+    [90m294|[39m           .flatMap((socket) => socket.sent.filter((frame) => frame.typ…
+    [90m295|[39m           [33m.[39m[34mmap[39m((frame) [33m=>[39m frame[33m.[39mafterRecordId)[33m,[39m
+    [90m296|[39m       )[33m.[39m[34mtoEqual[39m([[32m"one"[39m[33m,[39m [32m"two"[39m])[33m;[39m
+    [90m   |[39m         [31m^[39m
+    [90m297|[39m       [34mexpect[39m(retiredFenced)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m298|[39m       [35mconst[39m ids [33m=[39m [[32m"one"[39m[33m,[39m [32m"two"[39m[33m,[39m [32m"assistant-a"[39m[33m,[39m [32m"assistant-b"[39m][33m;[39m
+[90m [2m❯[22m runDst apps/orb-runtime/src/testkit/sim.ts:[2m85:5[22m[39m
+[90m [2m❯[22m apps/web/src/lib/live-cache.dst.test.ts:[2m15:3[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m   Start at [22m 16:54:26
+[2m   Duration [22m 1.55s[2m (transform 855ms, setup 0ms, import 1.35s, tests 47ms, environment 0ms)[22m
+

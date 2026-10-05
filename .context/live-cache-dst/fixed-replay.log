@@ -1,0 +1,26 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m apps/web/src/lib/live-cache.dst.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 38[2mms[22m[39m
+[31m   [31m×[31m DST: half-open offline/online recovers a parent-closed assistant suffix despite an empty inbox[39m[32m 37[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/lib/live-cache.dst.test.ts[2m > [22mDST: half-open offline/online recovers a parent-closed assistant suffix despite an empty inbox
+[31m[1mError[22m: Replay trace exhausted at position 8: the replay produced entropy request "Picking task out of browser-recovery, retired-socket-delivery"[39m
+[90m [2m❯[22m ReplayingTraceSource.next node_modules/determined/dist/index.js:[2m257:32[22m[39m
+[90m [2m❯[22m ReplayingTraceSource.random node_modules/determined/dist/index.js:[2m266:23[22m[39m
+[90m [2m❯[22m sample node_modules/determined/dist/index.js:[2m134:34[22m[39m
+[90m [2m❯[22m SimulationImpl.pickTask node_modules/determined/dist/index.js:[2m483:16[22m[39m
+[90m [2m❯[22m SimulationImpl.resumeCandidate node_modules/determined/dist/index.js:[2m598:21[22m[39m
+[90m [2m❯[22m SimulationImpl.onQuiescence node_modules/determined/dist/index.js:[2m665:9[22m[39m
+[90m [2m❯[22m Immediate.<anonymous> node_modules/determined/dist/index.js:[2m641:10[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m   Start at [22m 16:44:58
+[2m   Duration [22m 1.69s[2m (transform 959ms, setup 0ms, import 1.50s, tests 38ms, environment 0ms)[22m
+
