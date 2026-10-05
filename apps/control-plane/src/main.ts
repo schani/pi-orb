@@ -9,24 +9,14 @@ import {
   type MockOpenAiConfig,
   readMockOpenAiEnv,
 } from "@pi-orb/mock-openai";
-import {
-  HOSTING_MAX_FILE_BYTES,
-  HOSTING_TRANSFER_TIMEOUT_MS,
-  type SystemView,
-} from "@pi-orb/protocol";
+import type { SystemView } from "@pi-orb/protocol";
 import { NoSimulationTask, type SimulationTask } from "determined";
 import Fastify from "fastify";
-import { err, ok, okAsync } from "neverthrow";
+import { err, ok } from "neverthrow";
 import { openControlPlaneDatabase } from "./adapters/database.ts";
 import { DockerOrbHostProvider } from "./adapters/docker/provider.ts";
-import { RestGceApiTransport } from "./adapters/gce/api.ts";
 import { readGceImageIdentity } from "./adapters/gce/image-pin.ts";
-import { GceOrbHostProvider } from "./adapters/gce/provider.ts";
-import {
-  type GithubOAuthConfig,
-  GithubOAuthHttpClient,
-  GithubUpstreamRefresher,
-} from "./adapters/github-oauth/client.ts";
+import { type GithubOAuthConfig, GithubUpstreamRefresher } from "./adapters/github-oauth/client.ts";
 import {
   createGoogleLoginProvider,
   createGoogleMachineVerifier,
@@ -42,12 +32,8 @@ import {
   NodeCryptoSigningKeyGenerator,
   OidcTokenSigner,
 } from "./adapters/oidc/signer.ts";
-import { PiAuthGate } from "./adapters/pi-auth/gate.ts";
-import { PiActivityHeadlineGenerator } from "./adapters/pi-headline-generator.ts";
-import { PiOrbNameGenerator } from "./adapters/pi-name-generator.ts";
 import { ProcessOrbHostProvider } from "./adapters/process/provider.ts";
 import { createReleaseActivationReader } from "./adapters/release-activation.ts";
-import { FetchRuntimeClient } from "./adapters/runtime-client/fetch-client.ts";
 import { createSealedAuthCookies } from "./adapters/sealed-auth-cookies.ts";
 import { FileSecretStore } from "./adapters/secrets/file-store.ts";
 import { GsmSecretStore } from "./adapters/secrets/gsm-store.ts";
@@ -57,13 +43,11 @@ import {
   type TailscaleHostOptions,
 } from "./adapters/tailscale/client.ts";
 import { CryptoUserIdSource } from "./adapters/user-id.ts";
-import { uploadRequest } from "./adapters/workspace-upload-http.ts";
 import {
   type ApplicationAuth,
   createApplicationAuth,
   type GoogleLoginProvider,
 } from "./domain/application-auth.ts";
-import { CompositeAuthGate, SerializedAuthGate } from "./domain/auth-gates.ts";
 import {
   bindUserBroker,
   CODEX_PROVIDER,
@@ -71,8 +55,6 @@ import {
   type UserBrokerDeps,
 } from "./domain/broker.ts";
 import { DEFAULT_BROKER_CONSTANTS, DEFAULT_ISSUER_CONSTANTS } from "./domain/constants.ts";
-import { ControlState } from "./domain/control-state.ts";
-import { GithubAuthGate } from "./domain/github-auth.ts";
 import {
   readOrbBootContext,
   requestOrbArchive,
@@ -91,11 +73,10 @@ import {
 import { McpOAuth, type McpOAuthProtocol } from "./domain/mcp-oauth.ts";
 import { mcpOAuthCleanupLoop } from "./domain/mcp-oauth-garbage.ts";
 import { spawnOrb } from "./domain/orb-spawning.ts";
-import type { BrokerDeps, ControlPlaneDeps, SigningKeyDeps } from "./domain/ports.ts";
+import type { BrokerDeps, SigningKeyDeps } from "./domain/ports.ts";
 import { getProjectSecretSnapshot } from "./domain/project-secrets.ts";
 import { waitForReleaseActivation } from "./domain/release-activation.ts";
 import { createSigningKeyBootstrapState, ensureActiveSigningKey } from "./domain/signing-keys.ts";
-import { UserScope } from "./domain/user-scope.ts";
 import { MintDenialLog } from "./domain/workload-identity.ts";
 import { E2eReconcileCheckpoints } from "./e2e-reconcile-checkpoints.ts";
 import { createConfiguredHostingAccessPolicy, readHostingConfiguration } from "./hosting-config.ts";
@@ -121,7 +102,7 @@ import {
   createRequestPrincipalResolver,
   readRequestIdentityConfig,
 } from "./identity-composition.ts";
-import { lifecycleConstantsForHost } from "./lifecycle-config.ts";
+import { composeLifecycleDeps, createGceLifecycleHost } from "./lifecycle-composition.ts";
 import { migrationOwnerInput } from "./migrate.ts";
 
 const env = (name: string, fallback: string): string => {
@@ -413,24 +394,7 @@ export async function main(
   const specGeneration = Number.parseInt(env("PI_ORB_HOST_SPEC_GENERATION", "0"), 10) || 0;
   const hostProvider =
     providerKind === "gce"
-      ? new GceOrbHostProvider(new RestGceApiTransport(), {
-          projectId: env("PI_ORB_GCP_PROJECT", ""),
-          zone: env("PI_ORB_GCE_ZONE", "us-central1-a"),
-          machineType: env("PI_ORB_GCE_MACHINE_TYPE", "n2d-highmem-2"),
-          subnetwork: env(
-            "PI_ORB_GCE_SUBNETWORK",
-            "regions/us-central1/subnetworks/pi-orb-us-central1",
-          ),
-          serviceAccount: env("PI_ORB_GCE_SERVICE_ACCOUNT", ""),
-          imageResource: gceImage.ok ? gceImage.imageResource : "",
-          imageId: gceImage.ok ? gceImage.imageId : "",
-          workspaceImageResource: gceImage.ok ? gceImage.workspaceImageResource : "",
-          workspaceImageId: gceImage.ok ? gceImage.workspaceImageId : "",
-          controlPlaneUrl: env("PI_ORB_BROKER_URL", ""),
-          specGeneration,
-          ...extraEnvOption,
-          ...tailscaleOption,
-        })
+      ? createGceLifecycleHost(env, specGeneration, { ...extraEnvOption, ...tailscaleOption })
       : providerKind === "process"
         ? new ProcessOrbHostProvider({
             stateDirectory: env(
@@ -462,10 +426,6 @@ export async function main(
             ...tailscaleOption,
           });
   const nameInferenceUrl = env("PI_ORB_NAME_INFERENCE_URL", mockOpenAi?.inferenceBaseUrl ?? "");
-  const nameGenerator = new PiOrbNameGenerator(
-    brokerForUser,
-    nameInferenceUrl === "" ? null : nameInferenceUrl,
-  );
   const hostedBytes =
     hosting.store.kind === "gcs"
       ? createGcsHostedByteStore({
@@ -475,48 +435,20 @@ export async function main(
       : createFilesystemHostedByteStore({
           root: hosting.store.root,
         });
-  const deps: ControlPlaneDeps = {
-    workspaceUploadRuntime: (task) => ({
-      status: (row) => uploadRequest(task, deps, row, "status"),
-      finish: (row) => uploadRequest(task, deps, row, "finish"),
-    }),
-    store: database.store,
+  const deps = composeLifecycleDeps({
+    database,
     hostProvider,
-    resourceCleaner:
-      tailscaleForProvider && tailscaleClient !== null
-        ? {
-            cleanupOrb: (_task, orbId, context) =>
-              tailscaleClient.cleanupOrb(orbId, context.signal),
-          }
-        : { cleanupOrb: () => okAsync(undefined) },
-    runtimeClient: new FetchRuntimeClient(),
-    authGate: new SerializedAuthGate(
-      githubOauth !== null
-        ? new CompositeAuthGate([
-            new PiAuthGate(authDir, adapters.mockOpenAiForUser ?? mockOpenAi, brokerForUser),
-            new GithubAuthGate(brokerForUser, new GithubOAuthHttpClient(githubOauth)),
-          ])
-        : new PiAuthGate(authDir, adapters.mockOpenAiForUser ?? mockOpenAi, brokerForUser),
-    ),
-    nameGenerator,
-    headlineGenerator: new PiActivityHeadlineGenerator(
-      brokerForUser,
-      nameInferenceUrl === "" ? null : nameInferenceUrl,
-    ),
-    nameLeaseMs: 60_000,
-    control: new ControlState(),
-    constants: lifecycleConstantsForHost(hostProvider.kind),
-    projectSecrets: { pointers: database.projectSecrets, secrets },
-    personalInstructions: database.personalInstructions,
-    projectInstructions: database.projectInstructions,
-    userScope: new UserScope(database.users),
-    hosting: {
-      store: database.hosting,
-      bytes: hostedBytes,
-      uploadLeaseMs: HOSTING_TRANSFER_TIMEOUT_MS + 30_000,
-      maxFileBytes: HOSTING_MAX_FILE_BYTES,
-    },
-  };
+    secrets,
+    hostedBytes,
+    authDir,
+    brokerForUser,
+    githubOauth,
+    mockOpenAi,
+    mockOpenAiForUser: adapters.mockOpenAiForUser,
+    nameInferenceUrl,
+    tailscaleForProvider,
+    tailscaleClient,
+  });
 
   const e2eReconcileMessageHandler = (message: unknown): void => {
     if (
