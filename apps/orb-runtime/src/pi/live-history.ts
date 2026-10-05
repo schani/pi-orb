@@ -1,5 +1,9 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { HistoryRecord } from "@pi-orb/protocol";
+import {
+  createDisplayRecordProjector,
+  type DisplayRecord,
+  type HistoryRecord,
+} from "@pi-orb/protocol";
 import { err, ok, Result } from "neverthrow";
 import { type MappingError, mapPiEntry } from "./mapping.ts";
 
@@ -23,19 +27,26 @@ type PersistenceBoundary = AgentSessionEvent["type"];
  */
 export class LiveHistoryPublisher {
   private readonly source: PiEntrySource;
-  private readonly publish: (record: HistoryRecord, sourceMessage: object | null) => void;
+  private readonly project = createDisplayRecordProjector();
+  private readonly publish: (
+    record: HistoryRecord,
+    sourceMessage: object | null,
+    display: DisplayRecord,
+  ) => void;
   private readonly knownIds = new Set<string>();
   private flushScheduled = false;
 
   constructor(
     source: PiEntrySource,
-    publish: (record: HistoryRecord, sourceMessage: object | null) => void,
+    publish: (record: HistoryRecord, sourceMessage: object | null, display: DisplayRecord) => void,
   ) {
     this.source = source;
     this.publish = publish;
     for (const entry of source.getEntries()) {
       const id = this.entryId(entry);
       if (id !== null) this.knownIds.add(id);
+      const mapped = mapPiEntry(entry);
+      if (mapped.isOk()) this.project(mapped.value);
     }
   }
 
@@ -76,7 +87,7 @@ export class LiveHistoryPublisher {
         entry.message !== null
           ? entry.message
           : null;
-      this.publish(mapped.value, sourceMessage);
+      this.publish(mapped.value, sourceMessage, this.project(mapped.value));
     }
     return ok(undefined);
   }

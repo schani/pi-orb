@@ -7,7 +7,7 @@ import type { PostgreSQLClient } from "./client.ts";
 import { runMigrations } from "./migrate.ts";
 import { PostgreSQLUserStore } from "./users.ts";
 
-const migration = "029_google_identities.sql";
+const migration = "031_google_identities.sql";
 const first = {
   userId: "00000000-0000-4000-8000-000000000001",
   oldIssuer: "https://cloud.google.com/iap",
@@ -100,46 +100,57 @@ export function googleIdentityMigrationContracts(
         "026_mcp_oauth_diagnostics.sql",
         "027_orb_user_time_zone.sql",
         "028_orb_alerts.sql",
-        "029_google_identities.sql",
+        "029_history_record_shape.sql",
+        "030_activity_headlines.sql",
+        "031_google_identities.sql",
       ]);
       expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(true);
       expect((await runMigrations(client))._unsafeUnwrap()).toEqual([]);
     });
-    it("preserves an already-migrated Sandbox identity with its old 026 ledger entry", async () => {
-      const client = await prepare(true, "026");
-      for (const mapping of [first, second])
+    it.each(["026_google_identities.sql", "029_google_identities.sql"])(
+      "preserves an already-migrated Sandbox identity with its old %s ledger entry",
+      async (previousMigration) => {
+        const client = await prepare(true, "026");
+        for (const mapping of [first, second])
+          (
+            await client.query(
+              "UPDATE users SET identity_issuer = 'https://accounts.google.com', identity_subject = $2 WHERE id = $1",
+              [mapping.userId, mapping.googleSubject],
+            )
+          )._unsafeUnwrap();
         (
-          await client.query(
-            "UPDATE users SET identity_issuer = 'https://accounts.google.com', identity_subject = $2 WHERE id = $1",
-            [mapping.userId, mapping.googleSubject],
-          )
+          await client.query("INSERT INTO schema_migrations (name) VALUES ($1)", [
+            previousMigration,
+          ])
         )._unsafeUnwrap();
-      (
-        await client.query(
-          "INSERT INTO schema_migrations (name) VALUES ('026_google_identities.sql')",
-        )
-      )._unsafeUnwrap();
-      const before = await snapshot(client);
-      expect((await runMigrations(client))._unsafeUnwrap()).toEqual([
-        "026_mcp_oauth_diagnostics.sql",
-        "027_orb_user_time_zone.sql",
-        "028_orb_alerts.sql",
-        "029_google_identities.sql",
-      ]);
-      const after = await snapshot(client);
-      expect(after.slice(0, 4)).toEqual(before.slice(0, 4));
-      expect((after[4] ?? []).map((row) => row["name"])).toEqual(
-        [
-          ...(before[4] ?? []).map((row) => row["name"]),
+        const before = await snapshot(client);
+        expect((await runMigrations(client))._unsafeUnwrap()).toEqual([
           "026_mcp_oauth_diagnostics.sql",
           "027_orb_user_time_zone.sql",
           "028_orb_alerts.sql",
-          "029_google_identities.sql",
-        ].sort(),
-      );
-      expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(true);
-      expect((await runMigrations(client))._unsafeUnwrap()).toEqual([]);
-    });
+          "029_history_record_shape.sql",
+          "030_activity_headlines.sql",
+          "031_google_identities.sql",
+        ]);
+        const after = await snapshot(client);
+        expect(after.slice(0, 4)).toEqual(before.slice(0, 4));
+        expect((after[4] ?? []).map((row) => row["name"])).toEqual(
+          [
+            ...(before[4] ?? []).map((row) => row["name"]),
+            "026_mcp_oauth_diagnostics.sql",
+            "027_orb_user_time_zone.sql",
+            "028_orb_alerts.sql",
+            "029_history_record_shape.sql",
+            "030_activity_headlines.sql",
+            "031_google_identities.sql",
+          ].sort(),
+        );
+        expect((await client.query("SELECT detail FROM mcp_oauth_events LIMIT 0")).isOk()).toBe(
+          true,
+        );
+        expect((await runMigrations(client))._unsafeUnwrap()).toEqual([]);
+      },
+    );
     it("migrates the deployed Sandbox ledger through time zone, alerts and Google identities", async () => {
       const client = await prepare(true, "027");
       for (const mapping of [first, second])
@@ -165,7 +176,9 @@ export function googleIdentityMigrationContracts(
       expect((await runMigrations(client))._unsafeUnwrap()).toEqual([
         "027_orb_user_time_zone.sql",
         "028_orb_alerts.sql",
-        "029_google_identities.sql",
+        "029_history_record_shape.sql",
+        "030_activity_headlines.sql",
+        "031_google_identities.sql",
       ]);
       const after = await snapshot(client);
       expect(after.slice(0, 4)).toEqual(before.slice(0, 4));
@@ -174,7 +187,9 @@ export function googleIdentityMigrationContracts(
           ...(before[4] ?? []).map((row) => row["name"]),
           "027_orb_user_time_zone.sql",
           "028_orb_alerts.sql",
-          "029_google_identities.sql",
+          "029_history_record_shape.sql",
+          "030_activity_headlines.sql",
+          "031_google_identities.sql",
         ].sort(),
       );
       expect(

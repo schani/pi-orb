@@ -10,12 +10,12 @@ const view = {
   ],
   writable: true,
 };
-it("consumes slash only in message mode, with no shell interpretation", () => {
+it("consumes slash only in message mode", () => {
   expect(normalizeComposerChange("message", "/thinking")).toEqual({
     mode: "command",
     text: "thinking",
   });
-  expect(normalizeComposerChange("shell", "/tmp")).toEqual({ mode: "shell", text: "/tmp" });
+  expect(normalizeComposerChange("command", "/tmp")).toEqual({ mode: "command", text: "/tmp" });
   expect(normalizeComposerChange("message", "a/b").mode).toBe("message");
   expect(composerModeGlyph("command")).toBe("/");
 });

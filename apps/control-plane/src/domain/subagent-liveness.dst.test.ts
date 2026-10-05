@@ -39,8 +39,6 @@ function runtime() {
     sendUserMessage: async () => emit("agent_start"),
     sendCustomMessage: async () => emit("agent_start"),
     abort: async () => emit("agent_settled"),
-    abortBash: () => undefined,
-    executeBash: async () => ({ output: "", cancelled: false, truncated: false, exitCode: 0 }),
   };
   const agent = new PiOrbAgent({
     orbId: "orb-a",

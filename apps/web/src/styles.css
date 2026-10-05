@@ -523,6 +523,12 @@ h3 {
   min-height: calc(100dvh - 48px);
 }
 
+@media (width < 632px) {
+  .dashboard {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .app:has(> .session-ribbon) .dashboard {
   min-height: calc(100dvh - 48px - var(--ribbon));
 }
@@ -1049,6 +1055,17 @@ button.personal-instructions-gear {
   }
 }
 
+/* Safari zooms focused fields below 16px; include touch tablets at desktop widths. */
+@media (max-width: 600px), (any-pointer: coarse) {
+  input,
+  textarea,
+  select,
+  .composer-caret-mirror,
+  .composer-caret {
+    font-size: 16px;
+  }
+}
+
 /* ---------- project config ---------- */
 
 .project-secrets-backdrop {
@@ -1536,7 +1553,7 @@ body:has(.orb-page) {
   flex: 1 0 auto;
 }
 
-/* Shell records retain a compact type gutter; authored turns use the full width. */
+/* Diagnostics use a compact type gutter; authored turns use the full width. */
 .rec {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
@@ -1607,7 +1624,6 @@ body:has(.orb-page) {
 
 .msg-text,
 .reasoning-body,
-.shblk-out,
 .tool-call-output,
 .tool-command-output {
   margin: 0;
@@ -1627,6 +1643,10 @@ body:has(.orb-page) {
 
 .chat-markdown {
   overflow-wrap: anywhere;
+}
+
+.reasoning-body > .chat-markdown {
+  white-space: normal;
 }
 
 .chat-markdown > :last-child {
@@ -2205,7 +2225,7 @@ pre,
   overflow-wrap: anywhere;
 }
 
-/* ---------- compaction, custom events, shell blocks ---------- */
+/* ---------- compaction, custom events ---------- */
 
 .record-compaction {
   padding: 2px 12px;
@@ -2234,30 +2254,6 @@ pre,
 .record-custom {
   padding: 0 8px;
   border-left: 2px solid var(--st-start);
-}
-
-.shblk {
-  border: 1px solid var(--k);
-}
-
-.shblk-cmd {
-  padding: 0 8px;
-  border-bottom: 1px solid var(--g1);
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.shblk-out {
-  max-height: 28rem;
-  padding: 0 8px;
-  overflow: auto;
-  color: var(--g3);
-}
-
-.shblk-ft {
-  padding: 0 8px;
-  color: var(--g3);
-  border-top: 1px solid var(--g1);
 }
 
 /* The transcript's bit register is independent of the composer's caret. */

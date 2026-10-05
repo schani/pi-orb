@@ -374,9 +374,6 @@ kbd{font-family:var(--mono);font-size:11px;letter-spacing:.02em;color:var(--mute
 .divider{display:flex;align-items:center;gap:14px;color:var(--muted);font-size:12px}
 .divider::before,.divider::after{content:&quot;&quot;;flex:1;height:1px;background:var(--line)}
 .divider span{padding:3px 14px;border-radius:var(--r-peb);background:var(--sand);white-space:nowrap}
-.shellblock{border:1px solid var(--line);border-radius:var(--r-md);background:var(--paper-2);overflow:hidden}
-.shellblock__line{display:flex;align-items:center;gap:8px;padding:11px 16px;font-family:var(--mono);font-size:13px;background:linear-gradient(90deg, rgba(242,225,215,.6), rgba(252,251,246,0))}
-.shellblock__line b{color:var(--clay);font-weight:600}
 .stream{font-size:15.5px;line-height:1.72}
 .stream code{font-family:var(--mono);font-size:13.5px;background:var(--sand);padding:1px 6px;border-radius:6px}
 .caret{display:inline-block;width:8px;height:17px;vertical-align:-3px;margin-left:2px;background:var(--moss);border-radius:2px;animation:blink 1.15s steps(1,end) infinite}
@@ -402,9 +399,6 @@ kbd{font-family:var(--mono);font-size:11px;letter-spacing:.02em;color:var(--mute
 }
 .composer__box textarea:focus{outline:0}
 .composer__foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px 10px 14px}
-.modes{display:flex;gap:3px;padding:3px;background:var(--sand);border-radius:var(--r-peb)}
-.mode{padding:3px 12px;border-radius:var(--r-peb);font-size:12px;font-weight:600;color:var(--muted);transition:all .32s var(--ease)}
-.mode.is-on{background:var(--paper-2);color:var(--forest);box-shadow:0 1px 2px rgba(35,42,34,.1)}
 .composer__status{font-size:12px;color:var(--muted)}
 .composer__tools{margin-left:auto;display:flex;align-items:center;gap:6px}
 .send{
@@ -417,10 +411,6 @@ kbd{font-family:var(--mono);font-size:11px;letter-spacing:.02em;color:var(--mute
 .send:hover{background:var(--forest-2)}
 .send:active{transform:translateY(1px)}
 .send kbd{color:rgba(242,245,238,.72)}
-.composer__box.is-shell{border-color:var(--clay);background:#FBF6F2}
-.composer__box.is-shell textarea{font-family:var(--mono);font-size:13.5px}
-.composer__box.is-xshell{border-style:dashed;border-color:var(--sage);background:rgba(228,235,222,.4)}
-.composer__box.is-xshell textarea{font-family:var(--mono);font-size:13.5px}
 
 /* ---------- floating terminal ------------------------------------------- */
 .term{
@@ -868,14 +858,8 @@ socket.on(&lt;span class=&quot;tok-str&quot;&gt;&quot;pong&quot;&lt;/span&gt;, (
       &lt;!-- 4. compaction divider --&gt;
       &lt;div class=&quot;divider&quot;&gt;&lt;span&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;/div&gt;
 
-      &lt;!-- 5. persisted shell block --&gt;
-      &lt;div class=&quot;shellblock&quot;&gt;
-        &lt;div class=&quot;shellblock__line&quot;&gt;&lt;b&gt;!&lt;/b&gt;git status --short&lt;/div&gt;
-        &lt;pre class=&quot;cmd__out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? docs/postmortems/half-open-live-socket.md&lt;/pre&gt;
-        &lt;div class=&quot;cmd__foot&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-      &lt;/div&gt;
+
+
 
       &lt;!-- 6. queued user turn --&gt;
       &lt;div class=&quot;turn turn--queued&quot;&gt;
@@ -914,12 +898,8 @@ socket.on(&lt;span class=&quot;tok-str&quot;&gt;&quot;pong&quot;&lt;/span&gt;, (
       &lt;div class=&quot;composer__box&quot; id=&quot;cbox&quot;&gt;
         &lt;textarea id=&quot;ctext&quot; rows=&quot;2&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
         &lt;div class=&quot;composer__foot&quot;&gt;
-          &lt;div class=&quot;modes&quot; id=&quot;modes&quot;&gt;
-            &lt;button class=&quot;mode is-on&quot; data-mode=&quot;message&quot;&gt;message&lt;/button&gt;
-            &lt;button class=&quot;mode&quot; data-mode=&quot;shell&quot;&gt;shell&lt;/button&gt;
-            &lt;button class=&quot;mode&quot; data-mode=&quot;xshell&quot;&gt;excluded shell&lt;/button&gt;
-          &lt;/div&gt;
-          &lt;span class=&quot;composer__status&quot; id=&quot;cstatus&quot;&gt;sent to the agent · appears in the transcript&lt;/span&gt;
+
+
           &lt;div class=&quot;composer__tools&quot;&gt;
             &lt;button class=&quot;icon-btn&quot; title=&quot;Attach image&quot;&gt;&lt;svg class=&quot;ic&quot;&gt;&lt;use href=&quot;#g-image&quot;&gt;&lt;/use&gt;&lt;/svg&gt;&lt;/button&gt;
             &lt;button class=&quot;lnk lnk--warn&quot;&gt;abort&lt;/button&gt;
@@ -1018,25 +998,6 @@ socket.on(&lt;span class=&quot;tok-str&quot;&gt;&quot;pong&quot;&lt;/span&gt;, (
     });
   });
 
-  /* composer modes */
-  var box = $(&#x27;#cbox&#x27;), text = $(&#x27;#ctext&#x27;), status = $(&#x27;#cstatus&#x27;);
-  var COPY = {
-    message: [&#x27;Message the orb…&#x27;, &#x27;sent to the agent · appears in the transcript&#x27;],
-    shell: [&#x27;!npm run test:e2e&#x27;, &#x27;runs on the host · output kept in context&#x27;],
-    xshell: [&#x27;!!git log --oneline -5&#x27;, &#x27;runs on the host · output excluded from context&#x27;]
-  };
-  $$(&#x27;#modes .mode&#x27;).forEach(function (b) {
-    b.addEventListener(&#x27;click&#x27;, function () {
-      $$(&#x27;#modes .mode&#x27;).forEach(function (o) { o.classList.remove(&#x27;is-on&#x27;); });
-      b.classList.add(&#x27;is-on&#x27;);
-      var m = b.getAttribute(&#x27;data-mode&#x27;);
-      box.classList.toggle(&#x27;is-shell&#x27;, m === &#x27;shell&#x27;);
-      box.classList.toggle(&#x27;is-xshell&#x27;, m === &#x27;xshell&#x27;);
-      text.placeholder = COPY[m][0];
-      status.textContent = COPY[m][1];
-    });
-  });
-
   /* terminal */
   var term = $(&#x27;#term&#x27;), reopen = $(&#x27;#term-reopen&#x27;);
   var TABS = {
@@ -1062,8 +1023,8 @@ socket.on(&lt;span class=&quot;tok-str&quot;&gt;&quot;pong&quot;&lt;/span&gt;, (
 
 &lt;!--
   eco-modern — sustainable-tech calm for pi-orb.
-  Palette: off-white paper + sand and sage washes, clay for failure/shell, one deep forest green (#22402E) for primary actions; no pure black (ink is #232A22).
-  Type: Manrope for all UI; Fraunces reserved for orb names, project names and headings. Mono only for repo paths, codes and shell.
+  Palette: off-white paper + sand and sage washes, clay for failure, one deep forest green (#22402E) for primary actions; no pure black (ink is #232A22).
+  Type: Manrope for all UI; Fraunces reserved for orb names, project names and headings. Mono only for repo paths, codes and terminal.
   Layout: collapsible left sidebar rail (Find at top, projects → orbs with state glyphs, New Project at bottom); dashboard main area is a project overview with orbs as wide rows and an inset archive shelf; the orb screen is a 730px reading column with sticky header and composer.
   Shape/motion: 16–24px radii, pebble chips, hairline dividers, CSS grain gradients, slow 0.34–0.42s eases; state glyphs are inline SVG sprout / leaf / seed / wilted leaf / pressed leaf / dissolving seed.
   Signature detail: the &quot;growth ring&quot; — dashed rotating ring plus a breathing concentric halo drawn around any busy orb&#x27;s leaf glyph, in the sidebar, the dashboard row, the header and the live activity marker.
@@ -1546,19 +1507,6 @@ input::placeholder{color:#8b98b1}
   background:linear-gradient(90deg,rgba(154,88,255,.1),rgba(154,88,255,.45),rgba(154,88,255,.1));
   box-shadow:inset 0 1px 0 rgba(255,255,255,.7)}
 
-/* persisted shell block */
-.shellblock{
-  align-self:flex-end;max-width:min(720px,88%);border-radius:20px;overflow:hidden;
-  border:1px solid rgba(20,45,140,.28);
-  background:linear-gradient(180deg,#233763,#16233f);
-  box-shadow:0 16px 32px -20px rgba(20,45,140,1),inset 0 1px 0 rgba(255,255,255,.2);
-}
-.shellblock .cl{display:flex;align-items:center;gap:9px;padding:9px 14px;color:#ffd9a8;
-  font-family:&quot;DM Mono&quot;,monospace;font-size:12.5px;
-  background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.02))}
-.shellblock pre{margin:0;padding:10px 14px;color:#cfdcf7;font-family:&quot;DM Mono&quot;,monospace;font-size:12px;line-height:1.7}
-.shellblock .ft{padding:7px 14px;font-size:11.5px;color:#9fb2d8;border-top:1px solid rgba(255,255,255,.12)}
-
 /* live streaming */
 .cursor{display:inline-block;width:8px;height:16px;vertical-align:-3px;margin-left:2px;border-radius:2px;
   background:linear-gradient(180deg,#8dbaff,var(--blueberry-d));animation:blink 1s steps(1) infinite}
@@ -1577,15 +1525,6 @@ input::placeholder{color:#8b98b1}
 }
 .composer textarea::placeholder{color:#8b98b1}
 .cbar{display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap}
-.modes{display:flex;gap:3px;padding:3px;border-radius:var(--r-pill);
-  background:linear-gradient(180deg,rgba(226,234,250,.95),rgba(255,255,255,.85));
-  box-shadow:inset 0 2px 5px rgba(31,69,200,.2),inset 0 -1px 0 #fff}
-.modes button{border:0;background:transparent;cursor:pointer;font-size:11.5px;font-weight:600;
-  padding:4px 12px;border-radius:var(--r-pill);color:var(--ink-3);transition:all .3s var(--spring)}
-.modes button.on{color:#fff;background:linear-gradient(180deg,#8dbaff,var(--blueberry-d));
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 4px 10px -6px rgba(31,69,200,1)}
-.modes button.on.sh{background:linear-gradient(180deg,#ffc286,var(--tangerine-d))}
-.modes button.on.ex{background:linear-gradient(180deg,#d5b6ff,var(--grape-d))}
 .status{font-size:12px;color:var(--ink-3)}
 .send{
   margin-left:auto;display:inline-flex;align-items:center;gap:8px;padding:8px 10px 8px 16px;
@@ -1597,10 +1536,6 @@ input::placeholder{color:#8b98b1}
 .send .circ{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:14px;
   background:radial-gradient(circle at 34% 26%,#fff 4%,rgba(255,255,255,.55) 40%,rgba(255,255,255,.15) 100%);
   color:#12328f;box-shadow:inset 0 -2px 4px rgba(10,30,110,.3)}
-.composer.shell{background:linear-gradient(180deg,rgba(255,247,236,.96),rgba(255,235,212,.78))}
-.composer.shell textarea{font-family:&quot;DM Mono&quot;,monospace;font-size:13.5px}
-.composer.excl{background:linear-gradient(180deg,rgba(250,245,255,.96),rgba(238,226,255,.78))}
-.composer.excl textarea{font-family:&quot;DM Mono&quot;,monospace;font-size:13.5px}
 .static-ex{margin:16px 0 0;padding:12px 14px 10px;border-radius:26px}
 
 /* missing resource */
@@ -2006,14 +1941,8 @@ input::placeholder{color:#8b98b1}
     &lt;!-- 4. compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;mono&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5. persisted shell block --&gt;
-    &lt;div class=&quot;shellblock&quot;&gt;
-      &lt;div class=&quot;cl&quot;&gt;&lt;span style=&quot;color:#77d827&quot;&gt;!&lt;/span&gt;git status --short&lt;/div&gt;
-&lt;pre&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/pre&gt;
-      &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6. queued user turn --&gt;
     &lt;div class=&quot;turn user&quot;&gt;
@@ -2034,20 +1963,9 @@ input::placeholder{color:#8b98b1}
       &lt;/div&gt;
     &lt;/div&gt;
 
-    &lt;!-- composer, shell mode (static specimen) --&gt;
-    &lt;span class=&quot;tiny-cap&quot; style=&quot;text-align:center&quot;&gt;composer · shell mode&lt;/span&gt;
-    &lt;div class=&quot;static-ex composer shell panel&quot;&gt;
-      &lt;textarea rows=&quot;1&quot; placeholder=&quot;!npm test -- live-socket&quot; style=&quot;min-height:26px&quot;&gt;&lt;/textarea&gt;
-      &lt;div class=&quot;cbar&quot;&gt;
-        &lt;div class=&quot;modes&quot;&gt;
-          &lt;button data-mode=&quot;message&quot;&gt;message&lt;/button&gt;
-          &lt;button class=&quot;on sh&quot; data-mode=&quot;shell&quot;&gt;shell&lt;/button&gt;
-          &lt;button data-mode=&quot;excl&quot;&gt;excluded shell&lt;/button&gt;
-        &lt;/div&gt;
-        &lt;span class=&quot;status&quot;&gt;mode &lt;b&gt;shell&lt;/b&gt; · runs on the host, output persisted in context&lt;/span&gt;
-        &lt;button class=&quot;send&quot; style=&quot;margin-left:auto;background:linear-gradient(180deg,#ffc286,var(--tangerine-d));border-color:rgba(150,60,0,.45)&quot;&gt;⌘⏎ &lt;span class=&quot;circ&quot; style=&quot;color:#8a4300&quot;&gt;↑&lt;/span&gt;&lt;/button&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
+
     &lt;!-- missing resource specimen --&gt;
     &lt;div class=&quot;missing panel&quot;&gt;
       &lt;span class=&quot;tiny-cap&quot;&gt;missing resource&lt;/span&gt;
@@ -2061,15 +1979,11 @@ input::placeholder{color:#8b98b1}
     &lt;div class=&quot;composer panel&quot; id=&quot;composer&quot;&gt;
       &lt;textarea id=&quot;ta&quot; placeholder=&quot;Message the orb…&quot; rows=&quot;2&quot;&gt;&lt;/textarea&gt;
       &lt;div class=&quot;cbar&quot;&gt;
-        &lt;div class=&quot;modes&quot; id=&quot;modes&quot;&gt;
-          &lt;button class=&quot;on&quot; data-mode=&quot;message&quot;&gt;message&lt;/button&gt;
-          &lt;button data-mode=&quot;shell&quot;&gt;shell&lt;/button&gt;
-          &lt;button data-mode=&quot;excl&quot;&gt;excluded shell&lt;/button&gt;
-        &lt;/div&gt;
+
         &lt;button class=&quot;icon-btn&quot; title=&quot;attach image&quot;&gt;
           &lt;svg width=&quot;13&quot; height=&quot;13&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2.2&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot;&gt;&lt;rect x=&quot;3&quot; y=&quot;4&quot; width=&quot;18&quot; height=&quot;16&quot; rx=&quot;3&quot;/&gt;&lt;circle cx=&quot;8.5&quot; cy=&quot;9.5&quot; r=&quot;1.6&quot;/&gt;&lt;path d=&quot;M4 17l5-5 4.5 4.5L16 14l4 4&quot;/&gt;&lt;/svg&gt;
         &lt;/button&gt;
-        &lt;span class=&quot;status&quot; id=&quot;status&quot;&gt;mode &lt;b&gt;message&lt;/b&gt; · sent to the agent, kept in context&lt;/span&gt;
+
         &lt;button class=&quot;btn sm danger&quot; style=&quot;margin-left:auto&quot;&gt;abort&lt;/button&gt;
         &lt;button class=&quot;send&quot;&gt;⌘⏎ &lt;span class=&quot;circ&quot;&gt;↑&lt;/span&gt;&lt;/button&gt;
       &lt;/div&gt;
@@ -2153,26 +2067,6 @@ input::placeholder{color:#8b98b1}
       var old = b.innerHTML;
       b.textContent = &#x27;copied&#x27;;
       setTimeout(function(){ b.innerHTML = old; }, 1100);
-    });
-  });
-
-  // ---- composer mode toggle ----
-  var composer = document.getElementById(&#x27;composer&#x27;);
-  var status = document.getElementById(&#x27;status&#x27;);
-  var ta = document.getElementById(&#x27;ta&#x27;);
-  var copy = {
-    message: [&#x27;mode &lt;b&gt;message&lt;/b&gt; · sent to the agent, kept in context&#x27;, &#x27;Message the orb…&#x27;, &#x27;&#x27;],
-    shell:   [&#x27;mode &lt;b&gt;shell&lt;/b&gt; · runs on the host, output persisted in context&#x27;, &#x27;!npm test -- live-socket&#x27;, &#x27;shell&#x27;],
-    excl:    [&#x27;mode &lt;b&gt;excluded shell&lt;/b&gt; · runs on the host, kept out of the agent context&#x27;, &#x27;!!rm -rf node_modules/.cache&#x27;, &#x27;excl&#x27;]
-  };
-  document.querySelectorAll(&#x27;#modes button&#x27;).forEach(function(b){
-    b.addEventListener(&#x27;click&#x27;, function(){
-      document.querySelectorAll(&#x27;#modes button&#x27;).forEach(function(x){ x.className=&#x27;&#x27;; });
-      var m = b.dataset.mode;
-      b.className = &#x27;on&#x27; + (m === &#x27;shell&#x27; ? &#x27; sh&#x27; : m === &#x27;excl&#x27; ? &#x27; ex&#x27; : &#x27;&#x27;);
-      composer.className = &#x27;composer panel &#x27; + copy[m][2];
-      status.innerHTML = copy[m][0];
-      ta.placeholder = copy[m][1];
     });
   });
 
@@ -2675,17 +2569,6 @@ mark.hl{
   background:var(--paper-2);padding:0 12px;
 }
 
-/* persisted shell block */
-.shellblock{
-  position:relative;margin:0 0 24px;max-width:560px;background:#fff;border-radius:6px;padding:12px 14px 10px;
-  box-shadow:1px 3px 6px rgba(34,54,92,.15);transform:rotate(.4deg);
-}
-.shellblock .tape{top:-10px;left:30px;width:64px;transform:rotate(-5deg)}
-.shellblock .sb-cmd{font-family:var(--mono);font-size:13px;color:var(--ink);font-weight:700}
-.shellblock .sb-cmd .bang{color:var(--redpen)}
-.shellblock .sb-out{font-family:var(--mono);font-size:12px;color:var(--pencil);white-space:pre;margin:7px 0 8px;line-height:1.6}
-.shellblock .sb-foot{font-family:var(--hand2);font-size:13px;color:var(--pencil-2);border-top:1.5px dotted var(--rule);padding-top:6px}
-
 /* live streaming */
 .live-text{font-size:14.7px;line-height:28px;color:var(--ink-soft);max-width:62ch;margin:0 0 8px}
 .cursor{display:inline-block;width:8px;height:16px;background:var(--ink);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(1) infinite}
@@ -2705,23 +2588,12 @@ mark.hl{
   content:&quot;&quot;;position:absolute;left:6px;right:6px;bottom:-5px;height:12px;background:#fdeb8e;border-radius:0 0 6px 6px;z-index:-1;
 }
 .pad::after{left:12px;right:12px;bottom:-10px;background:#f5e07e}
-.pad[data-mode=&quot;shell&quot;]{background:var(--sky)}
-.pad[data-mode=&quot;shell&quot;]::before{background:#bcdcff}.pad[data-mode=&quot;shell&quot;]::after{background:#addbff}
-.pad[data-mode=&quot;xshell&quot;]{background:var(--grey-note)}
-.pad[data-mode=&quot;xshell&quot;]::before{background:#dfe3e7}.pad[data-mode=&quot;xshell&quot;]::after{background:#d6dade}
 .pad-top{display:flex;align-items:center;gap:9px;margin-bottom:6px}
 .pad-top .pen-ico{color:var(--ink);opacity:.75}
-.mode-chips{display:flex;gap:7px;margin-left:auto}
-.mode-chips button{
-  font-family:var(--hand2);font-size:13.5px;color:var(--pencil);background:rgba(255,255,255,.55);
-  padding:2px 10px;border-radius:12px;
-}
-.mode-chips button[aria-pressed=&quot;true&quot;]{color:var(--ink);background:#fff;box-shadow:inset 0 0 0 1.5px var(--ink)}
 .pad textarea{
   width:100%;min-height:48px;resize:none;border:0;outline:none;background:transparent;
   font-family:var(--hand);font-size:21px;line-height:1.35;color:var(--ink);
 }
-.pad[data-mode=&quot;shell&quot;] textarea,.pad[data-mode=&quot;xshell&quot;] textarea{font-family:var(--mono);font-size:14px;line-height:1.5}
 .pad textarea::placeholder{color:rgba(34,54,92,.42)}
 .pad-foot{display:flex;align-items:center;gap:12px;border-top:1.5px dashed rgba(34,54,92,.22);padding-top:8px;margin-top:4px}
 .status-line{font-family:var(--hand2);font-size:14px;color:var(--ink-soft);display:flex;align-items:center;gap:7px}
@@ -2771,8 +2643,6 @@ mark.hl{
   position:fixed;right:26px;bottom:198px;z-index:60;font-family:var(--hand2);font-size:14px;color:var(--ink);
   background:var(--yellow);padding:5px 14px;border-radius:6px;box-shadow:2px 3px 6px rgba(34,54,92,.25);transform:rotate(-2deg);
 }
-
-/* small notes: missing resource + shell sample */
 .footnotes{max-width:900px;margin:26px auto 0;padding:0 18px;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
 .missing{
   position:relative;background:#fff;padding:16px 18px 14px;border-radius:6px;max-width:330px;
@@ -3140,15 +3010,8 @@ socket.addEventListener(&lt;span class=&quot;s&quot;&gt;&quot;pong&quot;&lt;/spa
       &lt;div class=&quot;tear&quot;&gt;&lt;/div&gt;
     &lt;/div&gt;
 
-    &lt;!-- 5. persisted shell block --&gt;
-    &lt;div class=&quot;shellblock&quot;&gt;
-      &lt;span class=&quot;tape warm&quot;&gt;&lt;/span&gt;
-      &lt;div class=&quot;sb-cmd&quot;&gt;&lt;span class=&quot;bang&quot;&gt;!&lt;/span&gt;git status --short&lt;/div&gt;
-      &lt;pre class=&quot;sb-out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M docs/runtime-protocol.md
-?? apps/web/src/lib/heartbeat.test.ts&lt;/pre&gt;
-      &lt;div class=&quot;sb-foot&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6. queued user turn --&gt;
     &lt;div class=&quot;turn&quot;&gt;
@@ -3172,19 +3035,15 @@ socket.addEventListener(&lt;span class=&quot;s&quot;&gt;&quot;pong&quot;&lt;/spa
 
   &lt;!-- composer --&gt;
   &lt;div class=&quot;composer-dock&quot;&gt;
-    &lt;div class=&quot;pad&quot; id=&quot;pad&quot; data-mode=&quot;message&quot;&gt;
+    &lt;div class=&quot;pad&quot; id=&quot;pad&quot;&gt;
       &lt;div class=&quot;pad-top&quot;&gt;
         &lt;svg class=&quot;ico pen-ico&quot; style=&quot;font-size:19px&quot;&gt;&lt;use href=&quot;#i-pen&quot;/&gt;&lt;/svg&gt;
         &lt;span style=&quot;font-family:var(--hand);font-size:19px&quot;&gt;note to the orb&lt;/span&gt;
-        &lt;span class=&quot;mode-chips&quot;&gt;
-          &lt;button data-mode=&quot;message&quot; aria-pressed=&quot;true&quot;&gt;message&lt;/button&gt;
-          &lt;button data-mode=&quot;shell&quot; aria-pressed=&quot;false&quot;&gt;shell&lt;/button&gt;
-          &lt;button data-mode=&quot;xshell&quot; aria-pressed=&quot;false&quot;&gt;excluded shell&lt;/button&gt;
-        &lt;/span&gt;
+
       &lt;/div&gt;
       &lt;textarea id=&quot;pad-input&quot; placeholder=&quot;Message the orb…&quot; rows=&quot;2&quot;&gt;&lt;/textarea&gt;
       &lt;div class=&quot;pad-foot&quot;&gt;
-        &lt;span class=&quot;status-line&quot; id=&quot;pad-status&quot;&gt;mode &lt;b&gt;message&lt;/b&gt; · sent to the agent as a turn&lt;/span&gt;
+
         &lt;button class=&quot;attach&quot;&gt;&lt;svg class=&quot;ico&quot;&gt;&lt;use href=&quot;#i-clip&quot;/&gt;&lt;/svg&gt; image&lt;/button&gt;
         &lt;button class=&quot;abort&quot;&gt;abort&lt;/button&gt;
         &lt;span class=&quot;right&quot;&gt;
@@ -3195,7 +3054,7 @@ socket.addEventListener(&lt;span class=&quot;s&quot;&gt;&quot;pong&quot;&lt;/spa
     &lt;/div&gt;
   &lt;/div&gt;
 
-  &lt;!-- footnotes: missing resource + shell-mode pad sample --&gt;
+  &lt;!-- footnotes: missing resource --&gt;
   &lt;div class=&quot;footnotes&quot;&gt;
     &lt;div class=&quot;missing&quot;&gt;
       &lt;span class=&quot;pin&quot;&gt;&lt;/span&gt;
@@ -3203,21 +3062,7 @@ socket.addEventListener(&lt;span class=&quot;s&quot;&gt;&quot;pong&quot;&lt;/spa
       &lt;p&gt;Nothing is pinned at this address — it may have been deleted.&lt;/p&gt;
       &lt;a href=&quot;#&quot;&gt;← Back to dashboard&lt;/a&gt;
     &lt;/div&gt;
-    &lt;div class=&quot;sample&quot;&gt;
-      &lt;span class=&quot;sample-label&quot;&gt;pad in &lt;b&gt;excluded shell&lt;/b&gt; mode — runs on the host, never enters context&lt;/span&gt;
-      &lt;div class=&quot;pad&quot; data-mode=&quot;xshell&quot;&gt;
-        &lt;div class=&quot;pad-top&quot;&gt;
-          &lt;svg class=&quot;ico pen-ico&quot; style=&quot;font-size:19px&quot;&gt;&lt;use href=&quot;#i-pen&quot;/&gt;&lt;/svg&gt;
-          &lt;span style=&quot;font-family:var(--mono);font-size:13px&quot;&gt;host shell · excluded&lt;/span&gt;
-        &lt;/div&gt;
-        &lt;textarea rows=&quot;1&quot; placeholder=&quot;!!tail -f /var/log/orb.log&quot;&gt;&lt;/textarea&gt;
-        &lt;div class=&quot;pad-foot&quot;&gt;
-          &lt;span class=&quot;status-line&quot;&gt;mode &lt;b&gt;excluded shell&lt;/b&gt; · &lt;code style=&quot;font-family:var(--mono);font-size:11.5px&quot;&gt;!!&lt;/code&gt; prefix&lt;/span&gt;
-          &lt;span class=&quot;right&quot;&gt;&lt;span class=&quot;kbd-hint&quot;&gt;⌘⏎&lt;/span&gt;
-          &lt;button class=&quot;send&quot; aria-label=&quot;send&quot;&gt;&lt;svg class=&quot;ico&quot;&gt;&lt;use href=&quot;#i-up&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
   &lt;/div&gt;
 
   &lt;!-- floating terminal = spiral notepad --&gt;
@@ -3277,27 +3122,6 @@ socket.addEventListener(&lt;span class=&quot;s&quot;&gt;&quot;pong&quot;&lt;/spa
     });
   });
 
-  // --- composer mode toggle -------------------------------------------
-  var pad = document.getElementById(&#x27;pad&#x27;);
-  var input = document.getElementById(&#x27;pad-input&#x27;);
-  var status = document.getElementById(&#x27;pad-status&#x27;);
-  var copy = {
-    message: {ph: &#x27;Message the orb…&#x27;, txt: &#x27;mode &lt;b&gt;message&lt;/b&gt; · sent to the agent as a turn&#x27;},
-    shell:   {ph: &#x27;!git log --oneline -5&#x27;, txt: &#x27;mode &lt;b&gt;shell&lt;/b&gt; · runs on the host, output kept in context&#x27;},
-    xshell:  {ph: &#x27;!!tail -f /var/log/orb.log&#x27;, txt: &#x27;mode &lt;b&gt;excluded shell&lt;/b&gt; · runs on the host, excluded from context&#x27;}
-  };
-  pad.querySelectorAll(&#x27;.mode-chips button&#x27;).forEach(function(chip){
-    chip.addEventListener(&#x27;click&#x27;, function(){
-      var m = chip.dataset.mode;
-      pad.dataset.mode = m;
-      input.placeholder = copy[m].ph;
-      status.innerHTML = copy[m].txt;
-      pad.querySelectorAll(&#x27;.mode-chips button&#x27;).forEach(function(c){
-        c.setAttribute(&#x27;aria-pressed&#x27;, String(c === chip));
-      });
-    });
-  });
-
   // --- terminal controls ----------------------------------------------
   var term = document.getElementById(&#x27;terminal&#x27;);
   var collapse = document.getElementById(&#x27;term-collapse&#x27;);
@@ -3335,8 +3159,7 @@ socket.addEventListener(&lt;span class=&quot;s&quot;&gt;&quot;pong&quot;&lt;/spa
     faded stack inset in the card; orb chat is a notebook page with ruled lines and a red margin, user turns
     pinned on as sticky notes, agent turns typed on the rules, activity rail as a hand-drawn checklist,
     compaction as a torn-page edge. Rough edges come from one SVG turbulence filter on border pseudo-elements.
-  Signature: composer is a Post-it pad (stacked sheets, pen icon, pad colour changes with message/shell/excluded
-    shell mode); the floating terminal is a small spiral-bound notepad. Motion is a 0.5s wobble on hover only.
+  Signature: composer is a Post-it pad (stacked sheets, pen icon, yellow paper); the floating terminal is a small spiral-bound notepad. Motion is a 0.5s wobble on hover only.
 --&gt;
 "></iframe>
 </section>
@@ -3621,13 +3444,6 @@ a:hover{background:var(--yellow);color:var(--black);border-color:var(--black)}
 }
 .compact span{background:var(--black);color:var(--yellow);font-family:&#x27;Space Mono&#x27;,monospace;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;padding:5px 12px;width:100%;text-align:center;border-radius:2px}
 
-/* shell block */
-.blk--shell{background:var(--black);color:#F4F4EE;border-color:var(--black)}
-.blk--shell .body{font-family:&#x27;Space Mono&#x27;,monospace;font-size:12.5px;line-height:1.65;padding:12px 14px}
-.blk--shell .cmdrow{color:var(--yellow);font-weight:700}
-.blk--shell .shout{margin:6px 0 0;white-space:pre-wrap;font-family:&#x27;Space Mono&#x27;,monospace;color:#E4E4DC}
-.blk--shell .foot{border-top:var(--b2);border-color:#555;padding:7px 14px;font-family:&#x27;Space Mono&#x27;,monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--gray)}
-
 /* live streaming */
 .cursor{display:inline-block;width:10px;height:16px;background:var(--black);vertical-align:-3px;margin-left:2px;animation:blink .8s steps(1,end) infinite}
 @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
@@ -3661,10 +3477,6 @@ a:hover{background:var(--yellow);color:var(--black);border-color:var(--black)}
 .toggle button[aria-pressed=&quot;true&quot;]{background:var(--yellow);color:var(--black)}
 .statusline{font-family:&#x27;Space Mono&#x27;,monospace;font-size:11.5px;color:var(--gray);letter-spacing:.04em}
 .statusline b{color:var(--yellow)}
-.composer.mode-shell{border-top-color:var(--yellow)}
-.composer.mode-shell .ta{background:var(--black);color:var(--yellow);font-family:&#x27;Space Mono&#x27;,monospace;box-shadow:4px 4px 0 var(--yellow)}
-.composer.mode-excl .ta{background:var(--gray);color:var(--black);font-family:&#x27;Space Mono&#x27;,monospace;box-shadow:4px 4px 0 #fff}
-.composer.mode-excl{border-top-color:var(--gray)}
 .miniex{margin:0 0 18px}
 .miniex .demo{background:var(--black);border:var(--b);border-radius:2px;padding:10px}
 .miniex .demo .ta{min-height:34px;padding:6px 9px;font-family:&#x27;Space Mono&#x27;,monospace;background:var(--black);color:var(--yellow);font-size:13px}
@@ -4109,21 +3921,8 @@ watchdog(() =&amp;gt; now() - lastSeen &amp;gt; 2 * HEARTBEAT_MS &amp;amp;&amp;a
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;blk blk--shell&quot;&gt;
-      &lt;div class=&quot;plate plate--black&quot;&gt;
-        &lt;span class=&quot;studs studs--yellow&quot;&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;i&gt;&lt;/i&gt;&lt;/span&gt; shell · you
-        &lt;span class=&quot;spacer&quot;&gt;&lt;/span&gt;
-        &lt;span class=&quot;hint&quot; style=&quot;opacity:.8&quot;&gt;persisted&lt;/span&gt;
-      &lt;/div&gt;
-      &lt;div class=&quot;body&quot;&gt;
-        &lt;div class=&quot;cmdrow&quot;&gt;! git status --short&lt;/div&gt;
-&lt;pre class=&quot;shout&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/lib/live-socket.test.ts
-?? test-failures/live-socket-1723.trace&lt;/pre&gt;
-      &lt;/div&gt;
-      &lt;div class=&quot;foot&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;blk blk--queued&quot;&gt;
@@ -4162,42 +3961,22 @@ watchdog(() =&amp;gt; now() - lastSeen &amp;gt; 2 * HEARTBEAT_MS &amp;amp;&amp;a
       &lt;a href=&quot;#/&quot;&gt;Back to dashboard&lt;/a&gt;
     &lt;/div&gt;
 
-    &lt;!-- static example: shell composer variant --&gt;
-    &lt;div class=&quot;miniex&quot;&gt;
-      &lt;div class=&quot;hint&quot; style=&quot;margin-bottom:6px&quot;&gt;composer · shell mode (static example)&lt;/div&gt;
-      &lt;div class=&quot;demo&quot;&gt;
-        &lt;div class=&quot;compose-top&quot;&gt;
-          &lt;div class=&quot;ta mono&quot; style=&quot;border-color:var(--yellow);box-shadow:4px 4px 0 var(--yellow)&quot;&gt;! npm test -- live-socket&lt;/div&gt;
-          &lt;button class=&quot;send&quot;&gt;↑&lt;/button&gt;
-        &lt;/div&gt;
-        &lt;div class=&quot;compose-bot&quot;&gt;
-          &lt;div class=&quot;toggle&quot;&gt;
-            &lt;button aria-pressed=&quot;false&quot;&gt;message&lt;/button&gt;
-            &lt;button aria-pressed=&quot;true&quot;&gt;shell&lt;/button&gt;
-            &lt;button aria-pressed=&quot;false&quot;&gt;excl. shell&lt;/button&gt;
-          &lt;/div&gt;
-          &lt;span class=&quot;statusline&quot;&gt;mode &lt;b&gt;shell&lt;/b&gt; · runs on the host · output persisted to history&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
   &lt;/div&gt;
 
   &lt;!-- composer base plate --&gt;
-  &lt;div class=&quot;composer mode-msg&quot; id=&quot;composer&quot;&gt;
+  &lt;div class=&quot;composer&quot; id=&quot;composer&quot;&gt;
     &lt;div class=&quot;inner&quot;&gt;
       &lt;div class=&quot;compose-top&quot;&gt;
         &lt;textarea class=&quot;ta&quot; id=&quot;ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
         &lt;button class=&quot;send&quot; title=&quot;send&quot;&gt;↑&lt;/button&gt;
       &lt;/div&gt;
       &lt;div class=&quot;compose-bot&quot;&gt;
-        &lt;div class=&quot;toggle&quot; role=&quot;group&quot; aria-label=&quot;composer mode&quot;&gt;
-          &lt;button aria-pressed=&quot;true&quot; onclick=&quot;setMode(&#x27;msg&#x27;,this)&quot;&gt;message&lt;/button&gt;
-          &lt;button aria-pressed=&quot;false&quot; onclick=&quot;setMode(&#x27;shell&#x27;,this)&quot;&gt;shell&lt;/button&gt;
-          &lt;button aria-pressed=&quot;false&quot; onclick=&quot;setMode(&#x27;excl&#x27;,this)&quot;&gt;excl. shell&lt;/button&gt;
-        &lt;/div&gt;
+
         &lt;button class=&quot;btn btn--onblack&quot; style=&quot;background:var(--black);color:#fff&quot;&gt;🖼 Attach&lt;/button&gt;
-        &lt;span class=&quot;statusline&quot; id=&quot;status&quot;&gt;mode &lt;b&gt;message&lt;/b&gt; · ⌘⏎ to send&lt;/span&gt;
+
         &lt;span class=&quot;spacer&quot; style=&quot;flex:1&quot;&gt;&lt;/span&gt;
         &lt;button class=&quot;btn btn--red&quot;&gt;■ Abort&lt;/button&gt;
       &lt;/div&gt;
@@ -4255,19 +4034,8 @@ function toggleRail(panelId, btn){
   btn.setAttribute(&#x27;aria-expanded&#x27;, String(open));
 }
 
-var MODES = {
-  msg:   {cls:&#x27;mode-msg&#x27;,   ph:&#x27;Message the orb…&#x27;,            line:&#x27;mode &lt;b&gt;message&lt;/b&gt; · ⌘⏎ to send&#x27;},
-  shell: {cls:&#x27;mode-shell&#x27;, ph:&#x27;! command on the host…&#x27;,      line:&#x27;mode &lt;b&gt;shell&lt;/b&gt; · runs on the host · output persisted to history&#x27;},
-  excl:  {cls:&#x27;mode-excl&#x27;,  ph:&#x27;!! command, kept out of context…&#x27;, line:&#x27;mode &lt;b&gt;excluded shell&lt;/b&gt; · output persisted · excluded from context&#x27;}
-};
-function setMode(mode, btn){
-  var c = document.getElementById(&#x27;composer&#x27;);
-  c.className = &#x27;composer &#x27; + MODES[mode].cls;
-  document.getElementById(&#x27;ta&#x27;).placeholder = MODES[mode].ph;
-  document.getElementById(&#x27;status&#x27;).innerHTML = MODES[mode].line;
-  var group = btn.parentNode.querySelectorAll(&#x27;button&#x27;);
-  for (var i = 0; i &lt; group.length; i++) group[i].setAttribute(&#x27;aria-pressed&#x27;, String(group[i] === btn));
-}
+;
+
 
 function termTab(name, btn){
   document.getElementById(&#x27;term-zsh&#x27;).hidden = name !== &#x27;zsh&#x27;;
@@ -4541,13 +4309,6 @@ details.reason p{margin:12px 0 6px;font-size:14px;color:var(--mute);font-weight:
 .folio .t{font-family:var(--mono);font-size:9.5px;letter-spacing:.3em;text-transform:uppercase;color:var(--mute)}
 .folio .pg{font-family:var(--didone);font-size:15px;font-style:italic;color:var(--rose)}
 
-.shell{border:1px solid var(--hair);margin:0 0 30px;background:rgba(0,0,0,.28)}
-.shell .cmd{display:flex;gap:11px;padding:11px 16px;border-bottom:1px solid var(--hair);font-family:var(--mono);font-size:12.5px;color:var(--blush)}
-.shell .cmd .bang{color:var(--shock)}
-.shell .out{padding:11px 16px;font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--mute)}
-.shell .out span{color:var(--skin)}
-.shell .foot{padding:8px 16px;border-top:1px solid var(--hair);font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
-
 .live{position:relative}
 .live .marker{display:inline-flex;align-items:center;gap:10px;font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--shock);margin-bottom:14px;padding-bottom:6px;border-bottom:1px solid rgba(255,45,138,.36)}
 .cursor{display:inline-block;width:8px;height:17px;background:var(--shock);vertical-align:-3px;margin-left:3px;animation:blink 1.15s steps(1) infinite;box-shadow:0 0 14px rgba(255,45,138,.75)}
@@ -4566,16 +4327,11 @@ details.reason p{margin:12px 0 6px;font-size:14px;color:var(--mute);font-weight:
 .byline .sig{font-family:var(--didone);font-style:italic;font-size:19px;color:var(--rose);flex:none;padding-bottom:3px}
 .byline textarea{flex:1;background:none;border:0;outline:none;resize:none;color:var(--paper);font-family:var(--sans);font-weight:300;font-size:16px;line-height:1.5;padding:6px 0 4px;max-height:120px}
 .byline textarea::placeholder{color:#8A6E78}
-.byline.sh textarea,.byline.sh .sig{font-family:var(--mono);font-size:13.5px;letter-spacing:.02em}
-.byline.sh .sig{color:var(--shock);font-style:normal;letter-spacing:.1em}
 .attach{color:var(--dim);flex:none;padding-bottom:4px;transition:color .4s}
 .attach:hover{color:var(--rose)}
 .send{flex:none;width:36px;height:36px;border:1px solid var(--hair-2);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--blush);transition:border-color .5s,color .5s,box-shadow .5s}
 .send:hover{border-color:var(--shock);color:var(--shock);box-shadow:0 0 22px rgba(255,45,138,.35)}
 .status{display:flex;align-items:center;gap:0 18px;flex-wrap:wrap;margin-top:9px}
-.status .mode{font-family:var(--mono);font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--rose);border:1px solid var(--hair-2);padding:3px 8px;transition:color .4s,border-color .4s}
-.status .mode:hover{color:var(--blush);border-color:var(--rose)}
-.status .mode.sh{color:var(--shock);border-color:rgba(255,45,138,.5)}
 .status .hint{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
 .status .sp{flex:1}
 .status .abort{font-family:var(--mono);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--crimson-lt);border-bottom:1px solid transparent}
@@ -4952,15 +4708,7 @@ setInterval(() =&amp;gt; socket.send(PING), HEARTBEAT_MS);&lt;/pre&gt;
     &lt;/div&gt;
 
     &lt;div class=&quot;col2&quot;&gt;
-      &lt;div class=&quot;shell&quot;&gt;
-        &lt;div class=&quot;cmd&quot;&gt;&lt;span class=&quot;bang&quot;&gt;!&lt;/span&gt;&lt;span&gt;git status --short&lt;/span&gt;&lt;/div&gt;
-        &lt;div class=&quot;out&quot;&gt;
-           M &lt;span&gt;apps/web/src/lib/live-socket.ts&lt;/span&gt;&lt;br&gt;
-           M &lt;span&gt;apps/web/src/lib/live-socket.test.ts&lt;/span&gt;&lt;br&gt;
-          ?? &lt;span&gt;docs/postmortems/half-open-live-socket.md&lt;/span&gt;
-        &lt;/div&gt;
-        &lt;div class=&quot;foot&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-      &lt;/div&gt;
+
     &lt;/div&gt;
 
     &lt;blockquote class=&quot;quote queued col12&quot;&gt;
@@ -4976,21 +4724,8 @@ setInterval(() =&amp;gt; socket.send(PING), HEARTBEAT_MS);&lt;/pre&gt;
     &lt;/div&gt;
 
     &lt;div class=&quot;col2 specimen&quot;&gt;
-      &lt;div class=&quot;fn-title&quot;&gt;Specimen · composer, shell mode&lt;/div&gt;
-      &lt;div class=&quot;composer static&quot;&gt;
-        &lt;div class=&quot;byline sh&quot;&gt;
-          &lt;span class=&quot;sig&quot;&gt;!&lt;/span&gt;
-          &lt;textarea rows=&quot;1&quot; readonly&gt;git log --oneline -5&lt;/textarea&gt;
-          &lt;button class=&quot;attach&quot; title=&quot;attach image&quot;&gt;⊕&lt;/button&gt;
-          &lt;button class=&quot;send&quot; title=&quot;send&quot;&gt;&lt;svg width=&quot;13&quot; height=&quot;13&quot; viewBox=&quot;0 0 13 13&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.2&quot;&gt;&lt;path d=&quot;M6.5 11.5V1.6M2.4 5.7 6.5 1.5l4.1 4.2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
-        &lt;/div&gt;
-        &lt;div class=&quot;status&quot;&gt;
-          &lt;span class=&quot;mode sh&quot;&gt;shell · persisted&lt;/span&gt;
-          &lt;span class=&quot;hint&quot;&gt;!! prefix = excluded from context&lt;/span&gt;
-          &lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;
-          &lt;span class=&quot;hint&quot;&gt;⌘⏎ to run&lt;/span&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
+
+
 
       &lt;div class=&quot;notfound&quot;&gt;
         &lt;div class=&quot;fn-title&quot;&gt;Specimen · missing resource&lt;/div&gt;
@@ -5009,8 +4744,8 @@ setInterval(() =&amp;gt; socket.send(PING), HEARTBEAT_MS);&lt;/pre&gt;
       &lt;button class=&quot;send&quot; title=&quot;send&quot;&gt;&lt;svg width=&quot;14&quot; height=&quot;14&quot; viewBox=&quot;0 0 13 13&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.2&quot;&gt;&lt;path d=&quot;M6.5 11.5V1.6M2.4 5.7 6.5 1.5l4.1 4.2&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
     &lt;/div&gt;
     &lt;div class=&quot;status&quot;&gt;
-      &lt;button class=&quot;mode&quot; id=&quot;modeBtn&quot; onclick=&quot;cycleMode()&quot;&gt;message&lt;/button&gt;
-      &lt;span class=&quot;hint&quot; id=&quot;modeHint&quot;&gt;plain turn · enters the context&lt;/span&gt;
+
+
       &lt;span class=&quot;sp&quot;&gt;&lt;/span&gt;
       &lt;span class=&quot;hint&quot;&gt;⌘⏎ send&lt;/span&gt;
       &lt;button class=&quot;abort&quot;&gt;abort turn&lt;/button&gt;
@@ -5068,24 +4803,6 @@ function copied(btn){
   btn.textContent = &#x27;copied&#x27;;
   setTimeout(function(){ btn.textContent = was; }, 1400);
 }
-var MODES = [
-  {label:&#x27;message&#x27;, hint:&#x27;plain turn · enters the context&#x27;, sig:&#x27;—&#x27;, sh:false},
-  {label:&#x27;shell · persisted&#x27;, hint:&#x27;! prefix · output kept in context&#x27;, sig:&#x27;!&#x27;, sh:true},
-  {label:&#x27;shell · excluded&#x27;, hint:&#x27;!! prefix · output excluded from context&#x27;, sig:&#x27;!!&#x27;, sh:true}
-];
-var modeIdx = 0;
-function cycleMode(){
-  modeIdx = (modeIdx + 1) % MODES.length;
-  var m = MODES[modeIdx];
-  var btn = document.getElementById(&#x27;modeBtn&#x27;);
-  btn.textContent = m.label;
-  btn.classList.toggle(&#x27;sh&#x27;, m.sh);
-  document.getElementById(&#x27;modeHint&#x27;).textContent = m.hint;
-  document.getElementById(&#x27;sig&#x27;).textContent = m.sig;
-  document.getElementById(&#x27;byline&#x27;).classList.toggle(&#x27;sh&#x27;, m.sh);
-  var ta = document.getElementById(&#x27;ta&#x27;);
-  ta.placeholder = m.sh ? &#x27;Run on the host…&#x27; : &#x27;Message the orb…&#x27;;
-}
 function termTab(btn, i){
   btn.parentNode.querySelectorAll(&#x27;button&#x27;).forEach(function(b, j){
     b.setAttribute(&#x27;aria-selected&#x27;, String(j === i));
@@ -5103,7 +4820,7 @@ ta.addEventListener(&#x27;input&#x27;, function(){
 &lt;!--
   eros-shock — provocative fashion-editorial for pi-orb.
   Palette: near-black plum ground, deep crimson and rose accents, blush and warm skin neutrals,
-    rose-gold hairlines; one electric shock pink reserved strictly for live/busy states (glyph glow, cursor, shell mode).
+    rose-gold hairlines; one electric shock pink reserved strictly for live/busy states (glyph glow, cursor).
   Type: Bodoni Moda at display sizes with tight tracking for masthead, project features and orb names;
     italic Bodoni for user pull-quotes; Jost 300 for agent prose; Azeret Mono for meta, footnotes and terminal.
   Layout: full-bleed magazine spread — masthead, projects as features with outlined oversized folio numerals
@@ -5504,17 +5221,8 @@ code.inl,.md code{font-family:var(--f-mono);font-size:15px;color:var(--acid);bac
 .composer{position:sticky;bottom:0;z-index:50;margin-top:14px;padding:11px 13px 12px;
   background:linear-gradient(180deg,#0d1130,#070a20);border:1px solid var(--line-soft);
   box-shadow:0 -10px 26px rgba(2,3,14,.8),inset 0 0 30px rgba(47,240,255,.05)}
-.composer.shell{border-color:rgba(232,255,69,.45);box-shadow:0 -10px 26px rgba(2,3,14,.8),inset 0 0 30px rgba(232,255,69,.08)}
-.composer.xshell{border-style:dashed;border-color:rgba(255,122,31,.5)}
-.modes{display:flex;gap:7px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
-.modes .m{font-family:var(--f-pixel);font-size:7.5px;letter-spacing:.09em;padding:6px 9px;cursor:pointer;
-  background:rgba(6,9,28,.8);border:1px solid var(--line-soft);color:var(--dim)}
-.modes .m[aria-pressed=&quot;true&quot;]{color:#07091e;background:var(--cyan);border-color:var(--cyan)}
-.composer.shell .modes .m[aria-pressed=&quot;true&quot;]{background:var(--acid);border-color:var(--acid)}
-.composer.xshell .modes .m[aria-pressed=&quot;true&quot;]{background:var(--orange);border-color:var(--orange);color:#180701}
 .crow{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:10px;align-items:start}
 .cprompt{font-family:var(--f-mono);font-size:17px;color:var(--cyan);padding-top:8px}
-.composer.shell .cprompt,.composer.xshell .cprompt{color:var(--acid)}
 .composer textarea{width:100%;min-height:56px;resize:vertical;background:rgba(3,5,20,.9);
   border:1px solid rgba(90,120,220,.25);color:var(--txt);font-family:var(--f-body);font-size:19px;
   padding:8px 11px;letter-spacing:.01em}
@@ -5527,8 +5235,6 @@ code.inl,.md code{font-family:var(--f-mono);font-size:15px;color:var(--acid);bac
 .cfoot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;
   font-family:var(--f-mono);font-size:12.5px;letter-spacing:.06em;color:var(--dim)}
 .cfoot .st{color:var(--cyan)}
-.composer.shell .cfoot .st{color:var(--acid)}
-.composer.xshell .cfoot .st{color:var(--orange)}
 .cfoot .right{margin-left:auto;display:flex;gap:12px;align-items:center}
 .attach{background:none;border:1px dashed var(--line);color:var(--mut);font-family:var(--f-mono);font-size:12.5px;
   padding:3px 8px;cursor:pointer;letter-spacing:.06em}
@@ -5900,20 +5606,8 @@ code.inl,.md code{font-family:var(--f-mono);font-size:15px;color:var(--acid);bac
         &lt;/div&gt;
       &lt;/div&gt;
 
-      &lt;!-- 5. persisted shell block --&gt;
-      &lt;div class=&quot;entry&quot;&gt;
-        &lt;span class=&quot;ts&quot;&gt;09:19:41&lt;/span&gt;
-        &lt;div&gt;
-          &lt;div class=&quot;who&quot;&gt;&lt;span class=&quot;u&quot;&gt;USER&lt;/span&gt;&lt;span class=&quot;chip dash&quot; style=&quot;color:var(--acid);border-color:rgba(232,255,69,.45)&quot;&gt;shell&lt;/span&gt;&lt;/div&gt;
-          &lt;div class=&quot;cmd&quot;&gt;
-            &lt;div class=&quot;cl&quot; style=&quot;color:var(--acid)&quot;&gt;git status --short&lt;/div&gt;
-            &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/lib/live-socket.test.ts
-?? docs/postmortems/half-open-live-socket.md&lt;/div&gt;
-            &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
+
+
 
       &lt;!-- 6. queued user turn --&gt;
       &lt;div class=&quot;entry queued&quot;&gt;
@@ -5986,19 +5680,14 @@ code.inl,.md code{font-family:var(--f-mono);font-size:15px;color:var(--acid);bac
 
   &lt;!-- ─── composer ─── --&gt;
   &lt;div class=&quot;composer&quot; id=&quot;composer&quot;&gt;
-    &lt;div class=&quot;modes&quot;&gt;
-      &lt;button class=&quot;m&quot; data-mode=&quot;message&quot; aria-pressed=&quot;true&quot;&gt;message&lt;/button&gt;
-      &lt;button class=&quot;m&quot; data-mode=&quot;shell&quot; aria-pressed=&quot;false&quot;&gt;shell&lt;/button&gt;
-      &lt;button class=&quot;m&quot; data-mode=&quot;xshell&quot; aria-pressed=&quot;false&quot;&gt;excluded shell&lt;/button&gt;
-      &lt;span class=&quot;mono dimc&quot; id=&quot;modehint&quot; style=&quot;margin-left:6px&quot;&gt;prefix ! for shell · !! to exclude from context&lt;/span&gt;
-    &lt;/div&gt;
+
     &lt;div class=&quot;crow&quot;&gt;
       &lt;span class=&quot;cprompt&quot; id=&quot;cprompt&quot;&gt;&amp;gt;&lt;/span&gt;
       &lt;textarea id=&quot;cinput&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;button class=&quot;send&quot; title=&quot;send&quot;&gt;↑&lt;/button&gt;
     &lt;/div&gt;
     &lt;div class=&quot;cfoot&quot;&gt;
-      &lt;span class=&quot;st&quot; id=&quot;cstatus&quot;&gt;MODE: message · sends to the agent · kept in context&lt;/span&gt;
+
       &lt;span class=&quot;right&quot;&gt;
         &lt;button class=&quot;attach&quot;&gt;▣ attach image&lt;/button&gt;
         &lt;button class=&quot;mini danger&quot;&gt;abort&lt;/button&gt;
@@ -6069,37 +5758,6 @@ code.inl,.md code{font-family:var(--f-mono);font-size:15px;color:var(--acid);bac
     if (row) row.parentNode.removeChild(row);
   });
 
-  /* composer modes */
-  var comp = document.getElementById(&quot;composer&quot;),
-      cst  = document.getElementById(&quot;cstatus&quot;),
-      cpr  = document.getElementById(&quot;cprompt&quot;),
-      cin  = document.getElementById(&quot;cinput&quot;),
-      hint = document.getElementById(&quot;modehint&quot;);
-  var MODES = {
-    message: { cls:&quot;&quot;,       prompt:&quot;&gt;&quot;,  ph:&quot;Message the orb…&quot;,
-               status:&quot;MODE: message · sends to the agent · kept in context&quot;,
-               hint:&quot;prefix ! for shell · !! to exclude from context&quot; },
-    shell:   { cls:&quot;shell&quot;,  prompt:&quot;!&quot;,  ph:&quot;Run on the host…&quot;,
-               status:&quot;MODE: shell · runs on the host · output kept in context&quot;,
-               hint:&quot;output is persisted and replayed to the agent&quot; },
-    xshell:  { cls:&quot;xshell&quot;, prompt:&quot;!!&quot;, ph:&quot;Run on the host, keep it private…&quot;,
-               status:&quot;MODE: excluded shell · runs on the host · EXCLUDED from context&quot;,
-               hint:&quot;agent never sees this command or its output&quot; }
-  };
-  Array.prototype.forEach.call(document.querySelectorAll(&quot;.modes .m&quot;), function(b){
-    b.addEventListener(&quot;click&quot;, function(){
-      var m = MODES[b.getAttribute(&quot;data-mode&quot;)];
-      Array.prototype.forEach.call(document.querySelectorAll(&quot;.modes .m&quot;), function(o){
-        o.setAttribute(&quot;aria-pressed&quot;, o === b ? &quot;true&quot; : &quot;false&quot;);
-      });
-      comp.className = &quot;composer&quot; + (m.cls ? &quot; &quot; + m.cls : &quot;&quot;);
-      cpr.textContent = m.prompt;
-      cin.placeholder = m.ph;
-      cst.textContent = m.status;
-      hint.textContent = m.hint;
-    });
-  });
-
   /* floating terminal */
   var term = document.getElementById(&quot;term&quot;);
   document.getElementById(&quot;term-min&quot;).addEventListener(&quot;click&quot;, function(){
@@ -6134,7 +5792,7 @@ code.inl,.md code{font-family:var(--f-mono);font-size:15px;color:var(--acid);bac
 &lt;!--
   cyber-fun — playful arcade-cabinet cyberpunk, not grimdark.
   Palette: near-black navy (#040514/#0b0e28) with neon magenta (busy), electric cyan (idle/chrome),
-  acid yellow (transitional/shell) and hot orange (failed/deleting); CRT scanline overlay + vignette,
+  acid yellow (transitional) and hot orange (failed/deleting); CRT scanline overlay + vignette,
   chromatic-aberration text shadows on headings.
   Type: Press Start 2P for tiny caps labels only, Orbitron for names/brand, VT323/Share Tech Mono for
   all body, transcript and terminal text. Shape: clip-path cut corners, bracket ornaments, dashed
@@ -6507,15 +6165,6 @@ details.think .body{margin:9px 0 0 12px;padding:10px 16px;font-size:13px;color:v
 .compact .drops i:nth-child(4){left:88%;animation-delay:4.6s}
 @keyframes fall{0%{transform:translateY(0) scale(.6);opacity:0}20%{opacity:.85;transform:translateY(3px) scale(1)}100%{transform:translateY(20px) scale(.5);opacity:0}}
 
-/* persisted shell block */
-.shellblk{margin:0 0 8px;padding:14px 18px;border-radius:26px 40px 24px 38px / 38px 24px 40px 22px;
-  background:linear-gradient(160deg,#22320c,#141f05);color:#d9ecb0;font-family:&#x27;Sono&#x27;,monospace;font-size:12.5px;
-  box-shadow:var(--shadow),inset 0 10px 16px -12px rgba(255,255,255,.5)}
-.shellblk .prompt{color:var(--mustard)}
-.shellblk .c{color:#bce800}
-.shellblk pre{margin:8px 0 0;white-space:pre-wrap;color:#a8ba88;line-height:1.55}
-.shellblk .ft{margin-top:9px;font-size:11px;color:#83936a;border-top:1px dotted rgba(216,236,176,.25);padding-top:7px}
-
 /* live streaming */
 .cursor{display:inline-block;width:9px;height:16px;vertical-align:-3px;margin-left:2px;border-radius:4px;
   background:var(--lime-2);animation:blink 1s steps(2,start) infinite}
@@ -6533,12 +6182,6 @@ details.think .body{margin:9px 0 0 12px;padding:10px 16px;font-size:13px;color:v
   border-radius:34px 24px 32px 22px / 22px 32px 22px 30px;box-shadow:inset 0 0 0 2px rgba(63,93,28,.22),inset 0 4px 8px -5px rgba(20,32,4,.35)}
 .composer-in textarea:focus{outline:0;box-shadow:inset 0 0 0 2.5px var(--lime-2),0 0 0 4px rgba(188,232,0,.25)}
 .crow{display:flex;align-items:center;gap:10px;margin-top:9px;flex-wrap:wrap}
-.mode{display:inline-flex;align-items:center;gap:8px;border:0;cursor:pointer;padding:5px 14px;font-size:12px;
-  font-family:&#x27;Sono&#x27;,monospace;border-radius:50% 50% 45% 55% / 60% 55% 45% 40%;
-  background-image:var(--gloss),linear-gradient(160deg,var(--lime),var(--lime-2));color:var(--swamp-2);box-shadow:var(--wet)}
-.mode[data-mode=&quot;shell&quot;]{background-image:var(--gloss),linear-gradient(160deg,#3f5d1c,#22320c);color:#cfe98a}
-.mode[data-mode=&quot;excluded shell&quot;]{background-image:var(--gloss),linear-gradient(160deg,var(--bruise-l),var(--bruise));color:#fbeffd}
-.mode:active{transform:scale(.92,.85)}
 .hint{font-size:11.5px;color:var(--murk-2)}
 .send{margin-left:auto;display:inline-flex;align-items:center;gap:8px}
 .sendbtn{width:46px;height:46px;border:0;cursor:pointer;font-size:20px;line-height:1;
@@ -6551,10 +6194,6 @@ details.think .body{margin:9px 0 0 12px;padding:10px 16px;font-size:13px;color:v
 .attach{border:0;cursor:pointer;width:34px;height:34px;border-radius:55% 45% 50% 50% / 55% 50% 50% 45%;
   background:rgba(63,93,28,.13);color:var(--swamp);font-size:15px}
 .attach:active{transform:scale(.88)}
-.shellex{margin:12px 0 0;padding:11px 18px;border-radius:40px 28px 36px 26px / 26px 36px 26px 34px;
-  background:rgba(34,50,12,.92);color:#cfe49f;font-family:&#x27;Sono&#x27;,monospace;font-size:12.5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.shellex .tagm{font-size:11px;padding:2px 9px;border-radius:12px;background:rgba(188,232,0,.2);color:#cfe98a}
-.shellex .tagx{font-size:11px;padding:2px 9px;border-radius:12px;background:rgba(165,88,176,.34);color:#f0d6f5}
 
 /* floating terminal */
 .term{position:fixed;right:26px;bottom:270px;width:min(430px,calc(100% - 52px));z-index:65;
@@ -6970,13 +6609,7 @@ details.think .body{margin:9px 0 0 12px;padding:10px 16px;font-size:13px;color:v
       &lt;span class=&quot;lbl&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;
     &lt;/div&gt;
 
-    &lt;div class=&quot;shellblk&quot;&gt;
-      &lt;div&gt;&lt;span class=&quot;prompt&quot;&gt;!&lt;/span&gt; &lt;span class=&quot;c&quot;&gt;git status --short&lt;/span&gt;&lt;/div&gt;
-      &lt;pre&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/pre&gt;
-      &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-    &lt;/div&gt;
+
 
     &lt;div class=&quot;turn user&quot;&gt;
       &lt;div class=&quot;msg queued&quot;&gt;
@@ -7006,8 +6639,8 @@ details.think .body{margin:9px 0 0 12px;padding:10px 16px;font-size:13px;color:v
     &lt;div class=&quot;composer-in&quot;&gt;
       &lt;textarea placeholder=&quot;Message the orb…&quot; rows=&quot;2&quot;&gt;&lt;/textarea&gt;
       &lt;div class=&quot;crow&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;mode&quot; data-mode=&quot;message&quot;&gt;◉ mode: message&lt;/button&gt;
-        &lt;span class=&quot;hint&quot; id=&quot;modehint&quot;&gt;plain turn · goes into context&lt;/span&gt;
+
+
         &lt;button class=&quot;attach&quot; title=&quot;Attach image&quot;&gt;🖼&lt;/button&gt;
         &lt;span class=&quot;send&quot;&gt;
           &lt;button class=&quot;btn tiny grape&quot;&gt;abort&lt;/button&gt;
@@ -7015,12 +6648,7 @@ details.think .body{margin:9px 0 0 12px;padding:10px 16px;font-size:13px;color:v
           &lt;button class=&quot;sendbtn&quot; title=&quot;Send&quot;&gt;↑&lt;/button&gt;
         &lt;/span&gt;
       &lt;/div&gt;
-      &lt;div class=&quot;shellex&quot;&gt;
-        &lt;span class=&quot;tagm&quot;&gt;shell&lt;/span&gt;&lt;span class=&quot;mono&quot; style=&quot;color:#bce800&quot;&gt;!npm test -- live-socket&lt;/span&gt;
-        &lt;span style=&quot;opacity:.6&quot;&gt;persisted&lt;/span&gt;
-        &lt;span class=&quot;tagx&quot;&gt;excluded shell&lt;/span&gt;&lt;span class=&quot;mono&quot; style=&quot;color:#e2b4ea&quot;&gt;!!git status --short&lt;/span&gt;
-        &lt;span style=&quot;opacity:.6&quot;&gt;shown once, no context&lt;/span&gt;
-      &lt;/div&gt;
+
     &lt;/div&gt;
   &lt;/div&gt;
 
@@ -7081,20 +6709,6 @@ details.think .body{margin:9px 0 0 12px;padding:10px 16px;font-size:13px;color:v
       b.textContent = &#x27;copied ✓&#x27;;
       setTimeout(function(){ b.textContent = old; }, 1200);
     });
-  });
-
-  // composer mode cycle
-  var modes = [
-    [&#x27;message&#x27;, &#x27;◉ mode: message&#x27;, &#x27;plain turn · goes into context&#x27;],
-    [&#x27;shell&#x27;, &#x27;❯ mode: shell&#x27;, &#x27;runs on host · output persisted to transcript&#x27;],
-    [&#x27;excluded shell&#x27;, &#x27;❯❯ mode: excluded shell&#x27;, &#x27;runs on host · shown once · excluded from context&#x27;]
-  ];
-  var mi = 0, mb = document.getElementById(&#x27;mode&#x27;), mh = document.getElementById(&#x27;modehint&#x27;);
-  mb.addEventListener(&#x27;click&#x27;, function(){
-    mi = (mi + 1) % modes.length;
-    mb.dataset.mode = modes[mi][0];
-    mb.textContent = modes[mi][1];
-    mh.textContent = modes[mi][2];
   });
 
   // terminal controls
@@ -7429,14 +7043,6 @@ code{font-family:var(--mono); font-size:12.8px; line-height:1.7; color:#37435F}
 .compaction .cap{font-size:11.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--faint);
   padding:5px 16px; border-radius:999px; background:rgba(255,255,255,.5); border:1px solid rgba(255,255,255,.8)}
 
-/* shell block */
-.shellblock{border-radius:24px; padding:16px 20px; background:rgba(240,244,252,.6);
-  border:1px solid rgba(255,255,255,.85); margin-left:44px}
-.shellblock .cmdline{font-family:var(--mono); font-size:13px; color:#38445F}
-.shellblock .bang{color:#8E7BC7}
-.shellblock .out{font-family:var(--mono); font-size:12.4px; color:var(--mute); margin:8px 0 0; white-space:pre-wrap; line-height:1.6}
-.shellblock .foot{font-size:11.5px; letter-spacing:.14em; color:var(--faint); margin-top:10px}
-
 /* streaming */
 .cursorbar{display:inline-block; width:2px; height:1em; background:var(--ink); vertical-align:-2px;
   margin-left:2px; animation:caret 1.1s steps(1) infinite}
@@ -7450,19 +7056,11 @@ code{font-family:var(--mono); font-size:12.8px; line-height:1.7; color:#37435F}
   font-size:16px; color:var(--ink); min-height:52px; line-height:1.6}
 .composer textarea::placeholder{color:#98A3BC}
 .composer-foot{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:6px}
-.modes{display:inline-flex; gap:3px; padding:3px; border-radius:999px; background:rgba(255,255,255,.45);
-  border:1px solid rgba(255,255,255,.8)}
-.modes button{padding:4px 13px; border-radius:999px; font-size:11.5px; letter-spacing:.14em;
-  text-transform:uppercase; color:var(--mute)}
-.modes button[aria-pressed=&quot;true&quot;]{background:#fff; color:#2C3A57; box-shadow:0 6px 14px -10px rgba(56,74,116,.8)}
 .status{font-size:12.5px; color:var(--mute); letter-spacing:.05em}
 .send{width:46px;height:46px; border-radius:50%; margin-left:auto; display:grid; place-items:center; font-size:19px;
   background:linear-gradient(140deg, rgba(166,206,242,.98), rgba(198,188,239,.95)); color:#22304C;
   border:1px solid rgba(255,255,255,.9); box-shadow:0 18px 32px -16px rgba(84,110,170,.9); transition:.25s}
 .send:hover{transform:translateY(-2px) scale(1.03)}
-.composer.shell-mode{background:linear-gradient(120deg, rgba(198,188,239,.30), rgba(255,255,255,.5))}
-.composer.excl-mode{background:linear-gradient(120deg, rgba(175,227,210,.30), rgba(255,255,255,.5))}
-.composer.shell-mode textarea, .composer.excl-mode textarea{font-family:var(--mono); font-size:14.5px}
 
 /* specimens */
 .specimen{max-width:720px; margin:40px auto 0; display:flex; gap:18px; flex-wrap:wrap; align-items:stretch}
@@ -7496,8 +7094,7 @@ code{font-family:var(--mono); font-size:12.8px; line-height:1.7; color:#37435F}
 @media (max-width:860px){
   .shell{padding:0 16px 80px}
   .island,.island.w-lg,.island.w-md,.island.w-sm,.shelf{width:100%; margin-left:0; --x:0px}
-  .orb-pill:nth-child(even){margin-left:0} .orb-pill:nth-child(3n){margin-right:0}
-  .turn.user,.shellblock{margin-left:0} .turn.agent{margin-right:0}
+  .orb-pill:nth-child(even){margin-left:0} .orb-pill:nth-child(3n){margin-right:0} .turn.agent{margin-right:0}
   .terminal{right:12px; left:12px; width:auto}
 }
 @media (prefers-reduced-motion:reduce){
@@ -7868,14 +7465,8 @@ setInterval(() =&gt; {
         &lt;span class=&quot;rule&quot;&gt;&lt;/span&gt;
       &lt;/div&gt;
 
-      &lt;!-- 5 · persisted shell block --&gt;
-      &lt;div class=&quot;shellblock&quot;&gt;
-        &lt;div class=&quot;cmdline&quot;&gt;&lt;span class=&quot;bang&quot;&gt;!&lt;/span&gt; git status --short&lt;/div&gt;
-        &lt;p class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/lib/live-socket.test.ts
-?? docs/postmortems/half-open-live-socket.md&lt;/p&gt;
-        &lt;div class=&quot;foot&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-      &lt;/div&gt;
+
+
 
       &lt;!-- 6 · queued user turn --&gt;
       &lt;article class=&quot;turn user muted-turn glass&quot;&gt;
@@ -7897,18 +7488,14 @@ setInterval(() =&gt; {
       &lt;div class=&quot;composer glass&quot; id=&quot;composer&quot;&gt;
         &lt;textarea id=&quot;composer-input&quot; placeholder=&quot;Message the orb…&quot; rows=&quot;2&quot;&gt;&lt;/textarea&gt;
         &lt;div class=&quot;composer-foot&quot;&gt;
-          &lt;div class=&quot;modes&quot; role=&quot;group&quot; aria-label=&quot;composer mode&quot;&gt;
-            &lt;button data-mode=&quot;message&quot; aria-pressed=&quot;true&quot;&gt;message&lt;/button&gt;
-            &lt;button data-mode=&quot;shell&quot; aria-pressed=&quot;false&quot;&gt;shell&lt;/button&gt;
-            &lt;button data-mode=&quot;excluded&quot; aria-pressed=&quot;false&quot;&gt;excluded shell&lt;/button&gt;
-          &lt;/div&gt;
+
           &lt;button class=&quot;btn ghost tiny&quot; title=&quot;attach image&quot;&gt;
             &lt;svg width=&quot;15&quot; height=&quot;15&quot; viewBox=&quot;0 0 16 16&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;1.4&quot;&gt;
               &lt;rect x=&quot;1.8&quot; y=&quot;3&quot; width=&quot;12.4&quot; height=&quot;10&quot; rx=&quot;2.6&quot;/&gt;&lt;circle cx=&quot;5.8&quot; cy=&quot;6.6&quot; r=&quot;1.2&quot;/&gt;
               &lt;path d=&quot;m2.6 11.4 3.2-3 3 2.6 2-1.8 2.6 2.4&quot; stroke-linejoin=&quot;round&quot;/&gt;&lt;/svg&gt;
             image
           &lt;/button&gt;
-          &lt;span class=&quot;status&quot; id=&quot;composer-status&quot;&gt;mode &lt;b style=&quot;font-weight:500&quot;&gt;message&lt;/b&gt; · sent to the agent, kept in context&lt;/span&gt;
+
           &lt;button class=&quot;btn ghost tiny danger&quot;&gt;abort&lt;/button&gt;
           &lt;button class=&quot;send&quot; title=&quot;send&quot;&gt;↑&lt;/button&gt;
         &lt;/div&gt;
@@ -7924,15 +7511,7 @@ setInterval(() =&gt; {
         &lt;h4&gt;Orb doesn&#x27;t exist.&lt;/h4&gt;
         &lt;a href=&quot;#/&quot;&gt;Back to dashboard&lt;/a&gt;
       &lt;/div&gt;
-      &lt;div class=&quot;spec-card glass-lite&quot;&gt;
-        &lt;span class=&quot;label&quot;&gt;composer · shell&lt;/span&gt;
-        &lt;div class=&quot;composer shell-mode&quot; style=&quot;padding:12px 14px 10px; margin-top:10px; border-radius:22px; border:1px solid rgba(255,255,255,.8)&quot;&gt;
-          &lt;div style=&quot;font-family:var(--mono); font-size:14px; color:#3B4763&quot;&gt;! npm run test:e2e&lt;/div&gt;
-          &lt;div class=&quot;composer-foot&quot; style=&quot;margin-top:8px&quot;&gt;
-            &lt;span class=&quot;status&quot;&gt;mode &lt;b style=&quot;font-weight:500&quot;&gt;shell&lt;/b&gt; · runs on the host, output kept in context&lt;/span&gt;
-          &lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
+
     &lt;/div&gt;
 
   &lt;/main&gt;
@@ -8074,30 +7653,6 @@ setInterval(() =&gt; {
       b.style.opacity = &quot;0&quot;;
       b.style.filter = &quot;blur(8px)&quot;;
       setTimeout(function () { b.style.display = &quot;none&quot;; }, 340);
-    });
-  }
-
-  /* ---- composer modes ---- */
-  var COPY = {
-    message: &quot;mode &lt;b style=\&quot;font-weight:500\&quot;&gt;message&lt;/b&gt; · sent to the agent, kept in context&quot;,
-    shell: &quot;mode &lt;b style=\&quot;font-weight:500\&quot;&gt;shell&lt;/b&gt; · runs on the host, output kept in context&quot;,
-    excluded: &quot;mode &lt;b style=\&quot;font-weight:500\&quot;&gt;excluded shell&lt;/b&gt; · runs on the host, excluded from context&quot;
-  };
-  var PLACE = { message: &quot;Message the orb…&quot;, shell: &quot;! command on the host…&quot;, excluded: &quot;! command, output not shown to the agent…&quot; };
-  var composer = document.getElementById(&quot;composer&quot;);
-  var input = document.getElementById(&quot;composer-input&quot;);
-  var statusEl = document.getElementById(&quot;composer-status&quot;);
-  var modeBtns = document.querySelectorAll(&quot;.modes [data-mode]&quot;);
-  for (var m = 0; m &lt; modeBtns.length; m++) {
-    modeBtns[m].addEventListener(&quot;click&quot;, function () {
-      var mode = this.dataset.mode;
-      for (var i = 0; i &lt; modeBtns.length; i++) {
-        modeBtns[i].setAttribute(&quot;aria-pressed&quot;, modeBtns[i] === this ? &quot;true&quot; : &quot;false&quot;);
-      }
-      composer.classList.toggle(&quot;shell-mode&quot;, mode === &quot;shell&quot;);
-      composer.classList.toggle(&quot;excl-mode&quot;, mode === &quot;excluded&quot;);
-      statusEl.innerHTML = COPY[mode];
-      input.placeholder = PLACE[mode];
     });
   }
 
@@ -8318,9 +7873,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .mbox .s{color:var(--g3)}
 .code-lg{display:inline-block;background:var(--k);color:var(--w);padding:0 8px;letter-spacing:.18em;font-weight:700}
 .mnote{padding:4px 10px;color:var(--g3)}
-.modes{padding:4px 10px 8px;display:grid;gap:4px}
-.modes .ex{display:flex;gap:6px;align-items:baseline;border-bottom:1px solid var(--g1);padding-bottom:3px}
-.modes .ex .t{color:var(--g3)}
 
 /* ---------- orb: sticky header ---------- */
 .ohd{position:sticky;top:0;z-index:6;background:var(--w);border-bottom:1px solid var(--k);display:flex;align-items:center;gap:10px;padding:0 12px;height:26px}
@@ -8384,12 +7936,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--k);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -8400,9 +7946,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .comp .send{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 8px;line-height:18px;font-weight:700}
 .comp .send:hover{background:var(--w);color:var(--k)}
@@ -8809,19 +8352,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -8850,8 +8382,8 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
-        &lt;span class=&quot;faint&quot; id=&quot;comp-hint&quot;&gt;plain text · sent to the agent and kept in context&lt;/span&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
+
         &lt;button class=&quot;act&quot;&gt;+ image&lt;/button&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;span class=&quot;right&quot;&gt;
@@ -8884,16 +8416,12 @@ setInterval(() =&amp;gt; {
     &lt;div style=&quot;padding:0 10px 6px&quot;&gt;&lt;span class=&quot;code-lg&quot;&gt;WDJB-MJHT&lt;/span&gt; &lt;button class=&quot;act&quot; onclick=&quot;flash(this,&#x27;copied&#x27;)&quot;&gt;copy&lt;/button&gt;&lt;/div&gt;
     &lt;div class=&quot;mrow k2&quot;&gt;&lt;span class=&quot;faint&quot;&gt;expires&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;9m 41s&lt;/span&gt;&lt;/div&gt;
 
-    &lt;div class=&quot;sect sect-in up&quot;&gt;composer modes&lt;/div&gt;
-    &lt;div class=&quot;modes&quot;&gt;
-      &lt;div class=&quot;ex&quot;&gt;&lt;span class=&quot;mode inv&quot; style=&quot;padding:0 5px&quot;&gt;[message]&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;to agent&lt;/span&gt;&lt;/div&gt;
-      &lt;div class=&quot;ex&quot;&gt;&lt;span class=&quot;btn&quot;&gt;[shell]&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;runs, kept&lt;/span&gt;&lt;/div&gt;
-      &lt;div class=&quot;ex&quot;&gt;&lt;span class=&quot;btn&quot; style=&quot;border-style:dashed&quot;&gt;[!shell]&lt;/span&gt;&lt;span class=&quot;t&quot;&gt;runs, excluded&lt;/span&gt;&lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;div class=&quot;sect sect-in up&quot;&gt;keys&lt;/div&gt;
     &lt;div class=&quot;mrow k2&quot;&gt;&lt;span&gt;send&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;⌘⏎&lt;/span&gt;&lt;/div&gt;
-    &lt;div class=&quot;mrow k2&quot;&gt;&lt;span&gt;shell mode&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;!&lt;/span&gt;&lt;/div&gt;
+
     &lt;div class=&quot;mrow k2&quot;&gt;&lt;span&gt;terminal&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;t&lt;/span&gt;&lt;/div&gt;
     &lt;div class=&quot;mrow k2&quot;&gt;&lt;span&gt;move orb&lt;/span&gt;&lt;span class=&quot;v&quot;&gt;j/k&lt;/span&gt;&lt;/div&gt;
 
@@ -8954,22 +8482,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;,    &#x27;plain text · sent to the agent and kept in context&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;,  &#x27;runs on the host · output kept in context&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;, &#x27;runs on the host · output excluded from context&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-hint&#x27;).textContent = m[2];
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn, text){
   if (btn.dataset.busy) return;
   var old = btn.textContent;
@@ -9008,7 +8520,7 @@ function openTerm(){
   state rides entirely on glyph + weight (● ○ ◐ – ✕ ▫ ◑ …). One monospace family, one 13px size on a 20px
   line grid, tabular numerals; headings are uppercase and bold, never larger. Layout is a three-pane
   workspace: orb index, detail or transcript, status column. Transcript records use column-aligned prefixes
-  (you / orb / run / sh / ···) instead of bubbles; composer is one `&gt;` line with a mode chip. 1px rules, no
+  (you / orb / run / ···) instead of bubbles; composer is one `&gt;` line with a message prefix. 1px rules, no
   radius, no shadow, inversion for focus and selection; the only motion is the blinking block cursor.
   Signature detail: the compaction divider is a full-width run of ─ characters with the summary set inline.
 --&gt;
@@ -9302,12 +8814,6 @@ kbd{font:inherit}
 .compact .bar{height:3px;background:var(--ink)}
 .compact .cl{padding-top:8px;color:var(--mute)}
 
-/* persisted shell block */
-.shellblock{background:var(--wash);padding:16px;margin:24px 0}
-.shellblock .cmd{font-family:var(--mono);font-size:13px;font-weight:700}
-.shellblock .out{font-family:var(--mono);font-size:12.5px;line-height:22px;color:var(--mute);white-space:pre-wrap;padding-top:8px}
-.shellblock .ft{padding-top:8px;color:var(--mute)}
-
 /* live stream */
 .live .marker{display:inline-block;background:var(--vermilion);color:var(--white);padding:4px 12px;font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;margin-bottom:16px}
 .cursor{display:inline-block;width:9px;height:17px;background:var(--ink);vertical-align:-2px;margin-left:2px;animation:blink 1s steps(1,end) infinite}
@@ -9320,10 +8826,6 @@ kbd{font:inherit}
 
 /* composer : black bar at the bottom */
 .composer{position:sticky;bottom:0;z-index:45;background:var(--ink);color:var(--white)}
-.composer .modes{display:flex;gap:0;background:#1D1D1D}
-.composer .modes button{padding:8px 16px;font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#9B9B9B;transition:background-color .35s linear,color .35s linear}
-.composer .modes button[aria-pressed=&quot;true&quot;]{background:var(--white);color:var(--ink)}
-.composer .modes .abort{margin-left:auto;color:var(--vermilion)}
 .cbody{display:flex;align-items:stretch;gap:16px;padding:16px}
 .cbody .accent{width:4px;background:var(--white);flex:none;transition:background-color .45s linear}
 .cbody textarea{
@@ -9331,7 +8833,6 @@ kbd{font:inherit}
   resize:none;height:56px;padding:0;outline:none;
 }
 .cbody textarea::placeholder{color:#8E8E8E}
-.cbody textarea.sh{font-family:var(--mono);font-size:13px}
 .csend{display:flex;flex-direction:column;align-items:center;gap:4px;justify-content:flex-end}
 .csend .btn{width:40px;height:40px;background:var(--white);color:var(--ink);font-size:17px;font-weight:700;text-align:center;line-height:40px}
 .csend .hint{font-size:9px;letter-spacing:.16em;color:#8E8E8E}
@@ -9763,14 +9264,8 @@ socket.onmessage = (e) =&gt; {
           &lt;div class=&quot;cl lab-r&quot;&gt;context compacted · 31 records → summary&lt;/div&gt;
         &lt;/div&gt;
 
-        &lt;!-- 5. persisted shell block --&gt;
-        &lt;div class=&quot;shellblock&quot;&gt;
-          &lt;div class=&quot;cmd&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/lib/live-socket.test.ts
-?? docs/postmortems/half-open-sockets.md&lt;/div&gt;
-          &lt;div class=&quot;ft lab-r&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
+
+
 
         &lt;!-- 6. queued user turn --&gt;
         &lt;div class=&quot;uturn queued&quot;&gt;
@@ -9795,12 +9290,7 @@ socket.onmessage = (e) =&gt; {
 
       &lt;!-- composer --&gt;
       &lt;div class=&quot;composer&quot;&gt;
-        &lt;div class=&quot;modes&quot;&gt;
-          &lt;button id=&quot;m-message&quot; aria-pressed=&quot;true&quot; onclick=&quot;setMode(&#x27;message&#x27;)&quot;&gt;Message&lt;/button&gt;
-          &lt;button id=&quot;m-shell&quot; aria-pressed=&quot;false&quot; onclick=&quot;setMode(&#x27;shell&#x27;)&quot;&gt;Shell&lt;/button&gt;
-          &lt;button id=&quot;m-xshell&quot; aria-pressed=&quot;false&quot; onclick=&quot;setMode(&#x27;xshell&#x27;)&quot;&gt;Excluded shell&lt;/button&gt;
-          &lt;button class=&quot;abort&quot;&gt;Abort&lt;/button&gt;
-        &lt;/div&gt;
+
         &lt;div class=&quot;cbody&quot;&gt;
           &lt;span class=&quot;accent&quot; id=&quot;cAccent&quot;&gt;&lt;/span&gt;
           &lt;textarea id=&quot;cInput&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
@@ -9810,9 +9300,6 @@ socket.onmessage = (e) =&gt; {
           &lt;/span&gt;
         &lt;/div&gt;
         &lt;div class=&quot;cstatus&quot;&gt;
-          &lt;span&gt;Mode&lt;/span&gt;
-          &lt;span class=&quot;dotlabel&quot; id=&quot;cMode&quot;&gt;message&lt;/span&gt;
-          &lt;span id=&quot;cNote&quot;&gt;sent to the agent · added to context&lt;/span&gt;
           &lt;button class=&quot;attach&quot;&gt;⊞ Attach image&lt;/button&gt;
         &lt;/div&gt;
       &lt;/div&gt;
@@ -9868,26 +9355,8 @@ function copied(btn){
   setTimeout(function(){ btn.textContent = was; }, 1200);
 }
 
-var MODES = {
-  message: {label:&#x27;message&#x27;, note:&#x27;sent to the agent · added to context&#x27;,
-            ph:&#x27;Message the orb…&#x27;, accent:&#x27;#FFFFFF&#x27;, mono:false},
-  shell:   {label:&#x27;shell&#x27;, note:&#x27;runs on the host · output added to context&#x27;,
-            ph:&#x27;git status --short&#x27;, accent:&#x27;var(--cobalt)&#x27;, mono:true},
-  xshell:  {label:&#x27;excluded shell&#x27;, note:&#x27;runs on the host · excluded from context&#x27;,
-            ph:&#x27;tail -n 40 /var/log/agent.log&#x27;, accent:&#x27;var(--grey)&#x27;, mono:true}
-};
-function setMode(m){
-  var cfg = MODES[m];
-  [&#x27;message&#x27;,&#x27;shell&#x27;,&#x27;xshell&#x27;].forEach(function(k){
-    document.getElementById(&#x27;m-&#x27;+k).setAttribute(&#x27;aria-pressed&#x27;, k === m);
-  });
-  document.getElementById(&#x27;cMode&#x27;).textContent = cfg.label;
-  document.getElementById(&#x27;cNote&#x27;).textContent = cfg.note;
-  var ta = document.getElementById(&#x27;cInput&#x27;);
-  ta.placeholder = cfg.ph;
-  ta.classList.toggle(&#x27;sh&#x27;, cfg.mono);
-  document.getElementById(&#x27;cAccent&#x27;).style.background = cfg.accent;
-}
+;
+
 
 function termTab(btn){
   var tabs = btn.parentNode.querySelectorAll(&#x27;button&#x27;);

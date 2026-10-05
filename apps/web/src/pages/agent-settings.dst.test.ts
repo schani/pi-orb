@@ -64,10 +64,9 @@ it.each([false, true])(
                 await task.checkpoint("auth yielded with configuration owned");
                 expect(
                   decideRequest(agent.gateView(), {
-                    type: "shell",
+                    type: "message",
                     expectedHeadId: null,
-                    command: "echo no",
-                    excludeFromContext: false,
+                    content: [{ type: "text", text: "echo no" }],
                   }),
                 ).toMatchObject({ type: "reject", code: "busy" });
                 expect(

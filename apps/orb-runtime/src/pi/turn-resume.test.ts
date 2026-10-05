@@ -78,19 +78,6 @@ const toolResult = (callId: string) =>
     },
   });
 
-const bashExecution = () =>
-  entry("message", {
-    message: {
-      role: "bashExecution",
-      command: "npm test",
-      output: "passing",
-      exitCode: 0,
-      cancelled: false,
-      truncated: false,
-      timestamp: 4,
-    },
-  });
-
 const resumeMarker = () =>
   entry("custom_message", {
     customType: TURN_RESUME_CUSTOM_TYPE,
@@ -231,14 +218,6 @@ describe("detectInterruptedTurn", () => {
   it("does not resume a trailing tool result whose assistant did not stop on toolUse", () => {
     const entries = [user(), assistantAborted("call-1"), toolResult("call-1")];
     expect(detectInterruptedTurn(entries)).toEqual({ resume: false, reason: "settled_tail" });
-  });
-
-  it("does not resume a trailing shell execution", () => {
-    // Shell operations are out of scope; only agent turns resume.
-    expect(detectInterruptedTurn([user(), assistantText(), bashExecution()])).toEqual({
-      resume: false,
-      reason: "settled_tail",
-    });
   });
 
   it("allows three claimed resumes after the last human message, then declines", () => {

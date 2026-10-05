@@ -428,7 +428,7 @@ describe("frontend-only browser behavior", () => {
         await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb", composer);
         await expectPage(composer).toBeVisible();
         expectPage(await page.evaluate(() => Reflect.get(globalThis, "__composerFocuses"))).toBe(0);
-        await expectPage(composer).toHaveCSS("font-size", "13px");
+        await expectPage(composer).toHaveCSS("font-size", "16px");
         const rename = page.getByRole("button", { name: "Rename orb", exact: true });
         await rename.focus();
         await expectPage(rename).toBeFocused();
@@ -3330,6 +3330,52 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
+  it.each([
+    { width: 1440, prefix: "!" },
+    { width: 1440, prefix: "!!" },
+    { width: 390, prefix: "!" },
+    { width: 390, prefix: "!!" },
+  ])("sends $prefix as literal message text at $width px", async ({ width, prefix }) => {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    try {
+      await gotoFrontendFixture(page, `${origin}${ORB_PATH}`);
+      const composer = page.locator(".composer");
+      if (width < 600) await composer.getByRole("button", { name: "Write message" }).click();
+      const input = composer.getByRole("textbox", { name: "Message the orb", exact: true });
+      const sent = `${prefix}literal message ${randomUUID()}`;
+      await input.pressSequentially(sent);
+      await expectPage(input).toHaveValue(sent);
+      await input.fill("");
+      await input.fill(sent);
+      await expectPage(input).toHaveValue(sent);
+      await expectPage(composer.locator(".composer-line > .composer-prefix")).toHaveText(">");
+      await expectPage(composer.locator(".composer-mode")).toHaveText("message");
+      const send = composer.getByRole("button", { name: "Send message", exact: true });
+      if (width < 600) await expectPage(send).toBeEnabled();
+      else await expectPage(send).toHaveCount(0);
+      if (width < 600) {
+        await composer.getByRole("button", { name: "Fold editor" }).click();
+        await expectPage(composer.locator(".composer-draft-preview")).toHaveText(sent);
+        await expectPage(composer.locator(".composer-open .composer-prefix")).toHaveText(">");
+        await composer.getByRole("button", { name: "Write message" }).click();
+        await expectPage(input).toHaveValue(sent);
+      }
+      const submitted = page.waitForRequest(
+        (request) =>
+          request.method() === "PUT" &&
+          request.url().includes("/api/v1/orbs/frontend-fixture-orb/messages/"),
+      );
+      if (width < 600) await send.click();
+      else await input.press("Meta+Enter");
+      expectPage((await submitted).postDataJSON()).toEqual({
+        content: [{ type: "text", text: sent }],
+      });
+      await expectPage(page.locator(".history")).toContainText(sent);
+    } finally {
+      await page.close();
+    }
+  });
+
   it.each([1440, 390])("focuses the composer after terminal closure at %ipx", async (width) => {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     try {
@@ -3337,8 +3383,8 @@ describe("frontend-only browser behavior", () => {
       const composer = page.locator(".composer");
       if (width < 600) await composer.getByRole("button", { name: "Write message" }).click();
       const input = composer.getByRole("textbox");
-      await input.fill("!retained shell draft");
-      await expectPage(input).toHaveAttribute("aria-label", "Run a shell command");
+      await input.fill("retained message draft");
+      await expectPage(input).toHaveAttribute("aria-label", "Message the orb");
       const panel = page.getByRole("complementary", { name: "Interactive terminal" });
       for (const shortcut of [false, true]) {
         if (width < 600) {
@@ -3359,8 +3405,8 @@ describe("frontend-only browser behavior", () => {
         else await page.getByRole("button", { name: "Hide terminal", exact: true }).click();
         await expectPage(page.locator(".orb-terminal-window")).toBeHidden();
         await expectPage(input).toBeFocused();
-        await expectPage(input).toHaveValue("retained shell draft");
-        await expectPage(input).toHaveAttribute("aria-label", "Run a shell command");
+        await expectPage(input).toHaveValue("retained message draft");
+        await expectPage(input).toHaveAttribute("aria-label", "Message the orb");
         if (width < 600) await expectPage(composer).toHaveAttribute("data-expanded", "true");
         await page.keyboard.press("Meta+j");
         await expectPage(panel).toContainText("FOCUS_SESSION");
@@ -4623,7 +4669,7 @@ describe("frontend-only browser behavior", () => {
     }
   });
 
-  it("inserts orb URLs at typed @ and preserves cancelled mentions and shell input", async () => {
+  it("inserts orb URLs at typed @ and preserves cancelled mentions", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}${ORB_PATH}`);
     const composer = page.getByRole("textbox", { name: "Message the orb", exact: true });
@@ -4650,17 +4696,6 @@ describe("frontend-only browser behavior", () => {
     await composer.press("x");
     await expectPage(composer).toHaveValue(`before ${inserted}@x after`);
 
-    await composer.fill("");
-    await composer.press("!");
-    const shell = page.getByRole("textbox", { name: "Run a shell command", exact: true });
-    await shell.press("@");
-    await expectPage(shell).toHaveValue("@");
-    await expectPage(dialog).toBeHidden();
-    await shell.fill("");
-    await shell.press("!");
-    await shell.press("@");
-    await expectPage(shell).toHaveValue("@");
-    await expectPage(dialog).toBeHidden();
     await page.close();
   });
 

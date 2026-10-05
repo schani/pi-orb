@@ -69,6 +69,7 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
 
   let socket: WebSocket | null = null;
   let disposed = false;
+  let offline = false;
   let retryTimer: number | null = null;
   let runtimeInstanceId: string | null = null;
   let connectionId: string | null = null;
@@ -86,8 +87,48 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
     options.onStatus(status);
   }
 
-  function scheduleRetry(): void {
+  function retireTransport(): void {
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    const ws = socket;
+    socket = null;
+    if (ws !== null) {
+      try {
+        ws.close();
+      } catch {
+        // Ownership is already revoked even if the platform cannot close.
+      }
+    }
+  }
+
+  function onOffline(): void {
     if (disposed) return;
+    offline = true;
+    devConsoleDebug.record({
+      event: "connection",
+      orbId: options.orbId,
+      outcome: "browser_offline",
+    });
+    retireTransport();
+    reportStatus("retrying");
+  }
+
+  function onOnline(): void {
+    if (disposed) return;
+    offline = false;
+    devConsoleDebug.record({
+      event: "connection",
+      orbId: options.orbId,
+      outcome: "browser_online",
+    });
+    retireTransport();
+    connect();
+  }
+
+  function scheduleRetry(): void {
+    if (disposed || offline) return;
     reportStatus("retrying");
     retryTimer = window.setTimeout(connect, RETRY_DELAY_MS);
   }
@@ -149,7 +190,7 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
   }
 
   function connect(): void {
-    if (disposed) return;
+    if (disposed || offline) return;
     retryTimer = null;
     connectionId = null;
     reportStatus("connecting");
@@ -233,6 +274,8 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
     };
   }
 
+  window.addEventListener("offline", onOffline);
+  window.addEventListener("online", onOnline);
   connect();
 
   return {
@@ -253,16 +296,9 @@ export function openLiveConnection(options: LiveConnectionOptions): LiveConnecti
     dispose: (): void => {
       if (disposed) return;
       disposed = true;
-      if (retryTimer !== null) {
-        window.clearTimeout(retryTimer);
-        retryTimer = null;
-      }
-      const ws = socket;
-      socket = null;
-      if (ws !== null) {
-        ws.onclose = null;
-        ws.close();
-      }
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+      retireTransport();
       reportStatus("closed");
     },
   };

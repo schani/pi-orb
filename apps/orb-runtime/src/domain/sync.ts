@@ -1,4 +1,9 @@
-import { projectDisplayRecord, type RuntimeEvent, type ServerFrame } from "@pi-orb/protocol";
+import {
+  createDisplayRecordProjector,
+  type RuntimeEvent,
+  reasoningHeadline,
+  type ServerFrame,
+} from "@pi-orb/protocol";
 import type { HarnessSnapshot, LiveOperationView } from "./types.ts";
 
 /**
@@ -29,6 +34,8 @@ export function computeSyncFrames(
   }
   frames.push({ v: 1, type: "sync.started", at, mode, afterRecordId: effectiveAfter });
 
+  const project = createDisplayRecordProjector();
+  for (const record of snapshot.records.slice(0, startIndex)) project(record);
   let representedHead: string | null = mode === "after" ? effectiveAfter : null;
   for (const record of snapshot.records.slice(startIndex)) {
     representedHead = record.id;
@@ -36,7 +43,7 @@ export function computeSyncFrames(
       v: 1,
       type: "history.record",
       at,
-      record: projectDisplayRecord(record),
+      record: project(record),
       retiredBlockIds: [],
       headId: representedHead,
     });
@@ -56,6 +63,9 @@ export function computeSyncFrames(
         blockId: block.blockId,
         blockType: block.blockType,
         revision: block.revision,
+        ...(block.blockType === "reasoning"
+          ? { headline: reasoningHeadline(block.text, block.redacted) }
+          : {}),
         patch: { type: "replace", text: block.blockType === "reasoning" ? "" : block.text },
       });
     }

@@ -50,13 +50,14 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY patches patches
+COPY scripts/apply-dependency-patches.mjs scripts/apply-dependency-patches.mjs
 COPY vendor vendor
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/mock-openai/package.json packages/mock-openai/
 COPY packages/luna/package.json packages/luna/
 COPY apps/orb-runtime/package.json apps/orb-runtime/
 RUN npm ci --workspace @pi-orb/orb-runtime --include-workspace-root=false --ignore-scripts \
-  && npx --no-install patch-package --error-on-fail \
+  && node scripts/apply-dependency-patches.mjs \
   && ln -s /app/node_modules/.bin/agent-browser /usr/local/bin/agent-browser \
   && rm -rf node_modules/node-pty/prebuilds \
   && npm rebuild node-pty \

@@ -10,6 +10,10 @@ function rule(selector: string): string {
   return match?.[1] ?? "";
 }
 
+it("renders reasoning Markdown without inheriting literal pre-wrap whitespace", () => {
+  expect(rule(".reasoning-body > .chat-markdown")).toContain("white-space: normal");
+});
+
 describe("orb alerts", () => {
   it("keeps long plain text inside a phone-width reverse band without coloring the orb row", () => {
     const band = rule(".alert-band");
@@ -33,7 +37,7 @@ describe("subagent roster", () => {
 });
 
 describe("composer typography", () => {
-  it("inherits the transcript face and size at every viewport and input capability", () => {
+  it("inherits the transcript face with zoom-safe phone and touch input sizes", () => {
     expect(rule("body")).toContain("font-family: var(--text)");
     expect(rule("body")).toContain("font-size: var(--text-size)");
     expect(rule(":root")).toContain("--text-size: 13px");
@@ -42,8 +46,14 @@ describe("composer typography", () => {
       selector?.includes(".composer"),
     );
     for (const [, selector, declarations] of composerRules) {
-      expect(declarations, selector).not.toMatch(/font(?:-size|-family)?\s*:/);
+      expect(declarations, selector).not.toMatch(/font(?:-family)?\s*:/);
     }
+    expect(css).toMatch(
+      /@media \(max-width: 600px\), \(any-pointer: coarse\)\s*\{\s*input,\s*textarea,\s*select,\s*\.composer-caret-mirror,\s*\.composer-caret\s*\{\s*font-size: 16px;/,
+    );
+    const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    expect(html).toContain("width=device-width, initial-scale=1");
+    expect(html).not.toMatch(/user-scalable|maximum-scale|minimum-scale/);
   });
 });
 
@@ -120,6 +130,12 @@ describe("dashboard layout contract", () => {
     expect(rule(".project-column")).toContain("border-left: 1px solid var(--k)");
     expect(rule(".project-column")).toContain("border-bottom: 1px solid var(--k)");
     expect(rule(".new-project")).toContain("border-left: 1px dashed var(--k)");
+  });
+
+  it("fills available width whenever two fixed columns cannot fit", () => {
+    expect(css).toMatch(
+      /@media \(width < 632px\)\s*\{\s*\.dashboard\s*\{\s*grid-template-columns: minmax\(0, 1fr\);/,
+    );
   });
 
   it("rules the board from the totals strip to the bottom-pinned footer", () => {
@@ -254,7 +270,7 @@ describe("orb workspace layout contract", () => {
     expect(rule(".ix-project + .ix-project")).toContain("border-top: 1px solid var(--k)");
   });
 
-  it("retains the type gutter only for shell records and keeps queue state visible", () => {
+  it("retains the diagnostic gutter and keeps queue state visible", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
     expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     expect(rule(".busy-indicator")).toContain("padding: 0 12px");

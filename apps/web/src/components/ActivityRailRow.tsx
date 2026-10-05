@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 interface ActivityRailRowProps {
   label: string;
+  headerRef?: Ref<HTMLElement>;
   headline?: ReactNode;
   metric?: ReactNode;
   state?: "neutral" | "running" | "completed" | "failed";
@@ -18,6 +19,7 @@ interface ActivityRailRowProps {
  */
 export function ActivityRailRow({
   label,
+  headerRef,
   headline,
   metric,
   state = "neutral",
@@ -32,7 +34,7 @@ export function ActivityRailRow({
       open={defaultOpen || undefined}
       onToggle={onToggle === undefined ? undefined : (event) => onToggle(event.currentTarget.open)}
     >
-      <summary>
+      <summary ref={headerRef}>
         <span className="activity-rail-marker" aria-hidden="true" />
         <span className="activity-rail-summary">
           <span className="activity-rail-label">{label}</span>

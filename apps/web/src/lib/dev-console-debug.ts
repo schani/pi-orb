@@ -12,7 +12,8 @@ export type DebugTraceEvent =
   | "connection"
   | "frame_rejected"
   | "frame_received"
-  | "sync_state";
+  | "sync_state"
+  | "scroll_pin";
 
 export interface DebugTraceInput {
   event: DebugTraceEvent;
@@ -31,6 +32,9 @@ export interface DebugTraceInput {
   cursorBefore?: string | null | undefined;
   cursorAfter?: string | null | undefined;
   recordCount?: number | undefined;
+  scrollY?: number | undefined;
+  viewportHeight?: number | undefined;
+  contentHeight?: number | undefined;
 }
 
 interface DebugTraceEntry extends DebugTraceInput {
@@ -108,6 +112,13 @@ function safeTrace(input: DebugTraceInput, seq: number): DebugTraceEntry {
     ...(input.orbId !== undefined ? { orbId: boundedId(input.orbId) } : {}),
     ...(input.outcome !== undefined ? { outcome: boundedId(input.outcome) } : {}),
     ...(input.frameType !== undefined ? { frameType: boundedId(input.frameType) } : {}),
+    ...(input.scrollY !== undefined ? { scrollY: finiteCount(input.scrollY) } : {}),
+    ...(input.viewportHeight !== undefined
+      ? { viewportHeight: finiteCount(input.viewportHeight) }
+      : {}),
+    ...(input.contentHeight !== undefined
+      ? { contentHeight: finiteCount(input.contentHeight) }
+      : {}),
     ...(input.textLength !== undefined ? { textLength: finiteCount(input.textLength) } : {}),
     ...(input.connectionId !== undefined ? { connectionId: boundedId(input.connectionId) } : {}),
     ...(input.runtimeInstanceId !== undefined

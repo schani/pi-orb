@@ -45,12 +45,16 @@ async function repository(): Promise<string> {
 }
 
 describe("native image source snapshot", () => {
-  it("packages dependency patches in the default source snapshot", async () => {
+  it("packages dependency patches and their runner in the default source snapshot", async () => {
     expect(UPLOADED_SOURCE_PATHS).toContain("patches");
+    expect(UPLOADED_SOURCE_PATHS).toContain("scripts/apply-dependency-patches.mjs");
     const root = await repository();
+    await mkdir(`${root}/scripts`);
+    await writeFile(`${root}/scripts/apply-dependency-patches.mjs`, "runner\n");
     const snapshot = await prepareSourceSnapshot(`${root}/output`, { repositoryRoot: root });
     if (snapshot.isErr()) throw new Error(snapshot.error.message);
     expect(snapshot.value.inputInventory).toHaveProperty("patches/dependency+1.0.0.patch");
+    expect(snapshot.value.inputInventory).toHaveProperty("scripts/apply-dependency-patches.mjs");
   });
 
   it("captures dirty replacements and untracked patches without deleted tracked files", async () => {

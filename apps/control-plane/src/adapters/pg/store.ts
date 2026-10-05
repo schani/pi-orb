@@ -2,6 +2,10 @@ import type { HarnessSessionMetadata, HistoryRecord, OrbState, StopReason } from
 import type { SimulationTask } from "determined";
 import { err, errAsync, ok, okAsync, type Result, ResultAsync } from "neverthrow";
 import type {
+  ActivityHeadlineRef,
+  StoredActivityHeadline,
+} from "../../domain/activity-headline-store.ts";
+import type {
   CommitPullError,
   ProjectConflict,
   ReplicationIntegrityError,
@@ -105,6 +109,17 @@ function mapOrbRow(row: PgRow): OrbRow {
   };
 }
 
+function mapActivityHeadline(row: PgRow): StoredActivityHeadline {
+  return {
+    orbId: String(row["orb_id"]),
+    sessionId: String(row["session_id"]),
+    recordId: String(row["record_id"]),
+    detailKey: String(row["detail_key"]),
+    headline: String(row["headline"]),
+    generatedAt: toMs(row["generated_at"]),
+  };
+}
+
 function mapMessageRow(row: PgRow): OrbMessageRow {
   return {
     ...mapMessageMetadataRow(row),
@@ -181,6 +196,79 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   constructor(db: PostgreSQLClient) {
     this.db = db;
     this.uploads = new PgWorkspaceUploads(db);
+  }
+
+  readActivityHeadline(
+    _task: SimulationTask,
+    ref: ActivityHeadlineRef,
+  ): ResultAsync<StoredActivityHeadline | null, StoreError> {
+    return this.db
+      .query(
+        `SELECT * FROM activity_headlines
+       WHERE orb_id = $1 AND session_id = $2 AND record_id = $3 AND detail_key = $4`,
+        [ref.orbId, ref.sessionId, ref.recordId, ref.detailKey],
+      )
+      .map((result) => (result.rows[0] ? mapActivityHeadline(result.rows[0]) : null));
+  }
+
+  readActivityHeadlines(
+    _task: SimulationTask,
+    orbId: string,
+    sessionId: string,
+  ): ResultAsync<StoredActivityHeadline[], StoreError> {
+    return this.db
+      .query(
+        "SELECT * FROM activity_headlines WHERE orb_id = $1 AND session_id = $2 ORDER BY record_id, detail_key",
+        [orbId, sessionId],
+      )
+      .map((result) => result.rows.map(mapActivityHeadline));
+  }
+
+  putActivityHeadlineIfAbsent(
+    _task: SimulationTask,
+    value: StoredActivityHeadline,
+  ): ResultAsync<StoredActivityHeadline | null, StoreError> {
+    return this.db.transaction<StoredActivityHeadline | null, StoreError>(async (query) => {
+      // Parent before child matches project deletion's lock order. Each check
+      // locks the mutable authority until the insertion and winner read commit.
+      const project = await query(
+        `SELECT p.state FROM projects p
+         WHERE p.id = (SELECT project_id FROM orbs WHERE id = $1)
+         FOR SHARE /* activity headline fence */`,
+        [value.orbId],
+      );
+      if (project.isErr()) return err(project.error);
+      if (project.value.rows[0]?.["state"] !== "active") return ok(null);
+      const orb = await query(
+        "SELECT state, harness_session_id FROM orbs WHERE id = $1 FOR UPDATE /* activity headline fence */",
+        [value.orbId],
+      );
+      if (orb.isErr()) return err(orb.error);
+      const row = orb.value.rows[0];
+      if (!row || row["state"] === "deleting" || row["harness_session_id"] !== value.sessionId)
+        return ok(null);
+      const source = await query(
+        "SELECT record_id FROM history_records WHERE orb_id = $1 AND record_id = $2 FOR KEY SHARE /* activity headline fence */",
+        [value.orbId, value.recordId],
+      );
+      if (source.isErr()) return err(source.error);
+      if (source.value.rows.length === 0) return ok(null);
+      const key = [value.orbId, value.sessionId, value.recordId, value.detailKey];
+      const inserted = await query(
+        `INSERT INTO activity_headlines (orb_id, session_id, record_id, detail_key, headline, generated_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (orb_id, session_id, record_id, detail_key) DO NOTHING`,
+        [...key, value.headline, new Date(value.generatedAt)],
+      );
+      if (inserted.isErr()) return err(inserted.error);
+      const winner = await query(
+        "SELECT * FROM activity_headlines WHERE orb_id = $1 AND session_id = $2 AND record_id = $3 AND detail_key = $4",
+        key,
+      );
+      return winner.isErr()
+        ? err(winner.error)
+        : ok(winner.value.rows[0] ? mapActivityHeadline(winner.value.rows[0]) : null);
+    });
   }
 
   getProject(_task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError> {
@@ -1981,6 +2069,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
   readHistorySnapshot(
     _task: SimulationTask,
     orbId: string,
+    atRecordId?: string,
   ): ResultAsync<
     {
       session: HarnessSessionMetadata | null;
@@ -2009,8 +2098,7 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
         return ok({ session: null, cursor: null, headId: null, records: [] });
       }
       const cursor = row["replication_cursor"] === null ? null : String(row["replication_cursor"]);
-      // Linear order is reconstructed by following parent_id from the last
-      // committed record (docs/history-replication.md).
+      // Follow the requested source or current cursor, oldest ancestor first.
       const recordsResult = await query(
         `WITH RECURSIVE chain AS (
            SELECT record_id, parent_id, record, 0 AS depth
@@ -2022,15 +2110,14 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
             WHERE h.orb_id = $1
          )
          SELECT record FROM chain ORDER BY depth DESC`,
-        [orbId, cursor],
+        [orbId, atRecordId ?? cursor],
       );
       if (recordsResult.isErr()) return err(recordsResult.error);
       return ok({
         session: (row["harness_session_header"] ?? null) as HarnessSessionMetadata | null,
         cursor,
         headId: row["replicated_head_id"] === null ? null : String(row["replicated_head_id"]),
-        records:
-          cursor === null ? [] : recordsResult.value.rows.map((r) => r["record"] as HistoryRecord),
+        records: recordsResult.value.rows.map((r) => r["record"] as HistoryRecord),
       });
     });
   }

@@ -34,6 +34,92 @@ function snapshot(n: number, activity: "idle" | "busy" = "idle"): HarnessSnapsho
 const frameTypes = (frames: ServerFrame[]) => frames.map((frame) => frame.type);
 
 describe("computeSyncFrames", () => {
+  it("projects result markers using calls before the replay cursor", () => {
+    const source = snapshot(0);
+    const records: HistoryRecord[] = [
+      {
+        id: "call",
+        parentId: null,
+        timestamp: "t",
+        overflow: {},
+        type: "message",
+        role: "assistant",
+        content: [
+          { type: "tool_call", callId: "c", name: "subagent", arguments: { prompt: "task" } },
+        ],
+      },
+      {
+        id: "result",
+        parentId: "call",
+        timestamp: "t",
+        overflow: {},
+        type: "message",
+        role: "tool",
+        content: [
+          {
+            type: "tool_result",
+            callId: "c",
+            content: [{ type: "text", text: "Agent completed. Findings" }],
+          },
+        ],
+      },
+    ];
+    const frames = computeSyncFrames({ ...source, records, headId: "result" }, null, "call", "now");
+    expect(frames.filter((frame) => frame.type === "history.record")).toMatchObject([
+      { record: { id: "result", content: [{ headline: null }] } },
+    ]);
+  });
+  it("projects all-branch snapshots causally before slicing the replay cursor", () => {
+    const records: HistoryRecord[] = [
+      ...["read", "subagent"].map(
+        (name): HistoryRecord => ({
+          id: name,
+          parentId: null,
+          timestamp: "t",
+          overflow: {},
+          type: "message",
+          role: "assistant",
+          content: [{ type: "tool_call", callId: "c", name, arguments: {} }],
+        }),
+      ),
+      ...["read", "subagent"].map(
+        (name): HistoryRecord => ({
+          id: `${name}-result`,
+          parentId: name,
+          timestamp: "t",
+          overflow: {},
+          type: "message",
+          role: "tool",
+          content: [
+            {
+              type: "tool_result",
+              callId: "c",
+              content: [{ type: "text", text: name === "read" ? "READ_CANARY" : "done" }],
+            },
+          ],
+        }),
+      ),
+    ];
+    const before = JSON.stringify(records);
+    for (const cursor of [null, "read", "subagent"]) {
+      const frames = computeSyncFrames(
+        { ...snapshot(0), records, headId: "subagent-result" },
+        null,
+        cursor,
+        "now",
+      );
+      const read = frames.find(
+        (frame) => frame.type === "history.record" && frame.record.id === "read-result",
+      );
+      if (read?.type !== "history.record" || read.record.type !== "message")
+        throw new Error("expected read result");
+      expect(read.record.content[0]).not.toHaveProperty("headline");
+      expect(frames.filter((frame) => frame.type === "history.record").at(-1)).toMatchObject({
+        record: { id: "subagent-result", content: [{ headline: null }] },
+      });
+    }
+    expect(JSON.stringify(records)).toBe(before);
+  });
   it("replays everything in full mode for an unknown cursor", () => {
     const frames = computeSyncFrames(snapshot(2), null, "rec-unknown", "now");
     expect(frameTypes(frames)).toEqual([
@@ -68,7 +154,7 @@ describe("computeSyncFrames", () => {
     expect(completed.headId).toBe("rec-3");
   });
 
-  it("never exposes hidden bodies in full or delta replay, including active reasoning and shell", () => {
+  it("never exposes hidden bodies in full or delta replay, including active reasoning", () => {
     const source = snapshot(1, "busy");
     const records: HistoryRecord[] = [
       ...source.records,
@@ -93,7 +179,6 @@ describe("computeSyncFrames", () => {
     const withHidden = { ...source, records };
     const live: LiveOperationView = {
       operationId: "op",
-      operationKind: "agent",
       blocks: [{ blockId: "b", blockType: "reasoning", revision: 2, text: "SECRET_CANARY" }],
       tools: [],
       subagents: [],
@@ -107,10 +192,65 @@ describe("computeSyncFrames", () => {
     }
   });
 
+  it("replays compact reasoning headings in full and delta sync without bodies", () => {
+    const live: LiveOperationView = {
+      operationId: "op",
+      tools: [],
+      subagents: [],
+      blocks: [
+        {
+          blockId: "b",
+          blockType: "reasoning",
+          revision: 2,
+          text: "# Inspect\n\nSECRET_CANARY\n\n**Fix**",
+        },
+        {
+          blockId: "redacted",
+          blockType: "reasoning",
+          revision: 1,
+          text: "# REDACTED_HEADING",
+          redacted: true,
+        },
+      ],
+    };
+    for (const cursor of [null, "rec-1"]) {
+      const frames = computeSyncFrames(snapshot(1, "busy"), live, cursor, "now");
+      expect(frames).toContainEqual({
+        v: 1,
+        type: "runtime.event",
+        at: "now",
+        event: {
+          type: "output_patch",
+          operationId: "op",
+          blockId: "b",
+          blockType: "reasoning",
+          revision: 2,
+          headline: "Inspect · Fix",
+          patch: { type: "replace", text: "" },
+        },
+      });
+      expect(JSON.stringify(frames)).not.toContain("SECRET_CANARY");
+      expect(JSON.stringify(frames)).not.toContain("REDACTED_HEADING");
+      expect(frames).toContainEqual({
+        v: 1,
+        type: "runtime.event",
+        at: "now",
+        event: {
+          type: "output_patch",
+          operationId: "op",
+          blockId: "redacted",
+          blockType: "reasoning",
+          revision: 1,
+          headline: "",
+          patch: { type: "replace", text: "" },
+        },
+      });
+    }
+  });
+
   it("reconstructs live operation state with replace patches and tool states", () => {
     const live: LiveOperationView = {
       operationId: "op-1",
-      operationKind: "agent",
       blocks: [{ blockId: "b1", blockType: "text", revision: 7, text: "partial out" }],
       tools: [{ callId: "c1", name: "bash", revision: 3, state: "running" }],
       subagents: [{ id: "child", description: "Check deployment", phase: "running" }],
@@ -140,37 +280,6 @@ describe("computeSyncFrames", () => {
       { type: "subagents", operationId: "op-1", children: live.subagents },
       { type: "status", activity: "busy", operationId: "op-1" },
     ]);
-  });
-
-  it("reconstructs a live shell block through the ordinary patch path", () => {
-    const live: LiveOperationView = {
-      operationId: "op-shell",
-      operationKind: "shell",
-      blocks: [
-        {
-          blockId: "op-shell-shell",
-          blockType: "shell",
-          revision: 4,
-          text: "$ npm test\npassing",
-        },
-      ],
-      tools: [],
-      subagents: [],
-    };
-    const frames = computeSyncFrames(snapshot(1, "busy"), live, "rec-1", "now");
-    expect(frames).toContainEqual({
-      v: 1,
-      type: "runtime.event",
-      at: "now",
-      event: {
-        type: "output_patch",
-        operationId: "op-shell",
-        blockId: "op-shell-shell",
-        blockType: "shell",
-        revision: 4,
-        patch: { type: "replace", text: "$ npm test\npassing" },
-      },
-    });
   });
 
   it("emits an idle status event when no operation is live", () => {

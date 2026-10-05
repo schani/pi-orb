@@ -1,0 +1,43 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90m/workspace/repo[39m
+
+ [31m❯[39m apps/web/src/lib/live-cache.dst.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 45[2mms[22m[39m
+[31m   [31m×[31m DST: half-open offline/online recovers a parent-closed assistant suffix despite an empty inbox[39m[32m 43[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m apps/web/src/lib/live-cache.dst.test.ts[2m > [22mDST: half-open offline/online recovers a parent-closed assistant suffix despite an empty inbox
+[31m[1mError[22m: DST scenario "live-cache-half-open" failed at iteration 0 (trace: /workspace/repo/test-failures/live-cache-half-open-1791218684827-0.json, replay reproduces the failure): expected [ 'one' ] to deeply equal [ 'one', 'two' ][39m
+[36m [2m❯[22m runDst apps/orb-runtime/src/testkit/sim.ts:[2m114:13[22m[39m
+    [90m112|[39m       }
+    [90m113|[39m       const message = error instanceof Error ? error.message : String(…
+    [90m114|[39m       [35mthrow[39m [35mnew[39m [33mError[39m(
+    [90m   |[39m             [31m^[39m
+    [90m115|[39m         [32m`DST scenario "[39m[36m${[39moptions[33m.[39mname[36m}[39m[32m" failed at iteration [39m[36m${[39mi[36m}[39m[32m `[39m [33m+[39m
+    [90m116|[39m           `(trace: ${path}, replay ${reproduced ? "reproduces" : "DID …
+[90m [2m❯[22m apps/web/src/lib/live-cache.dst.test.ts:[2m14:3[22m[39m
+
+[31m[1mCaused by: AssertionError[22m: expected [ 'one' ] to deeply equal [ 'one', 'two' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "one",[22m
+[32m-   "two",[39m
+[2m  ][22m
+
+[36m [2m❯[22m Object.f apps/web/src/lib/live-cache.dst.test.ts:[2m161:15[22m[39m
+[90m [2m❯[22m SimulationImpl.runTasks node_modules/determined/dist/index.js:[2m858:14[22m[39m
+[90m [2m❯[22m apps/web/src/lib/live-cache.dst.test.ts:[2m89:22[22m[39m
+[90m [2m❯[22m runDst apps/orb-runtime/src/testkit/sim.ts:[2m94:7[22m[39m
+[90m [2m❯[22m apps/web/src/lib/live-cache.dst.test.ts:[2m14:3[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m   Start at [22m 16:44:43
+[2m   Duration [22m 1.59s[2m (transform 893ms, setup 0ms, import 1.38s, tests 45ms, environment 0ms)[22m
+

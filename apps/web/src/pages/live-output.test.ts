@@ -10,6 +10,30 @@ import {
 } from "../../../orb-runtime/src/pi/agent.ts";
 import { initialState, reducer } from "./OrbPage.tsx";
 
+it("reduces live headline replacements independently of hidden reasoning text", () => {
+  let state = initialState("test");
+  for (const headline of ["Inspect", "Inspect · Fix", ""]) {
+    state = reducer(state, {
+      type: "frame",
+      frame: {
+        v: 1,
+        type: "runtime.event",
+        at: "now",
+        event: {
+          type: "output_patch",
+          operationId: "op",
+          blockId: "b",
+          blockType: "reasoning",
+          revision: 1,
+          headline,
+          patch: { type: "replace", text: "" },
+        },
+      },
+    });
+    expect(state.liveBlocks.get("b")).toMatchObject({ headline, text: "" });
+  }
+});
+
 // Exhaust the finite schedules: next response before/after publication,
 // immediate/backpressured delivery, snapshot/microtask flush, and a mapping
 // failpoint before the committed response. Inspect every delivered frame.

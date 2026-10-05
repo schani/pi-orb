@@ -46,6 +46,8 @@ Run `npm run test:e2e` before deploying any change that touches the runtime prot
 
 No test may be flaky. A failure that does not reproduce on every run is evidence of an uncontrolled schedule, resource collision, or environmental assumption — never noise. It blocks deployment until it is root-caused; a passing rerun does not clear it. Never rerun merely to obtain green, weaken an assertion blindly, or hide the failure with a larger timeout. Preserve the first failure evidence, identify whether the defect is in the product, test synchronization, or harness isolation, and fix that cause with explicit deterministic synchronization or resource ownership wherever possible. This rule always holds, unless the user explicitly makes an exception.
 
+**UI exception (user-approved 2026-10-05):** flaky UI tests must still be fixed and validated, but deep investigation of a historical failure is optional once corrective stabilization is evidenced. A passing rerun alone is insufficient; new failing UI tests still require correction. Preserve first-failure evidence. Non-UI failures and DST replay/root-cause requirements are unchanged.
+
 For a DST failure, replay the recorded trace from `test-failures/` (`DST_REPLAY=<trace> npx vitest run …`) before any fix, understand the interleaving, and only then decide whether the defect is in the product or in the scenario's assumptions. Never delete the trace to make the suite pass.
 
 ## Observability

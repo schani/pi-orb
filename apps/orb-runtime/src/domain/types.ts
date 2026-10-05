@@ -24,9 +24,10 @@ export interface HarnessSnapshot {
 /** The accumulated state of one in-flight operation, for reconnect replay. */
 export interface LiveBlockState {
   readonly blockId: string;
-  readonly blockType: "text" | "reasoning" | "shell";
+  readonly blockType: "text" | "reasoning";
   readonly revision: number;
   readonly text: string;
+  readonly redacted?: boolean;
 }
 
 export interface LiveToolState {
@@ -39,7 +40,6 @@ export interface LiveToolState {
 
 export interface LiveOperationView {
   readonly operationId: string;
-  readonly operationKind: "agent" | "shell";
   readonly blocks: readonly LiveBlockState[];
   readonly tools: readonly LiveToolState[];
   readonly subagents: readonly ActiveSubagent[];

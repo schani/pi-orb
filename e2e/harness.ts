@@ -725,6 +725,7 @@ export async function startControlPlane(options: {
   fake: FakeSession;
   nameFake?: FakeSession;
   dockerNetwork?: string;
+  dockerInventoryScope?: string;
   runtimeImage?: string;
   launchFailureMarker?: string;
   hostSpecGeneration?: number;
@@ -780,6 +781,7 @@ export async function startControlPlane(options: {
         ? {}
         : { PI_ORB_NAME_INFERENCE_URL: options.nameFake.inferenceBaseUrl }),
       ...options.extraEnv,
+      PI_ORB_DOCKER_INVENTORY_SCOPE: options.dockerInventoryScope ?? randomUUID(),
     },
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });

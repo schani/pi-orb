@@ -13,14 +13,7 @@ import {
 import { usePhoneLayout } from "../lib/use-phone-layout.ts";
 import { ComposerCaret } from "./ComposerCaret.tsx";
 import { type CommandOption, commandOptions } from "./command-options.ts";
-import {
-  type ComposerMode,
-  composerModeGlyph,
-  composerModeLabel,
-  enterShellMode,
-  leaveShellMode,
-  normalizeComposerChange,
-} from "./composer-mode.ts";
+import { type ComposerMode, composerModeGlyph, normalizeComposerChange } from "./composer-mode.ts";
 import { Icon } from "./Icons.tsx";
 import { OrbLinkPicker } from "./OrbLinkPicker.tsx";
 import { isSendShortcut } from "./send-shortcut.ts";
@@ -56,8 +49,6 @@ interface ComposerProps {
   /** An operation is running and can be aborted. */
   canAbort: boolean;
   onAbort: () => void;
-  /** Shell submission was attempted while an image remains attached. */
-  onShellAttachmentBlocked: () => void;
   /** Phone-only operation feedback, beside the initiating control. */
   feedback?: string;
   settings?: AgentSettingsEvent | null;
@@ -80,7 +71,6 @@ export function Composer({
   onSend,
   canAbort,
   onAbort,
-  onShellAttachmentBlocked,
   feedback,
   settings = null,
   settingsDisabled = true,
@@ -88,7 +78,6 @@ export function Composer({
   onSettingsChange,
 }: ComposerProps) {
   const isCommand = mode === "command";
-  const isShell = mode === "shell" || mode === "excluded_shell";
   const [commandIndex, setCommandIndex] = useState(0);
   const choices = commandOptions(text, settings);
   const selectedCommand = Math.min(commandIndex, Math.max(0, choices.length - 1));
@@ -98,9 +87,8 @@ export function Composer({
       setCommandIndex(0);
     } else if (choice?.action && !settingsDisabled) onSettingsChange?.(choice.action);
   };
-  const shellBlockedByAttachment = isShell && images.length > 0;
-  const hasInput = isShell ? text.trim() !== "" : text.trim() !== "" || images.length > 0;
-  const sendEnabled = !isCommand && canSend && hasInput && !shellBlockedByAttachment;
+  const hasInput = text.trim() !== "" || images.length > 0;
+  const sendEnabled = !isCommand && canSend && hasInput;
   const phone = usePhoneLayout();
   const touchCapable =
     typeof window !== "undefined" &&
@@ -253,9 +241,9 @@ export function Composer({
           <span>{dropLabel}</span>
         </div>
       )}
-      {(feedback || shellBlockedByAttachment) && (
+      {feedback && (
         <div className="composer-phone-feedback" role="status">
-          {feedback || "Remove image attachments before running a shell command."}
+          {feedback}
         </div>
       )}
       <div className="composer-phone-pad">
@@ -408,45 +396,17 @@ export function Composer({
               const atStart = event.currentTarget.selectionStart === 0;
               const collapsed =
                 event.currentTarget.selectionStart === event.currentTarget.selectionEnd;
-              if (
-                event.key === "!" &&
-                atStart &&
-                collapsed &&
-                !event.metaKey &&
-                !event.ctrlKey &&
-                !event.altKey
-              ) {
-                const nextMode = enterShellMode(mode);
-                if (nextMode !== null) {
-                  event.preventDefault();
-                  onValueChange(text, nextMode);
-                  return;
-                }
+              if (event.key === "Backspace" && atStart && collapsed && isCommand && text === "") {
+                event.preventDefault();
+                onValueChange(text, "message");
+                return;
               }
-              if (
-                event.key === "Backspace" &&
-                atStart &&
-                collapsed &&
-                (!isCommand || text === "")
-              ) {
-                const nextMode = leaveShellMode(mode);
-                if (nextMode !== null) {
-                  event.preventDefault();
-                  onValueChange(text, nextMode);
-                  return;
-                }
-              }
-              if (isSendShortcut(event)) {
-                if (shellBlockedByAttachment) {
-                  event.preventDefault();
-                  onShellAttachmentBlocked();
-                } else if (sendEnabled) {
-                  event.preventDefault();
-                  submit();
-                }
+              if (isSendShortcut(event) && sendEnabled) {
+                event.preventDefault();
+                submit();
               }
             }}
-            aria-label={isShell ? "Run a shell command" : "Message the orb"}
+            aria-label="Message the orb"
             aria-controls={isCommand ? "command-choices" : undefined}
             aria-activedescendant={
               isCommand && choices.length ? `command-choice-${selectedCommand}` : undefined
@@ -468,8 +428,8 @@ export function Composer({
           <button
             type="button"
             className="icon-button composer-send"
-            aria-label={isShell ? "Run command" : "Send message"}
-            title={isShell ? "run" : "send"}
+            aria-label="Send message"
+            title="send"
             disabled={!sendEnabled}
             onClick={submit}
           >
@@ -489,7 +449,7 @@ export function Composer({
         )}
       </div>
       <div className="composer-mode visually-hidden" aria-live="polite">
-        {composerModeLabel(mode)}
+        {mode}
       </div>
     </div>
   );

@@ -1,6 +1,12 @@
-import type { DisplayBlock, DisplayRecord, OrbMessageView } from "@pi-orb/protocol";
+import {
+  type DisplayBlock,
+  type DisplayRecord,
+  type OrbMessageView,
+  ToolResultContext,
+} from "@pi-orb/protocol";
 import {
   createContext,
+  createElement,
   memo,
   type ReactNode,
   type RefObject,
@@ -10,7 +16,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { HeadlineLimiter } from "../lib/activity-headline.ts";
 import { representedInboxMessageIds } from "../lib/queued-messages.ts";
+import { HeadlineSlots } from "../lib/use-activity-headline.tsx";
 import { useHistoryTail } from "../lib/use-history-tail.ts";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { BitRegister } from "./BitRegister.tsx";
@@ -37,8 +45,9 @@ type CompactionRecord = Extract<DisplayRecord, { type: "compaction" }>;
 /** Streaming output block accumulated from `output_patch` events. */
 export interface LiveBlock {
   blockId: string;
-  blockType: "text" | "reasoning" | "shell";
+  blockType: "text" | "reasoning";
   text: string;
+  headline?: string;
   revision: number;
 }
 
@@ -197,10 +206,12 @@ function ReasoningRail({
   detailKey,
   recordId,
   live,
+  headline,
 }: {
   detailKey: string;
   recordId: string;
   live: boolean;
+  headline: string | undefined;
 }) {
   const openState = useContext(OpenDetailValue);
   const identity = openState?.aliases.get(detailKey) ?? detailKey;
@@ -214,14 +225,15 @@ function ReasoningRail({
     <ActivityRailRow
       className="reasoning"
       label="thinking"
+      headline={headline || undefined}
       state={live ? "running" : "neutral"}
       defaultOpen={open}
       onToggle={onToggle}
     >
       {open && (
-        <p className="reasoning-body">
+        <div className="reasoning-body">
           <LazyLegacyBody recordId={recordId} detailKey={detailKey} live={live} />
-        </p>
+        </div>
       )}
     </ActivityRailRow>
   );
@@ -231,8 +243,17 @@ function renderReasoningRail(
   key: string | number,
   recordId: string,
   live = false,
+  headline?: string,
 ): ReactNode {
-  return <ReasoningRail key={key} detailKey={detailKey} recordId={recordId} live={live} />;
+  return (
+    <ReasoningRail
+      key={key}
+      detailKey={detailKey}
+      recordId={recordId}
+      live={live}
+      headline={headline}
+    />
+  );
 }
 
 function renderMessageBlocks(record: MessageRecord): ReactNode[] {
@@ -243,7 +264,7 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
         nodes.push(<ChatMarkdown key={index}>{block.text}</ChatMarkdown>);
         break;
       case "reasoning":
-        nodes.push(renderReasoningRail(block.detailKey, index, record.id));
+        nodes.push(renderReasoningRail(block.detailKey, index, record.id, false, block.headline));
         break;
       case "tool_call":
         nodes.push(renderToolCall(block, record.id));
@@ -268,18 +289,13 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 
 /**
  * One transcript record: a user turn, a grouped agent turn (all adjacent
- * assistant/tool/event records share one prefix), a shell block, or a
+ * assistant/tool/event records share one prefix), or a
  * full-width compaction divider.
  */
 type Turn =
   | { kind: "user"; record: MessageRecord }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "alert"; record: EventRecord; message: string }
-  | {
-      kind: "shell";
-      record: EventRecord;
-      shell: NonNullable<EventRecord["shell"]>;
-    }
   | { kind: "compaction"; record: CompactionRecord };
 
 /** Per docs/pi-adapter.md, only a custom message the harness marked displayed is shown. */
@@ -311,23 +327,21 @@ interface ToolPairing {
 }
 
 function pairToolResults(records: readonly DisplayRecord[]): ToolPairing {
-  const pending = new Map<string, ToolCallBlock>();
+  const context = new ToolResultContext<ToolCallBlock>();
   const results = new Map<ToolCallBlock, { block: ToolResultBlock; recordId: string }>();
   const pairedResults = new Set<ToolResultBlock>();
   for (const record of records) {
-    if (record.type === "compaction" || (record.type === "message" && record.role === "user")) {
-      pending.clear();
-    }
+    const matches = context.visit(
+      record,
+      (source, index) => (source as MessageRecord).content[index] as ToolCallBlock,
+    );
     if (record.type !== "message" || record.role === "user") continue;
-    for (const block of record.content) {
-      if (block.type === "tool_call") pending.set(block.callId, block);
-      if (block.type === "tool_result") {
-        const call = pending.get(block.callId);
-        if (call === undefined) continue;
-        results.set(call, { block, recordId: record.id });
-        pairedResults.add(block);
-        pending.delete(block.callId);
-      }
+    for (const [index, block] of record.content.entries()) {
+      if (block.type !== "tool_result") continue;
+      const call = matches.get(index);
+      if (call === undefined) continue;
+      results.set(call, { block, recordId: record.id });
+      pairedResults.add(block);
     }
   }
   return { results, pairedResults };
@@ -485,8 +499,6 @@ function groupTurns(records: readonly DisplayRecord[]): Turn[] {
       case "event":
         if (record.alert !== undefined) {
           turns.push({ kind: "alert", record, message: record.alert.message });
-        } else if (record.shell !== undefined) {
-          turns.push({ kind: "shell", record, shell: record.shell });
         } else if (isDisplayedCustomMessage(record)) {
           appendAgentPart(record);
         }
@@ -518,7 +530,7 @@ function renderLiveAgentContent(live: LiveAgentContent, busy: boolean): ReactNod
   for (const block of live.blocks) {
     nodes.push(
       block.blockType === "reasoning" ? (
-        renderReasoningRail(block.blockId, block.blockId, "live", true)
+        renderReasoningRail(block.blockId, block.blockId, "live", true, block.headline)
       ) : block.text.trim() === "" ? null : (
         <ResponseMarkdown key={block.blockId} markdown={block.text} copySource={block.text} />
       ),
@@ -568,30 +580,6 @@ function renderTurn(
           </div>
         </article>
       );
-    case "shell": {
-      const shell = turn.shell;
-      const statuses = [
-        ...(shell.excludeFromContext ? ["excluded from model context"] : []),
-        ...(shell.cancelled
-          ? ["cancelled"]
-          : shell.exitCode !== null && shell.exitCode !== 0
-            ? [`exit ${shell.exitCode}`]
-            : []),
-        ...(shell.truncated ? ["output truncated"] : []),
-      ];
-      return (
-        <article className="rec rec-sh" key={turn.record.id} data-history-row={turn.record.id}>
-          <span className="rec-px">sh</span>
-          <div className="rec-bd">
-            <div className="shblk">
-              <div className="shblk-cmd">! {shell.command}</div>
-              {shell.output !== "" && <pre className="shblk-out">{shell.output}</pre>}
-              {statuses.length > 0 && <div className="shblk-ft">{statuses.join(" · ")}</div>}
-            </div>
-          </div>
-        </article>
-      );
-    }
     case "compaction":
       return (
         <div className="record-compaction" key={turn.record.id} data-history-row={turn.record.id}>
@@ -631,12 +619,12 @@ export const HistoryView = memo(function HistoryView({
   viewportRef,
   onCompensatedRef,
 }: HistoryViewProps) {
+  const [headlineSlots] = useState(() => new HeadlineLimiter());
   const [openedDetails] = useState(() => new Set<string>());
   const representedMessageIds = useMemo(() => representedInboxMessageIds(records), [records]);
   const pendingMessages = queuedMessages.filter(
     (message) => !representedMessageIds.has(message.id),
   );
-  const shellBlocks = liveBlocks.filter((block) => block.blockType === "shell");
   const { turns, pairing, committedToolCallIds, derivationMs } = useMemo(() => {
     const start = performance.now();
     return {
@@ -669,20 +657,18 @@ export const HistoryView = memo(function HistoryView({
     });
   }, [records, turns.length, firstMounted, derivationMs]);
   const finalTurn = turns[turns.length - 1];
-  const agentBlocks = liveBlocks.filter((block) => block.blockType !== "shell");
   const uncommittedTools = tools.filter((tool) => !committedToolCallIds.has(tool.callId));
-  const hasAgentLive = agentBlocks.length > 0 || uncommittedTools.length > 0;
+  const hasAgentLive = liveBlocks.length > 0 || uncommittedTools.length > 0;
   const mergeLiveIntoFinalTurn =
-    hasAgentLive &&
-    finalTurn?.kind === "agent" &&
-    pendingMessages.length === 0 &&
-    shellBlocks.length === 0;
+    hasAgentLive && finalTurn?.kind === "agent" && pendingMessages.length === 0;
   const mergedTurnIndex = mergeLiveIntoFinalTurn ? turns.length - 1 : -1;
   const liveAgentContent: LiveAgentContent = {
-    blocks: agentBlocks,
+    blocks: liveBlocks,
     tools: uncommittedTools,
   };
-  return (
+  return createElement(
+    HeadlineSlots.Provider,
+    { value: headlineSlots },
     <DetailContextValue.Provider value={detailContext}>
       <OpenDetailValue.Provider value={openDetailValue}>
         <div className="history" ref={historyRef}>
@@ -729,16 +715,6 @@ export const HistoryView = memo(function HistoryView({
               </article>
             );
           })}
-          {shellBlocks.map((block) => (
-            <article className="rec rec-sh" key={block.blockId}>
-              <span className="rec-px">sh</span>
-              <div className="rec-bd">
-                <div className="shblk">
-                  <pre className="shblk-out">{block.text}</pre>
-                </div>
-              </div>
-            </article>
-          ))}
           {hasAgentLive && !mergeLiveIntoFinalTurn && (
             <article className="rec rec-orb">
               <span className="visually-hidden">Orb:</span>
@@ -752,6 +728,6 @@ export const HistoryView = memo(function HistoryView({
           )}
         </div>
       </OpenDetailValue.Provider>
-    </DetailContextValue.Provider>
+    </DetailContextValue.Provider>,
   );
 });

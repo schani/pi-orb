@@ -1,0 +1,26 @@
+{
+  "kind": "sanitized-diagnostic-summary",
+  "date": "2026-10-04",
+  "replayable": false,
+  "notice": "NON-REPLAYABLE evidence summary; not a determined trace.",
+  "source": "/tmp/remove-composer-validation/e2e.log",
+  "sourceLines": [414, 448],
+  "engine": "webkit",
+  "testFile": "e2e/tool-images-frontend.e2e.test.ts",
+  "testName": "uses call arguments only when a completed read's result has no displayable body",
+  "failureLocation": "e2e/tool-images-frontend.e2e.test.ts:351:48",
+  "action": "normal.locator(':scope > summary').click()",
+  "timeoutMs": 30000,
+  "target": "docs/web-ui.md read-call summary within HistoryView.tsx / docs/web-ui.md category",
+  "observed": {
+    "locatorResolved": true,
+    "visibleEnabledStable": true,
+    "scrollIntoViewCompleted": true,
+    "interceptor": "<p>Before receipt.</p> from <div class=\"response-markdown\"> subtree",
+    "attemptGroups": [2, 2, 55],
+    "clickAdmitted": false
+  },
+  "rootCause": "Unproved; indirect layout, compositor or native-scroll interaction possible, not established.",
+  "scope": "ToolActivity, this test and seeded calls unchanged; transcript layout shifted. Not fallback rendering or waitForResponse race.",
+  "qualification": "One WebKit failure remains unqualified; no deployment."
+}

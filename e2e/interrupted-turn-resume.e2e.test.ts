@@ -42,6 +42,7 @@ const PG_CONTAINER = "pi-orb-e2e-resume-pg";
 const PG_PORT = 5437;
 const CP_PORT = 7145;
 const NETWORK = "pi-orb";
+const DOCKER_INVENTORY_SCOPE = randomUUID();
 const RUNTIME_IMAGE = "pi-orb-runtime:dev";
 const REPOSITORY_URL = "https://github.com/schani/pi-orb";
 const PROCESS_BACKEND = process.env["PI_ORB_E2E_BACKEND"] === "process";
@@ -185,6 +186,7 @@ beforeAll(async () => {
     fake,
     nameFake,
     dockerNetwork: NETWORK,
+    dockerInventoryScope: DOCKER_INVENTORY_SCOPE,
     runtimeImage: RUNTIME_IMAGE,
     extraEnv: { PI_ORB_E2E_HISTORY_INSPECTION: "1" },
   });

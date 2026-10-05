@@ -1,5 +1,7 @@
 import { capHeadline, type DisplayBlock, type DisplayDetailBody } from "@pi-orb/protocol";
 import { type ReactNode, useState } from "react";
+import { type ActivityHeadlineSource, selectToolHeadline } from "../lib/activity-headline.ts";
+import { useActivityHeadline } from "../lib/use-activity-headline.tsx";
 import { ActivityRailRow } from "./ActivityRailRow.tsx";
 import { CommittedImage, imageIndex } from "./CommittedImage.tsx";
 import { CommittedBody, type DetailContext, NestedSummary, RunningBody } from "./DetailBody.tsx";
@@ -22,6 +24,7 @@ interface Call {
   id: string;
   name: string;
   headline: string;
+  headlineSource?: ActivityHeadlineSource;
   targetId?: string;
   callRecordId?: string;
   callKey?: string;
@@ -153,6 +156,15 @@ function boundedReadLabel(call: Call): string {
     bytes += size;
   }
   return `${path}${range}`;
+}
+function headlineSource(call: Call, kind: Kind): ActivityHeadlineSource | undefined {
+  const source = call.headlineSource;
+  return kind === "read" &&
+    source !== undefined &&
+    source.detailKey === call.callKey &&
+    typeof source.headline === "string"
+    ? { ...source, headline: boundedReadLabel(call) }
+    : source;
 }
 function ReadBody({ call, context, kind }: { call: Call; context: DetailContext; kind: Kind }) {
   const render = (body: DisplayDetailBody) =>
@@ -288,19 +300,31 @@ function CallBody({ call, kind, context }: { call: Call; kind: Kind; context: De
     </div>
   );
 }
+function callLabel(call: Call, kind: Kind): string {
+  return kind === "read" ? boundedReadLabel(call) : call.headline || capHeadline(call.name);
+}
+type CallRowProps = {
+  call: Call;
+  kind: Kind;
+  context: DetailContext;
+  categoryOpen: boolean;
+};
+function OwnedCallRow(props: CallRowProps) {
+  const summary = useActivityHeadline(
+    headlineSource(props.call, props.kind),
+    props.context,
+    callLabel(props.call, props.kind),
+  );
+  return <CallRow {...props} summary={summary} />;
+}
 function CallRow({
   call,
   kind,
   context,
   categoryOpen,
-}: {
-  call: Call;
-  kind: Kind;
-  context: DetailContext;
-  categoryOpen: boolean;
-}) {
+  summary,
+}: CallRowProps & { summary: ReturnType<typeof useActivityHeadline> }) {
   const [open, setOpen] = useState(call.result?.hasImages === true);
-  const label = kind === "read" ? boundedReadLabel(call) : call.headline || capHeadline(call.name);
   const stats =
     call.result?.added === undefined && call.result?.removed === undefined ? null : (
       <>
@@ -314,10 +338,13 @@ function CallRow({
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary>
+      <summary ref={summary.headerRef}>
         <span className="tool-call-marker">·</span>
-        <code className="trunc" title={label}>
-          {label}
+        <code
+          className="trunc"
+          title={typeof summary.headline === "string" ? summary.headline : undefined}
+        >
+          {summary.headline}
         </code>
         {kind !== "read" && (
           <span className={`tool-call-status tool-call-${call.state}`}>
@@ -337,11 +364,20 @@ function CallRow({
 function CategoryRow({ category, context }: { category: Category; context: DetailContext }) {
   const image = category.calls.length === 1 && category.calls[0]?.result?.hasImages;
   const [open, setOpen] = useState(image === true);
+  const first = category.calls[0];
+  const single = category.calls.length === 1;
+  const summary = useActivityHeadline(
+    first ? headlineSource(first, category.kind) : undefined,
+    context,
+    single ? headline(category) : first ? callLabel(first, category.kind) : undefined,
+  );
+  const categoryHeadline = single ? summary.headline : headline(category);
   return (
     <ActivityRailRow
       className={image ? "tool-activity-category tool-image-activity" : "tool-activity-category"}
       label={category.label}
-      {...(headline(category) !== undefined ? { headline: headline(category) } : {})}
+      {...(single ? { headerRef: summary.headerRef } : {})}
+      {...(categoryHeadline !== undefined ? { headline: categoryHeadline } : {})}
       {...(metric(category) !== null ? { metric: metric(category) } : {})}
       state={
         category.calls.some((call) => call.state === "failed")
@@ -357,8 +393,17 @@ function CategoryRow({ category, context }: { category: Category; context: Detai
         {category.calls.map((call) =>
           category.calls.length === 1 ? (
             open && <CallBody key={call.id} call={call} kind={category.kind} context={context} />
-          ) : (
+          ) : call === first ? (
             <CallRow
+              key={call.id}
+              call={call}
+              kind={category.kind}
+              context={context}
+              categoryOpen={open}
+              summary={summary}
+            />
+          ) : (
+            <OwnedCallRow
               key={call.id}
               call={call}
               kind={category.kind}
@@ -385,7 +430,8 @@ export function ToolActivity({
     ...persisted.map(({ call, callRecordId, result, resultRecordId }) => ({
       id: call.callId,
       name: call.name,
-      headline: call.headline,
+      headline: call.headline ?? "",
+      headlineSource: selectToolHeadline(call, callRecordId, result, resultRecordId),
       targetId: call.targetId,
       offset: call.offset,
       limit: call.limit,

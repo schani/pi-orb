@@ -26,7 +26,6 @@
     "ipaddr.js": "2.2.0",
     "neverthrow": "^8.2.0",
     "openid-client": "^6.8.8",
-    "patch-package": "file:../../vendor/patch-package-8.0.1-orb.1.tgz",
     "pg": "^8.13.0",
     "typebox": "^1.3.6",
     "undici": "7.29.1",

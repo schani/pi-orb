@@ -21,14 +21,6 @@ export function toolTextContent(candidate: unknown): Array<{ type: "text"; text:
   );
 }
 
-/** Reasoning mutations update the HTTP-owned snapshot, never grow collapsed WS traffic. */
-export function shouldBroadcastOutputPatch(
-  blockType: "text" | "reasoning" | "shell",
-  hadPrevious: boolean,
-): boolean {
-  return blockType !== "reasoning" || !hadPrevious;
-}
-
 /** Snapshot active body synchronously; no per-viewer state or subscription. */
 export function readLiveDisplayDetail(
   sessionId: string,
@@ -38,7 +30,7 @@ export function readLiveDisplayDetail(
 ): LiveDisplayDetail {
   const block =
     live?.operationId === operationId
-      ? live.blocks.find((entry) => entry.blockId === blockId)
+      ? live.blocks.find((entry) => entry.blockId === blockId && entry.blockType === "reasoning")
       : undefined;
   return {
     v: 1,
@@ -50,7 +42,7 @@ export function readLiveDisplayDetail(
       ? {}
       : {
           body: {
-            type: block.blockType === "reasoning" ? ("reasoning" as const) : ("shell" as const),
+            type: "reasoning" as const,
             text: block.text,
           },
         }),

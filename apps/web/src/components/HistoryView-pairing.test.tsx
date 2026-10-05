@@ -1,7 +1,8 @@
-import type { HistoryRecord } from "@pi-orb/protocol";
+import { type HistoryRecord, projectDisplayRecords } from "@pi-orb/protocol";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { detailContext, displayRecord } from "../testkit/display-fixtures.ts";
+import { selectToolHeadline } from "../lib/activity-headline.ts";
+import { detailContext } from "../testkit/display-fixtures.ts";
 import { HistoryView } from "./HistoryView.tsx";
 import type { PersistedToolCall } from "./ToolActivity.tsx";
 
@@ -68,16 +69,26 @@ function alert(id: string): HistoryRecord {
     overflow: {},
   };
 }
-function render(records: HistoryRecord[]) {
+function render(records: HistoryRecord[], causal = false) {
+  if (!causal)
+    records = records.map((record, index) => ({
+      ...record,
+      parentId: records[index - 1]?.id ?? null,
+    }));
   return renderToStaticMarkup(
     <HistoryView
-      records={records.map(displayRecord)}
+      records={projectDisplayRecords(records)}
       detailContext={detailContext()}
       liveBlocks={[]}
       tools={[]}
       busy={false}
     />,
   );
+}
+function headlineSource(pair: PersistedToolCall | undefined) {
+  return pair === undefined
+    ? undefined
+    : selectToolHeadline(pair.call, pair.callRecordId, pair.result, pair.resultRecordId);
 }
 function pairs() {
   return captured.flat().map(({ call, callRecordId, result: matched, resultRecordId }) => ({
@@ -92,6 +103,105 @@ beforeEach(() => {
   captured.length = 0;
 });
 describe("persisted tool pairing across display boundaries", () => {
+  it("associates sibling reused IDs with their causal tool and outcome source", () => {
+    const read = message("read", "assistant", [call("shared", "read")]);
+    const child = message("child", "assistant", [call("shared", "subagent")]);
+    const readResult = {
+      ...message("read-result", "tool", [result("shared", 1)]),
+      parentId: "read",
+    };
+    const childResult = {
+      ...message("child-result", "tool", [result("shared", 2)]),
+      parentId: "child",
+    };
+    render([read, child, readResult], true);
+    expect(pairs()).toEqual([
+      {
+        callId: "shared",
+        callRecordId: "read",
+        resultRecordId: "read-result",
+        resultKey: "read-result:0",
+      },
+      { callId: "shared", callRecordId: "child", resultRecordId: undefined, resultKey: undefined },
+    ]);
+    const readSource = headlineSource(captured.flat()[0]);
+    captured.length = 0;
+    render([read, child, readResult, childResult], true);
+    expect(pairs()).toEqual([
+      {
+        callId: "shared",
+        callRecordId: "read",
+        resultRecordId: "read-result",
+        resultKey: "read-result:0",
+      },
+      {
+        callId: "shared",
+        callRecordId: "child",
+        resultRecordId: "child-result",
+        resultKey: "child-result:0",
+      },
+    ]);
+    expect(captured.flat()[1]?.result?.headline).toBeNull();
+    expect(captured.flat()[0]?.result).not.toHaveProperty("headline");
+    const [completedRead, completedChild] = captured.flat();
+    expect(headlineSource(completedRead)).toEqual(readSource);
+    expect(headlineSource(completedChild)).toEqual({
+      recordId: "child-result",
+      detailKey: "child-result:0",
+      headline: null,
+    });
+  });
+
+  it("uses ancestry rather than all-entry append order for resets and consumption", () => {
+    const first = message("first", "assistant", [call("shared")]);
+    const otherUser = message("other-user", "user", [{ type: "text", text: "Other branch" }]);
+    const outcome = { ...message("outcome", "tool", [result("shared", 1)]), parentId: "first" };
+    const duplicate = {
+      ...message("duplicate", "tool", [result("shared", 2)]),
+      parentId: "outcome",
+    };
+    const html = render([first, otherUser, outcome, duplicate], true);
+    expect(pairs()).toEqual([
+      {
+        callId: "shared",
+        callRecordId: "first",
+        resultRecordId: "outcome",
+        resultKey: "outcome:0",
+      },
+    ]);
+    expect(html.match(/tool output/g)).toHaveLength(1);
+  });
+
+  it("uses the latest unconsumed ancestral call without reviving an older reused ID", () => {
+    const html = render([
+      message("older", "assistant", [call("shared", "read")]),
+      message("latest", "assistant", [call("shared", "subagent")]),
+      notice("noop"),
+      message("outcome", "tool", [result("shared", 1), result("shared", 2)]),
+    ]);
+    expect(pairs()).toEqual([
+      { callId: "shared", callRecordId: "older", resultRecordId: undefined, resultKey: undefined },
+      {
+        callId: "shared",
+        callRecordId: "latest",
+        resultRecordId: "outcome",
+        resultKey: "outcome:0",
+      },
+    ]);
+    expect(html.match(/tool output/g)).toHaveLength(1);
+  });
+
+  it("keeps nonempty headingless reasoning but omits empty projected rows", () => {
+    const html = render([
+      message("thoughts", "assistant", [
+        { type: "reasoning", text: "" },
+        { type: "reasoning", text: " \n\t " },
+        { type: "reasoning", text: "Plain reasoning without a heading" },
+        { type: "reasoning", text: "", redacted: true },
+      ]),
+    ]);
+    expect(html.match(/activity-rail-label">thinking/g)).toHaveLength(2);
+  });
   it.each([
     ["prose", [message("prose", "assistant", [{ type: "text", text: "Between calls" }])]],
     ["displayed notice", [notice("notice")]],

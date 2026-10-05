@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getActivityHeadline,
   getCommittedImage,
   getOrbHistory,
   getSystem,
@@ -9,6 +10,95 @@ import {
   probeSession,
 } from "./api.ts";
 import { readBrowserSession, readSessionPrincipal, resetBrowserSessionForTest } from "./session.ts";
+
+describe("activity headline HTTP", () => {
+  beforeEach(resetBrowserSessionForTest);
+  afterEach(() => vi.unstubAllGlobals());
+  it("posts encoded identity only with the caller's abort signal", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        expect(path).toBe(
+          "/api/v1/orbs/orb%2F1/headlines/record%2F1/key%3A0?sessionId=session%2F1",
+        );
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBeUndefined();
+        expect(init?.signal).toBe(controller.signal);
+        expect(new Headers(init?.headers).get("x-requested-with")).toBeNull();
+        return new Response(JSON.stringify({ headline: "" }));
+      }),
+    );
+    expect(
+      (
+        await getActivityHeadline("orb/1", "record/1", "key:0", "session/1", controller.signal)
+      )._unsafeUnwrap(),
+    ).toEqual({ headline: "" });
+  });
+  it("fences a headline body held across logout", async () => {
+    let release!: (value: unknown) => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const body = new Promise<unknown>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) =>
+        path === "/auth/logout"
+          ? new Response(null, { status: 204 })
+          : {
+              status: 200,
+              ok: true,
+              json: () => {
+                entered();
+                return body;
+              },
+            },
+      ),
+    );
+    const headline = getActivityHeadline("o", "r", "k", "s", new AbortController().signal);
+    await started;
+    await logout();
+    release({ headline: "Old principal's headline" });
+    expect((await headline)._unsafeUnwrapErr().type).toBe("auth_required");
+  });
+
+  it("keeps typed CP errors and catches rejected transport at the API boundary", async () => {
+    const signal = new AbortController().signal;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: { code: "unavailable", message: "unavailable", retryable: true },
+            }),
+            { status: 503 },
+          ),
+      ),
+    );
+    expect((await getActivityHeadline("o", "r", "k", "s", signal))._unsafeUnwrapErr()).toEqual({
+      type: "http",
+      status: 503,
+      code: "unavailable",
+      message: "unavailable",
+      retryable: true,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("aborted", "AbortError");
+      }),
+    );
+    expect((await getActivityHeadline("o", "r", "k", "s", signal))._unsafeUnwrapErr()).toEqual({
+      type: "network",
+      message: "aborted",
+    });
+  });
+});
 
 describe("API session handling", () => {
   beforeEach(resetBrowserSessionForTest);

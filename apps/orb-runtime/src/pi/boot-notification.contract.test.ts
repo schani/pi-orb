@@ -58,10 +58,6 @@ it("persists a visible, model-visible user-role notice and deduplicates after re
     isIdle: true,
     sendUserMessage: async () => undefined,
     abort: async () => undefined,
-    abortBash: () => undefined,
-    executeBash: async () => {
-      throw new Error("unexpected shell");
-    },
     subscribe: () => () => undefined,
     sendCustomMessage: (message, options) => {
       manager.appendCustomMessageEntry(
@@ -398,7 +394,6 @@ it("keeps idle-stop admission fenced across runtime restart, reopening only on a
   expect(agent.prepareIdleStop()._unsafeUnwrap()).toBe(true);
   expect(agent.prepareIdleStop()._unsafeUnwrap()).toBe(true);
   expect((await agent.submitMessage([], "late")).isErr()).toBe(true);
-  expect((await agent.submitShell("echo forbidden", false, "late-shell")).isErr()).toBe(true);
   expect((await agent.deliverInboxMessage("late-inbox", ["late-inbox"], [])).isErr()).toBe(true);
   expect(agent.admitSubagent("late-child").isErr()).toBe(true);
   const path = manager.getSessionFile() as string;

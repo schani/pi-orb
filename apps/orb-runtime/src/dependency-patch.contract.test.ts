@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -19,21 +20,39 @@ const json = (
   };
 
 const piVersion = "1.0.0";
-const patchPackageArchive = "vendor/patch-package-8.0.1-orb.1.tgz";
+const runner = "scripts/apply-dependency-patches.mjs";
 const patchPath = `patches/@earendil-works+pi-coding-agent+${piVersion}.patch`;
 
 describe("Pi dependency patch installation", () => {
-  it("pins the patched SDK and patch-package in every installing workspace", () => {
-    expect(json("package.json").devDependencies?.["patch-package"]).toBe(
-      `file:${patchPackageArchive}`,
-    );
+  it("pins the patched SDK without patch-package in every installing workspace", () => {
+    expect(json("package.json").devDependencies).not.toHaveProperty("patch-package");
     for (const manifest of ["apps/orb-runtime/package.json", "apps/control-plane/package.json"]) {
       expect(json(manifest).dependencies).toMatchObject({
         "@earendil-works/pi-coding-agent":
           "file:../../vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz",
-        "patch-package": `file:../../${patchPackageArchive}`,
       });
+      expect(json(manifest).dependencies).not.toHaveProperty("patch-package");
     }
+  });
+
+  it("removes the vulnerable installer chain from the production lock", () => {
+    const lock = JSON.parse(read("package-lock.json")) as {
+      packages: Record<string, unknown>;
+    };
+    for (const name of ["patch-package", "find-yarn-workspace-root", "micromatch", "braces"])
+      expect(
+        Object.keys(lock.packages).filter(
+          (path) => path.endsWith(`/node_modules/${name}`) || path === `node_modules/${name}`,
+        ),
+      ).toEqual([]);
+  });
+
+  it("preserves the exact vendor SDK archive", () => {
+    expect(
+      createHash("sha256")
+        .update(readFileSync(join(root, "vendor/pi-coding-agent-1.0.0-brace-5.0.12.tgz")))
+        .digest("hex"),
+    ).toBe("eb67747b526d862e6bd0c959a330b7897ece86ebed3a21e7cf846730e293e509");
   });
 
   it("installs the patched brace expansion despite Pi's bundled shrinkwrap", () => {
@@ -56,7 +75,9 @@ describe("Pi dependency patch installation", () => {
   });
 
   it("applies exactly the installed patches during root and container installs", () => {
-    expect(json("package.json").scripts?.postinstall).toMatch(/^patch-package --error-on-fail && /);
+    expect(json("package.json").scripts?.postinstall).toBe(
+      `node ${runner} && node scripts/fix-node-pty-prebuild-permissions.mjs`,
+    );
 
     for (const [path, workspace] of [
       ["apps/orb-runtime/Dockerfile", "@pi-orb/orb-runtime"],
@@ -67,9 +88,15 @@ describe("Pi dependency patch installation", () => {
       expect(install).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeGreaterThan(-1);
       expect(dockerfile.indexOf("COPY vendor vendor")).toBeLessThan(install);
-      expect(
-        dockerfile.indexOf("npx --no-install patch-package --error-on-fail", install),
-      ).toBeGreaterThan(install);
+      expect(dockerfile.indexOf(`node ${runner}`, install)).toBeGreaterThan(install);
+      expect(dockerfile.indexOf(`COPY ${runner} ${runner}`)).toBeGreaterThan(-1);
+      expect(dockerfile.indexOf(`COPY ${runner} ${runner}`)).toBeLessThan(install);
+      expect(dockerfile.indexOf("apt-get install -y --no-install-recommends git")).toBeGreaterThan(
+        -1,
+      );
+      expect(dockerfile.indexOf("apt-get install -y --no-install-recommends git")).toBeLessThan(
+        install,
+      );
     }
 
     const patchFiles = [
@@ -105,7 +132,8 @@ describe("Pi dependency patch installation", () => {
       /UPLOADED_SOURCE_PATHS = \[[\s\S]*"patches"/,
     );
     const nativeInstall = read("infra/native-vm/install.sh");
-    expect(nativeInstall.indexOf("npx --no-install patch-package --error-on-fail")).toBeGreaterThan(
+    expect(read("packages/native-image/src/snapshot.ts")).toContain(`"${runner}"`);
+    expect(nativeInstall.indexOf(`node ${runner}`)).toBeGreaterThan(
       nativeInstall.indexOf("npm ci"),
     );
   });

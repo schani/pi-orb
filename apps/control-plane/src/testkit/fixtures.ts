@@ -119,6 +119,10 @@ export function makeHarness(options?: {
     runtimeClient: new FakeRuntimeClient(world),
     authGate,
     nameGenerator,
+    headlineGenerator: {
+      generate: () =>
+        okAsync("Inspect project configuration and identify relevant implementation boundaries"),
+    },
     nameLeaseMs: 30_000,
     control: new ControlState(),
     constants: { ...TEST_CONSTANTS, ...options?.constants },

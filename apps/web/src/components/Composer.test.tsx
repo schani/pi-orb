@@ -1,11 +1,20 @@
+import type { ReactElement, TextareaHTMLAttributes } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer.tsx";
+
+let input: TextareaHTMLAttributes<HTMLTextAreaElement>;
+vi.mock("./TextFieldFrame.tsx", () => ({
+  TextFieldFrame: ({ children }: { children: ReactElement[] }) => {
+    input = children[0]?.props as TextareaHTMLAttributes<HTMLTextAreaElement>;
+    return children;
+  },
+}));
 
 const noop = () => {};
 
 function render(
-  mode: "message" | "shell" | "excluded_shell",
+  mode: "message" | "command",
   withImage = false,
   canSend = true,
   canAbort = false,
@@ -22,38 +31,45 @@ function render(
       onSend={noop}
       canAbort={canAbort}
       onAbort={noop}
-      onShellAttachmentBlocked={noop}
     />,
   );
 }
 
-describe("Composer shell presentation", () => {
+describe("Composer", () => {
+  it.each(["!", "Backspace"])("does not consume %s at the start of a message", (key) => {
+    render("message");
+    const preventDefault = vi.fn();
+    input.onKeyDown?.({
+      key,
+      nativeEvent: { isComposing: false },
+      currentTarget: { selectionStart: 0, selectionEnd: 0 },
+      preventDefault,
+    } as unknown as Parameters<NonNullable<typeof input.onKeyDown>>[0]);
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
   it("starts with four lines without visible prompt text", () => {
     const message = render("message");
     expect(message).toMatch(/<textarea[^>]*aria-label="Message the orb"[^>]*rows="4"/);
     expect(message).not.toContain("placeholder=");
     expect(message).not.toContain("Message the orb…");
-    expect(render("shell")).toContain('aria-label="Run a shell command"');
   });
 
   it("carries the mode in the prefix column", () => {
     expect(render("message")).toContain('<span class="composer-prefix">&gt;</span>');
-    expect(render("shell")).toContain('<span class="composer-prefix">!</span>');
-    expect(render("excluded_shell")).toContain('<span class="composer-prefix">!!</span>');
+    expect(render("command")).toContain('<span class="composer-prefix">/</span>');
   });
 
   it("keeps exact mode labels in a visually hidden live region", () => {
     expect(render("message")).toContain(
       '<div class="composer-mode visually-hidden" aria-live="polite">message</div>',
     );
-    expect(render("shell")).toContain('aria-live="polite">shell</div>');
-    expect(render("excluded_shell")).toContain('aria-live="polite">excluded shell</div>');
+    expect(render("command")).toContain('aria-live="polite">command</div>');
   });
 
-  it("keeps an image attachment and the shell prefix when submission is blocked", () => {
-    const html = render("shell", true);
+  it("keeps image attachments with an editable message", () => {
+    const html = render("message", true);
     expect(html).toContain('alt="pasted attachment"');
-    expect(html).toContain('aria-live="polite">shell</div>');
+    expect(html).toContain('aria-live="polite">message</div>');
     expect(html).not.toMatch(/<textarea[^>]*disabled=""/);
   });
 
@@ -70,7 +86,6 @@ describe("Composer shell presentation", () => {
         onSend={noop}
         canAbort={false}
         onAbort={noop}
-        onShellAttachmentBlocked={noop}
         dropLabel="Uploads need a running orb."
       />,
     );
@@ -106,7 +121,7 @@ describe("Composer shell presentation", () => {
 
   it("disables phone send under the same admission and attachment rules", () => {
     expect(render("message", false, false)).toMatch(/aria-label="Send message"[^>]*disabled=""/);
-    expect(render("shell", true)).toMatch(/aria-label="Run command"[^>]*disabled=""/);
-    expect(render("shell")).not.toMatch(/aria-label="Run command"[^>]*disabled=""/);
+    expect(render("message", true)).not.toMatch(/aria-label="Send message"[^>]*disabled=""/);
+    expect(render("command")).toMatch(/aria-label="Send message"[^>]*disabled=""/);
   });
 });

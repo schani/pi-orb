@@ -21,7 +21,7 @@ No deployment. Main integration checkpoint `dd90350` and merge `48718af` are on 
 ## Added coverage
 
 - A shared health/snapshot/request-gate/live-operation oracle runs against both simulated SDK events and real installed-package sessions.
-- 200 runtime DST schedules race two child terminals, successor admission, inbox delivery and whole-operation abort, with a retained cleanup owner and assertions at relevant checkpoints. They include shell refusal, dedup/retry after abort and stale callback/wake fencing.
+- 200 runtime DST schedules race two child terminals, successor admission, inbox delivery and whole-operation abort, with a retained cleanup owner and assertions at relevant checkpoints. They include dedup/retry after abort and stale callback/wake fencing.
 - Composed control-plane DST adds 50 schedules with control-plane restart, an eight-hour wall-clock jump (monotonic time unchanged), delayed snapshots sampled at request acceptance, pull failure and post-commit failure. It asserts no premature idle-stop and complete replication after drain.
 - Twelve installed-SDK schedules add independent-child broker refresh and `auth_required` failure, no child model/tool execution after failed credentials, no credential material in root history, root-inline hook exclusion, discovered tools, awaited shutdown and deduplicated child-only inbox admission with a withheld completion wake.
 - Another 50 composed archival schedules keep history unsealed while the silent child is active, then retain its terminal record before destroying compute/workspace, including failed pulls/post-commit responses.

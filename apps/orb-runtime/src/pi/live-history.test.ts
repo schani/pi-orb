@@ -1,5 +1,5 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { HistoryRecord } from "@pi-orb/protocol";
+import { type DisplayRecord, type HistoryRecord, projectDisplayRecords } from "@pi-orb/protocol";
 import { describe, expect, it } from "vitest";
 import { LiveHistoryPublisher } from "./live-history.ts";
 
@@ -16,6 +16,95 @@ const entry = (id: string, parentId: string | null, role: "user" | "assistant", 
 });
 
 describe("LiveHistoryPublisher", () => {
+  it("seeds display matching from persisted calls without changing canonical records", () => {
+    const entries: unknown[] = [
+      {
+        id: "call",
+        parentId: null,
+        timestamp: "t",
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "c", name: "subagent", arguments: { prompt: "task" } }],
+        },
+      },
+    ];
+    const displays: unknown[] = [];
+    const records: HistoryRecord[] = [];
+    const publisher = new LiveHistoryPublisher(
+      { getEntries: () => entries },
+      (record, _message, display) => {
+        records.push(record);
+        displays.push(display);
+      },
+    );
+    entries.push({
+      id: "result",
+      parentId: "call",
+      timestamp: "t",
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "c",
+        toolName: "subagent",
+        content: [{ type: "text", text: "Agent completed. Findings" }],
+        isError: false,
+      },
+    });
+    expect(publisher.flushPersisted().isOk()).toBe(true);
+    expect(displays).toMatchObject([{ id: "result", content: [{ headline: null }] }]);
+    expect(JSON.stringify(records)).not.toContain("headline");
+  });
+  it("seeds all branches and matches incremental results only to their ancestors", () => {
+    const calls = ["read", "subagent"].map((name) => ({
+      id: name,
+      parentId: "root",
+      timestamp: "t",
+      type: "message",
+      message: { role: "assistant", content: [{ type: "toolCall", id: "c", name, arguments: {} }] },
+    }));
+    const results = ["read", "subagent"].map((name) => ({
+      id: `${name}-result`,
+      parentId: name,
+      timestamp: "t",
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "c",
+        toolName: "subagent",
+        content: [
+          { type: "text", text: name === "read" ? "READ_CANARY" : "Agent completed. Findings" },
+        ],
+        isError: false,
+      },
+    }));
+    const all = [entry("root", null, "user", "task"), ...calls, ...results];
+    for (let prefix = 0; prefix <= 3; prefix++) {
+      const entries: unknown[] = all.slice(0, prefix);
+      const records: HistoryRecord[] = [];
+      const displays: DisplayRecord[] = [];
+      const publisher = new LiveHistoryPublisher(
+        { getEntries: () => entries },
+        (record, _message, display) => {
+          records.push(record);
+          displays.push(display);
+        },
+      );
+      for (const item of all.slice(prefix)) {
+        entries.push(item);
+        expect(publisher.flushPersisted().isOk()).toBe(true);
+      }
+      const read = displays.find((record) => record.id === "read-result");
+      if (read?.type !== "message") throw new Error("expected read result");
+      expect(read.content[0]).not.toHaveProperty("headline");
+      expect(displays.at(-1)).toMatchObject({
+        id: "subagent-result",
+        content: [{ headline: null }],
+      });
+      expect(JSON.stringify(records)).not.toContain("headline");
+      if (prefix === 0) expect(displays).toEqual(projectDisplayRecords(records));
+    }
+  });
   it("preserves SDK message identity across append and mapping, even for equal text", () => {
     const manager = SessionManager.inMemory();
     const messages: unknown[] = [];
@@ -98,37 +187,6 @@ describe("LiveHistoryPublisher", () => {
       },
     ]);
     expect(JSON.stringify(published)).not.toContain("LIVE_SYSTEM_");
-  });
-
-  it("publishes a directly appended bash execution on an explicit flush", () => {
-    const entries: unknown[] = [];
-    const published: HistoryRecord[] = [];
-    const publisher = new LiveHistoryPublisher({ getEntries: () => entries }, (record) =>
-      published.push(record),
-    );
-    entries.push({
-      id: "bash-1",
-      parentId: null,
-      type: "message",
-      timestamp: "time-bash-1",
-      message: {
-        role: "bashExecution",
-        command: "npm test",
-        output: "passing",
-        exitCode: 0,
-        cancelled: false,
-        truncated: false,
-        excludeFromContext: true,
-        timestamp: 1,
-      },
-    });
-
-    const result = publisher.flushPersisted();
-
-    expect(result.isOk()).toBe(true);
-    expect(published).toMatchObject([
-      { type: "event", eventType: "pi.bash_execution", id: "bash-1" },
-    ]);
   });
 
   it("flushes committed responses before agent_settled and never republishes entries", () => {

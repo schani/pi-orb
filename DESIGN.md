@@ -44,14 +44,13 @@ The first version is not intended to be a generic VM configurator or a generic r
 - The orb's lifetime is independent of the browser or local CLI session.
 - There is one agent/conversation per orb in the first version.
 - Pi compaction is supported; Pi tree navigation and multiple sessions are not exposed initially.
-- The composer supports foreground Pi user-shell commands through explicit `message`, `shell`, and `excluded shell` modes. `!` and `!!` at input offset zero enter the shell modes without leaving a visible prefix; both persist to history, while excluded shell alone is omitted from later model context. Shell submission requires an idle runtime and no image attachments (decided 2026-08-05).
 - Multiple browser connections to one orb are allowed and may all issue requests; the runtime serializes live mutations and broadcasts state. The send-anytime message inbox serializes messages durably at the control plane before runtime delivery.
 - Multiplayer product features such as presence, attribution, and per-user permissions are out of scope for the first slice.
 - Multi-user scope is trusted coworkers at one small company (clarified 2026-09-16): default lists are own-user, while existing direct project/orb/file/transcript/settings/lifecycle access stays company-wide. A project and its children have one owner; its Codex/GitHub credentials, login cohort, runtime token grants, naming, and auxiliary inference follow that owner, never the viewer. No coworker switcher, transfers, quotas, security-boundary or roles framework. Stages 1–2 are deployed; stage 3 is on `main`, qualified, and undeployed. Coworker onboarding remains unauthorized. `docs/multi-user.md`.
 
 ## High-level architecture
 
-**Implemented 2026-09-19; local qualification passed 2026-09-20; not deployed:** one `pi-orb-issuer` application serves app/API/broker, public discovery/JWKS and an isolated files hostname. Its exact workload issuer and trust remain unchanged; app/files/broker URLs change. Google login uses twelve-hour stateless sealed cookies; logout cannot revoke copied cookies. Exact-Origin checks protect cookie mutations/WebSockets. Google machine ID tokens authorize the ordinary API; runtime incarnation bearers retain separate authority. The Google identity migration preserves user UUIDs; in the current undeployed tree it is migration 029. Public runtime ingress and shared issuer/application privileges deliberately reduce infrastructure isolation. Configuration: `docs/deployment.md`; authentication: `docs/credentials.md`; cutover/gates: `docs/control-plane-consolidation.md`.
+**Implemented 2026-09-19; local qualification passed 2026-09-20; not deployed:** one `pi-orb-issuer` application serves app/API/broker, public discovery/JWKS and an isolated files hostname. Its exact workload issuer and trust remain unchanged; app/files/broker URLs change. Google login uses twelve-hour stateless sealed cookies; logout cannot revoke copied cookies. Exact-Origin checks protect cookie mutations/WebSockets. Google machine ID tokens authorize the ordinary API; runtime incarnation bearers retain separate authority. The Google identity migration preserves user UUIDs; in the current undeployed tree it is migration 031. Public runtime ingress and shared issuer/application privileges deliberately reduce infrastructure isolation. Configuration: `docs/deployment.md`; authentication: `docs/credentials.md`; cutover/gates: `docs/control-plane-consolidation.md`.
 
 ```text
 Browser
@@ -111,12 +110,13 @@ Subsystem designs:
 - [docs/orb-archival.md](docs/orb-archival.md) — read-only transcript retention after shared deletion-grade resource cleanup
 - [docs/orb-spawning.md](docs/orb-spawning.md) — in-orb CLI creation with an atomically queued prompt and browser URL
 - [docs/runtime-protocol.md](docs/runtime-protocol.md) — the browser↔runtime wire protocol: handshake, display frames, detail HTTP, ordering, backpressure
-- [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, the PostgreSQL schema
+- [docs/history-replication.md](docs/history-replication.md) — the harness-agnostic history model, pull-only replication, PostgreSQL schema, and implemented explicit offline recovery (2026-10-05, America/Cancun)
 - [docs/pi-adapter.md](docs/pi-adapter.md) — Pi embedding and the Pi→normalized history mapping
 - [docs/subagents.md](docs/subagents.md) — local leaf subagents, minimal gotgenes fork, aggregate activity and DST-first integration/acceptance plan
 - [docs/control-plane-api.md](docs/control-plane-api.md) — the project model and the browser-facing HTTP API
 - [docs/multi-user.md](docs/multi-user.md) — trusted-company identity, owned projects/settings, per-user credentials, and tailnet options
 - [docs/web-ui.md](docs/web-ui.md) — UI behavior and visual design
+- [docs/activity-headlines.md](docs/activity-headlines.md) — locally implemented request-owned Luna activity headlines, durable metadata and bounded local qualification
 - [docs/transcript-cache.md](docs/transcript-cache.md) — bounded browser transcript caching, ownership/freshness rules, compact transport measurements and qualification
 - [docs/agent-settings.md](docs/agent-settings.md) — implemented lifecycle-cluster header, model/thinking authority, persistence, mutation and DST qualification
 - [docs/personal-instructions.md](docs/personal-instructions.md) — account-wide `AGENTS.md`, Home gear editor, next-start adoption and test-first qualification
@@ -138,6 +138,12 @@ Subsystem designs:
 
 Tracking:
 
+- [docs/postmortems/2026-10-05-offline-online-transcript.md](docs/postmortems/2026-10-05-offline-online-transcript.md) — reported missing transcript after connectivity recovery; reproduced half-open client gap, field cause unproved
+- [docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md](docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md) — fresh fixture inventory crossed the shared daemon's ownership boundary; scoped gate preserves foreign resources
+- [docs/postmortems/2026-10-04-workspace-full-history-desync.md](docs/postmortems/2026-10-04-workspace-full-history-desync.md) — full workspace followed by cursor-not-found; offline repair and normal replication verified 2026-10-05 (America/Cancun), with all original SQL rows unchanged
+- [docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md](docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md) — visible read summary blocked by markdown pointer interception; root cause unproved
+- [docs/postmortems/2026-10-04-ipad-sidebar-overdraw.md](docs/postmortems/2026-10-04-ipad-sidebar-overdraw.md) — missing/deleted orb view auto-placed beneath the fixed index; confirmed layout fix and superseded paint hypothesis
+
 - [docs/postmortems/2026-10-03-cached-orb-navigation.md](docs/postmortems/2026-10-03-cached-orb-navigation.md) — cached switching still pays metadata, remount, accessibility and 1Password focus costs; investigation only
 - [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set
 - [docs/postmortems/2026-10-02-webkit-lazy-return-gate.md](docs/postmortems/2026-10-02-webkit-lazy-return-gate.md) — captured split-target sidebar click, fixed rail/scroll ownership and diagnostic callback race
@@ -157,7 +163,6 @@ Tracking:
 - [docs/postmortems/2026-09-27-sandbox-qualification-harness.md](docs/postmortems/2026-09-27-sandbox-qualification-harness.md) — sandbox artifact, retirement, credential and presence evidence boundaries
 - [docs/postmortems/2026-09-27-webkit-image-fixture-sync.md](docs/postmortems/2026-09-27-webkit-image-fixture-sync.md) — HTTP-only image records raced a running orb's full live sync
 - [docs/postmortems/2026-09-27-restart-notice-e2e-rule.md](docs/postmortems/2026-09-27-restart-notice-e2e-rule.md) — Docker release blocked by a scripted model matcher predating the host notice wording
-- [docs/postmortems/2026-09-27-composer-caret-ordering.md](docs/postmortems/2026-09-27-composer-caret-ordering.md) — caret measurement preceded mode normalization; gated browser regression and document-bubble measurement fix
 - [docs/postmortems/2026-09-27-preemption-delegated-cancellation.md](docs/postmortems/2026-09-27-preemption-delegated-cancellation.md) — graceful Spot preemption persisted delegated cancellation through the shared shutdown/user-abort path; initiator remains unproved
 - [docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md](docs/postmortems/2026-09-26-unit-worker-rpc-timeout.md) — diagnostic qualification blocked by an unhandled Vitest worker RPC timeout; cause unresolved
 - [docs/postmortems/2026-09-26-provider-auth-failures.md](docs/postmortems/2026-09-26-provider-auth-failures.md) — Codex failure after wake and Datadog grant invalidation; causes unproved, production Datadog refresh observed

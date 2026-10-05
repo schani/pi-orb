@@ -1,3 +1,4 @@
+export * from "./activity-headline.ts";
 export * from "./agent-settings.ts";
 export * from "./broker.ts";
 export * from "./control-plane-api.ts";
@@ -17,10 +18,12 @@ export * from "./orb-spawn.ts";
 export * from "./personal-instructions.ts";
 export * from "./project-instructions.ts";
 export * from "./project-secrets.ts";
+export * from "./reasoning-headline.ts";
 export * from "./repository-url.ts";
 export * from "./runtime-http.ts";
 export * from "./runtime-launch.ts";
 export * from "./tailscale.ts";
 export * from "./terminal.ts";
+export * from "./tool-result-context.ts";
 export * from "./workload-identity.ts";
 export * from "./workspace-upload.ts";

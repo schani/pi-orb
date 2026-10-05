@@ -143,10 +143,10 @@ interface OrbPageState {
   composerImages: ComposerImage[];
   settings: AgentSettingsEvent | null;
   synced: boolean;
-  commandDraft: { text: string; mode: ComposerMode } | null;
+  commandDraft: { text: string } | null;
   pendingRequest: {
     requestId: string;
-    kind: "message" | "shell" | "abort" | "settings";
+    kind: "message" | "abort" | "settings";
     submittedText?: string;
   } | null;
   requestError: { code: string; message: string } | null;
@@ -177,7 +177,7 @@ type OrbPageAction =
   | {
       type: "request_sent";
       requestId: string;
-      kind: "message" | "shell" | "abort" | "settings";
+      kind: "message" | "abort" | "settings";
     }
   | { type: "request_lost"; requestId: string }
   | { type: "message_enqueued"; requestId: string }
@@ -275,6 +275,7 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
         blockId: event.blockId,
         blockType: event.blockType,
         text,
+        ...(event.headline === undefined ? {} : { headline: event.headline }),
         revision: event.revision,
       });
       return { ...state, liveBlocks };
@@ -417,7 +418,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
           ...(unchangedDraft
             ? {
                 composerText: state.commandDraft?.text ?? "",
-                composerMode: state.commandDraft?.mode ?? "message",
+                composerMode: "message",
                 commandDraft: null,
               }
             : {}),
@@ -602,9 +603,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       return {
         ...state,
         commandDraft:
-          state.composerMode === "command"
-            ? state.commandDraft
-            : { text: state.composerText, mode: state.composerMode },
+          state.composerMode === "command" ? state.commandDraft : { text: state.composerText },
         composerText: `${action.command} `,
         composerMode: "command",
         requestError: null,
@@ -615,7 +614,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         return {
           ...state,
           composerText: state.commandDraft.text,
-          composerMode: state.commandDraft.mode,
+          composerMode: "message",
           commandDraft: null,
           notice: null,
         };
@@ -835,7 +834,7 @@ function OrbConversation({
       orbId,
       {
         text: state.commandDraft?.text ?? state.composerText,
-        mode: state.commandDraft?.mode ?? state.composerMode,
+        mode: state.commandDraft ? "message" : state.composerMode,
         images: state.composerImages,
       },
       draftPrincipal,
@@ -1411,29 +1410,70 @@ function OrbConversation({
       contentHeight: target?.scrollHeight ?? 0,
     });
     let previousView = view();
+    let pointerActive = false;
+    let touchY: number | null = null;
+    const setPinned = (pinned: boolean, reason: string) => {
+      if (pinnedRef.current === pinned) return;
+      pinnedRef.current = pinned;
+      devConsoleDebug.record({
+        event: "scroll_pin",
+        orbId,
+        outcome: `${pinned ? "pinned" : "released"}:${reason}`,
+        ...view(),
+      });
+    };
     onHistoryCompensatedRef.current = () => {
       previousView = view();
     };
     const onScroll = () => {
       const current = view();
-      pinnedRef.current = isPinnedAfterScroll(
-        current,
-        autoScrollYRef.current,
-        pinnedRef.current ? previousView : undefined,
+      setPinned(
+        isPinnedAfterScroll(
+          current,
+          autoScrollYRef.current,
+          pinnedRef.current && !pointerActive ? previousView : undefined,
+        ),
+        "scroll",
       );
       previousView = current;
       autoScrollYRef.current = null;
     };
-    const readerIntent = () => {
-      pinnedRef.current = false;
+    const readerIntent = (reason: "wheel" | "key" | "touch") => {
+      setPinned(false, reason);
       autoScrollYRef.current = null;
+    };
+    const pointerIntent = () => {
+      pointerActive = true;
+      autoScrollYRef.current = null;
+    };
+    const pointerSettled = () => {
+      if (!pointerActive) return;
+      onScroll();
+      pointerActive = false;
+    };
+    const wheelIntent = (event: WheelEvent) => {
+      // A wheel at the tail may produce no scroll event to restore pinning.
+      if (event.deltaY < 0 && target && target.scrollTop > 0) readerIntent("wheel");
+    };
+    const touchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY ?? null;
+    };
+    const touchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY ?? null;
+      // Pointer cancellation starts native panning; it does not settle it.
+      if (y !== null && touchY !== null && y > touchY && target && target.scrollTop > 0)
+        readerIntent("touch");
+      touchY = y;
+    };
+    const touchSettled = () => {
+      touchY = null;
     };
     const isScrollKey = (event: KeyboardEvent) =>
       ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "].includes(event.key) &&
       event.target instanceof HTMLElement &&
       !event.target.closest("input, textarea, select, [contenteditable]");
     const keyboardIntent = (event: KeyboardEvent) => {
-      if (isScrollKey(event)) readerIntent();
+      if (isScrollKey(event)) readerIntent("key");
     };
     const keyboardSettled = (event: KeyboardEvent) => {
       if (isScrollKey(event)) onScroll();
@@ -1441,18 +1481,27 @@ function OrbConversation({
     target?.addEventListener("keydown", keyboardIntent);
     target?.addEventListener("keyup", keyboardSettled);
     target?.addEventListener("scroll", onScroll, { passive: true });
-    target?.addEventListener("pointerdown", readerIntent, { passive: true });
-    target?.addEventListener("wheel", readerIntent, { passive: true });
-    target?.addEventListener("pointerup", onScroll, { passive: true });
+    target?.addEventListener("pointerdown", pointerIntent, { passive: true });
+    target?.addEventListener("wheel", wheelIntent, { passive: true });
+    target?.addEventListener("touchstart", touchStart, { passive: true });
+    target?.addEventListener("touchmove", touchMove, { passive: true });
+    target?.addEventListener("touchend", touchSettled, { passive: true });
+    target?.addEventListener("touchcancel", touchSettled, { passive: true });
+    window.addEventListener("pointerup", pointerSettled, { passive: true });
+    window.addEventListener("pointercancel", pointerSettled, { passive: true });
     // Observe geometry, not React renders. Polling must not write into a native
     // scrolling layer, even at the same offset.
     const observer = new ResizeObserver(() => {
       const current = view();
       // Reconcile native movement before measuring the newly grown content.
       if (Math.abs(current.scrollY - previousView.scrollY) > 1) {
-        pinnedRef.current = isPinnedAfterScroll(
-          { ...previousView, scrollY: current.scrollY },
-          autoScrollYRef.current,
+        setPinned(
+          isPinnedAfterScroll(
+            pinnedRef.current ? current : { ...previousView, scrollY: current.scrollY },
+            autoScrollYRef.current,
+            pinnedRef.current && !pointerActive ? previousView : undefined,
+          ),
+          "resize",
         );
       }
       if (target && pinnedRef.current) {
@@ -1472,11 +1521,16 @@ function OrbConversation({
       target?.removeEventListener("keydown", keyboardIntent);
       target?.removeEventListener("keyup", keyboardSettled);
       target?.removeEventListener("scroll", onScroll);
-      target?.removeEventListener("pointerdown", readerIntent);
-      target?.removeEventListener("wheel", readerIntent);
-      target?.removeEventListener("pointerup", onScroll);
+      target?.removeEventListener("pointerdown", pointerIntent);
+      target?.removeEventListener("wheel", wheelIntent);
+      target?.removeEventListener("touchstart", touchStart);
+      target?.removeEventListener("touchmove", touchMove);
+      target?.removeEventListener("touchend", touchSettled);
+      target?.removeEventListener("touchcancel", touchSettled);
+      window.removeEventListener("pointerup", pointerSettled);
+      window.removeEventListener("pointercancel", pointerSettled);
     };
-  }, []);
+  }, [orbId]);
   // Live connection while running; hello carries the latest applied cursor.
   const afterRecordIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1563,32 +1617,10 @@ function OrbConversation({
   };
 
   const sendComposer = () => {
-    const connection = liveRef.current;
     const text = state.composerText.trim();
     const images = state.composerImages;
 
     if (state.composerMode === "command" || state.pendingRequest?.kind === "settings") return;
-    if (state.composerMode !== "message") {
-      if (connection === null) return;
-      if (images.length > 0) {
-        dispatch({
-          type: "notice",
-          message: "Remove image attachments before running a shell command.",
-        });
-        return;
-      }
-      if (text === "") return;
-      const requestId = connection.sendRequest({
-        type: "shell",
-        expectedHeadId: state.headId,
-        command: text,
-        excludeFromContext: state.composerMode === "excluded_shell",
-      });
-      if (requestId === null) dispatch({ type: "send_unavailable" });
-      else dispatch({ type: "request_sent", requestId, kind: "shell" });
-      return;
-    }
-
     if (text === "" && images.length === 0) return;
     const content: MessageInputBlock[] = [
       ...images.map(
@@ -1716,11 +1748,7 @@ function OrbConversation({
     state.activity !== "idle" ||
     state.pendingRequest !== null;
   const canSend =
-    state.pendingRequest === null &&
-    (state.settings?.writable ?? true) &&
-    (state.composerMode === "message"
-      ? messageAccepting
-      : connected && state.activity === "idle" && state.historyLoaded);
+    state.pendingRequest === null && (state.settings?.writable ?? true) && messageAccepting;
   const canAbort =
     connected &&
     state.activity === "busy" &&
@@ -1728,7 +1756,12 @@ function OrbConversation({
     state.pendingRequest === null &&
     (state.welcome?.capabilities.includes(CAPABILITY_ABORT) ?? false);
 
-  if (orbNotFound) return <NotFoundPage resourceName="Orb" />;
+  if (orbNotFound)
+    return (
+      <div className="orb-main">
+        <NotFoundPage resourceName="Orb" />
+      </div>
+    );
 
   const glyph =
     orb === null
@@ -2128,12 +2161,6 @@ function OrbConversation({
           onSend={sendComposer}
           canAbort={canAbort}
           onAbort={sendAbort}
-          onShellAttachmentBlocked={() =>
-            dispatch({
-              type: "notice",
-              message: "Remove image attachments before running a shell command.",
-            })
-          }
         />
       )}
     </main>

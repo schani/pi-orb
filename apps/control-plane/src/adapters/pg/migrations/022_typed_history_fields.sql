@@ -4,39 +4,6 @@
 -- native value of the wrong JSON type is absent rather than coerced, so no row
 -- can become schema-invalid and no shape can abort the migration.
 
--- Shell blocks.
-UPDATE history_records SET record = record || jsonb_build_object(
-  'shell', jsonb_build_object(
-    'command', CASE
-      WHEN jsonb_typeof(record->'overflow'->'native'->'message'->'command') = 'string'
-      THEN record->'overflow'->'native'->'message'->>'command'
-      ELSE ''
-    END,
-    'output', CASE
-      WHEN jsonb_typeof(record->'overflow'->'native'->'message'->'output') = 'string'
-      THEN record->'overflow'->'native'->'message'->>'output'
-      ELSE ''
-    END,
-    'exitCode', CASE
-      WHEN jsonb_typeof(record->'overflow'->'native'->'message'->'exitCode') = 'number'
-      THEN record->'overflow'->'native'->'message'->'exitCode'
-      ELSE 'null'::jsonb
-    END,
-    'cancelled',
-      COALESCE(record->'overflow'->'native'->'message'->'cancelled' = 'true'::jsonb, false),
-    'truncated',
-      COALESCE(record->'overflow'->'native'->'message'->'truncated' = 'true'::jsonb, false),
-    'excludeFromContext',
-      COALESCE(
-        record->'overflow'->'native'->'message'->'excludeFromContext' = 'true'::jsonb, false
-      )
-  )
-)
-WHERE record->>'type' = 'event'
-  AND record->>'eventType' = 'pi.bash_execution'
-  AND record->'shell' IS NULL
-  AND jsonb_typeof(record->'overflow'->'native'->'message') = 'object';
-
 -- Custom-message identity and visibility.
 UPDATE history_records SET record = record || jsonb_build_object(
   'custom', jsonb_build_object(

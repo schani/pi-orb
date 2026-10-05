@@ -7,6 +7,10 @@ import {
 import { ApplicationFailure, type SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
 import type {
+  ActivityHeadlineRef,
+  StoredActivityHeadline,
+} from "../domain/activity-headline-store.ts";
+import type {
   CommitPullError,
   ProjectConflict,
   ReplicationIntegrityError,
@@ -221,6 +225,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   private readonly projects = new Map<string, ProjectRow>();
   private readonly orbs = new Map<string, OrbRow>();
   private readonly replicas = new Map<string, OrbReplica>();
+  private readonly activityHeadlines = new Map<string, StoredActivityHeadline>();
   private readonly deletions = new Map<string, OrbDeletionRow>();
   private readonly messages = new Map<string, OrbMessageRow[]>();
   private readonly spawns = new Map<
@@ -253,6 +258,8 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   }
 
   seedOrb(orb: OrbRow): void {
+    if (this.orbs.get(orb.id)?.harnessSessionId !== orb.harnessSessionId)
+      this.deleteActivityHeadlines(orb.id);
     this.orbs.set(orb.id, orb);
   }
 
@@ -366,6 +373,58 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       this.replicas.set(orbId, replica);
     }
     return replica;
+  }
+
+  private activityHeadlineKey(ref: ActivityHeadlineRef): string {
+    return JSON.stringify([ref.orbId, ref.sessionId, ref.recordId, ref.detailKey]);
+  }
+
+  private deleteActivityHeadlines(orbId: string): void {
+    for (const [key, value] of this.activityHeadlines)
+      if (value.orbId === orbId) this.activityHeadlines.delete(key);
+  }
+
+  readActivityHeadline(
+    task: SimulationTask,
+    ref: ActivityHeadlineRef,
+  ): ResultAsync<StoredActivityHeadline | null, StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "read activity headline", () => {
+      const value = this.activityHeadlines.get(this.activityHeadlineKey(ref));
+      return value ? { ...value } : null;
+    });
+  }
+
+  readActivityHeadlines(
+    task: SimulationTask,
+    orbId: string,
+    sessionId: string,
+  ): ResultAsync<StoredActivityHeadline[], StoreError> {
+    return this.access(task, FAILPOINTS.storeRead, "read activity headlines", () =>
+      [...this.activityHeadlines.values()]
+        .filter((value) => value.orbId === orbId && value.sessionId === sessionId)
+        .map((value) => ({ ...value })),
+    );
+  }
+
+  putActivityHeadlineIfAbsent(
+    task: SimulationTask,
+    value: StoredActivityHeadline,
+  ): ResultAsync<StoredActivityHeadline | null, StoreError> {
+    return this.access(task, FAILPOINTS.storeWrite, "put activity headline if absent", () => {
+      const orb = this.orbs.get(value.orbId);
+      if (
+        !orb ||
+        orb.state === "deleting" ||
+        orb.harnessSessionId !== value.sessionId ||
+        this.projects.get(orb.projectId)?.state !== "active" ||
+        !this.replicas.get(value.orbId)?.records.has(value.recordId)
+      )
+        return null;
+      const key = this.activityHeadlineKey(value);
+      const winner = this.activityHeadlines.get(key) ?? { ...value };
+      this.activityHeadlines.set(key, winner);
+      return { ...winner };
+    });
   }
 
   // -- projects/orbs --------------------------------------------------------
@@ -1522,6 +1581,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       ) {
         return { conflict: true as const, currentState: orb?.state };
       }
+      this.deleteActivityHeadlines(params.orbId);
       this.replicas.delete(params.orbId);
       this.orbs.delete(params.orbId);
       this.deletions.delete(params.orbId);
@@ -2064,6 +2124,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
           ? { harnessSessionId: sessionCheck.id, harnessSessionHeader: sessionCheck.header }
           : {}),
       };
+      if (updated.harnessSessionId !== orb.harnessSessionId) this.deleteActivityHeadlines(orb.id);
       this.orbs.set(orb.id, updated);
       if (newestAlert !== undefined)
         logOrbEvent(task, orb.id, "alert-published", { recordId: newestAlert.id });
@@ -2106,6 +2167,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       const sessionCheck = this.verifySession(orb, session);
       if (sessionCheck !== null && "type" in sessionCheck) return sessionCheck;
       if (sessionCheck !== null) {
+        if (sessionCheck.id !== orb.harnessSessionId) this.deleteActivityHeadlines(orbId);
         this.orbs.set(orbId, {
           ...orb,
           harnessSessionId: sessionCheck.id,
@@ -2137,6 +2199,7 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
   readHistorySnapshot(
     task: SimulationTask,
     orbId: string,
+    atRecordId?: string,
   ): ResultAsync<
     {
       session: HarnessSessionMetadata | null;
@@ -2151,11 +2214,20 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
       if (orb === undefined || orb.state === "deleting") {
         return { session: null, cursor: null, headId: null, records: [] };
       }
+      const replica = this.replicas.get(orbId);
+      const records: HistoryRecord[] = [];
+      let id = atRecordId ?? orb.replicationCursor;
+      while (id !== null) {
+        const record = replica?.records.get(id);
+        if (record === undefined) break;
+        records.push(record);
+        id = record.parentId;
+      }
       return {
         session: orb.harnessSessionHeader,
         cursor: orb.replicationCursor,
         headId: orb.replicatedHeadId,
-        records: this.replicaRecords(orbId),
+        records: records.reverse(),
       };
     });
   }

@@ -66,6 +66,7 @@ const request = {
 interface ProviderOverrides {
   readonly image?: string;
   readonly network?: string;
+  readonly inventoryScope?: string;
   readonly controlPlaneUrl?: string;
   readonly extraEnv?: Readonly<Record<string, string>>;
   readonly specGeneration?: number;
@@ -83,9 +84,21 @@ function makeProvider(overrides: ProviderOverrides = {}): DockerOrbHostProvider 
 
 /** Scripts a fresh (no existing container) provision against the CLI fake. */
 function installFreshHost(): void {
+  let labels: Record<string, string> = {};
   dockerFake.install((args) => {
     if (args[0] === "inspect") return { error: "docker inspect: No such object: pi-orb-orb-1" };
-    if (args[0] === "volume") return { stdout: "pi-orb-data-orb-1\n" };
+    if (args[0] === "volume" && args[1] === "create") {
+      labels = {};
+      args.forEach((arg, index) => {
+        if (arg !== "--label") return;
+        const [key, value] = (args[index + 1] ?? "").split("=");
+        if (key !== undefined && value !== undefined) labels[key] = value;
+      });
+      return { stdout: "pi-orb-data-orb-1\n" };
+    }
+    if (args[0] === "volume" && args[1] === "inspect") {
+      return { stdout: JSON.stringify([{ Labels: labels }]) };
+    }
     if (args[0] === "run") return { stdout: "deadbeef\n" };
     return { error: `unexpected docker ${args[0]}` };
   });
@@ -360,6 +373,100 @@ describe("DockerOrbHostProvider", () => {
     );
     expect(result.isErr() && result.error.code).toBe("conflict");
     expect(dockerFake.calls).toHaveLength(1);
+  });
+
+  it("labels fixture compute and storage with its inventory scope", async () => {
+    const argv = await provisionArgv(makeProvider({ inventoryScope: "fixture-a" }));
+    expect(argv).toContain("pi-orb.inventory-scope=fixture-a");
+    expect(dockerFake.calls.find((args) => args[0] === "volume")).toContain(
+      "pi-orb.inventory-scope=fixture-a",
+    );
+  });
+
+  it.each([
+    [undefined, { "pi-orb.orb-id": "orb-1", "pi-orb.inventory-scope": "fixture-b" }],
+    ["fixture-a", { "pi-orb.orb-id": "orb-1", "pi-orb.inventory-scope": "fixture-b" }],
+    ["fixture-a", { "pi-orb.orb-id": "orb-1" }],
+    [undefined, { "pi-orb.orb-id": "orb-2" }],
+    ["fixture-a", { "pi-orb.orb-id": "orb-2", "pi-orb.inventory-scope": "fixture-a" }],
+    [undefined, {}],
+  ])(
+    "refuses foreign volume labels before mounting (scope %s, labels %j)",
+    async (inventoryScope, labels) => {
+      dockerFake.install((args) => {
+        if (args[0] === "inspect") return { error: "No such container" };
+        if (args[0] === "volume" && args[1] === "create") return { stdout: "pi-orb-data-orb-1\n" };
+        if (args[0] === "volume" && args[1] === "inspect") {
+          return { stdout: JSON.stringify([{ Labels: labels }]) };
+        }
+        return { stdout: "deadbeef\n" };
+      });
+      const result = await makeProvider(
+        inventoryScope === undefined ? {} : { inventoryScope },
+      ).provision(task, request, context);
+      expect(result.isErr() && result.error).toMatchObject({
+        operation: "provision",
+        code: "conflict",
+        retryable: false,
+      });
+      expect(dockerFake.calls.map((args) => args.slice(0, 2))).toEqual([
+        ["inspect", "--type"],
+        ["volume", "create"],
+        ["volume", "inspect"],
+      ]);
+    },
+  );
+
+  it.each([
+    [{ stdout: "not json" }, "operation_failed"],
+    [{ stdout: '[{"Labels":null}]' }, "conflict"],
+    [{ error: "daemon unavailable" }, "unavailable"],
+    [{ error: "No such volume" }, "invalid_state"],
+  ])("fails closed when volume inspection fails: %j", async (reply, code) => {
+    dockerFake.install((args) => {
+      if (args[0] === "inspect") return { error: "No such container" };
+      if (args[0] === "volume" && args[1] === "inspect") return reply;
+      return { stdout: "created\n" };
+    });
+    const result = await makeProvider().provision(task, request, context);
+    expect(result.isErr() && result.error).toMatchObject({ operation: "provision", code });
+    expect(dockerFake.calls.some((args) => args[0] === "run")).toBe(false);
+  });
+
+  it("filters inventory for the fixture scope", async () => {
+    dockerFake.install(() => ({ stdout: "" }));
+    await makeProvider({ inventoryScope: "fixture-a" }).listManagedHosts(task, context);
+    expect(dockerFake.calls[0]).toContain("label=pi-orb.inventory-scope=fixture-a");
+  });
+
+  it("excludes fixture compute from unscoped inventory", async () => {
+    dockerFake.install((args) =>
+      args[0] === "ps"
+        ? { stdout: "fixture-host\n" }
+        : {
+            stdout: JSON.stringify([
+              {
+                Config: {
+                  Labels: {
+                    "pi-orb.orb-id": "orb-1",
+                    "pi-orb.inventory-scope": "fixture-a",
+                  },
+                },
+              },
+            ]),
+          },
+    );
+    const result = await makeProvider().listManagedHosts(task, context);
+    expect(result.isOk() && result.value).toEqual([]);
+  });
+
+  it("refuses a foreign fixture before stopping it", async () => {
+    dockerFake.install(() => ({
+      stdout: JSON.stringify([{ Config: { Labels: { "pi-orb.inventory-scope": "fixture-b" } } }]),
+    }));
+    const result = await makeProvider({ inventoryScope: "fixture-a" }).stop(task, ref, context);
+    expect(result.isErr() && result.error.code).toBe("conflict");
+    expect(dockerFake.calls.map((args) => args[0])).toEqual(["inspect"]);
   });
 
   it("applies the same address derivation when listing managed hosts", async () => {

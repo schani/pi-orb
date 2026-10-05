@@ -11,6 +11,7 @@ import type {
 } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import type { ResultAsync } from "neverthrow";
+import type { ActivityHeadlineStore } from "./activity-headline-store.ts";
 import type {
   AuthGateError,
   CommitPullError,
@@ -164,7 +165,7 @@ export interface CommitPullBatchParams {
  * `state_version` CAS; replication writes use cursor CAS; the two never touch
  * each other's correctness fields.
  */
-export interface ControlPlaneStore {
+export interface ControlPlaneStore extends ActivityHeadlineStore {
   readonly uploads: WorkspaceUploadStore;
   getProject(task: SimulationTask, projectId: string): ResultAsync<ProjectRow | null, StoreError>;
   listProjects(task: SimulationTask): ResultAsync<ProjectRow[], StoreError>;
@@ -491,6 +492,7 @@ export interface ControlPlaneStore {
   readHistorySnapshot(
     task: SimulationTask,
     orbId: string,
+    atRecordId?: string,
   ): ResultAsync<
     {
       session: HarnessSessionMetadata | null;
@@ -1052,6 +1054,19 @@ export interface SigningKeyDeps extends SigningKeyMaterialDeps, JwksDeps {
 
 // ---------------------------------------------------------------------------
 
+export interface ActivityHeadlineGenerationError {
+  readonly type: "headline_generation_failed";
+  readonly stage: "auth" | "inference" | "cancelled";
+}
+
+export interface ActivityHeadlineGenerator {
+  generate(
+    task: SimulationTask,
+    input: { ownerUserId: string; source: import("@pi-orb/protocol").ActivityHeadlineSource },
+    context: OperationContext & { readonly deadlineAt: number },
+  ): ResultAsync<string, ActivityHeadlineGenerationError>;
+}
+
 export interface OrbNameGeneratorError {
   readonly type: "orb_name_generation_error";
   readonly message: string;
@@ -1090,6 +1105,7 @@ export interface ControlPlaneDeps {
   readonly runtimeClient: OrbRuntimeClient;
   readonly authGate: AuthGate;
   readonly nameGenerator: OrbNameGenerator;
+  readonly headlineGenerator: ActivityHeadlineGenerator;
   readonly nameLeaseMs: number;
   readonly control: import("./control-state.ts").ControlState;
   readonly constants: import("./constants.ts").LifecycleConstants;

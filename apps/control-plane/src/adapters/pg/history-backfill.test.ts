@@ -27,26 +27,6 @@ const entry = (id: string, native: Record<string, unknown>): Record<string, unkn
 
 /** Native Pi entries: every derivation, plus the shapes that could break one. */
 const entries: Record<string, unknown>[] = [
-  entry("shell", {
-    type: "message",
-    message: {
-      role: "bashExecution",
-      command: "npm test",
-      output: "passing",
-      exitCode: 2,
-      cancelled: false,
-      truncated: true,
-      excludeFromContext: true,
-    },
-  }),
-  entry("shell-cancelled", {
-    type: "message",
-    message: { role: "bashExecution", command: "sleep 10" },
-  }),
-  entry("shell-nonstring-output", {
-    type: "message",
-    message: { role: "bashExecution", command: 7, output: { chunks: [] }, exitCode: "2" },
-  }),
   entry("custom-shown", {
     type: "custom_message",
     customType: "my-ext",
@@ -240,7 +220,7 @@ const entries: Record<string, unknown>[] = [
   }),
 ];
 
-const TYPED_FIELDS = ["shell", "custom", "subagent", "inboxMessageIds", "failure"] as const;
+const TYPED_FIELDS = ["custom", "subagent", "inboxMessageIds", "failure"] as const;
 
 /** The same record as persisted before the adapter derived typed fields. */
 function legacyForm(record: HistoryRecord): Record<string, unknown> {
@@ -319,6 +299,56 @@ describe(`${BACKFILL} history backfill`, () => {
 
   afterAll(async () => {
     await client.end();
+  });
+
+  it("normalizes persisted record shape without changing native data or other records", async () => {
+    const migration = "029_history_record_shape.sql";
+    const record = {
+      id: "record-shape",
+      parentId: null,
+      timestamp: "2026-07-20T10:00:00.000Z",
+      type: "event",
+      eventType: "pi.custom",
+      content: [{ type: "text", text: "retained" }],
+      overflow: { native: { type: "message", data: { shell: { value: "retained" } } } },
+    };
+    const oldShape = { ...record, shell: { value: "obsolete" } };
+    expect(Check(HistoryRecordSchema, oldShape)).toBe(false);
+    expect(
+      (
+        await client.query(
+          "INSERT INTO history_records (orb_id, record_id, parent_id, record) VALUES ($1, $2, NULL, $3)",
+          [ORB, record.id, jsonParam(oldShape)],
+        )
+      ).isOk(),
+    ).toBe(true);
+    const before = (
+      await client.query("SELECT record FROM history_records ORDER BY record_id")
+    )._unsafeUnwrap().rows;
+    expect(
+      (await client.query("DELETE FROM schema_migrations WHERE name = $1", [migration])).isOk(),
+    ).toBe(true);
+    expect((await runMigrations(client))._unsafeUnwrap()).toEqual([migration]);
+    const after = (
+      await client.query("SELECT record FROM history_records ORDER BY record_id")
+    )._unsafeUnwrap().rows;
+    expect(after).toEqual(
+      before.map((row) => ((row["record"] as { id: string }).id === record.id ? { record } : row)),
+    );
+    const normalized = after.find((row) => (row["record"] as { id: string }).id === record.id)?.[
+      "record"
+    ];
+    expect(Check(HistoryRecordSchema, normalized)).toBe(true);
+    expect(normalized).toEqual(record);
+    expect((await runMigrations(client))._unsafeUnwrap()).toEqual([]);
+    expect(
+      (await client.query("DELETE FROM schema_migrations WHERE name = $1", [migration])).isOk(),
+    ).toBe(true);
+    expect((await runMigrations(client))._unsafeUnwrap()).toEqual([migration]);
+    expect(
+      (await client.query("SELECT record FROM history_records ORDER BY record_id"))._unsafeUnwrap()
+        .rows,
+    ).toEqual(after);
   });
 
   it("backfills exactly what the Pi adapter derives", () => {

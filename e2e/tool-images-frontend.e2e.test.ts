@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HistoryRecord } from "@pi-orb/protocol";
@@ -306,65 +306,232 @@ describe.each(["chromium", "webkit"] as const)("tool-returned image previews · 
     }
   });
 
-  it("uses call arguments only when a completed read's result has no displayable body", async () => {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    let emptyResult = "";
-    let emptyCall = "";
-    let normalCall = "";
-    const requested: string[] = [];
-    await page.route(`**/api/v1/orbs/${ORB_ID}/history`, async (route) => {
-      const response = await route.fetch();
-      const view = await response.json();
-      for (const record of view.records)
-        for (const block of record.content ?? []) {
-          if (block.callId === "fixture-read-one") {
-            if (block.type === "tool_call") emptyCall = `${record.id}/${block.detailKey}`;
-            if (block.type === "tool_result") emptyResult = `${record.id}/${block.detailKey}`;
+  // Own read semantics and transport schedules, not unrelated media or tail scrolling.
+  it.each(["normal-first", "result-loading", "input-loading", "input-release-at-click"] as const)(
+    "uses call arguments only when a completed read's result has no displayable body · %s",
+    async (schedule) => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      await page.addInitScript(`(() => {
+        const events = [];
+        Object.assign(globalThis, { __readFallbackEvents: events });
+        for (const type of ["pointerdown", "pointerup", "click", "toggle"])
+          document.addEventListener(type, event => {
+            events.push({ type, trusted: event.isTrusted,
+              target: event.target?.closest?.("summary, details")?.textContent,
+              open: event.target?.closest?.("details")?.open });
+          }, true);
+      })();`);
+      let liveSockets = 0;
+      page.on("websocket", (socket) => {
+        if (socket.url().endsWith(`/orbs/${ORB_ID}/live`)) liveSockets++;
+      });
+      const timestamp = "2026-10-05T12:00:00.000Z";
+      const records: HistoryRecord[] = [
+        {
+          id: "read-root",
+          parentId: null,
+          timestamp,
+          type: "message",
+          role: "user",
+          content: [{ type: "text", text: "Read fallback." }],
+          overflow: {},
+        },
+        {
+          id: "read-calls",
+          parentId: "read-root",
+          timestamp,
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              callId: "fixture-read-one",
+              name: "read",
+              arguments: { path: "apps/web/src/components/HistoryView.tsx" },
+            },
+            {
+              type: "tool_call",
+              callId: "fixture-read-two",
+              name: "read",
+              arguments: { path: "docs/web-ui.md" },
+            },
+          ],
+          overflow: {},
+        },
+        {
+          id: "read-empty",
+          parentId: "read-calls",
+          timestamp,
+          type: "message",
+          role: "tool",
+          content: [{ type: "tool_result", callId: "fixture-read-one", content: [] }],
+          overflow: {},
+        },
+        {
+          id: "read-body",
+          parentId: "read-empty",
+          timestamp,
+          type: "message",
+          role: "tool",
+          content: [
+            {
+              type: "tool_result",
+              callId: "fixture-read-two",
+              content: [{ type: "text", text: "Web UI design decisions" }],
+            },
+          ],
+          overflow: {},
+        },
+      ];
+      const projected = await projectFixtureHistory(page, ORB_ID, records);
+      await page.route(`**/api/v1/orbs/${ORB_ID}`, async (route) => {
+        const response = await route.fetch();
+        const orb = await response.json();
+        orb.state = "stopped";
+        await route.fulfill({ response, json: orb });
+      });
+      let emptyResult = "";
+      let emptyCall = "";
+      let normalCall = "";
+      const requested: string[] = [];
+      let releaseResult!: () => void;
+      let releaseInput!: () => void;
+      const resultGate = new Promise<void>((resolve) => {
+        releaseResult = resolve;
+      });
+      const inputGate = new Promise<void>((resolve) => {
+        releaseInput = resolve;
+      });
+      await page.route(`**/api/v1/orbs/${ORB_ID}/history`, async (route) => {
+        const response = await route.fetch();
+        const view = await response.json();
+        view.records = projected;
+        view.headId = records.at(-1)?.id;
+        view.cursor = view.headId;
+        for (const record of view.records)
+          for (const block of record.content ?? []) {
+            if (block.callId === "fixture-read-one") {
+              if (block.type === "tool_call") emptyCall = `${record.id}/${block.detailKey}`;
+              if (block.type === "tool_result") emptyResult = `${record.id}/${block.detailKey}`;
+            }
+            if (block.callId === "fixture-read-two" && block.type === "tool_call")
+              normalCall = `${record.id}/${block.detailKey}`;
           }
-          if (block.callId === "fixture-read-two" && block.type === "tool_call")
-            normalCall = `${record.id}/${block.detailKey}`;
+        await route.fulfill({ response, json: view });
+      });
+      await page.route(`**/api/v1/orbs/${ORB_ID}/details/**`, async (route) => {
+        const path = decodeURIComponent(new URL(route.request().url()).pathname);
+        requested.push(path);
+        if (schedule !== "normal-first" && path.endsWith(`/details/${emptyCall}`)) {
+          await inputGate;
+          return route.fallback();
         }
-      await route.fulfill({ response, json: view });
-    });
-    await page.route(`**/api/v1/orbs/${ORB_ID}/details/**`, async (route) => {
-      const path = decodeURIComponent(new URL(route.request().url()).pathname);
-      requested.push(path);
-      if (!path.endsWith(`/details/${emptyResult}`)) return route.continue();
-      const response = await route.fetch();
-      const detail = await response.json();
-      detail.body.content = [];
-      await route.fulfill({ response, json: detail });
-    });
-    try {
-      await gotoFrontendHistory(page, url, ORB_ID);
-      const read = page
-        .locator("details.tool-activity-category")
-        .filter({ hasText: "HistoryView.tsx" })
-        .filter({ hasText: "docs/web-ui.md" });
-      await read.locator(":scope > summary").click();
-      const empty = read
-        .locator("details.tool-activity-call")
-        .filter({ hasText: "HistoryView.tsx" });
-      const normal = read
-        .locator("details.tool-activity-call")
-        .filter({ hasText: "docs/web-ui.md" });
-      await normal.locator(":scope > summary").click();
-      await expectPage(normal.locator(".tool-call-output")).toContainText(
-        "Web UI design decisions",
-      );
-      expectPage(requested.some((path) => path.endsWith(`/details/${normalCall}`))).toBe(false);
-      await empty.locator(":scope > summary").click();
-      await expectPage(empty.locator(".tool-input")).toContainText("HistoryView.tsx");
-      expectPage(requested.filter((path) => path.endsWith(`/details/${emptyResult}`))).toHaveLength(
-        1,
-      );
-      expectPage(requested.filter((path) => path.endsWith(`/details/${emptyCall}`))).toHaveLength(
-        1,
-      );
-    } finally {
-      await page.close();
-    }
-  });
+        if (path.endsWith(`/details/${emptyResult}`) && schedule !== "normal-first")
+          await resultGate;
+        return route.fallback();
+      });
+      try {
+        await gotoFrontendHistory(page, url, ORB_ID);
+        const read = page
+          .locator("details.tool-activity-category")
+          .filter({ hasText: "HistoryView.tsx" })
+          .filter({ hasText: "docs/web-ui.md" });
+        await expectPage(read).toBeVisible();
+        await page.evaluate(async () => {
+          await Reflect.get(globalThis, "document").fonts.ready;
+        });
+        const assertBoundedHistory = async () => {
+          expectPage(
+            await page.locator(".orb-transcript-scroll").evaluate((element) => ({
+              overflow: element.scrollHeight > element.clientHeight,
+              scrollTop: element.scrollTop,
+            })),
+          ).toEqual({ overflow: false, scrollTop: 0 });
+        };
+        await assertBoundedHistory();
+        await expectPage(page.locator("details.tool-activity-category")).toHaveCount(1);
+        await expectPage(page.locator(".tool-image-preview, img.msg-image")).toHaveCount(0);
+        await read.locator(":scope > summary").click();
+        await assertBoundedHistory();
+        await expectPage(read.locator("details.tool-activity-call")).toHaveCount(2);
+        const empty = read
+          .locator("details.tool-activity-call")
+          .filter({ hasText: "HistoryView.tsx" });
+        const normal = read
+          .locator("details.tool-activity-call")
+          .filter({ hasText: "docs/web-ui.md" });
+        if (schedule !== "normal-first") {
+          const resultRequested = page.waitForRequest((request) =>
+            decodeURIComponent(new URL(request.url()).pathname).endsWith(`/details/${emptyResult}`),
+          );
+
+          await empty.locator(":scope > summary").click();
+          await resultRequested;
+          await expectPage(empty).toContainText("Loading…");
+          await assertBoundedHistory();
+          if (schedule !== "result-loading") {
+            const inputRequested = page.waitForRequest((request) =>
+              decodeURIComponent(new URL(request.url()).pathname).endsWith(`/details/${emptyCall}`),
+            );
+            releaseResult();
+            await inputRequested;
+            await expectPage(empty).toContainText("Loading…");
+            await assertBoundedHistory();
+          }
+        }
+
+        if (schedule === "input-release-at-click") releaseInput();
+        await normal.locator(":scope > summary").click();
+        await assertBoundedHistory();
+        await expectPage(normal.locator(".tool-call-output")).toContainText(
+          "Web UI design decisions",
+        );
+        expectPage(requested.some((path) => path.endsWith(`/details/${normalCall}`))).toBe(false);
+        if (schedule === "normal-first") {
+          await empty.locator(":scope > summary").click();
+          await assertBoundedHistory();
+        }
+        releaseResult();
+        releaseInput();
+        await expectPage(empty.locator(".tool-input")).toContainText("HistoryView.tsx");
+        expectPage(
+          requested.filter((path) => path.endsWith(`/details/${emptyResult}`)),
+        ).toHaveLength(1);
+        expectPage(requested.filter((path) => path.endsWith(`/details/${emptyCall}`))).toHaveLength(
+          1,
+        );
+        await assertBoundedHistory();
+        expectPage(liveSockets).toBe(0);
+      } catch (cause) {
+        const dir = join(import.meta.dirname, "../test-failures");
+        await mkdir(dir, { recursive: true });
+        const evidence = await page.evaluate(() => ({
+          events: Reflect.get(globalThis, "__readFallbackEvents"),
+          scroll: Array.from(
+            Reflect.get(globalThis, "document").querySelectorAll(".orb-transcript-scroll"),
+            (element: { scrollTop: number; scrollHeight: number; clientHeight: number }) => ({
+              scrollTop: element.scrollTop,
+              scrollHeight: element.scrollHeight,
+              clientHeight: element.clientHeight,
+            }),
+          ),
+        }));
+        await writeFile(
+          join(dir, `read-fallback-${engine}-${schedule}-${Date.now()}.json`),
+          JSON.stringify(
+            { replayable: false, requested, liveSockets, evidence, cause: String(cause) },
+            null,
+            2,
+          ),
+        );
+        throw cause;
+      } finally {
+        releaseResult();
+        releaseInput();
+        await page.close();
+      }
+    },
+  );
 
   it("enlarges a preview and Escape restores focus to its trigger", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });

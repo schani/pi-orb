@@ -52,6 +52,7 @@ function toolRecords() {
   });
   const result = projectDisplayRecord({
     ...message("result", "assistant"),
+    parentId: "call",
     role: "tool",
     content: [{ type: "tool_result", callId: "one", content: [{ type: "text", text: "DONE" }] }],
   });
