@@ -138,6 +138,8 @@ Tracking:
 - [docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md](docs/postmortems/2026-10-05-e2e-docker-inventory-isolation.md) — fresh fixture inventory crossed the shared daemon's ownership boundary; scoped gate preserves foreign resources
 - [docs/postmortems/2026-10-04-workspace-full-history-desync.md](docs/postmortems/2026-10-04-workspace-full-history-desync.md) — full workspace followed by cursor-not-found; offline repair and normal replication verified 2026-10-05 (America/Cancun), with all original SQL rows unchanged
 - [docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md](docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md) — visible read summary blocked by markdown pointer interception; root cause unproved
+- [docs/postmortems/2026-10-04-ipad-sidebar-overdraw.md](docs/postmortems/2026-10-04-ipad-sidebar-overdraw.md) — missing/deleted orb view auto-placed beneath the fixed index; confirmed layout fix and superseded paint hypothesis
+
 - [docs/postmortems/2026-10-03-cached-orb-navigation.md](docs/postmortems/2026-10-03-cached-orb-navigation.md) — cached switching still pays metadata, remount, accessibility and 1Password focus costs; investigation only
 - [docs/postmortems/2026-10-02-control-plane-patch-image-build.md](docs/postmortems/2026-10-02-control-plane-patch-image-build.md) — runtime-only patch broke the control-plane image build before apply; restrict its patch set
 - [docs/postmortems/2026-10-02-webkit-lazy-return-gate.md](docs/postmortems/2026-10-02-webkit-lazy-return-gate.md) — captured split-target sidebar click, fixed rail/scroll ownership and diagnostic callback race

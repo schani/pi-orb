@@ -1743,7 +1743,12 @@ function OrbConversation({
     state.pendingRequest === null &&
     (state.welcome?.capabilities.includes(CAPABILITY_ABORT) ?? false);
 
-  if (orbNotFound) return <NotFoundPage resourceName="Orb" />;
+  if (orbNotFound)
+    return (
+      <div className="orb-main">
+        <NotFoundPage resourceName="Orb" />
+      </div>
+    );
 
   const glyph =
     orb === null
