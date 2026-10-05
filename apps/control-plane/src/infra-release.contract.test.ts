@@ -41,6 +41,7 @@ function makeFixture(): { root: string; log: string } {
 const fs = require('node:fs');
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.CALL_LOG, 'record:' + a.join(' ') + '\\n');
+if (a[1] === 'infra.release_cutover') process.exit(Number(process.env.MOCK_CUTOVER_STATUS ?? 0));
 if (a[0] !== '-m' || a[1] !== 'infra.release_state') process.exit(0);
 const [action, path, ...rest] = a.slice(2);
 if (action === 'init') fs.writeFileSync(path, JSON.stringify({commit:rest[1],phase:'preflight',artifacts:{control_plane_image:'registry/control@sha256:abc',deploy_generation:201}}));
@@ -96,7 +97,10 @@ if [ "$1" = auth ]; then echo token; exit 0; fi
 if [ "$1 $2" = "storage cp" ]; then exit "\${MOCK_LOCK_STATUS:-0}"; fi
 if [ "$1 $2 $3" = "storage objects describe" ]; then echo 42; exit 0; fi
 if [ "$1 $2" = "storage rm" ]; then exit 0; fi
-if [ "$1 $2 $3" = "secrets versions describe" ]; then echo projects/test/secrets/database/versions/1; exit 0; fi
+if [ "$1 $2 $3" = "secrets versions describe" ]; then
+  if [[ "$*" == *"pi-orb-google-identity-mappings"* ]]; then echo '{"name":"projects/test/secrets/pi-orb-google-identity-mappings/versions/1","state":"ENABLED"}'; else echo projects/test/secrets/database/versions/1; fi
+  exit 0
+fi
 if [ "$1 $2 $3" = "run jobs create" ]; then exit "\${MOCK_SCHEMA_STATUS:-0}"; fi
 cat <<'JSON'
 {"spec":{"template":{"spec":{"containers":[{"env":[{"name":"PI_ORB_HOST_SPEC_GENERATION","value":"200"}]}]}}}}
@@ -388,8 +392,54 @@ describe("infra/release.sh", () => {
     );
     expect(calls).not.toContain("docker:build");
     expect(calls).toContain(
-      `--set-env-vars=^|^PI_ORB_USER_ID=${userId}|PI_ORB_ORIGINAL_USER_ID=${userId}|PI_ORB_ORIGINAL_IDENTITY_ISSUER=https://issuer.example|PI_ORB_ORIGINAL_IDENTITY_SUBJECT=original-subject|PI_ORB_GOOGLE_IDENTITY_MAPPINGS=[`,
+      `--set-env-vars=^@^PI_ORB_USER_ID=${userId}@PI_ORB_ORIGINAL_USER_ID=${userId}@PI_ORB_ORIGINAL_IDENTITY_ISSUER=https://issuer.example@PI_ORB_ORIGINAL_IDENTITY_SUBJECT=original-subject`,
     );
+    expect(calls).not.toContain("PI_ORB_GOOGLE_IDENTITY_MAPPINGS=[");
+    expect(calls).not.toContain("pi-orb-google-identity-mappings:1");
+  });
+
+  it("first consolidation qualifies and plans before retirement and secure migration", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+        GITHUB_ACTIONS: "true",
+      },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toMatch(
+      /npm:run test:e2e[\s\S]*\nbuild[\s\S]*tofu:.* plan[\s\S]*infra.release_cutover[\s\S]*run jobs create[\s\S]*tofu:.* apply[\s\S]*infra.release_retire wait[\s\S]*infra.release_state activate/,
+    );
+    expect(calls).toContain("PI_ORB_GOOGLE_IDENTITY_MAPPINGS=pi-orb-google-identity-mappings:1");
+    expect(calls).not.toContain("PI_ORB_GOOGLE_IDENTITY_MAPPINGS=[");
+  });
+
+  it("holds the global lock and stops before migration when retirement fails", () => {
+    const { root, log } = makeFixture();
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
+        GITHUB_ACTIONS: "true",
+        MOCK_CUTOVER_STATUS: "1",
+      },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("lock retained");
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("infra.release_state stage");
+    expect(calls).toContain(" maintenance");
+    expect(calls).not.toMatch(/run jobs create|tofu:.* apply|gcloud:storage rm/);
   });
 
   it("validation-only neither builds, migrates nor applies", () => {
@@ -417,25 +467,21 @@ describe("infra/release.sh", () => {
     );
   });
 
-  it("refuses a cutover without explicit mappings and independent execution", () => {
+  it("refuses first consolidation without independent Actions execution", () => {
     const { root, log } = makeFixture();
-    const result = spawnSync(
-      join(root, "infra/release.sh"),
-      ["--yes", "--cutover", "manifest.json"],
-      {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          PI_ORB_GOOGLE_IDENTITY_MAPPINGS: "",
-          CALL_LOG: log,
-          PATH: `${join(root, "bin")}:${process.env.PATH}`,
-          PROJECT: "test-project",
-          TMPDIR: join(root, "tmp"),
-        },
+    const result = spawnSync(join(root, "infra/release.sh"), ["--yes", "--first-consolidation"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PI_ORB_GOOGLE_IDENTITY_MAPPINGS: "",
+        CALL_LOG: log,
+        PATH: `${join(root, "bin")}:${process.env.PATH}`,
+        PROJECT: "test-project",
+        TMPDIR: join(root, "tmp"),
       },
-    );
+    });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("explicit verified identity mappings");
+    expect(result.stderr).toContain("first cutover requires independent GitHub execution");
     expect(readFileSync(log, "utf8")).not.toMatch(/npm:|run jobs create|tofu:.* apply/);
   });
 

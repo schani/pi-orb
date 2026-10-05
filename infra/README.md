@@ -123,7 +123,7 @@ Required ordering: retire only `pi-orb`, `pi-orb-ops` and `pi-orb-runtime-api`; 
 
 **Decision, 2026-10-05:** downtime, backend API breaks and lost queued messages are acceptable. Preserve existing conversation history and persistent workspace data; users can stop/restart old orbs. No fleet drain, maintenance snapshot or automatic resumption is required.
 
-The current `--cutover MANIFEST` verifier checks retirement evidence but does not retire old services. Replace fleet/wake attestations with a simple first-consolidation input and Actions-owned retirement using the existing observation checks. Completion is tracked in `TODO.md`; do not dispatch or substitute manual cloud steps. Durable release records and the Actions summary report phase/outcome independently of orb uptime.
+Set Deploy input `first_consolidation: true` for the first release (`--first-consolidation` in the shared shell). Qualification, fresh build, saved-plan/configuration/permission checks and a refreshed main-SHA guard precede deletion. Actions inventories exact service UIDs and deletes with v2 ETag preconditions; issuer and unrelated services remain. All three already absent is allowed, but partial absence requires operator review. Existing active/idle zeroes and pending Compute-operation checks gate migration. Retirement or migration uncertainty retains the global lock and recorded phase for inspection; no automatic rollback or retry. Durable release records and the Actions summary report phase/outcome independently of orb uptime.
 
 ## Tooling access
 

@@ -43,7 +43,14 @@ class ConsolidationTest(unittest.TestCase):
 
     def test_maintenance_precedes_schema(self):
         source = Path('infra/release.sh').read_text()
-        self.assertLess(source.index('release_cutover verify'), source.index('stage schema'))
+        self.assertLess(source.index('stage plan'), source.index('release_cutover'))
+        self.assertLess(source.index('git fetch --quiet origin main', source.index('stage plan')), source.index('release_cutover'))
+        self.assertLess(source.index('release_cutover'), source.index('stage schema'))
+        self.assertIn('KEEP_REMOTE_LOCK=true\n    release_run_child python3 -m infra.release_cutover', source)
+        workflow = Path('.github/workflows/deploy.yml').read_text()
+        self.assertIn('first_consolidation:', workflow)
+        self.assertIn('type: boolean', workflow)
+        self.assertNotIn('cutover_manifest', workflow)
         retirement = Path('infra/release_retire.py').read_text()
         self.assertIn('pi-orb-issuer', retirement)
         self.assertIn('pi-orb-ops', retirement)

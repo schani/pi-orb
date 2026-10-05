@@ -8,11 +8,11 @@ on:
         required: false
         type: string
         default: ''
-      cutover_manifest:
-        description: 'First consolidation only: reviewed maintenance manifest JSON; old writers must already be retired'
+      first_consolidation:
+        description: 'Retire the three old application services before Google identity migration (downtime)'
         required: false
-        type: string
-        default: ''
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -86,7 +86,7 @@ jobs:
         id: release
         env:
           VALIDATE_RELEASE: ${{ inputs.validate_release }}
-          CUTOVER_MANIFEST: ${{ inputs.cutover_manifest }}
+          FIRST_CONSOLIDATION: ${{ inputs.first_consolidation }}
           TF_VAR_google_client_id: 1077475695242-hs53alaasigvrurtme2j73ej37vqre63.apps.googleusercontent.com
           PI_ORB_RELEASE_RESULT_DIR: ${{ runner.temp }}/release-result
           PI_ORB_USER_ID: ${{ vars.PI_ORB_USER_ID }}
@@ -94,11 +94,7 @@ jobs:
           set -euo pipefail
           args=(--yes)
           if [ -n "$VALIDATE_RELEASE" ]; then args+=(--validate "$VALIDATE_RELEASE"); fi
-          if [ -n "$CUTOVER_MANIFEST" ]; then
-            umask 077
-            printf '%s' "$CUTOVER_MANIFEST" > "$RUNNER_TEMP/cutover.json"
-            args+=(--cutover "$RUNNER_TEMP/cutover.json")
-          fi
+          if [ "$FIRST_CONSOLIDATION" = true ]; then args+=(--first-consolidation); fi
           exec ./infra/release.sh "${args[@]}"
       - name: Upload lazy-return browser failure evidence
         if: failure()

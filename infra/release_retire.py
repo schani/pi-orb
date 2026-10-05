@@ -8,9 +8,9 @@ import urllib.parse
 from infra.release_state import Cloud, Result, fail, load, now, publish, save, utc_epoch as epoch, valid_id, valid_retirement, validate_record
 
 
-def metrics(cloud, project, region, start, end):
+def metrics(cloud, project, region, start, end, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
     result = []
-    for service in ("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer"):
+    for service in services:
         query = {
             "filter": f'metric.type="run.googleapis.com/container/instance_count" AND resource.type="cloud_run_revision" AND resource.labels.service_name="{service}" AND resource.labels.location="{region}"',
             "interval.startTime": start, "interval.endTime": end, "view": "FULL", "pageSize": "10000",
@@ -192,14 +192,15 @@ def pending_operations(cloud, project):
     return Result(sorted(pending))
 
 
-def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sleep=time.sleep, checkpoint=lambda _record: Result(), limit=75 * 60):
+def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sleep=time.sleep, checkpoint=lambda _record: Result(), limit=75 * 60, services=None):
     if record["retirement"] is None:
         return fail("invalid", "retirement inventory is required")
     deadline = monotonic() + limit
     previous = None
     while True:
         end = wall()
-        observed = metrics(cloud, record["project"], record["region"], record["retirement"]["after"], end)
+        scope = {} if services is None else {"services": services}
+        observed = metrics(cloud, record["project"], record["region"], record["retirement"]["after"], end, **scope)
         if observed.error:
             return observed
         found = evidence(record, observed.value, end)

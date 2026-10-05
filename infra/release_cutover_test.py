@@ -1,136 +1,88 @@
-import copy
 import unittest
 from unittest.mock import patch
-from infra.release_cutover import begin_observation, main, verify
-from infra.release_retire import inventory, wait_for_retirement
-from infra.release_retire_test import series
-from infra.release_state import Result, validate_record
+from infra.release_cutover import OLD_SERVICES, retire
+from infra.release_state import Result, fail
 from infra.release_state_test import record
 
 
 class Cloud:
-    def __init__(self, services): self.services = services
-    def json(self, args): return Result(self.services)
+    def __init__(self, absent=(), failure=None):
+        self.absent = set(absent)
+        self.failure = failure
+        self.calls = []
+    def http(self, method, url, body=None):
+        self.calls.append((method, url))
+        name = url.split('/services/')[-1].split('?')[0]
+        if method == 'POST': return Result({'permissions': ['run.services.delete']})
+        if method == 'DELETE':
+            if name == self.failure: return fail('http', 'delete failed')
+            self.absent.add(name)
+            return Result({'name': 'projects/test-project/locations/us-central1/operations/delete', 'done': True})
+        if '/operations/' in url: return Result({'done': True})
+        return Result(None if name in self.absent else {'name': url.split('/v2/')[1], 'uid': 'uid-' + name, 'etag': 'etag-' + name})
 
 
 class CutoverTest(unittest.TestCase):
-    def manifest(self):
-        return {'project': 'test-project', 'region': 'us-central1', 'commit': 'b'*40,
-                'fleetStopped': True, 'wakeIntentsReviewed': True,
-                'retirement': record()['retirement']}
+    def run_retire(self, cloud):
+        checkpoints = []
+        with patch('infra.release_cutover.inventory', side_effect=lambda _c, r, **_kw: Result(r)), patch('infra.release_cutover.wait_for_retirement', return_value=Result(record())) as wait:
+            result = retire(cloud, record(), checkpoint=lambda r: checkpoints.append(r.copy()) or Result())
+        return result, checkpoints, wait
 
-    def test_deleted_service_is_not_retirement_proof(self):
-        value = self.manifest()
-        value['retirement']['zeroes'] = {}
-        self.assertIsNotNone(verify(Cloud([]), record(), value).error)
-
-    def test_tagged_or_reactivatable_service_blocks_migration(self):
-        for name in ['pi-orb', 'pi-orb-ops', 'pi-orb-runtime-api']:
-            self.assertIsNotNone(verify(Cloud([{'metadata': {'name': name}}]), record(), self.manifest()).error)
-
-    def test_wrong_target_and_undrained_fleet_fail_closed(self):
-        for key, value in [('project', 'elsewhere'), ('commit', 'c'*40), ('fleetStopped', False), ('wakeIntentsReviewed', False)]:
-            manifest = self.manifest(); manifest[key] = value
-            self.assertIsNotNone(verify(Cloud([]), record(), manifest).error)
-
-    def test_observation_requires_fencing_and_discards_pre_fence_zeroes(self):
-        manifest = self.manifest()
-        self.assertIsNotNone(begin_observation(Cloud([{'metadata': {'name': 'pi-orb'}}]), record(), manifest).error)
-        result = begin_observation(Cloud([{'metadata': {'name': 'pi-orb-issuer'}}]), record(), manifest,
-                                   wall=lambda: '2026-09-09T12:03:00Z')
+    def test_exact_scope_and_order(self):
+        cloud = Cloud()
+        result, checkpoints, wait = self.run_retire(cloud)
         self.assertIsNone(result.error)
-        self.assertEqual(result.value['retirement']['after'], '2026-09-09T12:03:00Z')
-        self.assertEqual(result.value['retirement']['zeroes'], {})
-        self.assertEqual(result.value['retirement']['revisions'], manifest['retirement']['revisions'])
-        self.assertTrue(manifest['retirement']['zeroes'])
+        deletes = [url for method, url in cloud.calls if method == 'DELETE']
+        self.assertEqual(len(deletes), 3)
+        for name, url in zip(OLD_SERVICES, deletes):
+            self.assertTrue(url.endswith('/services/' + name + '?etag=etag-' + name))
+        self.assertTrue(all(method == 'GET' for method, _ in cloud.calls[:4]))
+        self.assertTrue(checkpoints)
+        self.assertEqual(wait.call_args.kwargs['services'], OLD_SERVICES)
 
-    def test_complete_evidence_admits_cutover(self):
-        self.assertIsNone(verify(Cloud([{'metadata': {'name': 'pi-orb-issuer'}}]), record(), self.manifest()).error)
+    def test_known_absence_is_checked_without_deleting(self):
+        cloud = Cloud(OLD_SERVICES)
+        result, _, wait = self.run_retire(cloud)
+        self.assertIsNone(result.error)
+        self.assertFalse(any(method == 'DELETE' for method, _ in cloud.calls))
+        wait.assert_called_once()
 
-    def test_manifest_rejects_arbitrary_fields(self):
-        manifest = self.manifest()
-        manifest['operatorNotes'] = 'not evidence'
-        self.assertIsNotNone(verify(Cloud([]), record(), manifest).error)
+    def test_partial_fence_fails_before_delete(self):
+        cloud = Cloud(['pi-orb'])
+        result, _, wait = self.run_retire(cloud)
+        self.assertIsNotNone(result.error)
+        self.assertFalse(any(method == 'DELETE' for method, _ in cloud.calls))
+        wait.assert_not_called()
 
-    def test_excluded_only_inventory_survives_observation_and_verification(self):
-        class PipelineCloud:
-            def __init__(self):
-                self.points = [series('pi-orb-deleted', 'active', '1', '2026-09-09T11:58:00Z')]
-                self.points += [series('pi-orb-deleted', state, '0', '2026-09-09T11:59:00Z') for state in ('active', 'idle')]
-                self.operations = []
-                self.writes = []
-            def json(self, args):
-                if args[0] == 'compute': return Result(self.operations)
-                if args[1:3] == ['revisions', 'list']: return Result([])
-                if args[2] == 'list': return Result([{'metadata': {'name': 'pi-orb-issuer'}}])
-                return Result({'status': {'latestReadyRevisionName': 'pi-orb-issuer-old'}})
-            def http(self, method, url):
-                return Result({'timeSeries': self.points})
-            def put(self, *args):
-                self.writes.append(args)
-                return Result()
-        cloud = PipelineCloud()
-        value = record()
-        found = inventory(cloud, value, services=('pi-orb', 'pi-orb-ops', 'pi-orb-runtime-api'), wall=lambda: '2026-09-09T12:00:00Z')
-        self.assertIsNone(found.error)
-        manifest = self.manifest()
-        manifest['retirement'] = found.value['retirement']
-        self.assertEqual(manifest['retirement']['revisions'], [])
-        self.assertEqual(set(manifest['retirement']['excluded']), {'pi-orb-deleted'})
-        observed = begin_observation(cloud, value, manifest, wall=lambda: '2026-09-09T12:03:00Z')
-        self.assertIsNone(observed.error)
-        cloud.points = []
-        self.assertIsNone(wait_for_retirement(cloud, observed.value, wall=lambda: '2026-09-09T12:04:00Z', limit=0).error)
-        manifest['retirement'] = observed.value['retirement']
-        self.assertTrue(validate_record({**value, 'retirement': manifest['retirement']}))
-        self.assertIsNone(verify(cloud, value, manifest).error)
-        for change in ('empty', 'overlap', 'utc', 'state', 'pending'):
-            with self.subTest(change=change):
-                invalid = copy.deepcopy(manifest)
-                proof = invalid['retirement']
-                if change == 'empty': proof['excluded'] = {}
-                if change == 'overlap': proof['revisions'] = ['pi-orb-deleted']
-                if change == 'utc': proof['excluded']['pi-orb-deleted']['idle'] = '2026-02-30T11:59:00Z'
-                if change == 'state': del proof['excluded']['pi-orb-deleted']['idle']
-                if change == 'pending': proof['operations'] = ['operation-old']
-                self.assertIsNotNone(verify(cloud, value, invalid).error)
-        operation = {'name': 'operation-old', 'status': 'RUNNING', 'targetLink': 'https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-a/instances/pi-orb-old'}
-        for change in ('none', 'positive', 'pending'):
-            with self.subTest(recheck=change):
-                cloud.points = [series('pi-orb-deleted', 'active', '1', '2026-09-09T12:04:00Z')] if change == 'positive' else []
-                cloud.operations = [operation] if change == 'pending' else []
-                cloud.writes = []
-                with patch('infra.release_cutover.Cloud', return_value=cloud), patch('infra.release_cutover.load', side_effect=[Result(value), Result(copy.deepcopy(manifest))]), patch('infra.release_cutover.save', return_value=Result()), patch('infra.release_cutover.publish', return_value=Result()), patch('infra.release_cutover.wait_for_retirement', side_effect=lambda cloud, candidate, **kwargs: wait_for_retirement(cloud, candidate, wall=lambda: '2026-09-09T12:05:00Z', **kwargs)):
-                    self.assertEqual(main(['cutover', 'verify', 'record', 'manifest']), 0 if change == 'none' else 1)
-                self.assertEqual(len(cloud.writes), 1 if change == 'none' else 0)
+    def test_missing_issuer_and_changed_uid_fail_closed(self):
+        cloud = Cloud(['pi-orb-issuer'])
+        self.assertIsNotNone(self.run_retire(cloud)[0].error)
+        self.assertFalse(any(method == 'DELETE' for method, _ in cloud.calls))
+        cloud = Cloud()
+        original = cloud.http
+        def changed(method, url, body=None):
+            result = original(method, url, body)
+            if len(cloud.calls) > 4 and method == 'GET': result.value['uid'] = 'replacement'
+            return result
+        cloud.http = changed
+        self.assertIsNotNone(self.run_retire(cloud)[0].error)
+        self.assertFalse(any(method == 'DELETE' for method, _ in cloud.calls))
 
-    def test_recheck_rejects_delayed_writer_and_preserves_issuer_retirement(self):
-        for delayed_writer in (True, False):
-            value = record()
-            value['serving'] = None
-            manifest = self.manifest()
-            before = copy.deepcopy(manifest)
-            writes = []
-            class LiveCloud:
-                def json(self, args):
-                    if args[0] == 'compute': return Result([])
-                    if args[2] == 'list': return Result([{'metadata': {'name': 'pi-orb-issuer'}}])
-                    return Result({'status': {'latestReadyRevisionName': 'pi-orb-issuer-old'}})
-                def http(self, method, url):
-                    points = [series('pi-orb-old', 'active', '1', '2026-09-09T12:02:00Z')] if delayed_writer else []
-                    return Result({'timeSeries': points})
-                def put(self, *args):
-                    writes.append(args)
-                    return Result()
-            def store(path, candidate):
-                writes.append(copy.deepcopy(candidate))
-                return Result()
-            with patch('infra.release_cutover.Cloud', return_value=LiveCloud()), patch('infra.release_cutover.load', side_effect=[Result(value), Result(manifest)]), patch('infra.release_cutover.save', side_effect=store), patch('infra.release_cutover.publish', return_value=Result()):
-                self.assertEqual(main(['cutover', 'verify', 'record', 'manifest']), 1 if delayed_writer else 0)
-            self.assertEqual(manifest, before)
-            if delayed_writer:
-                self.assertEqual(writes, [])
-            else:
-                self.assertEqual(writes[0][3], '0')
-                self.assertIn('pi-orb-issuer-old', writes[1]['retirement']['revisions'])
-                self.assertNotIn('pi-orb-issuer-old', writes[1]['retirement']['zeroes'])
+    def test_missing_delete_permission_precedes_every_delete(self):
+        cloud = Cloud()
+        original = cloud.http
+        cloud.http = lambda method, url, body=None: Result({'permissions': []}) if method == 'POST' else original(method, url, body)
+        self.assertIsNotNone(self.run_retire(cloud)[0].error)
+        self.assertFalse(any(method == 'DELETE' for method, _ in cloud.calls))
+
+    def test_partial_delete_failure_never_continues(self):
+        cloud = Cloud(failure='pi-orb-ops')
+        result, checkpoints, wait = self.run_retire(cloud)
+        self.assertIsNotNone(result.error)
+        self.assertEqual(len([1 for method, _ in cloud.calls if method == 'DELETE']), 2)
+        self.assertTrue(checkpoints)
+        wait.assert_not_called()
+
+
+if __name__ == '__main__': unittest.main()
