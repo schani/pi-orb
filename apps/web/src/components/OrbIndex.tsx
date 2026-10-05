@@ -11,7 +11,12 @@ import { FAVICON_HREFS } from "../lib/favicon.ts";
 import { navigate } from "../lib/navigation.ts";
 import { shouldAcknowledgeSelection } from "../lib/orb-alert.ts";
 import { projectDeletionProgressText } from "../lib/project-deletion.ts";
-import { formatProjectOrbAge, projectOrbGlyph, splitProjectOrbs } from "../lib/project-orbs.ts";
+import {
+  formatProjectOrbAge,
+  type OrbOrderCache,
+  projectOrbGlyph,
+  splitProjectOrbs,
+} from "../lib/project-orbs.ts";
 import { useAddressedProject } from "../lib/use-addressed-project.ts";
 import { generateUuid } from "../lib/uuid.ts";
 import { useAppSearchSource } from "./AppSearch.tsx";
@@ -80,6 +85,7 @@ function IndexRow({
 export function IndexProject({
   project,
   list,
+  orbOrder,
   orbId,
   pending,
   now,
@@ -89,6 +95,7 @@ export function IndexProject({
 }: {
   project: ProjectView;
   list: OrbList | undefined;
+  orbOrder: OrbOrderCache;
   orbId: string;
   pending: boolean;
   now: number;
@@ -135,7 +142,7 @@ export function IndexProject({
       navigate(`/orbs/${encodeURIComponent(result.value.id)}`);
     }
   };
-  const shelves = splitProjectOrbs(list?.items ?? []);
+  const shelves = splitProjectOrbs(list?.items ?? [], orbOrder);
   const currentArchived = shelves.archive.some((orb) => orb.id === orbId);
   const [archiveOpen, setArchiveOpen] = useState(currentArchived);
   useEffect(() => {
@@ -245,6 +252,7 @@ export function OrbIndex({
   const [error, setError] = useState<ApiError | null>(null);
   const [lists, setLists] = useState<Record<string, OrbList>>({});
   const [now, setNow] = useState(() => Date.now());
+  const [orbOrder] = useState<OrbOrderCache>(() => new Map());
   // Completed config/delete/create mutations fence reads that began before they committed.
   const revision = useRef(0);
   const projectInDefault =
@@ -294,6 +302,7 @@ export function OrbIndex({
           ]),
         ),
         now,
+        orbOrder,
       }),
       id: `orb-index:${orbId}`,
       onActivate: (item: AppSearchItem) => {
@@ -304,7 +313,7 @@ export function OrbIndex({
           onSelect();
       },
     }),
-    [error, now, orbId, onSelect, projects, visibleLists, visibleProjects],
+    [error, now, orbId, orbOrder, onSelect, projects, visibleLists, visibleProjects],
   );
   useAppSearchSource(searchSource);
   useEffect(() => {
@@ -393,6 +402,7 @@ export function OrbIndex({
           key={project.id}
           project={project}
           list={visibleLists[project.id]}
+          orbOrder={orbOrder}
           orbId={orbId}
           pending={pending}
           now={now}

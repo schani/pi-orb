@@ -37,6 +37,7 @@ import { projectDeletionProgressText } from "../lib/project-deletion.ts";
 import {
   dashboardTotals,
   formatProjectOrbAge,
+  type OrbOrderCache,
   orderProjects,
   projectOrbActions,
   projectOrbGlyph,
@@ -157,6 +158,7 @@ export function ProjectsPage({
   const cache = useContext(TranscriptCacheContext);
   const [archivingOrb, setArchivingOrb] = useState<string | null>(null);
   const [ageNow, setAgeNow] = useState(() => Date.now());
+  const [orbOrder] = useState<OrbOrderCache>(() => new Map());
   const [orbCreateError, setOrbCreateError] = useState<{
     projectId: string;
     message: string;
@@ -216,8 +218,9 @@ export function ProjectsPage({
         projectsFailed: projects === null && loadError !== null,
         orbLists: visibleOrbLists,
         now: ageNow,
+        orbOrder,
       }),
-    [ageNow, loadError, projects, visibleOrbLists, visibleProjects],
+    [ageNow, loadError, orbOrder, projects, visibleOrbLists, visibleProjects],
   );
   useAppSearchSource(focusedProjectMissing ? null : searchSource);
 
@@ -421,7 +424,10 @@ export function ProjectsPage({
         {ordered.map((project) => {
           const orbList = visibleOrbLists[project.id] ?? { type: "loading" as const };
           const deleting = project.state === "deleting";
-          const shelves = splitProjectOrbs(orbList.type === "loaded" ? orbList.items : []);
+          const shelves = splitProjectOrbs(
+            orbList.type === "loaded" ? orbList.items : [],
+            orbOrder,
+          );
           const entryProps = {
             now: ageNow,
             archivingOrb,

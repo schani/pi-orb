@@ -3,7 +3,16 @@ import { defineConfig } from "vite";
 import { mockBackendPlugin } from "./dev/mock-backend.ts";
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), ...(mode === "frontend" ? [mockBackendPlugin()] : [])],
+  plugins: [
+    react(),
+    ...(mode === "frontend"
+      ? [
+          mockBackendPlugin({
+            timestampChurn: process.env["PI_ORB_FIXTURE_TIMESTAMP_CHURN"] === "1",
+          }),
+        ]
+      : []),
+  ],
   server: {
     // Reachable over the tailnet (a private, trusted network — the
     // unauthenticated first slice must never be exposed publicly).
