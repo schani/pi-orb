@@ -147,7 +147,7 @@ test output, credentials, and other mutable state are not cached.
 
 ## Deployment-speed decisions and proposals (2026-10-05)
 
-**Items 1 and 5 approved and implemented locally; not deployed or hosted-qualified. Other items remain unapproved.** The
+**Items 1 and 5 approved and implemented; four-runner E2E is hosted-qualified, release reuse is not live-validated. Not deployed. Other items remain unapproved.** The
 September 18 example above took 62m15s: checks 33m14s, build/acceptance/publication
 9m51s, smokes 10m36s, and all remaining stages 8m34s (roughly nine minutes).
 These historical timings identify candidates, not measured savings.
@@ -172,8 +172,13 @@ In priority order:
    file coverage, execution-owned mock sessions and shard-specific failure
    evidence. Local inventory contracts prove all 44 files appear exactly once
    across four 11-file shards. A live fake-service probe isolated eight requests
-   across four concurrent, equally named sessions. The hosted matrix and
-   elapsed-time savings remain unvalidated; evidence limits are in `docs/testing.md`.
+   across four concurrent, equally named sessions. First-attempt hosted
+   [run 37381944028](https://github.com/schani/pi-orb/actions/runs/37381944028)
+   qualified immutable source `9e52d1287904a52cfb9aa522103abf5677846250`:
+   417 tests, 44 unique files (11 per shard), no failures or skips, four distinct
+   GitHub runners, 16m32s workflow elapsed. The historical serial 35m12s / 407-test
+   run is not a controlled same-source benchmark; no isolated speedup is claimed.
+   Evidence and shard timings are in `docs/testing.md`.
 2. **Persist a trusted BuildKit layer cache.** Reuse build layers without treating
    cache hits as acceptance. Restrict cache writers to trusted workflows, retain
    input/digest provenance, and exclude credentials and mutable test/release state.
@@ -213,8 +218,9 @@ In priority order:
    (`docs/postmortems/2026-09-09-live-web-rebuild.md`).
 
 Full local typecheck, lint and tests passed; focused review-fix checks also passed.
-Counts and logs are recorded in `docs/testing.md`. Hosted qualification and live
-release reuse remain unvalidated; no deployment was performed.
+Counts and logs are recorded in `docs/testing.md`. The hosted E2E run was a
+feature-branch dispatch, not eligible `push`/`main` production qualification.
+Live release reuse and deployment gates remain unvalidated; no deployment was performed.
 
 **Proposed instrumentation:** extend the token-free release record with per-stage
 start/end/duration, shard coverage, cache hits/misses, artifact-input identities,

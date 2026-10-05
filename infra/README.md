@@ -21,7 +21,7 @@ never uploaded. The release job timeout is 240 minutes; no browser pause is intr
 
 CI, E2E and Deploy use `ubuntu-24.04` / Node `24.6.0`; E2E runs four isolated,
 serial shards (`docs/testing.md`). **Qualification reuse (implemented locally
-2026-10-05; not deployed or hosted-qualified):** new GitHub releases
+2026-10-05; not deployed or live-validated):** new GitHub releases
 wait before the release lock for successful same-repository `push`/`main` CI and
 E2E runs at the dispatched SHA, then recheck latest main. Their run IDs and attempts
 become release evidence instead of rerunning the suites. Each workflow must have
@@ -32,7 +32,12 @@ qualify a new commit. `release.sh` re-verifies the evidence before locking.
 Concurrency covers only the release job: qualification waits do not block
 validation-only recovery, which does not require new-source checks. Local
 `release.sh` still runs checks/E2E normally. Full local checks and focused
-review-fix tests passed (`docs/testing.md`); hosted/live qualification is pending.
+review-fix tests passed. First-attempt hosted E2E
+[run 37381944028](https://github.com/schani/pi-orb/actions/runs/37381944028)
+qualified `9e52d12`: 417 tests in 44 unique files, 11 per shard on four distinct
+GitHub runners, no failures/skips, 16m32s workflow elapsed (`docs/testing.md`).
+This feature-branch dispatch is not eligible `push`/`main` production qualification;
+live release reuse and deployment gates remain unvalidated.
 Native acceptance and all deployment-specific gates remain required; see
 `docs/deployment.md` for the decision and evidence limits.
 
