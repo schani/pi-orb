@@ -920,9 +920,24 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
     "preserves cancelled touch pan and momentum through growth (scroll delivered: %s)",
     async (deliverScroll) => {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      let releaseFonts = () => {};
+      const fontsGate = new Promise<void>((resolve) => {
+        releaseFonts = resolve;
+      });
+      await page.route("**/fonts/*.woff2", async (route) => {
+        await fontsGate;
+        await route.continue();
+      });
+      const fontRequested = page.waitForRequest((request) => request.resourceType() === "font");
       try {
         await gotoFrontendHistory(page, `${origin}${ORB_PATH}`, "frontend-fixture-orb");
+        await fontRequested;
         await waitForFixtureMedia(page);
+        releaseFonts();
+        // Absolute offsets are comparable only after font-swap anchor compensation.
+        await page.evaluate(() =>
+          Reflect.get(globalThis, "document").fonts.ready.then(() => undefined),
+        );
         const scroller = page.locator(".orb-transcript-scroll");
         const distance = () =>
           scroller.evaluate((pane) => pane.scrollHeight - pane.clientHeight - pane.scrollTop);
@@ -978,6 +993,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           Number(await scroller.getAttribute("data-reader-top")),
         );
       } finally {
+        releaseFonts();
         await page.close();
       }
     },
