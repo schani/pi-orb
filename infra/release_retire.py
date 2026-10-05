@@ -8,9 +8,9 @@ import urllib.parse
 from infra.release_state import Cloud, Result, fail, load, now, publish, save, utc_epoch as epoch, valid_id, valid_retirement, validate_record
 
 
-def metrics(cloud, project, region, start, end, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
+def metrics(cloud, project, region, start, end):
     result = []
-    for service in services:
+    for service in ("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer"):
         query = {
             "filter": f'metric.type="run.googleapis.com/container/instance_count" AND resource.type="cloud_run_revision" AND resource.labels.service_name="{service}" AND resource.labels.location="{region}"',
             "interval.startTime": start, "interval.endTime": end, "view": "FULL", "pageSize": "10000",
@@ -97,7 +97,7 @@ def inventory(cloud, record, wall=now, services=("pi-orb", "pi-orb-ops", "pi-orb
     if at is None:
         return fail("invalid", "invalid inventory clock")
     start = datetime.fromtimestamp(at - 900, timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    observed = metrics(cloud, record["project"], record["region"], start, boundary, services)
+    observed = metrics(cloud, record["project"], record["region"], start, boundary)
     if observed.error:
         return observed
     parsed = samples(observed.value, record["region"], epoch(boundary))
@@ -192,14 +192,14 @@ def pending_operations(cloud, project):
     return Result(sorted(pending))
 
 
-def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sleep=time.sleep, checkpoint=lambda _record: Result(), limit=75 * 60, services=("pi-orb", "pi-orb-ops", "pi-orb-runtime-api", "pi-orb-issuer")):
+def wait_for_retirement(cloud, record, *, wall=now, monotonic=time.monotonic, sleep=time.sleep, checkpoint=lambda _record: Result(), limit=75 * 60):
     if record["retirement"] is None:
         return fail("invalid", "retirement inventory is required")
     deadline = monotonic() + limit
     previous = None
     while True:
         end = wall()
-        observed = metrics(cloud, record["project"], record["region"], record["retirement"]["after"], end, services)
+        observed = metrics(cloud, record["project"], record["region"], record["retirement"]["after"], end)
         if observed.error:
             return observed
         found = evidence(record, observed.value, end)

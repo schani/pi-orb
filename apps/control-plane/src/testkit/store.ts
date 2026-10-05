@@ -1244,62 +1244,6 @@ export class InMemoryControlPlaneStore implements ControlPlaneStore {
     });
   }
 
-  casMaintenanceStop(
-    task: SimulationTask,
-    params: { orbId: string; expectedStateVersion: number; now: number },
-  ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    return this.access(task, FAILPOINTS.storeWrite, "maintenance stop", () => {
-      const orb = this.orbs.get(params.orbId);
-      if (
-        !orb ||
-        orb.stateVersion !== params.expectedStateVersion ||
-        !["creating", "starting", "running"].includes(orb.state)
-      )
-        return null;
-      const updated: OrbRow = {
-        ...orb,
-        state: "stopping",
-        stateVersion: orb.stateVersion + 1,
-        stateChangedAt: params.now,
-        updatedAt: params.now,
-        stopReason: null,
-      };
-      this.orbs.set(orb.id, updated);
-      return updated;
-    }).andThen((orb) =>
-      orb === null ? errAsync({ type: "state_conflict" as const }) : okAsync(orb),
-    );
-  }
-
-  casMaintenanceResume(
-    task: SimulationTask,
-    params: { orbId: string; expectedStateVersion: number; now: number },
-  ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    return this.access(task, FAILPOINTS.storeWrite, "maintenance resume", () => {
-      const orb = this.orbs.get(params.orbId);
-      if (
-        !orb ||
-        orb.stateVersion !== params.expectedStateVersion ||
-        orb.state !== "stopped" ||
-        orb.sleepId !== null ||
-        orb.hostDiscardThroughIncarnation !== null
-      )
-        return null;
-      const updated: OrbRow = {
-        ...orb,
-        state: "starting",
-        stateVersion: orb.stateVersion + 1,
-        stateChangedAt: params.now,
-        updatedAt: params.now,
-        stopReason: null,
-      };
-      this.orbs.set(orb.id, updated);
-      return updated;
-    }).andThen((orb) =>
-      orb === null ? errAsync({ type: "state_conflict" as const }) : okAsync(orb),
-    );
-  }
-
   requestOrbStop(
     task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number; now: number },

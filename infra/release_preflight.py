@@ -35,38 +35,11 @@ def check_exclusion_authority(cloud, project):
     return Result(True)
 
 
-def check_consolidation_authority(cloud, project, account):
-    project = urllib.parse.quote(project, safe='')
-    probes = (
-        (f'https://cloudresourcemanager.googleapis.com/v1/projects/{project}:testIamPermissions',
-         ['run.jobs.create', 'run.jobs.run', 'run.jobs.get', 'run.jobs.delete', 'run.services.delete']),
-        (f'https://secretmanager.googleapis.com/v1/projects/{project}/secrets/pi-orb-google-identity-mappings:testIamPermissions',
-         ['secretmanager.secrets.getIamPolicy', 'secretmanager.secrets.setIamPolicy']),
-        (f'https://iam.googleapis.com/v1/projects/-/serviceAccounts/{urllib.parse.quote(account, safe="")}:testIamPermissions',
-         ['iam.serviceAccounts.actAs']),
-    )
-    for url, required in probes:
-        found = cloud.http('POST', url, {'permissions': required})
-        if found.error:
-            return found
-        if not isinstance(found.value, dict) or not isinstance(found.value.get('permissions'), list):
-            return fail('invalid', 'consolidation capability response is unknown')
-        if any(not isinstance(p, str) for p in found.value['permissions']):
-            return fail('invalid', 'consolidation capability permissions are unknown')
-        missing = sorted(set(required) - set(found.value['permissions']))
-        if missing:
-            return fail('conflict', 'missing consolidation permissions: ' + ', '.join(missing))
-    return Result()
-
-
 def main(args):
-    if len(args) not in (1, 2) or not args[0]:
+    if len(args) != 1 or not args[0]:
         print("usage: python3 -m infra.release_preflight PROJECT", file=sys.stderr)
         return 2
-    cloud = Cloud()
-    result = check_exclusion_authority(cloud, args[0])
-    if not result.error and len(args) == 2:
-        result = check_consolidation_authority(cloud, args[0], args[1])
+    result = check_exclusion_authority(Cloud(), args[0])
     if result.error:
         print("release preflight failed: " + result.error.message, file=sys.stderr)
         return 1

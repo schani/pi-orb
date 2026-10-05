@@ -4,7 +4,6 @@ import { err, ok, type Result } from "neverthrow";
 import { type ControlPlaneDatabase, openControlPlaneDatabase } from "./adapters/database.ts";
 import type { GoogleIdentityMapping, OriginalOwnerMigrationInput } from "./adapters/pg/migrate.ts";
 import { googleIdentityMigrationInput } from "./google-identity-migration-input.ts";
-import { runConsolidationPreflight } from "./migration-preflight.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -87,26 +86,7 @@ export async function migrateDatabase(
   return migrated.isErr() || closed.isErr() ? 1 : 0;
 }
 
-export function migrationMode(
-  args: readonly string[],
-): Result<"migrate" | "consolidation-preflight", "arguments"> {
-  if (args.length === 0) return ok("migrate");
-  if (args.length === 1 && args[0] === "--check-consolidation")
-    return ok("consolidation-preflight");
-  return err("arguments");
-}
-
 async function main(): Promise<void> {
-  const mode = migrationMode(process.argv.slice(2));
-  if (mode.isErr()) {
-    console.error(JSON.stringify({ kind: "consolidation_preflight", reason: mode.error }));
-    process.exitCode = 1;
-    return;
-  }
-  if (mode.value === "consolidation-preflight") {
-    process.exitCode = await runConsolidationPreflight(process.env, console.log, console.error);
-    return;
-  }
   const connectionString = process.env["DATABASE_URL"];
   if (connectionString === undefined || connectionString === "") {
     console.error("migration: DATABASE_URL is required");

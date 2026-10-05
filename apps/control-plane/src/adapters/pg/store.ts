@@ -1167,40 +1167,6 @@ export class PostgreSQLControlPlaneStore implements ControlPlaneStore {
       .map(() => undefined);
   }
 
-  casMaintenanceStop(
-    _task: SimulationTask,
-    params: { orbId: string; expectedStateVersion: number; now: number },
-  ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    return this.db
-      .query(
-        `UPDATE orbs SET state = 'stopping', state_version = state_version + 1,
-       state_changed_at = $3, updated_at = $3, stop_reason = NULL
-       WHERE id = $1 AND state_version = $2 AND state IN ('creating','starting','running')
-       RETURNING *`,
-        [params.orbId, params.expectedStateVersion, new Date(params.now)],
-      )
-      .andThen((result) =>
-        result.rows[0] === undefined ? err(stateConflict()) : ok(mapOrbRow(result.rows[0])),
-      );
-  }
-
-  casMaintenanceResume(
-    _task: SimulationTask,
-    params: { orbId: string; expectedStateVersion: number; now: number },
-  ): ResultAsync<OrbRow, StoreError | StateConflict> {
-    return this.db
-      .query(
-        `UPDATE orbs SET state = 'starting', state_version = state_version + 1,
-       state_changed_at = $3, updated_at = $3, stop_reason = NULL
-       WHERE id = $1 AND state_version = $2 AND state = 'stopped'
-         AND sleep_id IS NULL AND host_discard_through_incarnation IS NULL RETURNING *`,
-        [params.orbId, params.expectedStateVersion, new Date(params.now)],
-      )
-      .andThen((result) =>
-        result.rows[0] === undefined ? err(stateConflict()) : ok(mapOrbRow(result.rows[0])),
-      );
-  }
-
   requestOrbStop(
     _task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number; now: number },

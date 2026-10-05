@@ -18,17 +18,16 @@ LOCAL_LOCK_HELD=false
 REMOTE_LOCK_HELD=false
 REMOTE_LOCK_GENERATION=""
 KEEP_REMOTE_LOCK=false
-FIRST_CONSOLIDATION=false
-MAINTENANCE_STARTED=false
+CUTOVER=""
 
 usage() {
-  echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest] [--first-consolidation]'
+  echo 'Usage: ./infra/release.sh [--yes] [--validate RELEASE_ID|latest] [--cutover MANIFEST]'
   echo 'Deploy clean, freshly fetched main, or explicitly validate a recorded deployment without rebuilding/reapplying.'
 }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --yes) AUTO_APPROVE=true ;;
-    --first-consolidation) FIRST_CONSOLIDATION=true ;;
+    --cutover) [ "$#" -ge 2 ] || exit 2; CUTOVER=$2; shift ;;
     --validate) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; VALIDATE=$2; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
@@ -100,8 +99,8 @@ cleanup() {
     echo "durable record: gs://$STATE_BUCKET/static-plane/releases/$release_id.json"
   fi
   if [ "$REMOTE_LOCK_HELD" = true ]; then
-    if [ "$KEEP_REMOTE_LOCK" = true ] || { [ "$MAINTENANCE_STARTED" = true ] && [ "$status" -ne 0 ]; }; then
-      echo "release: lock retained: inspect private maintenance/job receipts before unlocking $REMOTE_LOCK_URL; never replay an uncertain phase" >&2
+    if [ "$KEEP_REMOTE_LOCK" = true ]; then
+      echo "release: lock retained: migration execution may still be running; inspect the recorded job before unlocking $REMOTE_LOCK_URL" >&2
       status=1
     elif [ -z "$REMOTE_LOCK_GENERATION" ] || ! gcloud storage rm "$REMOTE_LOCK_URL" --if-generation-match="$REMOTE_LOCK_GENERATION" --quiet >/dev/null; then
       echo "release: lock cleanup failed: $REMOTE_LOCK_URL; verify ownership before removing it" >&2
@@ -180,15 +179,14 @@ chmod 700 "$RESULT_DIR"
 RECORD="$RESULT_DIR/release.json"
 state init "$release_id" "$head_commit" "$PROJECT" "$REGION" "$ZONE" "$workflow_url"
 export PI_ORB_RELEASE_RECORD="$RECORD"
-if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; elif [ "$FIRST_CONSOLIDATION" = false ]; then state previous; fi
+if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; elif [ -z "$CUTOVER" ]; then state previous; fi
 state publish
 TF_VAR_machine_subject=$(python3 -m infra.release_auth "$PROJECT")
 export TF_VAR_machine_subject
 tofu -chdir="$INFRA" init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET" -backend-config=prefix=static-plane
 export PI_ORB_APP_ORIGIN=$(tofu -chdir="$INFRA" output -raw issuer_url)
 export PI_ORB_ISSUER_URL="$PI_ORB_APP_ORIGIN"
-python3 -m infra.release_consolidation detect "$RECORD" "$FIRST_CONSOLIDATION"
-if [ "$FIRST_CONSOLIDATION" = false ]; then
+if [ -z "$CUTOVER" ]; then
   "$INFRA/api.sh" /api/v1/system | jq -e '.hostProvider == "gce"' >/dev/null
 else
   [ -z "$VALIDATE" ] && [ "${GITHUB_ACTIONS:-}" = true ] || {
@@ -212,7 +210,7 @@ plan_and_guard() {
 if [ -z "$VALIDATE" ]; then
   python3 -m infra.release_preflight "$PROJECT"
   # Real scoped permission reads, including bucket IAM, precede expensive builds.
-  if [ "$FIRST_CONSOLIDATION" = false ]; then
+  if [ -z "$CUTOVER" ]; then
     state preflight-vars "$WORK_DIR/current.tfvars"
     plan_and_guard "$WORK_DIR/current.tfvars" "$WORK_DIR/preflight.tfplan"
     python3 -m infra.release_retire inventory "$RECORD"
@@ -236,24 +234,15 @@ if [ -z "$VALIDATE" ]; then
     read -r confirmation
     [ "$confirmation" = deploy ] || exit 1
   fi
-  # Recheck main before any fence; a later advance must not strand maintenance.
-  git fetch --quiet origin main
-  [ "$head_commit" = "$(git rev-parse origin/main)" ] || { echo 'release: main advanced before maintenance' >&2; exit 1; }
-  if [ "$FIRST_CONSOLIDATION" = true ]; then
-    python3 -m infra.release_consolidation guard-plan "$WORK_DIR/plan.json"
+  if [ -n "$CUTOVER" ]; then
     stage maintenance
-    MAINTENANCE_STARTED=true
-    KEEP_REMOTE_LOCK=true
-    python3 -m infra.release_preflight "$PROJECT" "$(jq -r '.control_plane_service_account_email.value' <<<"$foundation")"
+    python3 -m infra.release_cutover verify "$RECORD" "$CUTOVER"
+  fi
+  migration_secrets=""
+  if [ -n "$CUTOVER" ]; then
     gcloud secrets add-iam-policy-binding pi-orb-google-identity-mappings --project="$PROJECT" \
       --member="serviceAccount:$(jq -r '.control_plane_service_account_email.value' <<<"$foundation")" \
       --role=roles/secretmanager.secretAccessor --quiet >/dev/null
-    python3 -m infra.release_consolidation prepare "$RECORD" "$WORK_DIR/maintenance.json"
-    python3 -m infra.release_consolidation drain "$RECORD" "$WORK_DIR/maintenance.json"
-  fi
-  migration_secrets=""
-  if [ "$FIRST_CONSOLIDATION" = true ]; then
-    python3 -m infra.release_consolidation preflight-final "$RECORD" "$WORK_DIR/maintenance.json"
     migration_secrets=",PI_ORB_GOOGLE_IDENTITY_MAPPINGS=pi-orb-google-identity-mappings:1"
   fi
   migration_owner_args=("--set-env-vars=${migration_owner_env}")
@@ -275,15 +264,10 @@ if [ -z "$VALIDATE" ]; then
     --set-secrets="DATABASE_URL=pi-orb-database-url:$database_version$migration_secrets" \
     "${migration_owner_args[@]}" \
     --command=node --args=apps/control-plane/src/migrate.ts --tasks=1 --parallelism=1 \
-    --max-retries=0 --task-timeout=300s --cpu=1 --memory=512Mi --quiet
-  python3 -m infra.release_consolidation migration "$RECORD" "$WORK_DIR/maintenance.json"
-  if [ "$FIRST_CONSOLIDATION" = false ]; then KEEP_REMOTE_LOCK=false; fi
+    --max-retries=0 --task-timeout=300s --cpu=1 --memory=512Mi --execute-now --wait --quiet
+  KEEP_REMOTE_LOCK=false
   gcloud run jobs delete "$migration_job" --project="$PROJECT" --region="$REGION" --quiet
-  if [ "$FIRST_CONSOLIDATION" = false ]; then
-    state check-previous
-  else
-    python3 -m infra.release_consolidation resume "$RECORD" "$WORK_DIR/maintenance.json"
-  fi
+  if [ -z "$CUTOVER" ]; then state check-previous; fi
   stage apply
   release_run_child tofu -chdir="$INFRA" apply -input=false "$WORK_DIR/release.tfplan"
 fi
@@ -309,9 +293,5 @@ export PI_ORB_SMOKE_WIF_STS_AUDIENCE="//iam.googleapis.com/$(jq -r '.pi_orb_work
 export PI_ORB_SMOKE_WIF_TEST_SA=$(jq -r '.deployer_service_account_email.value' <<<"$foundation")
 release_run_child "$INFRA/smoke-workload-identity.sh"
 state check
-if [ "$FIRST_CONSOLIDATION" = true ]; then
-  python3 -m infra.release_consolidation outcome "$RECORD" "$WORK_DIR/maintenance.json"
-fi
 stage complete
-KEEP_REMOTE_LOCK=false
 echo "RELEASE VALIDATED: $(jq -r '.commit' "$RECORD") (generation $(jq -r '.artifacts.deploy_generation' "$RECORD"))"

@@ -314,14 +314,6 @@ export interface ControlPlaneStore extends ActivityHeadlineStore {
       now: number;
     },
   ): ResultAsync<void, StoreError>;
-  casMaintenanceStop(
-    task: SimulationTask,
-    params: { orbId: string; expectedStateVersion: number; now: number },
-  ): ResultAsync<OrbRow, StoreError | StateConflict>;
-  casMaintenanceResume(
-    task: SimulationTask,
-    params: { orbId: string; expectedStateVersion: number; now: number },
-  ): ResultAsync<OrbRow, StoreError | StateConflict>;
   requestOrbStop(
     task: SimulationTask,
     params: { orbId: string; expectedStateVersion: number; now: number },
