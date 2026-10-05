@@ -171,13 +171,15 @@ def copy_receipt(cloud, record, app_bucket, reference):
         return found
     if not isinstance(found.value, dict) or found.value.get('generation') != reference['generation']:
         return fail('conflict', 'maintenance receipt generation changed')
-    body = found.value['body']
-    digest = hashlib.sha256(json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+    raw = cloud.bytes(app_bucket, key, reference['generation'])
+    if raw.error:
+        return raw
+    digest = hashlib.sha256(raw.value).hexdigest()
     if digest != reference['sha256']:
         return fail('conflict', 'maintenance receipt hash differs')
     suffix = uri[len(prefix):]
     target = f"static-plane/releases/{record['releaseId']}/maintenance/{suffix}"
-    stored = cloud.put(f"pi-orb-tfstate-{record['project']}", target, body, '0')
+    stored = cloud.copy_bytes(f"pi-orb-tfstate-{record['project']}", target, raw.value)
     if stored.error:
         return stored
     return Result({'receiptUri': f"gs://pi-orb-tfstate-{record['project']}/{target}",

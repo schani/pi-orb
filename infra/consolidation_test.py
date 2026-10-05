@@ -43,7 +43,7 @@ class ConsolidationTest(unittest.TestCase):
 
     def test_maintenance_precedes_schema(self):
         source = Path('infra/release.sh').read_text()
-        self.assertLess(source.index('release_cutover verify'), source.index('stage schema'))
+        self.assertLess(source.index('release_consolidation drain'), source.index('stage schema'))
         retirement = Path('infra/release_retire.py').read_text()
         self.assertIn('pi-orb-issuer', retirement)
         self.assertIn('pi-orb-ops', retirement)

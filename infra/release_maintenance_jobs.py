@@ -4,6 +4,30 @@ import time
 from infra.release_state import Result, fail, utc_epoch
 
 
+def wait_created(cloud, job, operation, checkpoint, *, monotonic=time.monotonic, sleep=time.sleep, limit=300):
+    parent = job.rsplit('/jobs/', 1)[0]
+    name = operation.get('name') if isinstance(operation, dict) else None
+    if not isinstance(name, str) or not re.fullmatch(re.escape(parent) + r'/operations/[a-zA-Z0-9-]+', name):
+        return fail('invalid', 'job creation operation is unknown')
+    stored = checkpoint({'job': job, 'state': 'creating', 'operation': name})
+    if stored.error:
+        return stored
+    deadline = monotonic() + limit
+    while True:
+        found = cloud.http('GET', f'https://run.googleapis.com/v2/{name}')
+        if found.error:
+            return found
+        if not isinstance(found.value, dict):
+            return fail('invalid', 'job creation status is unknown')
+        if found.value.get('done') is True:
+            if found.value.get('response', {}).get('name') != job or 'error' in found.value:
+                return fail('conflict', 'job creation did not succeed')
+            return Result()
+        if monotonic() >= deadline:
+            return fail('timeout', 'job creation remains uncertain; retain release lock')
+        sleep(min(15, max(0, deadline - monotonic())))
+
+
 def execute(cloud, job, checkpoint, *, monotonic=time.monotonic, sleep=time.sleep, limit=30 * 60):
     """Caller holds release lock until complete; never retry an uncertain run."""
     if not isinstance(job, str) or not re.fullmatch(r'projects/[a-z0-9-]+/locations/[a-z0-9-]+/jobs/pi-orb-(maint|migrate)-[a-z0-9-]+', job):

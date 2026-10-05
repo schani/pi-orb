@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from infra.release_preflight import EXCLUSION_PERMISSIONS, check_exclusion_authority
+from infra.release_preflight import EXCLUSION_PERMISSIONS, check_exclusion_authority, check_consolidation_authority
 from infra.release_state import Result, fail
 
 
@@ -16,6 +16,19 @@ class FakeCloud:
 
 
 class PreflightTest(unittest.TestCase):
+    def test_consolidation_capabilities_are_scoped_readonly_and_fail_closed(self):
+        class Cloud:
+            def __init__(self, omit=None): self.calls = []; self.omit = omit
+            def http(self, method, url, body):
+                self.calls.append((method, url, body))
+                return Result({'permissions': [p for p in body['permissions'] if p != self.omit]})
+        cloud = Cloud()
+        self.assertIsNone(check_consolidation_authority(cloud, 'p', 'cp@p.iam.gserviceaccount.com').error)
+        self.assertEqual(len(cloud.calls), 3)
+        self.assertTrue(all(url.endswith(':testIamPermissions') for _, url, _ in cloud.calls))
+        for missing in ('run.jobs.run', 'run.services.delete', 'secretmanager.secrets.setIamPolicy', 'iam.serviceAccounts.actAs'):
+            self.assertIsNotNone(check_consolidation_authority(Cloud(missing), 'p', 'cp@p.iam.gserviceaccount.com').error)
+
     def test_complete_authority_is_read_only(self):
         cloud = FakeCloud(Result({"permissions": list(EXCLUSION_PERMISSIONS)}))
         self.assertTrue(check_exclusion_authority(cloud, "example-project").value)
@@ -88,7 +101,9 @@ class PreflightTest(unittest.TestCase):
         script = Path("infra/run.tf").read_text()
         browser = script.split('resource "google_cloud_run_v2_service" "issuer" {')[1].split('\nresource ')[0]
         dependencies = browser.split("depends_on = [")[1].split("]")[0]
-        for resource in ["google_logging_project_exclusion.mcp_oauth_callback",
+        for resource in ["google_logging_project_exclusion.google_callback",
+                         "google_secret_manager_secret_iam_member.cp_auth",
+                         "google_logging_project_exclusion.mcp_oauth_callback",
                          "google_secret_manager_secret_iam_member.cp_mcp_oauth_accessor",
                          "google_secret_manager_secret_iam_member.cp_mcp_oauth_versions"]:
             self.assertIn(resource, dependencies)

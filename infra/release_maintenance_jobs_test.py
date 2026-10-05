@@ -1,9 +1,54 @@
 import unittest
+import json
+from unittest.mock import patch
+from infra.release_consolidation import run_phase
+from infra.release_state_test import record
 from infra.release_state import Result, fail
-from infra.release_maintenance_jobs import execute
+from infra.release_maintenance_jobs import execute, wait_created
 
 
 class JobsTest(unittest.TestCase):
+    def test_creation_wait_is_bounded_and_checks_exact_job(self):
+        clock = [0]
+        class Cloud:
+            def http(self, *args): return Result({'done': False})
+        result = wait_created(Cloud(), 'projects/p/locations/r/jobs/pi-orb-maint-owned', {'name': 'projects/p/locations/r/operations/o'}, lambda value: Result(), monotonic=lambda: clock[0], sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds), limit=30)
+        self.assertEqual(result.error.kind, 'timeout')
+        class WrongCloud:
+            def http(self, *args): return Result({'done': True, 'response': {'name': 'another-job'}})
+        self.assertIsNotNone(wait_created(WrongCloud(), 'projects/p/locations/r/jobs/pi-orb-maint-owned', {'name': 'projects/p/locations/r/operations/o'}, lambda value: Result()).error)
+
+    def test_phase_copies_exact_private_bytes_before_terminal_job_delete(self):
+        for failure_at in (None, 'copy', 'schema', 'existing'):
+            calls = []
+            value = record()
+            job_id = f"pi-orb-maint-before-{value['releaseId']}"[:63]
+            envelope = {'schemaVersion': 1, 'releaseId': value['releaseId'], 'sourceSha': value['commit'], 'executionId': job_id, 'phase': 'before', 'mode': 'inventory', 'outcome': 'sealed', 'counts': {'orbs': 0}, 'snapshot': {'releaseId': value['releaseId'], 'phase': 'before', 'orbs': [], 'projects': [], 'resumeCandidates': []}}
+            if failure_at == 'schema': envelope['privatePayload'] = 'never-print'
+            raw = (json.dumps(envelope, indent=2) + '\n').encode()
+            class Cloud:
+                def http(self, method, url, body=None):
+                    calls.append((method, url))
+                    if '/storage/v1/' in url: return Result({'items': []})
+                    if '/executions?' in url: return Result({'executions': []})
+                    return Result({'name': 'existing'}) if failure_at == 'existing' else Result(None)
+                def json(self, args):
+                    calls.append(tuple(args))
+                    return Result({'generation': '42'})
+                def bytes(self, *args): return Result(raw)
+                def copy_bytes(self, bucket, key, body):
+                    calls.append(('copy', key))
+                    self_test.assertEqual(body, raw)
+                    return fail('http', 'injected') if failure_at == 'copy' else Result({'generation': '99'})
+            self_test = self
+            config = {'env': {'PI_ORB_HOSTING_BUCKET': 'private-data'}, 'secrets': {}, 'serviceAccount': 'cp@test', 'vpcAccess': {}}
+            with patch('infra.release_consolidation.wait_created', return_value=Result()), patch('infra.release_consolidation.execute', return_value=Result({'state': 'terminal'})):
+                result = run_phase(Cloud(), value, config, 'before', lambda receipt: Result())
+            self.assertEqual(result.error is None, failure_at is None)
+            deleted = [i for i, call in enumerate(calls) if call[:3] == ('run', 'jobs', 'delete')]
+            self.assertEqual(bool(deleted), failure_at is None)
+            if deleted: self.assertLess(next(i for i, call in enumerate(calls) if call[0] == 'copy'), deleted[0])
+
     def test_run_intent_durable_before_request(self):
         calls = []
         class Cloud:
