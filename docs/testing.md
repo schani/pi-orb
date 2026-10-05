@@ -231,7 +231,13 @@ Full-slice negative assertions no longer spend 65 seconds watching two backstop 
 
 **Candidate test split (proposed 2026-09-18; not implemented):** use process-hosted orbs with real PostgreSQL for ordinary lifecycle coverage, retaining Docker for PostgreSQL if convenient. Port provider-independent workload-identity and interrupted-process recovery assertions before changing the default. Keep narrow Docker image/volume/network/restart gates for that supported local provider and native-image/GCE acceptance for production packaging and supervision. Production uses native systemd runtimes, not the Docker runtime image; neither local host substitutes for the production image gate.
 
-## Hosted E2E job budget (2026-09-17)
+## Hosted E2E job budget (2026-10-05)
+
+**Current decision:** the E2E job has a 60-minute budget for dependency/browser setup, runtime-image build/startup, and the serial suite with headroom. It runs `npm run test:e2e -- --bail 1` so the first failure reaches Vitest's final assertion summary and failure-artifact steps before job cancellation. Individual test deadlines and assertions remain unchanged.
+
+Run [37384177586](https://github.com/schani/pi-orb/actions/runs/37384177586) reported an early mobile failure, continued progressing through PostgreSQL tests, then exhausted the 40-minute job budget after a 38m50s test step. Cancellation lost the actual assertion summary. The previous suite completed 46 files in 2055.74s; the next run's same 44 completed files took 268.825s longer. This is suite-capacity evidence, not a deadlock. The separate mobile readiness correction and qualification limits are recorded in `docs/postmortems/2026-10-05-mobile-reader-font-readiness.md`.
+
+### Historical decision (2026-09-17)
 
 In the 2026-09-17 configuration, GitHub ran every E2E file serially after dependency, browser, and runtime-image setup. The job deadline had to cover that whole path with material headroom; individual test deadlines remained deadlock watchdogs, not suite-capacity controls. Runs [35264000440](https://github.com/schani/pi-orb/actions/runs/35264000440) and [35270543609](https://github.com/schani/pi-orb/actions/runs/35270543609) passed every reported file before the 30-minute job cap killed Vitest. The last successful predecessor already used 28:02; the next serial two-user case added about two minutes, then sleep added about 72 seconds. The workflow job budget was therefore set to 40 minutes without changing test deadlines or assertions. Evidence and rejected sharding: `docs/postmortems/2026-09-17-e2e-job-budget.md`.
 
