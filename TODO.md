@@ -12,7 +12,7 @@ Actionable work items: bugs, hardening, and agreed follow-ups (see `AGENTS.md`):
 
 - [x] **Pair tool results by parent ancestry.** Backend and frontend matchers cover sibling branches/reused IDs. Final qualification: `docs/testing.md`.
 
-- **Root-cause WebKit read-drawer hit testing before shipping (2026-10-04).** Deterministically capture the actual hit target, disclosure open/toggle order, detail requests and scroll geometry around the native click; establish and fix the cause without force-clicks or larger timeouts. The original interception remains unexplained despite 24 focused passes and the final 385-case Docker gate; neither clears it. Evidence: `docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md`, `docs/testing.md`.
+- **Root-cause WebKit read-drawer hit testing before shipping (2026-10-04).** Deterministically capture the actual hit target, disclosure open/toggle order, detail requests and scroll geometry around the native click; establish and fix the cause without force-clicks or larger timeouts. Fallback test isolation is implemented and qualified: the current process-backed frontend passes 30 files / 256 tests. Historical 59-intercept persistence remains unproved; neither this run nor the earlier 385-case Docker gate clears the release blocker. Evidence: `docs/postmortems/2026-10-04-webkit-read-drawer-hit-test.md`, `docs/testing.md`.
 
 - [x] **Remove per-schedule host-key cryptography cost.** Three immutable real keypairs per file, isolated copies and uncached production probes pass all 50 schedules and the final repository gate. Evidence: `docs/postmortems/2026-09-20-validator-host-key-change.md`.
 
