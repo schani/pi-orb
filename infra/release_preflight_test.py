@@ -50,11 +50,12 @@ class PreflightTest(unittest.TestCase):
         package = json.loads(Path("package.json").read_text())
         self.assertEqual(package["scripts"]["test:e2e:install"],
                          "playwright install --with-deps chromium webkit")
-        for path in ["infra/release.sh", ".github/workflows/e2e.yml"]:
+        for path, command in [("infra/release.sh", "npm run test:e2e\n"),
+                              (".github/workflows/e2e.yml", "npm run test:e2e -- --bail 1\n")]:
             script = Path(path).read_text()
             self.assertLess(script.index("npm ci"), script.index("npm run test:e2e:install"))
             self.assertLess(script.index("npm run test:e2e:install"),
-                            script.index("npm run test:e2e\n"))
+                            script.index(command))
 
     def test_release_workflows_cache_only_dependencies_and_do_not_prebuild_runtime(self):
         key = "key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}"
