@@ -14,6 +14,14 @@ it("renders reasoning Markdown without inheriting literal pre-wrap whitespace", 
   expect(rule(".reasoning-body > .chat-markdown")).toContain("white-space: normal");
 });
 
+it("uses the error signal for activity headline failure and manual Retry", () => {
+  expect(rule(".error-text")).toContain("color: var(--bad)");
+  const retry = rule("button.text-action.error-text");
+  expect(retry).toContain("color: var(--bad)");
+  expect(retry).toContain("border-bottom-color: var(--bad)");
+  expect(retry).toContain("background: transparent");
+});
+
 describe("orb alerts", () => {
   it("keeps long plain text inside a phone-width reverse band without coloring the orb row", () => {
     const band = rule(".alert-band");

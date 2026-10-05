@@ -284,6 +284,7 @@ function applyRuntimeEvent(state: OrbPageState, event: RuntimeEvent): OrbPageSta
       tools.set(event.callId, {
         callId: event.callId,
         name: event.name,
+        ...(event.code === undefined ? {} : { code: event.code }),
         state: event.state,
         message: event.message ?? null,
       });

@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { capHeadline } from "./headline.ts";
 import type { ContentBlock, HistoryRecord } from "./history.ts";
 import { ToolResultContext } from "./tool-result-context.ts";
 
@@ -51,14 +52,32 @@ function quoted(fields: Record<string, string | boolean>): string {
   return JSON.stringify(selected);
 }
 
+/** Public root code only, preserving whitespace within the existing header byte bound. */
+export function activityCallCode(name: string, args: unknown): string | undefined {
+  if (name !== "codemode" && name !== "bash") return undefined;
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+  const value = (args as Record<string, unknown>)[name === "bash" ? "command" : "code"];
+  return typeof value === "string" && value.trim() !== "" ? capHeadline(value) : undefined;
+}
+
 export function activityCallEligible(block: Call): boolean {
-  return block.name === "codemode" || block.name === "subagent";
+  return (
+    activityCallCode(block.name, block.arguments) !== undefined ||
+    block.name === "subagent" ||
+    block.name === "get_subagent_result" ||
+    (block.name === "steer_subagent" &&
+      typeof block.arguments === "object" &&
+      block.arguments !== null &&
+      !Array.isArray(block.arguments) &&
+      typeof block.arguments.message === "string" &&
+      block.arguments.message.trim() !== "")
+  );
 }
 export function activityResultEligible(
   block: Extract<ContentBlock, { type: "tool_result" }>,
   tool: string | undefined,
 ): boolean {
-  if (tool === "get_subagent_result") return true;
+  if (tool === "bash" || tool === "get_subagent_result") return true;
   return (
     tool === "subagent" &&
     !block.content.some(
@@ -115,7 +134,20 @@ export function getActivityHeadlineSource(
         text: quoted(
           block.name === "codemode"
             ? { code: string("code") }
-            : { description: string("description"), prompt: string("prompt") },
+            : block.name === "bash"
+              ? { command: string("command") }
+              : block.name === "steer_subagent"
+                ? {
+                    ...(typeof fields.agent_id === "string" ? { agent_id: fields.agent_id } : {}),
+                    message: string("message"),
+                  }
+                : block.name === "get_subagent_result"
+                  ? {
+                      agent_id: string("agent_id"),
+                      ...(typeof fields.wait === "boolean" ? { wait: fields.wait } : {}),
+                      ...(typeof fields.verbose === "boolean" ? { verbose: fields.verbose } : {}),
+                    }
+                  : { description: string("description"), prompt: string("prompt") },
         ),
       };
     }

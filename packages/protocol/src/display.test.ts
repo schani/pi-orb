@@ -38,6 +38,73 @@ const record: HistoryRecord = {
 };
 
 describe("browser display projection", () => {
+  it.each(["bash", "codemode"])(
+    "projects bounded %s code without fetching or changing detail",
+    (name) => {
+      for (const code of ["  echo first\n\techo second  ", "😀".repeat(400), "x".repeat(1024)]) {
+        const arguments_ = {
+          [name === "bash" ? "command" : "code"]: code,
+          token: secret,
+          timeout: 30,
+        };
+        const source: HistoryRecord = {
+          ...record,
+          content: [{ type: "tool_call", callId: "c", name, arguments: arguments_ }],
+        };
+        const projected = projectDisplayRecord(source);
+        expect(projected).toMatchObject({ content: [{ code: capHeadline(code), headline: null }] });
+        expect(Buffer.byteLength(capHeadline(code))).toBeLessThanOrEqual(1024);
+        expect(capHeadline(code)).not.toContain("�");
+        expect(JSON.stringify(projected)).not.toContain(secret);
+        expect(projectRecordDetail(source, "r1:0")).toEqual({
+          type: "tool_call",
+          arguments: name === "bash" ? { command: code } : arguments_,
+        });
+        const project = createDisplayRecordProjector();
+        expect(project(source)).toEqual(projectDisplayRecords([source])[0]);
+      }
+    },
+  );
+  it("omits code for empty, malformed, unrelated, native and private child data", () => {
+    for (const name of ["bash", "codemode", "get_subagent_result", "commands", "functions.bash"]) {
+      for (const value of ["", " \n\t", 3, [], { code: secret }]) {
+        const source: HistoryRecord = {
+          ...record,
+          content: [
+            {
+              type: "tool_call",
+              callId: "c",
+              name,
+              arguments: { code: value, command: value },
+              overflow: { code: secret },
+            },
+          ],
+        };
+        const projected = projectDisplayRecord(source);
+        if (projected.type === "message") expect(projected.content[0]).not.toHaveProperty("code");
+      }
+    }
+    for (const name of ["get_subagent_result", "commands", "functions.bash", "mcp__codemode"]) {
+      const source: HistoryRecord = {
+        ...record,
+        content: [
+          { type: "tool_call", callId: "c", name, arguments: { code: secret, command: secret } },
+        ],
+      };
+      const projected = projectDisplayRecord(source);
+      if (projected.type === "message") expect(projected.content[0]).not.toHaveProperty("code");
+    }
+    const privateEvent: HistoryRecord = {
+      id: "private",
+      parentId: null,
+      timestamp: "t",
+      type: "event",
+      eventType: "pi.custom",
+      overflow: {},
+      content: [{ type: "tool_call", callId: "c", name: "codemode", arguments: { code: secret } }],
+    };
+    expect(JSON.stringify(projectDisplayRecord(privateEvent))).not.toContain(secret);
+  });
   it.each(["", " \n\t "])(
     "omits empty public reasoning %j without changing identity or detail indices",
     (text) => {

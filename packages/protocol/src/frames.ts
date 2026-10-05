@@ -213,6 +213,7 @@ export const ToolStateEventSchema = Type.Object(
     operationId: Type.String(),
     callId: Type.String(),
     name: Type.String(),
+    code: Type.Optional(Type.String()),
     revision: Type.Number(),
     state: Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed")]),
     message: Type.Optional(Type.String()),

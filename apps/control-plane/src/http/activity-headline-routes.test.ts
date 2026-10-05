@@ -3,9 +3,74 @@ import { NoSimulationTask } from "determined";
 import Fastify from "fastify";
 import { errAsync, okAsync } from "neverthrow";
 import { expect, it, vi } from "vitest";
+import type { ActivityHeadlineGenerationError } from "../domain/ports.ts";
 import { makeHarness, makeOrbRow, makeProjectRow, TEST_SYSTEM_VIEW } from "../testkit/fixtures.ts";
 import { registerAuthenticatedBrowserRoutes } from "./browser-identity.ts";
 import { registerRoutes } from "./routes.ts";
+
+it.each([true, false])(
+  "POST holds provider 503 retries before its single terminal response: recover=%s",
+  async (recover) => {
+    const task = new NoSimulationTask("headline HTTP retries", false);
+    const h = makeHarness();
+    h.store.seedProject(makeProjectRow("project"));
+    h.store.seedOrb(makeOrbRow("orb", "project", "stopped"));
+    await h.store.commitPullBatch(task, {
+      orbId: "orb",
+      expectedCursor: null,
+      session: { id: "session", overflow: {} },
+      records: [
+        {
+          id: "record",
+          parentId: null,
+          overflow: {},
+          timestamp: "2026-10-05T00:00:00Z",
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "tool_call",
+              callId: "call",
+              name: "codemode",
+              arguments: { code: "PRIVATE_SOURCE_CANARY" },
+            },
+          ],
+        },
+      ],
+      nextCursor: "record",
+      nextHeadId: "record",
+    });
+    let calls = 0;
+    const generate = vi.fn(() =>
+      ++calls === 2 && recover
+        ? okAsync("Recovered headline")
+        : errAsync<string, ActivityHeadlineGenerationError>({
+            type: "headline_generation_failed",
+            stage: "inference",
+            reason: "provider_error",
+            providerStatus: 503,
+          }),
+    );
+    const app = Fastify({ logger: false });
+    registerRoutes(app, task, { ...h.deps, headlineGenerator: { generate } }, {}, TEST_SYSTEM_VIEW);
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/orbs/orb/headlines/record/record%3A0?sessionId=session",
+      });
+      expect(calls).toBe(recover ? 2 : 3);
+      expect(response.statusCode).toBe(recover ? 200 : 503);
+      expect(response.json()).toEqual(
+        recover
+          ? { headline: "Recovered headline" }
+          : { error: { code: "unavailable", message: "headline unavailable", retryable: true } },
+      );
+      expect(response.body).not.toMatch(/PRIVATE|providerStatus|503/);
+    } finally {
+      await app.close();
+    }
+  },
+);
 
 it("POST accepts only URL identities and returns only headline; history enriches without inference", async () => {
   const task = new NoSimulationTask("headline routes", false);

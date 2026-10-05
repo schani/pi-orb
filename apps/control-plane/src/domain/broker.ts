@@ -3,10 +3,12 @@ import type { SimulationTask } from "determined";
 import { err, ok, type Result } from "neverthrow";
 import { sleepResult, withDeadline } from "./dst.ts";
 import type { OAuthRefreshDiagnostic, StoreError, TokenError } from "./errors.ts";
+import { logEvent } from "./log.ts";
 import type {
   BrokerDeps,
   CredentialPointerRow,
   CredentialPointerStoreFactory,
+  OperationContext,
   StoredCredential,
 } from "./ports.ts";
 
@@ -115,26 +117,65 @@ export async function getToken(
   deps: BrokerDeps,
   provider: string,
   request: TokenRequest,
+  context?: OperationContext & { readonly deadlineAt: number },
 ): Promise<Result<TokenGrant, TokenError>> {
   const constants = deps.constants;
   const deadline = task.monotonicNow() + constants.requestDeadlineMs;
-  const pause = async (ms: number): Promise<void> => {
-    await sleepResult(task, ms, "broker pause");
+  const admissionDeadline = Math.min(deadline, context?.deadlineAt ?? deadline);
+  const stopped = (): TokenError | null => {
+    if (context === undefined) return null;
+    if (context.signal.aborted) return retryable("token request cancelled");
+    return task.monotonicNow() >= admissionDeadline
+      ? retryable("token request deadline exceeded")
+      : null;
+  };
+  const pause = async (ms: number, admission = false): Promise<void> => {
+    if (admission && context !== undefined) {
+      if (stopped() !== null) return;
+      await sleepResult(
+        task,
+        Math.min(ms, Math.max(0, admissionDeadline - task.monotonicNow())),
+        "broker pause",
+        context.signal,
+      );
+    } else await sleepResult(task, ms, "broker pause");
+  };
+  const grant = (
+    credential: StoredCredential,
+    generation: number,
+    rotated = false,
+  ): Result<TokenGrant, TokenError> => {
+    const stop = stopped();
+    if (stop === null) return ok(grantOf(credential, generation));
+    if (rotated)
+      logEvent(task, "credential.rotation_settled", {
+        provider,
+        generation,
+        outcome: "stored",
+        caller_stopped: true,
+      });
+    return err(stop);
   };
 
   while (task.monotonicNow() <= deadline) {
+    let stop = stopped();
+    if (stop !== null) return err(stop);
     const pointerResult = await deps.pointers.readPointer(task, provider);
+    stop = stopped();
+    if (stop !== null) return err(stop);
     if (pointerResult.isErr()) return err(retryable(pointerResult.error.message));
     const pointer = pointerResult.value;
     if (pointer === null || pointer.secretVersion === null) return err(AUTH_REQUIRED);
 
     const credentialResult = await deps.secrets.readSecret(task, provider, pointer.secretVersion);
+    stop = stopped();
+    if (stop !== null) return err(stop);
     if (credentialResult.isErr()) return err(retryable(credentialResult.error.message));
     const credential = credentialResult.value;
     if (credential === null) {
       // The pointer moved between our reads (the old version was destroyed),
       // or the secret store is behind. Re-read; the deadline bounds us.
-      await pause(constants.waiterPollMs);
+      await pause(constants.waiterPollMs, true);
       continue;
     }
 
@@ -148,14 +189,14 @@ export async function getToken(
     const rejected = request.reason === "rejected" && demandsNewer;
 
     if (!demandsNewer && !expired && !nearExpiry) {
-      return ok(grantOf(credential, pointer.generation));
+      return grant(credential, pointer.generation);
     }
 
     if (pointer.refreshLeaseUntil > now) {
       // Another actor is refreshing. Serve the current token when it is
       // still usable and the caller did not demand a newer one.
-      if (!expired && !demandsNewer) return ok(grantOf(credential, pointer.generation));
-      await pause(constants.waiterPollMs);
+      if (!expired && !demandsNewer) return grant(credential, pointer.generation);
+      await pause(constants.waiterPollMs, true);
       continue;
     }
 
@@ -163,7 +204,7 @@ export async function getToken(
     if (!expired && sinceLastRefresh < constants.minRefreshIntervalMs) {
       // Global refresh rate limit (abuse backstop). A still-valid token is
       // served unless the caller says the upstream rejected exactly it.
-      if (!rejected) return ok(grantOf(credential, pointer.generation));
+      if (!rejected) return grant(credential, pointer.generation);
       return err(
         retryable("refresh rate limited", constants.minRefreshIntervalMs - sinceLastRefresh),
       );
@@ -173,10 +214,12 @@ export async function getToken(
     if (upstream === undefined) {
       // No refresher wired for this provider (configuration gap). A
       // still-valid token is served; an expired one cannot recover here.
-      if (!expired && !rejected) return ok(grantOf(credential, pointer.generation));
+      if (!expired && !rejected) return grant(credential, pointer.generation);
       return err(retryable(`no upstream refresher for provider ${provider}`));
     }
 
+    stop = stopped();
+    if (stop !== null) return err(stop);
     const leaseResult = await deps.pointers.casWritePointer(task, provider, pointer.rowVersion, {
       generation: pointer.generation,
       secretVersion: pointer.secretVersion,
@@ -186,11 +229,18 @@ export async function getToken(
     if (leaseResult.isErr()) {
       // Conflict: someone moved first — re-read. Store failure: the write is
       // ambiguous; re-read resolves it either way.
-      await pause(constants.waiterPollMs);
+      await pause(constants.waiterPollMs, true);
       continue;
     }
     const leased = leaseResult.value;
+    stop = stopped();
+    if (stop !== null) {
+      await releaseLease(task, deps, provider, leased);
+      return err(stop);
+    }
 
+    // An admitted refresh may rotate the only usable token. Its fenced settlement
+    // retains the broker budget, independent of caller cancellation/expiry.
     const refreshResult = await withDeadline(
       task,
       constants.upstreamTimeoutMs,
@@ -229,7 +279,7 @@ export async function getToken(
         });
         if (commit.isOk()) {
           await deps.secrets.destroySecret(task, provider, pointer.secretVersion);
-          return ok(grantOf(fresh, pointer.generation + 1));
+          return grant(fresh, pointer.generation + 1, true);
         }
 
         // A conflict may be only a replacement lease over the credential that
@@ -240,7 +290,7 @@ export async function getToken(
           if (reread.isOk()) {
             if (reread.value?.secretVersion === version) {
               await deps.secrets.destroySecret(task, provider, pointer.secretVersion);
-              return ok(grantOf(fresh, reread.value.generation));
+              return grant(fresh, reread.value.generation, true);
             }
             if (
               reread.value?.generation === pointer.generation &&
@@ -288,8 +338,8 @@ export async function getToken(
 
     // Transient upstream failure.
     await releaseLease(task, deps, provider, leased, refreshResult.error.diagnostic);
-    if (!expired && !rejected) return ok(grantOf(credential, pointer.generation));
-    await pause(refreshResult.error.retryAfterMs ?? 2 * constants.waiterPollMs);
+    if (!expired && !rejected) return grant(credential, pointer.generation);
+    await pause(refreshResult.error.retryAfterMs ?? 2 * constants.waiterPollMs, true);
   }
 
   return err(retryable("token request deadline exceeded"));

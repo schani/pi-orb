@@ -866,7 +866,12 @@ function headlineRecord(id: string, name = "codemode", callId = id): HistoryReco
         type: "tool_call",
         callId,
         name,
-        arguments: { code: "HEADLINE_DETAIL_BODY", task: "HEADLINE_DETAIL_BODY" },
+        arguments: {
+          ...(name === "bash"
+            ? { command: "HEADLINE_DETAIL_BODY" }
+            : { code: "HEADLINE_DETAIL_BODY" }),
+          task: "HEADLINE_DETAIL_BODY",
+        },
       },
     ],
     overflow: {},
@@ -958,7 +963,24 @@ async function handleHeadlineFixture(
       const records: HistoryRecord[] = [];
       const add = (id: string, name = "codemode") =>
         records.push(headlineRecord(id, name), headlineSeparator(id));
-      if (scenario === "first seen") {
+      if (scenario === "code headers") {
+        add("code-bash", "bash");
+        add("code-codemode");
+        add("code-ready", "bash");
+        add("code-empty");
+        add("code-absent", "bash");
+        const missing = headlineRecord("code-missing", "bash");
+        if (missing.type === "message" && missing.content[0]?.type === "tool_call")
+          missing.content[0].arguments = {};
+        records.push(missing, headlineSeparator("code-missing"));
+        for (const id of ["code-group-one", "code-group-two", "code-group-three"])
+          records.push(headlineRecord(id, "bash"));
+        records.push(headlineSeparator("code-group-three"));
+        state.headlines.markers.set("code-ready", "Ready from history");
+        state.headlines.markers.set("code-empty", "");
+        state.headlines.markers.set("code-absent", undefined);
+        state.headlines.markers.set("code-missing", undefined);
+      } else if (scenario === "first seen") {
         add("seen-null");
         add("seen-arbitrary", "arbitrary_fixture_label");
         add("seen-string", "read");
@@ -1023,7 +1045,9 @@ async function handleHeadlineFixture(
     } else if (action === "fail" || action === "success") state.headlines.fail = action === "fail";
     else {
       let record: HistoryRecord;
-      if (action === "result")
+      if (action === "code-result")
+        record = headlineResult("code-result", "code-bash", "code-bash");
+      else if (action === "result")
         record = headlineResult("scope-result", "scope-intent", "scope-intent");
       else if (action === "late-result")
         record = headlineResult("late-result", "late-intent", "late-intent");
@@ -1039,7 +1063,7 @@ async function handleHeadlineFixture(
       if (action === "live") state.headlines.pendingSources.set(record.id, record);
       else state.histories.get(HEADLINE_ORB_ID)?.push(record);
       headlineFrame(state, record);
-      if (action !== "result" && action !== "late-result") {
+      if (action !== "result" && action !== "late-result" && action !== "code-result") {
         const separator = headlineSeparator(record.id);
         state.histories.get(HEADLINE_ORB_ID)?.push(separator);
         headlineFrame(state, separator);

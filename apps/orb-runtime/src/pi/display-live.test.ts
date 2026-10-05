@@ -102,6 +102,46 @@ it("Pi publishes only changed compact reasoning headlines, including removal and
   expect(agent.liveView()?.blocks[0]?.redacted).toBe(true);
 });
 
+it.each(["codemode", "bash"])(
+  "Pi publishes bounded public %s code but ignores child calls",
+  (toolName) => {
+    const agent = new PiOrbAgent({
+      orbId: "test",
+      repositoryUrl: "https://example.com/repo",
+      workDir: "/unused",
+      skillsDir: null,
+      broker: null,
+      executionId: "test",
+      idleStopFence: new MemoryIdleStopFence(),
+    });
+    agent.attachSession(
+      { isIdle: true, subscribe: () => () => undefined } as unknown as PiSession,
+      SessionManager.inMemory("/unused"),
+      { summarize: () => okAsync("") },
+    );
+    const frames: unknown[] = [];
+    agent.subscribe((frame) => frames.push(frame));
+    agent["onAgentEvent"]({ type: "agent_start" } as Parameters<(typeof agent)["onAgentEvent"]>[0]);
+    const code = `  first\n${"😀".repeat(400)}`;
+    const args = { [toolName === "bash" ? "command" : "code"]: code, token: "SECRET_AUTH" };
+    agent["onAgentEvent"]({ type: "tool_execution_start", toolCallId: "root", toolName, args });
+    agent["onAgentEvent"]({
+      type: "tool_execution_start",
+      toolCallId: "child",
+      parentToolCallId: "root",
+      toolName,
+      args: { code: "SECRET_CHILD", command: "SECRET_CHILD" },
+    });
+    const live = agent.liveView();
+    expect(live?.tools).toHaveLength(1);
+    const projected = live?.tools[0] as { code?: string };
+    expect(projected.code).toContain("  first\n");
+    expect(Buffer.byteLength(projected.code ?? "")).toBeLessThanOrEqual(1024);
+    expect(projected.code).not.toContain("�");
+    expect(JSON.stringify(frames)).not.toContain("SECRET");
+  },
+);
+
 it("Pi tool progress remains HTTP-only and retires when the operation finishes", () => {
   const agent = new PiOrbAgent({
     orbId: "test",
@@ -138,6 +178,13 @@ it("Pi tool progress remains HTTP-only and retires when the operation finishes",
     state: "running",
     body: { type: "tool_result", content: [{ type: "text", text: "HIDDEN_OUTPUT" }] },
   });
+  expect(agent.liveView()?.tools[0]).toMatchObject({ code: "echo visible" });
+  expect(frames).toContainEqual(
+    expect.objectContaining({
+      type: "runtime.event",
+      event: expect.objectContaining({ type: "tool_state", code: "echo visible" }),
+    }),
+  );
   expect(JSON.stringify(frames)).not.toContain("HIDDEN_OUTPUT");
   expect(JSON.stringify(frames)).not.toContain("HIDDEN_ARG");
   agent["onAgentEvent"]({
@@ -151,6 +198,7 @@ it("Pi tool progress remains HTTP-only and retires when the operation finishes",
     state: "completed",
     body: { content: [{ text: "FINAL_OUTPUT" }] },
   });
+  expect(agent.liveView()?.tools[0]).toMatchObject({ code: "echo visible" });
   agent["finishAgentOperation"](operationId, "completed");
   expect(agent.readLiveDisplayDetail(operationId, "call").state).toBe("unavailable");
 });

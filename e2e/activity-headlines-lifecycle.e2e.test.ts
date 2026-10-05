@@ -117,6 +117,8 @@ describe.each([
           page,
           `fixture.render(1); ${state === "queued" ? "fixture.block();" : ""} fixture.see('${category}')`,
         );
+        expect(await page.locator(category).getByText("Summary unavailable.").count()).toBe(0);
+        expect(await page.locator(category).getByRole("button", { name: "Retry" }).count()).toBe(0);
         if (state === "failed" || state === "ready") {
           await command(page, `fixture.settle(0, ${state === "failed"})`);
           await page
@@ -145,9 +147,22 @@ describe.each([
           await page.locator(firstChild).getByText("Ready first").waitFor();
         }
         if (state === "failed") {
+          expect(
+            await page
+              .locator(firstChild)
+              .getByText("Summary unavailable.", { exact: true })
+              .getAttribute("class"),
+          ).toContain("error-text");
+          expect(await page.getByRole("button", { name: "Retry" }).getAttribute("class")).toContain(
+            "error-text",
+          );
+          await command(page, "fixture.render(2)");
+          expect(await requests(page)).toHaveLength(1);
           await page.getByRole("button", { name: "Retry" }).click();
           await command(page, `fixture.see('${firstChild}')`);
           expect(await requests(page)).toHaveLength(2);
+          expect(await page.locator(firstChild).locator(".error-text").count()).toBe(0);
+          expect(await page.getByRole("button", { name: "Retry" }).count()).toBe(0);
         }
       }),
   );

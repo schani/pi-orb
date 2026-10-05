@@ -1,4 +1,4 @@
-import { completeLuna } from "@pi-orb/luna";
+import { completeLuna, type LunaFailureDiagnostics } from "@pi-orb/luna";
 import { type ActivityHeadlineSource, capHeadline } from "@pi-orb/protocol";
 import type { SimulationTask } from "determined";
 import { errAsync, okAsync, ResultAsync } from "neverthrow";
@@ -12,7 +12,12 @@ import type {
 
 const failure = (
   stage: ActivityHeadlineGenerationError["stage"],
-): ActivityHeadlineGenerationError => ({ type: "headline_generation_failed", stage });
+  diagnostics: LunaFailureDiagnostics = {},
+): ActivityHeadlineGenerationError => ({
+  type: "headline_generation_failed",
+  stage,
+  ...diagnostics,
+});
 
 export class PiActivityHeadlineGenerator implements ActivityHeadlineGenerator {
   private readonly brokerForUser: (userId: string) => BrokerDeps;
@@ -33,9 +38,15 @@ export class PiActivityHeadlineGenerator implements ActivityHeadlineGenerator {
     const stopped = () => context.signal.aborted || task.monotonicNow() >= context.deadlineAt;
     if (stopped()) return errAsync(failure("cancelled"));
     return new ResultAsync(
-      getToken(task, this.brokerForUser(input.ownerUserId), "openai-codex", { reason: "startup" }),
+      getToken(
+        task,
+        this.brokerForUser(input.ownerUserId),
+        "openai-codex",
+        { reason: "startup" },
+        context,
+      ),
     )
-      .mapErr(() => failure(context.signal.aborted ? "cancelled" : "auth"))
+      .mapErr(() => failure(stopped() ? "cancelled" : "auth"))
       .andThen((grant) => {
         if (stopped()) return errAsync(failure("cancelled"));
         return ResultAsync.fromThrowable(
@@ -58,13 +69,25 @@ export class PiActivityHeadlineGenerator implements ActivityHeadlineGenerator {
                 ...(this.inferenceBaseUrl === null ? {} : { baseUrl: this.inferenceBaseUrl }),
               },
             }),
-          () => failure(context.signal.aborted ? "cancelled" : "inference"),
+          () => failure(stopped() ? "cancelled" : "inference", { reason: "completion_rejected" }),
         )().andThen((result) =>
-          result.mapErr(() => failure(context.signal.aborted ? "cancelled" : "inference")),
+          result.mapErr((error) =>
+            failure(stopped() ? "cancelled" : "inference", {
+              reason: error.reason,
+              providerStatus: error.providerStatus,
+              transport: error.transport,
+              phase: error.phase,
+              stopReason: error.stopReason,
+              inputTokens: error.inputTokens,
+              outputTokens: error.outputTokens,
+              reasoningTokens: error.reasoningTokens,
+              errorCode: error.errorCode,
+            }),
+          ),
         );
       })
       .andThen((text) => {
-        if (context.signal.aborted) return errAsync(failure("cancelled"));
+        if (stopped()) return errAsync(failure("cancelled"));
         const headline = capHeadline(text.normalize("NFKC").trim().replace(/\s+/gu, " "));
         return headline === "" ? errAsync(failure("inference")) : okAsync(headline);
       });

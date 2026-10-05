@@ -43,6 +43,92 @@ function ToolActivity({ persisted }: { persisted: readonly RawPair[] }) {
   return <BrowserToolActivity persisted={projected} detailContext={detailContext()} />;
 }
 
+describe("code header fallback", () => {
+  it.each(["bash", "codemode"])(
+    "%s shows live code without details or a summary request",
+    (name) => {
+      const html = renderToStaticMarkup(
+        <BrowserToolActivity
+          detailContext={detailContext()}
+          live={[{ callId: "live", name, state: "running", code: "raw source" }]}
+        />,
+      );
+      expect(html).toContain('<code class="trunc" title="raw source">raw source</code>');
+      expect(html).not.toContain("Loading…");
+    },
+  );
+  it.each(["bash", "codemode"])("%s uses call code until the selected summary is ready", (name) => {
+    const code = '\nprint("<b>  literal</b>")\nnext()';
+    const render = (intent: string | null | undefined, outcome?: string | null) =>
+      renderToStaticMarkup(
+        <BrowserToolActivity
+          detailContext={detailContext()}
+          persisted={[
+            {
+              callRecordId: "intent",
+              call: {
+                type: "tool_call",
+                callId: "one",
+                name,
+                detailKey: "intent:0",
+                code,
+                ...(intent === undefined ? {} : { headline: intent }),
+              },
+              ...(outcome === undefined
+                ? {}
+                : {
+                    resultRecordId: "outcome",
+                    result: {
+                      type: "tool_result",
+                      callId: "one",
+                      detailKey: "outcome:0",
+                      headline: outcome,
+                      hasImages: false,
+                    },
+                  }),
+            },
+          ]}
+        />,
+      );
+    for (const html of [render(undefined), render(null), render("Intent ready", null)]) {
+      expect(html).toContain('<code class="trunc"');
+      expect(html).toContain("print(&quot;&lt;b&gt;  literal&lt;/b&gt;&quot;)");
+      expect(html).not.toContain("Intent ready");
+      expect(html).not.toContain("Loading…");
+    }
+    for (const html of [render("Ready"), render(null, "Ready")]) {
+      expect(html).toContain("Ready");
+      expect(html).not.toContain("literal");
+    }
+    for (const html of [render(""), render("Intent ready", "")]) {
+      expect(html).not.toContain("literal");
+      expect(html).not.toContain("Intent ready");
+    }
+  });
+
+  it("keeps grouped command count and individual code headers", () => {
+    const html = renderToStaticMarkup(
+      <BrowserToolActivity
+        detailContext={detailContext()}
+        persisted={["pwd", "ls", "date"].map((code, index) => ({
+          callRecordId: `call-${index}`,
+          call: {
+            type: "tool_call",
+            callId: `${index}`,
+            name: "bash",
+            detailKey: `call-${index}:0`,
+            headline: null,
+            code,
+          },
+        }))}
+      />,
+    );
+    expect(html).toContain("3 ran");
+    for (const code of ["pwd", "ls", "date"]) expect(html).toContain(`>${code}</code>`);
+    expect(html).not.toContain("Loading…");
+  });
+});
+
 describe("bounded call labels", () => {
   it("uses the tool name for an empty generic projection heading and tooltip", () => {
     const html = renderToStaticMarkup(

@@ -122,7 +122,36 @@ describe("PiActivityHeadlineGenerator", () => {
     expect(result._unsafeUnwrapErr()).toEqual({
       type: "headline_generation_failed",
       stage: "inference",
+      reason: "completion_rejected",
     });
+  });
+  it("preserves structured safe provider failure facts without raw message", async () => {
+    mocks.complete.mockReturnValueOnce(
+      errAsync({
+        type: "luna_completion_error",
+        message: "PRIVATE_PROVIDER_CANARY",
+        reason: "provider_error",
+        providerStatus: 503,
+        transport: "sse",
+        phase: "before_message_stream_start",
+        stopReason: "error",
+        inputTokens: 10,
+        outputTokens: 0,
+      }),
+    );
+    const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps);
+    const result = await generator.generate(task, input, {
+      signal: new AbortController().signal,
+      deadlineAt: task.monotonicNow() + 30_000,
+    });
+    expect(result._unsafeUnwrapErr()).toMatchObject({
+      stage: "inference",
+      reason: "provider_error",
+      providerStatus: 503,
+      transport: "sse",
+      inputTokens: 10,
+    });
+    expect(JSON.stringify(result._unsafeUnwrapErr())).not.toContain("PRIVATE_PROVIDER_CANARY");
   });
   it("returns content-free typed provider/auth/empty failures", async () => {
     const generator = new PiActivityHeadlineGenerator(() => ({}) as BrokerDeps);

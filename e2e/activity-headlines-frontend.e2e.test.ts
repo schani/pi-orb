@@ -15,6 +15,7 @@ const cases = [
   "two-request cap",
   "scope replay result",
   "failure manual Retry",
+  "code headers",
 ] as const;
 function gate() {
   let release!: () => void;
@@ -132,7 +133,52 @@ it.each(
         expect(request, `held ${key}`).toBeDefined();
         request?.gate.release();
       };
-      if (scenario === "first seen") {
+      if (scenario === "code headers") {
+        let detailReads = 0;
+        page.on("request", (request) => {
+          if (new URL(request.url()).pathname.includes(`/${ORB}/details/`)) detailReads++;
+        });
+        await expect.poll(() => [...requests].sort()).toEqual(["code-bash", "code-codemode"]);
+        await expect(rows).toHaveCount(7);
+        for (const index of [0, 1, 4]) {
+          await expect(summaries.nth(index).locator("code")).toHaveText("HEADLINE_DETAIL_BODY");
+          await expect(summaries.nth(index).locator("code")).toHaveCSS("white-space", "nowrap");
+        }
+        await expect(summaries.nth(2)).toContainText("Ready from history");
+        await expect(summaries.nth(2).locator("code")).toHaveCount(0);
+        await expect(summaries.nth(3).locator(".activity-rail-headline")).toHaveText("");
+        await expect(summaries.nth(3).locator("code")).toHaveCount(0);
+        await expect(summaries.nth(5)).toContainText("commands");
+        await expect(summaries.nth(5).locator("code")).toHaveCount(0);
+        await expect(summaries.last()).toContainText("3 ran");
+        await expect(summaries.last().locator(".activity-rail-headline")).toHaveCount(0);
+        release("code-bash");
+        release("code-codemode");
+        await expect(summaries.first()).toContainText("Headline code-bash");
+        await expect(summaries.nth(1)).toContainText("Headline code-codemode");
+        await control("code-result");
+        await expect.poll(() => requests.at(-1)).toBe("code-result");
+        await expect(summaries.first().locator("code")).toHaveText("HEADLINE_DETAIL_BODY");
+        await expect(summaries.first()).not.toContainText("Headline code-bash");
+        release("code-result");
+        await expect(summaries.first()).toContainText("Headline code-result");
+        expect(detailReads).toBe(0);
+        expect(requests).toHaveLength(3);
+        await summaries.last().click();
+        await expect.poll(() => requests.length).toBe(5);
+        const children = page.locator(".tool-activity-call > summary");
+        await expect(children).toHaveCount(3);
+        for (const child of await children.all())
+          await expect(child).toContainText("HEADLINE_DETAIL_BODY");
+        const activeGroup = held.filter((item) => item.key.startsWith("code-group-"));
+        expect(activeGroup).toHaveLength(2);
+        for (const item of activeGroup) item.gate.release();
+        await expect.poll(() => requests.length).toBe(6);
+        for (const item of held.filter((item) => item.key.startsWith("code-group-")))
+          item.gate.release();
+        await expect(children.last()).toContainText("Headline code-group-three");
+        expect(detailReads).toBe(0);
+      } else if (scenario === "first seen") {
         await expect.poll(() => [...requests].sort()).toEqual(["seen-arbitrary", "seen-null"]);
         await expect(rows).toHaveCount(6);
         expect(await rows.first().getAttribute("open")).toBeNull();
@@ -296,12 +342,10 @@ it.each(
         await expect(page.locator(".history")).not.toContainText("STALE_HEADLINE_MUST_NOT_PUBLISH");
       } else {
         await expect.poll(() => requests).toEqual(["failure-intent"]);
+        const pendingLabel = await summaries.first().textContent();
+        await expect(summaries.first().locator("code")).toHaveText("HEADLINE_DETAIL_BODY");
         await control("fail");
-        release("failure-intent");
-        await expect(summaries.first()).toContainText("Summary unavailable.");
         await control("replay");
-        await flush();
-        expect(requests).toHaveLength(1);
         await page.route(`**/api/v1/orbs/${ORB}/details/**`, (route) =>
           route.fulfill({
             status: 503,
@@ -316,6 +360,35 @@ it.each(
           }),
         );
         await summaries.first().click();
+        await expect(rows.first().getByRole("alert")).toContainText("Fixture details unavailable");
+        await expect(
+          page.getByRole("textbox", { name: "Message the orb", exact: true }),
+        ).toBeEnabled();
+        await flush();
+        expect(await summaries.first().textContent()).toBe(pendingLabel);
+        await expect(summaries.first().locator(".error-text")).toHaveCount(0);
+        await expect(summaries.first().getByRole("button", { name: "Retry" })).toHaveCount(0);
+        expect(requests).toHaveLength(1);
+        release("failure-intent");
+        await expect(summaries.first()).toContainText("Summary unavailable.");
+        await expect(summaries.first().locator("code")).toHaveCount(0);
+        const badColor = await page.evaluate<string>(`(() => {
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--bad)';
+          document.body.append(probe);
+          const color = getComputedStyle(probe).color;
+          probe.remove();
+          return color;
+        })()`);
+        await expect(
+          summaries.first().getByText("Summary unavailable.", { exact: true }),
+        ).toHaveCSS("color", badColor);
+        await expect(
+          summaries.first().getByRole("button", { name: "Retry", exact: true }),
+        ).toHaveCSS("color", badColor);
+        await control("replay");
+        await flush();
+        expect(requests).toHaveLength(1);
         await expect(rows.first().getByRole("alert")).toContainText("Fixture details unavailable");
         await expect(summaries.first()).toContainText("Summary unavailable.");
         await page.unroute(`**/api/v1/orbs/${ORB}/details/**`);
@@ -339,6 +412,11 @@ it.each(
         await summaries.first().getByRole("button", { name: "Retry", exact: true }).click();
         expect(await rows.first().getAttribute("open")).toBeNull();
         await expect.poll(() => requests.length).toBe(2);
+        expect(await summaries.first().textContent()).toBe(pendingLabel);
+        await expect(summaries.first().locator(".error-text")).toHaveCount(0);
+        await expect(summaries.first().getByRole("button", { name: "Retry" })).toHaveCount(0);
+        await flush();
+        expect(requests).toHaveLength(2);
         held[1]?.gate.release();
         await expect(summaries.first()).toContainText("Headline failure-intent");
         await flush();
