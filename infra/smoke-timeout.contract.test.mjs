@@ -94,17 +94,17 @@ test("release validates explicit user and one-shot owner configuration before ex
   assert.match(conflicting.stderr, /conflicts/);
 });
 
-test("workflow forwards the selected user and guarded Google mappings", () => {
+test("workflow forwards the selected user without identity mapping payloads", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/deploy.yml", import.meta.url),
     "utf8",
   );
   assert.match(workflow, /PI_ORB_USER_ID: \$\{\{ vars\.PI_ORB_USER_ID \}\}/);
   assert.doesNotMatch(workflow, /PI_ORB_ORIGINAL_/);
-  assert.match(
-    workflow,
-    /PI_ORB_GOOGLE_IDENTITY_MAPPINGS: \$\{\{ secrets\.PI_ORB_GOOGLE_IDENTITY_MAPPINGS \}\}/,
-  );
+  assert.doesNotMatch(workflow, /PI_ORB_GOOGLE_IDENTITY_MAPPINGS/);
+  const release = readFileSync(new URL("./release.sh", import.meta.url), "utf8");
+  assert.match(release, /PI_ORB_GOOGLE_IDENTITY_MAPPINGS=pi-orb-google-identity-mappings:1/);
+  assert.doesNotMatch(release, /PI_ORB_GOOGLE_IDENTITY_MAPPINGS=\$PI_ORB_GOOGLE_IDENTITY_MAPPINGS/);
 });
 
 test("machine user header requires the domain UUID shape", () => {

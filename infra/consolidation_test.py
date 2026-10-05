@@ -18,10 +18,28 @@ class ConsolidationTest(unittest.TestCase):
     def test_origins_and_secret_boundaries(self):
         self.assertRegex(Path('infra/hosting.tf').read_text(), r'app_origin\s+= local\.oidc_issuer_url')
         source = Path('infra/auth.tf').read_text()
-        for fragment in ['google_client_secret', 'cookie_secret', 'secret_data', 'google_logging_project_exclusion']:
+        for fragment in ['google_client_secret', 'cookie_secret', 'google_logging_project_exclusion']:
             self.assertIn(fragment, source)
-        self.assertIn('var.machine_subject', Path('infra/run.tf').read_text())
+        self.assertNotIn('secret_data', source)
+        self.assertNotIn('google_secret_manager_secret_version', source)
+        self.assertIn('data "google_secret_manager_secret" "auth"', source)
+        run = Path('infra/run.tf').read_text()
+        self.assertIn('var.machine_subject', run)
+        self.assertIn('data.google_secret_manager_secret.auth[env.value].secret_id', run)
+        self.assertRegex(run, r'version\s+= "1"')
+        workflow = Path('.github/workflows/deploy.yml').read_text()
+        self.assertNotIn('TF_VAR_google_client_secret', workflow)
+        self.assertNotIn('TF_VAR_cookie_secret', workflow)
         self.assertNotIn('--iap', Path('infra/deploy.sh').read_text())
+
+    def test_actions_auth_uses_metadata_and_mapping_secret_reference(self):
+        source = Path('infra/release.sh').read_text()
+        self.assertIn('python3 -m infra.release_auth "$PROJECT"', source)
+        self.assertIn('PI_ORB_GOOGLE_IDENTITY_MAPPINGS=pi-orb-google-identity-mappings:1', source)
+        self.assertNotIn('PI_ORB_GOOGLE_IDENTITY_MAPPINGS=$PI_ORB_GOOGLE_IDENTITY_MAPPINGS', source)
+        workflow = Path('.github/workflows/deploy.yml').read_text()
+        self.assertNotIn('secrets.PI_ORB_GOOGLE_IDENTITY_MAPPINGS', workflow)
+        self.assertNotIn('vars.PI_ORB_MACHINE_SUBJECT', workflow)
 
     def test_maintenance_precedes_schema(self):
         source = Path('infra/release.sh').read_text()

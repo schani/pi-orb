@@ -87,11 +87,7 @@ jobs:
         env:
           VALIDATE_RELEASE: ${{ inputs.validate_release }}
           CUTOVER_MANIFEST: ${{ inputs.cutover_manifest }}
-          TF_VAR_machine_subject: ${{ vars.PI_ORB_MACHINE_SUBJECT }}
-          TF_VAR_google_client_id: ${{ vars.PI_ORB_GOOGLE_CLIENT_ID }}
-          TF_VAR_google_client_secret: ${{ secrets.PI_ORB_GOOGLE_CLIENT_SECRET }}
-          TF_VAR_cookie_secret: ${{ secrets.PI_ORB_COOKIE_SECRET }}
-          PI_ORB_GOOGLE_IDENTITY_MAPPINGS: ${{ secrets.PI_ORB_GOOGLE_IDENTITY_MAPPINGS }}
+          TF_VAR_google_client_id: 1077475695242-hs53alaasigvrurtme2j73ej37vqre63.apps.googleusercontent.com
           PI_ORB_RELEASE_RESULT_DIR: ${{ runner.temp }}/release-result
           PI_ORB_USER_ID: ${{ vars.PI_ORB_USER_ID }}
         run: |

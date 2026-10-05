@@ -86,8 +86,8 @@ resource "google_cloud_run_v2_service" "issuer" {
           name = env.key
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.auth[env.value].secret_id
-              version = google_secret_manager_secret_version.auth[env.value].version
+              secret  = data.google_secret_manager_secret.auth[env.value].secret_id
+              version = "1"
             }
           }
         }

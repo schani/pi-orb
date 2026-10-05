@@ -72,12 +72,12 @@ Remove browser/runtime/ops service resources, role env/outputs, browser IAP wiri
 
 Use a single maintenance window, not a compatibility rollout:
 
-1. Prepare the qualified image, callback configuration, verified identity mappings, database recovery point and independent restoration safeguard. Run through the independent GitHub deployment identity, not the orb being stopped.
+1. Prepare fresh Actions-qualified images, callback configuration and verified identity mappings. Run through the existing Deploy workflow's independent identity, not the orb being stopped.
 2. Drain/stop affected orbs. Block old browser/ops invocation, including tagged/revision URLs; drain admitted work and prove old identity-serving processes and controllers have stopped. Keep them from reactivating. A delayed old IAP request must not recreate an identity after migration. Deletion alone is not retirement proof.
 3. Run migrations; apply the single-service configuration and remove obsolete services. Keep autonomous work behind the existing activation barrier until retirement is proven. No external federation-trust change or staged issuer-removal protocol is needed.
 4. Activate and test owned smoke orbs first. Changing broker URLs may require existing workspace-preserving compute replacement, not just restart; update the host specification accordingly. Account for pending wake intents before activating, then resume the inventoried fleet after acceptance.
 
-Rehearse failed migration/apply/recovery against an isolated deployment. Recover explicitly through the independent identity and existing forward-generation procedure; do not assume reverting an image undoes an identity migration. Keep the issuer resource itself in place throughout.
+**Decision, 2026-10-05:** ordinary backups remain enabled; a new backup, restore drill and recovery attestation are not cutover gates. Migration 031 transactionally changes only the six verified identity issuer/subject pairs, preserving UUIDs and ownership. Retain the private original tuples for explicit undo; never automatically restore the database, reactivate old controllers or rotate credentials after uncertainty. Keep the issuer resource itself in place throughout. Actions owns durable continuation through fleet stop and resumption; the current verifier supplies retirement checks, not fleet orchestration. Remaining implementation is tracked in `TODO.md`.
 
 Primary code: `infra/{run,hosting,oidc,outputs}.tf`, `infra/{api,deploy,release,smoke,smoke-workload-identity}.sh`, `infra/release_*.py`, and their tests. Update relevant design/configuration docs with implementation, removing obsolete options rather than leaving tombstones.
 

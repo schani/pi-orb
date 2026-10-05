@@ -109,80 +109,19 @@ Configure the Workspace consent screen for `heyglide.com`. Update GitHub/MCP
 callback registrations and provider allowlists to the new app origin; reconnect
 integrations where necessary. No old-URL aliases are deployed.
 
-Supply `TF_VAR_google_client_id`, `TF_VAR_google_client_secret` and
-`TF_VAR_cookie_secret` to OpenTofu. Generate the cookie key once with at least 32
-random bytes (for example `openssl rand -base64 32`); retain it across restarts
-and releases. Validation requires at least 32 characters. GitHub **Deploy** uses
-repository variable `PI_ORB_GOOGLE_CLIENT_ID` and secrets
-`PI_ORB_GOOGLE_CLIENT_SECRET`, `PI_ORB_COOKIE_SECRET`. IaC writes secret values to
-Secret Manager, pins versions into the revision, and grants the control-plane
-identity access. Terraform state and plans contain these secrets: never commit
-or upload them. Provision these inputs before running any plan. Replacing the
-cookie key invalidates sessions only after all old-key processes retire.
+Supply the public `TF_VAR_google_client_id` to OpenTofu; production Deploy pins the registered web client ID. Before release, stage `pi-orb-google-client-secret` and `pi-orb-cookie-secret` in Secret Manager, version **1** each. Generate the cookie key once with at least 32 random bytes and retain it across releases. IaC reads container metadata only, grants the control-plane identity access and pins version 1 in the revision; it never reads or stores these payloads. Do not rotate either secret during cutover.
 
-The app sets `PI_ORB_AUTH_MODE=google`. An administrator must read the debug
-account's immutable ID with `gcloud iam service-accounts describe
-pi-orb-debug@<project>.iam.gserviceaccount.com --format='value(uniqueId)'` and
-supply `TF_VAR_machine_subject` (GitHub variable `PI_ORB_MACHINE_SUBJECT`). Verify
-that it belongs to the existing debug account; do not use its email or a user ID.
-This avoids granting recurring deployment authority additional IAM read access. Machine token audience is the exact app origin.
-The debug account and scoped impersonation binding remain external prerequisites.
-Request-log exclusions for `/auth/callback` and the MCP callback precede the app
-revision, so authorization codes are not retained in Cloud Run request logs.
+The release verifies enabled version metadata and derives `TF_VAR_machine_subject` from an IAM read of the existing `pi-orb-debug@<project>.iam.gserviceaccount.com`, checking its exact email, enabled state and numeric immutable `uniqueId`. Machine token audience is the exact app origin. Debug impersonation remains an external bootstrap prerequisite. Request-log exclusions for Google and MCP callbacks precede the app revision; inspect all applicable log routing before public exposure.
 
 ## First consolidation: controlled maintenance
 
-**Not cloud-validated.** Rehearse migration/apply failure and independent recovery
-in an isolated deployment before production authorization. Normal releases reject
-the old deployment contract; the explicit `--cutover MANIFEST` path is required.
-It runs only under GitHub's independent deployment identity, never an affected orb.
+**Decision, 2026-10-05:** production mutations run only through the existing main-branch Deploy workflow, under Actions concurrency and the global GCS release lock. The first cutover must qualify and freshly build the dispatched source. Its execution survives stopping the initiating orb. Ordinary backups remain enabled; no extra backup, restore drill or recovery attestation is required.
 
-1. Qualify the exact main commit and images; register callbacks and secrets.
-   Independently verify every existing identity mapping and preserve user UUIDs.
-   Set GitHub secret `PI_ORB_GOOGLE_IDENTITY_MAPPINGS` to a nonempty JSON array of
-   `{userId,oldIssuer,oldSubject,googleSubject}`. The migration alone receives it;
-   checks/E2E do not. The SQL guard, not email matching, admits those mappings.
-2. Create a database recovery point and test an independent restoration identity.
-   Inventory orbs, workspace disks and pending wake intents; stop/drain the fleet.
-   Do not resume it until owned smoke acceptance. Broker-origin changes require
-   workspace-preserving host replacement, not merely restarting old compute.
-3. Under the independent identity, initialize a private evidence record, then
-   capture **before deletion** every old service revision and pending mutation:
+Stage the six independently verified `{userId,oldIssuer,oldSubject,googleSubject}` mappings privately as `pi-orb-google-identity-mappings`, version **1**. Never submit this JSON as a workflow input or publish it. Actions grants only the migration identity access and the one-shot job uses a secret reference; checks/builds and the application receive no mappings. Retain the protected original tuples for explicit undo. Migration 031 preserves user UUIDs and ownership.
 
-       python3 -m infra.release_state init /private/maintenance-record.json maintenance-<id> <commit> <project> <region> <zone> ''
-       python3 -m infra.release_cutover inventory /private/maintenance-record.json /private/maintenance.json
+Required ordering: inventory fleet/workspaces/wake intentions; fence admission and drain through the old application API; retire only `pi-orb`, `pi-orb-ops` and `pi-orb-runtime-api`; require explicit post-fence active/idle zeros and no pending compute operations; verify exact ledger/identity tuples; migrate once without retries; apply; retire the prior issuer revision; advance activation by CAS; smoke; resume prior-running orbs through workspace-preserving replacement. Keep the exact issuer URL/resource throughout. Uncertainty fails closed; never automatically restore data or restart old controllers.
 
-   Keep concurrent release/admin writers excluded throughout maintenance. Block
-   old browser/ops invocation, including revision/tag URLs; delete the three old
-   services (`pi-orb`, `pi-orb-ops`, `pi-orb-runtime-api`) to prevent reactivation.
-   Never delete `pi-orb-issuer`. Drain admitted HTTP work. Deletion is **not** proof.
-
-       python3 -m infra.release_cutover observe /private/maintenance-record.json /private/maintenance.json
-
-   Observation first verifies that the old services are absent, then resets the
-   evidence boundary and discards pre-fence zeroes. It requires explicit post-fence
-   zero active **and** idle container samples for every inventoried/discovered old revision, plus completed compute
-   mutations. Missing samples, API errors and timeouts fail closed. Preserve the
-   evidence and diagnose; do not substitute elapsed time or an empty revision list.
-4. Review the manifest. Fill `recoveryPoint` and `restorationIdentity`; set
-   `fleetStopped` and `wakeIntentsReviewed` only after verifying them. Submit its
-   JSON in Deploy's `cutover_manifest` input, leaving `validate_release` empty.
-   Before migration the gate checks project/region/commit, confirms every old
-   service is absent, and rechecks Monitoring for contradictory positive samples.
-   It durably stores the manifest under
-   `static-plane/releases/<releaseId>-maintenance.json`. Manifest declarations
-   are operator attestations, not automatic database-backup/fleet verification.
-5. Migrate, apply the surviving service, retire its former issuer revision and
-   activate only after retirement proof. The activation generation advances above
-   published authority. Update the foundation separately to remove the issuer-only
-   account and browser-IAP administration **after** the surviving service uses the
-   control-plane account. Review that foundation plan: federation trust and Compute
-   SSH IAP must remain unchanged.
-6. Run owned smoke orbs and actual token exchange. Resume the inventoried fleet
-   only after acceptance. Remove the one-shot mapping secret when migration is
-   confirmed. Failures require explicit independent recovery and a forward
-   generation; reverting an image does not undo identity migration. The release
-   never automatically restarts old HTTP writers or restores a database.
+The current `--cutover MANIFEST` verifier checks retirement evidence but does not orchestrate fleet drain, service retirement or resumption. It is not yet an executable Actions-only first-release route. Completion is tracked in `TODO.md`; do not dispatch or substitute manual cloud steps. Durable release records and the Actions summary report phase/outcome independently of orb uptime.
 
 ## Tooling access
 

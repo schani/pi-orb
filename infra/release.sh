@@ -81,7 +81,6 @@ release_run_check() {
     -u PI_ORB_USER_ID -u PI_ORB_ORIGINAL_USER_ID \
     -u PI_ORB_ORIGINAL_IDENTITY_ISSUER -u PI_ORB_ORIGINAL_IDENTITY_SUBJECT \
     -u PI_ORB_GOOGLE_IDENTITY_MAPPINGS -u PI_ORB_APP_ORIGIN \
-    -u TF_VAR_google_client_secret -u TF_VAR_cookie_secret \
     "$@"
 }
 stage() {
@@ -182,15 +181,19 @@ state init "$release_id" "$head_commit" "$PROJECT" "$REGION" "$ZONE" "$workflow_
 export PI_ORB_RELEASE_RECORD="$RECORD"
 if [ -n "$VALIDATE" ]; then state recover "$VALIDATE"; elif [ -z "$CUTOVER" ]; then state previous; fi
 state publish
+TF_VAR_machine_subject=$(python3 -m infra.release_auth "$PROJECT")
+export TF_VAR_machine_subject
 tofu -chdir="$INFRA" init -input=false -lockfile=readonly -backend-config="bucket=$STATE_BUCKET" -backend-config=prefix=static-plane
 export PI_ORB_APP_ORIGIN=$(tofu -chdir="$INFRA" output -raw issuer_url)
 export PI_ORB_ISSUER_URL="$PI_ORB_APP_ORIGIN"
 if [ -z "$CUTOVER" ]; then
   "$INFRA/api.sh" /api/v1/system | jq -e '.hostProvider == "gce"' >/dev/null
 else
-  [ -z "$VALIDATE" ] && [ -n "${GITHUB_ACTIONS:-}" ] && [ -n "${PI_ORB_GOOGLE_IDENTITY_MAPPINGS:-}" ] || {
-    echo 'release: first cutover requires independent GitHub execution and explicit verified identity mappings' >&2; exit 1;
+  [ -z "$VALIDATE" ] && [ "${GITHUB_ACTIONS:-}" = true ] || {
+    echo 'release: first cutover requires independent GitHub execution' >&2; exit 1;
   }
+  gcloud secrets versions describe 1 --secret=pi-orb-google-identity-mappings --project="$PROJECT" --format=json |
+    jq -e '.state == "ENABLED" and (.name | endswith("/secrets/pi-orb-google-identity-mappings/versions/1"))' >/dev/null
 fi
 
 plan_and_guard() {
@@ -235,11 +238,12 @@ if [ -z "$VALIDATE" ]; then
     stage maintenance
     python3 -m infra.release_cutover verify "$RECORD" "$CUTOVER"
   fi
-  if [ -n "${PI_ORB_GOOGLE_IDENTITY_MAPPINGS:-}" ]; then
-    # JSON may contain commas and @; use a checked gcloud delimiter.
-    [[ "$PI_ORB_GOOGLE_IDENTITY_MAPPINGS" != *"|"* ]] || exit 2
-    jq -e 'type == "array" and length > 0' <<<"$PI_ORB_GOOGLE_IDENTITY_MAPPINGS" >/dev/null
-    migration_owner_env="${migration_owner_env//@/|}|PI_ORB_GOOGLE_IDENTITY_MAPPINGS=$PI_ORB_GOOGLE_IDENTITY_MAPPINGS"
+  migration_secrets=""
+  if [ -n "$CUTOVER" ]; then
+    gcloud secrets add-iam-policy-binding pi-orb-google-identity-mappings --project="$PROJECT" \
+      --member="serviceAccount:$(jq -r '.control_plane_service_account_email.value' <<<"$foundation")" \
+      --role=roles/secretmanager.secretAccessor --quiet >/dev/null
+    migration_secrets=",PI_ORB_GOOGLE_IDENTITY_MAPPINGS=pi-orb-google-identity-mappings:1"
   fi
   migration_owner_args=("--set-env-vars=${migration_owner_env}")
   stage schema
@@ -257,7 +261,7 @@ if [ -z "$VALIDATE" ]; then
     --service-account="$(jq -r '.control_plane_service_account_email.value' <<<"$foundation")" \
     --network="$(jq -r '.pi_orb_network.value' <<<"$foundation")" \
     --subnet="$(jq -r '.run_egress_subnetwork.value' <<<"$foundation")" --vpc-egress=private-ranges-only \
-    --set-secrets="DATABASE_URL=pi-orb-database-url:$database_version" \
+    --set-secrets="DATABASE_URL=pi-orb-database-url:$database_version$migration_secrets" \
     "${migration_owner_args[@]}" \
     --command=node --args=apps/control-plane/src/migrate.ts --tasks=1 --parallelism=1 \
     --max-retries=0 --task-timeout=300s --cpu=1 --memory=512Mi --execute-now --wait --quiet

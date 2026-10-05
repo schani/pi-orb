@@ -1,7 +1,6 @@
 """Explicit first-cutover evidence gate. Does not stop services or migrate data."""
 import copy
 import sys
-import re
 from infra.release_state import Cloud, Result, fail, load, now, save, publish, validate_record
 from infra.release_retire import inventory, wait_for_retirement
 
@@ -9,13 +8,13 @@ OLD_SERVICES = ('pi-orb', 'pi-orb-ops', 'pi-orb-runtime-api')
 
 
 def verify(cloud, record, manifest):
-    fields = {'project', 'region', 'commit', 'recoveryPoint', 'restorationIdentity', 'fleetStopped', 'wakeIntentsReviewed', 'retirement'}
+    fields = {'project', 'region', 'commit', 'fleetStopped', 'wakeIntentsReviewed', 'retirement'}
     if not isinstance(manifest, dict) or set(manifest) != fields:
         return fail('invalid', 'invalid maintenance manifest')
     if any(manifest[key] != record[key] for key in ('project', 'region', 'commit')):
         return fail('conflict', 'maintenance target differs from release')
-    if any(manifest[key] is not True for key in ('fleetStopped', 'wakeIntentsReviewed')) or any(not isinstance(manifest[key], str) or re.fullmatch(r'[A-Za-z0-9/_.:@-]{1,256}', manifest[key]) is None for key in ('recoveryPoint', 'restorationIdentity')):
-        return fail('invalid', 'fleet, wake intents and independent recovery require review')
+    if any(manifest[key] is not True for key in ('fleetStopped', 'wakeIntentsReviewed')):
+        return fail('invalid', 'fleet and wake intents require review')
     candidate = copy.deepcopy(record)
     candidate['retirement'] = copy.deepcopy(manifest['retirement'])
     if not validate_record(candidate):
@@ -67,7 +66,7 @@ def main(argv):
         result = inventory(cloud, record.value, services=OLD_SERVICES)
         if not result.error:
             value = {key: record.value[key] for key in ('project', 'region', 'commit')}
-            value.update(recoveryPoint='', restorationIdentity='', fleetStopped=False, wakeIntentsReviewed=False, retirement=result.value['retirement'])
+            value.update(fleetStopped=False, wakeIntentsReviewed=False, retirement=result.value['retirement'])
             result = save(argv[3], value)
         if result.error:
             print(f'release: {result.error.kind}: {result.error.message}', file=sys.stderr)

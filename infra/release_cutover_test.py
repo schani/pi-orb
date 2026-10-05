@@ -16,7 +16,6 @@ class Cloud:
 class CutoverTest(unittest.TestCase):
     def manifest(self):
         return {'project': 'test-project', 'region': 'us-central1', 'commit': 'b'*40,
-                'recoveryPoint': 'backup-123', 'restorationIdentity': 'independent-admin',
                 'fleetStopped': True, 'wakeIntentsReviewed': True,
                 'retirement': record()['retirement']}
 
@@ -29,8 +28,8 @@ class CutoverTest(unittest.TestCase):
         for name in ['pi-orb', 'pi-orb-ops', 'pi-orb-runtime-api']:
             self.assertIsNotNone(verify(Cloud([{'metadata': {'name': name}}]), record(), self.manifest()).error)
 
-    def test_wrong_target_and_unreviewed_recovery_fail_closed(self):
-        for key, value in [('project', 'elsewhere'), ('commit', 'c'*40), ('fleetStopped', False), ('restorationIdentity', '')]:
+    def test_wrong_target_and_undrained_fleet_fail_closed(self):
+        for key, value in [('project', 'elsewhere'), ('commit', 'c'*40), ('fleetStopped', False), ('wakeIntentsReviewed', False)]:
             manifest = self.manifest(); manifest[key] = value
             self.assertIsNotNone(verify(Cloud([]), record(), manifest).error)
 
@@ -47,6 +46,11 @@ class CutoverTest(unittest.TestCase):
 
     def test_complete_evidence_admits_cutover(self):
         self.assertIsNone(verify(Cloud([{'metadata': {'name': 'pi-orb-issuer'}}]), record(), self.manifest()).error)
+
+    def test_manifest_rejects_arbitrary_fields(self):
+        manifest = self.manifest()
+        manifest['operatorNotes'] = 'not evidence'
+        self.assertIsNotNone(verify(Cloud([]), record(), manifest).error)
 
     def test_excluded_only_inventory_survives_observation_and_verification(self):
         class PipelineCloud:
