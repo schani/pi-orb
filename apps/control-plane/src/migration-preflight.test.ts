@@ -39,7 +39,7 @@ it("rejects unknown arguments without migration fallthrough and emits only safe 
   expect(
     await runConsolidationPreflight(
       {
-        PI_ORB_DATABASE_URL: "private-sentinel",
+        DATABASE_URL: "private-sentinel",
         PI_ORB_GOOGLE_IDENTITY_MAPPINGS: "private-sentinel",
       },
       (line) => lines.push(line),
@@ -47,6 +47,26 @@ it("rejects unknown arguments without migration fallthrough and emits only safe 
     ),
   ).toBe(1);
   expect(lines).toEqual([JSON.stringify({ kind: "consolidation_preflight", reason: "input" })]);
+});
+
+it("requires DATABASE_URL without accepting a PI_ORB_DATABASE_URL alias", async () => {
+  for (const env of [{}, { PI_ORB_DATABASE_URL: "private-sentinel" }]) {
+    const lines: string[] = [];
+    expect(
+      await runConsolidationPreflight(
+        {
+          ...env,
+          PI_ORB_USER_ID: input.primaryUserId,
+          PI_ORB_GOOGLE_IDENTITY_MAPPINGS: JSON.stringify(mappings),
+        },
+        (line) => lines.push(line),
+        (line) => lines.push(line),
+      ),
+    ).toBe(1);
+    expect(lines).toEqual([
+      JSON.stringify({ kind: "consolidation_preflight", reason: "database_url" }),
+    ]);
+  }
 });
 
 it("accepts only six exact identity tuples and a bound primary UUID", () => {

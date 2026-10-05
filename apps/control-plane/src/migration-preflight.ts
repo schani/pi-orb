@@ -152,12 +152,13 @@ const open = Result.fromThrowable(
   (url: string) => new PgClient(url, true),
   () => failure("database"),
 );
+/** Source-container CLI: node apps/control-plane/src/migrate.ts --check-consolidation. */
 export async function runConsolidationPreflight(
   env: NodeJS.ProcessEnv,
   stdout: (line: string) => void,
   stderr: (line: string) => void,
 ): Promise<number> {
-  const url = env["PI_ORB_DATABASE_URL"];
+  const url = env["DATABASE_URL"];
   const input = consolidationInput(env);
   if (!url) {
     stderr(JSON.stringify(failure("database_url")));
