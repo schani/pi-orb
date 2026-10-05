@@ -37,7 +37,7 @@ type CompactionRecord = Extract<DisplayRecord, { type: "compaction" }>;
 /** Streaming output block accumulated from `output_patch` events. */
 export interface LiveBlock {
   blockId: string;
-  blockType: "text" | "reasoning" | "shell";
+  blockType: "text" | "reasoning";
   text: string;
   headline?: string;
   revision: number;
@@ -281,18 +281,13 @@ function renderMessageBlocks(record: MessageRecord): ReactNode[] {
 
 /**
  * One transcript record: a user turn, a grouped agent turn (all adjacent
- * assistant/tool/event records share one prefix), a shell block, or a
+ * assistant/tool/event records share one prefix), or a
  * full-width compaction divider.
  */
 type Turn =
   | { kind: "user"; record: MessageRecord }
   | { kind: "agent"; key: string; records: Array<MessageRecord | EventRecord> }
   | { kind: "alert"; record: EventRecord; message: string }
-  | {
-      kind: "shell";
-      record: EventRecord;
-      shell: NonNullable<EventRecord["shell"]>;
-    }
   | { kind: "compaction"; record: CompactionRecord };
 
 /** Per docs/pi-adapter.md, only a custom message the harness marked displayed is shown. */
@@ -498,8 +493,6 @@ function groupTurns(records: readonly DisplayRecord[]): Turn[] {
       case "event":
         if (record.alert !== undefined) {
           turns.push({ kind: "alert", record, message: record.alert.message });
-        } else if (record.shell !== undefined) {
-          turns.push({ kind: "shell", record, shell: record.shell });
         } else if (isDisplayedCustomMessage(record)) {
           appendAgentPart(record);
         }
@@ -581,30 +574,6 @@ function renderTurn(
           </div>
         </article>
       );
-    case "shell": {
-      const shell = turn.shell;
-      const statuses = [
-        ...(shell.excludeFromContext ? ["excluded from model context"] : []),
-        ...(shell.cancelled
-          ? ["cancelled"]
-          : shell.exitCode !== null && shell.exitCode !== 0
-            ? [`exit ${shell.exitCode}`]
-            : []),
-        ...(shell.truncated ? ["output truncated"] : []),
-      ];
-      return (
-        <article className="rec rec-sh" key={turn.record.id} data-history-row={turn.record.id}>
-          <span className="rec-px">sh</span>
-          <div className="rec-bd">
-            <div className="shblk">
-              <div className="shblk-cmd">! {shell.command}</div>
-              {shell.output !== "" && <pre className="shblk-out">{shell.output}</pre>}
-              {statuses.length > 0 && <div className="shblk-ft">{statuses.join(" · ")}</div>}
-            </div>
-          </div>
-        </article>
-      );
-    }
     case "compaction":
       return (
         <div className="record-compaction" key={turn.record.id} data-history-row={turn.record.id}>
@@ -649,7 +618,6 @@ export const HistoryView = memo(function HistoryView({
   const pendingMessages = queuedMessages.filter(
     (message) => !representedMessageIds.has(message.id),
   );
-  const shellBlocks = liveBlocks.filter((block) => block.blockType === "shell");
   const { turns, pairing, committedToolCallIds, derivationMs } = useMemo(() => {
     const start = performance.now();
     return {
@@ -682,17 +650,13 @@ export const HistoryView = memo(function HistoryView({
     });
   }, [records, turns.length, firstMounted, derivationMs]);
   const finalTurn = turns[turns.length - 1];
-  const agentBlocks = liveBlocks.filter((block) => block.blockType !== "shell");
   const uncommittedTools = tools.filter((tool) => !committedToolCallIds.has(tool.callId));
-  const hasAgentLive = agentBlocks.length > 0 || uncommittedTools.length > 0;
+  const hasAgentLive = liveBlocks.length > 0 || uncommittedTools.length > 0;
   const mergeLiveIntoFinalTurn =
-    hasAgentLive &&
-    finalTurn?.kind === "agent" &&
-    pendingMessages.length === 0 &&
-    shellBlocks.length === 0;
+    hasAgentLive && finalTurn?.kind === "agent" && pendingMessages.length === 0;
   const mergedTurnIndex = mergeLiveIntoFinalTurn ? turns.length - 1 : -1;
   const liveAgentContent: LiveAgentContent = {
-    blocks: agentBlocks,
+    blocks: liveBlocks,
     tools: uncommittedTools,
   };
   return (
@@ -742,16 +706,6 @@ export const HistoryView = memo(function HistoryView({
               </article>
             );
           })}
-          {shellBlocks.map((block) => (
-            <article className="rec rec-sh" key={block.blockId}>
-              <span className="rec-px">sh</span>
-              <div className="rec-bd">
-                <div className="shblk">
-                  <pre className="shblk-out">{block.text}</pre>
-                </div>
-              </div>
-            </article>
-          ))}
           {hasAgentLive && !mergeLiveIntoFinalTurn && (
             <article className="rec rec-orb">
               <span className="visually-hidden">Orb:</span>

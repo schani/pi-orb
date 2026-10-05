@@ -116,17 +116,10 @@ describe("history schemas", () => {
     expect(
       Check(HistoryRecordSchema, {
         ...eventRecord,
-        eventType: "pi.bash_execution",
-        shell: {
-          command: "npm test",
-          output: "passing",
-          exitCode: null,
-          cancelled: false,
-          truncated: true,
-          excludeFromContext: false,
-        },
+        eventType: "pi.custom",
+        unknownField: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       Check(HistoryRecordSchema, {
         ...eventRecord,
@@ -409,36 +402,10 @@ describe("frame schemas", () => {
       Check(ClientFrameSchema, {
         v: 1,
         type: "client.request",
-        requestId: "req-shell",
-        action: {
-          type: "shell",
-          expectedHeadId: "rec-2",
-          command: "npm test",
-          excludeFromContext: true,
-        },
-      }),
-    ).toBe(true);
-    expect(
-      Check(ClientFrameSchema, {
-        v: 1,
-        type: "client.request",
         requestId: "req-2",
         action: { type: "abort", operationId: "op-1" },
       }),
     ).toBe(true);
-    expect(
-      Check(ClientFrameSchema, {
-        v: 1,
-        type: "client.request",
-        requestId: "req-empty-shell",
-        action: {
-          type: "shell",
-          expectedHeadId: null,
-          command: "",
-          excludeFromContext: false,
-        },
-      }),
-    ).toBe(false);
   });
 
   it("accepts presence frames and rejects malformed ones (idle auto-stop)", () => {
@@ -564,14 +531,14 @@ describe("frame schemas", () => {
         at: "2026-07-20T10:00:00.000Z",
         event: {
           type: "output_patch",
-          operationId: "op-shell",
-          blockId: "shell-1",
-          blockType: "shell",
+          operationId: "op-unsupported",
+          blockId: "unsupported-1",
+          blockType: "unsupported",
           revision: 2,
           patch: { type: "append", text: "output" },
         },
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       Check(RuntimeEventFrameSchema, {
         v: 1,

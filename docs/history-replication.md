@@ -150,16 +150,6 @@ interface EventRecord extends HistoryRecordBase {
   /** User-facing alert; request identity deduplicates CLI retries. */
   alert?: { message: string; requestId: string };
 
-  /** Present iff `eventType` is `"pi.bash_execution"`. */
-  shell?: {
-    command: string;
-    output: string;
-    exitCode: number | null;
-    cancelled: boolean;
-    truncated: boolean;
-    excludeFromContext: boolean;
-  };
-
   /** Present iff `eventType` is `"pi.custom_message"`. */
   custom?: { customType: string; display: boolean };
 

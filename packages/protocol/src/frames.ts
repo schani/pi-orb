@@ -52,15 +52,6 @@ export const ClientActionSchema = Type.Union([
   ),
   Type.Object(
     {
-      type: Type.Literal("shell"),
-      expectedHeadId: Type.Union([Type.String(), Type.Null()]),
-      command: Type.String({ minLength: 1 }),
-      excludeFromContext: Type.Boolean(),
-    },
-    closed,
-  ),
-  Type.Object(
-    {
       type: Type.Literal("abort"),
       operationId: Type.String(),
     },
@@ -204,7 +195,7 @@ export const OutputPatchEventSchema = Type.Object(
     type: Type.Literal("output_patch"),
     operationId: Type.String(),
     blockId: Type.String(),
-    blockType: Type.Union([Type.Literal("text"), Type.Literal("reasoning"), Type.Literal("shell")]),
+    blockType: Type.Union([Type.Literal("text"), Type.Literal("reasoning")]),
     revision: Type.Number(),
     headline: Type.Optional(Type.String()),
     patch: Type.Union([

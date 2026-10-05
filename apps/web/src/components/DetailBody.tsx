@@ -387,9 +387,7 @@ export function RunningBody({
           ]
             .filter(Boolean)
             .join("\n\n")
-        : current !== undefined && "text" in current
-          ? current.text
-          : ""}
+        : ""}
     </pre>
   );
 }

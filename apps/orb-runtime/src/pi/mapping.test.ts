@@ -264,51 +264,6 @@ describe("Pi entry mapping", () => {
     });
   });
 
-  it("maps a bash execution message to an event with typed shell fields", () => {
-    const record = expectMapped({
-      ...base,
-      type: "message",
-      message: {
-        role: "bashExecution",
-        command: "npm test",
-        output: "ok",
-        exitCode: 2,
-        cancelled: false,
-        truncated: true,
-        excludeFromContext: false,
-        timestamp: 4,
-      },
-    });
-    expect(record.type).toBe("event");
-    if (record.type !== "event") return;
-    expect(record.eventType).toBe("pi.bash_execution");
-    expect(record.shell).toEqual({
-      command: "npm test",
-      output: "ok",
-      exitCode: 2,
-      cancelled: false,
-      truncated: true,
-      excludeFromContext: false,
-    });
-  });
-
-  it("maps a cancelled bash execution without an exit code", () => {
-    const record = expectMapped({
-      ...base,
-      type: "message",
-      message: { role: "bashExecution", command: "sleep 10", output: "", cancelled: true },
-    });
-    if (record.type !== "event") throw new Error("expected event");
-    expect(record.shell).toEqual({
-      command: "sleep 10",
-      output: "",
-      exitCode: null,
-      cancelled: true,
-      truncated: false,
-      excludeFromContext: false,
-    });
-  });
-
   it("maps a failed assistant message to a typed failure with diagnostic types", () => {
     const record = expectMapped({
       ...base,

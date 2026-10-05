@@ -89,15 +89,9 @@ class FakePiSession {
     return;
   }
 
-  executeBash(): Promise<never> {
-    throw new Error("not used");
-  }
-
   abort(): Promise<void> {
     return Promise.resolve();
   }
-
-  abortBash(): void {}
 
   /** Let the pending `sendUserMessage` prologue finish. */
   completePrologue(): void {

@@ -33,13 +33,13 @@ function fixture(busy = true) {
     {
       isIdle: !busy,
       subscribe: () => () => undefined,
-      executeBash: () => new Promise(() => {}),
+      sendUserMessage: () => new Promise(() => {}),
     } as unknown as PiSession,
     manager,
     { summarize: () => okAsync("") },
   );
   if (busy) {
-    void agent.submitShell("sleep 999", false, "running-shell");
+    void agent.submitMessage([], "running-agent");
   }
   const app = buildRuntimeServer(
     agent,

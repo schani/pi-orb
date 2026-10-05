@@ -44,8 +44,6 @@ function fixture(promptResult?: Promise<void>) {
       idle = true;
       emit("agent_settled");
     },
-    abortBash: () => undefined,
-    executeBash: async () => ({ output: "", exitCode: 0, cancelled: false, truncated: false }),
   };
   function emit(type: "agent_start" | "agent_settled") {
     for (const fn of listeners) fn({ type } as AgentSessionEvent);
@@ -248,10 +246,9 @@ it("arbitrates simultaneous child terminals, user input and abort without losing
       assertSubagentActivity(h.agent, "busy", "op");
       expect(
         decideRequest(h.agent.gateView(), {
-          type: "shell",
-          command: "must not run",
+          type: "message",
+          content: [{ type: "text", text: "must not run" }],
           expectedHeadId: null,
-          excludeFromContext: false,
         }),
       ).toMatchObject({ type: "reject", code: "busy" });
       expect(h.events.filter((e) => e.type === "operation_finished")).toEqual([]);

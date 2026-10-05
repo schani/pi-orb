@@ -30,7 +30,7 @@ export function readLiveDisplayDetail(
 ): LiveDisplayDetail {
   const block =
     live?.operationId === operationId
-      ? live.blocks.find((entry) => entry.blockId === blockId)
+      ? live.blocks.find((entry) => entry.blockId === blockId && entry.blockType === "reasoning")
       : undefined;
   return {
     v: 1,
@@ -42,7 +42,7 @@ export function readLiveDisplayDetail(
       ? {}
       : {
           body: {
-            type: block.blockType === "reasoning" ? ("reasoning" as const) : ("shell" as const),
+            type: "reasoning" as const,
             text: block.text,
           },
         }),

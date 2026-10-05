@@ -642,74 +642,6 @@ describe("HistoryView turn structure", () => {
     expect(html.match(/rec rec-orb/g)).toHaveLength(1);
   });
 
-  it("renders persisted and live shell output as preformatted shell blocks", () => {
-    const shellRecord: HistoryRecord = {
-      id: "shell-1",
-      parentId: null,
-      timestamp: "time-shell-1",
-      type: "event",
-      eventType: "pi.bash_execution",
-      content: [{ type: "text", text: "npm test\npassing" }],
-      shell: {
-        command: "npm test",
-        output: "passing",
-        exitCode: 2,
-        cancelled: false,
-        truncated: true,
-        excludeFromContext: true,
-      },
-      overflow: {},
-    };
-    const html = renderToStaticMarkup(
-      <HistoryView
-        records={[shellRecord]}
-        liveBlocks={[
-          {
-            blockId: "shell-live",
-            blockType: "shell",
-            text: "$ git status\nclean",
-            revision: 2,
-          },
-        ]}
-        tools={[]}
-        busy
-      />,
-    );
-
-    expect(html.match(/rec rec-sh/g)).toHaveLength(2);
-    expect(html).toContain('class="shblk-cmd">! npm test</div>');
-    expect(html).toContain('class="shblk-out">passing</pre>');
-    expect(html).toContain("excluded from model context · exit 2 · output truncated");
-    expect(html).toContain("$ git status\nclean");
-    expect(html).not.toContain("<strong>passing</strong>");
-  });
-
-  it("does not read shell blocks from native overflow", () => {
-    const html = renderToStaticMarkup(
-      <HistoryView
-        records={[
-          {
-            id: "shell-legacy",
-            parentId: null,
-            timestamp: "time-shell-legacy",
-            type: "event",
-            eventType: "pi.bash_execution",
-            content: [{ type: "text", text: "npm test\npassing" }],
-            overflow: {
-              native: {
-                message: { role: "bashExecution", command: "npm test", output: "passing" },
-              },
-            },
-          },
-        ]}
-        liveBlocks={[]}
-        tools={[]}
-        busy={false}
-      />,
-    );
-    expect(html).not.toContain("shblk");
-  });
-
   it("renders live streaming output, tool chips, and the bit register as an agent record", () => {
     const html = renderToStaticMarkup(
       <HistoryView
@@ -729,7 +661,7 @@ describe("HistoryView turn structure", () => {
     expect(html).not.toContain('class="cur"');
   });
 
-  it.each(["waiting", "text", "reasoning", "shell", "tool", "merged"] as const)(
+  it.each(["waiting", "text", "reasoning", "tool", "merged"] as const)(
     "renders exactly one accessible bit register only while busy: %s",
     (scenario) => {
       const records = scenario === "merged" ? [message("a1", "assistant", "committed output")] : [];
@@ -739,8 +671,7 @@ describe("HistoryView turn structure", () => {
           : [
               {
                 blockId: "live",
-                blockType:
-                  scenario === "shell" || scenario === "reasoning" ? scenario : ("text" as const),
+                blockType: scenario === "reasoning" ? scenario : ("text" as const),
                 text: "retained output",
                 revision: 1,
               },

@@ -1,0 +1,38 @@
+{
+  "kind": "sanitized-diagnostic-summary",
+  "date": "2026-10-04",
+  "replayable": false,
+  "notice": "NON-REPLAYABLE evidence summary; not a determined trace. No SSH key material retained.",
+  "command": "npm test",
+  "testFile": "packages/native-image/src/host-key-boot.dst.test.ts",
+  "testName": "executes the production barrier across late per-key publication schedules",
+  "scheduledIterations": 50,
+  "normallyCompleteFixturesObserved": 44,
+  "fixtureFakeClockValues": [0],
+  "timeout": {
+    "owner": "outer Vitest test timeout",
+    "limitMs": 120000,
+    "reportedTestDurationMs": 120421,
+    "currentDeterminedTraceGenerated": false
+  },
+  "diagnosedApproximateTimingSeconds": {
+    "rsaGeneration": 97.54,
+    "publicationAndProbe": 25.66
+  },
+  "diagnosis": "Real cryptography per iteration introduces wall-time nondeterminism; fixture cost, not a production barrier fault.",
+  "sources": {
+    "firstFailureLog": "/tmp/remove-composer-validation/unit-first-failure-snapshot.log",
+    "fixtureInventory": "/tmp/remove-composer-validation/host-key-first-failure-fixture-inventory.json",
+    "privateFixtureArchiveNotCopied": "/tmp/remove-composer-validation/host-key-first-failure-fixtures.tar.gz",
+    "exactReplayLog": "/tmp/remove-composer-validation/host-key-exact-replay.log"
+  },
+  "historicalReplay": {
+    "trace": "test-failures/native-validator-host-key-stability-1789938360305-1.json",
+    "result": "divergence",
+    "entropyPosition": 1,
+    "recordedTasks": ["manager-early-ready", "google-late-first-boot", "oslogin-ssh-restart", "custom-host-key-generator", "readiness-and-probe"],
+    "currentTasks": ["manager-early-ready", "google-late-first-boot", "oslogin-ssh-reload", "readiness-and-probe"],
+    "interpretation": "Obsolete five-task model cannot replay against the current four-task model."
+  },
+  "deployment": "blocked until fixture fix is qualified"
+}

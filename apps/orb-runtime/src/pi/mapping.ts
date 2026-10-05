@@ -407,29 +407,6 @@ function mapMessageEntry(
         ],
       });
     }
-    case "bashExecution": {
-      const exitCode = message["exitCode"];
-      return ok({
-        ...identity,
-        type: "event",
-        eventType: "pi.bash_execution",
-        content: [
-          textBlock(
-            [message["command"], message["output"]]
-              .filter((part): part is string => typeof part === "string")
-              .join("\n"),
-          ),
-        ],
-        shell: {
-          command: stringOf(message, "command") ?? "",
-          output: stringOf(message, "output") ?? "",
-          exitCode: typeof exitCode === "number" ? exitCode : null,
-          cancelled: message["cancelled"] === true,
-          truncated: message["truncated"] === true,
-          excludeFromContext: message["excludeFromContext"] === true,
-        },
-      });
-    }
     default:
       // An unknown message role becomes a generic event rather than
       // inventing a shared role (docs/pi-adapter.md).

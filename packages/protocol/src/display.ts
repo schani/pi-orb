@@ -73,17 +73,6 @@ const message = Type.Object(
   },
   closed,
 );
-const shell = Type.Object(
-  {
-    command: Type.String(),
-    output: Type.String(),
-    exitCode: Type.Union([Type.Number(), Type.Null()]),
-    cancelled: Type.Boolean(),
-    truncated: Type.Boolean(),
-    excludeFromContext: Type.Boolean(),
-  },
-  closed,
-);
 const subagent = Type.Object(
   {
     kind: Type.Union([
@@ -104,7 +93,6 @@ const event = Type.Object(
     type: Type.Literal("event"),
     eventType: Type.String(),
     content: Type.Optional(Type.Array(DisplayBlockSchema)),
-    shell: Type.Optional(shell),
     custom: Type.Optional(
       Type.Object({ customType: Type.String(), display: Type.Boolean() }, closed),
     ),
@@ -208,7 +196,6 @@ export const LiveDisplayDetailSchema = Type.Object(
     body: Type.Optional(
       Type.Union([
         Type.Object({ type: Type.Literal("reasoning"), text: Type.String() }, closed),
-        Type.Object({ type: Type.Literal("shell"), text: Type.String() }, closed),
         Type.Object(
           {
             type: Type.Literal("tool_result"),
@@ -361,18 +348,6 @@ export function projectDisplayRecord(record: HistoryRecord): DisplayRecord {
               content: record.content.map((block, index) =>
                 projectBlock(block, `${record.id}:${index}`),
               ),
-            }),
-        ...(record.shell === undefined
-          ? {}
-          : {
-              shell: {
-                command: record.shell.command,
-                output: record.shell.output,
-                exitCode: record.shell.exitCode,
-                cancelled: record.shell.cancelled,
-                truncated: record.shell.truncated,
-                excludeFromContext: record.shell.excludeFromContext,
-              },
             }),
         ...(record.custom === undefined ? {} : { custom: record.custom }),
         ...(record.subagent === undefined

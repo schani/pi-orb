@@ -131,14 +131,6 @@ class DeferredPiSession {
   abort(): Promise<void> {
     return Promise.resolve();
   }
-  abortBash(): void {}
-  executeBash(): Promise<never> {
-    return Promise.reject(new Error("not used"));
-  }
-  sendUserMessage(): Promise<void> {
-    return Promise.reject(new Error("not used"));
-  }
-
   sendCustomMessage(
     marker: { customType: string; content: unknown; display: boolean; details?: unknown },
     options?: { triggerTurn?: boolean },

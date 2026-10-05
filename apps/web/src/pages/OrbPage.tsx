@@ -142,10 +142,10 @@ interface OrbPageState {
   composerImages: ComposerImage[];
   settings: AgentSettingsEvent | null;
   synced: boolean;
-  commandDraft: { text: string; mode: ComposerMode } | null;
+  commandDraft: { text: string } | null;
   pendingRequest: {
     requestId: string;
-    kind: "message" | "shell" | "abort" | "settings";
+    kind: "message" | "abort" | "settings";
     submittedText?: string;
   } | null;
   requestError: { code: string; message: string } | null;
@@ -176,7 +176,7 @@ type OrbPageAction =
   | {
       type: "request_sent";
       requestId: string;
-      kind: "message" | "shell" | "abort" | "settings";
+      kind: "message" | "abort" | "settings";
     }
   | { type: "request_lost"; requestId: string }
   | { type: "message_enqueued"; requestId: string }
@@ -417,7 +417,7 @@ function applyFrame(state: OrbPageState, frame: ServerFrame): OrbPageState {
           ...(unchangedDraft
             ? {
                 composerText: state.commandDraft?.text ?? "",
-                composerMode: state.commandDraft?.mode ?? "message",
+                composerMode: "message",
                 commandDraft: null,
               }
             : {}),
@@ -602,9 +602,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
       return {
         ...state,
         commandDraft:
-          state.composerMode === "command"
-            ? state.commandDraft
-            : { text: state.composerText, mode: state.composerMode },
+          state.composerMode === "command" ? state.commandDraft : { text: state.composerText },
         composerText: `${action.command} `,
         composerMode: "command",
         requestError: null,
@@ -615,7 +613,7 @@ export function reducer(state: OrbPageState, action: OrbPageAction): OrbPageStat
         return {
           ...state,
           composerText: state.commandDraft.text,
-          composerMode: state.commandDraft.mode,
+          composerMode: "message",
           commandDraft: null,
           notice: null,
         };
@@ -832,7 +830,7 @@ function OrbConversation({
   useEffect(() => {
     const saved = saveComposerDraft(orbId, {
       text: state.commandDraft?.text ?? state.composerText,
-      mode: state.commandDraft?.mode ?? state.composerMode,
+      mode: state.commandDraft ? "message" : state.composerMode,
       images: state.composerImages,
     });
     if (saved.isErr() && !draftStorageErrorShown.current) {
@@ -1551,32 +1549,10 @@ function OrbConversation({
   };
 
   const sendComposer = () => {
-    const connection = liveRef.current;
     const text = state.composerText.trim();
     const images = state.composerImages;
 
     if (state.composerMode === "command" || state.pendingRequest?.kind === "settings") return;
-    if (state.composerMode !== "message") {
-      if (connection === null) return;
-      if (images.length > 0) {
-        dispatch({
-          type: "notice",
-          message: "Remove image attachments before running a shell command.",
-        });
-        return;
-      }
-      if (text === "") return;
-      const requestId = connection.sendRequest({
-        type: "shell",
-        expectedHeadId: state.headId,
-        command: text,
-        excludeFromContext: state.composerMode === "excluded_shell",
-      });
-      if (requestId === null) dispatch({ type: "send_unavailable" });
-      else dispatch({ type: "request_sent", requestId, kind: "shell" });
-      return;
-    }
-
     if (text === "" && images.length === 0) return;
     const content: MessageInputBlock[] = [
       ...images.map(
@@ -1704,11 +1680,7 @@ function OrbConversation({
     state.activity !== "idle" ||
     state.pendingRequest !== null;
   const canSend =
-    state.pendingRequest === null &&
-    (state.settings?.writable ?? true) &&
-    (state.composerMode === "message"
-      ? messageAccepting
-      : connected && state.activity === "idle" && state.historyLoaded);
+    state.pendingRequest === null && (state.settings?.writable ?? true) && messageAccepting;
   const canAbort =
     connected &&
     state.activity === "busy" &&
@@ -2116,12 +2088,6 @@ function OrbConversation({
           onSend={sendComposer}
           canAbort={canAbort}
           onAbort={sendAbort}
-          onShellAttachmentBlocked={() =>
-            dispatch({
-              type: "notice",
-              message: "Remove image attachments before running a shell command.",
-            })
-          }
         />
       )}
     </main>

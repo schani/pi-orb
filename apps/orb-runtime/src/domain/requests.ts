@@ -14,7 +14,6 @@ export interface AgentGateView {
 export type RequestDecision =
   | { readonly type: "change_settings" }
   | { readonly type: "start_message" }
-  | { readonly type: "start_shell" }
   | { readonly type: "abort_operation"; readonly operationId: string }
   | {
       readonly type: "reject";
@@ -71,25 +70,6 @@ export function decideRequest(view: AgentGateView, action: ClientAction): Reques
         };
       }
       return { type: "start_message" };
-    }
-    case "shell": {
-      if (view.activity === "busy") {
-        return {
-          type: "reject",
-          code: "busy",
-          message: "an operation is in progress; shell commands require an idle runtime",
-          retryable: true,
-        };
-      }
-      if (action.expectedHeadId !== view.headId) {
-        return {
-          type: "reject",
-          code: "stale_head",
-          message: `expected head ${JSON.stringify(action.expectedHeadId)} but head is ${JSON.stringify(view.headId)}`,
-          retryable: false,
-        };
-      }
-      return { type: "start_shell" };
     }
     case "abort": {
       if (view.activeOperationId === null || view.activeOperationId !== action.operationId) {

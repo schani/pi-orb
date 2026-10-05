@@ -319,24 +319,11 @@ export function buildRuntimeServer(
           return;
         }
         const actionBytes =
-          frame.action.type === "message"
-            ? JSON.stringify(frame.action.content).length
-            : frame.action.type === "shell"
-              ? frame.action.command.length
-              : 0;
+          frame.action.type === "message" ? JSON.stringify(frame.action.content).length : 0;
         if (actionBytes > MAX_PROMPT_BYTES) {
           const result: RequestResult = {
             type: "rejected",
             error: { code: "invalid_request", message: "input too large", retryable: false },
-          };
-          registry.record(frame.requestId, frame.action, result);
-          sendResult(frame.requestId, result);
-          return;
-        }
-        if (frame.action.type === "shell" && frame.action.command.trim() === "") {
-          const result: RequestResult = {
-            type: "rejected",
-            error: { code: "invalid_request", message: "shell command is empty", retryable: false },
           };
           registry.record(frame.requestId, frame.action, result);
           sendResult(frame.requestId, result);
@@ -392,13 +379,7 @@ export function buildRuntimeServer(
         const result: RequestResult = { type: "accepted", operationId, duplicate: false };
         registry.record(frame.requestId, frame.action, result);
         sendResult(frame.requestId, result);
-        if (decision.type === "start_shell" && frame.action.type === "shell") {
-          void agent.submitShell(
-            frame.action.command.trim(),
-            frame.action.excludeFromContext,
-            operationId,
-          );
-        } else if (frame.action.type === "message") {
+        if (frame.action.type === "message") {
           // Naming is auxiliary and starts only after the request gate accepted this message.
           agent.triggerAutoName(frame.action.content);
           // The operation id becomes visible through operation_started once Pi starts.

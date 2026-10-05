@@ -221,12 +221,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--k);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -237,9 +231,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .comp .send{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 8px;line-height:18px;font-weight:700}
 .comp .send:hover{background:var(--w);color:var(--k)}
@@ -608,19 +599,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -649,8 +629,8 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
-        &lt;span class=&quot;faint&quot; id=&quot;comp-hint&quot;&gt;plain text · sent to the agent and kept in context&lt;/span&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
+
         &lt;button class=&quot;act&quot;&gt;+ image&lt;/button&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;span class=&quot;right&quot;&gt;
@@ -710,22 +690,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;,    &#x27;plain text · sent to the agent and kept in context&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;,  &#x27;runs on the host · output kept in context&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;, &#x27;runs on the host · output excluded from context&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-hint&#x27;).textContent = m[2];
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn, text){
   if (btn.dataset.busy) return;
   var old = btn.textContent;
@@ -764,7 +728,7 @@ function openTerm(){
   state rides entirely on glyph + weight (● ○ ◐ – ✕ ▫ ◑ …). One monospace family, one 13px size on a 20px
   line grid, tabular numerals; headings are uppercase and bold, never larger. Layout is a two-pane
   workspace: orb index, detail or transcript. Transcript records use column-aligned prefixes
-  (you / orb / run / sh / ···) instead of bubbles; composer is one `&gt;` line with a mode chip. 1px rules, no
+  (you / orb / run / ···) instead of bubbles; composer is one `&gt;` line with a message prefix. 1px rules, no
   radius, no shadow, inversion for focus and selection; the only motion is the blinking block cursor.
   Signature detail: the compaction divider is a full-width run of ─ characters with the summary set inline.
 --&gt;
@@ -815,10 +779,6 @@ button{cursor:pointer;padding:0}
 /* ---------- duo split ----------
    IBM Plex Sans 14px  = prose + names.  IBM Plex Mono 13px = structural + literal.
    Both sit on the same 20px line grid. */
-.gl,.age,.ix-proj .c,.sect .n,.blk-meta,
-.disc&gt;.hdr .met,.disc&gt;.hdr .trunc,.fl,.cmd,.codeblk,.shblk,.compact,.term,
-.rec&gt;.px,.comp .line1 .px,.comp .mode,.auth .c,.ohd .life,.lbl,.key,
-.appbar .find .k,code{font-family:var(--mono);font-size:13px}
 .age{font-weight:400}
 .cmd .line .b{font-weight:500}
 
@@ -988,12 +948,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:500}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--k);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -1004,9 +958,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:500}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:44px;flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:500}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .comp .send{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 8px;line-height:18px;font-weight:600}
 .comp .send:hover{background:var(--w);color:var(--k)}
@@ -1375,19 +1326,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -1416,8 +1356,8 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
-        &lt;span class=&quot;faint&quot; id=&quot;comp-hint&quot;&gt;plain text · sent to the agent and kept in context&lt;/span&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
+
         &lt;button class=&quot;act&quot;&gt;+ image&lt;/button&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;span class=&quot;right&quot;&gt;
@@ -1477,22 +1417,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;,    &#x27;plain text · sent to the agent and kept in context&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;,  &#x27;runs on the host · output kept in context&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;, &#x27;runs on the host · output excluded from context&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-hint&#x27;).textContent = m[2];
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn, text){
   if (btn.dataset.busy) return;
   var old = btn.textContent;
@@ -1529,7 +1453,7 @@ function openTerm(){
 &lt;!--
   1 · plex duo — typography only, still no colour: IBM Plex Sans (400/500/600, 14px) carries prose and names,
   IBM Plex Mono (400/500, 13px) carries every structural or literal token — glyph column, ages, counts, paths,
-  commands and output, code, terminal, prefixes, mode chip, compaction rule. Same 20px grid, ch columns pinned to px.
+  commands and output, code, terminal, prefixes, compaction rule. Same 20px grid, ch columns pinned to px.
 --&gt;
 "></iframe>
 </section>
@@ -1748,12 +1672,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--ok);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -1764,9 +1682,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .comp .send{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 8px;line-height:18px;font-weight:700}
 .comp .send:hover{background:var(--w);color:var(--k)}
@@ -2135,19 +2050,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -2176,8 +2080,8 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
-        &lt;span class=&quot;faint&quot; id=&quot;comp-hint&quot;&gt;plain text · sent to the agent and kept in context&lt;/span&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
+
         &lt;button class=&quot;act&quot;&gt;+ image&lt;/button&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;span class=&quot;right&quot;&gt;
@@ -2235,22 +2139,6 @@ function tog(id){
   d.classList.toggle(&#x27;open&#x27;);
   var mk = d.querySelector(&#x27;.mk&#x27;);
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
-}
-
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;,    &#x27;plain text · sent to the agent and kept in context&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;,  &#x27;runs on the host · output kept in context&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;, &#x27;runs on the host · output excluded from context&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-hint&#x27;).textContent = m[2];
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
 }
 
 function flash(btn, text){
@@ -2334,11 +2222,6 @@ body{
   font-variant-numeric:tabular-nums;
   font-feature-settings:&quot;tnum&quot;,&quot;ss01&quot;;
   -webkit-font-smoothing:antialiased;
-}
-/* monospace survives only where the characters are data: code, commands and their
-   output, the shell block, file paths, the terminal */
-code,.codeblk .cbh,.codeblk pre,.cmd .line,.cmd .out,.cmd .ft,.shblk,.term .tb,.fl,.disc&gt;.hdr .trunc{
-  font-family:var(--mono);font-size:var(--mono-sz);font-feature-settings:&quot;tnum&quot;
 }
 a{color:inherit;text-decoration:none;border-bottom:1px solid var(--k)}
 a:hover{background:var(--k);color:var(--w);border-color:var(--k)}
@@ -2528,12 +2411,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0;font-family:var(--mono);font-size:var(--mono-sz)}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:500}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--k);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -2544,9 +2421,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:600;font-family:var(--mono)}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:46px;flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:600}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .comp .send{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 8px;line-height:18px;font-weight:600}
 .comp .send:hover{background:var(--w);color:var(--k)}
@@ -2915,19 +2789,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -2956,8 +2819,8 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
-        &lt;span class=&quot;faint&quot; id=&quot;comp-hint&quot;&gt;plain text · sent to the agent and kept in context&lt;/span&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
+
         &lt;button class=&quot;act&quot;&gt;+ image&lt;/button&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;span class=&quot;right&quot;&gt;
@@ -3017,22 +2880,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;,    &#x27;plain text · sent to the agent and kept in context&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;,  &#x27;runs on the host · output kept in context&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;, &#x27;runs on the host · output excluded from context&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-hint&#x27;).textContent = m[2];
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn, text){
   if (btn.dataset.busy) return;
   var old = btn.textContent;
@@ -3069,7 +2916,7 @@ function openTerm(){
 &lt;!--
   mono-minimal · 3 · inter states — Inter 400/500/600 at 13px/20px with &quot;tnum&quot;,&quot;ss01&quot; carries the whole UI;
   JetBrains Mono 12.5px survives only where characters are data (code, inline code, commands and output,
-  shell block, file paths, terminal). Each lifecycle state owns one muted hue, shown twice: glyph + 2px left rule.
+  file paths, terminal). Each lifecycle state owns one muted hue, shown twice: glyph + 2px left rule.
 --&gt;
 "></iframe>
 </section>
@@ -3283,12 +3130,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--k);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -3299,9 +3140,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .comp .send{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 8px;line-height:18px;font-weight:700}
 .comp .send:hover{background:var(--w);color:var(--k)}
@@ -3334,8 +3172,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 /* serif records keep a 22px sub-grid: 22n + 22 including padding and rule */
 .rec:has(&gt;.bd&gt;p:only-child){padding:11px 12px 10px}
 .rec:has(&gt;.bd&gt;p:first-child)&gt;.px{line-height:22px}
-.comp:has(.mode:not(.sh):not(.xsh)) textarea{font-family:var(--serif);font-size:15px;line-height:22px;height:44px}
-.comp:has(.mode:not(.sh):not(.xsh)) .line1 .px{line-height:22px}
 
 /* the hue means one thing: this needs you */
 .auth{background:var(--of)}
@@ -3692,19 +3528,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -3733,8 +3558,8 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
-        &lt;span class=&quot;faint&quot; id=&quot;comp-hint&quot;&gt;plain text · sent to the agent and kept in context&lt;/span&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
+
         &lt;button class=&quot;act&quot;&gt;+ image&lt;/button&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;span class=&quot;right&quot;&gt;
@@ -3794,22 +3619,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;,    &#x27;plain text · sent to the agent and kept in context&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;,  &#x27;runs on the host · output kept in context&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;, &#x27;runs on the host · output excluded from context&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-hint&#x27;).textContent = m[2];
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn, text){
   if (btn.dataset.busy) return;
   var old = btn.textContent;
@@ -3851,7 +3660,7 @@ function openTerm(){
 "></iframe>
 </section>
 <section class="design" id="mono-v5-ledger">
-  <div class="head"><div><h2>5 · Ledger</h2><p>Plex Sans Condensed chrome, Plex Sans prose, mono code. Pale record tints convey record type: user, shell, queued, compaction, auth. Diff and exit-code hues.</p></div>
+  <div class="head"><div><h2>5 · Ledger</h2><p>Plex Sans Condensed chrome, Plex Sans prose, mono code. Pale record tints convey record type: user, queued, compaction, auth. Diff and exit-code hues.</p></div>
   <div class="tools"><button data-h="700">short</button><button data-h="1000">tall</button><button data-h="1600">full</button></div></div>
   <iframe title="5 · Ledger" loading="lazy" srcdoc="&lt;!doctype html&gt;
 &lt;html lang=&quot;en&quot;&gt;
@@ -4056,12 +3865,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--k);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -4072,9 +3875,6 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .comp .send{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 8px;line-height:18px;font-weight:700}
 .comp .send:hover{background:var(--w);color:var(--k)}
@@ -4103,7 +3903,7 @@ hr.rule{border:0;border-top:1px solid var(--k);margin:0}
   --san:&quot;IBM Plex Sans&quot;,system-ui,-apple-system,&quot;Segoe UI&quot;,sans-serif;
   --t-you:#eef3fb;   /* user turn / composer */
   --t-px:#2f5fa6;    /* &quot;you&quot; prefix */
-  --t-sh:#f4f4f4;    /* persisted shell block */
+  --t-sh:#f4f4f4;
   --t-q:#f7f7f7;     /* queued turn */
   --t-cmp:#fafafa;   /* compaction rule row */
   --t-auth:#fff8e6;  /* auth banner */
@@ -4131,9 +3931,7 @@ body{font-family:var(--mono);font-size:12.5px;line-height:20px}
   font-family:var(--san);font-size:13.5px;line-height:20px;
 }
 
-/* code, commands, output, shell, paths, terminal, metrics */
-.fl,.cmd,.codeblk,.shblk,.term,.compact,.disc&gt;.hdr .met,
-.bd code,.key,.lbl{font-family:var(--mono);font-size:12.5px}
+/* code, commands, output, paths, terminal, metrics */
 
 /* condensed ch is narrower: re-tune the ledger columns so they still align */
 .gl{width:14px}
@@ -4144,8 +3942,6 @@ body{font-family:var(--mono);font-size:12.5px;line-height:20px}
 /* --- colour encodes record TYPE, not state --- */
 .rec.you{background:var(--t-you)}
 .rec.you&gt;.px{color:var(--t-px)}
-.rec:has(.shblk){background:var(--t-sh)}
-.rec:has(.shblk)&gt;.px{color:var(--g3)}
 .rec.q{background:var(--t-q);border-left:2px dotted var(--g2);padding-left:10px}
 .rec:has(.auth){background:var(--t-auth)}
 .auth{background:transparent}
@@ -4161,7 +3957,6 @@ body{font-family:var(--mono);font-size:12.5px;line-height:20px}
 #d-edit .fl:last-child .p,#d-edit .fl:last-child .r{color:var(--neg)}
 #d-cmd .cmd:first-child .ft{color:var(--neg)}
 #d-cmd .cmd:last-child .ft{color:var(--pos)}
-.shblk .ft{color:var(--pos)}
 &lt;/style&gt;
 &lt;/head&gt;
 &lt;body&gt;
@@ -4510,19 +4305,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -4551,8 +4335,8 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
-        &lt;span class=&quot;faint&quot; id=&quot;comp-hint&quot;&gt;plain text · sent to the agent and kept in context&lt;/span&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
+
         &lt;button class=&quot;act&quot;&gt;+ image&lt;/button&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;span class=&quot;right&quot;&gt;
@@ -4612,22 +4396,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;,    &#x27;plain text · sent to the agent and kept in context&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;,  &#x27;runs on the host · output kept in context&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;, &#x27;runs on the host · output excluded from context&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-hint&#x27;).textContent = m[2];
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn, text){
   if (btn.dataset.busy) return;
   var old = btn.textContent;
@@ -4666,14 +4434,14 @@ function openTerm(){
   state rides entirely on glyph + weight (● ○ ◐ – ✕ ▫ ◑ …). One monospace family, one 13px size on a 20px
   line grid, tabular numerals; headings are uppercase and bold, never larger. Layout is a two-pane
   workspace: orb index, detail or transcript. Transcript records use column-aligned prefixes
-  (you / orb / run / sh / ···) instead of bubbles; composer is one `&gt;` line with a mode chip. 1px rules, no
+  (you / orb / run / ···) instead of bubbles; composer is one `&gt;` line with a message prefix. 1px rules, no
   radius, no shadow, inversion for focus and selection; the only motion is the blinking block cursor.
   Signature detail: the compaction divider is a full-width run of ─ characters with the summary set inline.
 --&gt;
 &lt;!--
   5 · ledger — IBM Plex Sans Condensed 13/20 for index, tables, appbar, orb header, meta, section and rail headers
   and the composer status line; IBM Plex Sans 13.5 for transcript prose; JetBrains Mono 12.5 for code, paths, metrics.
-  Pale full-bleed tints name the record TYPE (user/composer blue, shell grey, queued dotted, auth amber); state stays glyph-only.
+  Pale full-bleed tints name the record TYPE (user/composer blue, queued dotted, auth amber); state stays glyph-only.
 --&gt;
 "></iframe>
 </section>

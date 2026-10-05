@@ -314,12 +314,6 @@ body[data-overflow=&quot;dense&quot;] .ent:hover .ops{visibility:visible}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--ok);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -330,9 +324,6 @@ body[data-overflow=&quot;dense&quot;] .ent:hover .ops{visibility:visible}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .send{margin-left:auto;border:1px solid var(--k);background:var(--k);color:var(--w)}
 .comp .send:hover{background:var(--w);color:var(--k)}
 
@@ -1001,19 +992,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -1042,7 +1022,7 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;button class=&quot;send ib&quot; aria-label=&quot;send&quot; title=&quot;send&quot;&gt;&lt;svg class=&quot;ic&quot;&gt;&lt;use href=&quot;#i-arrow-up&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
       &lt;/div&gt;
@@ -1232,21 +1212,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn){
   if (btn.dataset.busy) return;
   btn.dataset.busy = &#x27;1&#x27;;
@@ -1280,7 +1245,7 @@ layout();
   they overflow. Each column is a header, its working orbs as two-line entries carrying the state hue on their
   left edge and the age alone as text, and a collapsed archive shelf pinned to the bottom. New project is the
   last column. Actions are icon-only 20x20 buttons drawn from one inline SVG sprite; destructive ones are red.
-  Nothing labels or explains itself: the state is the hue and the glyph, the mode chip is the mode.
+  Nothing labels or explains itself: the state is the hue and the glyph, the composer prefix marks input.
 --&gt;
 "></iframe>
 </section>
@@ -1584,12 +1549,6 @@ body[data-overflow=&quot;dense&quot;] .ent:hover .ops{visibility:visible}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--ok);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -1600,9 +1559,6 @@ body[data-overflow=&quot;dense&quot;] .ent:hover .ops{visibility:visible}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .send{margin-left:auto;border:1px solid var(--k);background:var(--k);color:var(--w)}
 .comp .send:hover{background:var(--w);color:var(--k)}
 
@@ -2271,19 +2227,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -2312,7 +2257,7 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;button class=&quot;send ib&quot; aria-label=&quot;send&quot; title=&quot;send&quot;&gt;&lt;svg class=&quot;ic&quot;&gt;&lt;use href=&quot;#i-arrow-up&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
       &lt;/div&gt;
@@ -2502,21 +2447,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn){
   if (btn.dataset.busy) return;
   btn.dataset.busy = &#x27;1&#x27;;
@@ -2550,7 +2480,7 @@ layout();
   they overflow. Each column is a header, its working orbs as two-line entries carrying the state hue on their
   left edge and the age alone as text, and a collapsed archive shelf pinned to the bottom. New project is the
   last column. Actions are icon-only 20x20 buttons drawn from one inline SVG sprite; destructive ones are red.
-  Nothing labels or explains itself: the state is the hue and the glyph, the mode chip is the mode.
+  Nothing labels or explains itself: the state is the hue and the glyph, the composer prefix marks input.
 --&gt;
 "></iframe>
 </section>
@@ -2854,12 +2784,6 @@ body[data-overflow=&quot;dense&quot;] .ent:hover .ops{visibility:visible}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--ok);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -2870,9 +2794,6 @@ body[data-overflow=&quot;dense&quot;] .ent:hover .ops{visibility:visible}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .send{margin-left:auto;border:1px solid var(--k);background:var(--k);color:var(--w)}
 .comp .send:hover{background:var(--w);color:var(--k)}
 
@@ -3541,19 +3462,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -3582,7 +3492,7 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;button class=&quot;send ib&quot; aria-label=&quot;send&quot; title=&quot;send&quot;&gt;&lt;svg class=&quot;ic&quot;&gt;&lt;use href=&quot;#i-arrow-up&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
       &lt;/div&gt;
@@ -3772,21 +3682,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn){
   if (btn.dataset.busy) return;
   btn.dataset.busy = &#x27;1&#x27;;
@@ -3820,7 +3715,7 @@ layout();
   they overflow. Each column is a header, its working orbs as two-line entries carrying the state hue on their
   left edge and the age alone as text, and a collapsed archive shelf pinned to the bottom. New project is the
   last column. Actions are icon-only 20x20 buttons drawn from one inline SVG sprite; destructive ones are red.
-  Nothing labels or explains itself: the state is the hue and the glyph, the mode chip is the mode.
+  Nothing labels or explains itself: the state is the hue and the glyph, the composer prefix marks input.
 --&gt;
 "></iframe>
 </section>
@@ -4124,12 +4019,6 @@ body[data-overflow=&quot;dense&quot;] .ent:hover .ops{visibility:visible}
 .compact .fill{flex:1;overflow:hidden;white-space:nowrap;color:var(--g2);min-width:0}
 .compact .ct{white-space:nowrap;color:var(--k)}
 
-/* shell block */
-.shblk{border:1px solid var(--k)}
-.shblk .l1{padding:0 8px;border-bottom:1px solid var(--g1);font-weight:700}
-.shblk .out{padding:0 8px;color:var(--g3);white-space:pre-wrap}
-.shblk .ft{padding:0 8px;border-top:1px solid var(--g1);color:var(--g3)}
-
 /* live cursor */
 .cur{display:inline-block;width:.65em;height:1em;background:var(--ok);vertical-align:-2px;animation:bl 1.06s steps(1,end) infinite}
 @keyframes bl{0%,50%{opacity:1}50.01%,100%{opacity:0}}
@@ -4140,9 +4029,6 @@ body[data-overflow=&quot;dense&quot;] .ent:hover .ops{visibility:visible}
 .comp .line1 .px{color:var(--k);text-align:right;font-weight:700}
 .comp textarea{width:100%;resize:none;height:40px;line-height:20px;display:block}
 .comp .line2{display:flex;align-items:center;gap:12px;padding:0 12px 4px 12px;margin-left:calc(4ch + 12px);flex-wrap:wrap}
-.comp .mode{border:1px solid var(--k);background:var(--k);color:var(--w);padding:0 6px;line-height:18px;font-weight:700}
-.comp .mode.sh{background:var(--w);color:var(--k)}
-.comp .mode.xsh{background:var(--w);color:var(--k);border-style:dashed}
 .comp .send{margin-left:auto;border:1px solid var(--k);background:var(--k);color:var(--w)}
 .comp .send:hover{background:var(--w);color:var(--k)}
 
@@ -4811,19 +4697,8 @@ setInterval(() =&amp;gt; {
     &lt;!-- 4 · compaction divider --&gt;
     &lt;div class=&quot;compact&quot;&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;span class=&quot;ct&quot;&gt;context compacted · 31 records → summary&lt;/span&gt;&lt;span class=&quot;fill&quot; data-fill&gt;&lt;/span&gt;&lt;/div&gt;
 
-    &lt;!-- 5 · persisted shell block --&gt;
-    &lt;div class=&quot;rec&quot;&gt;
-      &lt;span class=&quot;px&quot;&gt;sh&lt;/span&gt;
-      &lt;div class=&quot;bd&quot;&gt;
-        &lt;div class=&quot;shblk&quot;&gt;
-          &lt;div class=&quot;l1&quot;&gt;! git status --short&lt;/div&gt;
-          &lt;div class=&quot;out&quot;&gt; M apps/web/src/lib/live-socket.ts
- M apps/web/src/OrbPage.tsx
-?? apps/web/src/lib/live-socket.test.ts&lt;/div&gt;
-          &lt;div class=&quot;ft&quot;&gt;exit 0 · 0.2s · excluded from context&lt;/div&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
+
+
 
     &lt;!-- 6 · queued user turn --&gt;
     &lt;div class=&quot;rec q&quot;&gt;
@@ -4852,7 +4727,7 @@ setInterval(() =&amp;gt; {
         &lt;textarea id=&quot;comp-ta&quot; placeholder=&quot;Message the orb…&quot;&gt;&lt;/textarea&gt;
       &lt;/div&gt;
       &lt;div class=&quot;line2&quot;&gt;
-        &lt;button class=&quot;mode&quot; id=&quot;comp-mode&quot; onclick=&quot;cycleMode()&quot;&gt;[message]&lt;/button&gt;
+        &lt;span class=&quot;prefix&quot;&gt;&amp;gt;&lt;/span&gt;
         &lt;button class=&quot;act&quot;&gt;abort&lt;/button&gt;
         &lt;button class=&quot;send ib&quot; aria-label=&quot;send&quot; title=&quot;send&quot;&gt;&lt;svg class=&quot;ic&quot;&gt;&lt;use href=&quot;#i-arrow-up&quot;/&gt;&lt;/svg&gt;&lt;/button&gt;
       &lt;/div&gt;
@@ -5042,21 +4917,6 @@ function tog(id){
   if (mk) mk.textContent = d.classList.contains(&#x27;open&#x27;) ? &#x27;▾&#x27; : &#x27;▸&#x27;;
 }
 
-var MODES = [
-  [&#x27;[message]&#x27;, &#x27;&#x27;],
-  [&#x27;[shell]&#x27;,   &#x27;sh&#x27;],
-  [&#x27;[!shell]&#x27;,  &#x27;xsh&#x27;]
-];
-var modeIx = 0;
-function cycleMode(){
-  modeIx = (modeIx + 1) % MODES.length;
-  var m = MODES[modeIx], b = document.getElementById(&#x27;comp-mode&#x27;);
-  b.textContent = m[0];
-  b.className = &#x27;mode&#x27; + (m[1] ? &#x27; &#x27; + m[1] : &#x27;&#x27;);
-  document.getElementById(&#x27;comp-ta&#x27;).placeholder =
-    modeIx === 0 ? &#x27;Message the orb…&#x27; : &#x27;git status --short&#x27;;
-}
-
 function flash(btn){
   if (btn.dataset.busy) return;
   btn.dataset.busy = &#x27;1&#x27;;
@@ -5090,7 +4950,7 @@ layout();
   they overflow. Each column is a header, its working orbs as two-line entries carrying the state hue on their
   left edge and the age alone as text, and a collapsed archive shelf pinned to the bottom. New project is the
   last column. Actions are icon-only 20x20 buttons drawn from one inline SVG sprite; destructive ones are red.
-  Nothing labels or explains itself: the state is the hue and the glyph, the mode chip is the mode.
+  Nothing labels or explains itself: the state is the hue and the glyph, the composer prefix marks input.
 --&gt;
 "></iframe>
 </section>

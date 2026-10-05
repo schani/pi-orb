@@ -147,23 +147,6 @@ const recordBase = {
   overflow: JsonObjectSchema,
 };
 
-/**
- * Normalized fields the harness adapter derives once so clients never parse
- * harness-native JSON (docs/pi-adapter.md). `overflow` stays lossless except
- * for the documented system-state confidentiality projection.
- */
-const ShellExecutionSchema = Type.Object(
-  {
-    command: Type.String(),
-    output: Type.String(),
-    exitCode: Type.Union([Type.Number(), Type.Null()]),
-    cancelled: Type.Boolean(),
-    truncated: Type.Boolean(),
-    excludeFromContext: Type.Boolean(),
-  },
-  closed,
-);
-
 const CustomMessageSchema = Type.Object(
   { customType: Type.String(), display: Type.Boolean() },
   closed,
@@ -273,8 +256,6 @@ export const EventRecordSchema = Type.Object(
     type: Type.Literal("event"),
     eventType: Type.String(),
     content: Type.Optional(Type.Array(ContentBlockSchema)),
-    /** Present iff `eventType` is `pi.bash_execution`. */
-    shell: Type.Optional(ShellExecutionSchema),
     /** Present iff `eventType` is `pi.custom_message`. */
     custom: Type.Optional(CustomMessageSchema),
     /** Present iff the custom message is a subagent receipt. */

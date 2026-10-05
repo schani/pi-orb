@@ -138,13 +138,7 @@ export interface SnapshotError {
  */
 export type PiSession = Pick<
   AgentSession,
-  | "subscribe"
-  | "sendUserMessage"
-  | "sendCustomMessage"
-  | "executeBash"
-  | "abort"
-  | "abortBash"
-  | "isIdle"
+  "subscribe" | "sendUserMessage" | "sendCustomMessage" | "abort" | "isIdle"
 >;
 
 /** The `SessionManager` surface the adapter reads, narrowed for the same reason. */
@@ -164,7 +158,7 @@ export type PiSessionManager = Pick<
 type FrameListener = (frame: ServerFrame) => void;
 
 interface LiveBlock {
-  blockType: "text" | "reasoning" | "shell";
+  blockType: "text" | "reasoning";
   revision: number;
   text: string;
   headline?: string;
@@ -177,9 +171,6 @@ interface LiveTool {
   state: "running" | "completed" | "failed";
   message?: string;
 }
-
-const LIVE_SHELL_OUTPUT_LIMIT = 50 * 1024;
-const LIVE_SHELL_TRUNCATION_MARKER = "[earlier live output truncated]\n";
 
 const execGit = (args: string[], cwd: string): ResultAsync<string, { message: string }> =>
   ResultAsync.fromPromise(
@@ -231,7 +222,6 @@ export class PiOrbAgent {
   /** This boot's interrupted-turn decision, when notable (docs/lifecycle.md). */
   private turnResume: RuntimeTurnResume | null = null;
   private operationId: string | null = null;
-  private operationKind: "agent" | "shell" | null = null;
   private readonly subagentWork = new SubagentWork();
   private operationOutcome: "completed" | "aborted" | "failed" = "completed";
   private operationError: string | undefined;
@@ -249,9 +239,6 @@ export class PiOrbAgent {
     null;
   private summaryStartIndex: number | null = null;
   private summaryCoordinator: TurnSummaryCoordinator | null = null;
-  private shellCommand = "";
-  private shellOutput = "";
-  private shellOutputTruncated = false;
   private readonly liveBlocks = new Map<string, LiveBlock>();
   private outputMessageSequence = 0;
   private readonly messageBlocks = new WeakMap<object, string[]>();
@@ -1121,7 +1108,7 @@ export class PiOrbAgent {
         // (auto-retry, auto-compaction): neither may restart the operation or
         // change its ID. Only an SDK/extension turn nobody claimed allocates
         // here; boot notifications now claim their operation before Pi starts.
-        if (this.operationKind === null) this.startAgentOperation(randomUUID(), null);
+        if (this.operationId === null) this.startAgentOperation(randomUUID(), null);
         this.settleTurnStart();
         break;
       }
@@ -1252,7 +1239,7 @@ export class PiOrbAgent {
         break;
       }
       case "agent_settled": {
-        if (this.operationKind !== "agent") break;
+        if (this.operationId === null) break;
         // Pi runs extension settled handlers before notifying subscribers, then
         // starts any continuation they deferred after this event returns.
         queueMicrotask(() => this.maybeFinishAgentOperation());
@@ -1265,7 +1252,7 @@ export class PiOrbAgent {
 
   /**
    * Claim the runtime for an agent operation at the instant its submission is
-   * accepted, exactly as a shell submission does (docs/runtime-protocol.md).
+   * accepted (docs/runtime-protocol.md).
    * Activity is what both ingress paths gate on, so it must not lag
    * acceptance: a second submitter reading `idle` during the window before
    * Pi's `agent_start` would be promised an operation ID for a turn that
@@ -1273,7 +1260,6 @@ export class PiOrbAgent {
    */
   private startAgentOperation(operationId: string, summaryStartIndex: number | null): void {
     this.operationId = operationId;
-    this.operationKind = "agent";
     this.operationOutcome = "completed";
     this.operationError = undefined;
     this.activity = "busy";
@@ -1291,7 +1277,6 @@ export class PiOrbAgent {
     message?: string,
   ): void {
     this.operationId = null;
-    this.operationKind = null;
     this.activity = "idle";
     this.liveBlocks.clear();
     this.liveTools.clear();
@@ -1315,7 +1300,7 @@ export class PiOrbAgent {
    * visible to the browser as a finished operation instead of silence.
    */
   private abandonAgentOperation(operationId: string, message: string): void {
-    if (this.operationId !== operationId || this.operationKind !== "agent") return;
+    if (this.operationId !== operationId) return;
     if (this.operationOutcome !== "aborted") {
       this.operationOutcome = "failed";
       this.operationError = message;
@@ -1330,8 +1315,7 @@ export class PiOrbAgent {
       this.health.status !== "ready" ||
       this.idleStopPrepared ||
       this.settingsController?.blocksInput ||
-      this.operationOutcome === "aborted" ||
-      this.operationKind === "shell"
+      this.operationOutcome === "aborted"
     )
       return err({
         type: "subagent_admission_rejected",
@@ -1410,7 +1394,7 @@ export class PiOrbAgent {
   private maybeFinishAgentOperation(): void {
     if (
       this.health.status !== "ready" ||
-      this.operationKind !== "agent" ||
+      this.operationId === null ||
       this.session === null ||
       !this.session.isIdle ||
       this.turnStart !== null ||
@@ -1722,7 +1706,6 @@ export class PiOrbAgent {
     if (this.operationId === null) return null;
     return {
       operationId: this.operationId,
-      operationKind: this.operationKind ?? "agent",
       subagents: this.subagentWork.view,
       blocks: [...this.liveBlocks.entries()].map(([blockId, block]) => ({
         blockId,
@@ -1932,12 +1915,7 @@ export class PiOrbAgent {
         }),
       );
     }
-    if (this.operationKind === "shell") {
-      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
-        err({ message: "a foreground shell command is running", retryable: true }),
-      );
-    }
-    if (this.operationKind === "agent" && this.operationOutcome === "aborted")
+    if (this.operationId !== null && this.operationOutcome === "aborted")
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
         err({ message: "The previous operation is still cancelling", retryable: true }),
       );
@@ -2030,124 +2008,11 @@ export class PiOrbAgent {
       });
   }
 
-  submitShell(
-    command: string,
-    excludeFromContext: boolean,
-    operationId: string,
-  ): ResultAsync<void, { message: string }> {
-    const session = this.session;
-    if (this.idleStopPrepared || session === null) {
-      return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
-        err({ message: "session is not accepting work" }),
-      );
-    }
-
-    this.startShellOperation(command, operationId);
-    const execution = ResultAsync.fromPromise(
-      session.executeBash(command, (chunk) => this.appendShellOutput(operationId, chunk), {
-        excludeFromContext,
-      }),
-      (error) => ({ message: error instanceof Error ? error.message : String(error) }),
-    );
-
-    return execution
-      .andThen((result) => {
-        const flushed = this.liveHistory?.flushPersisted();
-        if (flushed?.isErr()) return err({ message: flushed.error.message });
-        this.finishShellOperation(operationId, result.cancelled ? "aborted" : "completed");
-        return ok(undefined);
-      })
-      .mapErr((error) => {
-        this.finishShellOperation(operationId, "failed", error.message);
-        return error;
-      });
-  }
-
-  private startShellOperation(command: string, operationId: string): void {
-    this.operationId = operationId;
-    this.operationKind = "shell";
-    this.activity = "busy";
-    this.shellCommand = command;
-    this.shellOutput = "";
-    this.shellOutputTruncated = false;
-    this.liveBlocks.clear();
-    this.liveTools.clear();
-    this.liveToolBodies.clear();
-
-    const blockId = `${operationId}-shell`;
-    this.liveBlocks.set(blockId, { blockType: "shell", revision: 1, text: `$ ${command}` });
-    this.broadcastEvent({ type: "operation_started", operationId });
-    this.broadcastEvent({ type: "status", activity: "busy", operationId });
-    this.broadcastEvent({
-      type: "output_patch",
-      operationId,
-      blockId,
-      blockType: "shell",
-      revision: 1,
-      patch: { type: "replace", text: `$ ${command}` },
-    });
-  }
-
-  private appendShellOutput(operationId: string, chunk: string): void {
-    if (this.operationId !== operationId || this.operationKind !== "shell") return;
-    const previous = this.liveBlocks.get(`${operationId}-shell`);
-    this.shellOutput += chunk;
-    if (this.shellOutput.length > LIVE_SHELL_OUTPUT_LIMIT) {
-      this.shellOutput = this.shellOutput.slice(-LIVE_SHELL_OUTPUT_LIMIT);
-      this.shellOutputTruncated = true;
-    }
-    const output = `${this.shellOutputTruncated ? LIVE_SHELL_TRUNCATION_MARKER : ""}${this.shellOutput}`;
-    const text = `$ ${this.shellCommand}\n${output}`;
-    const revision = (previous?.revision ?? 0) + 1;
-    this.liveBlocks.set(`${operationId}-shell`, { blockType: "shell", revision, text });
-    this.broadcastEvent({
-      type: "output_patch",
-      operationId,
-      blockId: `${operationId}-shell`,
-      blockType: "shell",
-      revision,
-      patch:
-        previous !== undefined && text.startsWith(previous.text)
-          ? { type: "append", text: text.slice(previous.text.length) }
-          : { type: "replace", text },
-    });
-  }
-
-  private finishShellOperation(
-    operationId: string,
-    outcome: "completed" | "aborted" | "failed",
-    message?: string,
-  ): void {
-    if (this.operationId !== operationId || this.operationKind !== "shell") return;
-    this.operationId = null;
-    this.operationKind = null;
-    this.activity = "idle";
-    this.shellCommand = "";
-    this.shellOutput = "";
-    this.shellOutputTruncated = false;
-    this.liveBlocks.clear();
-    this.liveTools.clear();
-    this.liveToolBodies.clear();
-    this.broadcastEvent({
-      type: "operation_finished",
-      operationId,
-      outcome,
-      ...(message !== undefined ? { message } : {}),
-    });
-    this.broadcastEvent({ type: "status", activity: "idle" });
-  }
-
   abortOperation(source: "user" | "shutdown" = "user"): ResultAsync<void, { message: string }> {
     const session = this.session;
     if (session === null) {
       return ResultAsync.fromSafePromise(Promise.resolve()).andThen(() =>
         err({ message: "session is not ready" }),
-      );
-    }
-    if (this.operationKind === "shell") {
-      return ResultAsync.fromPromise(
-        Promise.resolve().then(() => session.abortBash()),
-        (error) => ({ message: error instanceof Error ? error.message : String(error) }),
       );
     }
     if (

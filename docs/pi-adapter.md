@@ -25,7 +25,6 @@ How Pi is embedded in the orb runtime and how its persisted session maps to the 
 - A Pi extension may still be useful for Pi-specific instrumentation, but it is not the infrastructure supervisor.
 - The orb runtime cannot restart itself reliably from inside its own failure domain. Docker initially, and GCE later, provide process/host supervision.
 - If the runtime enters an unrecoverable state, it should exit so its host can restart it.
-- User-shell commands call the Pi SDK's `AgentSession.executeBash()` directly. pi-orb does not reproduce the Pi TUI's separate `InteractiveMode` `user_bash` extension-interception layer (decided 2026-08-05).
 - The runtime's appended environment prompt opens with a pi-orb introduction and project URL, then a concise tool-baseline section: Python 3 and rustup are available; no Rust toolchain is installed by default, while explicit installs and repository `rust-toolchain.toml` selections persist in the orb home; `agent-browser` plus Chromium are installed for browser automation, with its basic `open` and snapshot/ref workflow; and `pi-orb orbs [query]` / `pi-orb transcript <orb-id>` expose sibling metadata and replicated prior work. This composes after discovered `APPEND_SYSTEM.md` content and before the optional port-exposure section without replacing Pi's normal resource discovery (tool baseline decided 2026-08-09; inspection commands added 2026-08-27; tool details in `docs/host-provider.md`).
 - Completed agent turns are summarized asynchronously by OpenAI's Luna model through a separate inference call. The turn-summary prompt requires one plain-text, past-tense sentence of no more than 15 words (and at most 180 characters), without a preamble or Markdown. The orb runtime resolves request authentication through its existing `ModelRuntime`, while the shared `@pi-orb/luna` package owns Luna model selection, no-tool/minimal-reasoning request policy, response parsing, and typed provider failures for both turn summaries and control-plane orb auto-naming. The adapter captures a bounded turn view after Pi settles, excluding reasoning and raw tool output, broadcasts completion/idle first, and only then queues Luna. The call never touches `AgentSession`, session history, operation outcome, or runtime health; failures are error-logged and produce no notification (decided 2026-08-06). Runtime logs record summary queued, completed (including live-connection count), skipped, and failed boundaries without logging transcript or summary content, so a missing browser notification can be localized to capture, inference, live delivery, permission, or browser construction (observability added 2026-08-07).
 
@@ -108,29 +107,13 @@ Rejected alternatives:
 - **Writing the skill into the persistent workspace at boot** (for example `/workspace/repo/.pi/skills/`). It would be agent-writable and user-committable state, so a corrupted or stale copy would silently outlive an image upgrade, and ownership of the file would be ambiguous between pi-orb and the user's repository.
 - **Putting it in the repository's `AGENTS.md`.** That file is the *user's* project instructions; pi-orb appending platform documentation to it muddies whose voice it is and would follow the repository out of the orb.
 
-## User shell API and persistence
-
-The pinned Pi SDK exposes the required public API:
-
-```ts
-session.executeBash(command, onChunk, { excludeFromContext }): Promise<BashResult>;
-session.abortBash(): void;
-session.isBashRunning: boolean;
-```
-
-`executeBash` runs in the session cwd using Pi's configured shell, streams sanitized output through `onChunk`, supports cancellation, and truncates retained output using Pi's bash limits. Normal completion, including cancellation and nonzero exit, appends a native `bashExecution` message to agent state and the persistent session. `excludeFromContext` changes only later model-context conversion: ordinary shell results are transformed into a user-context message, while excluded-shell results are skipped by `convertToLlm`. Both modes therefore remain in Pi history and replicate to PostgreSQL; exclusion does not mean ephemeral or absent from the history log.
-
-Abort dispatch depends on the active operation kind: agent work calls `session.abort()`, while shell work calls `session.abortBash()`. A nonzero command exit is a normal `BashResult`, not an SDK failure.
-
-`executeBash` appends its history entry directly and does not produce the prompt path's ordinary `message_end`/`agent_settled` persistence boundaries. After it resolves, the adapter must explicitly scan/publish the newly appended entry before broadcasting `operation_finished`. A cancelled result follows the same persistence ordering. If the SDK call rejects before producing a `BashResult`, the adapter reports a failed operation and must not invent a history record.
-
 ## Operation identity across concurrent submitters (decided and implemented 2026-08-11)
 
 Two ingress paths can hand Pi a new turn: the live WebSocket `message` action and the control plane's inbox delivery (`docs/runtime-protocol.md`). Each is answered with an operation ID before the turn exists, and everything afterwards — `operation_started`/`status`/`operation_finished`, the browser's abort, the Luna turn notification, and the delivery note the control plane persists for the batch — is correlated by that ID. The contract is therefore: **the operation ID promised to a submitter is the ID the turn its message started actually runs under, and a message that joins a running turn is answered with that turn's ID.**
 
 The first implementation broke that contract because it deferred the claim: each submitter wrote its ID into one `pendingOperationId` slot and Pi's `agent_start` consumed whatever was there. Both submitters gate on `activity`, which only became `busy` in that same `agent_start` handler, so during the window between accepting a submission and Pi announcing its turn the runtime still reported itself idle and a second submitter was admitted. Whichever wrote last won the slot, and the loser's promised ID named no operation at all — its abort was rejected as `stale_operation`, its status frames referred to somebody else's turn, and the control plane recorded an operation ID for the batch that nothing ever ran under.
 
-The fix is to claim the operation synchronously with acceptance, exactly as a shell submission already did: `submitMessage` and a `turn`-classified delivery set the operation ID, kind, summary start index, and `busy` activity, and broadcast `operation_started` before returning to their caller. `agent_start` no longer allocates for a claimed operation — it only confirms it. That also stops Pi's in-run continuations (auto-retry, auto-compaction re-enter `runAgentLoop` and re-emit `agent_start`) from silently re-broadcasting a *new* random operation ID mid-turn. Only a turn nobody submitted — the boot interrupted-turn resume (`docs/lifecycle.md`) — allocates an ID in the event handler.
+The fix is to claim the operation synchronously with acceptance: `submitMessage` and a `turn`-classified delivery set the operation ID, summary start index, and `busy` activity, and broadcast `operation_started` before returning to their caller. `agent_start` no longer allocates for a claimed operation — it only confirms it. That also stops Pi's in-run continuations (auto-retry, auto-compaction re-enter `runAgentLoop` and re-emit `agent_start`) from silently re-broadcasting a *new* random operation ID mid-turn. Only a turn nobody submitted — the boot interrupted-turn resume (`docs/lifecycle.md`) — allocates an ID in the event handler.
 
 Claiming eagerly opens the mirror-image window, and it must be closed too: the runtime is `busy` from acceptance, but Pi marks itself streaming only when it begins the turn. `AgentSession.sendUserMessage` reaches `_runAgentPrompt` behind an async prologue (`prompt()` runs extension `input` hooks, the auth check and the compaction check first), while `sendCustomMessage` has no prologue and flips streaming synchronously. A delivery classified `steer` inside that window would be handed to a Pi that still looks idle to itself, which starts a second, competing turn and makes Pi refuse the loser with "Agent is already processing" — an accepted submission silently lost. Deliveries therefore wait for the in-flight submission to reach `agent_start` (or fail) before sampling activity. The live path needs no such wait: its gate is synchronous and rejects the second submitter with `busy`.
 
@@ -197,7 +180,6 @@ Migration 022 missed the former stop-before-backfill instruction while one old r
 | `message` / user           | `MessageRecord`, role `user`; text/image blocks.                                                                                |
 | `message` / assistant      | `MessageRecord`, role `assistant`; text, thinking→reasoning, and tool-call blocks; provider/model, usage, stop reason; a failed stop reason with an error message nonempty under ECMAScript `trim()` also yields `failure` with the original message, diagnostic types, and optional allowlisted Codex `context` (`docs/runtime-protocol.md`). |
 | `message` / tool result    | `MessageRecord`, role `tool`; one typed `tool_result` block containing call ID, nested text/image content, error flag, and `details.patch` as `patch`. |
-| `message` / bash execution | `EventRecord`, `eventType: "pi.bash_execution"`; normalized textual content where useful, plus `shell` with command, output, exit code, cancellation, truncation, and context exclusion. |
 | `thinking_level_change`    | `EventRecord`, `eventType: "pi.thinking_level_change"`.                                                                         |
 | `model_change`             | `EventRecord`, `eventType: "pi.model_change"`.                                                                                  |
 | `compaction`               | `CompactionRecord`; summary as a text block, with first-kept ID/token/details retained natively.                                |
@@ -239,7 +221,6 @@ Visibility is presentation policy, not persistence filtering:
 - show user and assistant messages normally; show tool names and states while keeping tool inputs and outputs collapsed by default;
 - show compaction as a collapsed boundary;
 - show `pi.custom_message` only when `custom.display` is true;
-- show a record's `shell` block as preformatted command/output; show exit, cancellation, and truncation status, and mark excluded-shell entries as excluded from model context;
 - hide model/thinking changes, branch summaries, labels, session-info entries, ordinary custom entries, and unknown events by default.
 
 The UI still traverses hidden records when reconstructing parent chains. Hidden records remain available for diagnostics and future richer renderers.

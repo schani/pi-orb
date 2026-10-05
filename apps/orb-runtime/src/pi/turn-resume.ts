@@ -43,7 +43,7 @@ export type InterruptedTurnShape =
 export type NoResumeReason =
   /** Nothing conversational is persisted — including every fresh session. */
   | "empty_session"
-  /** The tail is a finished turn (or an aborted one, or a shell op). */
+  /** The tail is a finished turn (or an aborted one). */
   | "settled_tail"
   /** Earlier automatic boot turns; dangling tails exhaust the guard at three. */
   | "already_resumed";
@@ -127,7 +127,7 @@ type TailEntry =
   | { readonly kind: "resume_marker"; readonly id: string | null }
   | { readonly kind: "boot_marker"; readonly id: string | null }
   | { readonly kind: "decline_marker"; readonly id: string | null }
-  /** Conversational but not a turn boundary we resume from (shell, compaction, …). */
+  /** Conversational but not a turn boundary we resume from (compaction, …). */
   | { readonly kind: "other"; readonly id: string | null };
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
@@ -168,8 +168,7 @@ function classify(entry: unknown): TailEntry | null {
         case "toolResult":
           return { kind: "tool_result", id };
         default:
-          // bashExecution and any future role: shell operations are out of
-          // scope, and an unknown role is not an interruption we understand.
+          // Unknown roles are not agent turn boundaries.
           return { kind: "other", id };
       }
     }

@@ -1781,60 +1781,6 @@ describe("full slice E2E", () => {
     expect(toolCall).toBeDefined();
     expect(projectedFrames).not.toContain('"arguments"');
 
-    // A user-shell action executes directly through Pi (not through the model),
-    // streams as a shell block, and publishes its persisted bashExecution entry.
-    for (const frame of frames) {
-      if (frame.type === "history.record") headId = frame.headId ?? frame.record.id;
-    }
-    const shellRequestId = randomUUID();
-    socket.send(
-      JSON.stringify({
-        v: 1,
-        type: "client.request",
-        requestId: shellRequestId,
-        action: {
-          type: "shell",
-          expectedHeadId: headId,
-          command: "printf USER_SHELL_E2E_OK",
-          excludeFromContext: false,
-        },
-      }),
-    );
-    const shellResult = await untilFrame("shell request.result", () =>
-      frames.find((frame) => frame.type === "request.result" && frame.requestId === shellRequestId),
-    );
-    if (shellResult.type !== "request.result" || shellResult.result.type !== "accepted") {
-      throw new Error("shell request was not accepted");
-    }
-    const shellOperationId = shellResult.result.operationId;
-    await untilFrame("shell activity", () =>
-      frames.find(
-        (frame) =>
-          frame.type === "runtime.event" &&
-          frame.event.type === "output_patch" &&
-          frame.event.operationId === shellOperationId &&
-          frame.event.blockType === "shell",
-      ),
-    );
-    await untilFrame("shell history record", () =>
-      frames.find(
-        (frame) =>
-          frame.type === "history.record" &&
-          frame.record.type === "event" &&
-          frame.record.eventType === "pi.bash_execution" &&
-          JSON.stringify(frame.record).includes("printf USER_SHELL_E2E_OK"),
-      ),
-    );
-    await untilFrame("shell operation finished", () =>
-      frames.find(
-        (frame) =>
-          frame.type === "runtime.event" &&
-          frame.event.type === "operation_finished" &&
-          frame.event.operationId === shellOperationId &&
-          frame.event.outcome === "completed",
-      ),
-    );
-
     const generatedName = await waitFor(
       "orb auto-named",
       async () => {
@@ -1854,7 +1800,6 @@ describe("full slice E2E", () => {
         const serialized = JSON.stringify(records);
         return serialized.includes("E2E_TOOL_OK") &&
           serialized.includes("The check succeeded") &&
-          serialized.includes("USER_SHELL_E2E_OK") &&
           records.length >= 5
           ? records.length
           : null;
@@ -1972,7 +1917,6 @@ describe("full slice E2E", () => {
     const stoppedRecords = stopped.body["records"] as unknown[];
     expect(stoppedRecords.length).toBe(replicated);
     expect(JSON.stringify(stoppedRecords)).toContain("The check succeeded: E2E_TOOL_OK.");
-    expect(JSON.stringify(stoppedRecords)).toContain("USER_SHELL_E2E_OK");
     expect(await (await fetch(hostedUrl)).text()).toContain("replacement");
 
     // No human message is sent in either restart leg. The runtime must wake

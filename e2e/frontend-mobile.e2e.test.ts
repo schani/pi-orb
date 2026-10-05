@@ -531,7 +531,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
   });
 
   it.each([1280, 390, 320])(
-    "keeps modal closes in the corner and composer geometry fixed across modes at %ipx",
+    "keeps modal closes in the corner and message/command composer geometry fixed at %ipx",
     async (width) => {
       const phone = width <= 600;
       const page = await browser.newPage({
@@ -636,7 +636,7 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
         ).toBe(true);
         const input = composer.getByRole("textbox");
         if (phone) await composer.getByRole("button", { name: "Write message" }).tap();
-        const measureComposer = async (glyph: ">" | "!" | "!!" | "/") => {
+        const measureComposer = async (glyph: ">" | "/") => {
           const prefix = composer.locator(".composer-line > .composer-prefix");
           await expectPage(prefix).toHaveText(glyph);
           return composer.locator(".composer-line").evaluate((line) => {
@@ -674,7 +674,6 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
               pickerLeft: pickerBox?.left ?? null,
               pickerRight: pickerBox?.right ?? null,
               expectedPickerRight: Math.min(editorBox.left + 420, composerBox.right - 12),
-              prefixTextWidth: prefixTextBox.width,
               selectionEnd: input.selectionEnd,
               selectionStart: input.selectionStart,
             };
@@ -713,24 +712,10 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
             });
           return gate;
         });
-        await input.fill("!");
-        await expectPage(input).toHaveAttribute("aria-label", "Run a shell command");
-        const shellGeometry = await measureComposer("!");
-        expectStableEditor(shellGeometry, messageGeometry);
-        await input.fill("!");
-        const excludedGeometry = await measureComposer("!!");
-        expectStableEditor(excludedGeometry, messageGeometry);
-        expectPage(excludedGeometry?.prefixTextWidth).toBeGreaterThan(
-          shellGeometry?.prefixTextWidth ?? Number.POSITIVE_INFINITY,
-        );
-        expectPage(excludedGeometry?.prefixTextRight).toBeLessThanOrEqual(
-          excludedGeometry?.editorLeft ?? 0,
-        );
-
         if (phone) {
           await composer.getByRole("button", { name: "Fold editor" }).tap();
           const collapsed = composer.locator(".composer-open");
-          await expectPage(collapsed.locator(".composer-prefix")).toHaveText("!!");
+          await expectPage(collapsed.locator(".composer-prefix")).toHaveText(">");
           const collapsedGeometry = await collapsed.evaluate((button) => {
             const prefix = button.querySelector(".composer-prefix");
             const preview = button.querySelector(".composer-draft-preview");
@@ -751,18 +736,10 @@ describe.each(["chromium", "webkit"] as const)("phone frontend · %s", (engine) 
           expectPage(collapsedGeometry?.prefixTextRight).toBeLessThanOrEqual(
             collapsedGeometry?.previewLeft ?? 0,
           );
-          expectPage(collapsedGeometry?.prefixTrackWidth).toBeCloseTo(
-            excludedGeometry?.prefixTrackWidth ?? 0,
-            5,
-          );
           await collapsed.tap();
-          expectStableEditor(await measureComposer("!!"), messageGeometry);
+          expectStableEditor(await measureComposer(">"), messageGeometry);
         }
 
-        await input.press("Backspace");
-        expectStableEditor(await measureComposer("!"), messageGeometry);
-        await input.press("Backspace");
-        expectStableEditor(await measureComposer(">"), messageGeometry);
         await input.press("/");
         await expectPage(input).toHaveValue("");
         const commandGeometry = await measureComposer("/");

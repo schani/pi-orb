@@ -59,7 +59,7 @@ The first version is deliberately ephemeral:
 
 These semantics preserve filesystem work, which is the durable value, without pretending terminal screen state is durable. Detachable/shared terminals can be designed later if actual use shows they are needed.
 
-The interactive terminal is distinct from the composer `shell` action in `docs/runtime-protocol.md`. Composer shell commands are serialized foreground operations with bounded output and persisted history, and can deliberately enter model context. Interactive PTY input/output is not agent history, is not replicated, and can run concurrently with Pi. Terminal edits and processes can race with the agent in the same checkout; this is part of the documented trusted-orb execution model.
+Interactive PTY input/output is not agent history, is not replicated, and can run concurrently with Pi. Terminal edits and processes can race with the agent in the same checkout; this is part of the documented trusted-orb execution model.
 
 ## Terminal wire protocol (implemented)
 
@@ -117,7 +117,7 @@ The runtime owns a terminal manager that enforces the four-session limit, reserv
 - **Python standard-library helper.** Technically sound and experimentally proved to create and resize a Bash PTY, but it makes Python a process-host prerequisite and introduces a first-party binary framing, partial-I/O, signal, and cleanup protocol. Rejected 2026-08-09 in favor of accepting `node-pty`'s localized native build complexity.
 - **A prebuilt `node-pty` fork.** The inspected `@homebridge/node-pty-prebuilt-multiarch` 0.14.1 covers Linux glibc/musl x64 and arm64 through Node ABI 147, but replaces local build complexity with trust in another publisher's native binaries.
 - **`script`, `socat`, `ttyd`, `sshd`, or a similar executable.** These merely move the native dependency to an OS package/service. `script` can allocate a PTY but does not give the Node parent a clean, portable resize/control API when its own stdio is a pipe; injecting `stty` commands fails for full-screen foreground programs. The daemons add authentication, configuration, and another network/process surface.
-- **Plain shell pipes.** Adequate for the existing non-interactive composer shell operation, not an interactive terminal: no controlling terminal, terminal modes, job control, reliable signals, or full-screen resize.
+- **Plain shell pipes.** Not an interactive terminal: no controlling terminal, terminal modes, job control, reliable signals, or full-screen resize.
 - **wterm `just-bash` or another browser-only shell.** It would operate on an in-browser virtual filesystem and process model, not the orb checkout and programs, so it is not an orb terminal.
 
 ## Launcher replacement studies (2026-09-11; Wide shade + Bare prompt selected 2026-09-12)
@@ -138,7 +138,7 @@ All five have icon-only launch/hide controls with accessible names, visible focu
 
 ### Composer dock control refinement (2026-09-11; first three proposals rejected)
 
-The user likes the **composer dock** direction but rejects occupying the existing composer prefix position: `>`, `!`, and `!!` already indicate message, shell, and excluded-shell mode there. Preserve that prefix and its mode-entry behavior; terminal visibility must not become a fourth composer mode or mutate the draft. The initial bare-prompt launcher in the editor's left slot is rejected for this collision.
+The user likes the **composer dock** direction but rejects occupying the existing composer prefix position. Terminal visibility must not mutate the draft. The initial bare-prompt launcher in the editor's left slot is rejected for this collision.
 
 [`design-prototypes/terminal-dock-controls.html`](../design-prototypes/terminal-dock-controls.html) explores three unselected control placements, all opening a dock above the composer and shrinking the transcript rather than covering it:
 
@@ -146,7 +146,7 @@ The user likes the **composer dock** direction but rejects occupying the existin
 - **Divider tab:** a centered pane/dock SVG in a reserved 28px strip between transcript/dock and composer. The same inverted tab hides the dock. Strongest separation from input modes, at the cost of one permanent line.
 - **Utility spine:** a pane SVG in a 34px gutter outside the editor's left border. The gutter extends alongside the open terminal and its control rises to the top. The prefix stays inside its own editor lane; moving the control makes the hide target less conventional.
 
-All three preserve the draft and terminal mock output when switching designs or toggling visibility. Study-only mode controls exercise all three prefixes; typing `!` or Backspace at the start also models mode changes. There is no fake send arrow: production submits from the keyboard. The shell remains explicitly simulated, with no runtime, command execution, or telemetry. Browser checks exercise every placement × prefix × wide/narrow combination at 390, 820, 1024, and 1440px, asserting retained draft, non-overlapping prefix/control, header/composer containment, and no outer-frame scroll. No specific refined control has been selected or shipped.
+All three preserve the draft and terminal mock output when switching designs or toggling visibility. There is no fake send arrow: production submits from the keyboard. The shell remains explicitly simulated, with no runtime, command execution, or telemetry. Browser checks exercise every placement × wide/narrow combination at 390, 820, 1024, and 1440px, asserting retained draft, non-overlapping prefix/control, header/composer containment, and no outer-frame scroll. No specific refined control has been selected or shipped.
 
 **User rejection (2026-09-11):** all three add an intermediate pane, row, or rail solely to house a button. None is acceptable. The composer-dock direction remains preferred, but its launcher must reuse existing chrome, an existing boundary, or an existing interaction rather than acquire dedicated layout space. The recommendations above record the rejected study, not a current recommendation.
 
@@ -157,10 +157,10 @@ All three preserve the draft and terminal mock output when switching designs or 
 - **Header action:** put the icon beside Upload in the existing upper-right action bar, but open the terminal as a composer dock. Recommended for the simplest separation of terminal and input mode. Unlike the first study's header option, it does not open a floating console.
 - **Inset corner:** one unboxed icon in the composer's upper-right inset, with no endcap or separator. A 26px text inset prevents draft overlap; the tradeoff is slightly less text width, not a new pane.
 - **Border notch:** a 28×24px handle interrupts the existing upper border and follows the dock's top edge. No divider strip or layout row is added. The bottom 12px of the transcript viewport is clipped away from the handle, with scroll-end padding retaining access to the final text; this consumes a small visual margin, not a new pane.
-- **Prefix menu:** make the existing `> / ! / !!` glyph clickable without changing its geometry. A transient popover separates mode choices from an icon-and-Terminal action. Costs two clicks and may be less discoverable; terminal is not a fourth composer mode, and opening it leaves both mode and draft unchanged.
+- **Prefix menu:** make the existing `>` glyph clickable without changing its geometry. A transient popover offers an icon-and-Terminal action. Costs two clicks and may be less discoverable; opening it leaves the draft unchanged.
 - **Keyboard summon:** remove the launcher entirely. Alt+T toggles the dock; the open terminal retains its ordinary minimise action. This is intentionally keyboard-first, not an adequate standalone touch solution. The study's “Try Alt+T” button is outside the app mockup and is not proposed product chrome. The shortcut is offered across the other four studies too.
 
-These alternatives are unselected and non-shipping. All preserve prefix entry, draft, and simulated shell output. Browser checks cover five designs × three modes × wide/narrow previews at 390–1440px, including equal closed-composer rectangles, header containment, menu invocation, actual Alt+T input, and Escape-to-hide. No runtime changes, real commands, or autonomous machinery are introduced.
+These alternatives are unselected and non-shipping. All preserve the draft and simulated terminal output. Browser checks cover five designs × wide/narrow previews at 390–1440px, including equal closed-composer rectangles, header containment, menu invocation, actual Alt+T input, and Escape-to-hide. No runtime changes, real commands, or autonomous machinery are introduced.
 
 ### Header launcher with top-down opening (2026-09-11; five layouts and five icons proposed)
 
@@ -184,7 +184,7 @@ Icon proposals, drawn at 16px in the existing 20px header control, with larger s
 - **I4 Command brackets:** square brackets around a prompt; angular and compact, but potentially reads as a code editor.
 - **I5 Block cursor:** framed chevron with a solid caret; strongest small/inverted silhouette, heavier than adjacent outline utilities.
 
-At the time of this study, no opening or icon was selected; the subsequent selection is recorded below. The shared prototype header launcher has accessible action names and an expanded state; Alt+T, minimise, and Escape toggle the same simulated session without changing composer mode or draft. Chromium checks exercise all 25 combinations in wide/narrow previews at 390–1440px, comparing transcript rectangle, paragraph coordinates, scroll height/offset, and composer geometry before/open/after; they also cover bounds, preserved drafts, all three prefixes, and simulated input. The prototype makes no runtime calls and adds no production telemetry or autonomous machinery.
+At the time of this study, no opening or icon was selected; the subsequent selection is recorded below. The shared prototype header launcher has accessible action names and an expanded state; Alt+T, minimise, and Escape toggle the same simulated session without changing composer mode or draft. Chromium checks exercise all 25 combinations in wide/narrow previews at 390–1440px, comparing transcript rectangle, paragraph coordinates, scroll height/offset, and composer geometry before/open/after; they also cover bounds, preserved drafts, and simulated input. The prototype makes no runtime calls and adds no production telemetry or autonomous machinery.
 
 ## Wide shade + Bare prompt (selected and implemented 2026-09-12)
 

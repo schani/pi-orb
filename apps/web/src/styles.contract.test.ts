@@ -270,7 +270,7 @@ describe("orb workspace layout contract", () => {
     expect(rule(".ix-project + .ix-project")).toContain("border-top: 1px solid var(--k)");
   });
 
-  it("retains the type gutter only for shell records and keeps queue state visible", () => {
+  it("retains the diagnostic gutter and keeps queue state visible", () => {
     expect(rule(".rec")).toContain("grid-template-columns: 32px minmax(0, 1fr)");
     expect(rule(".rec-you,\n.rec-orb,\n.rec-alert")).toContain("display: block");
     expect(rule(".busy-indicator")).toContain("padding: 0 12px");
